@@ -7,8 +7,7 @@ import {
   History, 
   Settings, 
   LogOut, 
-  Menu, 
-  X,
+  Menu,
   FileText,
   User
 } from 'lucide-react'
