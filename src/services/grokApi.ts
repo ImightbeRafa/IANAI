@@ -37,14 +37,12 @@ export async function sendMessageToGrok(
 
 export function getInitialPrompt(language: Language = 'es'): string {
   if (language === 'en') {
-    return `Let's create high-converting ad scripts for your business. I'll ask you 5 strategic questions to understand your product and audience, then generate 5 unique scripts with different angles.
+    return `Let's create high-converting ad scripts for your business. I'll ask you a few quick questions to understand your product.
 
-**Question 1 of 5:**
 What product or service do you sell and what's your irresistible offer?`
   }
-  return `Vamos a crear guiones de venta de alta conversión para tu negocio. Te haré 5 preguntas estratégicas para entender tu producto y audiencia, luego generaré 5 guiones únicos con diferentes ángulos.
+  return `Vamos a crear guiones de venta de alta conversión para tu negocio. Te haré algunas preguntas rápidas para entender tu producto.
 
-**Pregunta 1 de 5:**
 ¿Qué producto o servicio vendes y cuál es tu oferta irresistible?`
 }
 
