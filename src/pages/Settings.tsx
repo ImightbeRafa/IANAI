@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage, Language } from '../contexts/LanguageContext'
+import { getProfile } from '../services/database'
+import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe } from 'lucide-react'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle } from 'lucide-react'
 
 export default function Settings() {
   const { user, updateProfile } = useAuth()
@@ -10,6 +12,61 @@ export default function Settings() {
   const [fullName, setFullName] = useState(user?.user_metadata?.full_name || '')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
+
+  useEffect(() => {
+    async function loadProfile() {
+      if (!user) return
+      const data = await getProfile(user.id)
+      setProfile(data)
+    }
+    loadProfile()
+  }, [user])
+
+  const labels = {
+    es: {
+      settings: 'Configuración',
+      manageAccount: 'Administra tu cuenta',
+      profileInfo: 'Información del Perfil',
+      email: 'Correo Electrónico',
+      emailCantChange: 'El correo no se puede cambiar',
+      fullName: 'Nombre Completo',
+      saveChanges: 'Guardar Cambios',
+      saving: 'Guardando...',
+      aiPreferences: 'Preferencias de IA',
+      aiLanguage: 'Idioma de IA',
+      languageDesc: 'Idioma para conversaciones de IA y scripts generados',
+      account: 'Cuenta',
+      accountCreated: 'Cuenta Creada',
+      accountType: 'Tipo de Cuenta',
+      team: 'Equipo',
+      individual: 'Individual',
+      teamDesc: 'Colabora con tu equipo y gestiona múltiples clientes',
+      individualDesc: 'Cuenta personal para uso individual'
+    },
+    en: {
+      settings: 'Settings',
+      manageAccount: 'Manage your account settings',
+      profileInfo: 'Profile Information',
+      email: 'Email',
+      emailCantChange: 'Email cannot be changed',
+      fullName: 'Full Name',
+      saveChanges: 'Save Changes',
+      saving: 'Saving...',
+      aiPreferences: 'AI Preferences',
+      aiLanguage: 'AI Language',
+      languageDesc: 'Language for AI conversations and generated scripts',
+      account: 'Account',
+      accountCreated: 'Account Created',
+      accountType: 'Account Type',
+      team: 'Team',
+      individual: 'Individual',
+      teamDesc: 'Collaborate with your team and manage multiple clients',
+      individualDesc: 'Personal account for individual use'
+    }
+  }
+
+  const t = labels[language]
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -123,14 +180,14 @@ export default function Settings() {
         </div>
 
         <div className="card mt-6">
-          <h2 className="text-lg font-semibold text-dark-900 mb-4">Account</h2>
+          <h2 className="text-lg font-semibold text-dark-900 mb-4">{t.account}</h2>
           <div className="space-y-4">
             <div className="flex items-center justify-between py-3 border-b border-dark-100">
               <div>
-                <p className="font-medium text-dark-900">Account Created</p>
+                <p className="font-medium text-dark-900">{t.accountCreated}</p>
                 <p className="text-sm text-dark-500">
                   {user?.created_at 
-                    ? new Date(user.created_at).toLocaleDateString('en-US', {
+                    ? new Date(user.created_at).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US', {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric'
@@ -140,12 +197,29 @@ export default function Settings() {
               </div>
             </div>
             <div className="flex items-center justify-between py-3">
-              <div>
-                <p className="font-medium text-dark-900">Subscription</p>
-                <p className="text-sm text-dark-500">Free Plan</p>
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  profile?.account_type === 'team' ? 'bg-purple-100' : 'bg-blue-100'
+                }`}>
+                  {profile?.account_type === 'team' ? (
+                    <Users className="w-5 h-5 text-purple-600" />
+                  ) : (
+                    <UserCircle className="w-5 h-5 text-blue-600" />
+                  )}
+                </div>
+                <div>
+                  <p className="font-medium text-dark-900">{t.accountType}</p>
+                  <p className="text-sm text-dark-500">
+                    {profile?.account_type === 'team' ? t.team : t.individual}
+                  </p>
+                </div>
               </div>
-              <span className="px-3 py-1 bg-primary-100 text-primary-700 text-sm font-medium rounded-full">
-                Coming Soon
+              <span className={`px-3 py-1 text-sm font-medium rounded-full ${
+                profile?.account_type === 'team' 
+                  ? 'bg-purple-100 text-purple-700' 
+                  : 'bg-blue-100 text-blue-700'
+              }`}>
+                {profile?.account_type === 'team' ? t.teamDesc : t.individualDesc}
               </span>
             </div>
           </div>

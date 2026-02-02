@@ -1,9 +1,5 @@
 -- =============================================
--- CopywriteAI Database Schema
--- Run this in your Supabase SQL Editor
--- 
--- Last Updated: February 2, 2026
--- This schema supports Teams and Single User accounts
+-- Database Schema for Teams & Single Users
 -- =============================================
 
 -- Enable UUID extension if not already enabled

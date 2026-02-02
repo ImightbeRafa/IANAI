@@ -1,32 +1,41 @@
-import type { BusinessDetails, Message } from '../types'
-import type { Language } from '../contexts/LanguageContext'
+import type { Message } from '../types'
 
-interface ApiResponse {
-  content?: string
-  error?: string
+type Language = 'en' | 'es'
+
+export interface ProductContext {
+  product_name?: string
+  product_description?: string
+  offer?: string
+  awareness_level?: string
+  market_alternatives?: string
+  customer_values?: string
+  purchase_reason?: string
+  target_audience?: string
+  call_to_action?: string
+  additional_context?: string
 }
 
 export async function sendMessageToGrok(
   messages: Message[],
-  businessDetails: BusinessDetails,
-  language: Language = 'en'
+  productContext: ProductContext,
+  language: Language = 'es'
 ): Promise<string> {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       messages: messages.map(m => ({
         role: m.role,
         content: m.content
       })),
-      businessDetails,
+      businessDetails: productContext,
       language
     })
   })
 
-  const data: ApiResponse = await response.json()
+  const data = await response.json()
 
   if (!response.ok) {
     throw new Error(data.error || `API error: ${response.status}`)
@@ -44,21 +53,4 @@ What product or service do you sell and what's your irresistible offer?`
   return `Vamos a crear guiones de venta de alta conversión para tu negocio. Te haré algunas preguntas rápidas para entender tu producto.
 
 ¿Qué producto o servicio vendes y cuál es tu oferta irresistible?`
-}
-
-export const INTERVIEW_QUESTIONS: Record<Language, string[]> = {
-  es: [
-    "¿Qué producto o servicio vendes y cuál es tu oferta irresistible?",
-    "¿Cuál es el nivel de conciencia de tu cliente ideal? (¿Sabe que tiene el problema? ¿Conoce tu solución?)",
-    "¿Qué otras opciones existen en el mercado y qué desventajas tienen comparadas contigo? (Sé específico sobre por qué la competencia es peor)",
-    "¿Qué es lo que MÁS valora tu cliente (Precio, rapidez, calidad, estatus)?",
-    "¿Por qué el cliente compra tu producto/servicio realmente? (La razón emocional o profunda)"
-  ],
-  en: [
-    "What product or service do you sell and what's your irresistible offer?",
-    "What's the awareness level of your ideal customer? (Do they know they have the problem? Do they know your solution?)",
-    "What other options exist in the market and what disadvantages do they have compared to you? (Be specific about why the competition is worse)",
-    "What does your customer value MOST (Price, speed, quality, status)?",
-    "Why does the customer really buy your product/service? (The emotional or deep reason)"
-  ]
 }

@@ -1,10 +1,9 @@
 import { ReactNode, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { 
   LayoutDashboard, 
-  MessageSquare, 
-  History, 
   Settings, 
   LogOut, 
   Menu,
@@ -18,6 +17,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const { user, signOut } = useAuth()
+  const { language } = useLanguage()
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -27,12 +27,24 @@ export default function Layout({ children }: LayoutProps) {
     navigate('/login')
   }
 
+  const labels = {
+    es: {
+      dashboard: 'Panel',
+      settings: 'Configuración',
+      signOut: 'Cerrar Sesión'
+    },
+    en: {
+      dashboard: 'Dashboard',
+      settings: 'Settings',
+      signOut: 'Sign Out'
+    }
+  }
+
+  const t = labels[language]
+
   const navItems = [
-    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/chat', label: 'New Script', icon: MessageSquare },
-    { path: '/history', label: 'History', icon: History },
-    { path: '/scripts', label: 'My Scripts', icon: FileText },
-    { path: '/settings', label: 'Settings', icon: Settings },
+    { path: '/dashboard', label: t.dashboard, icon: LayoutDashboard },
+    { path: '/settings', label: t.settings, icon: Settings },
   ]
 
   return (
@@ -101,7 +113,7 @@ export default function Layout({ children }: LayoutProps) {
               className="flex items-center gap-3 px-4 py-3 w-full text-dark-600 hover:bg-dark-50 hover:text-dark-900 rounded-lg transition-colors mt-2"
             >
               <LogOut className="w-5 h-5" />
-              <span className="font-medium">Sign Out</span>
+              <span className="font-medium">{t.signOut}</span>
             </button>
           </div>
         </div>

@@ -1,24 +1,97 @@
-export interface User {
+// =============================================
+// Account Types
+// =============================================
+export type AccountType = 'single' | 'team'
+export type TeamRole = 'owner' | 'admin' | 'member'
+export type ProductType = 'product' | 'service'
+export type SessionStatus = 'active' | 'completed' | 'archived'
+
+// =============================================
+// Core Entities
+// =============================================
+export interface Profile {
   id: string
   email: string
   full_name?: string
   avatar_url?: string
-  created_at: string
-  updated_at?: string
-}
-
-export interface Conversation {
-  id: string
-  user_id: string
-  title: string
-  status: 'active' | 'completed' | 'archived'
+  account_type: AccountType
   created_at: string
   updated_at: string
 }
 
+export interface Team {
+  id: string
+  name: string
+  owner_id: string
+  max_members: number
+  created_at: string
+  updated_at: string
+}
+
+export interface TeamMember {
+  id: string
+  team_id: string
+  user_id: string
+  role: TeamRole
+  invited_at: string
+  joined_at?: string
+  // Joined data
+  profile?: Profile
+}
+
+export interface Client {
+  id: string
+  team_id: string
+  name: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  // Computed
+  products_count?: number
+}
+
+export interface Product {
+  id: string
+  owner_id?: string
+  client_id?: string
+  name: string
+  type: ProductType
+  // Core product info (from form)
+  description?: string
+  offer?: string
+  awareness_level?: string
+  market_alternatives?: string
+  customer_values?: string
+  purchase_reason?: string
+  // Additional context
+  target_audience?: string
+  unique_value?: string
+  call_to_action?: string
+  created_at: string
+  updated_at: string
+  // Joined data
+  client?: Client
+  sessions_count?: number
+  scripts_count?: number
+}
+
+export interface ChatSession {
+  id: string
+  product_id: string
+  user_id: string
+  title: string
+  status: SessionStatus
+  context?: string
+  created_at: string
+  updated_at: string
+  // Joined data
+  product?: Product
+  messages_count?: number
+}
+
 export interface Message {
   id: string
-  conversation_id: string
+  session_id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   created_at: string
@@ -26,46 +99,46 @@ export interface Message {
 
 export interface Script {
   id: string
-  conversation_id: string
-  user_id: string
+  session_id: string
+  product_id: string
   title: string
   content: string
-  angle: ScriptAngle
+  angle?: string
+  is_favorite: boolean
   created_at: string
   updated_at: string
+  // Joined data
+  product?: Product
 }
 
-export type ScriptAngle = 
-  | 'direct_sale'
-  | 'discredit_competitors'
-  | 'process_certainty'
-  | 'pain_solution'
-  | 'social_proof'
-
-export interface BusinessDetails {
-  product_name?: string
-  product_description?: string
+// =============================================
+// Form Types
+// =============================================
+export interface ProductFormData {
+  name: string
+  type: ProductType
+  description: string
+  offer: string
+  awareness_level: string
+  market_alternatives: string
+  customer_values: string
+  purchase_reason: string
   target_audience?: string
-  unique_value?: string
-  competitors?: string
-  customer_pain_points?: string
-  emotional_trigger?: string
   call_to_action?: string
 }
 
-export interface ChatState {
-  currentConversation: Conversation | null
-  messages: Message[]
-  isLoading: boolean
-  error: string | null
-  businessDetails: BusinessDetails
-  interviewStep: number
-  interviewComplete: boolean
-}
-
+// =============================================
+// Dashboard Stats
+// =============================================
 export interface DashboardStats {
-  totalConversations: number
+  totalProducts: number
   totalScripts: number
-  activeConversations: number
+  totalSessions: number
   scriptsThisMonth: number
 }
+
+export interface TeamDashboardStats extends DashboardStats {
+  totalClients: number
+  totalMembers: number
+}
+
