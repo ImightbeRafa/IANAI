@@ -576,3 +576,94 @@ export async function getTeamDashboardStats(teamId: string): Promise<TeamDashboa
     scriptsThisMonth: monthlyScriptsResult.count || 0
   }
 }
+
+// =============================================
+// POST FUNCTIONS (AI Image Generation)
+// =============================================
+
+export interface Post {
+  id: string
+  product_id: string
+  created_by: string
+  prompt: string
+  input_images?: string[]
+  generated_image_url?: string
+  flux_task_id?: string
+  status: 'pending' | 'generating' | 'completed' | 'failed'
+  width: number
+  height: number
+  output_format: string
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export async function createPost(
+  productId: string,
+  userId: string,
+  data: {
+    prompt: string
+    input_images?: string[]
+    width?: number
+    height?: number
+    output_format?: string
+    flux_task_id?: string
+  }
+): Promise<Post> {
+  const { data: post, error } = await supabase
+    .from('posts')
+    .insert({
+      product_id: productId,
+      created_by: userId,
+      prompt: data.prompt,
+      input_images: data.input_images || [],
+      width: data.width || 1080,
+      height: data.height || 1080,
+      output_format: data.output_format || 'jpeg',
+      flux_task_id: data.flux_task_id,
+      status: 'generating'
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return post
+}
+
+export async function updatePostStatus(
+  postId: string,
+  status: 'pending' | 'generating' | 'completed' | 'failed',
+  imageUrl?: string,
+  errorMessage?: string
+): Promise<void> {
+  const updateData: Record<string, unknown> = { status }
+  if (imageUrl) updateData.generated_image_url = imageUrl
+  if (errorMessage) updateData.error_message = errorMessage
+
+  const { error } = await supabase
+    .from('posts')
+    .update(updateData)
+    .eq('id', postId)
+
+  if (error) throw error
+}
+
+export async function getProductPosts(productId: string): Promise<Post[]> {
+  const { data, error } = await supabase
+    .from('posts')
+    .select('*')
+    .eq('product_id', productId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function deletePost(postId: string): Promise<void> {
+  const { error } = await supabase
+    .from('posts')
+    .delete()
+    .eq('id', postId)
+
+  if (error) throw error
+}

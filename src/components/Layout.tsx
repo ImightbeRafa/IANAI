@@ -3,11 +3,12 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
-  LayoutDashboard, 
   Settings, 
   LogOut, 
   Menu,
-  User
+  User,
+  FileText,
+  ImageIcon
 } from 'lucide-react'
 
 interface LayoutProps {
@@ -28,12 +29,14 @@ export default function Layout({ children }: LayoutProps) {
 
   const labels = {
     es: {
-      dashboard: 'Panel',
+      scripts: 'Guiones',
+      posts: 'Posts',
       settings: 'Configuración',
       signOut: 'Cerrar Sesión'
     },
     en: {
-      dashboard: 'Dashboard',
+      scripts: 'Scripts',
+      posts: 'Posts',
       settings: 'Settings',
       signOut: 'Sign Out'
     }
@@ -42,7 +45,8 @@ export default function Layout({ children }: LayoutProps) {
   const t = labels[language]
 
   const navItems = [
-    { path: '/dashboard', label: t.dashboard, icon: LayoutDashboard },
+    { path: '/dashboard', label: t.scripts, icon: FileText },
+    { path: '/posts', label: t.posts, icon: ImageIcon },
     { path: '/settings', label: t.settings, icon: Settings },
   ]
 

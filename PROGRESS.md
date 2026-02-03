@@ -1,12 +1,14 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 3, 2026 at 1:07 PM (UTC-06:00)
+## Last Updated: February 3, 2026 at 2:30 PM (UTC-06:00)
 
 ---
 
 ## Project Overview
 
-**Advance AI** (formerly CopywriteAI) is an AI-powered ad script generator using Grok API. The platform generates high-conversion ad scripts for social media based on Ian's copywriting methodology.
+**Advance AI** (formerly CopywriteAI) is an AI-powered content creation platform. Features include:
+- **Scripts**: High-conversion ad scripts for social media using Grok API
+- **Posts**: AI-powered Instagram image generation using Flux 2 Klein API
 
 ---
 
@@ -239,6 +241,54 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `src/components/ScriptSettingsPanel.tsx` - New framework labels (ES/EN)
   - `src/services/grokApi.ts` - Default framework to `venta_directa`
   - `api/chat.ts` - Complete rewrite of `MASTER_PROMPTS` and `FRAMEWORK_PROMPTS`
+
+### February 3, 2026 - AI Image Posts Feature (2:30 PM)
+- [x] **NEW FEATURE: Instagram Post Image Generation**
+  - AI-powered image generation using Flux 2 Klein API (BFL)
+  - Supports img2img with up to 4 reference images
+  - Multiple aspect ratios: Square (1:1), Portrait (4:5), Story (9:16)
+  - Product context auto-fills prompt for better results
+- [x] **Sidebar Navigation Update**
+  - Renamed "Panel/Dashboard" to "Guiones/Scripts"
+  - Added new "Posts" section with ImageIcon
+  - Both sections share same client/product structure
+- [x] **New Files Created:**
+  - `api/generate-image.ts` - Vercel serverless function for Flux API
+  - `src/pages/PostsDashboard.tsx` - Product list for post generation
+  - `src/pages/PostWorkspace.tsx` - Image generation interface
+  - `supabase/migrations/008_posts_table.sql` - Database table for posts
+- [x] **Database Changes:**
+  - New `posts` table with RLS policies
+  - Stores prompts, input images, generated URLs, status
+  - Linked to products via `product_id`
+- [x] **Security:**
+  - `BFL_API_KEY` stored as environment variable
+  - API key never exposed to client
+  - Async polling pattern for image generation
+- [x] **Updated Files:**
+  - `src/components/Layout.tsx` - New sidebar navigation
+  - `src/App.tsx` - Added /posts and /posts/product/:id routes
+  - `src/services/database.ts` - Post CRUD functions
+
+### February 3, 2026 - Signup Flow & Branding Updates (2:06 PM)
+- [x] **Signup Email Verification Message**
+  - Shows success screen after signup instead of navigating to dashboard
+  - Displays "Check your email" with user's email address
+  - Amber warning box to check spam/junk folder
+- [x] **Auto Team Account Creation**
+  - New migration `007_auto_team_on_signup.sql`
+  - Updated `handle_new_user()` trigger to create `account_type = 'team'`
+  - Auto-creates team named "{Name}'s Team" for new users
+  - Adds user as team owner automatically
+- [x] **Removed Internal Branding**
+  - Replaced "Metodología Ian" with "Copywriting de Alta Conversión" (ES)
+  - Replaced "Ian Methodology" with "High-Conversion Copywriting" (EN)
+  - Removed "Método Ian" references from hero subtitles
+- [x] **Updated Files:**
+  - `src/pages/Signup.tsx` - Email verification success state
+  - `supabase/migrations/007_auto_team_on_signup.sql` - Auto team creation
+  - `supabase/schema.sql` - Updated handle_new_user function
+  - `src/pages/Home.tsx` - Removed Ian methodology references
 
 ### February 3, 2026 - Rebranding & Home Page (1:07 PM)
 - [x] **REBRANDING: CopywriteAI → Advance AI**

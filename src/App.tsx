@@ -7,6 +7,8 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import ProductWorkspace from './pages/ProductWorkspace'
+import PostsDashboard from './pages/PostsDashboard'
+import PostWorkspace from './pages/PostWorkspace'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -47,6 +49,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/posts"
+              element={
+                <ProtectedRoute>
+                  <PostsDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/posts/product/:productId"
+              element={
+                <ProtectedRoute>
+                  <PostWorkspace />
                 </ProtectedRoute>
               }
             />
