@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getProduct } from '../services/database'
-import type { Product } from '../types'
+import type { Product, ImageModel } from '../types'
 import Layout from '../components/Layout'
 import { 
   ArrowLeft,
@@ -17,8 +17,10 @@ import {
   Briefcase,
   UtensilsCrossed,
   Home,
-  Loader2
+  Loader2,
+  Cpu
 } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 interface GeneratedPost {
   id: string
@@ -47,6 +49,7 @@ export default function PostWorkspace() {
 
   // Image settings
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5' | '9:16'>('1:1')
+  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana')
 
   const labels = {
     es: {
@@ -71,7 +74,10 @@ export default function PostWorkspace() {
       useProductContext: 'Usar contexto del producto',
       error: 'Error al generar imagen',
       textWarningTitle: 'Nota sobre texto en imágenes',
-      textWarningMessage: 'La IA no puede generar texto legible en imágenes. El texto solicitado se ha removido del prompt. Usa herramientas de edición (Canva, Photoshop) para agregar texto después.'
+      textWarningMessage: 'La IA no puede generar texto legible en imágenes. El texto solicitado se ha removido del prompt. Usa herramientas de edición (Canva, Photoshop) para agregar texto después.',
+      imageModel: 'Modelo de IA',
+      nanoBanana: 'Nano Banana',
+      nanoBananaPro: 'Nano Banana Pro'
     },
     en: {
       back: 'Back',
@@ -95,7 +101,10 @@ export default function PostWorkspace() {
       useProductContext: 'Use product context',
       error: 'Error generating image',
       textWarningTitle: 'Note about text in images',
-      textWarningMessage: 'AI cannot generate readable text in images. Text requests have been removed from the prompt. Use editing tools (Canva, Photoshop) to add text afterwards.'
+      textWarningMessage: 'AI cannot generate readable text in images. Text requests have been removed from the prompt. Use editing tools (Canva, Photoshop) to add text afterwards.',
+      imageModel: 'AI Model',
+      nanoBanana: 'Nano Banana',
+      nanoBananaPro: 'Nano Banana Pro'
     }
   }
 
@@ -217,13 +226,22 @@ export default function PostWorkspace() {
     setTextWarning(false)
 
     try {
+      // Get auth token
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      
+      if (!token) {
+        throw new Error('No estás autenticado. Por favor inicia sesión.')
+      }
+
       const { width, height } = getAspectDimensions()
       
       const requestBody: Record<string, unknown> = {
         prompt: prompt,
         width,
         height,
-        output_format: 'jpeg'
+        output_format: 'jpeg',
+        model: imageModel
       }
 
       // Add reference images if uploaded
@@ -236,7 +254,10 @@ export default function PostWorkspace() {
 
       const response = await fetch(API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(requestBody)
       })
 
@@ -251,8 +272,19 @@ export default function PostWorkspace() {
         setTextWarning(true)
       }
 
-      // Start polling for result
-      setPollingTaskId(result.taskId)
+      // For Gemini models, result is immediate (no polling needed)
+      if (result.status === 'Ready' && result.result?.sample) {
+        setGeneratedPosts(prev => [{
+          id: `gemini-${Date.now()}`,
+          imageUrl: result.result.sample,
+          prompt: prompt,
+          createdAt: new Date()
+        }, ...prev])
+        setGenerating(false)
+      } else if (result.taskId) {
+        // For Flux, start polling for result
+        setPollingTaskId(result.taskId)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t.error)
       setGenerating(false)
@@ -413,6 +445,42 @@ export default function PostWorkspace() {
                     {option.label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* AI Model Selector */}
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">
+                <Cpu className="w-4 h-4 text-primary-500" />
+                {t.imageModel}
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setImageModel('nano-banana')}
+                  className={`p-3 rounded-lg text-sm transition-colors ${
+                    imageModel === 'nano-banana'
+                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
+                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
+                  }`}
+                >
+                  <div className="font-medium">{t.nanoBanana}</div>
+                  <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana' ? 'text-primary-600' : 'text-dark-400'}`}>
+                    Gemini 2.5 Flash
+                  </div>
+                </button>
+                <button
+                  onClick={() => setImageModel('nano-banana-pro')}
+                  className={`p-3 rounded-lg text-sm transition-colors ${
+                    imageModel === 'nano-banana-pro'
+                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
+                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
+                  }`}
+                >
+                  <div className="font-medium">{t.nanoBananaPro}</div>
+                  <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana-pro' ? 'text-primary-600' : 'text-dark-400'}`}>
+                    Gemini 3 Pro
+                  </div>
+                </button>
               </div>
             </div>
 

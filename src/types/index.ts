@@ -14,6 +14,7 @@ export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'in
 export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
 export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
 export type AIModel = 'grok' | 'gemini'
+export type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro'
 
 // =============================================
 // Core Entities

@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 3, 2026 at 3:34 PM (UTC-06:00)
+## Last Updated: February 3, 2026 at 5:30 PM (UTC-06:00)
 
 ---
 
@@ -254,6 +254,47 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] **Environment Variables Required**
   - `TILOPAY_WEBHOOK_SECRET` - Get from TiloPay dashboard
   - `SUPABASE_SERVICE_ROLE_KEY` - Already configured
+
+### February 3, 2026 - Model Switching & TiloPay Fixes (5:30 PM)
+- [x] **AI Model Switching for Scripts**
+  - Toggle between **Grok** (xAI) and **Gemini 3 Pro** (Google) models
+  - Same system prompts and context used for both models
+  - UI selector in ScriptSettingsPanel (compact and full modes)
+  - Added `AIModel` type: `'grok' | 'gemini'`
+- [x] **AI Model Switching for Image Generation (Posts)**
+  - **Nano Banana**: Gemini 2.5 Flash Image model
+  - **Nano Banana Pro**: Gemini 3 Pro Image Preview model
+  - UI selector in PostWorkspace with model descriptions
+  - Added `ImageModel` type: `'flux' | 'nano-banana' | 'nano-banana-pro'`
+- [x] **TiloPay Webhook Refactored**
+  - Event-specific webhook URLs (subscribe, payment, rejected, unsubscribe, reactive)
+  - Matches TiloPay Repeat API documentation
+  - User matching via email in `pending_subscriptions` or `profiles` table
+- [x] **Subscription Table Fix**
+  - Migration `012_fix_subscriptions_unique.sql` adds UNIQUE constraint on `user_id`
+  - Fixes upsert creating duplicate rows instead of updating
+  - Removes duplicate subscriptions (keeps most recent)
+- [x] **Auth Headers Fixed**
+  - Added Authorization header to `grokApi.ts` for chat API calls
+  - Added Authorization header to `ProductForm.tsx` for paste auto-fill
+  - Added Authorization header to `PostWorkspace.tsx` for image generation
+- [x] **Simplified Script Prompts**
+  - Removed duration and framework from user-visible prompts
+  - Now only shows "Generate X script(s)" in chat
+- [x] **Files Updated:**
+  - `api/chat.ts` - Gemini API integration, model selection
+  - `api/generate-image.ts` - Gemini image models support
+  - `api/tilopay/webhook.ts` - Event-specific webhook handling
+  - `src/types/index.ts` - AIModel, ImageModel types
+  - `src/components/ScriptSettingsPanel.tsx` - Model selector UI
+  - `src/pages/PostWorkspace.tsx` - Image model selector, auth header
+  - `src/pages/ProductWorkspace.tsx` - Simplified prompts
+  - `src/services/grokApi.ts` - Auth header, default model
+  - `src/components/ProductForm.tsx` - Auth header for paste feature
+- [x] **New Files:**
+  - `supabase/migrations/012_fix_subscriptions_unique.sql`
+- [x] **Environment Variables Required:**
+  - `GEMINI_API_KEY` - For Gemini text and image generation
 
 ### February 3, 2026 - TiloPay Hardening & Script Settings Simplification (3:45 PM)
 - [x] **Script Settings Simplified**
