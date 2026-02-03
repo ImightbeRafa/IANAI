@@ -331,15 +331,48 @@ export default function Settings() {
                   </div>
                 </div>
                 {subscription?.plan !== plan && subscription?.plan === 'free' && PLAN_DETAILS[plan].paymentLink && (
-                  <a 
-                    href={PLAN_DETAILS[plan].paymentLink!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2"
+                  <button 
+                    className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
+                    disabled={loading}
+                    onClick={async () => {
+                      setLoading(true)
+                      setMessage(null)
+                      try {
+                        const { data: { session } } = await supabase.auth.getSession()
+                        if (!session) {
+                          setMessage({ type: 'error', text: language === 'es' ? 'Sesión expirada' : 'Session expired' })
+                          return
+                        }
+
+                        const response = await fetch('/api/tilopay/create-checkout', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${session.access_token}`
+                          },
+                          body: JSON.stringify({ plan })
+                        })
+
+                        const data = await response.json()
+                        
+                        if (data.checkoutUrl) {
+                          window.open(data.checkoutUrl, '_blank')
+                        } else {
+                          setMessage({ type: 'error', text: data.error || 'Error al procesar' })
+                        }
+                      } catch (error) {
+                        console.error('Checkout error:', error)
+                        setMessage({ type: 'error', text: language === 'es' ? 'Error de conexión' : 'Connection error' })
+                      } finally {
+                        setLoading(false)
+                      }
+                    }}
                   >
                     <Check className="w-4 h-4" />
-                    {language === 'es' ? 'Actualizar Plan' : 'Upgrade Plan'}
-                  </a>
+                    {loading 
+                      ? (language === 'es' ? 'Procesando...' : 'Processing...') 
+                      : (language === 'es' ? 'Actualizar Plan' : 'Upgrade Plan')}
+                  </button>
                 )}
               </div>
             ))}

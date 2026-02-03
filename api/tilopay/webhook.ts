@@ -169,11 +169,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // =============================================
 
 async function handlePaymentSucceeded(data: TiloPayWebhookPayload['data']) {
-  const userId = data.metadata?.user_id
+  let userId = data.metadata?.user_id
   const subscriptionId = data.subscription_id
+  const customerEmail = (data as Record<string, unknown>).customer_email || (data as Record<string, unknown>).email
+
+  // If no user_id in metadata, try to match by email from pending_subscriptions
+  if (!userId && customerEmail) {
+    const { data: pending } = await supabase
+      .from('pending_subscriptions')
+      .select('user_id, plan')
+      .eq('email', customerEmail)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (pending) {
+      userId = pending.user_id
+      console.log(`Matched payment to user ${userId} via email ${customerEmail}`)
+      
+      // Mark pending subscription as completed
+      await supabase
+        .from('pending_subscriptions')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+    }
+  }
 
   if (!userId) {
-    console.error('Payment succeeded but no user_id in metadata')
+    console.error('Payment succeeded but could not identify user')
     return
   }
 
