@@ -23,7 +23,7 @@
 - Chat is used **only** for script generation and refinement
 - Users can provide additional context per session
 - Feedback mechanism allows iterating on generated scripts
-
+s
 ---
 
 ## Account Types
