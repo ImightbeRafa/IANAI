@@ -661,8 +661,8 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
   if (!settings) return ''
   
   const variationInstruction = language === 'es'
-    ? `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:\n- CANTIDAD: Genera EXACTAMENTE ${settings.variations} script(s). NI MÁS NI MENOS.\n- DURACIÓN: ${DURATION_PROMPTS[language][settings.duration]}\n- ESTRUCTURA: ${FRAMEWORK_PROMPTS[language][settings.framework]}`
-    : `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:\n- QUANTITY: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS.\n- DURATION: ${DURATION_PROMPTS[language][settings.duration]}\n- STRUCTURE: ${FRAMEWORK_PROMPTS[language][settings.framework]}`
+    ? `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:\n- CANTIDAD: Genera EXACTAMENTE ${settings.variations} guión(es). NI MÁS NI MENOS.`
+    : `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:\n- QUANTITY: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS.`
   
   return variationInstruction
 }

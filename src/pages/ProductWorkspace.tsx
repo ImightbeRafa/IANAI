@@ -272,17 +272,10 @@ export default function ProductWorkspace() {
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
       }
 
-      // Add system message asking for scripts with settings - be explicit about all config
-      const durationLabel = scriptSettings.duration === '15s' ? '15 segundos' : 
-                           scriptSettings.duration === '30s' ? '30 segundos' : 
-                           scriptSettings.duration === '60s' ? '60 segundos' : '90 segundos'
-      const durationLabelEn = scriptSettings.duration === '15s' ? '15 seconds' : 
-                              scriptSettings.duration === '30s' ? '30 seconds' : 
-                              scriptSettings.duration === '60s' ? '60 seconds' : '90 seconds'
-      
+      // Add system message asking for scripts - only variations count matters now
       const generatePrompt = language === 'es' 
-        ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta de ${durationLabel} cada uno, usando la estructura "${scriptSettings.framework}". Respeta estrictamente la duración indicada.`
-        : `Generate exactly ${scriptSettings.variations} sales script(s) of ${durationLabelEn} each, using the "${scriptSettings.framework}" structure. Strictly respect the indicated duration.`
+        ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta.`
+        : `Generate exactly ${scriptSettings.variations} sales script(s).`
       
       const userMessage = await addMessage(session.id, 'user', generatePrompt)
       setMessages(prev => [...prev, userMessage])

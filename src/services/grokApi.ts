@@ -1,4 +1,5 @@
 import type { Message, ScriptGenerationSettings, ProductType } from '../types'
+import { supabase } from '../lib/supabase'
 
 type Language = 'en' | 'es'
 
@@ -60,10 +61,19 @@ export async function sendMessageToGrok(
   scriptSettings?: ScriptGenerationSettings,
   productType?: ProductType
 ): Promise<string> {
+  // Get the current session token for authentication
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+
+  if (!token) {
+    throw new Error('No estás autenticado. Por favor inicia sesión.')
+  }
+
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
     },
     body: JSON.stringify({
       messages: messages.map(m => ({
