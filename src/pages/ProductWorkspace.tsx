@@ -357,14 +357,18 @@ export default function ProductWorkspace() {
       regenerate: 'Regenerar',
       saveScript: 'Guardar Script',
       scriptSaved: '¡Script guardado!',
-      description: 'Descripción',
-      offer: 'Oferta',
-      customerValues: 'Valores del cliente',
-      purchaseReason: 'Razón de compra',
+      productDescription: 'Descripción del producto/servicio',
+      mainProblem: 'Problema principal',
+      bestCustomers: 'Mejores clientes',
+      failedAttempts: 'Intentos fallidos',
+      attentionGrabber: 'Lo que más llama la atención',
+      realPain: 'Dolor real',
+      painConsequences: 'Consecuencias del dolor',
+      expectedResult: 'Resultado esperado',
+      differentiation: 'Diferenciación',
+      keyObjection: 'Objeción principal',
+      shippingInfo: 'Información de envío',
       awarenessLevel: 'Nivel de conciencia',
-      marketAlternatives: 'Alternativas del mercado',
-      targetAudience: 'Audiencia objetivo',
-      cta: 'Llamado a la acción',
       scriptSettings: 'Configuración del Script',
       rateScript: 'Calificar'
     },
@@ -388,14 +392,18 @@ export default function ProductWorkspace() {
       regenerate: 'Regenerate',
       saveScript: 'Save Script',
       scriptSaved: 'Script saved!',
-      description: 'Description',
-      offer: 'Offer',
-      customerValues: 'Customer Values',
-      purchaseReason: 'Purchase Reason',
+      productDescription: 'Product/Service Description',
+      mainProblem: 'Main Problem',
+      bestCustomers: 'Best Customers',
+      failedAttempts: 'Failed Attempts',
+      attentionGrabber: 'What Grabs Attention',
+      realPain: 'Real Pain',
+      painConsequences: 'Pain Consequences',
+      expectedResult: 'Expected Result',
+      differentiation: 'Differentiation',
+      keyObjection: 'Key Objection',
+      shippingInfo: 'Shipping Info',
       awarenessLevel: 'Awareness Level',
-      marketAlternatives: 'Market Alternatives',
-      targetAudience: 'Target Audience',
-      cta: 'Call to Action',
       scriptSettings: 'Script Settings',
       rateScript: 'Rate'
     }
@@ -694,18 +702,50 @@ export default function ProductWorkspace() {
                 {editingProduct ? (
                   <>
                     <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.description}</label>
+                      <label className="text-xs text-dark-400 block mb-1">{t.productDescription}</label>
                       <textarea
-                        value={editedProduct.description || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, description: e.target.value }))}
+                        value={editedProduct.product_description || ''}
+                        onChange={(e) => setEditedProduct(prev => ({ ...prev, product_description: e.target.value }))}
                         className="input-field text-sm min-h-[60px]"
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.offer}</label>
+                      <label className="text-xs text-dark-400 block mb-1">{t.mainProblem}</label>
                       <textarea
-                        value={editedProduct.offer || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, offer: e.target.value }))}
+                        value={editedProduct.main_problem || ''}
+                        onChange={(e) => setEditedProduct(prev => ({ ...prev, main_problem: e.target.value }))}
+                        className="input-field text-sm min-h-[60px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-dark-400 block mb-1">{t.bestCustomers}</label>
+                      <textarea
+                        value={editedProduct.best_customers || ''}
+                        onChange={(e) => setEditedProduct(prev => ({ ...prev, best_customers: e.target.value }))}
+                        className="input-field text-sm min-h-[60px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-dark-400 block mb-1">{t.attentionGrabber}</label>
+                      <textarea
+                        value={editedProduct.attention_grabber || ''}
+                        onChange={(e) => setEditedProduct(prev => ({ ...prev, attention_grabber: e.target.value }))}
+                        className="input-field text-sm min-h-[60px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-dark-400 block mb-1">{t.expectedResult}</label>
+                      <textarea
+                        value={editedProduct.expected_result || ''}
+                        onChange={(e) => setEditedProduct(prev => ({ ...prev, expected_result: e.target.value }))}
+                        className="input-field text-sm min-h-[60px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-dark-400 block mb-1">{t.differentiation}</label>
+                      <textarea
+                        value={editedProduct.differentiation || ''}
+                        onChange={(e) => setEditedProduct(prev => ({ ...prev, differentiation: e.target.value }))}
                         className="input-field text-sm min-h-[60px]"
                       />
                     </div>
@@ -717,70 +757,105 @@ export default function ProductWorkspace() {
                         className="input-field text-sm min-h-[60px]"
                       />
                     </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.marketAlternatives}</label>
-                      <textarea
-                        value={editedProduct.market_alternatives || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, market_alternatives: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.customerValues}</label>
-                      <textarea
-                        value={editedProduct.customer_values || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, customer_values: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.purchaseReason}</label>
-                      <textarea
-                        value={editedProduct.purchase_reason || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, purchase_reason: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.cta}</label>
-                      <input
-                        type="text"
-                        value={editedProduct.call_to_action || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, call_to_action: e.target.value }))}
-                        className="input-field text-sm"
-                      />
-                    </div>
+                    {/* Product-specific fields */}
+                    {product.type === 'product' && (
+                      <>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.keyObjection}</label>
+                          <textarea
+                            value={editedProduct.key_objection || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, key_objection: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.shippingInfo}</label>
+                          <textarea
+                            value={editedProduct.shipping_info || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, shipping_info: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {/* Service-specific fields */}
+                    {product.type === 'service' && (
+                      <>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.realPain}</label>
+                          <textarea
+                            value={editedProduct.real_pain || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, real_pain: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.painConsequences}</label>
+                          <textarea
+                            value={editedProduct.pain_consequences || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, pain_consequences: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
                     <div>
-                      <p className="text-xs text-dark-400">{t.description}</p>
-                      <p className="text-dark-700">{product.description || '-'}</p>
+                      <p className="text-xs text-dark-400">{t.productDescription}</p>
+                      <p className="text-dark-700">{product.product_description || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-dark-400">{t.offer}</p>
-                      <p className="text-dark-700">{product.offer || '-'}</p>
+                      <p className="text-xs text-dark-400">{t.mainProblem}</p>
+                      <p className="text-dark-700">{product.main_problem || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-dark-400">{t.bestCustomers}</p>
+                      <p className="text-dark-700">{product.best_customers || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-dark-400">{t.attentionGrabber}</p>
+                      <p className="text-dark-700">{product.attention_grabber || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-dark-400">{t.expectedResult}</p>
+                      <p className="text-dark-700">{product.expected_result || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-dark-400">{t.differentiation}</p>
+                      <p className="text-dark-700">{product.differentiation || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-dark-400">{t.awarenessLevel}</p>
                       <p className="text-dark-700">{product.awareness_level || '-'}</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.marketAlternatives}</p>
-                      <p className="text-dark-700">{product.market_alternatives || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.customerValues}</p>
-                      <p className="text-dark-700">{product.customer_values || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.purchaseReason}</p>
-                      <p className="text-dark-700">{product.purchase_reason || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.cta}</p>
-                      <p className="text-dark-700">{product.call_to_action || '-'}</p>
-                    </div>
+                    {/* Product-specific fields */}
+                    {product.type === 'product' && (
+                      <>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.keyObjection}</p>
+                          <p className="text-dark-700">{product.key_objection || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.shippingInfo}</p>
+                          <p className="text-dark-700">{product.shipping_info || '-'}</p>
+                        </div>
+                      </>
+                    )}
+                    {/* Service-specific fields */}
+                    {product.type === 'service' && (
+                      <>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.realPain}</p>
+                          <p className="text-dark-700">{product.real_pain || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.painConsequences}</p>
+                          <p className="text-dark-700">{product.pain_consequences || '-'}</p>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </div>

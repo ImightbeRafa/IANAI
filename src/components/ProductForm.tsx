@@ -360,11 +360,16 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 </div>
               </div>
 
-              {/* Quick Paste Button */}
+              {/* Quick Paste Button - requires name and type to be set first */}
               <button
                 type="button"
                 onClick={() => setShowPasteModal(true)}
-                className="w-full p-4 border-2 border-dashed border-dark-200 hover:border-primary-400 hover:bg-primary-50 rounded-xl transition-all flex items-center justify-center gap-3 text-dark-500 hover:text-primary-600"
+                disabled={!formData.name.trim() || !formData.type}
+                className={`w-full p-4 border-2 border-dashed rounded-xl transition-all flex items-center justify-center gap-3 ${
+                  formData.name.trim() && formData.type
+                    ? 'border-dark-200 hover:border-primary-400 hover:bg-primary-50 text-dark-500 hover:text-primary-600 cursor-pointer'
+                    : 'border-dark-100 text-dark-300 cursor-not-allowed'
+                }`}
               >
                 <ClipboardPaste className="w-5 h-5" />
                 <span className="font-medium">{t.quickPaste}</span>
