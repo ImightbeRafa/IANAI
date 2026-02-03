@@ -1,4 +1,4 @@
-import type { Message } from '../types'
+import type { Message, ScriptGenerationSettings } from '../types'
 
 type Language = 'en' | 'es'
 
@@ -15,10 +15,19 @@ export interface ProductContext {
   additional_context?: string
 }
 
+export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
+  framework: 'direct',
+  tone: 'professional',
+  duration: '30s',
+  platform: 'general',
+  variations: 3
+}
+
 export async function sendMessageToGrok(
   messages: Message[],
   productContext: ProductContext,
-  language: Language = 'es'
+  language: Language = 'es',
+  scriptSettings?: ScriptGenerationSettings
 ): Promise<string> {
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -31,7 +40,8 @@ export async function sendMessageToGrok(
         content: m.content
       })),
       businessDetails: productContext,
-      language
+      language,
+      scriptSettings
     })
   })
 

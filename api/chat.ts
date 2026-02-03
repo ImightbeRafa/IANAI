@@ -149,10 +149,112 @@ interface ChatMessage {
   content: string
 }
 
+interface ScriptSettings {
+  framework: 'direct' | 'pas' | 'aida' | 'bab' | 'fourp'
+  tone: 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
+  duration: '15s' | '30s' | '60s' | '90s'
+  platform: 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
+  variations: number
+}
+
 interface RequestBody {
   messages: ChatMessage[]
   businessDetails: Record<string, string>
   language: 'en' | 'es'
+  scriptSettings?: ScriptSettings
+}
+
+const FRAMEWORK_PROMPTS = {
+  es: {
+    direct: 'Usa el formato de VENTA DIRECTA: Gancho con oferta irresistible → Beneficios + Logística → CTA directo.',
+    pas: 'Usa el formato PAS (Problema-Agitación-Solución): Identifica el PROBLEMA del cliente → AGITA ese dolor haciéndolo más intenso → Presenta tu SOLUCIÓN como el alivio.',
+    aida: 'Usa el formato AIDA: ATENCIÓN con un gancho impactante → INTERÉS describiendo beneficios → DESEO creando urgencia emocional → ACCIÓN con CTA claro.',
+    bab: 'Usa el formato BAB (Before-After-Bridge): Describe el ANTES (situación actual del cliente) → Muestra el DESPUÉS (vida transformada) → El PUENTE es tu producto/servicio.',
+    fourp: 'Usa el formato 4Ps: PROMESA audaz → PINTURA de la transformación → PRUEBA social/garantía → PUSH con CTA urgente.'
+  },
+  en: {
+    direct: 'Use DIRECT SALE format: Hook with irresistible offer → Benefits + Logistics → Direct CTA.',
+    pas: 'Use PAS format (Problem-Agitate-Solution): Identify the customer\'s PROBLEM → AGITATE that pain making it more intense → Present your SOLUTION as the relief.',
+    aida: 'Use AIDA format: ATTENTION with impactful hook → INTEREST describing benefits → DESIRE creating emotional urgency → ACTION with clear CTA.',
+    bab: 'Use BAB format (Before-After-Bridge): Describe the BEFORE (customer\'s current situation) → Show the AFTER (transformed life) → The BRIDGE is your product/service.',
+    fourp: 'Use 4Ps format: Bold PROMISE → PICTURE the transformation → PROOF with social proof/guarantee → PUSH with urgent CTA.'
+  }
+}
+
+const TONE_PROMPTS = {
+  es: {
+    professional: 'Tono: PROFESIONAL - Lenguaje claro, confiable, orientado a resultados.',
+    casual: 'Tono: CASUAL - Como hablarías con un amigo, relajado pero convincente.',
+    urgent: 'Tono: URGENTE - Crea escasez y FOMO, usa palabras como "ahora", "última oportunidad", "solo hoy".',
+    humorous: 'Tono: HUMORÍSTICO - Usa humor inteligente, ironía o situaciones graciosas para conectar.',
+    inspirational: 'Tono: INSPIRACIONAL - Motivador, aspiracional, enfocado en el potencial del cliente.',
+    controversial: 'Tono: CONTROVERSIAL - Polarizante, desafía creencias comunes, genera debate.'
+  },
+  en: {
+    professional: 'Tone: PROFESSIONAL - Clear, trustworthy, results-oriented language.',
+    casual: 'Tone: CASUAL - Like talking to a friend, relaxed but convincing.',
+    urgent: 'Tone: URGENT - Create scarcity and FOMO, use words like "now", "last chance", "today only".',
+    humorous: 'Tone: HUMOROUS - Use smart humor, irony or funny situations to connect.',
+    inspirational: 'Tone: INSPIRATIONAL - Motivating, aspirational, focused on customer potential.',
+    controversial: 'Tone: CONTROVERSIAL - Polarizing, challenge common beliefs, generate debate.'
+  }
+}
+
+const DURATION_PROMPTS = {
+  es: {
+    '15s': 'Duración: 15 SEGUNDOS - Ultra corto. Solo gancho + 1 beneficio + CTA. Máximo 40 palabras.',
+    '30s': 'Duración: 30 SEGUNDOS - Estándar. Gancho + 2-3 beneficios + logística + CTA. Máximo 80 palabras.',
+    '60s': 'Duración: 60 SEGUNDOS - Completo. Gancho + desarrollo completo + prueba social + CTA. Máximo 150 palabras.',
+    '90s': 'Duración: 90 SEGUNDOS - Extendido. Historia completa con problema, solución, beneficios, prueba y CTA. Máximo 220 palabras.'
+  },
+  en: {
+    '15s': 'Duration: 15 SECONDS - Ultra short. Hook + 1 benefit + CTA only. Maximum 40 words.',
+    '30s': 'Duration: 30 SECONDS - Standard. Hook + 2-3 benefits + logistics + CTA. Maximum 80 words.',
+    '60s': 'Duration: 60 SECONDS - Complete. Hook + full development + social proof + CTA. Maximum 150 words.',
+    '90s': 'Duration: 90 SECONDS - Extended. Full story with problem, solution, benefits, proof and CTA. Maximum 220 words.'
+  }
+}
+
+const PLATFORM_PROMPTS = {
+  es: {
+    general: 'Plataforma: GENERAL - Formato versátil que funciona en múltiples canales.',
+    tiktok: 'Plataforma: TIKTOK - Gancho ultra rápido en primer segundo, lenguaje Gen-Z, ritmo acelerado, puede ser polémico.',
+    instagram: 'Plataforma: INSTAGRAM - Visual, aspiracional, lifestyle. Ganchos que funcionan con o sin sonido.',
+    youtube: 'Plataforma: YOUTUBE - Puede ser más largo, informativo, construye autoridad antes del pitch.',
+    facebook: 'Plataforma: FACEBOOK - Conversacional, puede apelar a emociones familiares, testimonios funcionan bien.',
+    linkedin: 'Plataforma: LINKEDIN - Profesional, B2B, enfocado en ROI y resultados de negocio.',
+    tv: 'Plataforma: TV - Más formal, ritmo tradicional, debe capturar atención sin depender de scroll.',
+    radio: 'Plataforma: RADIO - Solo audio, muy descriptivo, repetir información clave, incluir número/web claramente.'
+  },
+  en: {
+    general: 'Platform: GENERAL - Versatile format that works across multiple channels.',
+    tiktok: 'Platform: TIKTOK - Ultra-fast hook in first second, Gen-Z language, fast pace, can be controversial.',
+    instagram: 'Platform: INSTAGRAM - Visual, aspirational, lifestyle. Hooks that work with or without sound.',
+    youtube: 'Platform: YOUTUBE - Can be longer, informative, build authority before the pitch.',
+    facebook: 'Platform: FACEBOOK - Conversational, can appeal to family emotions, testimonials work well.',
+    linkedin: 'Platform: LINKEDIN - Professional, B2B, focused on ROI and business results.',
+    tv: 'Platform: TV - More formal, traditional pace, must capture attention without scroll dependency.',
+    radio: 'Platform: RADIO - Audio only, very descriptive, repeat key information, include number/website clearly.'
+  }
+}
+
+function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, language: 'en' | 'es'): string {
+  if (!settings) return ''
+  
+  const parts = [
+    '\n\n---\nSCRIPT GENERATION SETTINGS:',
+    FRAMEWORK_PROMPTS[language][settings.framework],
+    TONE_PROMPTS[language][settings.tone],
+    DURATION_PROMPTS[language][settings.duration],
+    PLATFORM_PROMPTS[language][settings.platform],
+    settings.variations > 1 
+      ? (language === 'es' 
+          ? `Genera ${settings.variations} VARIACIONES diferentes del script, cada una con un ángulo único.`
+          : `Generate ${settings.variations} DIFFERENT VARIATIONS of the script, each with a unique angle.`)
+      : ''
+  ]
+  
+  return parts.filter(Boolean).join('\n')
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -166,13 +268,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { messages, businessDetails, language = 'en' } = req.body as RequestBody
+    const { messages, businessDetails, language = 'en', scriptSettings } = req.body as RequestBody
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' })
     }
 
-    const systemPrompt = MASTER_PROMPTS[language] + (
+    const settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
+    
+    const systemPrompt = MASTER_PROMPTS[language] + settingsPrompt + (
       Object.keys(businessDetails || {}).length > 0
         ? `\n\nCurrent business context:\n${JSON.stringify(businessDetails, null, 2)}`
         : ''

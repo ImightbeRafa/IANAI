@@ -13,10 +13,11 @@ import {
   updateProduct,
   saveScript
 } from '../services/database'
-import { sendMessageToGrok } from '../services/grokApi'
-import type { Product, ChatSession, Message } from '../types'
+import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
+import type { Product, ChatSession, Message, ScriptGenerationSettings } from '../types'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
+import ScriptSettingsPanel from '../components/ScriptSettingsPanel'
 import { 
   Send, 
   Loader2, 
@@ -30,7 +31,10 @@ import {
   Sparkles,
   BookmarkPlus,
   RefreshCw,
-  Info
+  Info,
+  Settings,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -51,6 +55,8 @@ export default function ProductWorkspace() {
   const [editingProduct, setEditingProduct] = useState(false)
   const [editedProduct, setEditedProduct] = useState<Partial<Product>>({})
   const [savingScript, setSavingScript] = useState(false)
+  const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(DEFAULT_SCRIPT_SETTINGS)
+  const [showSettings, setShowSettings] = useState(false)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -136,7 +142,7 @@ export default function ProductWorkspace() {
       const productContext = buildProductContext(product, context)
       const allMessages = [...messages, savedUserMessage]
       
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings)
       
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse)
       setMessages(prev => [...prev, savedAiMessage])
@@ -212,10 +218,14 @@ export default function ProductWorkspace() {
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
       }
 
-      // Add system message asking for scripts
+      // Add system message asking for scripts with settings
+      const variationText = scriptSettings.variations > 1 
+        ? (language === 'es' ? `${scriptSettings.variations} variaciones` : `${scriptSettings.variations} variations`)
+        : (language === 'es' ? 'un guión' : 'one script')
+      
       const generatePrompt = language === 'es' 
-        ? 'Genera 5 guiones de venta únicos basándote en toda la información del producto que tienes.'
-        : 'Generate 5 unique sales scripts based on all the product information you have.'
+        ? `Genera ${variationText} de venta basándote en toda la información del producto que tienes.`
+        : `Generate ${variationText} based on all the product information you have.`
       
       const userMessage = await addMessage(session.id, 'user', generatePrompt)
       setMessages(prev => [...prev, userMessage])
@@ -223,7 +233,7 @@ export default function ProductWorkspace() {
       const productContext = buildProductContext(product, context)
       const allMessages = [...messages, userMessage]
       
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings)
       
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse)
       setMessages(prev => [...prev, savedAiMessage])
@@ -303,7 +313,9 @@ export default function ProductWorkspace() {
       awarenessLevel: 'Nivel de conciencia',
       marketAlternatives: 'Alternativas del mercado',
       targetAudience: 'Audiencia objetivo',
-      cta: 'Llamado a la acción'
+      cta: 'Llamado a la acción',
+      scriptSettings: 'Configuración del Script',
+      rateScript: 'Calificar'
     },
     en: {
       back: 'Back',
@@ -332,7 +344,9 @@ export default function ProductWorkspace() {
       awarenessLevel: 'Awareness Level',
       marketAlternatives: 'Market Alternatives',
       targetAudience: 'Target Audience',
-      cta: 'Call to Action'
+      cta: 'Call to Action',
+      scriptSettings: 'Script Settings',
+      rateScript: 'Rate'
     }
   }
 
@@ -434,6 +448,15 @@ export default function ProductWorkspace() {
                 </button>
               )}
               <button 
+                onClick={() => setShowSettings(!showSettings)}
+                className={`p-2 rounded-lg transition-colors ${
+                  showSettings ? 'bg-amber-100 text-amber-600' : 'hover:bg-dark-100 text-dark-500'
+                }`}
+                title={t.scriptSettings}
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+              <button 
                 onClick={() => setShowProductInfo(!showProductInfo)}
                 className={`p-2 rounded-lg transition-colors ${
                   showProductInfo ? 'bg-primary-100 text-primary-600' : 'hover:bg-dark-100 text-dark-500'
@@ -482,7 +505,7 @@ export default function ProductWorkspace() {
                       {message.content}
                     </div>
                     {message.role === 'assistant' && message.content.length > 100 && (
-                      <div className="mt-3 pt-3 border-t border-dark-100 flex items-center gap-2">
+                      <div className="mt-3 pt-3 border-t border-dark-100 flex items-center gap-3">
                         <button
                           onClick={() => handleSaveScript(message.content)}
                           disabled={savingScript}
@@ -491,6 +514,16 @@ export default function ProductWorkspace() {
                           <BookmarkPlus className="w-4 h-4" />
                           {t.saveScript}
                         </button>
+                        <span className="text-dark-200">|</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-dark-400">{t.rateScript}:</span>
+                          <button className="p-1 hover:bg-green-50 rounded text-dark-400 hover:text-green-600">
+                            <ThumbsUp className="w-4 h-4" />
+                          </button>
+                          <button className="p-1 hover:bg-red-50 rounded text-dark-400 hover:text-red-600">
+                            <ThumbsDown className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -677,6 +710,21 @@ export default function ProductWorkspace() {
                 )}
               </div>
             </div>
+
+            {/* Script Settings Panel */}
+            {showSettings && (
+              <div className="p-4 border-t border-dark-100 bg-amber-50/50">
+                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-amber-600" />
+                  {t.scriptSettings}
+                </h3>
+                <ScriptSettingsPanel
+                  settings={scriptSettings}
+                  onChange={setScriptSettings}
+                  language={language}
+                />
+              </div>
+            )}
 
             {/* Session Context */}
             <div className="p-4 border-t border-dark-100">

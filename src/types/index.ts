@@ -7,6 +7,14 @@ export type ProductType = 'product' | 'service'
 export type SessionStatus = 'active' | 'completed' | 'archived'
 
 // =============================================
+// Script Enhancement Types
+// =============================================
+export type ScriptFramework = 'direct' | 'pas' | 'aida' | 'bab' | 'fourp'
+export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
+export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
+export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
+
+// =============================================
 // Core Entities
 // =============================================
 export interface Profile {
@@ -82,6 +90,11 @@ export interface ChatSession {
   title: string
   status: SessionStatus
   context?: string
+  // Script generation settings
+  framework: ScriptFramework
+  tone: ScriptTone
+  duration: ScriptDuration
+  platform: ScriptPlatform
   created_at: string
   updated_at: string
   // Joined data
@@ -105,10 +118,36 @@ export interface Script {
   content: string
   angle?: string
   is_favorite: boolean
+  // Enhancement fields
+  rating?: number
+  version: number
+  parent_script_id?: string
+  framework?: ScriptFramework
+  tone?: ScriptTone
+  duration?: ScriptDuration
+  platform?: ScriptPlatform
+  variation_number: number
   created_at: string
   updated_at: string
   // Joined data
   product?: Product
+  versions?: Script[]
+}
+
+export interface ScriptTemplate {
+  id: string
+  owner_id?: string
+  team_id?: string
+  name: string
+  description?: string
+  content: string
+  framework?: ScriptFramework
+  tone?: ScriptTone
+  duration?: ScriptDuration
+  platform?: ScriptPlatform
+  usage_count: number
+  created_at: string
+  updated_at: string
 }
 
 // =============================================
@@ -125,6 +164,14 @@ export interface ProductFormData {
   purchase_reason: string
   target_audience?: string
   call_to_action?: string
+}
+
+export interface ScriptGenerationSettings {
+  framework: ScriptFramework
+  tone: ScriptTone
+  duration: ScriptDuration
+  platform: ScriptPlatform
+  variations: number
 }
 
 // =============================================

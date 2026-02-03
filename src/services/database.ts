@@ -420,6 +420,61 @@ export async function toggleScriptFavorite(scriptId: string, isFavorite: boolean
   if (error) throw error
 }
 
+export async function rateScript(scriptId: string, rating: number): Promise<void> {
+  const { error } = await supabase
+    .from('scripts')
+    .update({ rating })
+    .eq('id', scriptId)
+
+  if (error) throw error
+}
+
+export async function getScriptVersions(parentScriptId: string): Promise<Script[]> {
+  const { data, error } = await supabase
+    .from('scripts')
+    .select('*')
+    .eq('parent_script_id', parentScriptId)
+    .order('version', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createScriptVersion(
+  originalScriptId: string,
+  sessionId: string,
+  productId: string,
+  title: string,
+  content: string
+): Promise<Script> {
+  // Get the latest version number
+  const { data: existing } = await supabase
+    .from('scripts')
+    .select('version')
+    .or(`id.eq.${originalScriptId},parent_script_id.eq.${originalScriptId}`)
+    .order('version', { ascending: false })
+    .limit(1)
+    .single()
+
+  const newVersion = (existing?.version || 1) + 1
+
+  const { data, error } = await supabase
+    .from('scripts')
+    .insert({ 
+      session_id: sessionId, 
+      product_id: productId, 
+      title: `${title} (v${newVersion})`, 
+      content,
+      parent_script_id: originalScriptId,
+      version: newVersion
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
 // =============================================
 // DASHBOARD STATS
 // =============================================
