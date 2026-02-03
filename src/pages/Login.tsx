@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { FileText, Mail, Lock, AlertCircle } from 'lucide-react'
+import { Mail, Lock, AlertCircle } from 'lucide-react'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -31,11 +31,9 @@ export default function Login() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center">
-              <FileText className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-2xl font-bold text-dark-900">CopywriteAI</span>
+          <div className="inline-flex items-center gap-3 mb-4">
+            <img src="/logo.png" alt="Advance AI" className="w-12 h-12 object-contain rounded-xl" />
+            <span className="text-2xl font-bold text-dark-900">Advance AI</span>
           </div>
           <p className="text-dark-500">Sign in to create winning ad scripts</p>
         </div>

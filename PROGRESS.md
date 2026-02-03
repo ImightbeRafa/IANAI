@@ -1,12 +1,12 @@
-# CopywriteAI - Development Progress
+# Advance AI - Development Progress
 
-## Last Updated: February 3, 2026 at 12:10 PM (UTC-06:00)
+## Last Updated: February 3, 2026 at 1:07 PM (UTC-06:00)
 
 ---
 
 ## Project Overview
 
-**CopywriteAI** is an AI-powered ad script generator using Grok API. The platform generates high-conversion ad scripts for social media based on Ian's copywriting methodology.
+**Advance AI** (formerly CopywriteAI) is an AI-powered ad script generator using Grok API. The platform generates high-conversion ad scripts for social media based on Ian's copywriting methodology.
 
 ---
 
