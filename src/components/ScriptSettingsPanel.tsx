@@ -33,7 +33,7 @@ const LABELS = {
 
 const MODEL_OPTIONS: { value: AIModel; label: string; description: string }[] = [
   { value: 'grok', label: 'Grok', description: 'xAI - Fast & Creative' },
-  { value: 'gemini', label: 'Gemini 2.5 Pro', description: 'Google - State of the art' }
+  { value: 'gemini', label: 'Gemini 3 Pro', description: 'Google - State of the art' }
 ]
 
 export default function ScriptSettingsPanel({ 

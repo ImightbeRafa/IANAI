@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-05-06:generateContent'
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent'
 
 type AIModel = 'grok' | 'gemini'
 
