@@ -7,7 +7,6 @@ import {
   Settings, 
   LogOut, 
   Menu,
-  FileText,
   User
 } from 'lucide-react'
 
@@ -67,11 +66,9 @@ export default function Layout({ children }: LayoutProps) {
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="p-6 border-b border-dark-100">
-            <Link to="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-                <FileText className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-xl font-semibold text-dark-900">CopywriteAI</span>
+            <Link to="/dashboard" className="flex items-center justify-center gap-3">
+              <img src="/logo.png" alt="Advance AI" className="w-10 h-10 rounded-lg object-cover" />
+              <span className="text-2xl font-semibold italic tracking-wide" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7' }}>Advance AI</span>
             </Link>
           </div>
 
@@ -129,7 +126,10 @@ export default function Layout({ children }: LayoutProps) {
           >
             <Menu className="w-6 h-6" />
           </button>
-          <span className="text-lg font-semibold text-dark-900">CopywriteAI</span>
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Advance AI" className="w-6 h-6 rounded object-cover" />
+            <span className="text-lg font-semibold italic tracking-wide" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7' }}>Advance AI</span>
+          </div>
           <div className="w-10" />
         </header>
 

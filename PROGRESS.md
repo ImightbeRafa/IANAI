@@ -156,25 +156,65 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - Creates teams for users who don't have one
   - Adds owners as team admins
 
+### February 3, 2026 - Team Account Features (AM Session)
+- [x] Updated `Settings.tsx` to display account type (Team/Individual) with visual indicators
+- [x] Revamped `Dashboard.tsx` for team accounts:
+  - Client-based hierarchy view for team accounts
+  - Create/manage clients functionality
+  - "Unassigned Products" section for products without a client
+  - Ability to assign orphaned products to clients
+- [x] Added `assignProductToClient()` function to database service
+- [x] Created migration `003_fix_rls_policies.sql` for RLS policy fixes
+
+### February 3, 2026 - Script Enhancement Features (10:15 AM)
+- [x] **Script Frameworks** - Added 5 copywriting frameworks:
+  - Direct Sale, PAS (Problem-Agitate-Solution), AIDA, BAB (Before-After-Bridge), 4Ps
+- [x] **Tone Controls** - 6 tone options:
+  - Professional, Casual, Urgent, Humorous, Inspirational, Controversial
+- [x] **Duration Options** - Script length presets:
+  - 15s (~40 words), 30s (~80 words), 60s (~150 words), 90s (~220 words)
+- [x] **Platform Targeting** - 8 platform-specific styles:
+  - General, TikTok, Instagram, YouTube, Facebook, LinkedIn, TV, Radio
+- [x] **A/B Variations** - Generate 1, 2, 3, or 5 script variations at once
+- [x] **Script Rating** - Thumbs up/down buttons that:
+  - Auto-save script when rated
+  - Store rating (1-5) in database for feedback loop
+  - Visual feedback showing rated state
+- [x] Created `ScriptSettingsPanel.tsx` component with bilingual labels
+- [x] Updated `api/chat.ts` with framework/tone/duration/platform prompts
+- [x] Created migration `004_script_enhancements.sql`:
+  - Added settings columns to `chat_sessions`
+  - Added rating/versioning columns to `scripts`
+  - Created `script_templates` table
+  - Added `get_user_team_ids()` helper function
+- [x] Added database functions: `rateScript()`, `getScriptVersions()`, `createScriptVersion()`
+- [x] Made settings panel scrollable for smaller screens
+
 ---
 
 ## TODO / Next Steps
 
+### Completed ✅
+- [x] Team Dashboard UI - Client hierarchy, create/manage clients
+- [x] Script Frameworks (PAS, AIDA, BAB, 4Ps)
+- [x] Tone/Style Controls
+- [x] Duration/Platform Options
+- [x] A/B Variations (1-5 scripts)
+- [x] Script Rating (feedback loop)
+
 ### High Priority
-1. **Team Dashboard UI** - Client management for team accounts
-   - Create/edit/delete clients
-   - Products organized under clients
-   - Team member invitation and management
+1. **Team Member Management** - Invite team members, assign roles
+2. **Script Library Page** - Dedicated page to view all saved scripts with filters
 
 ### Medium Priority
-2. **Script Library** - Dedicated page to view all saved scripts
-3. **Script Export** - Export scripts as PDF/TXT/Copy to clipboard
-4. **Toast Notifications** - User feedback for save actions
+3. **AI Feedback Loop** - Use highly-rated scripts as examples for better generation
+4. **Script Export** - Export scripts as PDF/TXT/Copy to clipboard
+5. **Toast Notifications** - User feedback for save/rate actions
 
 ### Low Priority / Future
-5. **Subscription/Billing** - Paid plans with usage limits
-6. **Analytics** - Track script performance/engagement
-7. **Templates** - Pre-built script templates by industry
+6. **Subscription/Billing** - Paid plans with usage limits
+7. **Analytics** - Track script performance/engagement
+8. **Templates Marketplace** - Share/sell script templates
 
 ---
 
