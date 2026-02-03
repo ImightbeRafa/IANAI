@@ -240,6 +240,27 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `src/services/grokApi.ts` - Default framework to `venta_directa`
   - `api/chat.ts` - Complete rewrite of `MASTER_PROMPTS` and `FRAMEWORK_PROMPTS`
 
+### February 3, 2026 - Rebranding & Home Page (1:07 PM)
+- [x] **REBRANDING: CopywriteAI → Advance AI**
+  - Updated all references across the application
+  - New logo with rounded corners (`rounded-xl`)
+  - Brand styling: Montserrat font, italic, `#0284c7` (sky-600) color
+- [x] **NEW: Home/Landing Page** (`src/pages/Home.tsx`)
+  - Modern, professional design with light theme
+  - Sections: Navigation, Hero, Stats, Features, How it Works, Pricing, Testimonials, CTA, Footer
+  - Bilingual support (ES/EN)
+  - Pricing displayed: $30/month (Single), $400/month (Teams up to 5)
+- [x] **Light Theme Implementation**
+  - Home page uses white/light backgrounds
+  - Proper contrast with `dark-600`, `dark-900` text colors
+  - Primary color accents (`primary-600`, `primary-100`)
+- [x] **Updated Files:**
+  - `src/pages/Home.tsx` - New landing page with light theme
+  - `src/pages/Login.tsx` - Advance AI branding, rounded logo
+  - `src/pages/Signup.tsx` - Advance AI branding, rounded logo
+  - `src/App.tsx` - Added Home route, redirects to `/` by default
+  - `index.html` - Updated title and favicon to Advance AI
+
 ---
 
 ## Ian's Content Engineering Methodology

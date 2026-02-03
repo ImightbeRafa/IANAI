@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { Mail, Lock, User, AlertCircle } from 'lucide-react'
+import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox } from 'lucide-react'
 
 export default function Signup() {
   const [email, setEmail] = useState('')
@@ -9,8 +9,8 @@ export default function Signup() {
   const [fullName, setFullName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
   const { signUp } = useAuth()
-  const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -19,12 +19,53 @@ export default function Signup() {
 
     try {
       await signUp(email, password, fullName)
-      navigate('/dashboard')
+      setEmailSent(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create account')
     } finally {
       setLoading(false)
     }
+  }
+
+  // Show success message after signup
+  if (emailSent) {
+    return (
+      <div className="min-h-screen bg-dark-50 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center gap-3 mb-4">
+              <img src="/logo.png" alt="Advance AI" className="w-12 h-12 object-contain rounded-xl" />
+              <span className="text-2xl font-bold text-dark-900">Advance AI</span>
+            </div>
+          </div>
+
+          <div className="card text-center py-8">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="w-8 h-8 text-green-600" />
+            </div>
+            <h2 className="text-xl font-semibold text-dark-900 mb-2">Check your email</h2>
+            <p className="text-dark-600 mb-4">
+              We've sent a verification link to <strong>{email}</strong>
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <Inbox className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-left">
+                  <p className="text-sm text-amber-800 font-medium">Don't see it?</p>
+                  <p className="text-sm text-amber-700">Check your spam or junk folder. The email may take a few minutes to arrive.</p>
+                </div>
+              </div>
+            </div>
+            <Link 
+              to="/login" 
+              className="text-primary-600 hover:text-primary-700 font-medium text-sm"
+            >
+              Back to login
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

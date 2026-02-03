@@ -310,16 +310,34 @@ CREATE POLICY "Users can manage own scripts" ON scripts
 -- FUNCTIONS & TRIGGERS
 -- =============================================
 
--- Auto-create profile on user signup
+-- Auto-create profile AND team on user signup (all accounts are team accounts)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  new_team_id UUID;
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name)
+  -- Create profile with team account type
+  INSERT INTO public.profiles (id, email, full_name, account_type)
   VALUES (
     NEW.id,
     NEW.email,
-    NEW.raw_user_meta_data->>'full_name'
+    NEW.raw_user_meta_data->>'full_name',
+    'team'
   );
+  
+  -- Auto-create a team for the new user
+  INSERT INTO public.teams (name, owner_id)
+  VALUES (
+    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)) || '''s Team',
+    NEW.id
+  )
+  RETURNING id INTO new_team_id;
+  
+  -- Add user as team owner
+  INSERT INTO public.team_members (team_id, user_id, role, joined_at)
+  VALUES (new_team_id, NEW.id, 'owner', NOW())
+  ON CONFLICT (team_id, user_id) DO NOTHING;
+  
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
