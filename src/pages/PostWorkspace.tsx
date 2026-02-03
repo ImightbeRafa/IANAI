@@ -43,6 +43,7 @@ export default function PostWorkspace() {
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
   const [pollingTaskId, setPollingTaskId] = useState<string | null>(null)
+  const [textWarning, setTextWarning] = useState(false)
 
   // Image settings
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5' | '9:16'>('1:1')
@@ -68,7 +69,9 @@ export default function PostWorkspace() {
       regenerate: 'Regenerar',
       productInfo: 'Información del producto',
       useProductContext: 'Usar contexto del producto',
-      error: 'Error al generar imagen'
+      error: 'Error al generar imagen',
+      textWarningTitle: 'Nota sobre texto en imágenes',
+      textWarningMessage: 'La IA no puede generar texto legible en imágenes. El texto solicitado se ha removido del prompt. Usa herramientas de edición (Canva, Photoshop) para agregar texto después.'
     },
     en: {
       back: 'Back',
@@ -90,7 +93,9 @@ export default function PostWorkspace() {
       regenerate: 'Regenerate',
       productInfo: 'Product info',
       useProductContext: 'Use product context',
-      error: 'Error generating image'
+      error: 'Error generating image',
+      textWarningTitle: 'Note about text in images',
+      textWarningMessage: 'AI cannot generate readable text in images. Text requests have been removed from the prompt. Use editing tools (Canva, Photoshop) to add text afterwards.'
     }
   }
 
@@ -209,6 +214,7 @@ export default function PostWorkspace() {
 
     setGenerating(true)
     setError('')
+    setTextWarning(false)
 
     try {
       const { width, height } = getAspectDimensions()
@@ -238,6 +244,11 @@ export default function PostWorkspace() {
 
       if (!response.ok) {
         throw new Error(result.error || t.error)
+      }
+
+      // Check if text was requested (and filtered out)
+      if (result.textWarning) {
+        setTextWarning(true)
       }
 
       // Start polling for result
@@ -404,6 +415,14 @@ export default function PostWorkspace() {
                 ))}
               </div>
             </div>
+
+            {/* Text warning message */}
+            {textWarning && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm font-medium text-amber-800">{t.textWarningTitle}</p>
+                <p className="text-sm text-amber-700 mt-1">{t.textWarningMessage}</p>
+              </div>
+            )}
 
             {/* Error message */}
             {error && (

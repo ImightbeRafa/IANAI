@@ -2,9 +2,28 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage, Language } from '../contexts/LanguageContext'
 import { getProfile } from '../services/database'
+import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle } from 'lucide-react'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check } from 'lucide-react'
+
+interface Subscription {
+  plan: 'free' | 'starter' | 'pro' | 'enterprise'
+  status: string
+  current_period_end?: string
+}
+
+interface Usage {
+  scripts_generated: number
+  images_generated: number
+}
+
+const PLAN_DETAILS = {
+  free: { name: 'Gratis', price: 0, scripts: 10, images: 5, color: 'gray' },
+  starter: { name: 'Starter', price: 9900, scripts: 100, images: 50, color: 'blue' },
+  pro: { name: 'Pro', price: 29900, scripts: 500, images: 200, color: 'purple' },
+  enterprise: { name: 'Enterprise', price: null, scripts: -1, images: -1, color: 'amber' }
+}
 
 export default function Settings() {
   const { user, updateProfile } = useAuth()
@@ -13,14 +32,47 @@ export default function Settings() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const [usage, setUsage] = useState<Usage | null>(null)
 
   useEffect(() => {
-    async function loadProfile() {
+    async function loadData() {
       if (!user) return
-      const data = await getProfile(user.id)
-      setProfile(data)
+      
+      // Load profile
+      const profileData = await getProfile(user.id)
+      setProfile(profileData)
+      
+      // Load subscription
+      const { data: subData } = await supabase
+        .from('subscriptions')
+        .select('plan, status, current_period_end')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .single()
+      
+      if (subData) {
+        setSubscription(subData as Subscription)
+      } else {
+        setSubscription({ plan: 'free', status: 'active' })
+      }
+      
+      // Load current month usage
+      const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
+      const { data: usageData } = await supabase
+        .from('usage')
+        .select('scripts_generated, images_generated')
+        .eq('user_id', user.id)
+        .eq('period_start', currentMonth)
+        .single()
+      
+      if (usageData) {
+        setUsage(usageData as Usage)
+      } else {
+        setUsage({ scripts_generated: 0, images_generated: 0 })
+      }
     }
-    loadProfile()
+    loadData()
   }, [user])
 
   const labels = {
@@ -177,6 +229,116 @@ export default function Settings() {
               Language for AI conversations and generated scripts
             </p>
           </div>
+        </div>
+
+        {/* Billing & Subscription */}
+        <div className="card mt-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-primary-500" />
+              {language === 'es' ? 'Plan y Facturación' : 'Plan & Billing'}
+            </h2>
+            {subscription && (
+              <span className={`px-3 py-1 text-sm font-medium rounded-full ${
+                subscription.plan === 'free' ? 'bg-gray-100 text-gray-700' :
+                subscription.plan === 'starter' ? 'bg-blue-100 text-blue-700' :
+                subscription.plan === 'pro' ? 'bg-purple-100 text-purple-700' :
+                'bg-amber-100 text-amber-700'
+              }`}>
+                {PLAN_DETAILS[subscription.plan].name}
+              </span>
+            )}
+          </div>
+
+          {/* Current Usage */}
+          {usage && subscription && (
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="p-4 bg-dark-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Zap className="w-4 h-4 text-amber-500" />
+                  <span className="text-sm font-medium text-dark-700">
+                    {language === 'es' ? 'Guiones' : 'Scripts'}
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-dark-900">
+                  {usage.scripts_generated}
+                  <span className="text-sm font-normal text-dark-400">
+                    / {PLAN_DETAILS[subscription.plan].scripts === -1 ? '∞' : PLAN_DETAILS[subscription.plan].scripts}
+                  </span>
+                </div>
+              </div>
+              <div className="p-4 bg-dark-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Crown className="w-4 h-4 text-purple-500" />
+                  <span className="text-sm font-medium text-dark-700">
+                    {language === 'es' ? 'Imágenes' : 'Images'}
+                  </span>
+                </div>
+                <div className="text-2xl font-bold text-dark-900">
+                  {usage.images_generated}
+                  <span className="text-sm font-normal text-dark-400">
+                    / {PLAN_DETAILS[subscription.plan].images === -1 ? '∞' : PLAN_DETAILS[subscription.plan].images}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Plan Options */}
+          <div className="space-y-3">
+            {(['starter', 'pro'] as const).map((plan) => (
+              <div 
+                key={plan}
+                className={`p-4 rounded-xl border-2 transition-all ${
+                  subscription?.plan === plan 
+                    ? 'border-primary-500 bg-primary-50' 
+                    : 'border-dark-200 hover:border-dark-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-dark-900">{PLAN_DETAILS[plan].name}</span>
+                      {subscription?.plan === plan && (
+                        <span className="px-2 py-0.5 text-xs bg-primary-500 text-white rounded-full">
+                          {language === 'es' ? 'Actual' : 'Current'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-dark-500 mt-1">
+                      {PLAN_DETAILS[plan].scripts} {language === 'es' ? 'guiones' : 'scripts'} + {PLAN_DETAILS[plan].images} {language === 'es' ? 'imágenes' : 'images'} / {language === 'es' ? 'mes' : 'month'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xl font-bold text-dark-900">
+                      ₡{(PLAN_DETAILS[plan].price || 0).toLocaleString()}
+                    </div>
+                    <p className="text-xs text-dark-400">/ {language === 'es' ? 'mes' : 'month'}</p>
+                  </div>
+                </div>
+                {subscription?.plan !== plan && subscription?.plan === 'free' && (
+                  <button 
+                    className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2"
+                    onClick={() => {
+                      // TODO: Integrate TiloPay checkout
+                      alert(language === 'es' 
+                        ? `Próximamente: Actualizar a ${PLAN_DETAILS[plan].name}` 
+                        : `Coming soon: Upgrade to ${PLAN_DETAILS[plan].name}`)
+                    }}
+                  >
+                    <Check className="w-4 h-4" />
+                    {language === 'es' ? 'Actualizar Plan' : 'Upgrade Plan'}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-dark-400 mt-4 text-center">
+            {language === 'es' 
+              ? 'Los pagos se procesan de forma segura con TiloPay' 
+              : 'Payments processed securely via TiloPay'}
+          </p>
         </div>
 
         <div className="card mt-6">

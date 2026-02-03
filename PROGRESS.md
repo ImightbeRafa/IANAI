@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 3, 2026 at 2:30 PM (UTC-06:00)
+## Last Updated: February 3, 2026 at 3:45 PM (UTC-06:00)
 
 ---
 
@@ -241,6 +241,89 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `src/components/ScriptSettingsPanel.tsx` - New framework labels (ES/EN)
   - `src/services/grokApi.ts` - Default framework to `venta_directa`
   - `api/chat.ts` - Complete rewrite of `MASTER_PROMPTS` and `FRAMEWORK_PROMPTS`
+
+### February 3, 2026 - TiloPay Hardening & Script Settings Simplification (3:45 PM)
+- [x] **Script Settings Simplified**
+  - Removed framework/structure options (were limiting script quality)
+  - Removed duration options
+  - Now only shows "How many scripts?" (1, 2, 3, or 5 variations)
+  - Cleaner UI with prominent generate button
+- [x] **TiloPay Webhook Security Hardened**
+  - Implemented proper HMAC-SHA256 signature verification
+  - Uses `hash-tilopay` header as per TiloPay Repeat API
+  - Timing-safe comparison to prevent timing attacks
+  - Strict validation - rejects unsigned webhooks in production
+- [x] **Billing Dashboard Added**
+  - New billing section in Settings page
+  - Shows current plan (Free, Starter, Pro, Enterprise)
+  - Displays usage stats (scripts/images generated this month)
+  - Plan upgrade buttons (TiloPay checkout integration ready)
+  - Pricing in CRC (Costa Rican Colones)
+- [x] **Webhook Test Script**
+  - Created `scripts/test-tilopay-webhook.js`
+  - Tests signature generation and verification locally
+  - Can send live test webhooks to dev server
+  - Run: `node scripts/test-tilopay-webhook.js --live`
+- [x] **Files Updated:**
+  - `src/components/ScriptSettingsPanel.tsx` - Simplified to variations only
+  - `api/tilopay/webhook.ts` - HMAC-SHA256 verification
+  - `src/pages/Settings.tsx` - Added billing section
+- [x] **New Files:**
+  - `scripts/test-tilopay-webhook.js` - Webhook testing utility
+
+### February 3, 2026 - Security Audit & Payment Preparation (3:15 PM)
+- [x] **Comprehensive Security Audit**
+  - Created `SECURITY_AUDIT.md` documenting all findings
+  - RLS policies verified for proper team data isolation
+  - Identified and addressed API endpoint vulnerabilities
+- [x] **Enhanced Registration Form**
+  - Added Google OAuth sign-in via Supabase
+  - Strong password requirements (8+ chars, uppercase, lowercase, number)
+  - Password visibility toggle
+  - Confirm password field with validation
+  - Terms of service acceptance checkbox
+  - Spanish language UI
+- [x] **Server-Side API Authentication**
+  - Created `api/lib/auth.ts` with auth verification utilities
+  - Added JWT token verification to `/api/chat.ts`
+  - Added JWT token verification to `/api/generate-image.ts`
+  - Usage limit checking per user plan
+  - Usage tracking increments on successful operations
+- [x] **Subscriptions & Usage System**
+  - New migration `009_subscriptions_and_usage.sql`
+  - Tables: `subscriptions`, `usage`, `payments`, `plan_limits`
+  - Plans: free, starter, pro, enterprise with defined limits
+  - Auto-create free subscription on signup
+  - Helper functions: `check_usage_limit()`, `increment_usage()`
+- [x] **Tilo Pay Integration Preparation**
+  - Created `api/tilopay/webhook.ts` with GET/POST handlers
+  - Webhook signature verification (placeholder for Tilo Pay docs)
+  - Event handlers for: payment.succeeded, payment.failed, subscription.created/updated/cancelled
+  - Idempotent payment recording
+- [x] **New Files Created:**
+  - `SECURITY_AUDIT.md` - Security findings and recommendations
+  - `api/lib/auth.ts` - Auth verification utilities
+  - `api/tilopay/webhook.ts` - Tilo Pay webhook endpoint
+  - `supabase/migrations/009_subscriptions_and_usage.sql` - Subscription tables
+- [x] **Updated Files:**
+  - `src/pages/Signup.tsx` - Complete form overhaul
+  - `src/contexts/AuthContext.tsx` - Added `signInWithGoogle` method
+  - `api/chat.ts` - Auth verification + usage limits
+  - `api/generate-image.ts` - Auth verification + usage limits
+
+### February 3, 2026 - AI Image Posts Prompt Improvements (2:35 PM)
+- [x] **System Prompt Enhancement (Spanish Primary)**
+  - System prompt now in Spanish as primary language
+  - Instructs Flux to create clean product photos, NOT Instagram UI mockups
+  - Explicitly forbids text/watermarks/logos in generated images
+- [x] **Text Request Handling**
+  - Detects when users request text in images (e.g., "que diga", "font", "con texto")
+  - Automatically removes text instructions (AI can't render readable text)
+  - Shows amber warning to user explaining limitation
+  - Suggests using Canva/Photoshop for text overlay
+- [x] **Updated Files:**
+  - `api/generate-image.ts` - Spanish system prompt, text detection/cleaning
+  - `src/pages/PostWorkspace.tsx` - Text warning UI with bilingual labels
 
 ### February 3, 2026 - AI Image Posts Feature (2:30 PM)
 - [x] **NEW FEATURE: Instagram Post Image Generation**

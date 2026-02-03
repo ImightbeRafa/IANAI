@@ -1,6 +1,52 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth'
 
 const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
+
+// System prompt to enhance user prompts for better Instagram content images (Spanish primary)
+const SYSTEM_PROMPT_PREFIX = `Crea una fotografía profesional de alta calidad para marketing en redes sociales.
+NO crees una captura de pantalla o mockup de Instagram u otra red social.
+NO incluyas texto, letras, palabras, marcas de agua ni logos en la imagen.
+Enfócate en: composición limpia, iluminación profesional, colores vibrantes, atractivo comercial.
+Estilo: Fotografía de producto moderna, imágenes lifestyle, contenido promocional.
+
+Solicitud del usuario: `
+
+// Detect if user is asking for text in the image
+function containsTextRequest(prompt: string): boolean {
+  const textIndicators = [
+    /que diga/i,
+    /con texto/i,
+    /with text/i,
+    /that says/i,
+    /saying/i,
+    /write/i,
+    /escrib/i,
+    /font/i,
+    /tipograf/i,
+    /letter/i,
+    /palabra/i,
+    /frase/i,
+  ]
+  return textIndicators.some(pattern => pattern.test(prompt))
+}
+
+// Remove text-related instructions from prompt
+function cleanPromptForImageGen(prompt: string): string {
+  // Remove common text request patterns
+  let cleaned = prompt
+    .replace(/que diga[^,.]*/gi, '')
+    .replace(/con texto[^,.]*/gi, '')
+    .replace(/with text[^,.]*/gi, '')
+    .replace(/that says[^,.]*/gi, '')
+    .replace(/saying[^,.]*/gi, '')
+    .replace(/en font[^,.]*/gi, '')
+    .replace(/in font[^,.]*/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  
+  return cleaned
+}
 
 interface FluxRequest {
   prompt: string
@@ -43,6 +89,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // Verify user authentication
+  const user = await requireAuth(req, res)
+  if (!user) return // Response already sent by requireAuth
+
   const apiKey = process.env.BFL_API_KEY
   if (!apiKey) {
     console.error('BFL_API_KEY not configured')
@@ -51,6 +101,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { action, taskId, ...imageParams } = req.body
+
+    // For polling requests, skip usage check (already counted on initial request)
+    if (action !== 'poll') {
+      // Check usage limits for new generation requests
+      const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'image')
+      if (!allowed) {
+        return res.status(429).json({ 
+          error: 'Límite de imágenes alcanzado',
+          message: `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
+          limit,
+          remaining: 0
+        })
+      }
+    }
 
     // Poll for result
     if (action === 'poll' && taskId) {
@@ -73,8 +137,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Submit new generation request
+    let userPrompt = imageParams.prompt || ''
+    
+    // Check if user is requesting text in the image
+    const hasTextRequest = containsTextRequest(userPrompt)
+    if (hasTextRequest) {
+      // Clean the prompt to remove text instructions (AI models can't render text well)
+      userPrompt = cleanPromptForImageGen(userPrompt)
+    }
+    
+    // Enhance prompt with system instructions
+    const enhancedPrompt = SYSTEM_PROMPT_PREFIX + userPrompt
+    
     const fluxRequest: FluxRequest = {
-      prompt: imageParams.prompt || '',
+      prompt: enhancedPrompt,
       width: imageParams.width || 1080,
       height: imageParams.height || 1080,
       output_format: imageParams.output_format || 'jpeg',
@@ -124,10 +200,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const result: FluxSubmitResponse = await response.json()
     
+    // Increment usage counter after successful submission
+    await incrementUsage(user.id, 'image')
+
     return res.status(200).json({
       taskId: result.id,
       pollingUrl: result.polling_url,
-      cost: result.cost
+      cost: result.cost,
+      textWarning: hasTextRequest // Let frontend know text was requested but filtered
     })
 
   } catch (error) {

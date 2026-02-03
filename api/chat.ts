@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -671,6 +672,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // Verify user authentication
+  const user = await requireAuth(req, res)
+  if (!user) return // Response already sent by requireAuth
+
+  // Check usage limits
+  const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'script')
+  if (!allowed) {
+    return res.status(429).json({ 
+      error: 'Límite de scripts alcanzado',
+      message: `Has alcanzado el límite de ${limit} scripts este mes. Actualiza tu plan para continuar.`,
+      limit,
+      remaining: 0
+    })
+  }
+
   const apiKey = process.env.GROK_API_KEY
   if (!apiKey) {
     return res.status(500).json({ error: 'API key not configured' })
@@ -735,7 +751,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await response.json()
     const content = data.choices?.[0]?.message?.content || 'No response generated'
 
-    return res.status(200).json({ content })
+    // Increment usage counter after successful generation
+    await incrementUsage(user.id, 'script')
+
+    return res.status(200).json({ content, remaining: remaining - 1 })
   } catch (error) {
     console.error('Chat API error:', error)
     return res.status(500).json({ 
