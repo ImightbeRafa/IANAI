@@ -9,7 +9,7 @@ export type SessionStatus = 'active' | 'completed' | 'archived'
 // =============================================
 // Script Enhancement Types
 // =============================================
-export type ScriptFramework = 'direct' | 'pas' | 'aida' | 'bab' | 'fourp'
+export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso'
 export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
 export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
 export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'

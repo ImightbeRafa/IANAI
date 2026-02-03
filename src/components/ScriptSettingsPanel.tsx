@@ -22,11 +22,11 @@ const LABELS = {
     platform: 'Platform',
     variations: 'Variations',
     frameworks: {
-      direct: 'Direct Sale',
-      pas: 'PAS (Problem-Agitate-Solution)',
-      aida: 'AIDA (Attention-Interest-Desire-Action)',
-      bab: 'BAB (Before-After-Bridge)',
-      fourp: '4Ps (Promise-Picture-Proof-Push)'
+      venta_directa: 'Direct Sale (La Madre)',
+      desvalidar_alternativas: 'Invalidate Alternatives (Positioner)',
+      mostrar_servicio: 'Show Service (Process)',
+      variedad_productos: 'Product Variety (The Menu)',
+      paso_a_paso: 'Step by Step (Retargeting)'
     },
     tones: {
       professional: 'Professional',
@@ -60,11 +60,11 @@ const LABELS = {
     platform: 'Plataforma',
     variations: 'Variaciones',
     frameworks: {
-      direct: 'Venta Directa',
-      pas: 'PAS (Problema-Agitación-Solución)',
-      aida: 'AIDA (Atención-Interés-Deseo-Acción)',
-      bab: 'BAB (Antes-Después-Puente)',
-      fourp: '4Ps (Promesa-Pintura-Prueba-Push)'
+      venta_directa: 'Venta Directa (La Madre)',
+      desvalidar_alternativas: 'Desvalidar Alternativas (Posicionador)',
+      mostrar_servicio: 'Mostrar Servicio (Proceso)',
+      variedad_productos: 'Variedad de Productos (El Menú)',
+      paso_a_paso: 'Paso a Paso (Retargeting)'
     },
     tones: {
       professional: 'Profesional',
@@ -108,7 +108,7 @@ export default function ScriptSettingsPanel({
     onChange({ ...settings, [key]: value })
   }
 
-  const frameworks: ScriptFramework[] = ['direct', 'pas', 'aida', 'bab', 'fourp']
+  const frameworks: ScriptFramework[] = ['venta_directa', 'desvalidar_alternativas', 'mostrar_servicio', 'variedad_productos', 'paso_a_paso']
   const tones: ScriptTone[] = ['professional', 'casual', 'urgent', 'humorous', 'inspirational', 'controversial']
   const durations: ScriptDuration[] = ['15s', '30s', '60s', '90s']
   const platforms: ScriptPlatform[] = ['general', 'tiktok', 'instagram', 'youtube', 'facebook', 'linkedin', 'tv', 'radio']

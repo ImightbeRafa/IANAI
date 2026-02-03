@@ -1,6 +1,6 @@
 # CopywriteAI - Development Progress
 
-## Last Updated: February 3, 2026 at 11:56 AM (UTC-06:00)
+## Last Updated: February 3, 2026 at 12:10 PM (UTC-06:00)
 
 ---
 
@@ -219,6 +219,56 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `api/chat.ts` - `REAL_ESTATE_PROMPTS` and `SERVICE_PROMPTS`, handler selects prompt by type
   - `supabase/migrations/006_new_form_fields.sql` - Real estate columns added
 
+### February 3, 2026 - Ian's 5 Master Structures Implementation (12:10 PM)
+- [x] **MAJOR REFACTOR: Script Frameworks to Ian's 5 Master Structures**
+  - Replaced old frameworks (direct, pas, aida, bab, fourp) with Ian's methodology
+  - New structures based on "Ingeniería de Contenido para Venta Directa"
+- [x] **The 5 Master Structures:**
+  1. **Venta Directa (La Madre)** - For known demand products (iPads, Tech, Clothing)
+  2. **Desvalidar Alternativas (El Posicionador)** - Position against generic competition
+  3. **Mostrar el Servicio (Principio a Fin)** - Show service process step by step
+  4. **Variedad de Productos (El Menú)** - Help undecided customers self-select
+  5. **Paso a Paso (Complementario/Retargeting)** - Explain complex logistics
+- [x] **Enhanced AI Prompts with Ian Methodology:**
+  - "Certeza Total" philosophy - eliminate doubt, not convince
+  - Tríada Estructural: Hook (0-3s) → Development (4-35s) → CTA (5s)
+  - Zero greetings rule, no reiteration, logistics in development
+  - Tangible value over abstract claims
+- [x] **Updated Files:**
+  - `src/types/index.ts` - New `ScriptFramework` type with 5 structures
+  - `src/components/ScriptSettingsPanel.tsx` - New framework labels (ES/EN)
+  - `src/services/grokApi.ts` - Default framework to `venta_directa`
+  - `api/chat.ts` - Complete rewrite of `MASTER_PROMPTS` and `FRAMEWORK_PROMPTS`
+
+---
+
+## Ian's Content Engineering Methodology
+
+### Philosophy: "Total Certainty"
+The main problem with social media sales is NOT the price, it's **friction from distrust**. Videos shouldn't "try to convince" but **eliminate doubt** through precise description of reality.
+
+### Key Principles
+1. **Product > Marketing** - Best marketing is having an excellent product and simply describing it
+2. **Tangible Value** - Clarity about what is received must exceed fear of losing money
+3. **Zero Greetings Rule** - 2 seconds of attention credit, don't waste on "Hello"
+
+### The Structural Triad
+| Section | Duration | Function |
+|---------|----------|----------|
+| **Hook** | 0-3 sec | Filter and segment - attract wallets, not everyone |
+| **Development** | 4-35 sec | Generate certainty and clarity with logistics |
+| **CTA** | Last 5 sec | Cold, dry, direct navigation instruction |
+
+### The 5 Master Structures
+
+| Structure | Spanish Name | Ideal For | Formula |
+|-----------|--------------|-----------|---------|
+| **Direct Sale** | Venta Directa (La Madre) | Known demand products | Hook + Price Justification + Guarantee + Logistics + CTA |
+| **Invalidate Alternatives** | Desvalidar Alternativas (Posicionador) | Superior to competition | "Don't buy X without knowing this" + 3 Defects + 3 Opposite Benefits + CTA |
+| **Show Service** | Mostrar el Servicio | Aesthetics, Health, Processes | Service Name + Step 1,2,3 + Result + Assessment CTA |
+| **Product Variety** | Variedad de Productos (El Menú) | Varied stock stores | "3 types you need to know" + Option A,B,C + Logistics + CTA |
+| **Step by Step** | Paso a Paso (Retargeting) | Complex logistics | "Order in 3 steps" + Step 1,2,3 + CTA |
+
 ---
 
 ## Product Types
@@ -241,7 +291,7 @@ Form fields: name, business type (sale/rent/airbnb), price, location, constructi
 
 ### Completed ✅
 - [x] Team Dashboard UI - Client hierarchy, create/manage clients
-- [x] Script Frameworks (PAS, AIDA, BAB, 4Ps)
+- [x] ~~Script Frameworks (PAS, AIDA, BAB, 4Ps)~~ → Replaced with Ian's 5 Master Structures
 - [x] Tone/Style Controls
 - [x] Duration/Platform Options
 - [x] A/B Variations (1-5 scripts)
@@ -250,6 +300,8 @@ Form fields: name, business type (sale/rent/airbnb), price, location, constructi
 - [x] Quick Paste modal with AI organization
 - [x] Real Estate product type with dedicated form
 - [x] Improved Service prompts with placeholders
+- [x] **Ian's 5 Master Structures** - Venta Directa, Desvalidar Alternativas, Mostrar Servicio, Variedad, Paso a Paso
+- [x] **Ian Methodology in AI Prompts** - Certeza Total philosophy, Tríada Estructural, Zero Greetings Rule
 
 ### High Priority
 1. **Team Member Management** - Invite team members, assign roles

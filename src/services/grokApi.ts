@@ -46,7 +46,7 @@ export interface ProductContext {
 }
 
 export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
-  framework: 'direct',
+  framework: 'venta_directa',
   tone: 'professional',
   duration: '30s',
   platform: 'general',
