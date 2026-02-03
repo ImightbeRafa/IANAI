@@ -1,6 +1,6 @@
 # CopywriteAI - Development Progress
 
-## Last Updated: February 3, 2026 at 10:15 AM (UTC-06:00)
+## Last Updated: February 3, 2026 at 11:56 AM (UTC-06:00)
 
 ---
 
@@ -190,6 +190,51 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] Added database functions: `rateScript()`, `getScriptVersions()`, `createScriptVersion()`
 - [x] Made settings panel scrollable for smaller screens
 
+### February 3, 2026 - New Product Form Fields & Info Panel (11:00 AM)
+- [x] **Redesigned ProductForm** with new detailed questions:
+  - **Products**: Description, main problem, best customers, failed attempts, attention grabber, expected result, differentiation, key objection, shipping info, awareness level
+  - **Services**: Same base + real pain, pain consequences (instead of objection/shipping)
+- [x] **Quick Paste Modal** - Paste raw client answers, AI organizes them into form fields
+- [x] Updated `ProductWorkspace` info panel to display all new fields per type
+- [x] Added edit mode for all new fields in ProductWorkspace
+- [x] Created migration `006_new_form_fields.sql` with new columns
+- [x] Updated `createProduct()` and `updateProduct()` in database.ts
+- [x] Updated `buildProductContext()` to pass new fields to AI
+
+### February 3, 2026 - Real Estate Product Type & Improved Service Prompts (11:56 AM)
+- [x] **NEW Product Type: Real Estate** (`real_estate`)
+  - Form fields: Business type (sale/rent/airbnb), price, location, construction size, bedrooms, capacity, bathrooms, parking, highlights, location reference, CTA
+  - 3-step form for real estate (vs 5 steps for product/service)
+  - Dedicated AI prompt for real estate scripts with price+location hooks
+- [x] **Improved Service Prompts** with Ian methodology:
+  - 5 angle variations: Authority, Process, Pain vs Solution, Educational/List, Irresistible Offer
+  - Smart placeholders `[PLACEHOLDER]` for cases of success
+  - Tangibilize intangibles with numbers, times, steps
+- [x] **Updated Files:**
+  - `src/types/index.ts` - Added `'real_estate'` to ProductType, real estate fields to Product and ProductFormData
+  - `src/components/ProductForm.tsx` - 3-column type selector, real estate form steps 2-3
+  - `src/pages/ProductWorkspace.tsx` - Real estate labels (ES/EN), view/edit fields, buildProductContext
+  - `src/services/grokApi.ts` - Real estate fields in ProductContext
+  - `src/services/database.ts` - Real estate fields in createProduct
+  - `api/chat.ts` - `REAL_ESTATE_PROMPTS` and `SERVICE_PROMPTS`, handler selects prompt by type
+  - `supabase/migrations/006_new_form_fields.sql` - Real estate columns added
+
+---
+
+## Product Types
+
+### 1. Product (Physical)
+Form fields: name, description, main problem, best customers, failed attempts, attention grabber, expected result, differentiation, key objection, shipping info, awareness level
+
+### 2. Service
+Form fields: name, description, main problem, best customers, failed attempts, attention grabber, real pain, pain consequences, expected result, differentiation, awareness level
+
+### 3. Restaurant
+Form fields: name, menu text, location, schedule, is new restaurant
+
+### 4. Real Estate (NEW)
+Form fields: name, business type (sale/rent/airbnb), price, location, construction size, bedrooms, capacity, bathrooms, parking, highlights, location reference, CTA
+
 ---
 
 ## TODO / Next Steps
@@ -201,26 +246,66 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] Duration/Platform Options
 - [x] A/B Variations (1-5 scripts)
 - [x] Script Rating (feedback loop)
+- [x] New detailed product/service form fields
+- [x] Quick Paste modal with AI organization
+- [x] Real Estate product type with dedicated form
+- [x] Improved Service prompts with placeholders
 
 ### High Priority
 1. **Team Member Management** - Invite team members, assign roles
 2. **Script Library Page** - Dedicated page to view all saved scripts with filters
+3. **Run Migration 006** - Add real estate columns to database
 
 ### Medium Priority
-3. **AI Feedback Loop** - Use highly-rated scripts as examples for better generation
-4. **Script Export** - Export scripts as PDF/TXT/Copy to clipboard
-5. **Toast Notifications** - User feedback for save/rate actions
+4. **AI Feedback Loop** - Use highly-rated scripts as examples for better generation
+5. **Script Export** - Export scripts as PDF/TXT/Copy to clipboard
+6. **Toast Notifications** - User feedback for save/rate actions
 
 ### Low Priority / Future
-6. **Subscription/Billing** - Paid plans with usage limits
-7. **Analytics** - Track script performance/engagement
-8. **Templates Marketplace** - Share/sell script templates
+7. **Subscription/Billing** - Paid plans with usage limits
+8. **Analytics** - Track script performance/engagement
+9. **Templates Marketplace** - Share/sell script templates
 
 ---
 
 ## Testing Steps
 
-### 1. Apply Database Migration
+### 1. Apply Database Migration (006 - Real Estate)
+Run this in your Supabase SQL Editor to add real estate columns:
+```sql
+-- Add new form fields to products table
+ALTER TABLE products 
+ADD COLUMN IF NOT EXISTS product_description TEXT,
+ADD COLUMN IF NOT EXISTS main_problem TEXT,
+ADD COLUMN IF NOT EXISTS best_customers TEXT,
+ADD COLUMN IF NOT EXISTS failed_attempts TEXT,
+ADD COLUMN IF NOT EXISTS attention_grabber TEXT,
+ADD COLUMN IF NOT EXISTS real_pain TEXT,
+ADD COLUMN IF NOT EXISTS pain_consequences TEXT,
+ADD COLUMN IF NOT EXISTS expected_result TEXT,
+ADD COLUMN IF NOT EXISTS differentiation TEXT,
+ADD COLUMN IF NOT EXISTS key_objection TEXT,
+ADD COLUMN IF NOT EXISTS shipping_info TEXT;
+
+-- Add real estate specific fields
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS re_business_type TEXT,
+ADD COLUMN IF NOT EXISTS re_price TEXT,
+ADD COLUMN IF NOT EXISTS re_location TEXT,
+ADD COLUMN IF NOT EXISTS re_construction_size TEXT,
+ADD COLUMN IF NOT EXISTS re_bedrooms TEXT,
+ADD COLUMN IF NOT EXISTS re_capacity TEXT,
+ADD COLUMN IF NOT EXISTS re_bathrooms TEXT,
+ADD COLUMN IF NOT EXISTS re_parking TEXT,
+ADD COLUMN IF NOT EXISTS re_highlights TEXT,
+ADD COLUMN IF NOT EXISTS re_location_reference TEXT,
+ADD COLUMN IF NOT EXISTS re_cta TEXT;
+
+-- Create index for faster queries on product type
+CREATE INDEX IF NOT EXISTS idx_products_owner_type ON products(owner_id, type);
+```
+
+### 2. Previous Migration (Profiles to Team)
 Run this in your Supabase SQL Editor:
 ```sql
 -- First, check current state

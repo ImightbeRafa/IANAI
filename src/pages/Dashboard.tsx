@@ -29,7 +29,8 @@ import {
   Building2,
   ChevronRight,
   ArrowLeft,
-  UtensilsCrossed
+  UtensilsCrossed,
+  Home
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -42,7 +43,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [showProductForm, setShowProductForm] = useState(false)
   const [showRestaurantForm, setShowRestaurantForm] = useState(false)
-  const [showTypeSelector, setShowTypeSelector] = useState(false)
   
   // Team-specific state
   const [team, setTeam] = useState<Team | null>(null)
@@ -205,11 +205,13 @@ export default function Dashboard() {
       product: 'Producto',
       service: 'Servicio',
       restaurant: 'Restaurante',
+      realEstate: 'Inmobiliaria',
       // Type selector
       selectType: '¿Qué quieres crear?',
       productDesc: 'Producto físico o digital',
       serviceDesc: 'Servicio profesional',
       restaurantDesc: 'Restaurante con menú',
+      realEstateDesc: 'Venta o alquiler de propiedades',
       // Team labels
       yourClients: 'Tus Clientes',
       newClient: 'Nuevo Cliente',
@@ -242,11 +244,13 @@ export default function Dashboard() {
       product: 'Product',
       service: 'Service',
       restaurant: 'Restaurant',
+      realEstate: 'Real Estate',
       // Type selector
       selectType: 'What do you want to create?',
       productDesc: 'Physical or digital product',
       serviceDesc: 'Professional service',
       restaurantDesc: 'Restaurant with menu',
+      realEstateDesc: 'Property sale or rental',
       // Team labels
       yourClients: 'Your Clients',
       newClient: 'New Client',
@@ -282,6 +286,7 @@ export default function Dashboard() {
         case 'product': return { bg: 'bg-blue-100', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
         case 'service': return { bg: 'bg-purple-100', icon: <Briefcase className="w-5 h-5 text-purple-600" />, label: t.service }
         case 'restaurant': return { bg: 'bg-orange-100', icon: <UtensilsCrossed className="w-5 h-5 text-orange-600" />, label: t.restaurant }
+        case 'real_estate': return { bg: 'bg-teal-100', icon: <Home className="w-5 h-5 text-teal-600" />, label: t.realEstate }
         default: return { bg: 'bg-blue-100', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
       }
     }
@@ -388,7 +393,7 @@ export default function Dashboard() {
             {/* Show new product button for individual OR when viewing a client */}
             {(!isTeamAccount || selectedClient) && (
               <button 
-                onClick={() => setShowTypeSelector(true)}
+                onClick={() => setShowProductForm(true)}
                 className="btn-primary flex items-center gap-2"
               >
                 <Plus className="w-5 h-5" />
@@ -562,70 +567,6 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-
-      {/* Type Selector Modal */}
-      {showTypeSelector && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
-            <h3 className="text-lg font-semibold text-dark-900 mb-2">{t.selectType}</h3>
-            <div className="grid grid-cols-1 gap-3 mt-4">
-              <button
-                onClick={() => {
-                  setShowTypeSelector(false)
-                  setShowProductForm(true)
-                }}
-                className="p-4 border-2 border-dark-200 hover:border-blue-400 hover:bg-blue-50 rounded-xl transition-all flex items-center gap-4 text-left"
-              >
-                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                  <Package className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-dark-900">{t.product}</p>
-                  <p className="text-sm text-dark-500">{t.productDesc}</p>
-                </div>
-              </button>
-              <button
-                onClick={() => {
-                  setShowTypeSelector(false)
-                  setShowProductForm(true)
-                }}
-                className="p-4 border-2 border-dark-200 hover:border-purple-400 hover:bg-purple-50 rounded-xl transition-all flex items-center gap-4 text-left"
-              >
-                <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-                  <Briefcase className="w-6 h-6 text-purple-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-dark-900">{t.service}</p>
-                  <p className="text-sm text-dark-500">{t.serviceDesc}</p>
-                </div>
-              </button>
-              <button
-                onClick={() => {
-                  setShowTypeSelector(false)
-                  setShowRestaurantForm(true)
-                }}
-                className="p-4 border-2 border-dark-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all flex items-center gap-4 text-left"
-              >
-                <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
-                  <UtensilsCrossed className="w-6 h-6 text-orange-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-dark-900">{t.restaurant}</p>
-                  <p className="text-sm text-dark-500">{t.restaurantDesc}</p>
-                </div>
-              </button>
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setShowTypeSelector(false)}
-                className="btn-secondary"
-              >
-                {t.cancel}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Product Form Modal */}
       {showProductForm && (

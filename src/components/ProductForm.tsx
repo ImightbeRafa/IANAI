@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { ProductFormData, ProductType } from '../types'
-import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home } from 'lucide-react'
+import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home, UtensilsCrossed } from 'lucide-react'
 
 interface ProductFormProps {
   onSubmit: (data: ProductFormData) => Promise<void>
@@ -46,6 +46,7 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
       cancel: 'Cancelar',
       product: 'Producto Físico',
       service: 'Servicio',
+      restaurant: 'Restaurante',
       realEstate: 'Inmobiliaria',
       quickPaste: 'Pegar Respuestas',
       quickPasteDesc: 'Pega todas las respuestas del cliente y la IA las organizará automáticamente',
@@ -138,6 +139,7 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
       cancel: 'Cancel',
       product: 'Physical Product',
       service: 'Service',
+      restaurant: 'Restaurant',
       realEstate: 'Real Estate',
       quickPaste: 'Paste Answers',
       quickPasteDesc: 'Paste all client answers and AI will organize them automatically',
@@ -373,7 +375,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 <label className="block text-sm font-medium text-dark-700 mb-3">
                   {language === 'es' ? '¿Qué tipo de negocio es?' : 'What type of business is it?'}
                 </label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <button
                     type="button"
                     onClick={() => handleTypeSelect('product')}
@@ -400,6 +402,20 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     <Briefcase className={`w-6 h-6 ${formData.type === 'service' ? 'text-primary-600' : 'text-dark-400'}`} />
                     <span className={`text-sm font-medium ${formData.type === 'service' ? 'text-primary-600' : 'text-dark-600'}`}>
                       {t.service}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTypeSelect('restaurant')}
+                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
+                      formData.type === 'restaurant'
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-dark-200 hover:border-dark-300'
+                    }`}
+                  >
+                    <UtensilsCrossed className={`w-6 h-6 ${formData.type === 'restaurant' ? 'text-primary-600' : 'text-dark-400'}`} />
+                    <span className={`text-sm font-medium ${formData.type === 'restaurant' ? 'text-primary-600' : 'text-dark-600'}`}>
+                      {t.restaurant}
                     </span>
                   </button>
                   <button
