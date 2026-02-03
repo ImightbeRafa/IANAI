@@ -180,6 +180,18 @@ export async function createProduct(
     location?: string
     schedule?: string
     is_new_restaurant?: boolean
+    // Real estate fields
+    re_business_type?: string
+    re_price?: string
+    re_location?: string
+    re_construction_size?: string
+    re_bedrooms?: string
+    re_capacity?: string
+    re_bathrooms?: string
+    re_parking?: string
+    re_highlights?: string
+    re_location_reference?: string
+    re_cta?: string
   },
   ownerId: string,
   clientId?: string
@@ -219,6 +231,21 @@ export async function createProduct(
     insertData.location = data.location
     insertData.schedule = data.schedule
     insertData.is_new_restaurant = data.is_new_restaurant
+  }
+
+  // Add real estate-specific fields if present
+  if (data.type === 'real_estate') {
+    insertData.re_business_type = data.re_business_type
+    insertData.re_price = data.re_price
+    insertData.re_location = data.re_location
+    insertData.re_construction_size = data.re_construction_size
+    insertData.re_bedrooms = data.re_bedrooms
+    insertData.re_capacity = data.re_capacity
+    insertData.re_bathrooms = data.re_bathrooms
+    insertData.re_parking = data.re_parking
+    insertData.re_highlights = data.re_highlights
+    insertData.re_location_reference = data.re_location_reference
+    insertData.re_cta = data.re_cta
   }
 
   const { data: product, error } = await supabase

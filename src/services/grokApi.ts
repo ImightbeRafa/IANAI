@@ -31,6 +31,18 @@ export interface ProductContext {
   location?: string
   schedule?: string
   is_new_restaurant?: boolean
+  // Real estate-specific fields
+  re_business_type?: 'sale' | 'rent' | 'airbnb'
+  re_price?: string
+  re_location?: string
+  re_construction_size?: string
+  re_bedrooms?: string
+  re_capacity?: string
+  re_bathrooms?: string
+  re_parking?: string
+  re_highlights?: string
+  re_location_reference?: string
+  re_cta?: string
 }
 
 export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {

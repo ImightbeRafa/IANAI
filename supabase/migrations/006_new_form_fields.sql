@@ -1,4 +1,4 @@
--- Migration: Add new form fields for products and services
+-- Migration: Add new form fields for products, services, and real estate
 -- Updates the products table with new question-based fields
 
 -- Add new form fields to products table
@@ -14,6 +14,20 @@ ADD COLUMN IF NOT EXISTS expected_result TEXT,
 ADD COLUMN IF NOT EXISTS differentiation TEXT,
 ADD COLUMN IF NOT EXISTS key_objection TEXT,
 ADD COLUMN IF NOT EXISTS shipping_info TEXT;
+
+-- Add real estate specific fields
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS re_business_type TEXT,
+ADD COLUMN IF NOT EXISTS re_price TEXT,
+ADD COLUMN IF NOT EXISTS re_location TEXT,
+ADD COLUMN IF NOT EXISTS re_construction_size TEXT,
+ADD COLUMN IF NOT EXISTS re_bedrooms TEXT,
+ADD COLUMN IF NOT EXISTS re_capacity TEXT,
+ADD COLUMN IF NOT EXISTS re_bathrooms TEXT,
+ADD COLUMN IF NOT EXISTS re_parking TEXT,
+ADD COLUMN IF NOT EXISTS re_highlights TEXT,
+ADD COLUMN IF NOT EXISTS re_location_reference TEXT,
+ADD COLUMN IF NOT EXISTS re_cta TEXT;
 
 -- Create index for faster queries on product type
 CREATE INDEX IF NOT EXISTS idx_products_owner_type ON products(owner_id, type);

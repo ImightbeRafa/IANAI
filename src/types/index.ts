@@ -3,7 +3,7 @@
 // =============================================
 export type AccountType = 'single' | 'team'
 export type TeamRole = 'owner' | 'admin' | 'member'
-export type ProductType = 'product' | 'service' | 'restaurant'
+export type ProductType = 'product' | 'service' | 'restaurant' | 'real_estate'
 export type SessionStatus = 'active' | 'completed' | 'archived'
 
 // =============================================
@@ -92,6 +92,18 @@ export interface Product {
   location?: string
   schedule?: string
   is_new_restaurant?: boolean
+  // Real estate-specific fields
+  re_business_type?: 'sale' | 'rent' | 'airbnb'
+  re_price?: string
+  re_location?: string
+  re_construction_size?: string
+  re_bedrooms?: string
+  re_capacity?: string
+  re_bathrooms?: string
+  re_parking?: string
+  re_highlights?: string
+  re_location_reference?: string
+  re_cta?: string
   created_at: string
   updated_at: string
   // Joined data
@@ -174,25 +186,37 @@ export interface ProductFormData {
   name: string
   type: ProductType
   // Section 1: The Product/Service
-  product_description: string      // What are you selling / What service do you offer
-  main_problem: string             // What main problem does it solve
+  product_description?: string      // What are you selling / What service do you offer
+  main_problem?: string             // What main problem does it solve
   // Section 2: Client & Context
-  best_customers: string           // Describe your best current customers/clients
-  failed_attempts: string          // What they tried before that didn't work
-  attention_grabber: string        // What catches their attention about your product/service
+  best_customers?: string           // Describe your best current customers/clients
+  failed_attempts?: string          // What they tried before that didn't work
+  attention_grabber?: string        // What catches their attention about your product/service
   // Section 3: Real Pain (Service only, but stored for both)
   real_pain?: string               // What bothers potential clients most (service)
   pain_consequences?: string       // What happens if they don't solve it (service)
   // Section 4: Desire/Result
-  expected_result: string          // What result do they expect
+  expected_result?: string          // What result do they expect
   // Section 5: Differentiation
-  differentiation: string          // What makes this different/better
+  differentiation?: string          // What makes this different/better
   // Section 6: Key Objection (Product only)
   key_objection?: string           // What do people doubt or ask before buying
   // Section 7: Logistics (Product only)
   shipping_info?: string           // How does shipping work
   // Section 8: Awareness Level
-  awareness_level: string          // How do they find this product/service
+  awareness_level?: string          // How do they find this product/service
+  // Real estate fields
+  re_business_type?: 'sale' | 'rent' | 'airbnb'
+  re_price?: string
+  re_location?: string
+  re_construction_size?: string
+  re_bedrooms?: string
+  re_capacity?: string
+  re_bathrooms?: string
+  re_parking?: string
+  re_highlights?: string
+  re_location_reference?: string
+  re_cta?: string
   // Legacy fields for backward compatibility
   description?: string
   offer?: string
@@ -211,6 +235,22 @@ export interface RestaurantFormData {
   location: string
   schedule: string
   is_new_restaurant: boolean
+}
+
+export interface RealEstateFormData {
+  name: string
+  type: 'real_estate'
+  re_business_type: 'sale' | 'rent' | 'airbnb'
+  re_price: string
+  re_location: string
+  re_construction_size: string
+  re_bedrooms: string
+  re_capacity: string
+  re_bathrooms: string
+  re_parking: string
+  re_highlights: string
+  re_location_reference: string
+  re_cta: string
 }
 
 export interface ScriptGenerationSettings {

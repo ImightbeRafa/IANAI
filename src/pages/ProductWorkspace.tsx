@@ -203,6 +203,24 @@ export default function ProductWorkspace() {
       }
     }
 
+    // Add real estate-specific fields if applicable
+    if (product.type === 'real_estate') {
+      return {
+        ...baseContext,
+        re_business_type: product.re_business_type,
+        re_price: product.re_price,
+        re_location: product.re_location,
+        re_construction_size: product.re_construction_size,
+        re_bedrooms: product.re_bedrooms,
+        re_capacity: product.re_capacity,
+        re_bathrooms: product.re_bathrooms,
+        re_parking: product.re_parking,
+        re_highlights: product.re_highlights,
+        re_location_reference: product.re_location_reference,
+        re_cta: product.re_cta
+      }
+    }
+
     return baseContext
   }
 
@@ -374,6 +392,18 @@ export default function ProductWorkspace() {
       location: 'Ubicación',
       schedule: 'Horario',
       isNewRestaurant: '¿Es nuevo?',
+      // Real estate labels
+      reBusinessType: 'Tipo de negocio',
+      rePrice: 'Precio',
+      reLocation: 'Ubicación',
+      reConstructionSize: 'Metros construcción',
+      reBedrooms: 'Habitaciones',
+      reCapacity: 'Capacidad',
+      reBathrooms: 'Baños',
+      reParking: 'Estacionamientos',
+      reHighlights: 'Puntos destacados',
+      reLocationReference: 'Referencia ubicación',
+      reCta: 'Llamado a acción',
       scriptSettings: 'Configuración del Script',
       rateScript: 'Calificar'
     },
@@ -414,6 +444,18 @@ export default function ProductWorkspace() {
       location: 'Location',
       schedule: 'Schedule',
       isNewRestaurant: 'Is new?',
+      // Real estate labels
+      reBusinessType: 'Business Type',
+      rePrice: 'Price',
+      reLocation: 'Location',
+      reConstructionSize: 'Construction Size',
+      reBedrooms: 'Bedrooms',
+      reCapacity: 'Capacity',
+      reBathrooms: 'Bathrooms',
+      reParking: 'Parking',
+      reHighlights: 'Highlights',
+      reLocationReference: 'Location Reference',
+      reCta: 'Call to Action',
       scriptSettings: 'Script Settings',
       rateScript: 'Rate'
     }
@@ -853,6 +895,58 @@ export default function ProductWorkspace() {
                         </div>
                       </>
                     )}
+                    {/* Real estate edit fields */}
+                    {product.type === 'real_estate' && (
+                      <>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.reBusinessType}</label>
+                          <select
+                            value={editedProduct.re_business_type || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, re_business_type: e.target.value as 'sale' | 'rent' | 'airbnb' }))}
+                            className="input-field text-sm"
+                          >
+                            <option value="sale">{language === 'es' ? 'Venta' : 'Sale'}</option>
+                            <option value="rent">{language === 'es' ? 'Alquiler' : 'Rent'}</option>
+                            <option value="airbnb">Airbnb</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.rePrice}</label>
+                          <input
+                            type="text"
+                            value={editedProduct.re_price || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, re_price: e.target.value }))}
+                            className="input-field text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.reLocation}</label>
+                          <input
+                            type="text"
+                            value={editedProduct.re_location || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, re_location: e.target.value }))}
+                            className="input-field text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.reHighlights}</label>
+                          <textarea
+                            value={editedProduct.re_highlights || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, re_highlights: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.reCta}</label>
+                          <input
+                            type="text"
+                            value={editedProduct.re_cta || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, re_cta: e.target.value }))}
+                            className="input-field text-sm"
+                          />
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
@@ -933,6 +1027,53 @@ export default function ProductWorkspace() {
                         <div>
                           <p className="text-xs text-dark-400">{t.schedule}</p>
                           <p className="text-dark-700">{product.schedule || '-'}</p>
+                        </div>
+                      </>
+                    )}
+                    {/* Real estate-specific fields */}
+                    {product.type === 'real_estate' && (
+                      <>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.reBusinessType}</p>
+                          <p className="text-dark-700">{product.re_business_type || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.rePrice}</p>
+                          <p className="text-dark-700">{product.re_price || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.reLocation}</p>
+                          <p className="text-dark-700">{product.re_location || '-'}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-xs text-dark-400">{t.reConstructionSize}</p>
+                            <p className="text-dark-700">{product.re_construction_size || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-dark-400">{t.reBedrooms}</p>
+                            <p className="text-dark-700">{product.re_bedrooms || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-dark-400">{t.reBathrooms}</p>
+                            <p className="text-dark-700">{product.re_bathrooms || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-dark-400">{t.reParking}</p>
+                            <p className="text-dark-700">{product.re_parking || '-'}</p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.reHighlights}</p>
+                          <p className="text-dark-700">{product.re_highlights || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.reLocationReference}</p>
+                          <p className="text-dark-700">{product.re_location_reference || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.reCta}</p>
+                          <p className="text-dark-700">{product.re_cta || '-'}</p>
                         </div>
                       </>
                     )}

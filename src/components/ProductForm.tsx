@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { ProductFormData, ProductType } from '../types'
-import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X } from 'lucide-react'
+import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home } from 'lucide-react'
 
 interface ProductFormProps {
   onSubmit: (data: ProductFormData) => Promise<void>
@@ -46,6 +46,7 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
       cancel: 'Cancelar',
       product: 'Producto Físico',
       service: 'Servicio',
+      realEstate: 'Inmobiliaria',
       quickPaste: 'Pegar Respuestas',
       quickPasteDesc: 'Pega todas las respuestas del cliente y la IA las organizará automáticamente',
       pasteHere: 'Pega aquí las respuestas del cliente...',
@@ -91,6 +92,26 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         passive: 'No lo buscan, pero saben que lo necesitan',
         impulse: 'No lo estaban buscando, pero el mensaje los activa'
       },
+      // Real estate questions
+      realEstateQuestions: {
+        name: '¿Cuál es el nombre o referencia de la propiedad?',
+        re_business_type: 'Tipo de negocio',
+        re_price: 'Precio exacto',
+        re_location: 'Ubicación (Barrio + Ciudad)',
+        re_construction_size: 'Metros de construcción',
+        re_bedrooms: 'Habitaciones',
+        re_capacity: 'Para cuántas personas',
+        re_bathrooms: 'Baños',
+        re_parking: 'Estacionamientos',
+        re_highlights: 'Puntos destacados (máximo 3, sé específico)',
+        re_location_reference: 'Referencia de ubicación',
+        re_cta: '¿Qué deben hacer los interesados?'
+      },
+      realEstateBusinessTypes: {
+        sale: 'Venta (Precio Total)',
+        rent: 'Alquiler Largo Plazo (Precio Mensual)',
+        airbnb: 'Airbnb/Vacacional (Precio por Noche)'
+      },
       placeholders: {
         name: 'Ej: Café de Especialidad Premium',
         product_description: 'Describe qué vendes y para qué sirve...',
@@ -117,6 +138,7 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
       cancel: 'Cancel',
       product: 'Physical Product',
       service: 'Service',
+      realEstate: 'Real Estate',
       quickPaste: 'Paste Answers',
       quickPasteDesc: 'Paste all client answers and AI will organize them automatically',
       pasteHere: 'Paste client answers here...',
@@ -162,6 +184,26 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         passive: 'They don\'t search for it, but know they need it',
         impulse: 'They weren\'t looking, but the message activates them'
       },
+      // Real estate questions
+      realEstateQuestions: {
+        name: 'What is the name or reference of the property?',
+        re_business_type: 'Business type',
+        re_price: 'Exact price',
+        re_location: 'Location (Neighborhood + City)',
+        re_construction_size: 'Construction size (m²)',
+        re_bedrooms: 'Bedrooms',
+        re_capacity: 'For how many people',
+        re_bathrooms: 'Bathrooms',
+        re_parking: 'Parking spaces',
+        re_highlights: 'Key highlights (max 3, be specific)',
+        re_location_reference: 'Location reference',
+        re_cta: 'What should interested people do?'
+      },
+      realEstateBusinessTypes: {
+        sale: 'Sale (Total Price)',
+        rent: 'Long-term Rent (Monthly)',
+        airbnb: 'Airbnb/Vacation (Per Night)'
+      },
       placeholders: {
         name: 'E.g.: Premium Specialty Coffee',
         product_description: 'Describe what you sell and what it\'s for...',
@@ -180,8 +222,8 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
   }
 
   const t = labels[language]
-  const totalSteps = formData.type === 'service' ? 5 : 5
-  const questions = formData.type === 'service' ? t.serviceQuestions : t.productQuestions
+  const totalSteps = formData.type === 'real_estate' ? 3 : 5
+  const questions = formData.type === 'service' ? t.serviceQuestions : formData.type === 'real_estate' ? t.realEstateQuestions : t.productQuestions
   const awarenessOpts = formData.type === 'service' ? t.serviceAwarenessOptions : t.awarenessOptions
 
   const handleChange = (field: keyof ProductFormData, value: string) => {
@@ -268,16 +310,19 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
       case 1:
         return formData.name.trim() && formData.type
       case 2:
-        return formData.product_description.trim() && formData.main_problem.trim()
-      case 3:
-        return formData.best_customers.trim() && formData.attention_grabber.trim()
-      case 4:
-        if (formData.type === 'service') {
-          return formData.expected_result.trim() && formData.differentiation.trim()
+        if (formData.type === 'real_estate') {
+          return formData.re_business_type && (formData.re_price || '').trim() && (formData.re_location || '').trim()
         }
-        return formData.expected_result.trim() && formData.differentiation.trim()
+        return (formData.product_description || '').trim() && (formData.main_problem || '').trim()
+      case 3:
+        if (formData.type === 'real_estate') {
+          return (formData.re_highlights || '').trim() && (formData.re_cta || '').trim()
+        }
+        return (formData.best_customers || '').trim() && (formData.attention_grabber || '').trim()
+      case 4:
+        return (formData.expected_result || '').trim() && (formData.differentiation || '').trim()
       case 5:
-        return formData.awareness_level.trim()
+        return (formData.awareness_level || '').trim()
       default:
         return true
     }
@@ -326,35 +371,49 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-3">
-                  {questions.type}
+                  {language === 'es' ? '¿Qué tipo de negocio es?' : 'What type of business is it?'}
                 </label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
                     onClick={() => handleTypeSelect('product')}
-                    className={`p-6 rounded-xl border-2 transition-all flex flex-col items-center gap-3 ${
+                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                       formData.type === 'product'
                         ? 'border-primary-600 bg-primary-50'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
-                    <Package className={`w-8 h-8 ${formData.type === 'product' ? 'text-primary-600' : 'text-dark-400'}`} />
-                    <span className={`font-medium ${formData.type === 'product' ? 'text-primary-600' : 'text-dark-600'}`}>
+                    <Package className={`w-6 h-6 ${formData.type === 'product' ? 'text-primary-600' : 'text-dark-400'}`} />
+                    <span className={`text-sm font-medium ${formData.type === 'product' ? 'text-primary-600' : 'text-dark-600'}`}>
                       {t.product}
                     </span>
                   </button>
                   <button
                     type="button"
                     onClick={() => handleTypeSelect('service')}
-                    className={`p-6 rounded-xl border-2 transition-all flex flex-col items-center gap-3 ${
+                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                       formData.type === 'service'
                         ? 'border-primary-600 bg-primary-50'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
-                    <Briefcase className={`w-8 h-8 ${formData.type === 'service' ? 'text-primary-600' : 'text-dark-400'}`} />
-                    <span className={`font-medium ${formData.type === 'service' ? 'text-primary-600' : 'text-dark-600'}`}>
+                    <Briefcase className={`w-6 h-6 ${formData.type === 'service' ? 'text-primary-600' : 'text-dark-400'}`} />
+                    <span className={`text-sm font-medium ${formData.type === 'service' ? 'text-primary-600' : 'text-dark-600'}`}>
                       {t.service}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTypeSelect('real_estate')}
+                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
+                      formData.type === 'real_estate'
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-dark-200 hover:border-dark-300'
+                    }`}
+                  >
+                    <Home className={`w-6 h-6 ${formData.type === 'real_estate' ? 'text-primary-600' : 'text-dark-400'}`} />
+                    <span className={`text-sm font-medium ${formData.type === 'real_estate' ? 'text-primary-600' : 'text-dark-600'}`}>
+                      {t.realEstate}
                     </span>
                   </button>
                 </div>
@@ -377,12 +436,12 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 2: Product/Service Description & Problem */}
-          {step === 2 && (
+          {/* Step 2: Product/Service Description & Problem (NOT for real_estate) */}
+          {step === 2 && formData.type !== 'real_estate' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.product_description}
+                  {formData.type === 'service' ? t.serviceQuestions.product_description : t.productQuestions.product_description}
                 </label>
                 <textarea
                   value={formData.product_description}
@@ -395,7 +454,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.main_problem}
+                  {formData.type === 'service' ? t.serviceQuestions.main_problem : t.productQuestions.main_problem}
                 </label>
                 <textarea
                   value={formData.main_problem}
@@ -407,15 +466,70 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 3: Client & Context */}
-          {step === 3 && (
+          {/* REAL ESTATE Step 2: Business Type & Price */}
+          {step === 2 && formData.type === 'real_estate' && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-3">
+                  {t.realEstateQuestions.re_business_type}
+                </label>
+                <div className="space-y-3">
+                  {(['sale', 'rent', 'airbnb'] as const).map((bType) => (
+                    <button
+                      key={bType}
+                      type="button"
+                      onClick={() => handleChange('re_business_type', bType)}
+                      className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
+                        formData.re_business_type === bType
+                          ? 'border-primary-600 bg-primary-50'
+                          : 'border-dark-200 hover:border-dark-300'
+                      }`}
+                    >
+                      <span className={`font-medium ${formData.re_business_type === bType ? 'text-primary-600' : 'text-dark-600'}`}>
+                        {t.realEstateBusinessTypes[bType]}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.realEstateQuestions.re_price}
+                </label>
+                <input
+                  type="text"
+                  value={formData.re_price || ''}
+                  onChange={(e) => handleChange('re_price', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: $2.35 Millones / $1,200 mes' : 'E.g.: $2.35M / $1,200/mo'}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.realEstateQuestions.re_location}
+                </label>
+                <input
+                  type="text"
+                  value={formData.re_location || ''}
+                  onChange={(e) => handleChange('re_location', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: La Guácima, Alajuela' : 'E.g.: Downtown, Miami'}
+                  className="input-field"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Client & Context (NOT for real_estate) */}
+          {step === 3 && formData.type !== 'real_estate' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.best_customers}
+                  {formData.type === 'service' ? t.serviceQuestions.best_customers : t.productQuestions.best_customers}
                 </label>
                 <textarea
-                  value={formData.best_customers}
+                  value={formData.best_customers || ''}
                   onChange={(e) => handleChange('best_customers', e.target.value)}
                   placeholder={t.placeholders.best_customers}
                   className="input-field min-h-[80px]"
@@ -425,10 +539,10 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.failed_attempts}
+                  {formData.type === 'service' ? t.serviceQuestions.failed_attempts : t.productQuestions.failed_attempts}
                 </label>
                 <textarea
-                  value={formData.failed_attempts}
+                  value={formData.failed_attempts || ''}
                   onChange={(e) => handleChange('failed_attempts', e.target.value)}
                   placeholder={t.placeholders.failed_attempts}
                   className="input-field min-h-[80px]"
@@ -437,10 +551,10 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.attention_grabber}
+                  {formData.type === 'service' ? t.serviceQuestions.attention_grabber : t.productQuestions.attention_grabber}
                 </label>
                 <textarea
-                  value={formData.attention_grabber}
+                  value={formData.attention_grabber || ''}
                   onChange={(e) => handleChange('attention_grabber', e.target.value)}
                   placeholder={t.placeholders.attention_grabber}
                   className="input-field min-h-[80px]"
@@ -477,15 +591,119 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 4: Result & Differentiation */}
-          {step === 4 && (
+          {/* REAL ESTATE Step 3: Property Details */}
+          {step === 3 && formData.type === 'real_estate' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-2">
+                    {t.realEstateQuestions.re_construction_size}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.re_construction_size || ''}
+                    onChange={(e) => handleChange('re_construction_size', e.target.value)}
+                    placeholder="1,300 m²"
+                    className="input-field"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-2">
+                    {t.realEstateQuestions.re_bedrooms}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.re_bedrooms || ''}
+                    onChange={(e) => handleChange('re_bedrooms', e.target.value)}
+                    placeholder="4"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-2">
+                    {t.realEstateQuestions.re_capacity}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.re_capacity || ''}
+                    onChange={(e) => handleChange('re_capacity', e.target.value)}
+                    placeholder="6"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-2">
+                    {t.realEstateQuestions.re_bathrooms}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.re_bathrooms || ''}
+                    onChange={(e) => handleChange('re_bathrooms', e.target.value)}
+                    placeholder="3"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-2">
+                    {t.realEstateQuestions.re_parking}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.re_parking || ''}
+                    onChange={(e) => handleChange('re_parking', e.target.value)}
+                    placeholder="2"
+                    className="input-field"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.realEstateQuestions.re_highlights}
+                </label>
+                <textarea
+                  value={formData.re_highlights || ''}
+                  onChange={(e) => handleChange('re_highlights', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: Vista al valle, Seguridad 24/7, Piscina privada' : 'E.g.: Valley view, 24/7 Security, Private pool'}
+                  className="input-field min-h-[80px]"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.realEstateQuestions.re_location_reference}
+                </label>
+                <input
+                  type="text"
+                  value={formData.re_location_reference || ''}
+                  onChange={(e) => handleChange('re_location_reference', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: A 15 min del aeropuerto' : 'E.g.: 15 min from airport'}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.realEstateQuestions.re_cta}
+                </label>
+                <input
+                  type="text"
+                  value={formData.re_cta || ''}
+                  onChange={(e) => handleChange('re_cta', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: Envíame un mensaje para agendar visita' : 'E.g.: Send me a message to schedule a visit'}
+                  className="input-field"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Result & Differentiation (NOT for real_estate) */}
+          {step === 4 && formData.type !== 'real_estate' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.expected_result}
+                  {formData.type === 'service' ? t.serviceQuestions.expected_result : t.productQuestions.expected_result}
                 </label>
                 <textarea
-                  value={formData.expected_result}
+                  value={formData.expected_result || ''}
                   onChange={(e) => handleChange('expected_result', e.target.value)}
                   placeholder={t.placeholders.expected_result}
                   className="input-field min-h-[80px]"
@@ -495,10 +713,10 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {questions.differentiation}
+                  {formData.type === 'service' ? t.serviceQuestions.differentiation : t.productQuestions.differentiation}
                 </label>
                 <textarea
-                  value={formData.differentiation}
+                  value={formData.differentiation || ''}
                   onChange={(e) => handleChange('differentiation', e.target.value)}
                   placeholder={t.placeholders.differentiation}
                   className="input-field min-h-[80px]"
@@ -535,12 +753,12 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 5: Awareness Level */}
-          {step === 5 && (
+          {/* Step 5: Awareness Level (NOT for real_estate) */}
+          {step === 5 && formData.type !== 'real_estate' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-3">
-                  {questions.awareness_level}
+                  {formData.type === 'service' ? t.serviceQuestions.awareness_level : t.productQuestions.awareness_level}
                 </label>
                 <div className="space-y-3">
                   <button
