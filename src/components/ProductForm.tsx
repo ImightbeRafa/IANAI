@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { ProductFormData, ProductType } from '../types'
 import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home, UtensilsCrossed } from 'lucide-react'
+import { supabase } from '../lib/supabase'
 
 interface ProductFormProps {
   onSubmit: (data: ProductFormData) => Promise<void>
@@ -305,9 +306,21 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
 Responde en JSON con estos campos: product_description, main_problem, best_customers, failed_attempts, attention_grabber, real_pain, pain_consequences, expected_result, differentiation, awareness_level`
 
+      // Get auth token for API call
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      
+      if (!token) {
+        console.error('No auth token available')
+        return
+      }
+
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           messages: [{ role: 'user', content: `${prompt}\n\nRespuestas del cliente:\n${pasteText}` }],
           businessDetails: {},

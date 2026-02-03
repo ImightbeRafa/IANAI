@@ -139,8 +139,8 @@ export default function ProductWorkspace() {
 
       // Add settings context to feedback messages so AI applies current config
       const settingsContext = language === 'es'
-        ? `\n\n[Config actual: ${scriptSettings.variations} script(s), ${scriptSettings.duration}, estructura: ${scriptSettings.framework}]`
-        : `\n\n[Current config: ${scriptSettings.variations} script(s), ${scriptSettings.duration}, structure: ${scriptSettings.framework}]`
+        ? `\n\n[Config: ${scriptSettings.variations} guión(es)]`
+        : `\n\n[Config: ${scriptSettings.variations} script(s)]`
       
       const messageWithSettings = messages.length > 0 ? userMessage + settingsContext : userMessage
 
