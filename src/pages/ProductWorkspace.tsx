@@ -369,6 +369,11 @@ export default function ProductWorkspace() {
       keyObjection: 'Objeción principal',
       shippingInfo: 'Información de envío',
       awarenessLevel: 'Nivel de conciencia',
+      // Restaurant-specific labels
+      menuText: 'Menú',
+      location: 'Ubicación',
+      schedule: 'Horario',
+      isNewRestaurant: '¿Es nuevo?',
       scriptSettings: 'Configuración del Script',
       rateScript: 'Calificar'
     },
@@ -404,6 +409,11 @@ export default function ProductWorkspace() {
       keyObjection: 'Key Objection',
       shippingInfo: 'Shipping Info',
       awarenessLevel: 'Awareness Level',
+      // Restaurant-specific labels
+      menuText: 'Menu',
+      location: 'Location',
+      schedule: 'Schedule',
+      isNewRestaurant: 'Is new?',
       scriptSettings: 'Script Settings',
       rateScript: 'Rate'
     }
@@ -701,62 +711,75 @@ export default function ProductWorkspace() {
               <div className="space-y-3 text-sm">
                 {editingProduct ? (
                   <>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.productDescription}</label>
-                      <textarea
-                        value={editedProduct.product_description || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, product_description: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.mainProblem}</label>
-                      <textarea
-                        value={editedProduct.main_problem || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, main_problem: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.bestCustomers}</label>
-                      <textarea
-                        value={editedProduct.best_customers || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, best_customers: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.attentionGrabber}</label>
-                      <textarea
-                        value={editedProduct.attention_grabber || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, attention_grabber: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.expectedResult}</label>
-                      <textarea
-                        value={editedProduct.expected_result || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, expected_result: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.differentiation}</label>
-                      <textarea
-                        value={editedProduct.differentiation || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, differentiation: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-dark-400 block mb-1">{t.awarenessLevel}</label>
-                      <textarea
-                        value={editedProduct.awareness_level || ''}
-                        onChange={(e) => setEditedProduct(prev => ({ ...prev, awareness_level: e.target.value }))}
-                        className="input-field text-sm min-h-[60px]"
-                      />
-                    </div>
+                    {/* Product & Service common fields - Edit Mode */}
+                    {(product.type === 'product' || product.type === 'service') && (
+                      <>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.productDescription}</label>
+                          <textarea
+                            value={editedProduct.product_description || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, product_description: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.mainProblem}</label>
+                          <textarea
+                            value={editedProduct.main_problem || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, main_problem: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.bestCustomers}</label>
+                          <textarea
+                            value={editedProduct.best_customers || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, best_customers: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.failedAttempts}</label>
+                          <textarea
+                            value={editedProduct.failed_attempts || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, failed_attempts: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.attentionGrabber}</label>
+                          <textarea
+                            value={editedProduct.attention_grabber || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, attention_grabber: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.expectedResult}</label>
+                          <textarea
+                            value={editedProduct.expected_result || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, expected_result: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.differentiation}</label>
+                          <textarea
+                            value={editedProduct.differentiation || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, differentiation: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.awarenessLevel}</label>
+                          <textarea
+                            value={editedProduct.awareness_level || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, awareness_level: e.target.value }))}
+                            className="input-field text-sm min-h-[60px]"
+                          />
+                        </div>
+                      </>
+                    )}
                     {/* Product-specific fields */}
                     {product.type === 'product' && (
                       <>
@@ -799,37 +822,77 @@ export default function ProductWorkspace() {
                         </div>
                       </>
                     )}
+                    {/* Restaurant-specific fields */}
+                    {product.type === 'restaurant' && (
+                      <>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.menuText}</label>
+                          <textarea
+                            value={editedProduct.menu_text || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, menu_text: e.target.value }))}
+                            className="input-field text-sm min-h-[100px]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.location}</label>
+                          <input
+                            type="text"
+                            value={editedProduct.location || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, location: e.target.value }))}
+                            className="input-field text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.schedule}</label>
+                          <input
+                            type="text"
+                            value={editedProduct.schedule || ''}
+                            onChange={(e) => setEditedProduct(prev => ({ ...prev, schedule: e.target.value }))}
+                            className="input-field text-sm"
+                          />
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.productDescription}</p>
-                      <p className="text-dark-700">{product.product_description || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.mainProblem}</p>
-                      <p className="text-dark-700">{product.main_problem || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.bestCustomers}</p>
-                      <p className="text-dark-700">{product.best_customers || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.attentionGrabber}</p>
-                      <p className="text-dark-700">{product.attention_grabber || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.expectedResult}</p>
-                      <p className="text-dark-700">{product.expected_result || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.differentiation}</p>
-                      <p className="text-dark-700">{product.differentiation || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-dark-400">{t.awarenessLevel}</p>
-                      <p className="text-dark-700">{product.awareness_level || '-'}</p>
-                    </div>
+                    {/* Product & Service common fields */}
+                    {(product.type === 'product' || product.type === 'service') && (
+                      <>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.productDescription}</p>
+                          <p className="text-dark-700">{product.product_description || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.mainProblem}</p>
+                          <p className="text-dark-700">{product.main_problem || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.bestCustomers}</p>
+                          <p className="text-dark-700">{product.best_customers || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.failedAttempts}</p>
+                          <p className="text-dark-700">{product.failed_attempts || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.attentionGrabber}</p>
+                          <p className="text-dark-700">{product.attention_grabber || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.expectedResult}</p>
+                          <p className="text-dark-700">{product.expected_result || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.differentiation}</p>
+                          <p className="text-dark-700">{product.differentiation || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.awarenessLevel}</p>
+                          <p className="text-dark-700">{product.awareness_level || '-'}</p>
+                        </div>
+                      </>
+                    )}
                     {/* Product-specific fields */}
                     {product.type === 'product' && (
                       <>
@@ -853,6 +916,23 @@ export default function ProductWorkspace() {
                         <div>
                           <p className="text-xs text-dark-400">{t.painConsequences}</p>
                           <p className="text-dark-700">{product.pain_consequences || '-'}</p>
+                        </div>
+                      </>
+                    )}
+                    {/* Restaurant-specific fields */}
+                    {product.type === 'restaurant' && (
+                      <>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.menuText}</p>
+                          <p className="text-dark-700 whitespace-pre-wrap">{product.menu_text || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.location}</p>
+                          <p className="text-dark-700">{product.location || '-'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{t.schedule}</p>
+                          <p className="text-dark-700">{product.schedule || '-'}</p>
                         </div>
                       </>
                     )}
