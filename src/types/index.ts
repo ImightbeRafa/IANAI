@@ -64,14 +64,25 @@ export interface Product {
   client_id?: string
   name: string
   type: ProductType
-  // Core product info (from form)
+  // New form fields
+  product_description?: string
+  main_problem?: string
+  best_customers?: string
+  failed_attempts?: string
+  attention_grabber?: string
+  real_pain?: string
+  pain_consequences?: string
+  expected_result?: string
+  differentiation?: string
+  key_objection?: string
+  shipping_info?: string
+  awareness_level?: string
+  // Legacy fields for backward compatibility
   description?: string
   offer?: string
-  awareness_level?: string
   market_alternatives?: string
   customer_values?: string
   purchase_reason?: string
-  // Additional context
   target_audience?: string
   unique_value?: string
   call_to_action?: string
@@ -162,12 +173,32 @@ export interface ScriptTemplate {
 export interface ProductFormData {
   name: string
   type: ProductType
-  description: string
-  offer: string
-  awareness_level: string
-  market_alternatives: string
-  customer_values: string
-  purchase_reason: string
+  // Section 1: The Product/Service
+  product_description: string      // What are you selling / What service do you offer
+  main_problem: string             // What main problem does it solve
+  // Section 2: Client & Context
+  best_customers: string           // Describe your best current customers/clients
+  failed_attempts: string          // What they tried before that didn't work
+  attention_grabber: string        // What catches their attention about your product/service
+  // Section 3: Real Pain (Service only, but stored for both)
+  real_pain?: string               // What bothers potential clients most (service)
+  pain_consequences?: string       // What happens if they don't solve it (service)
+  // Section 4: Desire/Result
+  expected_result: string          // What result do they expect
+  // Section 5: Differentiation
+  differentiation: string          // What makes this different/better
+  // Section 6: Key Objection (Product only)
+  key_objection?: string           // What do people doubt or ask before buying
+  // Section 7: Logistics (Product only)
+  shipping_info?: string           // How does shipping work
+  // Section 8: Awareness Level
+  awareness_level: string          // How do they find this product/service
+  // Legacy fields for backward compatibility
+  description?: string
+  offer?: string
+  market_alternatives?: string
+  customer_values?: string
+  purchase_reason?: string
   target_audience?: string
   call_to_action?: string
 }

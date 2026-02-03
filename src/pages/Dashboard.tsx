@@ -129,24 +129,26 @@ export default function Dashboard() {
     if (!user) return
     try {
       const clientId = isTeamAccount && selectedClient ? selectedClient.id : undefined
-      // Convert RestaurantFormData to a format createProduct can handle
-      const productData = {
+      // Restaurant uses different fields - pass directly to createProduct
+      const restaurantData = {
         name: data.name,
         type: 'restaurant' as const,
-        description: '',
-        offer: '',
+        product_description: '',
+        main_problem: '',
+        best_customers: '',
+        failed_attempts: '',
+        attention_grabber: '',
+        expected_result: '',
+        differentiation: '',
         awareness_level: '',
-        market_alternatives: '',
-        customer_values: '',
-        purchase_reason: '',
-        // Restaurant-specific fields will be passed separately
+        // Restaurant-specific fields
         menu_text: data.menu_text,
         menu_pdf_url: data.menu_pdf_url,
         location: data.location,
         schedule: data.schedule,
         is_new_restaurant: data.is_new_restaurant
       }
-      const newProduct = await createProduct(productData as ProductFormData, user.id, clientId)
+      const newProduct = await createProduct(restaurantData, user.id, clientId)
       
       if (isTeamAccount && selectedClient) {
         setClientProducts(prev => [newProduct, ...prev])

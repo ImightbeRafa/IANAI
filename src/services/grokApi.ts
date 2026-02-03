@@ -5,9 +5,21 @@ type Language = 'en' | 'es'
 export interface ProductContext {
   product_name?: string
   product_type?: ProductType
+  // New form fields
   product_description?: string
-  offer?: string
+  main_problem?: string
+  best_customers?: string
+  failed_attempts?: string
+  attention_grabber?: string
+  real_pain?: string
+  pain_consequences?: string
+  expected_result?: string
+  differentiation?: string
+  key_objection?: string
+  shipping_info?: string
   awareness_level?: string
+  // Legacy fields for backward compatibility
+  offer?: string
   market_alternatives?: string
   customer_values?: string
   purchase_reason?: string

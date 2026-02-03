@@ -169,9 +169,21 @@ export default function ProductWorkspace() {
     const baseContext = {
       product_name: product.name,
       product_type: product.type,
-      product_description: product.description,
-      offer: product.offer,
+      // New form fields
+      product_description: product.product_description,
+      main_problem: product.main_problem,
+      best_customers: product.best_customers,
+      failed_attempts: product.failed_attempts,
+      attention_grabber: product.attention_grabber,
+      real_pain: product.real_pain,
+      pain_consequences: product.pain_consequences,
+      expected_result: product.expected_result,
+      differentiation: product.differentiation,
+      key_objection: product.key_objection,
+      shipping_info: product.shipping_info,
       awareness_level: product.awareness_level,
+      // Legacy fields for backward compatibility
+      offer: product.offer,
       market_alternatives: product.market_alternatives,
       customer_values: product.customer_values,
       purchase_reason: product.purchase_reason,
