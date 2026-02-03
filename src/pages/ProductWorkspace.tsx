@@ -166,8 +166,9 @@ export default function ProductWorkspace() {
   }
 
   const buildProductContext = (product: Product, additionalContext: string) => {
-    return {
+    const baseContext = {
       product_name: product.name,
+      product_type: product.type,
       product_description: product.description,
       offer: product.offer,
       awareness_level: product.awareness_level,
@@ -178,6 +179,19 @@ export default function ProductWorkspace() {
       call_to_action: product.call_to_action,
       additional_context: additionalContext
     }
+
+    // Add restaurant-specific fields if applicable
+    if (product.type === 'restaurant') {
+      return {
+        ...baseContext,
+        menu_text: product.menu_text,
+        location: product.location,
+        schedule: product.schedule,
+        is_new_restaurant: product.is_new_restaurant
+      }
+    }
+
+    return baseContext
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

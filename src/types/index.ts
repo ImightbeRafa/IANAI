@@ -3,7 +3,7 @@
 // =============================================
 export type AccountType = 'single' | 'team'
 export type TeamRole = 'owner' | 'admin' | 'member'
-export type ProductType = 'product' | 'service'
+export type ProductType = 'product' | 'service' | 'restaurant'
 export type SessionStatus = 'active' | 'completed' | 'archived'
 
 // =============================================
@@ -75,6 +75,12 @@ export interface Product {
   target_audience?: string
   unique_value?: string
   call_to_action?: string
+  // Restaurant-specific fields
+  menu_text?: string
+  menu_pdf_url?: string
+  location?: string
+  schedule?: string
+  is_new_restaurant?: boolean
   created_at: string
   updated_at: string
   // Joined data
@@ -164,6 +170,16 @@ export interface ProductFormData {
   purchase_reason: string
   target_audience?: string
   call_to_action?: string
+}
+
+export interface RestaurantFormData {
+  name: string
+  type: 'restaurant'
+  menu_text: string
+  menu_pdf_url?: string
+  location: string
+  schedule: string
+  is_new_restaurant: boolean
 }
 
 export interface ScriptGenerationSettings {

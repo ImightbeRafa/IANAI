@@ -162,6 +162,7 @@ interface RequestBody {
   businessDetails: Record<string, string>
   language: 'en' | 'es'
   scriptSettings?: ScriptSettings
+  productType?: 'product' | 'service' | 'restaurant'
 }
 
 const FRAMEWORK_PROMPTS = {
@@ -213,6 +214,103 @@ const DURATION_PROMPTS = {
     '60s': 'Duration: 60 SECONDS - Complete. Hook + full development + social proof + CTA. Maximum 150 words.',
     '90s': 'Duration: 90 SECONDS - Extended. Full story with problem, solution, benefits, proof and CTA. Maximum 220 words.'
   }
+}
+
+const RESTAURANT_PROMPTS = {
+  es: `ACTÚA COMO: Copywriter experto en anuncios de venta directa para restaurantes (videos cortos tipo Reels/TikTok) con objetivo de atraer gente al local físico.
+
+IMPORTANTE: Siempre responde en Español.
+
+CONTEXTO CRÍTICO A VERIFICAR:
+- MENÚ: Ya tienes el menú del restaurante en el contexto del negocio.
+- UBICACIÓN: Ya tienes la ubicación en el contexto.
+- HORARIO: Ya tienes el horario en el contexto.
+- NUEVO VS CONOCIDO: Ya sabes si el restaurante es nuevo/poco conocido o ya conocido.
+
+REGLAS SEGÚN TIPO DE RESTAURANTE:
+- Si es NUEVO/poco conocido: Cada guión debe dar contexto rápido de ubicación en el gancho con variaciones (ej: "Llegó a Curri…", "Aquí en Curridabat…", "En Central Market Curri…"), y luego especificar ubicación exacta en el cierre.
+- Si YA es conocido: Evita mencionar ubicación en el gancho y déjala para el cierre.
+
+INSTRUCCIONES DE GENERACIÓN:
+Crea guiones de venta directa, cada uno para un platillo REAL que exista en el menú (PROHIBIDO inventar platillos), priorizando platillos IMPORTANTES/VIRALES/gancho (los más antojables visualmente, abundantes, crocantes, con salsa, para compartir, etc.).
+
+El último guión debe ser platillo ejecutivo/almuerzo (si no hay algo definido, inventa un ejemplo inspirado estrictamente en el menú y deja claro "este es un ejemplo, se debe adaptar al platillo real el día de grabación").
+
+ESTRUCTURA ESTRICTA POR GUIÓN:
+Título + "Gancho (0–3s)" + "Desarrollo (8–16s)" + "Cierre (4–6s)"
+
+ESTILO OBLIGATORIO:
+- Frases cortas, directas, sin emojis, sin explicación innecesaria, sin "valores de marca"
+- Todo es antojo + claridad + acción
+- El gancho tiene que ser lógico, específico y con impacto (evitar "mirá esto" genérico)
+- Puede usar superlativos creíbles ("más crocante", "más jugosas", "qué locura…")
+- En el desarrollo describe QUÉ trae el plato y mete sensaciones en cada cosa (adjetivos tipo "jugoso", "sabroso", "abundante", "sin miedo", "bien cargado", "como tiene que ser")
+- SIEMPRE incluye placeholders de cantidades para que se llenen en grabación cuando no se sepa (ej: "___ gramos de cerdo jugoso", "___ gramos de guacamole fresco", "(cantidad) huesos", "___ guarniciones")
+- Sin instrucciones a grabación ni hablar de tomas
+- Puedes incluir recursos de antojo como sonido crocante ("Solo escuche esto… (sonido crocante)", "Oiga como suena este chicharrón…") y remates de deseo ("No va a encontrar nada parecido a esto")
+
+EJEMPLOS DE REFERENCIA (copia el estilo, no el contenido):
+
+GUION 1 — CHICHARRÓN CON GUACAMOLE
+Gancho (0–3s): "Llegó a Curri el legítimo chicharrón estilo colombiano, bien crocante por fuera y jugoso por dentro."
+Desarrollo (8–12s): "Este plato trae ___ gramos de chicharrón de panceta, dorado al punto exacto, acompañado de ___ gramos de guacamole fresco. Solo vea cómo cruje este chicharrón… y lo jugoso que es. No va a encontrar nada parecido a esto."
+Cierre (4–5s): "Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
+
+GUION 2 — FIESTA PARA COMPARTIR
+Gancho (0–3s): "Esta bandeja es para 4 personas y los está esperando aquí en Curri."
+Desarrollo (10–14s): "La Fiesta trae 500 gramos de chicharrón bien jugoso, medio pollo asado, 4 sliders, chorizo y 5 acompañamientos. Oiga como suena este chicharrón (sonido crocante)"
+Cierre (4–5s): "Venga con sus compas, con su familia… Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
+
+GUION 3 — COSTILLAS
+Gancho (0–3s): "Estas son las costillas más carnosas y jugosas que va a encontrar en Curri."
+Desarrollo (8–12s): "Vienen con (cantidad) huesos, bañadas en nuestra deliciosa salsa especial de la casa.. y acompañadas de ___ guarniciones. Vea cómo se desarman solas. Vienen bien cargadas de salsa, como tiene que ser."
+Cierre (4–5s): "Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
+
+GUION 4 — BURGER
+Gancho (0–3s): "Vea qué locura esta burger… la tenemos en [NOMBRE RESTAURANTE]."
+Desarrollo (10–14s): "Burger hecha con carne Angus, buena cantidad de queso, nuestra salsa especial secreta de la casa y acompañada de papas. Jugosa, grande y bien cargada. Vea como se ve esto, me va a decir que no se le antoja?"
+Cierre (4–5s): "Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
+
+GUION 5 — ALMUERZO EJECUTIVO (ejemplo)
+Gancho (0–3s): "Si usted trabaja en Curri y sus almuerzos no se ven así… usted ya está perdiendo."
+Desarrollo (12–16s): "Por ¢X.xx usted puede almorzar como un rey. Nuestro almuerzo ejecutivo incluye: ___ gramos de chicharrón crocante. Solo escuche esto.. (sonido del chicharrón crocante) o también puede elegir cerdo ahumado, No puede faltar obvio el arroz, los frijoles, ensalada, maduro, guacamole y bebida incluida.."
+Horario + cierre (5–6s): "Almuerzos ejecutivos de lunes a viernes desde las 12 del mediodía a 3 de la tarde. Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
+
+USA EL MENÚ PROPORCIONADO PARA CREAR GUIONES CON PLATILLOS REALES.`,
+
+  en: `ACT AS: Expert copywriter in direct sales ads for restaurants (short videos like Reels/TikTok) with the goal of attracting people to the physical location.
+
+IMPORTANT: Always respond in English.
+
+CRITICAL CONTEXT TO VERIFY:
+- MENU: You already have the restaurant menu in the business context.
+- LOCATION: You already have the location in the context.
+- SCHEDULE: You already have the schedule in the context.
+- NEW VS KNOWN: You already know if the restaurant is new/not well known or already known.
+
+RULES BASED ON RESTAURANT TYPE:
+- If NEW/not well known: Each script must give quick location context in the hook with variations (e.g.: "Just arrived in downtown…", "Here in the city center…"), and then specify exact location in the closing.
+- If ALREADY known: Avoid mentioning location in the hook and leave it for the closing.
+
+GENERATION INSTRUCTIONS:
+Create direct sales scripts, each for a REAL dish that exists in the menu (FORBIDDEN to invent dishes), prioritizing IMPORTANT/VIRAL/hook dishes (the most visually appetizing, abundant, crispy, saucy, shareable, etc.).
+
+The last script should be for lunch special/executive meal (if none defined, create an example strictly inspired by the menu and clearly state "this is an example, should be adapted to the actual dish on filming day").
+
+STRICT STRUCTURE PER SCRIPT:
+Title + "Hook (0–3s)" + "Development (8–16s)" + "Closing (4–6s)"
+
+MANDATORY STYLE:
+- Short phrases, direct, no emojis, no unnecessary explanation, no "brand values"
+- Everything is craving + clarity + action
+- The hook must be logical, specific and impactful (avoid generic "look at this")
+- Can use believable superlatives ("crispiest", "juiciest", "what a crazy...")
+- In the development describe WHAT the dish brings and add sensations to each thing (adjectives like "juicy", "tasty", "abundant", "loaded", "well-stuffed", "as it should be")
+- ALWAYS include quantity placeholders to be filled during filming when unknown (e.g.: "___ grams of juicy pork", "___ grams of fresh guacamole", "(quantity) ribs", "___ sides")
+- No filming instructions or talking about shots
+- You can include craving resources like crunchy sound ("Just listen to this… (crunchy sound)", "Hear how this pork crackles…") and desire closers ("You won't find anything like this")
+
+USE THE PROVIDED MENU TO CREATE SCRIPTS WITH REAL DISHES.`
 }
 
 const PLATFORM_PROMPTS = {
@@ -276,7 +374,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
     
-    const systemPrompt = MASTER_PROMPTS[language] + settingsPrompt + (
+    const isRestaurant = req.body.productType === 'restaurant'
+    const basePrompt = isRestaurant ? RESTAURANT_PROMPTS[language] : MASTER_PROMPTS[language]
+    
+    const systemPrompt = basePrompt + settingsPrompt + (
       Object.keys(businessDetails || {}).length > 0
         ? `\n\nCurrent business context:\n${JSON.stringify(businessDetails, null, 2)}`
         : ''

@@ -1,9 +1,10 @@
-import type { Message, ScriptGenerationSettings } from '../types'
+import type { Message, ScriptGenerationSettings, ProductType } from '../types'
 
 type Language = 'en' | 'es'
 
 export interface ProductContext {
   product_name?: string
+  product_type?: ProductType
   product_description?: string
   offer?: string
   awareness_level?: string
@@ -13,6 +14,11 @@ export interface ProductContext {
   target_audience?: string
   call_to_action?: string
   additional_context?: string
+  // Restaurant-specific fields
+  menu_text?: string
+  location?: string
+  schedule?: string
+  is_new_restaurant?: boolean
 }
 
 export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
@@ -27,7 +33,8 @@ export async function sendMessageToGrok(
   messages: Message[],
   productContext: ProductContext,
   language: Language = 'es',
-  scriptSettings?: ScriptGenerationSettings
+  scriptSettings?: ScriptGenerationSettings,
+  productType?: ProductType
 ): Promise<string> {
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -41,7 +48,8 @@ export async function sendMessageToGrok(
       })),
       businessDetails: productContext,
       language,
-      scriptSettings
+      scriptSettings,
+      productType: productType || productContext.product_type
     })
   })
 

@@ -13,9 +13,10 @@ import {
   createClient,
   assignProductToClient
 } from '../services/database'
-import type { Profile, Product, DashboardStats, ProductFormData, Team, Client } from '../types'
+import type { Profile, Product, DashboardStats, ProductFormData, RestaurantFormData, Team, Client } from '../types'
 import Layout from '../components/Layout'
 import ProductForm from '../components/ProductForm'
+import RestaurantForm from '../components/RestaurantForm'
 import { 
   Package, 
   FileText, 
@@ -27,7 +28,8 @@ import {
   FolderOpen,
   Building2,
   ChevronRight,
-  ArrowLeft
+  ArrowLeft,
+  UtensilsCrossed
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -39,6 +41,8 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [showProductForm, setShowProductForm] = useState(false)
+  const [showRestaurantForm, setShowRestaurantForm] = useState(false)
+  const [showTypeSelector, setShowTypeSelector] = useState(false)
   
   // Team-specific state
   const [team, setTeam] = useState<Team | null>(null)
@@ -121,6 +125,41 @@ export default function Dashboard() {
     }
   }
 
+  const handleCreateRestaurant = async (data: RestaurantFormData) => {
+    if (!user) return
+    try {
+      const clientId = isTeamAccount && selectedClient ? selectedClient.id : undefined
+      // Convert RestaurantFormData to a format createProduct can handle
+      const productData = {
+        name: data.name,
+        type: 'restaurant' as const,
+        description: '',
+        offer: '',
+        awareness_level: '',
+        market_alternatives: '',
+        customer_values: '',
+        purchase_reason: '',
+        // Restaurant-specific fields will be passed separately
+        menu_text: data.menu_text,
+        menu_pdf_url: data.menu_pdf_url,
+        location: data.location,
+        schedule: data.schedule,
+        is_new_restaurant: data.is_new_restaurant
+      }
+      const newProduct = await createProduct(productData as ProductFormData, user.id, clientId)
+      
+      if (isTeamAccount && selectedClient) {
+        setClientProducts(prev => [newProduct, ...prev])
+      } else {
+        setProducts(prev => [newProduct, ...prev])
+      }
+      setShowRestaurantForm(false)
+      navigate(`/product/${newProduct.id}`)
+    } catch (error) {
+      console.error('Failed to create restaurant:', error)
+    }
+  }
+
   const handleCreateClient = async () => {
     if (!user || !team || !newClientName.trim()) return
     setCreatingClient(true)
@@ -152,7 +191,7 @@ export default function Dashboard() {
     es: {
       welcome: '¡Bienvenido de nuevo',
       overview: 'Resumen de tu actividad',
-      newProduct: 'Nuevo Producto/Servicio',
+      newProduct: 'Nuevo',
       upgradeTeam: 'Actualizar a Equipo',
       products: 'Productos',
       scripts: 'Scripts',
@@ -163,6 +202,12 @@ export default function Dashboard() {
       startFirst: 'Crea tu primer producto o servicio para empezar a generar scripts',
       product: 'Producto',
       service: 'Servicio',
+      restaurant: 'Restaurante',
+      // Type selector
+      selectType: '¿Qué quieres crear?',
+      productDesc: 'Producto físico o digital',
+      serviceDesc: 'Servicio profesional',
+      restaurantDesc: 'Restaurante con menú',
       // Team labels
       yourClients: 'Tus Clientes',
       newClient: 'Nuevo Cliente',
@@ -183,7 +228,7 @@ export default function Dashboard() {
     en: {
       welcome: 'Welcome back',
       overview: 'Overview of your activity',
-      newProduct: 'New Product/Service',
+      newProduct: 'New',
       upgradeTeam: 'Upgrade to Team',
       products: 'Products',
       scripts: 'Scripts',
@@ -194,6 +239,12 @@ export default function Dashboard() {
       startFirst: 'Create your first product or service to start generating scripts',
       product: 'Product',
       service: 'Service',
+      restaurant: 'Restaurant',
+      // Type selector
+      selectType: 'What do you want to create?',
+      productDesc: 'Physical or digital product',
+      serviceDesc: 'Professional service',
+      restaurantDesc: 'Restaurant with menu',
       // Team labels
       yourClients: 'Your Clients',
       newClient: 'New Client',
@@ -223,51 +274,62 @@ export default function Dashboard() {
   ]
 
   // Render product card component
-  const renderProductCard = (product: Product, showAssignButton = false) => (
-    <div
-      key={product.id}
-      className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group"
-    >
-      <div className="flex items-start gap-4">
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-          product.type === 'product' ? 'bg-blue-100' : 'bg-purple-100'
-        }`}>
-          {product.type === 'product' ? (
-            <Package className="w-5 h-5 text-blue-600" />
-          ) : (
-            <Briefcase className="w-5 h-5 text-purple-600" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <Link to={`/product/${product.id}`} className="block">
-            <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
-              {product.name}
-            </p>
-            <p className="text-sm text-dark-400 capitalize">
-              {product.type === 'product' ? t.product : t.service}
-            </p>
-            {product.description && (
-              <p className="text-sm text-dark-500 mt-2 line-clamp-2">
-                {product.description}
+  const renderProductCard = (product: Product, showAssignButton = false) => {
+    const getTypeStyles = () => {
+      switch (product.type) {
+        case 'product': return { bg: 'bg-blue-100', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
+        case 'service': return { bg: 'bg-purple-100', icon: <Briefcase className="w-5 h-5 text-purple-600" />, label: t.service }
+        case 'restaurant': return { bg: 'bg-orange-100', icon: <UtensilsCrossed className="w-5 h-5 text-orange-600" />, label: t.restaurant }
+        default: return { bg: 'bg-blue-100', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
+      }
+    }
+    const typeStyles = getTypeStyles()
+    
+    return (
+      <div
+        key={product.id}
+        className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group"
+      >
+        <div className="flex items-start gap-4">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${typeStyles.bg}`}>
+            {typeStyles.icon}
+          </div>
+          <div className="flex-1 min-w-0">
+            <Link to={`/product/${product.id}`} className="block">
+              <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
+                {product.name}
               </p>
+              <p className="text-sm text-dark-400 capitalize">
+                {typeStyles.label}
+              </p>
+              {product.description && (
+                <p className="text-sm text-dark-500 mt-2 line-clamp-2">
+                  {product.description}
+                </p>
+              )}
+              {product.type === 'restaurant' && product.location && (
+                <p className="text-sm text-dark-500 mt-2 line-clamp-1">
+                  📍 {product.location}
+                </p>
+              )}
+            </Link>
+            {showAssignButton && clients.length > 0 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setAssigningProduct(product)
+                }}
+                className="mt-3 text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
+              >
+                <FolderOpen className="w-3 h-3" />
+                {t.assignTo}...
+              </button>
             )}
-          </Link>
-          {showAssignButton && clients.length > 0 && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setAssigningProduct(product)
-              }}
-              className="mt-3 text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
-            >
-              <FolderOpen className="w-3 h-3" />
-              {t.assignTo}...
-            </button>
-          )}
+          </div>
         </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   // Render client card component
   const renderClientCard = (client: Client) => (
@@ -324,7 +386,7 @@ export default function Dashboard() {
             {/* Show new product button for individual OR when viewing a client */}
             {(!isTeamAccount || selectedClient) && (
               <button 
-                onClick={() => setShowProductForm(true)}
+                onClick={() => setShowTypeSelector(true)}
                 className="btn-primary flex items-center gap-2"
               >
                 <Plus className="w-5 h-5" />
@@ -499,11 +561,83 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* Type Selector Modal */}
+      {showTypeSelector && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
+            <h3 className="text-lg font-semibold text-dark-900 mb-2">{t.selectType}</h3>
+            <div className="grid grid-cols-1 gap-3 mt-4">
+              <button
+                onClick={() => {
+                  setShowTypeSelector(false)
+                  setShowProductForm(true)
+                }}
+                className="p-4 border-2 border-dark-200 hover:border-blue-400 hover:bg-blue-50 rounded-xl transition-all flex items-center gap-4 text-left"
+              >
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                  <Package className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-dark-900">{t.product}</p>
+                  <p className="text-sm text-dark-500">{t.productDesc}</p>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setShowTypeSelector(false)
+                  setShowProductForm(true)
+                }}
+                className="p-4 border-2 border-dark-200 hover:border-purple-400 hover:bg-purple-50 rounded-xl transition-all flex items-center gap-4 text-left"
+              >
+                <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                  <Briefcase className="w-6 h-6 text-purple-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-dark-900">{t.service}</p>
+                  <p className="text-sm text-dark-500">{t.serviceDesc}</p>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setShowTypeSelector(false)
+                  setShowRestaurantForm(true)
+                }}
+                className="p-4 border-2 border-dark-200 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition-all flex items-center gap-4 text-left"
+              >
+                <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
+                  <UtensilsCrossed className="w-6 h-6 text-orange-600" />
+                </div>
+                <div>
+                  <p className="font-semibold text-dark-900">{t.restaurant}</p>
+                  <p className="text-sm text-dark-500">{t.restaurantDesc}</p>
+                </div>
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setShowTypeSelector(false)}
+                className="btn-secondary"
+              >
+                {t.cancel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Product Form Modal */}
       {showProductForm && (
         <ProductForm
           onSubmit={handleCreateProduct}
           onCancel={() => setShowProductForm(false)}
+        />
+      )}
+
+      {/* Restaurant Form Modal */}
+      {showRestaurantForm && (
+        <RestaurantForm
+          onSubmit={handleCreateRestaurant}
+          onCancel={() => setShowRestaurantForm(false)}
         />
       )}
 

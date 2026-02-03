@@ -174,26 +174,43 @@ export async function deleteClient(clientId: string): Promise<void> {
 // PRODUCT FUNCTIONS
 // =============================================
 export async function createProduct(
-  data: ProductFormData,
+  data: ProductFormData & {
+    menu_text?: string
+    menu_pdf_url?: string
+    location?: string
+    schedule?: string
+    is_new_restaurant?: boolean
+  },
   ownerId: string,
   clientId?: string
 ): Promise<Product> {
+  const insertData: Record<string, unknown> = {
+    owner_id: ownerId,
+    client_id: clientId || null,
+    name: data.name,
+    type: data.type,
+    description: data.description,
+    offer: data.offer,
+    awareness_level: data.awareness_level,
+    market_alternatives: data.market_alternatives,
+    customer_values: data.customer_values,
+    purchase_reason: data.purchase_reason,
+    target_audience: data.target_audience,
+    call_to_action: data.call_to_action
+  }
+
+  // Add restaurant-specific fields if present
+  if (data.type === 'restaurant') {
+    insertData.menu_text = data.menu_text
+    insertData.menu_pdf_url = data.menu_pdf_url
+    insertData.location = data.location
+    insertData.schedule = data.schedule
+    insertData.is_new_restaurant = data.is_new_restaurant
+  }
+
   const { data: product, error } = await supabase
     .from('products')
-    .insert({
-      owner_id: ownerId,
-      client_id: clientId || null,
-      name: data.name,
-      type: data.type,
-      description: data.description,
-      offer: data.offer,
-      awareness_level: data.awareness_level,
-      market_alternatives: data.market_alternatives,
-      customer_values: data.customer_values,
-      purchase_reason: data.purchase_reason,
-      target_audience: data.target_audience,
-      call_to_action: data.call_to_action
-    })
+    .insert(insertData)
     .select()
     .single()
 
