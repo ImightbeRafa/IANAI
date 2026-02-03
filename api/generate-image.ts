@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth'
+import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 
 const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
 

@@ -5,11 +5,13 @@ import crypto from 'crypto'
 // Tilo Pay webhook handler
 // Documentation: https://tilopay.com/docs/webhooks
 
-const supabaseUrl = process.env.SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 // Initialize Supabase with service role key for webhook operations
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const supabase = supabaseUrl && supabaseServiceKey 
+  ? createClient(supabaseUrl, supabaseServiceKey) 
+  : null
 
 // Webhook event types from Tilo Pay (Repeat API)
 type TiloPayEventType = 
@@ -98,6 +100,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    // Check if Supabase is configured
+    if (!supabase) {
+      console.error('Supabase not configured - missing env vars')
+      return res.status(500).json({ error: 'Server not configured' })
+    }
+
     const rawBody = JSON.stringify(req.body)
     // TiloPay uses 'hash-tilopay' header for signature
     const signature = req.headers['hash-tilopay'] as string | undefined
@@ -175,7 +183,7 @@ async function handlePaymentSucceeded(data: TiloPayWebhookPayload['data']) {
 
   // If no user_id in metadata, try to match by email from pending_subscriptions
   if (!userId && customerEmail) {
-    const { data: pending } = await supabase
+    const { data: pending } = await supabase!
       .from('pending_subscriptions')
       .select('user_id, plan')
       .eq('email', customerEmail)
@@ -189,7 +197,7 @@ async function handlePaymentSucceeded(data: TiloPayWebhookPayload['data']) {
       console.log(`Matched payment to user ${userId} via email ${customerEmail}`)
       
       // Mark pending subscription as completed
-      await supabase
+      await supabase!
         .from('pending_subscriptions')
         .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('user_id', userId)
@@ -202,7 +210,7 @@ async function handlePaymentSucceeded(data: TiloPayWebhookPayload['data']) {
   }
 
   // Record the payment
-  await supabase.from('payments').insert({
+  await supabase!.from('payments').insert({
     subscription_id: subscriptionId,
     user_id: userId,
     amount: data.amount,
@@ -224,7 +232,7 @@ async function handlePaymentFailed(data: TiloPayWebhookPayload['data']) {
   }
 
   // Record failed payment
-  await supabase.from('payments').insert({
+  await supabase!.from('payments').insert({
     user_id: userId,
     amount: data.amount || 0,
     currency: data.currency || 'CRC',
@@ -245,7 +253,7 @@ async function handleSubscriptionCreated(data: TiloPayWebhookPayload['data']) {
   }
 
   // Update or create subscription
-  await supabase.from('subscriptions')
+  await supabase!.from('subscriptions')
     .upsert({
       user_id: userId,
       plan: plan,
@@ -263,7 +271,7 @@ async function handleSubscriptionUpdated(data: TiloPayWebhookPayload['data']) {
   const tilopaySubscriptionId = data.id
 
   // Find subscription by Tilo Pay ID and update
-  await supabase.from('subscriptions')
+  await supabase!.from('subscriptions')
     .update({
       plan: data.metadata?.plan,
       status: data.status || 'active',
@@ -277,7 +285,7 @@ async function handleSubscriptionUpdated(data: TiloPayWebhookPayload['data']) {
 async function handleSubscriptionCancelled(data: TiloPayWebhookPayload['data']) {
   const tilopaySubscriptionId = data.id
 
-  await supabase.from('subscriptions')
+  await supabase!.from('subscriptions')
     .update({
       status: 'cancelled',
       cancel_at_period_end: true,
@@ -291,7 +299,7 @@ async function handleSubscriptionCancelled(data: TiloPayWebhookPayload['data']) 
 async function handleSubscriptionPastDue(data: TiloPayWebhookPayload['data']) {
   const tilopaySubscriptionId = data.id
 
-  await supabase.from('subscriptions')
+  await supabase!.from('subscriptions')
     .update({
       status: 'past_due',
       updated_at: new Date().toISOString()
@@ -306,7 +314,7 @@ async function handleInvoicePaid(data: TiloPayWebhookPayload['data']) {
   const tilopaySubscriptionId = data.subscription_id
 
   if (tilopaySubscriptionId) {
-    await supabase.from('subscriptions')
+    await supabase!.from('subscriptions')
       .update({
         status: 'active',
         current_period_start: new Date().toISOString(),
@@ -323,7 +331,7 @@ async function handleInvoicePaymentFailed(data: TiloPayWebhookPayload['data']) {
   const tilopaySubscriptionId = data.subscription_id
 
   if (tilopaySubscriptionId) {
-    await supabase.from('subscriptions')
+    await supabase!.from('subscriptions')
       .update({
         status: 'past_due',
         updated_at: new Date().toISOString()

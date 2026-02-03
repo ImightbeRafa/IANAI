@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth'
+import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
