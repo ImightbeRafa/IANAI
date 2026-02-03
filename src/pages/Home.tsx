@@ -29,7 +29,7 @@ export default function Home() {
         badge: 'IA de última generación para ventas',
         title: 'Genera guiones de venta que',
         titleHighlight: 'realmente convierten',
-        subtitle: 'Deja de adivinar qué decir. Nuestra IA entrenada con el Método Ian crea guiones de alto impacto para TikTok, Reels e historias que generan mensajes en tu DM.',
+        subtitle: 'Deja de adivinar qué decir. Nuestra IA especializada en copywriting crea guiones de alto impacto para TikTok, Reels e historias que generan mensajes en tu DM.',
         cta: 'Empezar ahora',
         ctaSecondary: 'Ver demo',
         trusted: 'Usado por equipos de marketing en'
@@ -46,8 +46,8 @@ export default function Home() {
           },
           {
             icon: 'Target',
-            title: 'Metodología Ian',
-            description: 'Entrenada con el método probado de ingeniería de contenido. Cero saludos, máxima conversión, CTAs que funcionan.'
+            title: 'Copywriting de Alta Conversión',
+            description: 'Entrenada con técnicas probadas de ingeniería de contenido. Cero saludos, máxima conversión, CTAs que funcionan.'
           },
           {
             icon: 'Clock',
@@ -131,7 +131,7 @@ export default function Home() {
         badge: 'State-of-the-art sales AI',
         title: 'Generate sales scripts that',
         titleHighlight: 'actually convert',
-        subtitle: 'Stop guessing what to say. Our AI trained with the Ian Method creates high-impact scripts for TikTok, Reels and stories that drive DMs.',
+        subtitle: 'Stop guessing what to say. Our AI specialized in copywriting creates high-impact scripts for TikTok, Reels and stories that drive DMs.',
         cta: 'Get started',
         ctaSecondary: 'Watch demo',
         trusted: 'Trusted by marketing teams at'
@@ -148,8 +148,8 @@ export default function Home() {
           },
           {
             icon: 'Target',
-            title: 'Ian Methodology',
-            description: 'Trained with proven content engineering method. Zero greetings, maximum conversion, CTAs that work.'
+            title: 'High-Conversion Copywriting',
+            description: 'Trained with proven content engineering techniques. Zero greetings, maximum conversion, CTAs that work.'
           },
           {
             icon: 'Clock',
