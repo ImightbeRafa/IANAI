@@ -13,6 +13,7 @@ export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mos
 export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
 export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
 export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
+export type AIModel = 'grok' | 'gemini'
 
 // =============================================
 // Core Entities
@@ -265,6 +266,7 @@ export interface ScriptGenerationSettings {
   duration: ScriptDuration
   platform: ScriptPlatform
   variations: number
+  model: AIModel
 }
 
 // =============================================

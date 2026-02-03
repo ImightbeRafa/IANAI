@@ -51,7 +51,8 @@ export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
   tone: 'professional',
   duration: '30s',
   platform: 'general',
-  variations: 3
+  variations: 3,
+  model: 'grok'
 }
 
 export async function sendMessageToGrok(

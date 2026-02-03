@@ -2,6 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-05-06:generateContent'
+
+type AIModel = 'grok' | 'gemini'
 
 const MASTER_PROMPTS = {
   es: `ACTÚA COMO: Experto Senior en Copywriting y Guiones de Venta Directa, entrenado bajo el MÉTODO IAN de Ingeniería de Contenido.
@@ -256,6 +259,7 @@ interface ScriptSettings {
   duration: '15s' | '30s' | '60s' | '90s'
   platform: 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
   variations: number
+  model?: AIModel
 }
 
 interface RequestBody {
@@ -687,16 +691,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
   }
 
-  const apiKey = process.env.GROK_API_KEY
-  if (!apiKey) {
-    return res.status(500).json({ error: 'API key not configured' })
-  }
-
   try {
     const { messages, businessDetails, language = 'en', scriptSettings } = req.body as RequestBody
+    const selectedModel: AIModel = scriptSettings?.model || 'grok'
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' })
+    }
+
+    // Validate API key based on selected model
+    const grokApiKey = process.env.GROK_API_KEY
+    const geminiApiKey = process.env.GEMINI_API_KEY
+
+    if (selectedModel === 'grok' && !grokApiKey) {
+      return res.status(500).json({ error: 'Grok API key not configured' })
+    }
+    if (selectedModel === 'gemini' && !geminiApiKey) {
+      return res.status(500).json({ error: 'Gemini API key not configured' })
     }
 
     const settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
@@ -718,43 +729,93 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : ''
     )
 
-    const grokMessages: ChatMessage[] = [
-      { role: 'system', content: systemPrompt },
-      ...messages.map(m => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content
+    let content: string
+
+    if (selectedModel === 'gemini') {
+      // =============================================
+      // GEMINI API CALL
+      // =============================================
+      const geminiMessages = messages.map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
       }))
-    ]
 
-    const response = await fetch(GROK_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'grok-4-1-fast-reasoning',
-        messages: grokMessages,
-        temperature: 0.8,
-        max_tokens: 2048
-      })
-    })
+      // Add system instruction as first user message for Gemini
+      const geminiContents = [
+        { role: 'user', parts: [{ text: systemPrompt }] },
+        { role: 'model', parts: [{ text: 'Entendido. Estoy listo para crear guiones de venta siguiendo el Método IAN.' }] },
+        ...geminiMessages
+      ]
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Grok API error:', response.status, errorText)
-      return res.status(response.status).json({ 
-        error: `AI service error: ${response.status}` 
+      const geminiResponse = await fetch(`${GEMINI_API_URL}?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: geminiContents,
+          generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 8192,
+            topP: 0.95,
+            topK: 40
+          }
+        })
       })
+
+      if (!geminiResponse.ok) {
+        const errorText = await geminiResponse.text()
+        console.error('Gemini API error:', geminiResponse.status, errorText)
+        return res.status(geminiResponse.status).json({ 
+          error: `Gemini API error: ${geminiResponse.status}` 
+        })
+      }
+
+      const geminiData = await geminiResponse.json()
+      content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated'
+
+    } else {
+      // =============================================
+      // GROK API CALL (default)
+      // =============================================
+      const grokMessages: ChatMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...messages.map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content
+        }))
+      ]
+
+      const response = await fetch(GROK_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${grokApiKey}`
+        },
+        body: JSON.stringify({
+          model: 'grok-3-fast',
+          messages: grokMessages,
+          temperature: 0.8,
+          max_tokens: 4096
+        })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Grok API error:', response.status, errorText)
+        return res.status(response.status).json({ 
+          error: `Grok API error: ${response.status}` 
+        })
+      }
+
+      const data = await response.json()
+      content = data.choices?.[0]?.message?.content || 'No response generated'
     }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content || 'No response generated'
 
     // Increment usage counter after successful generation
     await incrementUsage(user.id, 'script')
 
-    return res.status(200).json({ content, remaining: remaining - 1 })
+    return res.status(200).json({ content, remaining: remaining - 1, model: selectedModel })
   } catch (error) {
     console.error('Chat API error:', error)
     return res.status(500).json({ 
