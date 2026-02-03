@@ -1,6 +1,6 @@
 # CopywriteAI - Development Progress
 
-## Last Updated: February 2, 2026 at 12:08 PM (UTC-06:00)
+## Last Updated: February 3, 2026 at 10:15 AM (UTC-06:00)
 
 ---
 
@@ -23,7 +23,7 @@
 - Chat is used **only** for script generation and refinement
 - Users can provide additional context per session
 - Feedback mechanism allows iterating on generated scripts
-s
+
 ---
 
 ## Account Types
@@ -92,7 +92,8 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 | `products` | Products/Services with all business context |
 | `chat_sessions` | Chat sessions per product |
 | `messages` | Chat messages |
-| `scripts` | Saved/generated scripts |
+| `scripts` | Saved/generated scripts with ratings |
+| `script_templates` | User-saved script templates (NEW) |
 
 ---
 
@@ -109,6 +110,7 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - `src/components/ProductForm.tsx` - Form for creating/editing products
 - `src/components/ProtectedRoute.tsx` - Auth guard
 - `src/components/ThinkingAnimation.tsx` - AI loading animation
+- `src/components/ScriptSettingsPanel.tsx` - Script generation settings UI (NEW)
 - `src/services/database.ts` - Supabase database functions
 - `src/services/grokApi.ts` - Grok API integration
 - `src/contexts/AuthContext.tsx` - Authentication context

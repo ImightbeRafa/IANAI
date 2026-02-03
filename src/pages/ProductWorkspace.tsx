@@ -11,7 +11,8 @@ import {
   addMessage,
   updateChatSession,
   updateProduct,
-  saveScript
+  saveScript,
+  rateScript
 } from '../services/database'
 import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
 import type { Product, ChatSession, Message, ScriptGenerationSettings } from '../types'
@@ -57,6 +58,8 @@ export default function ProductWorkspace() {
   const [savingScript, setSavingScript] = useState(false)
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(DEFAULT_SCRIPT_SETTINGS)
   const [showSettings, setShowSettings] = useState(false)
+  const [ratedMessages, setRatedMessages] = useState<Record<string, 'up' | 'down'>>({})
+  const [savedScriptIds, setSavedScriptIds] = useState<Record<string, string>>({})
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -218,14 +221,10 @@ export default function ProductWorkspace() {
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
       }
 
-      // Add system message asking for scripts with settings
-      const variationText = scriptSettings.variations > 1 
-        ? (language === 'es' ? `${scriptSettings.variations} variaciones` : `${scriptSettings.variations} variations`)
-        : (language === 'es' ? 'un guión' : 'one script')
-      
+      // Add system message asking for scripts with settings - be explicit about count
       const generatePrompt = language === 'es' 
-        ? `Genera ${variationText} de venta basándote en toda la información del producto que tienes.`
-        : `Generate ${variationText} based on all the product information you have.`
+        ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta. No más, no menos. Basándote en toda la información del producto.`
+        : `Generate exactly ${scriptSettings.variations} sales script(s). No more, no less. Based on all the product information.`
       
       const userMessage = await addMessage(session.id, 'user', generatePrompt)
       setMessages(prev => [...prev, userMessage])
@@ -253,21 +252,47 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleSaveScript = async (content: string) => {
-    if (!currentSession || !product || savingScript) return
+  const handleSaveScript = async (content: string, messageId?: string): Promise<string | null> => {
+    if (!currentSession || !product || savingScript) return null
     setSavingScript(true)
     try {
-      await saveScript(
+      const script = await saveScript(
         currentSession.id,
         product.id,
         `Script - ${new Date().toLocaleDateString()}`,
         content
       )
-      // Could show a toast notification here
+      if (messageId) {
+        setSavedScriptIds(prev => ({ ...prev, [messageId]: script.id }))
+      }
+      return script.id
     } catch (error) {
       console.error('Failed to save script:', error)
+      return null
     } finally {
       setSavingScript(false)
+    }
+  }
+
+  const handleRateScript = async (messageId: string, content: string, rating: 'up' | 'down') => {
+    if (!currentSession || !product) return
+    
+    try {
+      // Check if already saved, if not save it first
+      let scriptId = savedScriptIds[messageId]
+      if (!scriptId) {
+        scriptId = await handleSaveScript(content, messageId) as string
+        if (!scriptId) return
+      }
+      
+      // Rate the script (5 for thumbs up, 1 for thumbs down)
+      const ratingValue = rating === 'up' ? 5 : 1
+      await rateScript(scriptId, ratingValue)
+      
+      // Update UI state
+      setRatedMessages(prev => ({ ...prev, [messageId]: rating }))
+    } catch (error) {
+      console.error('Failed to rate script:', error)
     }
   }
 
@@ -507,20 +532,44 @@ export default function ProductWorkspace() {
                     {message.role === 'assistant' && message.content.length > 100 && (
                       <div className="mt-3 pt-3 border-t border-dark-100 flex items-center gap-3">
                         <button
-                          onClick={() => handleSaveScript(message.content)}
-                          disabled={savingScript}
-                          className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                          onClick={() => handleSaveScript(message.content, message.id)}
+                          disabled={savingScript || !!savedScriptIds[message.id]}
+                          className={`text-xs flex items-center gap-1 ${
+                            savedScriptIds[message.id] 
+                              ? 'text-green-600' 
+                              : 'text-primary-600 hover:text-primary-700'
+                          }`}
                         >
                           <BookmarkPlus className="w-4 h-4" />
-                          {t.saveScript}
+                          {savedScriptIds[message.id] ? (language === 'es' ? '¡Guardado!' : 'Saved!') : t.saveScript}
                         </button>
                         <span className="text-dark-200">|</span>
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-dark-400">{t.rateScript}:</span>
-                          <button className="p-1 hover:bg-green-50 rounded text-dark-400 hover:text-green-600">
+                          <button 
+                            onClick={() => handleRateScript(message.id, message.content, 'up')}
+                            disabled={!!ratedMessages[message.id]}
+                            className={`p-1 rounded transition-colors ${
+                              ratedMessages[message.id] === 'up'
+                                ? 'bg-green-100 text-green-600'
+                                : ratedMessages[message.id] === 'down'
+                                  ? 'text-dark-200 cursor-not-allowed'
+                                  : 'hover:bg-green-50 text-dark-400 hover:text-green-600'
+                            }`}
+                          >
                             <ThumbsUp className="w-4 h-4" />
                           </button>
-                          <button className="p-1 hover:bg-red-50 rounded text-dark-400 hover:text-red-600">
+                          <button 
+                            onClick={() => handleRateScript(message.id, message.content, 'down')}
+                            disabled={!!ratedMessages[message.id]}
+                            className={`p-1 rounded transition-colors ${
+                              ratedMessages[message.id] === 'down'
+                                ? 'bg-red-100 text-red-600'
+                                : ratedMessages[message.id] === 'up'
+                                  ? 'text-dark-200 cursor-not-allowed'
+                                  : 'hover:bg-red-50 text-dark-400 hover:text-red-600'
+                            }`}
+                          >
                             <ThumbsDown className="w-4 h-4" />
                           </button>
                         </div>
@@ -713,8 +762,8 @@ export default function ProductWorkspace() {
 
             {/* Script Settings Panel */}
             {showSettings && (
-              <div className="p-4 border-t border-dark-100 bg-amber-50/50">
-                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
+              <div className="p-4 border-t border-dark-100 bg-amber-50/50 max-h-[50vh] overflow-y-auto">
+                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2 sticky top-0 bg-amber-50/50 pb-2">
                   <Settings className="w-4 h-4 text-amber-600" />
                   {t.scriptSettings}
                 </h3>

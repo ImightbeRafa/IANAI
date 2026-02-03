@@ -241,17 +241,17 @@ const PLATFORM_PROMPTS = {
 function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, language: 'en' | 'es'): string {
   if (!settings) return ''
   
+  const variationInstruction = language === 'es'
+    ? `\n\nIMPORTANTE - NÚMERO DE SCRIPTS: Genera EXACTAMENTE ${settings.variations} script(s). NI MÁS NI MENOS. ${settings.variations === 1 ? 'Solo UN script.' : `Exactamente ${settings.variations} scripts diferentes.`}`
+    : `\n\nIMPORTANT - NUMBER OF SCRIPTS: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS. ${settings.variations === 1 ? 'Only ONE script.' : `Exactly ${settings.variations} different scripts.`}`
+  
   const parts = [
     '\n\n---\nSCRIPT GENERATION SETTINGS:',
     FRAMEWORK_PROMPTS[language][settings.framework],
     TONE_PROMPTS[language][settings.tone],
     DURATION_PROMPTS[language][settings.duration],
     PLATFORM_PROMPTS[language][settings.platform],
-    settings.variations > 1 
-      ? (language === 'es' 
-          ? `Genera ${settings.variations} VARIACIONES diferentes del script, cada una con un ángulo único.`
-          : `Generate ${settings.variations} DIFFERENT VARIATIONS of the script, each with a unique angle.`)
-      : ''
+    variationInstruction
   ]
   
   return parts.filter(Boolean).join('\n')
