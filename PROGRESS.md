@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 3, 2026 at 3:45 PM (UTC-06:00)
+## Last Updated: February 3, 2026 at 3:34 PM (UTC-06:00)
 
 ---
 
@@ -241,6 +241,19 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `src/components/ScriptSettingsPanel.tsx` - New framework labels (ES/EN)
   - `src/services/grokApi.ts` - Default framework to `venta_directa`
   - `api/chat.ts` - Complete rewrite of `MASTER_PROMPTS` and `FRAMEWORK_PROMPTS`
+
+### February 3, 2026 - TiloPay Integration Complete (3:34 PM)
+- [x] **TiloPay Dashboard Configured**
+  - Plan created in TiloPay Repeat API dashboard
+  - Webhook URLs configured: `https://advanceai.studio/api/tilopay/webhook`
+  - Redirect URLs configured for success/cancel flows
+- [x] **Existing Users Granted Enterprise Access**
+  - Migration `010_grant_existing_users_enterprise.sql` created
+  - All existing test accounts will receive permanent enterprise plan
+  - Enterprise plan = unlimited scripts/images (expires 2099)
+- [x] **Environment Variables Required**
+  - `TILOPAY_WEBHOOK_SECRET` - Get from TiloPay dashboard
+  - `SUPABASE_SERVICE_ROLE_KEY` - Already configured
 
 ### February 3, 2026 - TiloPay Hardening & Script Settings Simplification (3:45 PM)
 - [x] **Script Settings Simplified**

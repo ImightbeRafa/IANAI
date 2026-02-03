@@ -19,10 +19,24 @@ interface Usage {
 }
 
 const PLAN_DETAILS = {
-  free: { name: 'Gratis', price: 0, scripts: 10, images: 5, color: 'gray' },
-  starter: { name: 'Starter', price: 9900, scripts: 100, images: 50, color: 'blue' },
-  pro: { name: 'Pro', price: 29900, scripts: 500, images: 200, color: 'purple' },
-  enterprise: { name: 'Enterprise', price: null, scripts: -1, images: -1, color: 'amber' }
+  free: { name: 'Gratis', price: 0, scripts: 10, images: 5, color: 'gray', paymentLink: null },
+  starter: { 
+    name: 'Individual', 
+    price: 9900, 
+    scripts: 100, 
+    images: 50, 
+    color: 'blue',
+    paymentLink: 'https://tp.cr/l/TkRnM01RPT18MQ==?encrypted=base64'
+  },
+  pro: { 
+    name: 'Teams', 
+    price: 29900, 
+    scripts: 500, 
+    images: 200, 
+    color: 'purple',
+    paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ==?encrypted=base64'
+  },
+  enterprise: { name: 'Enterprise', price: null, scripts: -1, images: -1, color: 'amber', paymentLink: null }
 }
 
 export default function Settings() {
@@ -316,19 +330,16 @@ export default function Settings() {
                     <p className="text-xs text-dark-400">/ {language === 'es' ? 'mes' : 'month'}</p>
                   </div>
                 </div>
-                {subscription?.plan !== plan && subscription?.plan === 'free' && (
-                  <button 
+                {subscription?.plan !== plan && subscription?.plan === 'free' && PLAN_DETAILS[plan].paymentLink && (
+                  <a 
+                    href={PLAN_DETAILS[plan].paymentLink!}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2"
-                    onClick={() => {
-                      // TODO: Integrate TiloPay checkout
-                      alert(language === 'es' 
-                        ? `Próximamente: Actualizar a ${PLAN_DETAILS[plan].name}` 
-                        : `Coming soon: Upgrade to ${PLAN_DETAILS[plan].name}`)
-                    }}
                   >
                     <Check className="w-4 h-4" />
                     {language === 'es' ? 'Actualizar Plan' : 'Upgrade Plan'}
-                  </button>
+                  </a>
                 )}
               </div>
             ))}
