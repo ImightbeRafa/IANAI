@@ -22,19 +22,19 @@ const PLAN_DETAILS = {
   free: { name: 'Gratis', price: 0, scripts: 10, images: 5, color: 'gray', paymentLink: null },
   starter: { 
     name: 'Individual', 
-    price: 9900, 
+    price: 30, 
     scripts: 100, 
     images: 50, 
     color: 'blue',
-    paymentLink: 'https://tp.cr/l/TkRnM01RPT18MQ==?encrypted=base64'
+    paymentLink: 'https://tp.cr/l/TkRnM01RPT18MQ=='
   },
   pro: { 
     name: 'Teams', 
-    price: 29900, 
+    price: 400, 
     scripts: 500, 
     images: 200, 
     color: 'purple',
-    paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ==?encrypted=base64'
+    paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ=='
   },
   enterprise: { name: 'Enterprise', price: null, scripts: -1, images: -1, color: 'amber', paymentLink: null }
 }
@@ -325,7 +325,7 @@ export default function Settings() {
                   </div>
                   <div className="text-right">
                     <div className="text-xl font-bold text-dark-900">
-                      ₡{(PLAN_DETAILS[plan].price || 0).toLocaleString()}
+                      ${PLAN_DETAILS[plan].price || 0}
                     </div>
                     <p className="text-xs text-dark-400">/ {language === 'es' ? 'mes' : 'month'}</p>
                   </div>

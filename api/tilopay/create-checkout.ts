@@ -74,13 +74,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Continue anyway - we can still try to match by email in webhook
     }
 
-    // Build payment URL with email parameter for matching
-    const paymentUrl = new URL(BASE_PAYMENT_LINKS[plan])
-    paymentUrl.searchParams.set('email', user.email || '')
-    paymentUrl.searchParams.set('encrypted', 'base64')
-
+    // Return the direct payment link (don't modify shortened URLs)
+    // User matching happens via pending_subscriptions table using email
     return res.status(200).json({
-      checkoutUrl: paymentUrl.toString(),
+      checkoutUrl: BASE_PAYMENT_LINKS[plan],
       userId: user.id
     })
 
