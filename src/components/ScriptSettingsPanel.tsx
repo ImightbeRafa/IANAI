@@ -1,26 +1,26 @@
 import { 
   Zap, 
-  MessageCircle, 
   Clock, 
-  Monitor,
-  Layers
+  Layers,
+  Sparkles
 } from 'lucide-react'
-import type { ScriptGenerationSettings, ScriptFramework, ScriptTone, ScriptDuration, ScriptPlatform } from '../types'
+import type { ScriptGenerationSettings, ScriptFramework, ScriptDuration } from '../types'
 
 interface ScriptSettingsPanelProps {
   settings: ScriptGenerationSettings
   onChange: (settings: ScriptGenerationSettings) => void
   language: 'en' | 'es'
   compact?: boolean
+  onGenerate?: () => void
+  loading?: boolean
 }
 
 const LABELS = {
   en: {
     framework: 'Framework',
-    tone: 'Tone',
     duration: 'Duration',
-    platform: 'Platform',
     variations: 'Variations',
+    generate: 'Generate',
     frameworks: {
       venta_directa: 'Direct Sale (La Madre)',
       desvalidar_alternativas: 'Invalidate Alternatives (Positioner)',
@@ -28,37 +28,18 @@ const LABELS = {
       variedad_productos: 'Product Variety (The Menu)',
       paso_a_paso: 'Step by Step (Retargeting)'
     },
-    tones: {
-      professional: 'Professional',
-      casual: 'Casual',
-      urgent: 'Urgent',
-      humorous: 'Humorous',
-      inspirational: 'Inspirational',
-      controversial: 'Controversial'
-    },
     durations: {
       '15s': '15 sec',
       '30s': '30 sec',
       '60s': '60 sec',
       '90s': '90 sec'
-    },
-    platforms: {
-      general: 'General',
-      tiktok: 'TikTok',
-      instagram: 'Instagram',
-      youtube: 'YouTube',
-      facebook: 'Facebook',
-      linkedin: 'LinkedIn',
-      tv: 'TV',
-      radio: 'Radio'
     }
   },
   es: {
     framework: 'Estructura',
-    tone: 'Tono',
     duration: 'Duración',
-    platform: 'Plataforma',
     variations: 'Variaciones',
+    generate: 'Generar',
     frameworks: {
       venta_directa: 'Venta Directa (La Madre)',
       desvalidar_alternativas: 'Desvalidar Alternativas (Posicionador)',
@@ -66,29 +47,11 @@ const LABELS = {
       variedad_productos: 'Variedad de Productos (El Menú)',
       paso_a_paso: 'Paso a Paso (Retargeting)'
     },
-    tones: {
-      professional: 'Profesional',
-      casual: 'Casual',
-      urgent: 'Urgente',
-      humorous: 'Humorístico',
-      inspirational: 'Inspiracional',
-      controversial: 'Controversial'
-    },
     durations: {
       '15s': '15 seg',
       '30s': '30 seg',
       '60s': '60 seg',
       '90s': '90 seg'
-    },
-    platforms: {
-      general: 'General',
-      tiktok: 'TikTok',
-      instagram: 'Instagram',
-      youtube: 'YouTube',
-      facebook: 'Facebook',
-      linkedin: 'LinkedIn',
-      tv: 'TV',
-      radio: 'Radio'
     }
   }
 }
@@ -97,7 +60,9 @@ export default function ScriptSettingsPanel({
   settings, 
   onChange, 
   language,
-  compact = false 
+  compact = false,
+  onGenerate,
+  loading = false
 }: ScriptSettingsPanelProps) {
   const t = LABELS[language]
 
@@ -109,9 +74,7 @@ export default function ScriptSettingsPanel({
   }
 
   const frameworks: ScriptFramework[] = ['venta_directa', 'desvalidar_alternativas', 'mostrar_servicio', 'variedad_productos', 'paso_a_paso']
-  const tones: ScriptTone[] = ['professional', 'casual', 'urgent', 'humorous', 'inspirational', 'controversial']
   const durations: ScriptDuration[] = ['15s', '30s', '60s', '90s']
-  const platforms: ScriptPlatform[] = ['general', 'tiktok', 'instagram', 'youtube', 'facebook', 'linkedin', 'tv', 'radio']
 
   if (compact) {
     return (
@@ -126,30 +89,12 @@ export default function ScriptSettingsPanel({
           ))}
         </select>
         <select
-          value={settings.tone}
-          onChange={(e) => updateSetting('tone', e.target.value as ScriptTone)}
-          className="text-xs px-2 py-1 bg-dark-50 border border-dark-200 rounded-lg"
-        >
-          {tones.map(tone => (
-            <option key={tone} value={tone}>{t.tones[tone]}</option>
-          ))}
-        </select>
-        <select
           value={settings.duration}
           onChange={(e) => updateSetting('duration', e.target.value as ScriptDuration)}
           className="text-xs px-2 py-1 bg-dark-50 border border-dark-200 rounded-lg"
         >
           {durations.map(d => (
             <option key={d} value={d}>{t.durations[d]}</option>
-          ))}
-        </select>
-        <select
-          value={settings.platform}
-          onChange={(e) => updateSetting('platform', e.target.value as ScriptPlatform)}
-          className="text-xs px-2 py-1 bg-dark-50 border border-dark-200 rounded-lg"
-        >
-          {platforms.map(p => (
-            <option key={p} value={p}>{t.platforms[p]}</option>
           ))}
         </select>
       </div>
@@ -181,29 +126,6 @@ export default function ScriptSettingsPanel({
         </div>
       </div>
 
-      {/* Tone */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">
-          <MessageCircle className="w-4 h-4 text-blue-500" />
-          {t.tone}
-        </label>
-        <div className="grid grid-cols-2 gap-1.5">
-          {tones.map(tone => (
-            <button
-              key={tone}
-              onClick={() => updateSetting('tone', tone)}
-              className={`px-3 py-2 text-sm rounded-lg transition-colors ${
-                settings.tone === tone
-                  ? 'bg-primary-100 text-primary-700 border border-primary-300'
-                  : 'bg-dark-50 text-dark-600 hover:bg-dark-100 border border-transparent'
-              }`}
-            >
-              {t.tones[tone]}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Duration */}
       <div>
         <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">
@@ -222,29 +144,6 @@ export default function ScriptSettingsPanel({
               }`}
             >
               {t.durations[d]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Platform */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">
-          <Monitor className="w-4 h-4 text-purple-500" />
-          {t.platform}
-        </label>
-        <div className="grid grid-cols-4 gap-1.5">
-          {platforms.map(p => (
-            <button
-              key={p}
-              onClick={() => updateSetting('platform', p)}
-              className={`px-2 py-2 text-xs rounded-lg transition-colors ${
-                settings.platform === p
-                  ? 'bg-primary-100 text-primary-700 border border-primary-300'
-                  : 'bg-dark-50 text-dark-600 hover:bg-dark-100 border border-transparent'
-              }`}
-            >
-              {t.platforms[p]}
             </button>
           ))}
         </div>
@@ -272,6 +171,18 @@ export default function ScriptSettingsPanel({
           ))}
         </div>
       </div>
+
+      {/* Generate Button */}
+      {onGenerate && (
+        <button
+          onClick={onGenerate}
+          disabled={loading}
+          className="w-full btn-primary py-3 flex items-center justify-center gap-2 mt-4"
+        >
+          <Sparkles className={`w-5 h-5 ${loading ? 'animate-pulse' : ''}`} />
+          {t.generate}
+        </button>
+      )}
     </div>
   )
 }

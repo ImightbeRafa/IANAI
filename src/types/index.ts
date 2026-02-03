@@ -205,6 +205,12 @@ export interface ProductFormData {
   shipping_info?: string           // How does shipping work
   // Section 8: Awareness Level
   awareness_level?: string          // How do they find this product/service
+  // Restaurant fields
+  menu_text?: string
+  menu_pdf_url?: string
+  location?: string
+  schedule?: string
+  is_new_restaurant?: boolean
   // Real estate fields
   re_business_type?: 'sale' | 'rent' | 'airbnb'
   re_price?: string

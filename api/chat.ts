@@ -660,19 +660,10 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
   if (!settings) return ''
   
   const variationInstruction = language === 'es'
-    ? `\n\nIMPORTANTE - NÚMERO DE SCRIPTS: Genera EXACTAMENTE ${settings.variations} script(s). NI MÁS NI MENOS. ${settings.variations === 1 ? 'Solo UN script.' : `Exactamente ${settings.variations} scripts diferentes.`}`
-    : `\n\nIMPORTANT - NUMBER OF SCRIPTS: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS. ${settings.variations === 1 ? 'Only ONE script.' : `Exactly ${settings.variations} different scripts.`}`
+    ? `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:\n- CANTIDAD: Genera EXACTAMENTE ${settings.variations} script(s). NI MÁS NI MENOS.\n- DURACIÓN: ${DURATION_PROMPTS[language][settings.duration]}\n- ESTRUCTURA: ${FRAMEWORK_PROMPTS[language][settings.framework]}`
+    : `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:\n- QUANTITY: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS.\n- DURATION: ${DURATION_PROMPTS[language][settings.duration]}\n- STRUCTURE: ${FRAMEWORK_PROMPTS[language][settings.framework]}`
   
-  const parts = [
-    '\n\n---\nSCRIPT GENERATION SETTINGS:',
-    FRAMEWORK_PROMPTS[language][settings.framework],
-    TONE_PROMPTS[language][settings.tone],
-    DURATION_PROMPTS[language][settings.duration],
-    PLATFORM_PROMPTS[language][settings.platform],
-    variationInstruction
-  ]
-  
-  return parts.filter(Boolean).join('\n')
+  return variationInstruction
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

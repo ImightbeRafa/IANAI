@@ -31,7 +31,6 @@ import {
   Download,
   Sparkles,
   BookmarkPlus,
-  RefreshCw,
   Info,
   Settings,
   ThumbsUp,
@@ -138,12 +137,20 @@ export default function ProductWorkspace() {
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
       }
 
+      // Add settings context to feedback messages so AI applies current config
+      const settingsContext = language === 'es'
+        ? `\n\n[Config actual: ${scriptSettings.variations} script(s), ${scriptSettings.duration}, estructura: ${scriptSettings.framework}]`
+        : `\n\n[Current config: ${scriptSettings.variations} script(s), ${scriptSettings.duration}, structure: ${scriptSettings.framework}]`
+      
+      const messageWithSettings = messages.length > 0 ? userMessage + settingsContext : userMessage
+
       const savedUserMessage = await addMessage(session.id, 'user', userMessage)
       setMessages(prev => [...prev, savedUserMessage])
 
-      // Build context for AI
+      // Build context for AI - use message with settings for API call
       const productContext = buildProductContext(product, context)
-      const allMessages = [...messages, savedUserMessage]
+      const messageForApi = { ...savedUserMessage, content: messageWithSettings }
+      const allMessages = [...messages, messageForApi]
       
       const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings)
       
@@ -265,10 +272,17 @@ export default function ProductWorkspace() {
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
       }
 
-      // Add system message asking for scripts with settings - be explicit about count
+      // Add system message asking for scripts with settings - be explicit about all config
+      const durationLabel = scriptSettings.duration === '15s' ? '15 segundos' : 
+                           scriptSettings.duration === '30s' ? '30 segundos' : 
+                           scriptSettings.duration === '60s' ? '60 segundos' : '90 segundos'
+      const durationLabelEn = scriptSettings.duration === '15s' ? '15 seconds' : 
+                              scriptSettings.duration === '30s' ? '30 seconds' : 
+                              scriptSettings.duration === '60s' ? '60 seconds' : '90 seconds'
+      
       const generatePrompt = language === 'es' 
-        ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta. No más, no menos. Basándote en toda la información del producto.`
-        : `Generate exactly ${scriptSettings.variations} sales script(s). No more, no less. Based on all the product information.`
+        ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta de ${durationLabel} cada uno, usando la estructura "${scriptSettings.framework}". Respeta estrictamente la duración indicada.`
+        : `Generate exactly ${scriptSettings.variations} sales script(s) of ${durationLabelEn} each, using the "${scriptSettings.framework}" structure. Strictly respect the indicated duration.`
       
       const userMessage = await addMessage(session.id, 'user', generatePrompt)
       setMessages(prev => [...prev, userMessage])
@@ -677,16 +691,6 @@ export default function ProductWorkspace() {
           <div className="bg-white border-t border-dark-100 p-4">
             <div className="max-w-4xl mx-auto">
               <div className="flex items-end gap-3">
-                {messages.length > 0 && (
-                  <button
-                    onClick={handleGenerateScript}
-                    disabled={loading}
-                    className="btn-secondary h-[52px] px-4 flex items-center gap-2"
-                    title={t.regenerate}
-                  >
-                    <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                  </button>
-                )}
                 <div className="flex-1 relative">
                   <textarea
                     value={input}
@@ -1093,6 +1097,8 @@ export default function ProductWorkspace() {
                   settings={scriptSettings}
                   onChange={setScriptSettings}
                   language={language}
+                  onGenerate={handleGenerateScript}
+                  loading={loading}
                 />
               </div>
             )}

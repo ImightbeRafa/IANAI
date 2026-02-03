@@ -113,6 +113,18 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         rent: 'Alquiler Largo Plazo (Precio Mensual)',
         airbnb: 'Airbnb/Vacacional (Precio por Noche)'
       },
+      // Restaurant questions
+      restaurantQuestions: {
+        name: '¿Cuál es el nombre de tu restaurante?',
+        menu_text: 'Pega aquí tu menú completo (platillos con precios)',
+        location: '¿Dónde está ubicado? (Barrio + Ciudad)',
+        schedule: '¿Cuál es el horario de atención?',
+        is_new_restaurant: '¿Es un restaurante nuevo o poco conocido?'
+      },
+      restaurantNewOptions: {
+        yes: 'Sí, es nuevo o poco conocido',
+        no: 'No, ya es conocido en la zona'
+      },
       placeholders: {
         name: 'Ej: Café de Especialidad Premium',
         product_description: 'Describe qué vendes y para qué sirve...',
@@ -206,6 +218,18 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         rent: 'Long-term Rent (Monthly)',
         airbnb: 'Airbnb/Vacation (Per Night)'
       },
+      // Restaurant questions
+      restaurantQuestions: {
+        name: 'What is the name of your restaurant?',
+        menu_text: 'Paste your full menu here (dishes with prices)',
+        location: 'Where is it located? (Neighborhood + City)',
+        schedule: 'What are the opening hours?',
+        is_new_restaurant: 'Is it a new or little-known restaurant?'
+      },
+      restaurantNewOptions: {
+        yes: 'Yes, it\'s new or little-known',
+        no: 'No, it\'s already known in the area'
+      },
       placeholders: {
         name: 'E.g.: Premium Specialty Coffee',
         product_description: 'Describe what you sell and what it\'s for...',
@@ -224,8 +248,11 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
   }
 
   const t = labels[language]
-  const totalSteps = formData.type === 'real_estate' ? 3 : 5
-  const questions = formData.type === 'service' ? t.serviceQuestions : formData.type === 'real_estate' ? t.realEstateQuestions : t.productQuestions
+  const totalSteps = formData.type === 'real_estate' ? 3 : formData.type === 'restaurant' ? 2 : 5
+  const questions = formData.type === 'service' ? t.serviceQuestions : 
+                    formData.type === 'real_estate' ? t.realEstateQuestions : 
+                    formData.type === 'restaurant' ? t.restaurantQuestions : 
+                    t.productQuestions
   const awarenessOpts = formData.type === 'service' ? t.serviceAwarenessOptions : t.awarenessOptions
 
   const handleChange = (field: keyof ProductFormData, value: string) => {
@@ -314,6 +341,9 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
       case 2:
         if (formData.type === 'real_estate') {
           return formData.re_business_type && (formData.re_price || '').trim() && (formData.re_location || '').trim()
+        }
+        if (formData.type === 'restaurant') {
+          return (formData.menu_text || '').trim() && (formData.location || '').trim() && (formData.schedule || '').trim()
         }
         return (formData.product_description || '').trim() && (formData.main_problem || '').trim()
       case 3:
@@ -452,8 +482,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 2: Product/Service Description & Problem (NOT for real_estate) */}
-          {step === 2 && formData.type !== 'real_estate' && (
+          {/* Step 2: Product/Service Description & Problem (NOT for real_estate or restaurant) */}
+          {step === 2 && formData.type !== 'real_estate' && formData.type !== 'restaurant' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
@@ -537,8 +567,86 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 3: Client & Context (NOT for real_estate) */}
-          {step === 3 && formData.type !== 'real_estate' && (
+          {/* RESTAURANT Step 2: Menu, Location, Schedule */}
+          {step === 2 && formData.type === 'restaurant' && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.restaurantQuestions.menu_text}
+                </label>
+                <textarea
+                  value={formData.menu_text || ''}
+                  onChange={(e) => handleChange('menu_text', e.target.value)}
+                  placeholder={language === 'es' ? 'Pega aquí el menú completo con nombres de platillos y precios...' : 'Paste the full menu with dish names and prices...'}
+                  className="input-field min-h-[150px]"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.restaurantQuestions.location}
+                </label>
+                <input
+                  type="text"
+                  value={formData.location || ''}
+                  onChange={(e) => handleChange('location', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: Curridabat, San José' : 'E.g.: Downtown, Miami'}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {t.restaurantQuestions.schedule}
+                </label>
+                <input
+                  type="text"
+                  value={formData.schedule || ''}
+                  onChange={(e) => handleChange('schedule', e.target.value)}
+                  placeholder={language === 'es' ? 'Ej: Lunes a Viernes 11am-9pm' : 'E.g.: Mon-Fri 11am-9pm'}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-3">
+                  {t.restaurantQuestions.is_new_restaurant}
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, is_new_restaurant: true }))}
+                    className={`p-4 rounded-xl border-2 transition-all ${
+                      formData.is_new_restaurant === true
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-dark-200 hover:border-dark-300'
+                    }`}
+                  >
+                    <span className={`font-medium ${formData.is_new_restaurant === true ? 'text-primary-600' : 'text-dark-600'}`}>
+                      {t.restaurantNewOptions.yes}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, is_new_restaurant: false }))}
+                    className={`p-4 rounded-xl border-2 transition-all ${
+                      formData.is_new_restaurant === false
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-dark-200 hover:border-dark-300'
+                    }`}
+                  >
+                    <span className={`font-medium ${formData.is_new_restaurant === false ? 'text-primary-600' : 'text-dark-600'}`}>
+                      {t.restaurantNewOptions.no}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Client & Context (NOT for real_estate or restaurant) */}
+          {step === 3 && formData.type !== 'real_estate' && formData.type !== 'restaurant' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
@@ -711,8 +819,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 4: Result & Differentiation (NOT for real_estate) */}
-          {step === 4 && formData.type !== 'real_estate' && (
+          {/* Step 4: Result & Differentiation (NOT for real_estate or restaurant) */}
+          {step === 4 && formData.type !== 'real_estate' && formData.type !== 'restaurant' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-2">
@@ -769,8 +877,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
             </div>
           )}
 
-          {/* Step 5: Awareness Level (NOT for real_estate) */}
-          {step === 5 && formData.type !== 'real_estate' && (
+          {/* Step 5: Awareness Level (NOT for real_estate or restaurant) */}
+          {step === 5 && formData.type !== 'real_estate' && formData.type !== 'restaurant' && (
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-3">
