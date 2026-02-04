@@ -5,10 +5,10 @@ import { GoogleGenAI } from '@google/genai'
 
 const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
 
-// Gemini Image Generation Models (from official SDK examples)
+// Gemini Image Generation Models (from official SDK documentation)
 const GEMINI_IMAGE_MODELS: Record<string, string> = {
-  'nano-banana': 'gemini-2.0-flash-preview-image-generation',     // Nano Banana
-  'nano-banana-pro': 'imagen-3.0-generate-002'                    // Nano Banana Pro (Imagen 3)
+  'nano-banana': 'gemini-2.5-flash-image',          // Fast, efficient (1K resolution)
+  'nano-banana-pro': 'gemini-3-pro-image-preview'   // High quality, reasoning (up to 4K)
 }
 
 type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro'
@@ -198,12 +198,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        // Generate image using SDK
+        // Generate image using SDK (format from official docs)
         const response = await ai.models.generateContent({
           model: geminiModelId,
           contents: promptParts,
           config: {
-            responseModalities: ['image', 'text']
+            responseModalities: ['TEXT', 'IMAGE']
           }
         })
 
