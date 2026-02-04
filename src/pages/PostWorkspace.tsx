@@ -19,7 +19,8 @@ import {
   UtensilsCrossed,
   Home,
   Loader2,
-  Cpu
+  Cpu,
+  Wand2
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -49,6 +50,7 @@ export default function PostWorkspace() {
   const [error, setError] = useState('')
   const [pollingTaskId, setPollingTaskId] = useState<string | null>(null)
   const [textWarning, setTextWarning] = useState(false)
+  const [enhancing, setEnhancing] = useState(false)
 
   // Image settings
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5' | '9:16'>('1:1')
@@ -58,9 +60,11 @@ export default function PostWorkspace() {
     es: {
       back: 'Volver',
       title: 'Generar Post',
-      subtitle: 'Crea imágenes para Instagram',
+      subtitle: 'Crea imágenes para redes sociales',
       promptLabel: 'Describe tu imagen',
-      promptPlaceholder: 'Ej: Foto profesional del producto sobre fondo blanco con iluminación suave...',
+      promptPlaceholder: 'Ej: Mi producto en una mesa de madera con luz natural...',
+      enhancePrompt: 'Mejorar con IA',
+      enhancing: 'Mejorando...',
       uploadImages: 'Subir imágenes de referencia',
       uploadHint: 'Arrastra imágenes o haz clic para subir (máx. 4)',
       generate: 'Generar Imagen',
@@ -87,9 +91,11 @@ export default function PostWorkspace() {
     en: {
       back: 'Back',
       title: 'Generate Post',
-      subtitle: 'Create images for Instagram',
+      subtitle: 'Create images for social media',
       promptLabel: 'Describe your image',
-      promptPlaceholder: 'E.g: Professional product photo on white background with soft lighting...',
+      promptPlaceholder: 'E.g: My product on a wooden table with natural light...',
+      enhancePrompt: 'Enhance with AI',
+      enhancing: 'Enhancing...',
       uploadImages: 'Upload reference images',
       uploadHint: 'Drag images or click to upload (max 4)',
       generate: 'Generate Image',
@@ -123,12 +129,6 @@ export default function PostWorkspace() {
       try {
         const productData = await getProduct(productId)
         setProduct(productData)
-        
-        // Pre-fill prompt with product context
-        if (productData) {
-          const contextPrompt = buildProductContextPrompt(productData)
-          setPrompt(contextPrompt)
-        }
 
         // Load saved posts for this product
         const savedPosts = await getProductPosts(productId)
@@ -233,22 +233,61 @@ export default function PostWorkspace() {
     return () => clearInterval(pollInterval)
   }, [pollingTaskId, prompt, t.error])
 
-  const buildProductContextPrompt = (product: Product): string => {
-    const parts: string[] = []
-    
-    if (product.name) {
-      parts.push(`Product: ${product.name}`)
-    }
-    if (product.description || product.product_description) {
-      parts.push(`Description: ${product.description || product.product_description}`)
-    }
-    if (product.type) {
-      parts.push(`Type: ${product.type}`)
-    }
+  const ENHANCE_API_URL = import.meta.env.PROD ? '/api/enhance-prompt' : 'http://localhost:3000/api/enhance-prompt'
 
-    return parts.length > 0 
-      ? `Create a professional Instagram post image for: ${parts.join('. ')}`
-      : ''
+  const handleEnhancePrompt = async () => {
+    if (!prompt.trim() || enhancing) return
+
+    setEnhancing(true)
+    setError('')
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      
+      if (!token) {
+        throw new Error('No estás autenticado. Por favor inicia sesión.')
+      }
+
+      // Build product context for better enhancement
+      let productContext = ''
+      if (product) {
+        const parts: string[] = []
+        if (product.name) parts.push(`Producto: ${product.name}`)
+        if (product.description || product.product_description) {
+          parts.push(`Descripción: ${product.description || product.product_description}`)
+        }
+        if (product.type) parts.push(`Tipo: ${product.type}`)
+        productContext = parts.join('. ')
+      }
+
+      const response = await fetch(ENHANCE_API_URL, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          prompt: prompt.trim(),
+          type: 'image',
+          productContext
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Error al mejorar el prompt')
+      }
+
+      if (result.enhancedPrompt) {
+        setPrompt(result.enhancedPrompt)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al mejorar el prompt')
+    } finally {
+      setEnhancing(false)
+    }
   }
 
   const getAspectDimensions = () => {
@@ -461,9 +500,28 @@ export default function PostWorkspace() {
           {/* Prompt Input */}
           <div className="p-4 flex-1 overflow-auto space-y-4">
             <div>
-              <label className="block text-sm font-medium text-dark-700 mb-2">
-                {t.promptLabel}
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-dark-700">
+                  {t.promptLabel}
+                </label>
+                <button
+                  onClick={handleEnhancePrompt}
+                  disabled={!prompt.trim() || enhancing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {enhancing ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      {t.enhancing}
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-3.5 h-3.5" />
+                      {t.enhancePrompt}
+                    </>
+                  )}
+                </button>
+              </div>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}

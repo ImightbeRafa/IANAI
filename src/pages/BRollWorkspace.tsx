@@ -18,7 +18,8 @@ import {
   Home,
   Loader2,
   Clock,
-  Play
+  Play,
+  Wand2
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -47,6 +48,7 @@ export default function BRollWorkspace() {
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideo[]>([])
   const [error, setError] = useState('')
   const [pollingRequestId, setPollingRequestId] = useState<string | null>(null)
+  const [enhancing, setEnhancing] = useState(false)
 
   // Video settings
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
@@ -59,7 +61,9 @@ export default function BRollWorkspace() {
       title: 'Generar B-Roll',
       subtitle: 'Crea videos cortos para contenido',
       promptLabel: 'Describe tu video',
-      promptPlaceholder: 'Ej: Toma cinematográfica de café siendo servido con vapor...',
+      promptPlaceholder: 'Ej: Mi producto girando lentamente sobre fondo blanco...',
+      enhancePrompt: 'Mejorar con IA',
+      enhancing: 'Mejorando...',
       uploadImage: 'Imagen de referencia (opcional)',
       uploadHint: 'Genera video a partir de una imagen',
       generate: 'Generar Video',
@@ -86,7 +90,9 @@ export default function BRollWorkspace() {
       title: 'Generate B-Roll',
       subtitle: 'Create short videos for content',
       promptLabel: 'Describe your video',
-      promptPlaceholder: 'E.g: Cinematic shot of coffee being poured with steam...',
+      promptPlaceholder: 'E.g: My product rotating slowly on white background...',
+      enhancePrompt: 'Enhance with AI',
+      enhancing: 'Enhancing...',
       uploadImage: 'Reference image (optional)',
       uploadHint: 'Generate video from an image',
       generate: 'Generate Video',
@@ -118,11 +124,6 @@ export default function BRollWorkspace() {
       try {
         const productData = await getProduct(productId)
         setProduct(productData)
-        
-        if (productData) {
-          const contextPrompt = buildProductContextPrompt(productData)
-          setPrompt(contextPrompt)
-        }
       } catch (error) {
         console.error('Failed to load product:', error)
       } finally {
@@ -182,22 +183,61 @@ export default function BRollWorkspace() {
     return () => clearInterval(pollInterval)
   }, [pollingRequestId, prompt, duration, t.error])
 
-  const buildProductContextPrompt = (product: Product): string => {
-    const parts: string[] = []
-    
-    if (product.name) {
-      parts.push(`Product: ${product.name}`)
-    }
-    if (product.description || product.product_description) {
-      parts.push(`Description: ${product.description || product.product_description}`)
-    }
-    if (product.type) {
-      parts.push(`Type: ${product.type}`)
-    }
+  const ENHANCE_API_URL = import.meta.env.PROD ? '/api/enhance-prompt' : 'http://localhost:3000/api/enhance-prompt'
 
-    return parts.length > 0 
-      ? `B-Roll video for: ${parts.join('. ')}`
-      : ''
+  const handleEnhancePrompt = async () => {
+    if (!prompt.trim() || enhancing) return
+
+    setEnhancing(true)
+    setError('')
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      
+      if (!token) {
+        throw new Error('No estás autenticado. Por favor inicia sesión.')
+      }
+
+      // Build product context for better enhancement
+      let productContext = ''
+      if (product) {
+        const parts: string[] = []
+        if (product.name) parts.push(`Producto: ${product.name}`)
+        if (product.description || product.product_description) {
+          parts.push(`Descripción: ${product.description || product.product_description}`)
+        }
+        if (product.type) parts.push(`Tipo: ${product.type}`)
+        productContext = parts.join('. ')
+      }
+
+      const response = await fetch(ENHANCE_API_URL, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          prompt: prompt.trim(),
+          type: 'video',
+          productContext
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Error al mejorar el prompt')
+      }
+
+      if (result.enhancedPrompt) {
+        setPrompt(result.enhancedPrompt)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al mejorar el prompt')
+    } finally {
+      setEnhancing(false)
+    }
   }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -347,9 +387,28 @@ export default function BRollWorkspace() {
             <div className="space-y-4">
               {/* Prompt */}
               <div>
-                <label className="block text-sm font-medium text-dark-700 mb-2">
-                  {t.promptLabel}
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-dark-700">
+                    {t.promptLabel}
+                  </label>
+                  <button
+                    onClick={handleEnhancePrompt}
+                    disabled={!prompt.trim() || enhancing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {enhancing ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        {t.enhancing}
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 className="w-3.5 h-3.5" />
+                        {t.enhancePrompt}
+                      </>
+                    )}
+                  </button>
+                </div>
                 <textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}

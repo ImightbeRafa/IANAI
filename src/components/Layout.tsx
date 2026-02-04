@@ -54,11 +54,11 @@ export default function Layout({ children }: LayoutProps) {
   const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email)
 
   const navItems = [
-    { path: '/dashboard', label: t.scripts, icon: FileText },
-    { path: '/posts', label: t.posts, icon: ImageIcon },
-    { path: '/broll', label: t.broll, icon: Film },
-    { path: '/settings', label: t.settings, icon: Settings },
-    ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3 }] : []),
+    { path: '/dashboard', label: t.scripts, icon: FileText, beta: true },
+    { path: '/posts', label: t.posts, icon: ImageIcon, beta: true },
+    { path: '/broll', label: t.broll, icon: Film, beta: true },
+    { path: '/settings', label: t.settings, icon: Settings, beta: false },
+    ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false }] : []),
   ]
 
   return (
@@ -89,20 +89,25 @@ export default function Layout({ children }: LayoutProps) {
 
           {/* Navigation */}
           <nav className="flex-1 p-4 space-y-1">
-            {navItems.map(({ path, label, icon: Icon }) => (
+            {navItems.map(({ path, label, icon: Icon, beta }) => (
               <Link
                 key={path}
                 to={path}
                 onClick={() => setSidebarOpen(false)}
                 className={`
                   flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
-                  ${location.pathname === path 
+                  ${location.pathname === path || location.pathname.startsWith(path + '/')
                     ? 'bg-primary-50 text-primary-700' 
                     : 'text-dark-600 hover:bg-dark-50 hover:text-dark-900'}
                 `}
               >
                 <Icon className="w-5 h-5" />
                 <span className="font-medium">{label}</span>
+                {beta && (
+                  <span className="text-[10px] px-1.5 py-0.5 bg-primary-100 text-primary-600 rounded font-medium opacity-70">
+                    beta
+                  </span>
+                )}
               </Link>
             ))}
           </nav>
