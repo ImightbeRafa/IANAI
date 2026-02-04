@@ -132,10 +132,11 @@ User request: ${prompt}`
       hasVideoUrl: !!video_url
     })
 
-    // Build request
+    // Build request with official model name
+    // Model: grok-imagine-video ($0.05/sec at 480p, $0.07/sec at 720p)
     const videoRequest: VideoGenerationRequest = {
       prompt: systemPrompt,
-      model: 'grok-2-video-1212',
+      model: 'grok-imagine-video',
       duration: validDuration,
       aspect_ratio,
       resolution
@@ -184,12 +185,14 @@ User request: ${prompt}`
     // Increment usage counter after successful submission
     await incrementUsage(user.id, 'video')
 
-    // Log usage
+    // Log usage with resolution-based pricing model
+    // grok-imagine-video-480p: $0.05/sec, grok-imagine-video-720p: $0.07/sec
+    const pricingModel = resolution === '720p' ? 'grok-imagine-video-720p' : 'grok-imagine-video-480p'
     await logApiUsage({
       userId: user.id,
       userEmail: user.email,
       feature: 'video',
-      model: 'grok-imagine-video',
+      model: pricingModel,
       success: true,
       metadata: { 
         requestId: result.request_id,

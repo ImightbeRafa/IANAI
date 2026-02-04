@@ -298,6 +298,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       try {
         // Use b64_json to avoid CORS issues with xAI's image hosting
+        // Model: grok-2-image-1212 ($0.07/image, 300 rpm)
         const grokRequest: Record<string, unknown> = {
           model: 'grok-2-image-1212',
           prompt: enhancedPrompt,

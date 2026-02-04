@@ -17,10 +17,12 @@ export const MODEL_COSTS = {
   'flux': { perImage: 0.003 }, // Flux Klein ~$0.003/image
   'nano-banana': { perImage: 0.02 }, // Gemini 2.5 Flash Image estimate
   'nano-banana-pro': { perImage: 0.05 }, // Gemini 3 Pro Image estimate
-  'grok-imagine': { perImage: 0.07 }, // Grok Imagine Image estimate
+  'grok-imagine': { perImage: 0.07 }, // grok-2-image-1212: $0.07/image
   
-  // Video generation models (per video)
-  'grok-imagine-video': { perVideo: 0.25 }, // Grok Imagine Video estimate per 5s clip
+  // Video generation models (per second of output)
+  // grok-imagine-video: $0.05/sec at 480p, $0.07/sec at 720p
+  'grok-imagine-video-480p': { perSecond: 0.05 },
+  'grok-imagine-video-720p': { perSecond: 0.07 },
 }
 
 interface UsageLogParams {
@@ -61,14 +63,15 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
     if (modelCosts) {
       if ('perImage' in modelCosts) {
         // Image model - fixed cost per image
-        estimatedCostUsd = modelCosts.perImage
-      } else if ('perVideo' in modelCosts) {
-        // Video model - fixed cost per video
-        estimatedCostUsd = modelCosts.perVideo
+        estimatedCostUsd = modelCosts.perImage as number
+      } else if ('perSecond' in modelCosts) {
+        // Video model - cost per second (duration passed in metadata)
+        const duration = (metadata?.duration as number) || 5
+        estimatedCostUsd = (modelCosts.perSecond as number) * duration
       } else if ('input' in modelCosts && 'output' in modelCosts) {
         // Text model - cost based on tokens
-        const inputCost = (inputTokens / 1_000_000) * modelCosts.input
-        const outputCost = (outputTokens / 1_000_000) * modelCosts.output
+        const inputCost = (inputTokens / 1_000_000) * (modelCosts.input as number)
+        const outputCost = (outputTokens / 1_000_000) * (modelCosts.output as number)
         estimatedCostUsd = inputCost + outputCost
       }
     }
