@@ -139,9 +139,23 @@ export default function PostWorkspace() {
 
     const pollInterval = setInterval(async () => {
       try {
+        // Get auth token for polling
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        
+        if (!token) {
+          console.error('No auth token for polling')
+          setPollingTaskId(null)
+          setGenerating(false)
+          return
+        }
+
         const response = await fetch(API_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ action: 'poll', taskId: pollingTaskId })
         })
 
