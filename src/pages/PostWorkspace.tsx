@@ -2,9 +2,10 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct } from '../services/database'
+import { getProduct, getProductPosts, createPost, updatePostStatus } from '../services/database'
 import type { Product, ImageModel } from '../types'
 import Layout from '../components/Layout'
+import { uploadPostImage } from '../utils/imageCompression'
 import { 
   ArrowLeft,
   ImageIcon,
@@ -27,6 +28,8 @@ interface GeneratedPost {
   imageUrl: string
   prompt: string
   createdAt: Date
+  model?: string
+  saved?: boolean
 }
 
 const API_URL = import.meta.env.PROD ? '/api/generate-image' : 'http://localhost:3000/api/generate-image'
@@ -113,7 +116,7 @@ export default function PostWorkspace() {
   const t = labels[language]
 
   useEffect(() => {
-    async function loadProduct() {
+    async function loadProductAndPosts() {
       if (!productId || !user) return
       try {
         const productData = await getProduct(productId)
@@ -124,13 +127,27 @@ export default function PostWorkspace() {
           const contextPrompt = buildProductContextPrompt(productData)
           setPrompt(contextPrompt)
         }
+
+        // Load saved posts for this product
+        const savedPosts = await getProductPosts(productId)
+        const loadedPosts: GeneratedPost[] = savedPosts
+          .filter(post => post.status === 'completed' && post.generated_image_url)
+          .map(post => ({
+            id: post.id,
+            imageUrl: post.generated_image_url!,
+            prompt: post.prompt,
+            createdAt: new Date(post.created_at),
+            model: post.model,
+            saved: true
+          }))
+        setGeneratedPosts(loadedPosts)
       } catch (error) {
         console.error('Failed to load product:', error)
       } finally {
         setLoading(false)
       }
     }
-    loadProduct()
+    loadProductAndPosts()
   }, [productId, user])
 
   // Polling for generation result
@@ -162,11 +179,42 @@ export default function PostWorkspace() {
         const result = await response.json()
 
         if (result.status === 'Ready' && result.result?.sample) {
+          // Save to storage and database
+          const imageUrl = result.result.sample
+          let savedUrl = imageUrl
+          let postId = pollingTaskId
+          
+          try {
+            if (user && productId) {
+              // Upload compressed image to storage
+              savedUrl = await uploadPostImage(user.id, productId, imageUrl)
+              
+              // Save post to database
+              const post = await createPost(productId, user.id, {
+                prompt,
+                width: 1080,
+                height: 1080,
+                output_format: 'webp',
+                flux_task_id: pollingTaskId,
+                model: 'flux'
+              })
+              postId = post.id
+              
+              // Update with the saved URL
+              await updatePostStatus(postId, 'completed', savedUrl)
+            }
+          } catch (saveErr) {
+            console.error('Failed to save image:', saveErr)
+            // Continue with unsaved image - user can still see and download it
+          }
+          
           setGeneratedPosts(prev => [{
-            id: pollingTaskId,
-            imageUrl: result.result.sample,
+            id: postId,
+            imageUrl: savedUrl,
             prompt: prompt,
-            createdAt: new Date()
+            createdAt: new Date(),
+            model: 'flux',
+            saved: !!user && !!productId
           }, ...prev])
           setPollingTaskId(null)
           setGenerating(false)
@@ -290,11 +338,39 @@ export default function PostWorkspace() {
 
       // For Gemini models, result is immediate (no polling needed)
       if (result.status === 'Ready' && result.result?.sample) {
+        const imageUrl = result.result.sample
+        let savedUrl = imageUrl
+        let postId = `gemini-${Date.now()}`
+        
+        try {
+          if (user && productId) {
+            // Upload compressed image to storage
+            savedUrl = await uploadPostImage(user.id, productId, imageUrl)
+            
+            // Save post to database
+            const post = await createPost(productId, user.id, {
+              prompt,
+              width: requestBody.width as number || 1080,
+              height: requestBody.height as number || 1080,
+              output_format: 'webp',
+              model: imageModel
+            })
+            postId = post.id
+            
+            // Update with the saved URL
+            await updatePostStatus(postId, 'completed', savedUrl)
+          }
+        } catch (saveErr) {
+          console.error('Failed to save image:', saveErr)
+        }
+        
         setGeneratedPosts(prev => [{
-          id: `gemini-${Date.now()}`,
-          imageUrl: result.result.sample,
+          id: postId,
+          imageUrl: savedUrl,
           prompt: prompt,
-          createdAt: new Date()
+          createdAt: new Date(),
+          model: imageModel,
+          saved: !!user && !!productId
         }, ...prev])
         setGenerating(false)
       } else if (result.taskId) {

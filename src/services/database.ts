@@ -593,6 +593,7 @@ export interface Post {
   width: number
   height: number
   output_format: string
+  model?: string
   error_message?: string
   created_at: string
   updated_at: string
@@ -608,6 +609,7 @@ export async function createPost(
     height?: number
     output_format?: string
     flux_task_id?: string
+    model?: string
   }
 ): Promise<Post> {
   const { data: post, error } = await supabase
@@ -621,6 +623,7 @@ export async function createPost(
       height: data.height || 1080,
       output_format: data.output_format || 'jpeg',
       flux_task_id: data.flux_task_id,
+      model: data.model || 'flux',
       status: 'generating'
     })
     .select()
