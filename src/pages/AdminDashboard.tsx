@@ -64,7 +64,7 @@ const MODEL_PRICING: Record<string, string> = {
 }
 
 // Admin emails (only these can access)
-const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio']
+const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio', 'ian@iankupfer.com']
 
 export default function AdminDashboard() {
   const { user } = useAuth()

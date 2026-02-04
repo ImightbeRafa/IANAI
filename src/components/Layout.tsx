@@ -12,7 +12,7 @@ import {
   BarChart3
 } from 'lucide-react'
 
-const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio']
+const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio', 'ian@iankupfer.com']
 
 interface LayoutProps {
   children: ReactNode
