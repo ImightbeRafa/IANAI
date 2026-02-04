@@ -13,12 +13,21 @@ const GEMINI_IMAGE_MODELS: Record<string, string> = {
 
 type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro'
 
-// System prompt to enhance user prompts for better Instagram content images (Spanish primary)
-const SYSTEM_PROMPT_PREFIX = `Crea una fotografía profesional de alta calidad para marketing en redes sociales.
+// System prompt for Flux (no text support)
+const FLUX_PROMPT_PREFIX = `Crea una fotografía profesional de alta calidad para marketing en redes sociales.
 NO crees una captura de pantalla o mockup de Instagram u otra red social.
 NO incluyas texto, letras, palabras, marcas de agua ni logos en la imagen.
 Enfócate en: composición limpia, iluminación profesional, colores vibrantes, atractivo comercial.
 Estilo: Fotografía de producto moderna, imágenes lifestyle, contenido promocional.
+
+Solicitud del usuario: `
+
+// System prompt for Gemini (CAN render text in images)
+const GEMINI_PROMPT_PREFIX = `Crea una imagen profesional de alta calidad para marketing en redes sociales.
+NO crees una captura de pantalla o mockup de Instagram u otra red social.
+Enfócate en: composición limpia, iluminación profesional, colores vibrantes, atractivo comercial.
+Estilo: Fotografía de producto moderna, imágenes lifestyle, contenido promocional.
+Puedes incluir texto legible si el usuario lo solicita.
 
 Solicitud del usuario: `
 
@@ -148,16 +157,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Submit new generation request
     let userPrompt = imageParams.prompt || ''
+    const isGeminiModel = selectedModel === 'nano-banana' || selectedModel === 'nano-banana-pro'
     
     // Check if user is requesting text in the image
     const hasTextRequest = containsTextRequest(userPrompt)
-    if (hasTextRequest) {
-      // Clean the prompt to remove text instructions (AI models can't render text well)
+    
+    // Only strip text for Flux models - Gemini CAN render text in images
+    if (hasTextRequest && !isGeminiModel) {
       userPrompt = cleanPromptForImageGen(userPrompt)
     }
     
-    // Enhance prompt with system instructions
-    const enhancedPrompt = SYSTEM_PROMPT_PREFIX + userPrompt
+    // Use appropriate prompt prefix based on model
+    const promptPrefix = isGeminiModel ? GEMINI_PROMPT_PREFIX : FLUX_PROMPT_PREFIX
+    const enhancedPrompt = promptPrefix + userPrompt
 
     // =============================================
     // GEMINI IMAGE GENERATION (Nano Banana models)
@@ -240,11 +252,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
 
         // Return immediately (no polling needed for Gemini)
+        // No textWarning for Gemini - it CAN render text in images
         return res.status(200).json({
           status: 'Ready',
           result: { sample: imageUrl },
           model: selectedModel,
-          textWarning: hasTextRequest
+          textWarning: false
         })
 
       } catch (geminiError) {
