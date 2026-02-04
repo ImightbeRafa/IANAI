@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 
-const GROK_VIDEO_API_URL = 'https://api.x.ai/v1/video/generations'
-const GROK_VIDEO_RESULT_URL = 'https://api.x.ai/v1/video/generations'
+const GROK_VIDEO_API_URL = 'https://api.x.ai/v1/videos/generations'
+const GROK_VIDEO_RESULT_URL = 'https://api.x.ai/v1/videos'
 
 type AspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | '3:4' | '3:2' | '2:3'
 type VideoResolution = '720p' | '480p'
@@ -135,7 +135,7 @@ User request: ${prompt}`
     // Build request
     const videoRequest: VideoGenerationRequest = {
       prompt: systemPrompt,
-      model: 'grok-2-video',
+      model: 'grok-2-video-1212',
       duration: validDuration,
       aspect_ratio,
       resolution

@@ -297,11 +297,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
 
       try {
+        // Use b64_json to avoid CORS issues with xAI's image hosting
         const grokRequest: Record<string, unknown> = {
-          model: 'grok-2-image',
+          model: 'grok-2-image-1212',
           prompt: enhancedPrompt,
           n: 1,
-          response_format: 'url'
+          response_format: 'b64_json'
         }
 
         const response = await fetch(GROK_IMAGINE_API_URL, {
@@ -334,11 +335,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         const result = await response.json()
-        const imageUrl = result.data?.[0]?.url
-
-        if (!imageUrl) {
-          throw new Error('No image URL in response')
+        
+        // Handle base64 response format
+        const b64Data = result.data?.[0]?.b64_json
+        if (!b64Data) {
+          throw new Error('No image data in response')
         }
+        
+        // Convert to data URL for client consumption
+        const imageUrl = `data:image/jpeg;base64,${b64Data}`
 
         // Increment usage counter
         await incrementUsage(user.id, 'image')

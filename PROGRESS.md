@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 3, 2026 at 5:30 PM (UTC-06:00)
+## Last Updated: February 4, 2026 at 5:15 PM (UTC-06:00)
 
 ---
 
@@ -8,7 +8,8 @@
 
 **Advance AI** (formerly CopywriteAI) is an AI-powered content creation platform. Features include:
 - **Scripts**: High-conversion ad scripts for social media using Grok API
-- **Posts**: AI-powered Instagram image generation using Flux 2 Klein API
+- **Posts**: AI-powered Instagram image generation using Flux, Gemini, and Grok Imagine APIs
+- **B-Roll**: AI-powered video generation using Grok Imagine Video API (NEW)
 
 ---
 
@@ -325,6 +326,54 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `supabase/migrations/012_fix_subscriptions_unique.sql`
 - [x] **Environment Variables Required:**
   - `GEMINI_API_KEY` - For Gemini text and image generation
+
+### February 4, 2026 - B-Roll Video Generation & Grok Imagine (5:15 PM)
+- [x] **NEW FEATURE: B-Roll Video Generation**
+  - AI-powered video generation using Grok Imagine Video API
+  - Generate short B-Roll clips from text prompts
+  - Generate videos from existing images (image-to-video)
+  - Support for multiple aspect ratios: 16:9, 4:3, 1:1, 9:16, 3:4, 3:2, 2:3
+  - Support for resolutions: 720p, 480p
+  - Duration options: 5 seconds (default)
+  - Async polling pattern for video generation (videos take time)
+- [x] **NEW FEATURE: Grok Imagine Image Model**
+  - Added Grok Imagine as third image generation option alongside Flux and Gemini
+  - Uses xAI's image generation API at `https://api.x.ai/v1/images/generations`
+  - Cost tracking: ~$0.07 per image
+- [x] **NEW FEATURE: Prompt Enhancement with AI**
+  - "Mejorar con IA" / "Enhance with AI" button next to prompt textarea
+  - Takes simple user prompts and enhances them for better AI generation
+  - Separate enhancement prompts for images vs videos
+  - Focuses on social media marketing context
+  - Usage tracked in admin dashboard under `grok` model with `action: enhance_prompt`
+- [x] **Beta Badges on Sidebar Navigation**
+  - Small "beta" badges added to Guiones, Posts, and B-Roll nav items
+  - Subtle styling to indicate features in beta
+- [x] **Removed Auto-Generated Prompts**
+  - PostWorkspace and BRollWorkspace no longer auto-fill prompts
+  - Users write their own prompts and use "Enhance with AI" to improve them
+- [x] **New Files Created:**
+  - `api/generate-video.ts` - Grok Imagine Video API endpoint
+  - `api/enhance-prompt.ts` - AI prompt enhancement endpoint
+  - `src/pages/BRollDashboard.tsx` - Product selection for B-Roll
+  - `src/pages/BRollWorkspace.tsx` - Video generation interface
+  - `supabase/migrations/015_videos_and_usage.sql` - Videos table and usage tracking
+- [x] **Files Updated:**
+  - `src/types/index.ts` - Added `VideoModel`, `AspectRatio`, `VideoResolution` types, extended `ImageModel`
+  - `api/generate-image.ts` - Added Grok Imagine support
+  - `api/lib/auth.ts` - Added video support to usage limits
+  - `api/lib/usage-logger.ts` - Added video and Grok Imagine cost tracking
+  - `src/pages/PostWorkspace.tsx` - Grok Imagine option, prompt enhancement UI
+  - `src/pages/AdminDashboard.tsx` - Grok Imagine and Video pricing info
+  - `src/components/Layout.tsx` - B-Roll nav item, beta badges
+  - `src/App.tsx` - B-Roll routes
+  - `src/services/database.ts` - Added model parameter to createPost
+- [x] **Bug Fixes:**
+  - Fixed BRollDashboard not loading products for team accounts
+  - Fixed Grok Video API URL (was `/video/` should be `/videos/`)
+  - Fixed environment variable name (`XAI_API_KEY` → `GROK_API_KEY`)
+- [x] **Environment Variables:**
+  - `GROK_API_KEY` - For Grok chat, image, and video generation (xAI)
 
 ### February 3, 2026 - TiloPay Hardening & Script Settings Simplification (3:45 PM)
 - [x] **Script Settings Simplified**
@@ -668,7 +717,15 @@ In Supabase dashboard, check:
 ## Environment Variables
 
 ```
+# Frontend (exposed to browser)
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
-GROK_API_KEY=your_grok_api_key (server-side only)
+
+# Backend (server-side only - Vercel)
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+GROK_API_KEY=your_xai_api_key          # For Grok chat, images, and videos
+GEMINI_API_KEY=your_gemini_api_key     # For Gemini text and image generation
+BFL_API_KEY=your_bfl_api_key           # For Flux image generation
+TILOPAY_WEBHOOK_SECRET=your_secret     # For payment webhooks
 ```
