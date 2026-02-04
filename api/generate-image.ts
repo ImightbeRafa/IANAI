@@ -5,10 +5,10 @@ import { GoogleGenAI } from '@google/genai'
 
 const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
 
-// Gemini Image Generation Models
+// Gemini Image Generation Models (from official SDK examples)
 const GEMINI_IMAGE_MODELS: Record<string, string> = {
-  'nano-banana': 'gemini-2.0-flash-exp',           // Nano Banana (image generation capable)
-  'nano-banana-pro': 'gemini-2.0-flash-exp'        // Nano Banana Pro (same model for now)
+  'nano-banana': 'gemini-2.0-flash-preview-image-generation',     // Nano Banana
+  'nano-banana-pro': 'imagen-3.0-generate-002'                    // Nano Banana Pro (Imagen 3)
 }
 
 type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro'
