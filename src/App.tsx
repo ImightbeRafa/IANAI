@@ -10,6 +10,7 @@ import ProductWorkspace from './pages/ProductWorkspace'
 import PostsDashboard from './pages/PostsDashboard'
 import PostWorkspace from './pages/PostWorkspace'
 import Settings from './pages/Settings'
+import AdminDashboard from './pages/AdminDashboard'
 
 export default function App() {
   return (
@@ -65,6 +66,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <PostWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute>
+                  <AdminDashboard />
                 </ProtectedRoute>
               }
             />

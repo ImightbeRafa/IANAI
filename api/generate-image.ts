@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
+import { logApiUsage } from './lib/usage-logger.js'
 
 const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
 
@@ -216,6 +217,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Increment usage counter after successful generation
       await incrementUsage(user.id, 'image')
 
+      // Log Gemini image usage
+      await logApiUsage({
+        userId: user.id,
+        userEmail: user.email,
+        feature: 'image',
+        model: selectedModel,
+        success: true,
+        metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image }
+      })
+
       // Return immediately (no polling needed for Gemini)
       return res.status(200).json({
         status: 'Ready',
@@ -286,6 +297,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     // Increment usage counter after successful submission
     await incrementUsage(user.id, 'image')
+
+    // Log Flux usage
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: 'image',
+      model: 'flux',
+      success: true,
+      metadata: { 
+        width: fluxRequest.width, 
+        height: fluxRequest.height, 
+        hasInputImage: !!fluxRequest.input_image,
+        taskId: result.id,
+        cost: result.cost
+      }
+    })
 
     return res.status(200).json({
       taskId: result.id,

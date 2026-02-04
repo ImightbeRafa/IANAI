@@ -255,6 +255,36 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - `TILOPAY_WEBHOOK_SECRET` - Get from TiloPay dashboard
   - `SUPABASE_SERVICE_ROLE_KEY` - Already configured
 
+### February 3, 2026 - Admin Usage Dashboard (5:55 PM)
+- [x] **Admin Dashboard for API Usage Tracking**
+  - New page at `/admin` (only visible to admin emails)
+  - Tracks all AI API calls with model, tokens, and costs
+  - Shows total cost, total calls, success rate
+  - Usage breakdown by model (Grok, Gemini, Flux, Nano Banana, Nano Banana Pro)
+  - Usage breakdown by feature (Scripts, Images, Paste Auto-fill)
+  - Daily trend chart
+  - Recent activity log with all API calls
+  - Date range filter (7d, 30d, 90d)
+- [x] **Usage Logging System**
+  - New `api_usage_logs` table with RLS policies
+  - Logs: user, feature, model, tokens, estimated cost, success/failure
+  - SQL functions: `get_usage_summary()`, `get_daily_usage()`
+- [x] **Cost Estimation**
+  - Grok: $3/1M input, $15/1M output tokens
+  - Gemini: $0.15/1M input, $0.60/1M output tokens
+  - Flux: ~$0.003/image
+  - Nano Banana: ~$0.02/image
+  - Nano Banana Pro: ~$0.05/image
+- [x] **Files Created:**
+  - `supabase/migrations/013_api_usage_logs.sql`
+  - `api/lib/usage-logger.ts`
+  - `src/pages/AdminDashboard.tsx`
+- [x] **Files Updated:**
+  - `api/chat.ts` - Added usage logging for Grok and Gemini
+  - `api/generate-image.ts` - Added usage logging for Flux and Gemini image
+  - `src/components/Layout.tsx` - Admin link in sidebar (admin only)
+  - `src/App.tsx` - Added /admin route
+
 ### February 3, 2026 - Model Switching & TiloPay Fixes (5:30 PM)
 - [x] **AI Model Switching for Scripts**
   - Toggle between **Grok** (xAI) and **Gemini 3 Pro** (Google) models

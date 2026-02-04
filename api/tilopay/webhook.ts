@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break
 
       case 'payment':
-        await handlePayment(userId, data)
+        await handlePayment(userId, plan, data)
         break
 
       case 'rejected':
@@ -197,19 +197,26 @@ async function handleSubscribe(
 /**
  * Handle successful recurring payment (webhook_payment)
  * Called for each successful recurring charge
+ * Also updates plan in case this is first payment or plan changed
  */
-async function handlePayment(userId: string, data: TiloPayWebhookData) {
-  console.log(`Recurring payment for user ${userId}`)
+async function handlePayment(userId: string, plan: string, data: TiloPayWebhookData) {
+  console.log(`Recurring payment for user ${userId}, plan: ${plan}`)
 
-  // Extend subscription period
-  await supabase!.from('subscriptions')
+  // Update subscription with plan AND extend period
+  // This ensures plan is set correctly even if subscribe event was missed
+  const { error } = await supabase!.from('subscriptions')
     .update({
+      plan: plan, // Always update plan based on payment
       status: 'active',
       current_period_start: new Date().toISOString(),
       current_period_end: getNextBillingDate().toISOString(),
       updated_at: new Date().toISOString()
     })
     .eq('user_id', userId)
+
+  if (error) {
+    console.error('Failed to update subscription:', error)
+  }
 
   // Record payment
   await supabase!.from('payments').insert({
@@ -220,7 +227,7 @@ async function handlePayment(userId: string, data: TiloPayWebhookData) {
     paid_at: new Date().toISOString()
   })
 
-  console.log(`Payment recorded and subscription extended`)
+  console.log(`Payment recorded, subscription extended, plan set to: ${plan}`)
 }
 
 /**
@@ -298,14 +305,31 @@ async function handleReactive(
 
 /**
  * Determine plan from TiloPay webhook data
+ * Uses amount, plan_title, or modality to detect plan
  */
 function determinePlanFromData(data: TiloPayWebhookData): string {
-  // Try to determine plan from modality or plan_title
+  // First try to determine from amount (most reliable)
+  const amount = parseFloat(String(data.amount || '0'))
+  
+  if (amount >= 400) {
+    return 'pro' // Team/Pro plan at $400/month
+  }
+  if (amount >= 25) {
+    return 'starter' // Starter plan at $30/month
+  }
+  
+  // Fallback: try to determine plan from modality or plan_title
   const title = (data.modality || data.plan_title || '').toLowerCase()
   
-  if (title.includes('team') || title.includes('pro')) {
+  if (title.includes('team') || title.includes('pro') || title.includes('empresa')) {
     return 'pro'
   }
+  if (title.includes('starter') || title.includes('individual') || title.includes('básico')) {
+    return 'starter'
+  }
+  
+  // Default to starter if we can't determine
+  console.log('Could not determine plan from data, defaulting to starter:', data)
   return 'starter'
 }
 

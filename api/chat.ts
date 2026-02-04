@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
+import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent'
@@ -774,6 +775,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const geminiData = await geminiResponse.json()
       content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated'
 
+      // Log Gemini usage
+      const inputText = geminiContents.map(c => c.parts.map(p => p.text).join('')).join('')
+      await logApiUsage({
+        userId: user.id,
+        userEmail: user.email,
+        feature: 'script',
+        model: 'gemini',
+        inputTokens: estimateTokens(inputText),
+        outputTokens: estimateTokens(content),
+        success: true,
+        metadata: { productType, variations: scriptSettings?.variations }
+      })
+
     } else {
       // =============================================
       // GROK API CALL (default)
@@ -810,6 +824,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const data = await response.json()
       content = data.choices?.[0]?.message?.content || 'No response generated'
+
+      // Log Grok usage (use actual token counts from response if available)
+      const usage = data.usage || {}
+      await logApiUsage({
+        userId: user.id,
+        userEmail: user.email,
+        feature: 'script',
+        model: 'grok',
+        inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
+        outputTokens: usage.completion_tokens || estimateTokens(content),
+        success: true,
+        metadata: { productType, variations: scriptSettings?.variations }
+      })
     }
 
     // Increment usage counter after successful generation

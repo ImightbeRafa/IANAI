@@ -76,6 +76,7 @@ export default function PostWorkspace() {
       textWarningTitle: 'Nota sobre texto en imágenes',
       textWarningMessage: 'La IA no puede generar texto legible en imágenes. El texto solicitado se ha removido del prompt. Usa herramientas de edición (Canva, Photoshop) para agregar texto después.',
       imageModel: 'Modelo de IA',
+      flux: 'Flux',
       nanoBanana: 'Nano Banana',
       nanoBananaPro: 'Nano Banana Pro'
     },
@@ -103,6 +104,7 @@ export default function PostWorkspace() {
       textWarningTitle: 'Note about text in images',
       textWarningMessage: 'AI cannot generate readable text in images. Text requests have been removed from the prompt. Use editing tools (Canva, Photoshop) to add text afterwards.',
       imageModel: 'AI Model',
+      flux: 'Flux',
       nanoBanana: 'Nano Banana',
       nanoBananaPro: 'Nano Banana Pro'
     }
@@ -454,7 +456,20 @@ export default function PostWorkspace() {
                 <Cpu className="w-4 h-4 text-primary-500" />
                 {t.imageModel}
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setImageModel('flux')}
+                  className={`p-3 rounded-lg text-sm transition-colors ${
+                    imageModel === 'flux'
+                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
+                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
+                  }`}
+                >
+                  <div className="font-medium">{t.flux}</div>
+                  <div className={`text-xs mt-0.5 ${imageModel === 'flux' ? 'text-primary-600' : 'text-dark-400'}`}>
+                    BFL Klein
+                  </div>
+                </button>
                 <button
                   onClick={() => setImageModel('nano-banana')}
                   className={`p-3 rounded-lg text-sm transition-colors ${
@@ -465,7 +480,7 @@ export default function PostWorkspace() {
                 >
                   <div className="font-medium">{t.nanoBanana}</div>
                   <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana' ? 'text-primary-600' : 'text-dark-400'}`}>
-                    Gemini 2.5 Flash
+                    Gemini 2.5
                   </div>
                 </button>
                 <button
@@ -478,7 +493,7 @@ export default function PostWorkspace() {
                 >
                   <div className="font-medium">{t.nanoBananaPro}</div>
                   <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana-pro' ? 'text-primary-600' : 'text-dark-400'}`}>
-                    Gemini 3 Pro
+                    Gemini 3
                   </div>
                 </button>
               </div>

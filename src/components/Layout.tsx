@@ -8,8 +8,11 @@ import {
   Menu,
   User,
   FileText,
-  ImageIcon
+  ImageIcon,
+  BarChart3
 } from 'lucide-react'
+
+const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio']
 
 interface LayoutProps {
   children: ReactNode
@@ -32,22 +35,26 @@ export default function Layout({ children }: LayoutProps) {
       scripts: 'Guiones',
       posts: 'Posts',
       settings: 'Configuración',
-      signOut: 'Cerrar Sesión'
+      signOut: 'Cerrar Sesión',
+      admin: 'Admin'
     },
     en: {
       scripts: 'Scripts',
       posts: 'Posts',
       settings: 'Settings',
-      signOut: 'Sign Out'
+      signOut: 'Sign Out',
+      admin: 'Admin'
     }
   }
 
   const t = labels[language]
+  const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email)
 
   const navItems = [
     { path: '/dashboard', label: t.scripts, icon: FileText },
     { path: '/posts', label: t.posts, icon: ImageIcon },
     { path: '/settings', label: t.settings, icon: Settings },
+    ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3 }] : []),
   ]
 
   return (
