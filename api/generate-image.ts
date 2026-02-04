@@ -286,7 +286,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // GROK IMAGINE IMAGE GENERATION
     // =============================================
     if (selectedModel === 'grok-imagine') {
-      const xaiApiKey = process.env.XAI_API_KEY
+      const xaiApiKey = process.env.GROK_API_KEY
       if (!xaiApiKey) {
         return res.status(500).json({ error: 'xAI API key not configured' })
       }
