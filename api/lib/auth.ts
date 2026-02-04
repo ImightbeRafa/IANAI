@@ -91,7 +91,7 @@ export async function requireAuth(
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image'
+  action: 'script' | 'image' | 'video'
 ): Promise<{ allowed: boolean; remaining: number; limit: number }> {
   if (!supabaseAdmin) {
     return { allowed: true, remaining: -1, limit: -1 } // Allow if not configured
@@ -119,7 +119,11 @@ export async function checkUsageLimit(
       return { allowed: true, remaining: -1, limit: -1 }
     }
 
-    const limit = action === 'script' ? limits.scripts_per_month : limits.images_per_month
+    const limit = action === 'script' 
+      ? limits.scripts_per_month 
+      : action === 'image' 
+        ? limits.images_per_month 
+        : limits.videos_per_month || 10
 
     // -1 means unlimited
     if (limit === -1) {
@@ -137,7 +141,9 @@ export async function checkUsageLimit(
 
     const currentUsage = action === 'script' 
       ? (usage?.scripts_generated || 0)
-      : (usage?.images_generated || 0)
+      : action === 'image'
+        ? (usage?.images_generated || 0)
+        : (usage?.videos_generated || 0)
 
     const remaining = limit - currentUsage
     const allowed = remaining > 0
@@ -154,7 +160,7 @@ export async function checkUsageLimit(
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image'
+  action: 'script' | 'image' | 'video'
 ): Promise<void> {
   if (!supabaseAdmin) return
 
@@ -166,7 +172,7 @@ export async function incrementUsage(
     // Upsert usage record
     const { data: existing } = await supabaseAdmin
       .from('usage')
-      .select('id, scripts_generated, images_generated')
+      .select('id, scripts_generated, images_generated, videos_generated')
       .eq('user_id', userId)
       .eq('period_start', periodStart.toISOString().slice(0, 10))
       .single()
@@ -175,7 +181,9 @@ export async function incrementUsage(
       // Update existing record
       const updates = action === 'script'
         ? { scripts_generated: (existing.scripts_generated || 0) + 1 }
-        : { images_generated: (existing.images_generated || 0) + 1 }
+        : action === 'image'
+          ? { images_generated: (existing.images_generated || 0) + 1 }
+          : { videos_generated: (existing.videos_generated || 0) + 1 }
 
       await supabaseAdmin
         .from('usage')
@@ -190,7 +198,8 @@ export async function incrementUsage(
           period_start: periodStart.toISOString().slice(0, 10),
           period_end: periodEnd.toISOString().slice(0, 10),
           scripts_generated: action === 'script' ? 1 : 0,
-          images_generated: action === 'image' ? 1 : 0
+          images_generated: action === 'image' ? 1 : 0,
+          videos_generated: action === 'video' ? 1 : 0
         })
     }
   } catch (err) {

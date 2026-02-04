@@ -81,7 +81,8 @@ export default function PostWorkspace() {
       imageModel: 'Modelo de IA',
       flux: 'Flux',
       nanoBanana: 'Nano Banana',
-      nanoBananaPro: 'Nano Banana Pro'
+      nanoBananaPro: 'Nano Banana Pro',
+      grokImagine: 'Grok Imagine'
     },
     en: {
       back: 'Back',
@@ -109,7 +110,8 @@ export default function PostWorkspace() {
       imageModel: 'AI Model',
       flux: 'Flux',
       nanoBanana: 'Nano Banana',
-      nanoBananaPro: 'Nano Banana Pro'
+      nanoBananaPro: 'Nano Banana Pro',
+      grokImagine: 'Grok Imagine'
     }
   }
 
@@ -584,6 +586,19 @@ export default function PostWorkspace() {
                   <div className="font-medium">{t.nanoBananaPro}</div>
                   <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana-pro' ? 'text-primary-600' : 'text-dark-400'}`}>
                     Gemini 3
+                  </div>
+                </button>
+                <button
+                  onClick={() => setImageModel('grok-imagine')}
+                  className={`p-3 rounded-lg text-sm transition-colors ${
+                    imageModel === 'grok-imagine'
+                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
+                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
+                  }`}
+                >
+                  <div className="font-medium">{t.grokImagine}</div>
+                  <div className={`text-xs mt-0.5 ${imageModel === 'grok-imagine' ? 'text-primary-600' : 'text-dark-400'}`}>
+                    xAI
                   </div>
                 </button>
               </div>

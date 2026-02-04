@@ -9,6 +9,7 @@ import {
   User,
   FileText,
   ImageIcon,
+  Film,
   BarChart3
 } from 'lucide-react'
 
@@ -34,6 +35,7 @@ export default function Layout({ children }: LayoutProps) {
     es: {
       scripts: 'Guiones',
       posts: 'Posts',
+      broll: 'B-Roll',
       settings: 'Configuración',
       signOut: 'Cerrar Sesión',
       admin: 'Admin'
@@ -41,6 +43,7 @@ export default function Layout({ children }: LayoutProps) {
     en: {
       scripts: 'Scripts',
       posts: 'Posts',
+      broll: 'B-Roll',
       settings: 'Settings',
       signOut: 'Sign Out',
       admin: 'Admin'
@@ -53,6 +56,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/dashboard', label: t.scripts, icon: FileText },
     { path: '/posts', label: t.posts, icon: ImageIcon },
+    { path: '/broll', label: t.broll, icon: Film },
     { path: '/settings', label: t.settings, icon: Settings },
     ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3 }] : []),
   ]

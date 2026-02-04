@@ -4,6 +4,7 @@ import { logApiUsage } from './lib/usage-logger.js'
 import { GoogleGenAI } from '@google/genai'
 
 const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
+const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
 // Gemini Image Generation Models (from official SDK documentation)
 const GEMINI_IMAGE_MODELS: Record<string, string> = {
@@ -11,7 +12,7 @@ const GEMINI_IMAGE_MODELS: Record<string, string> = {
   'nano-banana-pro': 'gemini-3-pro-image-preview'   // High quality, reasoning (up to 4K)
 }
 
-type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro'
+type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
 
 // System prompt for Flux (no text support)
 const FLUX_PROMPT_PREFIX = `Crea una fotografía profesional de alta calidad para marketing en redes sociales.
@@ -277,6 +278,105 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(500).json({ 
           error: 'Gemini image generation failed',
           details: geminiError instanceof Error ? geminiError.message : 'Unknown error'
+        })
+      }
+    }
+
+    // =============================================
+    // GROK IMAGINE IMAGE GENERATION
+    // =============================================
+    if (selectedModel === 'grok-imagine') {
+      const xaiApiKey = process.env.XAI_API_KEY
+      if (!xaiApiKey) {
+        return res.status(500).json({ error: 'xAI API key not configured' })
+      }
+
+      console.log('Submitting to Grok Imagine API:', { 
+        prompt: enhancedPrompt.substring(0, 100) + '...',
+        hasInputImage: !!imageParams.input_image
+      })
+
+      try {
+        const grokRequest: Record<string, unknown> = {
+          model: 'grok-2-image',
+          prompt: enhancedPrompt,
+          n: 1,
+          response_format: 'url'
+        }
+
+        const response = await fetch(GROK_IMAGINE_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${xaiApiKey}`
+          },
+          body: JSON.stringify(grokRequest)
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('Grok Imagine API error:', errorText)
+          
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'image',
+            model: 'grok-imagine',
+            success: false,
+            errorMessage: errorText,
+            metadata: { hasInputImage: !!imageParams.input_image }
+          })
+
+          return res.status(response.status).json({ 
+            error: 'Grok Imagine generation failed',
+            details: errorText
+          })
+        }
+
+        const result = await response.json()
+        const imageUrl = result.data?.[0]?.url
+
+        if (!imageUrl) {
+          throw new Error('No image URL in response')
+        }
+
+        // Increment usage counter
+        await incrementUsage(user.id, 'image')
+
+        // Log usage
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: 'image',
+          model: 'grok-imagine',
+          success: true,
+          metadata: { width: imageParams.width, height: imageParams.height }
+        })
+
+        // Return immediately (Grok Imagine is synchronous)
+        return res.status(200).json({
+          status: 'Ready',
+          result: { sample: imageUrl },
+          model: selectedModel,
+          textWarning: false
+        })
+
+      } catch (grokError) {
+        console.error('Grok Imagine error:', grokError)
+        
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: 'image',
+          model: 'grok-imagine',
+          success: false,
+          errorMessage: grokError instanceof Error ? grokError.message : 'Unknown error',
+          metadata: { hasInputImage: !!imageParams.input_image }
+        })
+
+        return res.status(500).json({ 
+          error: 'Grok Imagine generation failed',
+          details: grokError instanceof Error ? grokError.message : 'Unknown error'
         })
       }
     }

@@ -52,15 +52,19 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'flux': { name: 'Flux Klein', color: 'bg-green-500' },
   'nano-banana': { name: 'Nano Banana', color: 'bg-yellow-500' },
   'nano-banana-pro': { name: 'Nano Banana Pro', color: 'bg-orange-500' },
+  'grok-imagine': { name: 'Grok Imagine', color: 'bg-pink-500' },
+  'grok-imagine-video': { name: 'Grok Video', color: 'bg-red-500' },
 }
 
-// Cost per 1M tokens or per image (for reference display)
+// Cost per 1M tokens or per image/video (for reference display)
 const MODEL_PRICING: Record<string, string> = {
   'grok': '$3/1M in, $15/1M out',
   'gemini': '$0.15/1M in, $0.60/1M out',
   'flux': '~$0.003/image',
   'nano-banana': '~$0.02/image',
   'nano-banana-pro': '~$0.05/image',
+  'grok-imagine': '~$0.07/image',
+  'grok-imagine-video': '~$0.25/video (5s)',
 }
 
 // Admin emails (only these can access)

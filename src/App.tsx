@@ -9,6 +9,8 @@ import Dashboard from './pages/Dashboard'
 import ProductWorkspace from './pages/ProductWorkspace'
 import PostsDashboard from './pages/PostsDashboard'
 import PostWorkspace from './pages/PostWorkspace'
+import BRollDashboard from './pages/BRollDashboard'
+import BRollWorkspace from './pages/BRollWorkspace'
 import Settings from './pages/Settings'
 import AdminDashboard from './pages/AdminDashboard'
 
@@ -66,6 +68,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <PostWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/broll"
+              element={
+                <ProtectedRoute>
+                  <BRollDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/broll/product/:productId"
+              element={
+                <ProtectedRoute>
+                  <BRollWorkspace />
                 </ProtectedRoute>
               }
             />

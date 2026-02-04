@@ -14,7 +14,10 @@ export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'in
 export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
 export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
 export type AIModel = 'grok' | 'gemini'
-export type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro'
+export type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
+export type VideoModel = 'grok-imagine-video'
+export type AspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | '3:4' | '3:2' | '2:3'
+export type VideoResolution = '720p' | '480p'
 
 // =============================================
 // Core Entities
