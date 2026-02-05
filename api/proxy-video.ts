@@ -40,21 +40,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { url } = req.query
+    // Use WHATWG URL API to parse query params (avoids url.parse deprecation)
+    const fullUrl = new URL(req.url || '', `https://${req.headers.host}`)
+    const videoUrl = fullUrl.searchParams.get('url')
 
-    if (!url || typeof url !== 'string') {
+    if (!videoUrl || typeof videoUrl !== 'string') {
       return res.status(400).json({ error: 'Missing video URL' })
     }
 
-    // Only allow xAI video URLs
-    if (!url.startsWith('https://vidgen.x.ai/')) {
-      return res.status(400).json({ error: 'Invalid video URL' })
+    // Validate it's an xAI video URL
+    let parsedVideoUrl: URL
+    try {
+      parsedVideoUrl = new URL(videoUrl)
+    } catch {
+      return res.status(400).json({ error: 'Invalid video URL format' })
+    }
+
+    if (!parsedVideoUrl.hostname.endsWith('.x.ai') && !parsedVideoUrl.hostname.endsWith('.xai.com')) {
+      return res.status(400).json({ error: 'Invalid video URL domain' })
     }
 
     // Fetch video from xAI
-    const videoResponse = await fetch(url)
+    const videoResponse = await fetch(videoUrl)
     
     if (!videoResponse.ok) {
+      console.error('Video fetch failed:', { status: videoResponse.status, url: videoUrl.substring(0, 80) })
       return res.status(videoResponse.status).json({ error: 'Failed to fetch video' })
     }
 
@@ -64,6 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Content-Type', 'video/mp4')
     res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"')
     res.setHeader('Content-Length', videoBuffer.byteLength)
+    res.setHeader('Cache-Control', 'no-cache')
 
     return res.status(200).send(Buffer.from(videoBuffer))
 

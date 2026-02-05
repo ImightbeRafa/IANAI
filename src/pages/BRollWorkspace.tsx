@@ -547,14 +547,14 @@ export default function BRollWorkspace() {
                   <input
                     type="range"
                     min="5"
-                    max="15"
+                    max="30"
                     value={duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
                     className="w-full"
                   />
                   <div className="flex justify-between text-xs text-dark-400 mt-0.5">
                     <span>5s</span>
-                    <span>15s</span>
+                    <span>30s</span>
                   </div>
                 </div>
                 <div>
