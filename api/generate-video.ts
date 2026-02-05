@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
-import { logApiUsage } from './lib/usage-logger.js'
+import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 
 const GROK_VIDEO_API_URL = 'https://api.x.ai/v1/videos/generations'
 const GROK_VIDEO_RESULT_URL = 'https://api.x.ai/v1/videos'
@@ -195,6 +195,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             systemPrompt = (condensed || motherPrompt).substring(0, MAX_PROMPT_LENGTH)
             console.log(`Truncated to ${MAX_PROMPT_LENGTH} chars`)
           }
+
+          // Log the condense call usage
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'prompt_condense',
+            model: 'grok-3-mini',
+            inputTokens: estimateTokens(motherPrompt),
+            outputTokens: estimateTokens(condensed || ''),
+            success: true,
+            metadata: { source: 'grok_video', originalLength: motherPrompt.length, condensedLength: (condensed || '').length }
+          })
         } catch (condenseErr) {
           console.error('Condense failed, truncating:', condenseErr)
           systemPrompt = motherPrompt.substring(0, MAX_PROMPT_LENGTH)
@@ -249,11 +261,12 @@ User request: ${prompt}`
       const errorText = await response.text()
       console.error('Grok Video API error:', errorText)
       
+      const errorPricingModel = resolution === '720p' ? 'grok-imagine-video-720p' : 'grok-imagine-video-480p'
       await logApiUsage({
         userId: user.id,
         userEmail: user.email,
         feature: 'video',
-        model: 'grok-imagine-video',
+        model: errorPricingModel,
         success: false,
         errorMessage: errorText,
         metadata: { duration: validDuration, aspect_ratio, resolution }

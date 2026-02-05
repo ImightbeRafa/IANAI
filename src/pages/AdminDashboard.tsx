@@ -52,12 +52,17 @@ interface RecentLog {
 // Model display names and colors
 const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'grok': { name: 'Grok (xAI)', color: 'bg-purple-500' },
+  'grok-3-mini': { name: 'Grok 3 Mini', color: 'bg-purple-400' },
   'gemini': { name: 'Gemini 3 Pro', color: 'bg-blue-500' },
   'flux': { name: 'Flux Klein', color: 'bg-green-500' },
   'nano-banana': { name: 'Nano Banana', color: 'bg-yellow-500' },
   'nano-banana-pro': { name: 'Nano Banana Pro', color: 'bg-orange-500' },
   'grok-imagine': { name: 'Grok Imagine', color: 'bg-pink-500' },
   'grok-imagine-video': { name: 'Grok Video', color: 'bg-red-500' },
+  'grok-imagine-video-480p': { name: 'Grok Video 480p', color: 'bg-red-400' },
+  'grok-imagine-video-720p': { name: 'Grok Video 720p', color: 'bg-red-500' },
+  'fal-ai/kling-video/v2.6/pro/text-to-video': { name: 'Kling 2.6 Pro Text', color: 'bg-cyan-500' },
+  'fal-ai/kling-video/v2.6/pro/image-to-video': { name: 'Kling 2.6 Pro Image', color: 'bg-cyan-600' },
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
 }
@@ -65,12 +70,17 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
 // Cost per 1M tokens or per image/video (for reference display)
 const MODEL_PRICING: Record<string, string> = {
   'grok': '$3/1M in, $15/1M out',
+  'grok-3-mini': '$0.30/1M in, $0.50/1M out',
   'gemini': '$0.15/1M in, $0.60/1M out',
   'flux': '~$0.003/image',
   'nano-banana': '~$0.02/image',
   'nano-banana-pro': '~$0.05/image',
   'grok-imagine': '~$0.07/image',
-  'grok-imagine-video': '~$0.25/video (5s)',
+  'grok-imagine-video': '$0.07/sec (incl. audio)',
+  'grok-imagine-video-480p': '$0.05/sec',
+  'grok-imagine-video-720p': '$0.07/sec (incl. audio)',
+  'fal-ai/kling-video/v2.6/pro/text-to-video': '$0.07/sec (no audio)',
+  'fal-ai/kling-video/v2.6/pro/image-to-video': '$0.07/sec (no audio)',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
 }
@@ -114,7 +124,10 @@ export default function AdminDashboard() {
       last90days: 'Últimos 90 días',
       script: 'Guiones',
       image: 'Imágenes',
-      video: 'Videos',
+      video: 'Videos (Grok)',
+      kling_video: 'Videos (Kling)',
+      ad_prompt_build: 'Prompt de Anuncio (A+B+C)',
+      prompt_condense: 'Condensar Prompt',
       paste_organize: 'Auto-llenado',
       prompt_enhance: 'Mejora de Prompts',
       pdf_extract: 'Extracción PDF',
@@ -149,7 +162,10 @@ export default function AdminDashboard() {
       last90days: 'Last 90 days',
       script: 'Scripts',
       image: 'Images',
-      video: 'Videos',
+      video: 'Videos (Grok)',
+      kling_video: 'Videos (Kling)',
+      ad_prompt_build: 'Ad Prompt Build (A+B+C)',
+      prompt_condense: 'Prompt Condense',
       paste_organize: 'Auto-fill',
       prompt_enhance: 'Prompt Enhancement',
       pdf_extract: 'PDF Extraction',
@@ -403,6 +419,9 @@ export default function AdminDashboard() {
                         {feature === 'script' && <FileText className="w-5 h-5 text-blue-500" />}
                         {feature === 'image' && <ImageIcon className="w-5 h-5 text-green-500" />}
                         {feature === 'video' && <Video className="w-5 h-5 text-red-500" />}
+                        {feature === 'kling_video' && <Video className="w-5 h-5 text-cyan-500" />}
+                        {feature === 'ad_prompt_build' && <Sparkles className="w-5 h-5 text-violet-500" />}
+                        {feature === 'prompt_condense' && <Cpu className="w-5 h-5 text-indigo-500" />}
                         {feature === 'paste_organize' && <FileText className="w-5 h-5 text-purple-500" />}
                         {feature === 'prompt_enhance' && <Sparkles className="w-5 h-5 text-amber-500" />}
                         {feature === 'pdf_extract' && <FileUp className="w-5 h-5 text-orange-500" />}

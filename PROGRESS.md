@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 5, 2026 at 6:30 AM (UTC-06:00)
+## Last Updated: February 5, 2026 at 5:44 PM (UTC-06:00)
 
 ---
 
@@ -9,7 +9,8 @@
 **Advance AI** (formerly CopywriteAI) is an AI-powered content creation platform. Features include:
 - **Scripts**: High-conversion ad scripts for social media using Grok API
 - **Posts**: AI-powered Instagram image generation using Flux, Gemini, and Grok Imagine APIs
-- **B-Roll**: AI-powered video generation using Grok Imagine Video API (NEW)
+- **B-Roll**: AI-powered video generation using Grok Imagine Video & Kling 2.6 Pro (via fal.ai)
+- **ICP Profiles**: Ideal Customer Profile management for targeted script generation
 
 ---
 
@@ -327,6 +328,81 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] **Environment Variables Required:**
   - `GEMINI_API_KEY` - For Gemini text and image generation
 
+### February 5, 2026 - Kling 2.6 Pro via fal.ai & Usage Tracking Overhaul (5:44 PM)
+- [x] **MAJOR: Kling AI Video Generation via fal.ai**
+  - Migrated from direct Kling API + JWT auth to fal.ai client
+  - Uses `@fal-ai/client` package (fal.queue.submit / fal.queue.status / fal.queue.result)
+  - Models: `fal-ai/kling-video/v2.6/pro/text-to-video` and `fal-ai/kling-video/v2.6/pro/image-to-video`
+  - Duration: 5-30 seconds in 5s increments
+  - Prompt limit: 3000 chars (condensed via grok-3-mini if motherPrompt exceeds)
+  - Task ID format: `modelId::requestId` (double colon separator)
+  - Pricing: $0.07/sec (no audio), $0.14/sec (with audio)
+  - Auth: single `FAL_KEY` env var (removed KLING_ACCESS_KEY/SECRET_KEY and JWT generation)
+  - Removed `jsonwebtoken` dependency entirely
+- [x] **B-Roll Ad Prompt Pipeline (Module A+B+C)**
+  - New `api/build-ad-prompt.ts` endpoint implementing 3-module pipeline:
+    - Module A: Visual DNA Processor (product photos → visual identity)
+    - Module B: Cinematic Script Transformer (script → shot-by-shot breakdown)
+    - Module C: Mother Prompt Fusion (Visual DNA + Cinematic Script → final video prompt)
+  - Modules A+B run in parallel for reduced latency
+  - Output capped at 3000 chars to fit video API limits
+  - Uses grok-3-mini for all three modules
+- [x] **Frontend: Dual Video Model Support**
+  - Model selector: Kling 2.6 Pro (fal.ai) vs Grok (xAI)
+  - Kling mode selector: Standard vs Professional with bilingual descriptions
+    - Estándar: "Rápido, buena calidad. Ideal para borradores y pruebas."
+    - Profesional: "Máxima calidad y coherencia visual. Ideal para entrega final."
+  - Duration slider: both models 5-30s (Kling steps by 5, Grok steps by 1)
+  - Script paste textarea replaces script selector dropdown
+  - Prompt preview auto-shows when mother prompt is built
+  - Generate button hidden until motherPrompt is set
+- [x] **Usage Tracking Overhaul**
+  - Added `grok-3-mini` to MODEL_COSTS ($0.30/1M in, $0.50/1M out)
+  - Added Kling fal.ai model cost entries ($0.07/sec per model)
+  - Added `prompt_condense` feature type for tracking condense calls
+  - Both video endpoints now log condense usage separately
+  - All endpoints now log both success AND failure (fixed missing error logs)
+  - Fixed Grok video error log using wrong model string (was `grok-imagine-video`, now uses resolution-based string)
+- [x] **Admin Dashboard Updates**
+  - Added all Kling fal.ai models to MODEL_INFO with display names + colors
+  - Added `grok-3-mini`, `grok-imagine-video-480p`, `grok-imagine-video-720p` to MODEL_INFO
+  - Added all new models to MODEL_PRICING reference display
+  - Added `kling_video`, `ad_prompt_build`, `prompt_condense` to bilingual feature labels
+  - Added feature icons for all new feature types
+- [x] **Proxy Video Domain Updates**
+  - Added `.fal.media`, `.fal.ai`, `.fal.run` to allowed download domains
+  - Updated comment from "xAI video URL" to "video URL domain"
+- [x] **New Files Created:**
+  - `api/build-ad-prompt.ts` - 3-module ad prompt pipeline
+  - `api/generate-video-kling.ts` - Kling video generation via fal.ai
+- [x] **Files Updated:**
+  - `api/generate-video.ts` - Added prompt condense logging, fixed error model string
+  - `api/proxy-video.ts` - Added fal.ai domains
+  - `api/lib/usage-logger.ts` - Added grok-3-mini, Kling costs, prompt_condense feature
+  - `src/pages/BRollWorkspace.tsx` - Dual model UI, ad prompt pipeline, script paste
+  - `src/pages/AdminDashboard.tsx` - All new models/features/labels/icons
+- [x] **Dependencies:**
+  - Added: `@fal-ai/client`
+  - Removed: `jsonwebtoken`, `@types/jsonwebtoken`
+- [x] **Environment Variables:**
+  - Added: `FAL_KEY` (fal.ai API key)
+  - Removed: `KLING_ACCESS_KEY`, `KLING_SECRET_KEY` (no longer needed)
+
+### February 5, 2026 - ICP Profiles Feature (Earlier)
+- [x] **NEW FEATURE: ICP (Ideal Customer Profile) Management**
+  - Database: `icps` table with fields: name, description, awareness_level, sophistication_level, urgency_type, gender, age_range
+  - Schema file: `supabase/icp-schema.sql`
+  - Types: ICP and ICPFormData in `src/types/index.ts`
+  - Pages: `ICPDashboard.tsx` (list), `ICPForm.tsx` (create/edit)
+  - Routes: /icps, /icps/new, /icps/:icpId/edit
+  - Sidebar: Added "Perfiles ICP" / "ICP Profiles" with Users icon
+  - Database functions: getICPs, getICP, createICP, updateICP, deleteICP
+  - ICP interpretation rules for AI:
+    - awareness_level: Controls how to start messages (symptoms vs solutions)
+    - sophistication_level: Controls claim aggressiveness (simple vs precise language)
+    - urgency_type: Controls CTA directness and message rhythm
+    - gender/age_range: Adjust vocabulary and examples
+
 ### February 5, 2026 - Team Management, PDF Upload & API Usage Tracking (6:30 AM)
 - [x] **NEW FEATURE: Team Management Page**
   - New page at `/team` for managing team members
@@ -640,11 +716,15 @@ Form fields: name, business type (sale/rent/airbnb), price, location, constructi
 3. ~~**Google Login**~~ - Added to login page (was only on signup) ✓
 4. ~~**Delete Functionality**~~ - Delete clients/products with confirmation ✓
 5. ~~**API Usage Tracking**~~ - Track PDF extraction, URL fetch, prompt enhance ✓
+6. ~~**ICP Profiles**~~ - Ideal Customer Profile management ✓
+7. ~~**B-Roll Ad Prompt Pipeline**~~ - 3-module pipeline (Visual DNA + Cinematic Script + Mother Prompt) ✓
+8. ~~**Kling 2.6 Pro via fal.ai**~~ - Dual video model support (Grok + Kling) ✓
+9. ~~**Usage Tracking Overhaul**~~ - All features tracked with accurate pricing ✓
 
 ### High Priority
 1. **Script Library Page** - Dedicated page to view all saved scripts with filters
-2. **Run Migration 006** - Add real estate columns to database
-3. **ICP Integration** - Use ICP profiles in script generation
+2. **ICP Integration in Scripts** - Use ICP profiles to customize script generation prompts
+3. **Audio Support for Kling** - Enable audio generation ($0.14/sec) with toggle
 
 ### Medium Priority
 4. **AI Feedback Loop** - Use highly-rated scripts as examples for better generation
@@ -778,5 +858,6 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 GROK_API_KEY=your_xai_api_key          # For Grok chat, images, and videos
 GEMINI_API_KEY=your_gemini_api_key     # For Gemini text and image generation
 BFL_API_KEY=your_bfl_api_key           # For Flux image generation
+FAL_KEY=your_fal_ai_key                # For Kling video generation via fal.ai
 TILOPAY_WEBHOOK_SECRET=your_secret     # For payment webhooks
 ```

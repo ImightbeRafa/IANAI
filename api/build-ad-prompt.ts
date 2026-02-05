@@ -234,6 +234,16 @@ Tipo: Anuncio de venta directa para redes sociales`
 
   } catch (error) {
     console.error('Build ad prompt error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: 'ad_prompt_build',
+      model: 'grok-3-mini',
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({ 
       error: 'Failed to build ad prompt',
       message: error instanceof Error ? error.message : 'Unknown error'

@@ -111,7 +111,9 @@ export default function BRollWorkspace() {
       modelKling: 'Kling 2.6 Pro (fal.ai)',
       klingMode: 'Modo',
       klingStd: 'Estándar',
-      klingPro: 'Profesional'
+      klingPro: 'Profesional',
+      klingStdDesc: 'Rápido, buena calidad. Ideal para borradores y pruebas.',
+      klingProDesc: 'Máxima calidad y coherencia visual. Ideal para entrega final.'
     },
     en: {
       back: 'Back',
@@ -146,7 +148,9 @@ export default function BRollWorkspace() {
       modelKling: 'Kling 2.6 Pro (fal.ai)',
       klingMode: 'Mode',
       klingStd: 'Standard',
-      klingPro: 'Professional'
+      klingPro: 'Professional',
+      klingStdDesc: 'Fast, good quality. Ideal for drafts and testing.',
+      klingProDesc: 'Maximum quality and visual coherence. Ideal for final delivery.'
     }
   }
 
@@ -612,15 +616,15 @@ export default function BRollWorkspace() {
                   <input
                     type="range"
                     min="5"
-                    max={videoModel === 'kling' ? '10' : '30'}
+                    max="30"
                     step={videoModel === 'kling' ? '5' : '1'}
-                    value={videoModel === 'kling' ? (duration >= 8 ? 10 : 5) : duration}
+                    value={duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
                     className="w-full"
                   />
                   <div className="flex justify-between text-xs text-dark-400 mt-0.5">
                     <span>5s</span>
-                    <span>{videoModel === 'kling' ? '10s' : '30s'}</span>
+                    <span>30s</span>
                   </div>
                 </div>
                 <div>
@@ -651,6 +655,9 @@ export default function BRollWorkspace() {
                           {t.klingPro}
                         </button>
                       </div>
+                      <p className="text-[10px] text-dark-400 mt-1.5 leading-tight">
+                        {klingMode === 'std' ? t.klingStdDesc : t.klingProDesc}
+                      </p>
                     </>
                   ) : (
                     <>

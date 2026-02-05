@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { fal } from '@fal-ai/client'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
-import { logApiUsage } from './lib/usage-logger.js'
+import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 
 /**
  * KLING AI VIDEO GENERATION via fal.ai
@@ -16,7 +16,7 @@ import { logApiUsage } from './lib/usage-logger.js'
  *   Text-to-video:  fal-ai/kling-video/v2.6/pro/text-to-video
  * 
  * Pricing: ~$0.07/sec (no audio), ~$0.14/sec (with audio)
- * Duration: 5-10s native (fal handles billing per second)
+ * Duration: 5-30s in 5s increments (fal handles billing per second)
  */
 
 // Model IDs on fal.ai
@@ -189,6 +189,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } else {
               finalPrompt = (condensed || motherPrompt).substring(0, MAX_PROMPT_LENGTH)
             }
+
+            // Log the condense call usage
+            await logApiUsage({
+              userId: user.id,
+              userEmail: user.email,
+              feature: 'prompt_condense',
+              model: 'grok-3-mini',
+              inputTokens: estimateTokens(motherPrompt),
+              outputTokens: estimateTokens(condensed || ''),
+              success: true,
+              metadata: { source: 'kling_video', originalLength: motherPrompt.length, condensedLength: (condensed || '').length }
+            })
           } catch {
             finalPrompt = motherPrompt.substring(0, MAX_PROMPT_LENGTH)
           }
@@ -205,8 +217,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const imageRef = image_url || (image_urls && image_urls[0])
     const modelId = hasImages ? FAL_KLING_IMAGE_TO_VIDEO : FAL_KLING_TEXT_TO_VIDEO
 
-    // Kling via fal supports 5 or 10 second durations
-    const validDuration = duration >= 8 ? 10 : 5
+    // Kling via fal.ai: snap to nearest 5s increment (5, 10, 15, 20, 25, 30)
+    const validDuration = Math.max(5, Math.min(30, Math.round(duration / 5) * 5))
 
     // Build fal.ai input
     const falInput: Record<string, unknown> = {
@@ -270,6 +282,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error) {
     console.error('fal.ai Kling video generation error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: 'kling_video',
+      model: FAL_KLING_TEXT_TO_VIDEO,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'

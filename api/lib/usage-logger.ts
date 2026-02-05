@@ -9,20 +9,24 @@ const supabase = supabaseUrl && supabaseServiceKey
 
 // Cost per 1M tokens (in USD) - Update these based on actual pricing
 export const MODEL_COSTS = {
-  // Script generation models
-  'grok': { input: 3.00, output: 15.00 }, // Grok pricing per 1M tokens
-  'gemini': { input: 0.15, output: 0.60 }, // Gemini 3 Pro pricing
+  // Script generation models (per 1M tokens)
+  'grok': { input: 3.00, output: 15.00 },
+  'grok-3-mini': { input: 0.30, output: 0.50 },
+  'gemini': { input: 0.15, output: 0.60 },
   
-  // Image generation models (per image, not tokens)
-  'flux': { perImage: 0.003 }, // Flux Klein ~$0.003/image
-  'nano-banana': { perImage: 0.02 }, // Gemini 2.5 Flash Image estimate
-  'nano-banana-pro': { perImage: 0.05 }, // Gemini 3 Pro Image estimate
-  'grok-imagine': { perImage: 0.07 }, // grok-2-image-1212: $0.07/image
+  // Image generation models (per image)
+  'flux': { perImage: 0.003 },
+  'nano-banana': { perImage: 0.02 },
+  'nano-banana-pro': { perImage: 0.05 },
+  'grok-imagine': { perImage: 0.07 },
   
   // Video generation models (per second of output)
-  // grok-imagine-video: $0.05/sec at 480p, $0.07/sec at 720p
+  // Grok Imagine Video: $0.07/sec (including audio)
   'grok-imagine-video-480p': { perSecond: 0.05 },
   'grok-imagine-video-720p': { perSecond: 0.07 },
+  // Kling via fal.ai v2.6 Pro: $0.07/sec (no audio), $0.14/sec (with audio)
+  'fal-ai/kling-video/v2.6/pro/text-to-video': { perSecond: 0.07 },
+  'fal-ai/kling-video/v2.6/pro/image-to-video': { perSecond: 0.07 },
 }
 
 // Feature types for tracking
@@ -35,7 +39,8 @@ export type FeatureType =
   | 'pdf_extract'      // PDF text extraction
   | 'url_fetch'        // URL content fetching
   | 'ad_prompt_build'  // Ad video prompt pipeline (Module A+B+C)
-  | 'kling_video'      // Kling AI video generation
+  | 'kling_video'      // Kling AI video generation (fal.ai)
+  | 'prompt_condense'  // Prompt condensing for video APIs
 
 interface UsageLogParams {
   userId?: string
