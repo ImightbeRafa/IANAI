@@ -49,6 +49,10 @@ export default function BRollWorkspace() {
   const [error, setError] = useState('')
   const [pollingRequestId, setPollingRequestId] = useState<string | null>(null)
   const [enhancing, setEnhancing] = useState(false)
+  const [pollCount, setPollCount] = useState(0)
+  const [pollStartTime, setPollStartTime] = useState<number | null>(null)
+  const [lastPollStatus, setLastPollStatus] = useState<string | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
   // Video settings
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
@@ -133,9 +137,28 @@ export default function BRollWorkspace() {
     loadProduct()
   }, [productId, user])
 
+  // Timer for elapsed seconds display
+  useEffect(() => {
+    if (!pollStartTime) {
+      setElapsedSeconds(0)
+      return
+    }
+    const timerInterval = setInterval(() => {
+      setElapsedSeconds(Math.round((Date.now() - pollStartTime) / 1000))
+    }, 1000)
+    return () => clearInterval(timerInterval)
+  }, [pollStartTime])
+
   // Polling for video result
   useEffect(() => {
     if (!pollingRequestId) return
+
+    // Initialize polling state
+    if (!pollStartTime) {
+      setPollStartTime(Date.now())
+      setPollCount(0)
+      setLastPollStatus('Iniciando...')
+    }
 
     const pollInterval = setInterval(async () => {
       try {
@@ -146,8 +169,11 @@ export default function BRollWorkspace() {
           console.error('No auth token for polling')
           setPollingRequestId(null)
           setGenerating(false)
+          setPollStartTime(null)
           return
         }
+
+        setPollCount(prev => prev + 1)
 
         const response = await fetch(API_URL, {
           method: 'POST',
@@ -159,6 +185,17 @@ export default function BRollWorkspace() {
         })
 
         const result = await response.json()
+        
+        // Update status for UI display
+        const debugInfo = result.debug || {}
+        setLastPollStatus(`Estado: ${result.status} | API: ${debugInfo.rawStatus || 'unknown'}`)
+        
+        console.log('Poll result:', { 
+          status: result.status, 
+          debug: debugInfo,
+          pollCount: pollCount + 1,
+          elapsed: pollStartTime ? Math.round((Date.now() - pollStartTime) / 1000) : 0
+        })
 
         if (result.status === 'Ready' && result.result?.sample) {
           setGeneratedVideos(prev => [{
@@ -170,18 +207,33 @@ export default function BRollWorkspace() {
           }, ...prev])
           setPollingRequestId(null)
           setGenerating(false)
+          setPollStartTime(null)
+          setLastPollStatus(null)
         } else if (result.status === 'Error' || result.status === 'Failed') {
-          setError(result.error || t.error)
+          const errorMsg = result.error || result.debug?.rawStatus || t.error
+          setError(`Error: ${errorMsg}`)
           setPollingRequestId(null)
           setGenerating(false)
+          setPollStartTime(null)
+          setLastPollStatus(null)
+        }
+        
+        // Timeout after 5 minutes (100 polls at 3s each)
+        if (pollCount > 100) {
+          setError('Video generation timed out after 5 minutes. Please try again.')
+          setPollingRequestId(null)
+          setGenerating(false)
+          setPollStartTime(null)
+          setLastPollStatus(null)
         }
       } catch (err) {
         console.error('Polling error:', err)
+        setLastPollStatus(`Error de conexión`)
       }
     }, 3000) // Poll every 3 seconds for video (takes longer than images)
 
     return () => clearInterval(pollInterval)
-  }, [pollingRequestId, prompt, duration, t.error])
+  }, [pollingRequestId, prompt, duration, t.error, pollStartTime, pollCount])
 
   const ENHANCE_API_URL = import.meta.env.PROD ? '/api/enhance-prompt' : 'http://localhost:3000/api/enhance-prompt'
 
@@ -578,14 +630,23 @@ export default function BRollWorkspace() {
             </h2>
 
             {generating && pollingRequestId && (
-              <div className="mb-4 p-4 bg-primary-50 rounded-lg flex items-center gap-3">
-                <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
-                <div>
-                  <p className="text-sm font-medium text-primary-700">{t.processing}</p>
-                  <p className="text-xs text-primary-500">
-                    <Clock className="w-3 h-3 inline mr-1" />
-                    {duration}s video
-                  </p>
+              <div className="mb-4 p-4 bg-primary-50 rounded-lg">
+                <div className="flex items-center gap-3 mb-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
+                  <div>
+                    <p className="text-sm font-medium text-primary-700">{t.processing}</p>
+                    <p className="text-xs text-primary-500">
+                      <Clock className="w-3 h-3 inline mr-1" />
+                      {duration}s video @ {resolution}
+                    </p>
+                  </div>
+                </div>
+                {/* Progress tracking */}
+                <div className="mt-3 pt-3 border-t border-primary-100 text-xs text-primary-600 space-y-1">
+                  <p>⏱️ Tiempo: {elapsedSeconds}s</p>
+                  <p>🔄 Intentos: {pollCount}</p>
+                  {lastPollStatus && <p>📡 {lastPollStatus}</p>}
+                  <p className="text-primary-400 mt-2">ID: {pollingRequestId}</p>
                 </div>
               </div>
             )}

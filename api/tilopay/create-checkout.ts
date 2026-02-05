@@ -9,10 +9,10 @@ const supabase = supabaseUrl && supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null
 
-// TiloPay API credentials from environment
-const TILOPAY_API_KEY = process.env.TILOPAY_API_KEY || '7067-2615-6995-8721-7143'
-const TILOPAY_API_USER = process.env.TILOPAY_API_USER || '0S4T29'
-const TILOPAY_API_PASSWORD = process.env.TILOPAY_API_PASSWORD || 'exojM6'
+// TiloPay API credentials from environment (NEVER hardcode these!)
+const TILOPAY_API_KEY = process.env.TILOPAY_API_KEY
+const TILOPAY_API_USER = process.env.TILOPAY_API_USER
+const TILOPAY_API_PASSWORD = process.env.TILOPAY_API_PASSWORD
 
 // TiloPay payment links (direct checkout links from TiloPay dashboard)
 const BASE_PAYMENT_LINKS: Record<string, string> = {

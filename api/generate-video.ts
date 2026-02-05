@@ -66,7 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Poll for video result
     if (action === 'poll' && requestId) {
-      console.log('Polling Grok Video result:', requestId)
+      const pollStartTime = Date.now()
+      console.log('Polling Grok Video result:', { requestId, timestamp: new Date().toISOString() })
       
       const pollResponse = await fetch(`${GROK_VIDEO_RESULT_URL}/${requestId}`, {
         method: 'GET',
@@ -76,24 +77,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       })
 
+      const pollLatency = Date.now() - pollStartTime
+
       if (!pollResponse.ok) {
         const errorText = await pollResponse.text()
-        console.error('Grok Video poll error:', errorText)
-        return res.status(pollResponse.status).json({ error: 'Failed to check video status' })
+        console.error('Grok Video poll error:', { 
+          requestId, 
+          status: pollResponse.status, 
+          error: errorText,
+          latency: pollLatency
+        })
+        return res.status(pollResponse.status).json({ 
+          error: 'Failed to check video status',
+          details: errorText,
+          debug: { requestId, httpStatus: pollResponse.status, latency: pollLatency }
+        })
       }
 
-      const pollResult: VideoResultResponse = await pollResponse.json()
+      const pollResult = await pollResponse.json()
       
-      // Map status to our format
+      // Log full response for debugging
+      console.log('Grok Video poll response:', { 
+        requestId,
+        rawStatus: pollResult.status,
+        hasUrl: !!pollResult.url,
+        latency: pollLatency,
+        fullResponse: JSON.stringify(pollResult).substring(0, 500)
+      })
+      
+      // Map status to our format - check for various possible status values
       let status: 'Pending' | 'Ready' | 'Error' | 'Failed' = 'Pending'
-      if (pollResult.status === 'completed') status = 'Ready'
-      else if (pollResult.status === 'failed') status = 'Failed'
-      else if (pollResult.status === 'processing' || pollResult.status === 'pending') status = 'Pending'
+      const rawStatus = (pollResult.status || '').toLowerCase()
+      
+      if (rawStatus === 'completed' || rawStatus === 'complete' || rawStatus === 'succeeded' || pollResult.url) {
+        status = 'Ready'
+      } else if (rawStatus === 'failed' || rawStatus === 'error' || rawStatus === 'cancelled') {
+        status = 'Failed'
+      } else if (rawStatus === 'processing' || rawStatus === 'pending' || rawStatus === 'in_progress' || rawStatus === 'queued') {
+        status = 'Pending'
+      }
 
       return res.status(200).json({
         status,
         result: pollResult.url ? { sample: pollResult.url, duration: pollResult.duration } : undefined,
-        error: pollResult.error
+        error: pollResult.error || pollResult.message,
+        debug: {
+          requestId,
+          rawStatus: pollResult.status,
+          latency: pollLatency,
+          timestamp: new Date().toISOString()
+        }
       })
     }
 
