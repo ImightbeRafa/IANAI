@@ -36,7 +36,7 @@ export default function Layout({ children }: LayoutProps) {
     es: {
       scripts: 'Guiones',
       posts: 'Posts',
-      broll: 'B-Roll',
+      broll: 'Ad Videos',
       icps: 'Perfiles ICP',
       settings: 'Configuración',
       signOut: 'Cerrar Sesión',
@@ -45,7 +45,7 @@ export default function Layout({ children }: LayoutProps) {
     en: {
       scripts: 'Scripts',
       posts: 'Posts',
-      broll: 'B-Roll',
+      broll: 'Ad Videos',
       icps: 'ICP Profiles',
       settings: 'Settings',
       signOut: 'Sign Out',

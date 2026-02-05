@@ -40,9 +40,9 @@ export default function BRollDashboard() {
 
   const labels = {
     es: {
-      title: 'B-Roll Videos',
-      subtitle: 'Genera videos cortos para tu contenido',
-      selectProduct: 'Selecciona un producto para generar B-Roll',
+      title: 'Ad Videos',
+      subtitle: 'Genera videos de anuncios a partir de guiones ganadores',
+      selectProduct: 'Selecciona un producto para generar un Ad Video',
       noProducts: 'No tienes productos aún',
       createProduct: 'Crea tu primer producto para empezar a generar videos',
       goToDashboard: 'Ir a Dashboard',
@@ -54,12 +54,12 @@ export default function BRollDashboard() {
       back: 'Volver',
       noClients: 'No hay clientes aún',
       createFirstClient: 'Crea tu primer cliente para organizar tus productos',
-      generateBRoll: 'Generar B-Roll'
+      generateBRoll: 'Generar Ad Video'
     },
     en: {
-      title: 'B-Roll Videos',
-      subtitle: 'Generate short videos for your content',
-      selectProduct: 'Select a product to generate B-Roll',
+      title: 'Ad Videos',
+      subtitle: 'Generate ad videos from winning scripts',
+      selectProduct: 'Select a product to generate an Ad Video',
       noProducts: 'You have no products yet',
       createProduct: 'Create your first product to start generating videos',
       goToDashboard: 'Go to Dashboard',
@@ -71,7 +71,7 @@ export default function BRollDashboard() {
       back: 'Back',
       noClients: 'No clients yet',
       createFirstClient: 'Create your first client to organize your products',
-      generateBRoll: 'Generate B-Roll'
+      generateBRoll: 'Generate Ad Video'
     }
   }
 
@@ -312,7 +312,7 @@ export default function BRollDashboard() {
                     </div>
                     <div className="mt-4 flex items-center gap-2 text-primary-600 text-sm font-medium">
                       <Video className="w-4 h-4" />
-                      Generar B-Roll
+                      {language === 'es' ? 'Generar Ad Video' : 'Generate Ad Video'}
                     </div>
                   </Link>
                 )

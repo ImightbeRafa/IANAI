@@ -154,8 +154,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Validate duration (1-15 seconds for generation, editing keeps original)
     const validDuration = Math.max(1, Math.min(15, duration))
 
-    // Build system prompt for B-Roll
-    const systemPrompt = `Create a professional B-Roll video clip for social media marketing.
+    // Check if this is a structured ad video prompt (from build-ad-prompt pipeline)
+    // or a legacy B-Roll free-form prompt
+    const { motherPrompt } = req.body
+    
+    const systemPrompt = motherPrompt 
+      ? motherPrompt  // Module C output — already fully structured
+      : `Create a professional B-Roll video clip for social media marketing.
 Focus on: smooth motion, cinematic quality, professional lighting, engaging visuals.
 Style: Modern, clean, commercial-quality footage suitable for ads and social media content.
 

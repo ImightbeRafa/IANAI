@@ -34,6 +34,7 @@ export type FeatureType =
   | 'prompt_enhance'   // Prompt enhancement
   | 'pdf_extract'      // PDF text extraction
   | 'url_fetch'        // URL content fetching
+  | 'ad_prompt_build'  // Ad video prompt pipeline (Module A+B+C)
 
 interface UsageLogParams {
   userId?: string
