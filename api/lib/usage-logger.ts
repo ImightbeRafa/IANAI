@@ -35,6 +35,7 @@ export type FeatureType =
   | 'pdf_extract'      // PDF text extraction
   | 'url_fetch'        // URL content fetching
   | 'ad_prompt_build'  // Ad video prompt pipeline (Module A+B+C)
+  | 'kling_video'      // Kling AI video generation
 
 interface UsageLogParams {
   userId?: string

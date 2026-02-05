@@ -35,7 +35,10 @@ interface GeneratedVideo {
 }
 
 const VIDEO_API_URL = import.meta.env.PROD ? '/api/generate-video' : 'http://localhost:3000/api/generate-video'
+const KLING_VIDEO_API_URL = import.meta.env.PROD ? '/api/generate-video-kling' : 'http://localhost:3000/api/generate-video-kling'
 const BUILD_PROMPT_API_URL = import.meta.env.PROD ? '/api/build-ad-prompt' : 'http://localhost:3000/api/build-ad-prompt'
+
+type VideoModel = 'grok' | 'kling'
 
 export default function BRollWorkspace() {
   const { productId } = useParams<{ productId: string }>()
@@ -71,6 +74,8 @@ export default function BRollWorkspace() {
   // Video settings
   const [duration, setDuration] = useState<number>(15)
   const [resolution, setResolution] = useState<VideoResolution>('720p')
+  const [videoModel, setVideoModel] = useState<VideoModel>('kling')
+  const [klingMode, setKlingMode] = useState<'std' | 'pro'>('std')
 
   const labels = {
     es: {
@@ -100,7 +105,13 @@ export default function BRollWorkspace() {
       processing: 'Procesando video...',
       visualDNA: 'ADN Visual',
       cinematicScript: 'Guión Cinematográfico',
-      motherPromptLabel: 'Prompt Madre'
+      motherPromptLabel: 'Prompt Madre',
+      modelLabel: 'Modelo de Video',
+      modelGrok: 'Grok (xAI)',
+      modelKling: 'Kling 2.6 Pro (fal.ai)',
+      klingMode: 'Modo',
+      klingStd: 'Estándar',
+      klingPro: 'Profesional'
     },
     en: {
       back: 'Back',
@@ -129,7 +140,13 @@ export default function BRollWorkspace() {
       processing: 'Processing video...',
       visualDNA: 'Visual DNA',
       cinematicScript: 'Cinematic Script',
-      motherPromptLabel: 'Mother Prompt'
+      motherPromptLabel: 'Mother Prompt',
+      modelLabel: 'Video Model',
+      modelGrok: 'Grok (xAI)',
+      modelKling: 'Kling 2.6 Pro (fal.ai)',
+      klingMode: 'Mode',
+      klingStd: 'Standard',
+      klingPro: 'Professional'
     }
   }
 
@@ -187,13 +204,18 @@ export default function BRollWorkspace() {
 
         setPollCount(prev => prev + 1)
 
-        const response = await fetch(VIDEO_API_URL, {
+        const pollApiUrl = videoModel === 'kling' ? KLING_VIDEO_API_URL : VIDEO_API_URL
+        const pollBody = videoModel === 'kling' 
+          ? { action: 'poll', taskId: pollingRequestId }
+          : { action: 'poll', requestId: pollingRequestId }
+
+        const response = await fetch(pollApiUrl, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`
           },
-          body: JSON.stringify({ action: 'poll', requestId: pollingRequestId })
+          body: JSON.stringify(pollBody)
         })
 
         const result = await response.json()
@@ -236,7 +258,7 @@ export default function BRollWorkspace() {
     }, 3000)
 
     return () => clearInterval(pollInterval)
-  }, [pollingRequestId, motherPrompt, scriptText, duration, t.error, pollStartTime, pollCount, language])
+  }, [pollingRequestId, motherPrompt, scriptText, duration, t.error, pollStartTime, pollCount, language, videoModel])
 
   // Handle multiple image uploads
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -347,6 +369,8 @@ export default function BRollWorkspace() {
         throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
       }
       
+      const apiUrl = videoModel === 'kling' ? KLING_VIDEO_API_URL : VIDEO_API_URL
+
       const requestBody: Record<string, unknown> = {
         prompt: scriptText.trim() || 'Ad video generation',
         motherPrompt: motherPrompt || undefined,
@@ -355,12 +379,24 @@ export default function BRollWorkspace() {
         resolution
       }
 
-      // If we have an uploaded image, send the first one as reference
-      if (uploadedImages.length > 0) {
-        requestBody.image_url = uploadedImages[0]
+      // Model-specific params
+      if (videoModel === 'kling') {
+        requestBody.mode = klingMode
+        // fal.ai Kling supports image_url and image_urls for multi-image
+        if (uploadedImages.length > 0) {
+          requestBody.image_url = uploadedImages[0]
+        }
+        if (uploadedImages.length > 1) {
+          requestBody.image_urls = uploadedImages
+        }
+      } else {
+        // Grok: send first image as reference
+        if (uploadedImages.length > 0) {
+          requestBody.image_url = uploadedImages[0]
+        }
       }
 
-      const response = await fetch(VIDEO_API_URL, {
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -538,6 +574,35 @@ export default function BRollWorkspace() {
                 {t.step3}
               </h2>
 
+              {/* Model Selector */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-dark-600 mb-1.5">
+                  {t.modelLabel}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    onClick={() => setVideoModel('kling')}
+                    className={`p-2 rounded-lg text-xs font-medium transition-colors ${
+                      videoModel === 'kling'
+                        ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    {t.modelKling}
+                  </button>
+                  <button
+                    onClick={() => setVideoModel('grok')}
+                    className={`p-2 rounded-lg text-xs font-medium transition-colors ${
+                      videoModel === 'grok'
+                        ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    {t.modelGrok}
+                  </button>
+                </div>
+              </div>
+
               {/* Video Settings */}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
@@ -547,42 +612,75 @@ export default function BRollWorkspace() {
                   <input
                     type="range"
                     min="5"
-                    max="30"
-                    value={duration}
+                    max={videoModel === 'kling' ? '10' : '30'}
+                    step={videoModel === 'kling' ? '5' : '1'}
+                    value={videoModel === 'kling' ? (duration >= 8 ? 10 : 5) : duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
                     className="w-full"
                   />
                   <div className="flex justify-between text-xs text-dark-400 mt-0.5">
                     <span>5s</span>
-                    <span>30s</span>
+                    <span>{videoModel === 'kling' ? '10s' : '30s'}</span>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-dark-600 mb-1.5">
-                    {t.resolution}
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={() => setResolution('720p')}
-                      className={`p-1.5 rounded-lg text-xs transition-colors ${
-                        resolution === '720p'
-                          ? 'bg-primary-100 text-primary-700 border border-primary-500'
-                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
-                      }`}
-                    >
-                      720p HD
-                    </button>
-                    <button
-                      onClick={() => setResolution('480p')}
-                      className={`p-1.5 rounded-lg text-xs transition-colors ${
-                        resolution === '480p'
-                          ? 'bg-primary-100 text-primary-700 border border-primary-500'
-                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
-                      }`}
-                    >
-                      480p
-                    </button>
-                  </div>
+                  {videoModel === 'kling' ? (
+                    <>
+                      <label className="block text-xs font-medium text-dark-600 mb-1.5">
+                        {t.klingMode}
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          onClick={() => setKlingMode('std')}
+                          className={`p-1.5 rounded-lg text-xs transition-colors ${
+                            klingMode === 'std'
+                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          {t.klingStd}
+                        </button>
+                        <button
+                          onClick={() => setKlingMode('pro')}
+                          className={`p-1.5 rounded-lg text-xs transition-colors ${
+                            klingMode === 'pro'
+                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          {t.klingPro}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label className="block text-xs font-medium text-dark-600 mb-1.5">
+                        {t.resolution}
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          onClick={() => setResolution('720p')}
+                          className={`p-1.5 rounded-lg text-xs transition-colors ${
+                            resolution === '720p'
+                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          720p HD
+                        </button>
+                        <button
+                          onClick={() => setResolution('480p')}
+                          className={`p-1.5 rounded-lg text-xs transition-colors ${
+                            resolution === '480p'
+                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          480p
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -654,24 +752,26 @@ export default function BRollWorkspace() {
                 </div>
               )}
 
-              {/* Generate Video Button */}
-              <button
-                onClick={handleGenerate}
-                disabled={generating || !motherPrompt}
-                className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-              >
-                {generating ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    {t.generating}
-                  </>
-                ) : (
-                  <>
-                    <Video className="w-5 h-5" />
-                    {t.generate}
-                  </>
-                )}
-              </button>
+              {/* Generate Video Button — only shown after mother prompt is built */}
+              {motherPrompt && (
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="w-full py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      {t.generating}
+                    </>
+                  ) : (
+                    <>
+                      <Video className="w-5 h-5" />
+                      {t.generate}
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 

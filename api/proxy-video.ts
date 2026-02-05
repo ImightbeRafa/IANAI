@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing video URL' })
     }
 
-    // Validate it's an xAI video URL
+    // Validate video URL domain
     let parsedVideoUrl: URL
     try {
       parsedVideoUrl = new URL(videoUrl)
@@ -56,7 +56,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid video URL format' })
     }
 
-    if (!parsedVideoUrl.hostname.endsWith('.x.ai') && !parsedVideoUrl.hostname.endsWith('.xai.com')) {
+    const allowedDomains = ['.x.ai', '.xai.com', '.kwimgs.com', '.klingai.com', '.fal.media', '.fal.ai', '.fal.run']
+    const isAllowed = allowedDomains.some(d => parsedVideoUrl.hostname.endsWith(d))
+    if (!isAllowed) {
       return res.status(400).json({ error: 'Invalid video URL domain' })
     }
 
