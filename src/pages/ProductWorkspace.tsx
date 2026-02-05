@@ -14,6 +14,7 @@ import {
   saveScript,
   rateScript,
   getICPs,
+  getClientICPs,
   getContextDocuments,
   createContextDocument,
   deleteContextDocument
@@ -104,8 +105,10 @@ export default function ProductWorkspace() {
         const sessionsData = await getChatSessions(productId)
         setSessions(sessionsData)
 
-        // Load user's ICPs for script generation
-        const icpsData = await getICPs(user.id)
+        // Load ICPs: client-scoped for team products, user-scoped for single accounts
+        const icpsData = productData.client_id 
+          ? await getClientICPs(productData.client_id)
+          : await getICPs(user.id)
         setICPs(icpsData)
 
         if (sessionId) {

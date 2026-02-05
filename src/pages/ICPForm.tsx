@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 
 export default function ICPForm() {
-  const { icpId } = useParams<{ icpId: string }>()
+  const { icpId, clientId } = useParams<{ icpId: string; clientId: string }>()
   const { user } = useAuth()
   const { language } = useLanguage()
   const navigate = useNavigate()
@@ -193,7 +193,8 @@ export default function ICPForm() {
       if (isEditing && icpId) {
         await updateICP(icpId, formData)
       } else {
-        await createICP(user.id, formData)
+        const icpPayload = { ...formData, ...(clientId ? { client_id: clientId } : {}) }
+        await createICP(user.id, icpPayload)
       }
       navigate('/icps')
     } catch (err) {
@@ -222,6 +223,10 @@ export default function ICPForm() {
           <Link
             to="/icps"
             className="p-2 text-dark-500 hover:text-dark-900 hover:bg-dark-100 rounded-lg transition-colors"
+            onClick={(e) => {
+              e.preventDefault()
+              navigate('/icps')
+            }}
           >
             <ArrowLeft className="w-5 h-5" />
           </Link>

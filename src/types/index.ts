@@ -285,6 +285,7 @@ export type AgeRange = '18-24' | '25-34' | '35-44' | '45-54' | '55+'
 export interface ICP {
   id: string
   owner_id: string
+  client_id?: string
   name: string
   description: string  // Persona que [situación], quiere [resultado], pero está bloqueada por [bloqueo]
   awareness_level: AwarenessLevel
@@ -304,6 +305,7 @@ export interface ICPFormData {
   urgency_type: UrgencyType
   gender: Gender
   age_range: AgeRange
+  client_id?: string
 }
 
 // =============================================

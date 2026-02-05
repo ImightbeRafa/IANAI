@@ -115,6 +115,22 @@ export default function App() {
               }
             />
             <Route
+              path="/icps/client/:clientId/new"
+              element={
+                <ProtectedRoute>
+                  <ICPForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/icps/client/:clientId/:icpId/edit"
+              element={
+                <ProtectedRoute>
+                  <ICPForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/team"
               element={
                 <ProtectedRoute>

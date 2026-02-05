@@ -683,6 +683,18 @@ export async function getICPs(userId: string): Promise<ICP[]> {
     .from('icps')
     .select('*')
     .eq('owner_id', userId)
+    .is('client_id', null)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getClientICPs(clientId: string): Promise<ICP[]> {
+  const { data, error } = await supabase
+    .from('icps')
+    .select('*')
+    .eq('client_id', clientId)
     .order('created_at', { ascending: false })
 
   if (error) throw error

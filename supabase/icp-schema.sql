@@ -7,6 +7,7 @@
 CREATE TABLE IF NOT EXISTS icps (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   owner_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL,  -- Persona que [situación], quiere [resultado], pero bloqueada por [bloqueo]
   awareness_level TEXT NOT NULL CHECK (awareness_level IN ('unaware', 'problem_aware', 'solution_aware', 'product_aware')),
@@ -36,3 +37,4 @@ CREATE POLICY "Users can delete own ICPs" ON icps
 
 -- Index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_icps_owner_id ON icps(owner_id);
+CREATE INDEX IF NOT EXISTS idx_icps_client_id ON icps(client_id);
