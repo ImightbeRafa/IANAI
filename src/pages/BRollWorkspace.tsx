@@ -360,7 +360,22 @@ export default function BRollWorkspace() {
 
   const handleDownload = async (videoUrl: string, index: number) => {
     try {
-      const response = await fetch(videoUrl)
+      // Use proxy to avoid CORS issues with xAI video URLs
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      
+      const proxyUrl = import.meta.env.PROD 
+        ? `/api/proxy-video?url=${encodeURIComponent(videoUrl)}`
+        : `http://localhost:3000/api/proxy-video?url=${encodeURIComponent(videoUrl)}`
+      
+      const response = await fetch(proxyUrl, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      })
+      
+      if (!response.ok) {
+        throw new Error('Download failed')
+      }
+      
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -372,6 +387,7 @@ export default function BRollWorkspace() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Download failed:', err)
+      setError(language === 'es' ? 'Error al descargar el video' : 'Failed to download video')
     }
   }
 
