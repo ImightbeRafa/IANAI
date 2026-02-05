@@ -12,7 +12,11 @@ import {
   TrendingUp,
   Calendar,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Video,
+  Sparkles,
+  FileUp,
+  Link2
 } from 'lucide-react'
 
 interface UsageSummary {
@@ -54,6 +58,8 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'nano-banana-pro': { name: 'Nano Banana Pro', color: 'bg-orange-500' },
   'grok-imagine': { name: 'Grok Imagine', color: 'bg-pink-500' },
   'grok-imagine-video': { name: 'Grok Video', color: 'bg-red-500' },
+  'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
+  'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
 }
 
 // Cost per 1M tokens or per image/video (for reference display)
@@ -65,6 +71,8 @@ const MODEL_PRICING: Record<string, string> = {
   'nano-banana-pro': '~$0.05/image',
   'grok-imagine': '~$0.07/image',
   'grok-imagine-video': '~$0.25/video (5s)',
+  'pdf-parse': 'Free (local)',
+  'web-scraper': 'Free (local)',
 }
 
 // Admin emails (only these can access)
@@ -106,7 +114,11 @@ export default function AdminDashboard() {
       last90days: 'Últimos 90 días',
       script: 'Guiones',
       image: 'Imágenes',
+      video: 'Videos',
       paste_organize: 'Auto-llenado',
+      prompt_enhance: 'Mejora de Prompts',
+      pdf_extract: 'Extracción PDF',
+      url_fetch: 'Lectura de URLs',
       noData: 'No hay datos de uso aún',
       user: 'Usuario',
       time: 'Hora',
@@ -137,7 +149,11 @@ export default function AdminDashboard() {
       last90days: 'Last 90 days',
       script: 'Scripts',
       image: 'Images',
+      video: 'Videos',
       paste_organize: 'Auto-fill',
+      prompt_enhance: 'Prompt Enhancement',
+      pdf_extract: 'PDF Extraction',
+      url_fetch: 'URL Fetching',
       noData: 'No usage data yet',
       user: 'User',
       time: 'Time',
@@ -386,7 +402,11 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-3">
                         {feature === 'script' && <FileText className="w-5 h-5 text-blue-500" />}
                         {feature === 'image' && <ImageIcon className="w-5 h-5 text-green-500" />}
+                        {feature === 'video' && <Video className="w-5 h-5 text-red-500" />}
                         {feature === 'paste_organize' && <FileText className="w-5 h-5 text-purple-500" />}
+                        {feature === 'prompt_enhance' && <Sparkles className="w-5 h-5 text-amber-500" />}
+                        {feature === 'pdf_extract' && <FileUp className="w-5 h-5 text-orange-500" />}
+                        {feature === 'url_fetch' && <Link2 className="w-5 h-5 text-teal-500" />}
                         <span className="font-medium text-dark-900">
                           {t[feature as keyof typeof t] || feature}
                         </span>

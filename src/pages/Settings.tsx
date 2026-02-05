@@ -5,7 +5,8 @@ import { getProfile } from '../services/database'
 import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check } from 'lucide-react'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 interface Subscription {
   plan: 'free' | 'starter' | 'pro' | 'enterprise'
@@ -402,7 +403,7 @@ export default function Settings() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center justify-between py-3">
+            <div className="flex items-center justify-between py-3 border-b border-dark-100">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                   profile?.account_type === 'team' ? 'bg-purple-100' : 'bg-blue-100'
@@ -428,6 +429,29 @@ export default function Settings() {
                 {profile?.account_type === 'team' ? t.teamDesc : t.individualDesc}
               </span>
             </div>
+            
+            {/* Team Management Link */}
+            {profile?.account_type === 'team' && (
+              <Link 
+                to="/team" 
+                className="flex items-center justify-between py-3 hover:bg-dark-50 -mx-4 px-4 rounded-lg transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-green-100">
+                    <Users className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-dark-900">
+                      {language === 'es' ? 'Gestionar Equipo' : 'Manage Team'}
+                    </p>
+                    <p className="text-sm text-dark-500">
+                      {language === 'es' ? 'Invitar y administrar miembros' : 'Invite and manage members'}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-dark-400" />
+              </Link>
+            )}
           </div>
         </div>
       </div>

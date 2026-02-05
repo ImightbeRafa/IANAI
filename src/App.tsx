@@ -14,6 +14,7 @@ import BRollWorkspace from './pages/BRollWorkspace'
 import ICPDashboard from './pages/ICPDashboard'
 import ICPForm from './pages/ICPForm'
 import Settings from './pages/Settings'
+import TeamManagement from './pages/TeamManagement'
 import AdminDashboard from './pages/AdminDashboard'
 
 export default function App() {
@@ -110,6 +111,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <ICPForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/team"
+              element={
+                <ProtectedRoute>
+                  <TeamManagement />
                 </ProtectedRoute>
               }
             />

@@ -9,6 +9,14 @@ const supabase = supabaseUrl && supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb'
+    }
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -41,104 +49,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { url } = req.body
+    const { base64Content, fileName } = req.body
 
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ error: 'URL is required' })
+    if (!base64Content || typeof base64Content !== 'string') {
+      return res.status(400).json({ error: 'PDF content is required' })
     }
 
-    // Validate URL format
-    let parsedUrl: URL
+    // Decode base64 to buffer
+    const pdfBuffer = Buffer.from(base64Content, 'base64')
+    
+    // Extract text from PDF using pdf-parse compatible approach
+    // For serverless, we use a simple text extraction
+    let textContent = ''
+    
     try {
-      parsedUrl = new URL(url)
-      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-        throw new Error('Invalid protocol')
-      }
+      // Try to extract text using pdf-parse if available
+      const pdfParse = await import('pdf-parse')
+      const pdfData = await pdfParse.default(pdfBuffer)
+      textContent = pdfData.text
     } catch {
-      return res.status(400).json({ error: 'Invalid URL format' })
+      // Fallback: Basic text extraction for PDFs with embedded text
+      const pdfString = pdfBuffer.toString('utf8')
+      const textMatches = pdfString.match(/\(([^)]+)\)/g) || []
+      textContent = textMatches
+        .map(m => m.slice(1, -1))
+        .filter(t => t.length > 1 && !/^[\\\/\d\s]+$/.test(t))
+        .join(' ')
+      
+      if (textContent.length < 50) {
+        textContent = 'PDF uploaded: ' + (fileName || 'document.pdf') + '\n[Note: Text extraction limited. PDF may contain images or scanned content.]'
+      }
     }
 
-    // Fetch URL content
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; AdvanceAI/1.0)',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
-      signal: AbortSignal.timeout(10000) // 10 second timeout
-    })
-
-    if (!response.ok) {
-      return res.status(400).json({ error: `Failed to fetch URL: ${response.status}` })
-    }
-
-    const contentType = response.headers.get('content-type') || ''
-    const html = await response.text()
-
-    // Extract text content from HTML
-    let textContent = html
-      // Remove scripts
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      // Remove styles
-      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-      // Remove HTML tags
-      .replace(/<[^>]+>/g, ' ')
-      // Decode HTML entities
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      // Normalize whitespace
+    // Clean up the text
+    textContent = textContent
       .replace(/\s+/g, ' ')
       .trim()
 
-    // Limit content length to prevent token overflow
+    // Limit content length
     const maxLength = 8000
     if (textContent.length > maxLength) {
       textContent = textContent.substring(0, maxLength) + '...[truncated]'
     }
 
-    // Extract page title
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-    const title = titleMatch ? titleMatch[1].trim() : parsedUrl.hostname
-
-    // Log usage - URL fetching is tracked as a utility feature
+    // Log usage - PDF extraction is tracked as a utility feature
     await logApiUsage({
       userId: user.id,
       userEmail: user.email || undefined,
-      feature: 'url_fetch',
-      model: 'web-scraper',
+      feature: 'pdf_extract',
+      model: 'pdf-parse',
       success: true,
       metadata: { 
-        url: parsedUrl.hostname,
+        fileName: fileName || 'document.pdf',
         contentLength: textContent.length,
-        contentType
+        fileSize: base64Content.length
       }
     })
 
     return res.status(200).json({
       success: true,
-      title,
       content: textContent,
-      url: url,
-      contentType
+      fileName: fileName || 'document.pdf',
+      pageCount: 'unknown'
     })
 
   } catch (error) {
-    console.error('URL fetch error:', error)
+    console.error('PDF extraction error:', error)
     
     // Log failed usage
     await logApiUsage({
       userId: user.id,
       userEmail: user.email || undefined,
-      feature: 'url_fetch',
-      model: 'web-scraper',
+      feature: 'pdf_extract',
+      model: 'pdf-parse',
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })
     
     return res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Failed to fetch URL content'
+      error: error instanceof Error ? error.message : 'Failed to extract PDF content'
     })
   }
 }

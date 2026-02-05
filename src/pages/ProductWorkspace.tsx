@@ -43,7 +43,8 @@ import {
   Users,
   Link2,
   FileText,
-  Trash2
+  Trash2,
+  Upload
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -343,6 +344,74 @@ export default function ProductWorkspace() {
     } catch (error) {
       console.error('Failed to delete document:', error)
     }
+  }
+
+  const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !currentSession || !user || addingDoc) return
+    
+    if (!file.type.includes('pdf')) {
+      console.error('Please upload a PDF file')
+      return
+    }
+
+    setAddingDoc(true)
+    
+    try {
+      // Read file as base64
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        const base64 = (e.target?.result as string)?.split(',')[1]
+        if (!base64) {
+          setAddingDoc(false)
+          return
+        }
+
+        // Extract text via API
+        const { data: { session: authSession } } = await supabase.auth.getSession()
+        const token = authSession?.access_token
+
+        const extractUrl = import.meta.env.PROD 
+          ? '/api/extract-pdf' 
+          : 'http://localhost:3000/api/extract-pdf'
+
+        const response = await fetch(extractUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ base64Content: base64, fileName: file.name })
+        })
+
+        const result = await response.json()
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to extract PDF')
+        }
+
+        // Save to database
+        const newDoc = await createContextDocument(currentSession.id, user.id, {
+          type: 'pdf',
+          name: file.name,
+          content: result.content
+        })
+
+        setContextDocs(prev => [newDoc, ...prev])
+        setAddingDoc(false)
+      }
+      reader.onerror = () => {
+        console.error('Failed to read file')
+        setAddingDoc(false)
+      }
+      reader.readAsDataURL(file)
+    } catch (error) {
+      console.error('Failed to upload PDF:', error)
+      setAddingDoc(false)
+    }
+    
+    // Reset input
+    event.target.value = ''
   }
 
   const handleSaveProduct = async () => {
@@ -1245,16 +1314,31 @@ export default function ProductWorkspace() {
                   {language === 'es' ? 'Documentos de Contexto' : 'Context Documents'}
                 </h3>
 
-                {/* Add Link Button */}
-                {!showAddLink ? (
+                {/* Add Link & PDF Buttons */}
+                <div className="flex gap-2 mb-3">
                   <button
                     onClick={() => setShowAddLink(true)}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-dark-300 rounded-lg text-sm text-dark-500 hover:border-green-500 hover:text-green-600 transition-colors"
+                    disabled={showAddLink}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-dark-300 rounded-lg text-sm text-dark-500 hover:border-green-500 hover:text-green-600 transition-colors disabled:opacity-50"
                   >
                     <Link2 className="w-4 h-4" />
-                    {language === 'es' ? 'Agregar enlace web' : 'Add web link'}
+                    {language === 'es' ? 'Enlace' : 'Link'}
                   </button>
-                ) : (
+                  <label className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-dark-300 rounded-lg text-sm text-dark-500 hover:border-green-500 hover:text-green-600 transition-colors cursor-pointer">
+                    <Upload className="w-4 h-4" />
+                    {language === 'es' ? 'PDF' : 'PDF'}
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      onChange={handlePdfUpload}
+                      className="hidden"
+                      disabled={addingDoc}
+                    />
+                  </label>
+                </div>
+
+                {/* Add Link Form */}
+                {showAddLink && (
                   <div className="space-y-2">
                     <input
                       type="url"

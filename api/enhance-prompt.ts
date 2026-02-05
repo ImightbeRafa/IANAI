@@ -90,11 +90,11 @@ Reglas:
       await logApiUsage({
         userId: user.id,
         userEmail: user.email,
-        feature: 'script',
+        feature: 'prompt_enhance',
         model: 'grok',
         success: false,
         errorMessage: errorText,
-        metadata: { action: 'enhance_prompt', type }
+        metadata: { type }
       })
 
       return res.status(response.status).json({ 
@@ -118,12 +118,12 @@ Reglas:
     await logApiUsage({
       userId: user.id,
       userEmail: user.email,
-      feature: 'script',
+      feature: 'prompt_enhance',
       model: 'grok',
       inputTokens,
       outputTokens,
       success: true,
-      metadata: { action: 'enhance_prompt', type }
+      metadata: { type }
     })
 
     return res.status(200).json({

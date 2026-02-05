@@ -11,7 +11,9 @@ import {
   getDashboardStats,
   createProduct,
   createClient,
-  assignProductToClient
+  assignProductToClient,
+  deleteClient,
+  deleteProduct
 } from '../services/database'
 import type { Profile, Product, DashboardStats, ProductFormData, RestaurantFormData, Team, Client } from '../types'
 import Layout from '../components/Layout'
@@ -30,7 +32,8 @@ import {
   ChevronRight,
   ArrowLeft,
   UtensilsCrossed,
-  Home
+  Home,
+  Trash2
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -189,6 +192,40 @@ export default function Dashboard() {
     }
   }
 
+  const handleDeleteClient = async (client: Client) => {
+    const confirmMsg = language === 'es' 
+      ? `¿Eliminar "${client.name}" y todos sus productos, guiones y datos? Esta acción no se puede deshacer.`
+      : `Delete "${client.name}" and all its products, scripts, and data? This cannot be undone.`
+    
+    if (!confirm(confirmMsg)) return
+
+    try {
+      await deleteClient(client.id)
+      setClients(prev => prev.filter(c => c.id !== client.id))
+    } catch (error) {
+      console.error('Failed to delete client:', error)
+    }
+  }
+
+  const handleDeleteProduct = async (product: Product) => {
+    const confirmMsg = language === 'es' 
+      ? `¿Eliminar "${product.name}" y todos sus guiones y datos? Esta acción no se puede deshacer.`
+      : `Delete "${product.name}" and all its scripts and data? This cannot be undone.`
+    
+    if (!confirm(confirmMsg)) return
+
+    try {
+      await deleteProduct(product.id)
+      if (selectedClient) {
+        setClientProducts(prev => prev.filter(p => p.id !== product.id))
+      } else {
+        setProducts(prev => prev.filter(p => p.id !== product.id))
+      }
+    } catch (error) {
+      console.error('Failed to delete product:', error)
+    }
+  }
+
   const labels = {
     es: {
       welcome: '¡Bienvenido de nuevo',
@@ -295,8 +332,19 @@ export default function Dashboard() {
     return (
       <div
         key={product.id}
-        className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group"
+        className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group relative"
       >
+        {/* Delete button - only for team owners or individual accounts */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            handleDeleteProduct(product)
+          }}
+          className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+          title={language === 'es' ? 'Eliminar' : 'Delete'}
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
         <div className="flex items-start gap-4">
           <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${typeStyles.bg}`}>
             {typeStyles.icon}
@@ -340,26 +388,41 @@ export default function Dashboard() {
 
   // Render client card component
   const renderClientCard = (client: Client) => (
-    <button
+    <div
       key={client.id}
-      onClick={() => setSelectedClient(client)}
-      className="block w-full p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group text-left"
+      className="relative p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group"
     >
-      <div className="flex items-center gap-4">
-        <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
-          <Building2 className="w-6 h-6 text-amber-600" />
+      {/* Delete button - only for team owners */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          handleDeleteClient(client)
+        }}
+        className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10"
+        title={language === 'es' ? 'Eliminar cliente' : 'Delete client'}
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => setSelectedClient(client)}
+        className="w-full text-left"
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+            <Building2 className="w-6 h-6 text-amber-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
+              {client.name}
+            </p>
+            <p className="text-sm text-dark-400">
+              {new Date(client.created_at).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US')}
+            </p>
+          </div>
+          <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600" />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
-            {client.name}
-          </p>
-          <p className="text-sm text-dark-400">
-            {new Date(client.created_at).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US')}
-          </p>
-        </div>
-        <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600" />
-      </div>
-    </button>
+      </button>
+    </div>
   )
 
   return (

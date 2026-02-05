@@ -25,10 +25,20 @@ export const MODEL_COSTS = {
   'grok-imagine-video-720p': { perSecond: 0.07 },
 }
 
+// Feature types for tracking
+export type FeatureType = 
+  | 'script'           // Script generation
+  | 'image'            // Image generation
+  | 'video'            // Video generation
+  | 'paste_organize'   // Auto-fill/paste organize
+  | 'prompt_enhance'   // Prompt enhancement
+  | 'pdf_extract'      // PDF text extraction
+  | 'url_fetch'        // URL content fetching
+
 interface UsageLogParams {
   userId?: string
   userEmail?: string
-  feature: 'script' | 'image' | 'video' | 'paste_organize'
+  feature: FeatureType
   model: string
   inputTokens?: number
   outputTokens?: number
