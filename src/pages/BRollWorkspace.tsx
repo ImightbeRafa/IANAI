@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getScripts } from '../services/database'
-import type { Product, Script, AspectRatio, VideoResolution } from '../types'
+import { getProduct } from '../services/database'
+import type { Product, AspectRatio, VideoResolution } from '../types'
 import Layout from '../components/Layout'
 import { 
   ArrowLeft,
@@ -20,7 +20,6 @@ import {
   Clock,
   Play,
   FileText,
-  ChevronDown,
   Eye,
   EyeOff,
   Clapperboard
@@ -46,12 +45,10 @@ export default function BRollWorkspace() {
 
   // Data
   const [product, setProduct] = useState<Product | null>(null)
-  const [scripts, setScripts] = useState<Script[]>([])
   const [loading, setLoading] = useState(true)
 
   // Step 1: Inputs
-  const [selectedScript, setSelectedScript] = useState<Script | null>(null)
-  const [showScriptPicker, setShowScriptPicker] = useState(false)
+  const [scriptText, setScriptText] = useState('')
   const [uploadedImages, setUploadedImages] = useState<string[]>([])
 
   // Step 2: Build prompt (Module A+B+C)
@@ -80,12 +77,10 @@ export default function BRollWorkspace() {
       back: 'Volver',
       title: 'Generar Ad Video',
       subtitle: 'Crea videos de anuncios a partir de guiones ganadores',
-      step1: 'Paso 1: Selecciona tu guión ganador',
+      step1: 'Paso 1: Pega tu guión ganador',
       step2: 'Paso 2: Fotos del producto (opcional)',
       step3: 'Paso 3: Genera tu video',
-      selectScript: 'Seleccionar guión',
-      noScripts: 'No hay guiones para este producto. Crea uno primero.',
-      scriptSelected: 'Guión seleccionado',
+      pasteScript: 'Pega aquí tu guión ganador...',
       uploadPhotos: 'Sube fotos de tu producto',
       uploadHint: 'Las fotos ayudan a la IA a mantener la identidad visual',
       buildPrompt: 'Construir Prompt de Anuncio',
@@ -111,12 +106,10 @@ export default function BRollWorkspace() {
       back: 'Back',
       title: 'Generate Ad Video',
       subtitle: 'Create ad videos from winning scripts',
-      step1: 'Step 1: Select your winning script',
+      step1: 'Step 1: Paste your winning script',
       step2: 'Step 2: Product photos (optional)',
       step3: 'Step 3: Generate your video',
-      selectScript: 'Select script',
-      noScripts: 'No scripts for this product. Create one first.',
-      scriptSelected: 'Script selected',
+      pasteScript: 'Paste your winning script here...',
       uploadPhotos: 'Upload product photos',
       uploadHint: 'Photos help the AI maintain visual identity',
       buildPrompt: 'Build Ad Prompt',
@@ -147,12 +140,8 @@ export default function BRollWorkspace() {
     async function loadData() {
       if (!productId || !user) return
       try {
-        const [productData, scriptsData] = await Promise.all([
-          getProduct(productId),
-          getScripts(productId)
-        ])
+        const productData = await getProduct(productId)
         setProduct(productData)
-        setScripts(scriptsData)
       } catch (error) {
         console.error('Failed to load data:', error)
       } finally {
@@ -215,7 +204,7 @@ export default function BRollWorkspace() {
           setGeneratedVideos(prev => [{
             id: pollingRequestId,
             videoUrl: result.result.sample,
-            prompt: motherPrompt || selectedScript?.content || '',
+            prompt: motherPrompt || scriptText,
             duration: result.result.duration || duration,
             createdAt: new Date()
           }, ...prev])
@@ -247,7 +236,7 @@ export default function BRollWorkspace() {
     }, 3000)
 
     return () => clearInterval(pollInterval)
-  }, [pollingRequestId, motherPrompt, selectedScript, duration, t.error, pollStartTime, pollCount, language])
+  }, [pollingRequestId, motherPrompt, scriptText, duration, t.error, pollStartTime, pollCount, language])
 
   // Handle multiple image uploads
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -288,7 +277,7 @@ export default function BRollWorkspace() {
 
   // STEP 2: Build Ad Prompt (Module A → B → C)
   const handleBuildPrompt = async () => {
-    if (!selectedScript) return
+    if (!scriptText.trim()) return
 
     setBuildingPrompt(true)
     setError('')
@@ -319,7 +308,7 @@ export default function BRollWorkspace() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          script: selectedScript.content,
+          script: scriptText.trim(),
           productContext: getProductContext(),
           productPhotosDescription,
           duration
@@ -344,7 +333,7 @@ export default function BRollWorkspace() {
 
   // STEP 3: Generate Video with Mother Prompt
   const handleGenerate = async () => {
-    if (!motherPrompt && !selectedScript) return
+    if (!motherPrompt && !scriptText.trim()) return
 
     setGenerating(true)
     setError('')
@@ -358,7 +347,7 @@ export default function BRollWorkspace() {
       }
       
       const requestBody: Record<string, unknown> = {
-        prompt: selectedScript?.content || 'Ad video generation',
+        prompt: scriptText.trim() || 'Ad video generation',
         motherPrompt: motherPrompt || undefined,
         duration,
         aspect_ratio: '9:16' as AspectRatio,
@@ -487,65 +476,18 @@ export default function BRollWorkspace() {
                 {t.step1}
               </h2>
 
-              {scripts.length === 0 ? (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-sm text-amber-700">{t.noScripts}</p>
-                </div>
-              ) : (
-                <div className="relative">
-                  <button
-                    onClick={() => setShowScriptPicker(!showScriptPicker)}
-                    className={`w-full text-left px-4 py-3 border rounded-lg transition-colors flex items-center justify-between ${
-                      selectedScript 
-                        ? 'border-primary-300 bg-primary-50' 
-                        : 'border-dark-200 hover:border-primary-300'
-                    }`}
-                  >
-                    <span className={`text-sm ${selectedScript ? 'text-dark-800 font-medium' : 'text-dark-400'}`}>
-                      {selectedScript 
-                        ? `${selectedScript.title || selectedScript.content.substring(0, 60) + '...'}`
-                        : t.selectScript
-                      }
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-dark-400 transition-transform ${showScriptPicker ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {showScriptPicker && (
-                    <div className="absolute z-20 mt-1 w-full bg-white border border-dark-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                      {scripts.map((script) => (
-                        <button
-                          key={script.id}
-                          onClick={() => {
-                            setSelectedScript(script)
-                            setShowScriptPicker(false)
-                            setMotherPrompt('')
-                            setVisualDNA('')
-                            setCinematicScript('')
-                          }}
-                          className={`w-full text-left px-4 py-3 hover:bg-primary-50 transition-colors border-b border-dark-50 last:border-0 ${
-                            selectedScript?.id === script.id ? 'bg-primary-50' : ''
-                          }`}
-                        >
-                          <p className="text-sm font-medium text-dark-800 truncate">
-                            {script.title || `${language === 'es' ? 'Guión' : 'Script'} #${script.variation_number}`}
-                          </p>
-                          <p className="text-xs text-dark-500 mt-1 line-clamp-2">{script.content.substring(0, 120)}...</p>
-                          {script.is_favorite && (
-                            <span className="inline-block mt-1 text-xs text-amber-600 font-medium">★ {language === 'es' ? 'Favorito' : 'Favorite'}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Show selected script content */}
-              {selectedScript && (
-                <div className="mt-3 p-3 bg-dark-50 rounded-lg max-h-32 overflow-y-auto">
-                  <p className="text-xs text-dark-600 whitespace-pre-wrap">{selectedScript.content}</p>
-                </div>
-              )}
+              <textarea
+                value={scriptText}
+                onChange={(e) => {
+                  setScriptText(e.target.value)
+                  setMotherPrompt('')
+                  setVisualDNA('')
+                  setCinematicScript('')
+                }}
+                placeholder={t.pasteScript}
+                rows={6}
+                className="w-full px-4 py-3 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none text-sm"
+              />
             </div>
 
             {/* STEP 2: Product Photos */}
@@ -654,7 +596,7 @@ export default function BRollWorkspace() {
               {!motherPrompt && (
                 <button
                   onClick={handleBuildPrompt}
-                  disabled={!selectedScript || buildingPrompt}
+                  disabled={!scriptText.trim() || buildingPrompt}
                   className="w-full py-3 bg-dark-800 text-white rounded-lg font-medium hover:bg-dark-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 mb-3"
                 >
                   {buildingPrompt ? (
