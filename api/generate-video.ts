@@ -105,11 +105,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         fullResponse: JSON.stringify(pollResult).substring(0, 500)
       })
       
+      // Extract video URL - API returns it in video.url
+      const videoUrl = pollResult.video?.url || pollResult.url
+      const videoDuration = pollResult.video?.duration || pollResult.duration
+      
       // Map status to our format - check for various possible status values
       let status: 'Pending' | 'Ready' | 'Error' | 'Failed' = 'Pending'
       const rawStatus = (pollResult.status || '').toLowerCase()
       
-      if (rawStatus === 'completed' || rawStatus === 'complete' || rawStatus === 'succeeded' || pollResult.url) {
+      if (rawStatus === 'completed' || rawStatus === 'complete' || rawStatus === 'succeeded' || videoUrl) {
         status = 'Ready'
       } else if (rawStatus === 'failed' || rawStatus === 'error' || rawStatus === 'cancelled') {
         status = 'Failed'
@@ -119,11 +123,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       return res.status(200).json({
         status,
-        result: pollResult.url ? { sample: pollResult.url, duration: pollResult.duration } : undefined,
+        result: videoUrl ? { sample: videoUrl, duration: videoDuration } : undefined,
         error: pollResult.error || pollResult.message,
         debug: {
           requestId,
           rawStatus: pollResult.status,
+          videoUrl: !!videoUrl,
           latency: pollLatency,
           timestamp: new Date().toISOString()
         }
