@@ -28,7 +28,6 @@ import {
   Briefcase,
   Users,
   FolderOpen,
-  Building2,
   ChevronRight,
   ArrowLeft,
   UtensilsCrossed,
@@ -408,8 +407,8 @@ export default function Dashboard() {
         className="w-full text-left"
       >
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
-            <Building2 className="w-6 h-6 text-amber-600" />
+          <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center">
+            <Briefcase className="w-6 h-6 text-primary-600" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
@@ -528,8 +527,8 @@ export default function Dashboard() {
                       <ArrowLeft className="w-5 h-5 text-dark-500" />
                     </button>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-                        <Building2 className="w-5 h-5 text-amber-600" />
+                      <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                        <Briefcase className="w-5 h-5 text-primary-600" />
                       </div>
                       <div>
                         <h2 className="text-lg font-semibold text-dark-900">
@@ -662,8 +661,8 @@ export default function Dashboard() {
                   onClick={() => handleAssignToClient(client.id)}
                   className="w-full p-3 text-left bg-dark-50 hover:bg-dark-100 rounded-lg transition-colors flex items-center gap-3"
                 >
-                  <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                    <Building2 className="w-4 h-4 text-amber-600" />
+                  <div className="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                    <Briefcase className="w-4 h-4 text-primary-600" />
                   </div>
                   <span className="font-medium text-dark-900">{client.name}</span>
                 </button>

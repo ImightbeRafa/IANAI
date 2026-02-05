@@ -23,7 +23,6 @@ import {
   Briefcase,
   Users,
   FolderOpen,
-  Building2,
   ChevronRight,
   ArrowLeft,
   UtensilsCrossed,
@@ -287,8 +286,8 @@ export default function PostsDashboard() {
 
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
-                    <Building2 className="w-5 h-5 text-primary-600" />
+                  <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                    <Briefcase className="w-5 h-5 text-primary-600" />
                   </div>
                   <h2 className="text-xl font-semibold text-dark-900">{selectedClient.name}</h2>
                 </div>
@@ -372,7 +371,7 @@ export default function PostsDashboard() {
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
-                          <Building2 className="w-6 h-6 text-primary-600" />
+                          <Briefcase className="w-6 h-6 text-primary-600" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <h3 className="font-semibold text-dark-900 group-hover:text-primary-600 transition-colors truncate">
