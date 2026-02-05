@@ -11,6 +11,8 @@ import PostsDashboard from './pages/PostsDashboard'
 import PostWorkspace from './pages/PostWorkspace'
 import BRollDashboard from './pages/BRollDashboard'
 import BRollWorkspace from './pages/BRollWorkspace'
+import ICPDashboard from './pages/ICPDashboard'
+import ICPForm from './pages/ICPForm'
 import Settings from './pages/Settings'
 import AdminDashboard from './pages/AdminDashboard'
 
@@ -84,6 +86,30 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <BRollWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/icps"
+              element={
+                <ProtectedRoute>
+                  <ICPDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/icps/new"
+              element={
+                <ProtectedRoute>
+                  <ICPForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/icps/:icpId/edit"
+              element={
+                <ProtectedRoute>
+                  <ICPForm />
                 </ProtectedRoute>
               }
             />

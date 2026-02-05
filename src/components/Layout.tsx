@@ -10,7 +10,8 @@ import {
   FileText,
   ImageIcon,
   Film,
-  BarChart3
+  BarChart3,
+  Users
 } from 'lucide-react'
 
 const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio', 'ian@iankupfer.com']
@@ -36,6 +37,7 @@ export default function Layout({ children }: LayoutProps) {
       scripts: 'Guiones',
       posts: 'Posts',
       broll: 'B-Roll',
+      icps: 'Perfiles ICP',
       settings: 'Configuración',
       signOut: 'Cerrar Sesión',
       admin: 'Admin'
@@ -44,6 +46,7 @@ export default function Layout({ children }: LayoutProps) {
       scripts: 'Scripts',
       posts: 'Posts',
       broll: 'B-Roll',
+      icps: 'ICP Profiles',
       settings: 'Settings',
       signOut: 'Sign Out',
       admin: 'Admin'
@@ -57,6 +60,7 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/dashboard', label: t.scripts, icon: FileText, beta: true },
     { path: '/posts', label: t.posts, icon: ImageIcon, beta: true },
     { path: '/broll', label: t.broll, icon: Film, beta: true },
+    { path: '/icps', label: t.icps, icon: Users, beta: true },
     { path: '/settings', label: t.settings, icon: Settings, beta: false },
     ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false }] : []),
   ]

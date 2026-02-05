@@ -12,10 +12,15 @@ import {
   updateChatSession,
   updateProduct,
   saveScript,
-  rateScript
+  rateScript,
+  getICPs,
+  getContextDocuments,
+  createContextDocument,
+  deleteContextDocument
 } from '../services/database'
 import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
-import type { Product, ChatSession, Message, ScriptGenerationSettings } from '../types'
+import type { Product, ChatSession, Message, ScriptGenerationSettings, ICP, ContextDocument } from '../types'
+import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
 import ScriptSettingsPanel from '../components/ScriptSettingsPanel'
@@ -34,7 +39,11 @@ import {
   Info,
   Settings,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  Users,
+  Link2,
+  FileText,
+  Trash2
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -59,6 +68,13 @@ export default function ProductWorkspace() {
   const [showSettings, setShowSettings] = useState(false)
   const [ratedMessages, setRatedMessages] = useState<Record<string, 'up' | 'down'>>({})
   const [savedScriptIds, setSavedScriptIds] = useState<Record<string, string>>({})
+  const [icps, setICPs] = useState<ICP[]>([])
+  const [selectedICP, setSelectedICP] = useState<ICP | null>(null)
+  const [contextDocs, setContextDocs] = useState<ContextDocument[]>([])
+  const [showAddLink, setShowAddLink] = useState(false)
+  const [newLinkUrl, setNewLinkUrl] = useState('')
+  const [newTextContent, setNewTextContent] = useState('')
+  const [addingDoc, setAddingDoc] = useState(false)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -87,6 +103,10 @@ export default function ProductWorkspace() {
         const sessionsData = await getChatSessions(productId)
         setSessions(sessionsData)
 
+        // Load user's ICPs for script generation
+        const icpsData = await getICPs(user.id)
+        setICPs(icpsData)
+
         if (sessionId) {
           const sessionData = await getChatSession(sessionId)
           if (sessionData) {
@@ -94,6 +114,9 @@ export default function ProductWorkspace() {
             setContext(sessionData.context || '')
             const messagesData = await getMessages(sessionId)
             setMessages(messagesData)
+            // Load context documents for this session
+            const docsData = await getContextDocuments(sessionId)
+            setContextDocs(docsData)
           }
         } else if (sessionsData.length > 0) {
           navigate(`/product/${productId}/session/${sessionsData[0].id}`, { replace: true })
@@ -247,6 +270,81 @@ export default function ProductWorkspace() {
     }
   }
 
+  const handleAddLink = async () => {
+    if (!currentSession || !user || !newLinkUrl.trim() || addingDoc) return
+    setAddingDoc(true)
+    
+    try {
+      // Fetch URL content via API
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const token = authSession?.access_token
+
+      const fetchUrl = import.meta.env.PROD 
+        ? '/api/fetch-url' 
+        : 'http://localhost:3000/api/fetch-url'
+
+      const response = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ url: newLinkUrl })
+      })
+
+      const result = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to fetch URL')
+      }
+
+      // Save to database
+      const newDoc = await createContextDocument(currentSession.id, user.id, {
+        type: 'link',
+        name: result.title || newLinkUrl,
+        content: result.content,
+        url: newLinkUrl
+      })
+
+      setContextDocs(prev => [newDoc, ...prev])
+      setNewLinkUrl('')
+      setShowAddLink(false)
+    } catch (error) {
+      console.error('Failed to add link:', error)
+    } finally {
+      setAddingDoc(false)
+    }
+  }
+
+  const handleAddText = async () => {
+    if (!currentSession || !user || !newTextContent.trim() || addingDoc) return
+    setAddingDoc(true)
+    
+    try {
+      const newDoc = await createContextDocument(currentSession.id, user.id, {
+        type: 'text',
+        name: language === 'es' ? 'Texto adicional' : 'Additional text',
+        content: newTextContent
+      })
+
+      setContextDocs(prev => [newDoc, ...prev])
+      setNewTextContent('')
+    } catch (error) {
+      console.error('Failed to add text:', error)
+    } finally {
+      setAddingDoc(false)
+    }
+  }
+
+  const handleDeleteDoc = async (docId: string) => {
+    try {
+      await deleteContextDocument(docId)
+      setContextDocs(prev => prev.filter(d => d.id !== docId))
+    } catch (error) {
+      console.error('Failed to delete document:', error)
+    }
+  }
+
   const handleSaveProduct = async () => {
     if (!product) return
     try {
@@ -283,7 +381,7 @@ export default function ProductWorkspace() {
       const productContext = buildProductContext(product, context)
       const allMessages = [...messages, userMessage]
       
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
       
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse)
       setMessages(prev => [...prev, savedAiMessage])
@@ -1079,6 +1177,32 @@ export default function ProductWorkspace() {
               </div>
             </div>
 
+            {/* ICP Selector */}
+            {icps.length > 0 && (
+              <div className="p-4 border-t border-dark-100 bg-blue-50/50">
+                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-600" />
+                  {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
+                </h3>
+                <select
+                  value={selectedICP?.id || ''}
+                  onChange={(e) => {
+                    const icp = icps.find(i => i.id === e.target.value) || null
+                    setSelectedICP(icp)
+                  }}
+                  className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
+                  {icps.map(icp => (
+                    <option key={icp.id} value={icp.id}>{icp.name}</option>
+                  ))}
+                </select>
+                {selectedICP && (
+                  <p className="text-xs text-dark-500 mt-2 line-clamp-2">{selectedICP.description}</p>
+                )}
+              </div>
+            )}
+
             {/* Script Settings Panel */}
             {showSettings && (
               <div className="p-4 border-t border-dark-100 bg-amber-50/50 max-h-[50vh] overflow-y-auto">
@@ -1112,6 +1236,96 @@ export default function ProductWorkspace() {
                 {t.saveContext}
               </button>
             </div>
+
+            {/* Context Documents */}
+            {currentSession && (
+              <div className="p-4 border-t border-dark-100 bg-green-50/50">
+                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-green-600" />
+                  {language === 'es' ? 'Documentos de Contexto' : 'Context Documents'}
+                </h3>
+
+                {/* Add Link Button */}
+                {!showAddLink ? (
+                  <button
+                    onClick={() => setShowAddLink(true)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-dark-300 rounded-lg text-sm text-dark-500 hover:border-green-500 hover:text-green-600 transition-colors"
+                  >
+                    <Link2 className="w-4 h-4" />
+                    {language === 'es' ? 'Agregar enlace web' : 'Add web link'}
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="url"
+                      value={newLinkUrl}
+                      onChange={(e) => setNewLinkUrl(e.target.value)}
+                      placeholder="https://..."
+                      className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleAddLink}
+                        disabled={addingDoc || !newLinkUrl.trim()}
+                        className="flex-1 px-3 py-2 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        {addingDoc ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                        {language === 'es' ? 'Agregar' : 'Add'}
+                      </button>
+                      <button
+                        onClick={() => { setShowAddLink(false); setNewLinkUrl('') }}
+                        className="px-3 py-2 text-dark-500 hover:bg-dark-100 rounded-lg text-sm"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Add Text */}
+                <div className="mt-3">
+                  <textarea
+                    value={newTextContent}
+                    onChange={(e) => setNewTextContent(e.target.value)}
+                    placeholder={language === 'es' ? 'Agregar texto adicional...' : 'Add additional text...'}
+                    className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm h-16 resize-none focus:ring-2 focus:ring-green-500"
+                  />
+                  {newTextContent.trim() && (
+                    <button
+                      onClick={handleAddText}
+                      disabled={addingDoc}
+                      className="mt-2 w-full px-3 py-2 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      {addingDoc ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                      {language === 'es' ? 'Agregar texto' : 'Add text'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Document List */}
+                {contextDocs.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-xs text-dark-500 font-medium">
+                      {language === 'es' ? 'Documentos agregados:' : 'Added documents:'}
+                    </p>
+                    {contextDocs.map(doc => (
+                      <div key={doc.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-dark-100">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {doc.type === 'link' ? <Link2 className="w-4 h-4 text-blue-500 flex-shrink-0" /> : <FileText className="w-4 h-4 text-green-500 flex-shrink-0" />}
+                          <span className="text-xs text-dark-700 truncate">{doc.name}</span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteDoc(doc.id)}
+                          className="p-1 text-dark-400 hover:text-red-500 transition-colors flex-shrink-0"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

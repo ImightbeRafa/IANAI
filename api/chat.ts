@@ -263,12 +263,31 @@ interface ScriptSettings {
   model?: AIModel
 }
 
+interface ICPData {
+  name: string
+  description: string
+  awareness_level: 'unaware' | 'problem_aware' | 'solution_aware' | 'product_aware'
+  sophistication_level: 'low' | 'medium' | 'high'
+  urgency_type: 'immediate' | 'latent' | 'low'
+  gender: 'male' | 'female' | 'any'
+  age_range: '18-24' | '25-34' | '35-44' | '45-54' | '55+'
+}
+
+interface ContextDocumentData {
+  type: 'pdf' | 'image' | 'link' | 'text'
+  name: string
+  content?: string
+  url?: string
+}
+
 interface RequestBody {
   messages: ChatMessage[]
   businessDetails: Record<string, string>
   language: 'en' | 'es'
   scriptSettings?: ScriptSettings
   productType?: 'product' | 'service' | 'restaurant' | 'real_estate'
+  icp?: ICPData | null
+  contextDocuments?: ContextDocumentData[]
 }
 
 const FRAMEWORK_PROMPTS = {
@@ -672,6 +691,102 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
   return variationInstruction
 }
 
+function buildContextDocumentsPrompt(docs: ContextDocumentData[] | undefined, language: 'en' | 'es'): string {
+  if (!docs || docs.length === 0) return ''
+
+  const header = language === 'es'
+    ? `\n\n===================================================================
+DOCUMENTOS DE CONTEXTO ADICIONAL
+===================================================================
+El usuario ha proporcionado los siguientes documentos/enlaces como contexto adicional para la generación de guiones. USA esta información para enriquecer y personalizar los guiones:`
+    : `\n\n===================================================================
+ADDITIONAL CONTEXT DOCUMENTS
+===================================================================
+The user has provided the following documents/links as additional context for script generation. USE this information to enrich and personalize the scripts:`
+
+  const docsContent = docs.map((doc, i) => {
+    const docType = doc.type === 'link' 
+      ? (language === 'es' ? 'Enlace web' : 'Web link')
+      : (language === 'es' ? 'Texto' : 'Text')
+    
+    return `
+--- ${docType}: ${doc.name} ---
+${doc.content || '(Sin contenido / No content)'}
+${doc.url ? `URL: ${doc.url}` : ''}`
+  }).join('\n')
+
+  return `${header}\n${docsContent}`
+}
+
+function buildICPPrompt(icp: ICPData | null | undefined, language: 'en' | 'es'): string {
+  if (!icp) return ''
+
+  const awarenessRules = {
+    es: {
+      unaware: 'NIVEL DE CONCIENCIA: INCONSCIENTE - El ICP siente frustración pero no sabe qué le pasa. PROHIBIDO mencionar soluciones, productos o métodos al inicio. Los mensajes deben partir de síntomas o consecuencias.',
+      problem_aware: 'NIVEL DE CONCIENCIA: CONSCIENTE DEL PROBLEMA - El ICP sabe qué le duele, pero no conoce la solución. Se puede nombrar el problema. No asumir conocimiento de soluciones.',
+      solution_aware: 'NIVEL DE CONCIENCIA: CONSCIENTE DE LA SOLUCIÓN - El ICP sabe que existen soluciones. Se puede asumir que "algo" ya intentó. Enfocar en diferenciación y fricción previa.',
+      product_aware: 'NIVEL DE CONCIENCIA: CONSCIENTE DEL PRODUCTO - El ICP ya compara opciones. Se puede hablar de criterios, elección y comparación. El mensaje puede ser directo y decisivo.'
+    },
+    en: {
+      unaware: 'AWARENESS LEVEL: UNAWARE - The ICP feels frustration but doesn\'t know what\'s wrong. FORBIDDEN to mention solutions, products or methods at the beginning. Messages must start from symptoms or consequences.',
+      problem_aware: 'AWARENESS LEVEL: PROBLEM AWARE - The ICP knows what hurts, but doesn\'t know the solution. You can name the problem. Don\'t assume knowledge of solutions.',
+      solution_aware: 'AWARENESS LEVEL: SOLUTION AWARE - The ICP knows solutions exist. You can assume they\'ve tried "something". Focus on differentiation and previous friction.',
+      product_aware: 'AWARENESS LEVEL: PRODUCT AWARE - The ICP already compares options. You can talk about criteria, choice and comparison. The message can be direct and decisive.'
+    }
+  }
+
+  const sophisticationRules = {
+    es: {
+      low: 'SOFISTICACIÓN DEL MERCADO: BAJA - Permitir mensajes simples y directos. Claims claros sin necesidad de desvalidación.',
+      medium: 'SOFISTICACIÓN DEL MERCADO: MEDIA - Reconocer promesas comunes. Diferenciar sin confrontar agresivamente.',
+      high: 'SOFISTICACIÓN DEL MERCADO: ALTA - Restringir claims exagerados. Usar lenguaje preciso, sobrio y específico. Evitar hype, exageración y fórmulas genéricas.'
+    },
+    en: {
+      low: 'MARKET SOPHISTICATION: LOW - Allow simple and direct messages. Clear claims without need for invalidation.',
+      medium: 'MARKET SOPHISTICATION: MEDIUM - Recognize common promises. Differentiate without aggressive confrontation.',
+      high: 'MARKET SOPHISTICATION: HIGH - Restrict exaggerated claims. Use precise, sober and specific language. Avoid hype, exaggeration and generic formulas.'
+    }
+  }
+
+  const urgencyRules = {
+    es: {
+      immediate: 'URGENCIA: INMEDIATA - Ritmo rápido. CTA directo. Mensajes orientados a acción inmediata.',
+      latent: 'URGENCIA: LATENTE - Construir urgencia progresiva. CTA de primer paso.',
+      low: 'URGENCIA: BAJA - PROHIBIDO forzar cierre. Mensajes orientados a conciencia y preparación.'
+    },
+    en: {
+      immediate: 'URGENCY: IMMEDIATE - Fast pace. Direct CTA. Messages oriented to immediate action.',
+      latent: 'URGENCY: LATENT - Build progressive urgency. First step CTA.',
+      low: 'URGENCY: LOW - FORBIDDEN to force close. Messages oriented to awareness and preparation.'
+    }
+  }
+
+  const genderAgeNote = language === 'es'
+    ? `DEMOGRAFÍA: ${icp.gender === 'any' ? 'Indistinto' : icp.gender === 'male' ? 'Masculino' : 'Femenino'}, ${icp.age_range} años. Ajusta vocabulario, ejemplos y ritmo del mensaje según esta demografía.`
+    : `DEMOGRAPHICS: ${icp.gender === 'any' ? 'Any' : icp.gender === 'male' ? 'Male' : 'Female'}, ${icp.age_range} years. Adjust vocabulary, examples and message rhythm according to this demographic.`
+
+  const header = language === 'es'
+    ? `\n\n===================================================================
+PERFIL DE CLIENTE IDEAL (ICP): "${icp.name}"
+===================================================================
+DESCRIPCIÓN: ${icp.description}
+
+REGLAS DE COMUNICACIÓN PARA ESTE ICP:`
+    : `\n\n===================================================================
+IDEAL CLIENT PROFILE (ICP): "${icp.name}"
+===================================================================
+DESCRIPTION: ${icp.description}
+
+COMMUNICATION RULES FOR THIS ICP:`
+
+  return `${header}
+${awarenessRules[language][icp.awareness_level]}
+${sophisticationRules[language][icp.sophistication_level]}
+${urgencyRules[language][icp.urgency_type]}
+${genderAgeNote}`
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -693,7 +808,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { messages, businessDetails, language = 'en', scriptSettings } = req.body as RequestBody
+    const { messages, businessDetails, language = 'en', scriptSettings, icp, contextDocuments } = req.body as RequestBody
     const selectedModel: AIModel = scriptSettings?.model || 'grok'
 
     if (!messages || !Array.isArray(messages)) {
@@ -712,6 +827,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
+    const icpPrompt = buildICPPrompt(icp, language)
+    const contextDocsPrompt = buildContextDocumentsPrompt(contextDocuments, language)
     
     const productType = req.body.productType
     let basePrompt = MASTER_PROMPTS[language]
@@ -724,7 +841,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       basePrompt = SERVICE_PROMPTS[language]
     }
     
-    const systemPrompt = basePrompt + settingsPrompt + (
+    const systemPrompt = basePrompt + settingsPrompt + icpPrompt + contextDocsPrompt + (
       Object.keys(businessDetails || {}).length > 0
         ? `\n\nCurrent business context:\n${JSON.stringify(businessDetails, null, 2)}`
         : ''

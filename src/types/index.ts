@@ -274,6 +274,64 @@ export interface ScriptGenerationSettings {
 }
 
 // =============================================
+// ICP (Ideal Client Profile) Types
+// =============================================
+export type AwarenessLevel = 'unaware' | 'problem_aware' | 'solution_aware' | 'product_aware'
+export type SophisticationLevel = 'low' | 'medium' | 'high'
+export type UrgencyType = 'immediate' | 'latent' | 'low'
+export type Gender = 'male' | 'female' | 'any'
+export type AgeRange = '18-24' | '25-34' | '35-44' | '45-54' | '55+'
+
+export interface ICP {
+  id: string
+  owner_id: string
+  name: string
+  description: string  // Persona que [situación], quiere [resultado], pero está bloqueada por [bloqueo]
+  awareness_level: AwarenessLevel
+  sophistication_level: SophisticationLevel
+  urgency_type: UrgencyType
+  gender: Gender
+  age_range: AgeRange
+  created_at: string
+  updated_at: string
+}
+
+export interface ICPFormData {
+  name: string
+  description: string
+  awareness_level: AwarenessLevel
+  sophistication_level: SophisticationLevel
+  urgency_type: UrgencyType
+  gender: Gender
+  age_range: AgeRange
+}
+
+// =============================================
+// Context Documents Types
+// =============================================
+export type ContextDocumentType = 'pdf' | 'image' | 'link' | 'text'
+
+export interface ContextDocument {
+  id: string
+  session_id: string
+  owner_id: string
+  type: ContextDocumentType
+  name: string
+  content?: string
+  url?: string
+  file_path?: string
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export interface ContextDocumentFormData {
+  type: ContextDocumentType
+  name: string
+  content?: string
+  url?: string
+}
+
+// =============================================
 // Dashboard Stats
 // =============================================
 export interface DashboardStats {

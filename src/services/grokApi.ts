@@ -1,4 +1,4 @@
-import type { Message, ScriptGenerationSettings, ProductType } from '../types'
+import type { Message, ScriptGenerationSettings, ProductType, ICP, ContextDocument } from '../types'
 import { supabase } from '../lib/supabase'
 
 type Language = 'en' | 'es'
@@ -60,7 +60,9 @@ export async function sendMessageToGrok(
   productContext: ProductContext,
   language: Language = 'es',
   scriptSettings?: ScriptGenerationSettings,
-  productType?: ProductType
+  productType?: ProductType,
+  icp?: ICP | null,
+  contextDocs?: ContextDocument[]
 ): Promise<string> {
   // Get the current session token for authentication
   const { data: { session } } = await supabase.auth.getSession()
@@ -69,6 +71,14 @@ export async function sendMessageToGrok(
   if (!token) {
     throw new Error('No estás autenticado. Por favor inicia sesión.')
   }
+
+  // Prepare context documents for API
+  const contextDocuments = contextDocs?.map(doc => ({
+    type: doc.type,
+    name: doc.name,
+    content: doc.content,
+    url: doc.url
+  })) || []
 
   const response = await fetch('/api/chat', {
     method: 'POST',
@@ -84,7 +94,17 @@ export async function sendMessageToGrok(
       businessDetails: productContext,
       language,
       scriptSettings,
-      productType: productType || productContext.product_type
+      productType: productType || productContext.product_type,
+      icp: icp ? {
+        name: icp.name,
+        description: icp.description,
+        awareness_level: icp.awareness_level,
+        sophistication_level: icp.sophistication_level,
+        urgency_type: icp.urgency_type,
+        gender: icp.gender,
+        age_range: icp.age_range
+      } : null,
+      contextDocuments
     })
   })
 

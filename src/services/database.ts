@@ -10,7 +10,11 @@ import type {
   Script,
   ProductFormData,
   DashboardStats,
-  TeamDashboardStats
+  TeamDashboardStats,
+  ICP,
+  ICPFormData,
+  ContextDocument,
+  ContextDocumentFormData
 } from '../types'
 
 // =============================================
@@ -667,6 +671,108 @@ export async function deletePost(postId: string): Promise<void> {
     .from('posts')
     .delete()
     .eq('id', postId)
+
+  if (error) throw error
+}
+
+// =============================================
+// ICP (Ideal Client Profile) FUNCTIONS
+// =============================================
+export async function getICPs(userId: string): Promise<ICP[]> {
+  const { data, error } = await supabase
+    .from('icps')
+    .select('*')
+    .eq('owner_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getICP(icpId: string): Promise<ICP | null> {
+  const { data, error } = await supabase
+    .from('icps')
+    .select('*')
+    .eq('id', icpId)
+    .single()
+
+  if (error) return null
+  return data
+}
+
+export async function createICP(userId: string, icpData: ICPFormData): Promise<ICP> {
+  const { data, error } = await supabase
+    .from('icps')
+    .insert({
+      owner_id: userId,
+      ...icpData
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateICP(icpId: string, updates: Partial<ICPFormData>): Promise<ICP> {
+  const { data, error } = await supabase
+    .from('icps')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', icpId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteICP(icpId: string): Promise<void> {
+  const { error } = await supabase
+    .from('icps')
+    .delete()
+    .eq('id', icpId)
+
+  if (error) throw error
+}
+
+// =============================================
+// CONTEXT DOCUMENTS FUNCTIONS
+// =============================================
+export async function getContextDocuments(sessionId: string): Promise<ContextDocument[]> {
+  const { data, error } = await supabase
+    .from('context_documents')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createContextDocument(
+  sessionId: string,
+  userId: string,
+  docData: ContextDocumentFormData
+): Promise<ContextDocument> {
+  const { data, error } = await supabase
+    .from('context_documents')
+    .insert({
+      session_id: sessionId,
+      owner_id: userId,
+      ...docData
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteContextDocument(docId: string): Promise<void> {
+  const { error } = await supabase
+    .from('context_documents')
+    .delete()
+    .eq('id', docId)
 
   if (error) throw error
 }
