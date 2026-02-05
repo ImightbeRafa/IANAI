@@ -20,11 +20,14 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2"
   },
+  "overrides": {
+    "undici": "^5.28.5"
+  },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@vercel/node": "^5.5.28",
+    "@vercel/node": "^5.5.31",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.9.0",

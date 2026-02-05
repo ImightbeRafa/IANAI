@@ -47,6 +47,16 @@ export async function compressImageToWebP(
  * Upload a compressed image to Supabase Storage
  * Returns the public URL of the uploaded image
  */
+/**
+ * Sanitize a path segment to prevent path traversal attacks
+ */
+function sanitizePathSegment(segment: string): string {
+  return segment
+    .replace(/\.\./g, '')
+    .replace(/[\/\\]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+}
+
 export async function uploadPostImage(
   userId: string,
   productId: string,
@@ -56,10 +66,18 @@ export async function uploadPostImage(
   // Compress to WebP
   const compressedBlob = await compressImageToWebP(imageSource)
   
-  // Generate unique filename
+  // Generate unique filename with sanitization
   const timestamp = Date.now()
-  const imageName = filename || `${timestamp}.webp`
-  const filePath = `${userId}/${productId}/${imageName}`
+  const rawName = filename || `${timestamp}.webp`
+  const safeUserId = sanitizePathSegment(userId)
+  const safeProductId = sanitizePathSegment(productId)
+  const safeFileName = sanitizePathSegment(rawName)
+  
+  if (!safeUserId || !safeProductId || !safeFileName) {
+    throw new Error('Invalid file path parameters')
+  }
+  
+  const filePath = `${safeUserId}/${safeProductId}/${safeFileName}`
   
   // Upload to Supabase Storage
   const { data, error } = await supabase.storage

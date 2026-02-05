@@ -58,6 +58,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid URL format' })
     }
 
+    // SSRF protection: block internal/private IPs and localhost
+    const hostname = parsedUrl.hostname.toLowerCase()
+    const blockedPatterns = [
+      'localhost', '127.0.0.1', '0.0.0.0', '::1',
+      '169.254.', '10.', '172.16.', '172.17.', '172.18.', '172.19.',
+      '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
+      '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.',
+      '192.168.', 'metadata.google', '169.254.169.254'
+    ]
+    if (blockedPatterns.some(p => hostname.startsWith(p) || hostname === p)) {
+      return res.status(400).json({ error: 'URL not allowed' })
+    }
+
     // Fetch URL content
     const response = await fetch(url, {
       headers: {
