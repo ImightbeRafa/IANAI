@@ -107,45 +107,25 @@ Responde SOLO con el guión cinematográfico estructurado, sin explicaciones adi
 
 const MODULE_C_SYSTEM = `Eres un ingeniero de prompts especializado en generación de video con IA para anuncios de venta directa.
 
-Tu tarea es fusionar tres inputs en UN SOLO PROMPT FINAL optimizado para una IA de generación de video.
+Tu tarea es fusionar tres inputs en UN SOLO PROMPT FINAL COMPACTO optimizado para una IA de generación de video.
 
-El prompt final DEBE contener estas secciones exactas:
+LÍMITE ESTRICTO: El prompt final debe tener MÁXIMO 3000 caracteres. Sé denso y directo.
 
-1. VIDEO SPECS
-- Duración: [según el guión]
-- Formato: 9:16 (vertical, para redes sociales)
-- Tipo: video de venta directa
-- Estilo: realista, comercial, alta calidad
+Estructura del prompt (sin headers markdown, todo en texto corrido):
 
-2. PRODUCT VISUAL DNA
-- Pegar el ADN visual tal cual, sin reinterpretar
-
-3. CINEMATIC SCRIPT
-- Guión técnico escena por escena, sincronizado con el texto
-- Cada toma con su tiempo, plano, y acción
-
-4. VOICEOVER
-- Guión EXACTO como narración
-- NO modificar palabras
-- NO resumir ni reinterpretar
-
-5. ON-SCREEN TEXT
-- Fragmentos del guión como subtítulos grandes
-- Solo apoyo visual, sin texto nuevo
-
-6. NEGATIVE PROMPT / RESTRICCIONES
-- No inconsistencias visuales con el producto real
-- No escenas fuera de guión
-- No elementos inventados
-- No contradicciones texto-imagen
-- No cambios en la apariencia del producto
+1. SPECS: Duración, formato 9:16 vertical, estilo realista comercial.
+2. PRODUCTO: Descripción visual compacta del producto (colores, forma, materiales).
+3. ESCENAS: Cada toma en una línea: [tiempo] [plano] [qué se ve] [acción].
+4. VOICEOVER: Guión exacto como narración (NO modificar palabras).
+5. RESTRICCIONES: No inconsistencias visuales, no escenas fuera de guión, no elementos inventados.
 
 REGLAS:
-- El prompt debe ser claro, directo y técnico
+- NO uses markdown (ni #, ni **, ni ---, ni bullets con -)
+- Escribe en texto corrido, párrafos densos separados por líneas en blanco
 - Cada palabra del guión debe tener su imagen correspondiente
-- Prioriza la coherencia visual sobre la estética
-- Responde SOLO con el prompt final, sin explicaciones
-- Máximo 800 palabras`
+- Prioriza coherencia visual sobre estética
+- Responde SOLO con el prompt final
+- MÁXIMO 3000 caracteres total`
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -175,24 +155,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'API key not configured' })
     }
 
-    // ─── MODULE A: Extract Visual DNA ─────────────────────────────────
-    let visualDNA = ''
-    
+    // ─── MODULE A + B: Run in PARALLEL to reduce latency ──────────────
     const moduleAInput = productPhotosDescription 
       ? `Fotos/descripción del producto:\n${productPhotosDescription}`
       : productContext 
         ? `Contexto del producto:\n${productContext}`
         : ''
 
-    if (moduleAInput) {
-      console.log('Module A: Extracting Visual DNA...')
-      visualDNA = await callGrok(xaiApiKey, MODULE_A_SYSTEM, moduleAInput, 500)
-      console.log('Module A complete:', visualDNA.substring(0, 100) + '...')
-    }
-
-    // ─── MODULE B: Cinematic Script Transformation ────────────────────
-    console.log('Module B: Transforming to cinematic script...')
-    
     const moduleBInput = `Guión ganador FINAL (NO modificar el texto, solo traducir a tomas cinematográficas):
 
 "${script.trim()}"
@@ -200,7 +169,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 Duración total del video: ${duration} segundos.
 Divide el guión en segmentos que cubran los ${duration} segundos completos.`
 
-    const cinematicScript = await callGrok(xaiApiKey, MODULE_B_SYSTEM, moduleBInput, 1500)
+    console.log('Modules A+B: Running in parallel...')
+
+    const [visualDNA, cinematicScript] = await Promise.all([
+      moduleAInput 
+        ? callGrok(xaiApiKey, MODULE_A_SYSTEM, moduleAInput, 500)
+        : Promise.resolve(''),
+      callGrok(xaiApiKey, MODULE_B_SYSTEM, moduleBInput, 1500)
+    ])
+
+    console.log('Module A complete:', visualDNA ? visualDNA.substring(0, 100) + '...' : '(skipped)')
     console.log('Module B complete:', cinematicScript.substring(0, 100) + '...')
 
     // ─── MODULE C: Mother Prompt Fusion ───────────────────────────────
@@ -220,7 +198,7 @@ Duración: ${duration} segundos
 Formato: 9:16 (vertical)
 Tipo: Anuncio de venta directa para redes sociales`
 
-    const motherPrompt = await callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInput, 2000)
+    const motherPrompt = await callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInput, 1000)
     console.log('Module C complete:', motherPrompt.substring(0, 100) + '...')
 
     // Calculate total token usage

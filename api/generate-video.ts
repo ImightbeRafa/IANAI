@@ -157,14 +157,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Check if this is a structured ad video prompt (from build-ad-prompt pipeline)
     // or a legacy B-Roll free-form prompt
     const { motherPrompt } = req.body
+    const MAX_PROMPT_LENGTH = 3900 // Grok Video API limit is 4096, leave margin
     
-    const systemPrompt = motherPrompt 
-      ? motherPrompt  // Module C output — already fully structured
-      : `Create a professional B-Roll video clip for social media marketing.
+    let systemPrompt: string
+
+    if (motherPrompt) {
+      // If mother prompt fits, use it directly
+      if (motherPrompt.length <= MAX_PROMPT_LENGTH) {
+        systemPrompt = motherPrompt
+      } else {
+        // Condense the mother prompt to fit the video API limit
+        console.log(`Mother prompt too long (${motherPrompt.length} chars), condensing...`)
+        try {
+          const condenseResponse = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${xaiApiKey}`
+            },
+            body: JSON.stringify({
+              model: 'grok-3-mini',
+              messages: [
+                { role: 'system', content: `You are a video prompt engineer. Condense the following structured video prompt into a SINGLE dense paragraph under 3500 characters. Keep ALL visual details, shot descriptions, product appearance, and timing. Remove markdown formatting, section headers, and redundancy. Output ONLY the condensed prompt, nothing else.` },
+                { role: 'user', content: motherPrompt }
+              ],
+              temperature: 0.2,
+              max_tokens: 1000
+            })
+          })
+          const condenseResult = await condenseResponse.json()
+          const condensed = condenseResult.choices?.[0]?.message?.content?.trim()
+          if (condensed && condensed.length <= MAX_PROMPT_LENGTH) {
+            systemPrompt = condensed
+            console.log(`Condensed to ${condensed.length} chars`)
+          } else {
+            // Fallback: hard truncate
+            systemPrompt = (condensed || motherPrompt).substring(0, MAX_PROMPT_LENGTH)
+            console.log(`Truncated to ${MAX_PROMPT_LENGTH} chars`)
+          }
+        } catch (condenseErr) {
+          console.error('Condense failed, truncating:', condenseErr)
+          systemPrompt = motherPrompt.substring(0, MAX_PROMPT_LENGTH)
+        }
+      }
+    } else {
+      systemPrompt = `Create a professional B-Roll video clip for social media marketing.
 Focus on: smooth motion, cinematic quality, professional lighting, engaging visuals.
 Style: Modern, clean, commercial-quality footage suitable for ads and social media content.
 
 User request: ${prompt}`
+    }
 
     console.log('Submitting to Grok Video API:', { 
       prompt: systemPrompt.substring(0, 100) + '...',

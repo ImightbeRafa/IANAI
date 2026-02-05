@@ -324,6 +324,7 @@ export default function BRollWorkspace() {
       setMotherPrompt(result.motherPrompt)
       setVisualDNA(result.visualDNA || '')
       setCinematicScript(result.cinematicScript || '')
+      setShowPromptPreview(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error building ad prompt')
     } finally {
