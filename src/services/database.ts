@@ -701,6 +701,30 @@ export async function getClientICPs(clientId: string): Promise<ICP[]> {
   return data || []
 }
 
+export async function getOrphanedICPs(userId: string): Promise<ICP[]> {
+  const { data, error } = await supabase
+    .from('icps')
+    .select('*')
+    .eq('owner_id', userId)
+    .is('client_id', null)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function assignICPToClient(icpId: string, clientId: string): Promise<ICP> {
+  const { data, error } = await supabase
+    .from('icps')
+    .update({ client_id: clientId, updated_at: new Date().toISOString() })
+    .eq('id', icpId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
 export async function getICP(icpId: string): Promise<ICP | null> {
   const { data, error } = await supabase
     .from('icps')

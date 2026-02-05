@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getICPs, getClientICPs, deleteICP, getProfile, getTeam, getClients } from '../services/database'
+import { getICPs, getClientICPs, getOrphanedICPs, assignICPToClient, deleteICP, getProfile, getTeam, getClients } from '../services/database'
 import type { ICP, Client, Profile } from '../types'
 import Layout from '../components/Layout'
 import { 
@@ -31,6 +31,8 @@ export default function ICPDashboard() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
+  const [orphanedICPs, setOrphanedICPs] = useState<ICP[]>([])
+  const [assigningICP, setAssigningICP] = useState<string | null>(null)
 
   const isTeamAccount = profile?.account_type === 'team'
 
@@ -55,6 +57,10 @@ export default function ICPDashboard() {
       back: 'Volver',
       noICPsClient: 'Este cliente no tiene perfiles ICP',
       noICPsClientDesc: 'Crea el primer perfil de cliente ideal para este cliente',
+      unassignedICPs: 'ICPs sin asignar',
+      unassignedDesc: 'Estos perfiles ICP no están asignados a ningún cliente',
+      assignTo: 'Asignar a...',
+      assigned: 'Asignado correctamente',
       awarenessLevels: {
         unaware: 'Inconsciente',
         problem_aware: 'Consciente del problema',
@@ -92,6 +98,10 @@ export default function ICPDashboard() {
       back: 'Back',
       noICPsClient: 'This client has no ICP profiles',
       noICPsClientDesc: 'Create the first ideal client profile for this client',
+      unassignedICPs: 'Unassigned ICPs',
+      unassignedDesc: 'These ICP profiles are not assigned to any client',
+      assignTo: 'Assign to...',
+      assigned: 'Assigned successfully',
       awarenessLevels: {
         unaware: 'Unaware',
         problem_aware: 'Problem aware',
@@ -126,6 +136,9 @@ export default function ICPDashboard() {
             const clientsData = await getClients(teamData.id)
             setClients(clientsData)
           }
+          // Load orphaned ICPs (no client_id) for team accounts
+          const orphaned = await getOrphanedICPs(user.id)
+          setOrphanedICPs(orphaned)
         } else {
           // Single account: load user-scoped ICPs (no client_id)
           const data = await getICPs(user.id)
@@ -170,6 +183,22 @@ export default function ICPDashboard() {
       console.error('Failed to delete ICP:', err)
     } finally {
       setDeleting(null)
+    }
+  }
+
+  const handleAssignICP = async (icpId: string, clientId: string) => {
+    setAssigningICP(icpId)
+    try {
+      const updated = await assignICPToClient(icpId, clientId)
+      setOrphanedICPs(orphanedICPs.filter(icp => icp.id !== icpId))
+      // If we're viewing that client's ICPs, add it there
+      if (selectedClient?.id === clientId) {
+        setICPs(prev => [updated, ...prev])
+      }
+    } catch (err) {
+      console.error('Failed to assign ICP:', err)
+    } finally {
+      setAssigningICP(null)
     }
   }
 
@@ -323,38 +352,77 @@ export default function ICPDashboard() {
 
         {/* Team account: show clients first */}
         {isTeamAccount && !selectedClient ? (
-          clients.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {clients.map((client) => (
-                <button
-                  key={client.id}
-                  onClick={() => handleSelectClient(client)}
-                  className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
-                        <Briefcase className="w-5 h-5 text-primary-600" />
+          <>
+            {clients.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {clients.map((client) => (
+                  <button
+                    key={client.id}
+                    onClick={() => handleSelectClient(client)}
+                    className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                          <Briefcase className="w-5 h-5 text-primary-600" />
+                        </div>
+                        <span className="font-semibold text-dark-800 group-hover:text-primary-600 transition-colors">
+                          {client.name}
+                        </span>
                       </div>
-                      <span className="font-semibold text-dark-800 group-hover:text-primary-600 transition-colors">
-                        {client.name}
-                      </span>
+                      <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600 transition-colors" />
                     </div>
-                    <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600 transition-colors" />
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
-              <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-dark-700 mb-2">{t.noClients}</h3>
-              <p className="text-dark-500 mb-6">{t.createFirstClient}</p>
-              <Link to="/dashboard" className="btn-primary">
-                {t.goToDashboard}
-              </Link>
-            </div>
-          )
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
+                <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-dark-700 mb-2">{t.noClients}</h3>
+                <p className="text-dark-500 mb-6">{t.createFirstClient}</p>
+                <Link to="/dashboard" className="btn-primary">
+                  {t.goToDashboard}
+                </Link>
+              </div>
+            )}
+
+            {/* Unassigned ICPs */}
+            {orphanedICPs.length > 0 && (
+              <div className="mt-8">
+                <h2 className="text-lg font-semibold text-dark-700 flex items-center gap-2 mb-4">
+                  <AlertCircle className="w-5 h-5 text-amber-500" />
+                  {t.unassignedICPs}
+                </h2>
+                <p className="text-dark-500 text-sm mb-4">{t.unassignedDesc}</p>
+                <div className="grid gap-3">
+                  {orphanedICPs.map((icp) => (
+                    <div
+                      key={icp.id}
+                      className="bg-white rounded-xl border border-amber-200 p-4 flex items-center justify-between gap-4"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-dark-900 truncate">{icp.name}</h4>
+                        <p className="text-sm text-dark-500 truncate">{icp.description}</p>
+                      </div>
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value) handleAssignICP(icp.id, e.target.value)
+                        }}
+                        disabled={assigningICP === icp.id}
+                        className="px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 min-w-[160px]"
+                        defaultValue=""
+                      >
+                        <option value="" disabled>{assigningICP === icp.id ? '...' : t.assignTo}</option>
+                        {clients.map((client) => (
+                          <option key={client.id} value={client.id}>{client.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           renderICPList()
         )}
