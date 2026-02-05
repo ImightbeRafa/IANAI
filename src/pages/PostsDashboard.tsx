@@ -188,7 +188,7 @@ export default function PostsDashboard() {
     if (!team || !newClientName.trim() || !user) return
     setCreatingClient(true)
     try {
-      const newClient = await createClient(team.id, newClientName.trim(), user.id)
+      const newClient = await createClient(team.id, user.id, newClientName.trim())
       setClients([...clients, newClient])
       setNewClientName('')
       setShowNewClientForm(false)

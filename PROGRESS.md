@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 4, 2026 at 5:15 PM (UTC-06:00)
+## Last Updated: February 5, 2026 at 6:30 AM (UTC-06:00)
 
 ---
 
@@ -327,6 +327,50 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] **Environment Variables Required:**
   - `GEMINI_API_KEY` - For Gemini text and image generation
 
+### February 5, 2026 - Team Management, PDF Upload & API Usage Tracking (6:30 AM)
+- [x] **NEW FEATURE: Team Management Page**
+  - New page at `/team` for managing team members
+  - Invite new members by email (must be registered first)
+  - Remove team members (owner only)
+  - View all members with roles (Owner, Admin, Member)
+  - Role icons: Crown (owner), Shield (admin), User (member)
+  - Link added to Settings page for team accounts
+- [x] **NEW FEATURE: PDF Upload for Context Documents**
+  - Upload PDF files as context documents in ProductWorkspace (Guiones)
+  - PDF text extraction via new API endpoint `/api/extract-pdf`
+  - Supports files up to 10MB
+  - Extracted text saved to database as `pdf` type document
+  - UI: PDF upload button alongside Link button in context documents section
+- [x] **NEW FEATURE: Google Sign-In on Login Page**
+  - Added Google OAuth login button to Login page (was only on Signup)
+  - Same styling as Signup page Google button
+- [x] **NEW FEATURE: Delete Functionality**
+  - Delete clients with all associated products, scripts, and data (owner only)
+  - Delete products with all associated scripts and data
+  - Confirmation dialogs in both Spanish and English
+  - Delete buttons appear on hover for clients and products in Dashboard
+- [x] **ENHANCED: API Usage Tracking**
+  - Added tracking for PDF extraction (`pdf_extract` feature)
+  - Added tracking for URL fetching (`url_fetch` feature)
+  - Fixed prompt enhancement to use `prompt_enhance` feature (was using `script`)
+  - New models in Admin Dashboard: PDF Parser, Web Scraper
+  - New feature labels: Prompt Enhancement, PDF Extraction, URL Fetching
+  - Icons added for all feature types in Admin Dashboard
+- [x] **New Files Created:**
+  - `src/pages/TeamManagement.tsx` - Team member management page
+  - `api/extract-pdf.ts` - PDF text extraction API endpoint
+  - `api/fetch-url.ts` - URL content fetching API endpoint
+- [x] **Files Updated:**
+  - `src/pages/Login.tsx` - Added Google sign-in button
+  - `src/pages/Settings.tsx` - Added link to Team Management page
+  - `src/pages/Dashboard.tsx` - Added delete buttons for clients and products
+  - `src/pages/ProductWorkspace.tsx` - Added PDF upload UI and handler
+  - `src/pages/AdminDashboard.tsx` - New feature types and icons
+  - `src/App.tsx` - Added `/team` route
+  - `api/enhance-prompt.ts` - Changed feature type to `prompt_enhance`
+  - `api/lib/usage-logger.ts` - Added new feature types
+  - `package.json` - Added `pdf-parse` dependency
+
 ### February 4, 2026 - B-Roll Video Generation & Grok Imagine (5:15 PM)
 - [x] **NEW FEATURE: B-Roll Video Generation**
   - AI-powered video generation using Grok Imagine Video API
@@ -590,10 +634,17 @@ Form fields: name, business type (sale/rent/airbnb), price, location, constructi
 - [x] **Ian's 5 Master Structures** - Venta Directa, Desvalidar Alternativas, Mostrar Servicio, Variedad, Paso a Paso
 - [x] **Ian Methodology in AI Prompts** - Certeza Total philosophy, Tríada Estructural, Zero Greetings Rule
 
+### Recently Completed ✅
+1. ~~**Team Member Management**~~ - Invite/remove team members, view roles ✓
+2. ~~**PDF Upload for Context**~~ - Upload PDFs as context documents in Guiones ✓
+3. ~~**Google Login**~~ - Added to login page (was only on signup) ✓
+4. ~~**Delete Functionality**~~ - Delete clients/products with confirmation ✓
+5. ~~**API Usage Tracking**~~ - Track PDF extraction, URL fetch, prompt enhance ✓
+
 ### High Priority
-1. **Team Member Management** - Invite team members, assign roles
-2. **Script Library Page** - Dedicated page to view all saved scripts with filters
-3. **Run Migration 006** - Add real estate columns to database
+1. **Script Library Page** - Dedicated page to view all saved scripts with filters
+2. **Run Migration 006** - Add real estate columns to database
+3. **ICP Integration** - Use ICP profiles in script generation
 
 ### Medium Priority
 4. **AI Feedback Loop** - Use highly-rated scripts as examples for better generation

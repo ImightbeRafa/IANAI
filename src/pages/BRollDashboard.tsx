@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProfile, getProducts, getTeam, getClients, getClientProducts } from '../services/database'
+import { getProfile, getProducts, getTeam, getClients, getClientProducts, createClient } from '../services/database'
 import type { Product, Profile, Team, Client } from '../types'
 import Layout from '../components/Layout'
 import { 
@@ -16,7 +16,9 @@ import {
   Film,
   Building2,
   ChevronRight,
-  ArrowLeft
+  ArrowLeft,
+  Users,
+  FolderOpen
 } from 'lucide-react'
 
 export default function BRollDashboard() {
@@ -27,10 +29,13 @@ export default function BRollDashboard() {
   const [loading, setLoading] = useState(true)
   
   // Team-specific state
-  const [, setTeam] = useState<Team | null>(null)
+  const [team, setTeam] = useState<Team | null>(null)
   const [clients, setClients] = useState<Client[]>([])
   const [selectedClient, setSelectedClient] = useState<Client | null>(null)
   const [clientProducts, setClientProducts] = useState<Product[]>([])
+  const [showNewClientForm, setShowNewClientForm] = useState(false)
+  const [newClientName, setNewClientName] = useState('')
+  const [creatingClient, setCreatingClient] = useState(false)
   
   const isTeamAccount = profile?.account_type === 'team'
 
@@ -41,7 +46,16 @@ export default function BRollDashboard() {
       selectProduct: 'Selecciona un producto para generar B-Roll',
       noProducts: 'No tienes productos aún',
       createProduct: 'Crea tu primer producto para empezar a generar videos',
-      goToDashboard: 'Ir a Dashboard'
+      goToDashboard: 'Ir a Dashboard',
+      clients: 'Clientes',
+      newClient: '+ Nuevo Cliente',
+      clientName: 'Nombre del cliente',
+      cancel: 'Cancelar',
+      create: 'Crear',
+      back: 'Volver',
+      noClients: 'No hay clientes aún',
+      createFirstClient: 'Crea tu primer cliente para organizar tus productos',
+      generateBRoll: 'Generar B-Roll'
     },
     en: {
       title: 'B-Roll Videos',
@@ -49,7 +63,16 @@ export default function BRollDashboard() {
       selectProduct: 'Select a product to generate B-Roll',
       noProducts: 'You have no products yet',
       createProduct: 'Create your first product to start generating videos',
-      goToDashboard: 'Go to Dashboard'
+      goToDashboard: 'Go to Dashboard',
+      clients: 'Clients',
+      newClient: '+ New Client',
+      clientName: 'Client name',
+      cancel: 'Cancel',
+      create: 'Create',
+      back: 'Back',
+      noClients: 'No clients yet',
+      createFirstClient: 'Create your first client to organize your products',
+      generateBRoll: 'Generate B-Roll'
     }
   }
 
@@ -100,6 +123,21 @@ export default function BRollDashboard() {
     }
     loadClientProducts()
   }, [selectedClient])
+
+  const handleCreateClient = async () => {
+    if (!team || !newClientName.trim() || !user) return
+    setCreatingClient(true)
+    try {
+      const newClient = await createClient(team.id, user.id, newClientName.trim())
+      setClients([...clients, newClient])
+      setNewClientName('')
+      setShowNewClientForm(false)
+    } catch (error) {
+      console.error('Failed to create client:', error)
+    } finally {
+      setCreatingClient(false)
+    }
+  }
 
   const getProductIcon = (type: string) => {
     switch (type) {
@@ -153,34 +191,85 @@ export default function BRollDashboard() {
           </div>
         </div>
 
-        {/* Team account: Show clients first */}
-        {isTeamAccount && !selectedClient && clients.length > 0 && (
+        {/* Team account: Show clients section */}
+        {isTeamAccount && !selectedClient && (
           <div className="mb-8">
-            <h2 className="text-lg font-semibold text-dark-700 mb-4 flex items-center gap-2">
-              <Building2 className="w-5 h-5" />
-              Clientes
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {clients.map((client) => (
-                <button
-                  key={client.id}
-                  onClick={() => setSelectedClient(client)}
-                  className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
-                        <Building2 className="w-5 h-5 text-primary-600" />
-                      </div>
-                      <span className="font-semibold text-dark-800 group-hover:text-primary-600 transition-colors">
-                        {client.name}
-                      </span>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600 transition-colors" />
-                  </div>
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-dark-700 flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                {t.clients}
+              </h2>
+              <button
+                onClick={() => setShowNewClientForm(true)}
+                className="btn-primary"
+              >
+                {t.newClient}
+              </button>
             </div>
+
+            {showNewClientForm && (
+              <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-4 mb-4">
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    placeholder={t.clientName}
+                    className="input flex-1"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => setShowNewClientForm(false)}
+                    className="btn-secondary"
+                  >
+                    {t.cancel}
+                  </button>
+                  <button
+                    onClick={handleCreateClient}
+                    disabled={!newClientName.trim() || creatingClient}
+                    className="btn-primary"
+                  >
+                    {creatingClient ? '...' : t.create}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {clients.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {clients.map((client) => (
+                  <button
+                    key={client.id}
+                    onClick={() => setSelectedClient(client)}
+                    className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
+                          <Building2 className="w-5 h-5 text-primary-600" />
+                        </div>
+                        <span className="font-semibold text-dark-800 group-hover:text-primary-600 transition-colors">
+                          {client.name}
+                        </span>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600 transition-colors" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : !showNewClientForm && (
+              <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
+                <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-dark-700 mb-2">{t.noClients}</h3>
+                <p className="text-dark-500 mb-6">{t.createFirstClient}</p>
+                <button
+                  onClick={() => setShowNewClientForm(true)}
+                  className="btn-primary"
+                >
+                  {t.newClient}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
