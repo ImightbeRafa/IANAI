@@ -16,7 +16,7 @@ import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
  *   Text-to-video:  fal-ai/kling-video/v2.6/pro/text-to-video
  * 
  * Pricing: ~$0.07/sec (no audio), ~$0.14/sec (with audio)
- * Duration: 5-30s in 5s increments (fal handles billing per second)
+ * Duration: 5 or 10 seconds per generation (longer videos require scene extension chaining)
  */
 
 // Model IDs on fal.ai
@@ -82,41 +82,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const falStatus = queueStatus.status as string
 
         if (falStatus === 'COMPLETED') {
-          // Use response_url from status if available, otherwise construct it
-          const statusAny = queueStatus as unknown as Record<string, unknown>
-          const responseUrl = (statusAny.response_url as string) 
-            || `https://queue.fal.run/${modelId}/requests/${requestId}/response`
-
-          console.log('fal.ai fetching result:', { responseUrl, requestId })
-
-          // Fetch result via REST to avoid SDK fal.queue.result() 422 ValidationError
-          const resultResponse = await fetch(responseUrl, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Key ${falKey}`
-            }
-          })
-
-          if (!resultResponse.ok) {
-            const errText = await resultResponse.text()
-            console.error('fal.ai result fetch error:', {
-              status: resultResponse.status,
-              body: errText,
-              requestId,
-              responseUrl
-            })
-            return res.status(200).json({
-              status: 'Pending',
-              debug: {
-                requestId,
-                rawStatus: 'result_fetch_error',
-                httpStatus: resultResponse.status,
-                timestamp: new Date().toISOString()
-              }
-            })
-          }
-
-          const data = await resultResponse.json() as Record<string, unknown>
+          // Fetch the actual result using SDK
+          const result = await fal.queue.result(modelId, { requestId })
+          const data = result.data as Record<string, unknown>
           const video = data?.video as Record<string, unknown> | undefined
           const videoUrl = video?.url as string | undefined
 
@@ -193,7 +161,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Build the prompt — use motherPrompt if available
     // fal.ai/Kling handles longer prompts well, but keep condenser as safety net
-    const MAX_PROMPT_LENGTH = 3000
+    const MAX_PROMPT_LENGTH = 2500
     let finalPrompt: string
 
     if (motherPrompt) {
@@ -214,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               body: JSON.stringify({
                 model: 'grok-3-mini',
                 messages: [
-                  { role: 'system', content: `You are a video prompt engineer. Condense the following structured video prompt into a SINGLE dense paragraph under 2800 characters. Keep ALL visual details, shot descriptions, product appearance, and timing. Remove markdown formatting, section headers, and redundancy. Output ONLY the condensed prompt, nothing else.` },
+                  { role: 'system', content: `You are a video prompt engineer. Condense the following structured video prompt into a SINGLE dense paragraph under 2300 characters. Keep ALL visual details, shot descriptions, product appearance, and timing. Remove markdown formatting, section headers, and redundancy. Output ONLY the condensed prompt, nothing else.` },
                   { role: 'user', content: motherPrompt }
                 ],
                 temperature: 0.2,
@@ -257,8 +225,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const imageRef = image_url || (image_urls && image_urls[0])
     const modelId = hasImages ? FAL_KLING_IMAGE_TO_VIDEO : FAL_KLING_TEXT_TO_VIDEO
 
-    // Kling via fal.ai: snap to nearest 5s increment (5, 10, 15, 20, 25, 30)
-    const validDuration = Math.max(5, Math.min(30, Math.round(duration / 5) * 5))
+    // Kling via fal.ai: only 5 or 10 seconds permitted
+    const validDuration = duration >= 10 ? 10 : 5
 
     // Validate aspect_ratio for Kling (only 16:9, 9:16, 1:1 supported)
     const validAspectRatios = ['16:9', '9:16', '1:1']

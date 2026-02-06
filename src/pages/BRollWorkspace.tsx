@@ -72,7 +72,7 @@ export default function BRollWorkspace() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
   // Video settings
-  const [duration, setDuration] = useState<number>(15)
+  const [duration, setDuration] = useState<number>(10)
   const [resolution, setResolution] = useState<VideoResolution>('720p')
   const [videoModel, setVideoModel] = useState<VideoModel>('kling')
   const [generateAudio, setGenerateAudio] = useState(false)
@@ -654,19 +654,46 @@ export default function BRollWorkspace() {
                   <label className="block text-xs font-medium text-dark-600 mb-1.5">
                     {t.duration}: {duration}s
                   </label>
-                  <input
-                    type="range"
-                    min="5"
-                    max="30"
-                    step={videoModel === 'kling' ? '5' : '1'}
-                    value={duration}
-                    onChange={(e) => setDuration(Number(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="flex justify-between text-xs text-dark-400 mt-0.5">
-                    <span>5s</span>
-                    <span>30s</span>
-                  </div>
+                  {videoModel === 'kling' ? (
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        onClick={() => setDuration(5)}
+                        className={`p-1.5 rounded-lg text-xs transition-colors ${
+                          duration <= 5
+                            ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                            : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                        }`}
+                      >
+                        5s
+                      </button>
+                      <button
+                        onClick={() => setDuration(10)}
+                        className={`p-1.5 rounded-lg text-xs transition-colors ${
+                          duration >= 10
+                            ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                            : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                        }`}
+                      >
+                        10s
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="range"
+                        min="5"
+                        max="30"
+                        step="1"
+                        value={duration}
+                        onChange={(e) => setDuration(Number(e.target.value))}
+                        className="w-full"
+                      />
+                      <div className="flex justify-between text-xs text-dark-400 mt-0.5">
+                        <span>5s</span>
+                        <span>30s</span>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div>
                   {videoModel === 'kling' ? (
