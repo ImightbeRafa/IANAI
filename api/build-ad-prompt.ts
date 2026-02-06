@@ -127,53 +127,41 @@ REGLAS:
 - Responde SOLO con el prompt final
 - MÁXIMO 3000 caracteres total`
 
-// ─── MODULE C SPLIT: TWO-PART PROMPT FOR 30s VIDEOS ─────────────────────────
-// When duration >= 25s, we split into 2×15s clips chained via last-frame image reference
+// ─── CINEMATIC SCRIPT SPLITTER (30s → 2×15s) ────────────────────────────────
+// Module B's cinematic script has time markers (e.g. "Tiempo: 15-20s").
+// We split at the 15s boundary and run Module C on each half separately.
 
-const MODULE_C_SPLIT_SYSTEM = `Eres un ingeniero de prompts especializado en generación de video con IA para anuncios de venta directa.
+function splitCinematicScript(script: string): { part1: string; part2: string } {
+  // Look for time markers at or near the 15s boundary
+  const patterns = [
+    /\n\s*-\s*\*\*Tiempo:\s*15/i,
+    /\n\*\*Tiempo:\s*15/i,
+    /\nTiempo:\s*15/i,
+    /\n\s*-\s*\*\*Time:\s*15/i,
+    /\nTime:\s*15/i,
+  ]
 
-Tu tarea es fusionar tres inputs en DOS PROMPTS FINALES optimizados para una IA de generación de video.
-
-Se van a generar DOS clips de video POR SEPARADO (cada uno de 15 segundos) que luego se van a unir para crear UN VIDEO CONTINUO de 30 segundos. El segundo clip se generará usando el ÚLTIMO FRAME del primer clip como imagen de referencia, así que la continuidad visual es CRÍTICA.
-
-REGLAS CRÍTICAS PARA CONTINUIDAD VISUAL:
-- La última escena de PARTE 1 debe terminar en un encuadre estable y claro (no en movimiento brusco ni transición)
-- PARTE 2 debe comenzar describiendo EXACTAMENTE el mismo encuadre, iluminación, colores, ambiente y composición donde PARTE 1 termina
-- Ambas partes deben usar el mismo estilo visual, paleta de colores, tono y tipo de iluminación
-- La primera frase de PARTE 2 debe describir la escena de continuación exacta
-- NO cambiar el estilo, la paleta, ni el tipo de escena entre partes
-
-FORMATO DE SALIDA (usa estos separadores EXACTOS, sin espacios extra):
-===PART_1===
-[Prompt para primeros 15 segundos: Hook visual, introducción del producto, primeras escenas del guión. Máximo 3500 caracteres]
-===PART_2===
-[Prompt para últimos 15 segundos: Continuación natural desde el último frame de PARTE 1, desarrollo, CTA, cierre. Máximo 3500 caracteres]
-
-REGLAS:
-- NO uses markdown (ni #, ni **, ni ---, ni bullets con -)
-- Escribe en texto corrido, párrafos densos separados por líneas en blanco
-- Cada palabra del guión debe tener su imagen correspondiente
-- Prioriza coherencia visual sobre todo
-- La transición entre partes debe ser IMPERCEPTIBLE
-- Responde SOLO con las dos partes usando los separadores exactos
-- MÁXIMO 3500 caracteres por parte`
-
-function parseSplitPrompts(output: string): { part1: string; part2: string } {
-  const marker = '===PART_2==='
-  const idx = output.indexOf(marker)
-  if (idx === -1) {
-    // Fallback: split roughly in half at a sentence boundary
-    const mid = Math.floor(output.length / 2)
-    const sentenceEnd = output.indexOf('.', mid)
-    const splitAt = sentenceEnd > mid ? sentenceEnd + 1 : mid
-    return {
-      part1: output.substring(0, splitAt).replace('===PART_1===', '').trim(),
-      part2: output.substring(splitAt).trim()
+  for (const pattern of patterns) {
+    const match = script.search(pattern)
+    if (match !== -1) {
+      return {
+        part1: script.substring(0, match).trim(),
+        part2: script.substring(match).trim()
+      }
     }
   }
-  const part1 = output.substring(0, idx).replace('===PART_1===', '').trim()
-  const part2 = output.substring(idx + marker.length).trim()
-  return { part1, part2 }
+
+  // Fallback: split at the nearest blank line near the middle
+  const lines = script.split('\n')
+  const mid = Math.floor(lines.length / 2)
+  let splitLine = mid
+  for (let i = mid; i < Math.min(mid + 10, lines.length); i++) {
+    if (lines[i].trim() === '') { splitLine = i; break }
+  }
+  return {
+    part1: lines.slice(0, splitLine).join('\n').trim(),
+    part2: lines.slice(splitLine).join('\n').trim()
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -232,10 +220,76 @@ Divide el guión en segmentos que cubran los ${duration} segundos completos.`
 
     // ─── MODULE C: Mother Prompt Fusion ───────────────────────────────
     const is30sMode = duration >= 25
-    const moduleCSystem = is30sMode ? MODULE_C_SPLIT_SYSTEM : MODULE_C_SYSTEM
-    const moduleCMaxTokens = is30sMode ? 2500 : 1000
 
-    console.log(`Module C: ${is30sMode ? 'Split 2×15s' : 'Single'} mode...`)
+    if (is30sMode) {
+      // 30s mode: split cinematic script at 15s, run Module C on each half in parallel
+      console.log('Module C: Split 2×15s mode — splitting cinematic script...')
+      const { part1: scriptPart1, part2: scriptPart2 } = splitCinematicScript(cinematicScript)
+      console.log(`Cinematic script split: Part1=${scriptPart1.length} chars, Part2=${scriptPart2.length} chars`)
+
+      const moduleCInputPart1 = `INPUTS PARA FUSIONAR:
+
+${visualDNA ? `--- PRODUCT VISUAL DNA ---\n${visualDNA}\n` : ''}
+--- CINEMATIC SCRIPT (0-15s) ---
+${scriptPart1}
+
+--- SPECS ---
+Duración: 15 segundos
+Formato: 9:16 (vertical)
+Tipo: Anuncio de venta directa para redes sociales`
+
+      const moduleCInputPart2 = `INPUTS PARA FUSIONAR:
+
+${visualDNA ? `--- PRODUCT VISUAL DNA ---\n${visualDNA}\n` : ''}
+--- CINEMATIC SCRIPT (15-30s) ---
+${scriptPart2}
+
+--- SPECS ---
+Duración: 15 segundos (segunda mitad, continuación directa del clip anterior)
+Formato: 9:16 (vertical)
+Tipo: Anuncio de venta directa para redes sociales
+Nota: Este clip se generará usando el último frame del clip anterior como imagen de referencia. La primera escena debe continuar naturalmente desde ese frame.`
+
+      const [motherPromptPart1, motherPromptPart2] = await Promise.all([
+        callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInputPart1, 1000),
+        callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInputPart2, 1000)
+      ])
+
+      console.log(`Module C Part1: ${motherPromptPart1.substring(0, 80)}...`)
+      console.log(`Module C Part2: ${motherPromptPart2.substring(0, 80)}...`)
+
+      const totalInputTokens = estimateTokens(
+        MODULE_A_SYSTEM + moduleAInput +
+        MODULE_B_SYSTEM + moduleBInput +
+        MODULE_C_SYSTEM + moduleCInputPart1 +
+        MODULE_C_SYSTEM + moduleCInputPart2
+      )
+      const totalOutputTokens = estimateTokens(visualDNA + cinematicScript + motherPromptPart1 + motherPromptPart2)
+
+      await logApiUsage({
+        userId: user.id,
+        userEmail: user.email,
+        feature: 'ad_prompt_build',
+        model: 'grok-4-fast-non-reasoning',
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        success: true,
+        metadata: { duration, hasVisualDNA: !!visualDNA, scriptLength: script.length, splitMode: true }
+      })
+
+      return res.status(200).json({
+        motherPromptPart1,
+        motherPromptPart2,
+        splitMode: true,
+        visualDNA,
+        cinematicScript,
+        originalScript: script.trim(),
+        duration
+      })
+    }
+
+    // Normal single-clip mode
+    console.log('Module C: Single mode...')
 
     const moduleCInput = `INPUTS PARA FUSIONAR:
 
@@ -247,20 +301,19 @@ ${cinematicScript}
 "${script.trim()}"
 
 --- SPECS ---
-Duración: ${is30sMode ? '30 segundos (2 clips de 15s cada uno)' : `${duration} segundos`}
+Duración: ${duration} segundos
 Formato: 9:16 (vertical)
 Tipo: Anuncio de venta directa para redes sociales`
 
-    const moduleCOutput = await callGrok(xaiApiKey, moduleCSystem, moduleCInput, moduleCMaxTokens)
-    console.log('Module C complete:', moduleCOutput.substring(0, 100) + '...')
+    const motherPrompt = await callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInput, 1000)
+    console.log('Module C complete:', motherPrompt.substring(0, 100) + '...')
 
-    // Calculate total token usage
     const totalInputTokens = estimateTokens(
-      MODULE_A_SYSTEM + moduleAInput + 
-      MODULE_B_SYSTEM + moduleBInput + 
-      moduleCSystem + moduleCInput
+      MODULE_A_SYSTEM + moduleAInput +
+      MODULE_B_SYSTEM + moduleBInput +
+      MODULE_C_SYSTEM + moduleCInput
     )
-    const totalOutputTokens = estimateTokens(visualDNA + cinematicScript + moduleCOutput)
+    const totalOutputTokens = estimateTokens(visualDNA + cinematicScript + motherPrompt)
 
     await logApiUsage({
       userId: user.id,
@@ -270,30 +323,11 @@ Tipo: Anuncio de venta directa para redes sociales`
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,
       success: true,
-      metadata: { 
-        duration,
-        hasVisualDNA: !!visualDNA,
-        scriptLength: script.length,
-        splitMode: is30sMode
-      }
+      metadata: { duration, hasVisualDNA: !!visualDNA, scriptLength: script.length, splitMode: false }
     })
 
-    if (is30sMode) {
-      const { part1, part2 } = parseSplitPrompts(moduleCOutput)
-      console.log(`Split prompts: Part1=${part1.length} chars, Part2=${part2.length} chars`)
-      return res.status(200).json({
-        motherPromptPart1: part1,
-        motherPromptPart2: part2,
-        splitMode: true,
-        visualDNA,
-        cinematicScript,
-        originalScript: script.trim(),
-        duration
-      })
-    }
-
     return res.status(200).json({
-      motherPrompt: moduleCOutput,
+      motherPrompt,
       visualDNA,
       cinematicScript,
       originalScript: script.trim(),
