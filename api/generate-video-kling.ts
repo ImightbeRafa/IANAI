@@ -82,13 +82,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const falStatus = queueStatus.status as string
 
         if (falStatus === 'COMPLETED') {
-          // Fetch the actual result via REST to avoid SDK 422 ValidationError
-          const resultUrl = `https://queue.fal.run/${modelId}/requests/${requestId}`
-          const resultResponse = await fetch(resultUrl, {
+          // Use response_url from status if available, otherwise construct it
+          const statusAny = queueStatus as unknown as Record<string, unknown>
+          const responseUrl = (statusAny.response_url as string) 
+            || `https://queue.fal.run/${modelId}/requests/${requestId}/response`
+
+          console.log('fal.ai fetching result:', { responseUrl, requestId })
+
+          // Fetch result via REST to avoid SDK fal.queue.result() 422 ValidationError
+          const resultResponse = await fetch(responseUrl, {
             method: 'GET',
             headers: {
-              'Authorization': `Key ${falKey}`,
-              'Content-Type': 'application/json'
+              'Authorization': `Key ${falKey}`
             }
           })
 
@@ -97,7 +102,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             console.error('fal.ai result fetch error:', {
               status: resultResponse.status,
               body: errText,
-              requestId
+              requestId,
+              responseUrl
             })
             return res.status(200).json({
               status: 'Pending',
