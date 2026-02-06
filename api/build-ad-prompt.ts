@@ -222,49 +222,16 @@ Divide el guión en segmentos que cubran los ${duration} segundos completos.`
     const is30sMode = duration >= 25
 
     if (is30sMode) {
-      // 30s mode: split cinematic script at 15s, run Module C on each half in parallel
-      console.log('Module C: Split 2×15s mode — splitting cinematic script...')
-      const { part1: scriptPart1, part2: scriptPart2 } = splitCinematicScript(cinematicScript)
-      console.log(`Cinematic script split: Part1=${scriptPart1.length} chars, Part2=${scriptPart2.length} chars`)
-
-      const moduleCInputPart1 = `INPUTS PARA FUSIONAR:
-
-${visualDNA ? `--- PRODUCT VISUAL DNA ---\n${visualDNA}\n` : ''}
---- CINEMATIC SCRIPT (0-15s) ---
-${scriptPart1}
-
---- SPECS ---
-Duración: 15 segundos
-Formato: 9:16 (vertical)
-Tipo: Anuncio de venta directa para redes sociales`
-
-      const moduleCInputPart2 = `INPUTS PARA FUSIONAR:
-
-${visualDNA ? `--- PRODUCT VISUAL DNA ---\n${visualDNA}\n` : ''}
---- CINEMATIC SCRIPT (15-30s) ---
-${scriptPart2}
-
---- SPECS ---
-Duración: 15 segundos (segunda mitad, continuación directa del clip anterior)
-Formato: 9:16 (vertical)
-Tipo: Anuncio de venta directa para redes sociales
-Nota: Este clip se generará usando el último frame del clip anterior como imagen de referencia. La primera escena debe continuar naturalmente desde ese frame.`
-
-      const [motherPromptPart1, motherPromptPart2] = await Promise.all([
-        callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInputPart1, 1000),
-        callGrok(xaiApiKey, MODULE_C_SYSTEM, moduleCInputPart2, 1000)
-      ])
-
-      console.log(`Module C Part1: ${motherPromptPart1.substring(0, 80)}...`)
-      console.log(`Module C Part2: ${motherPromptPart2.substring(0, 80)}...`)
+      // 30s mode: skip Module C, just split cinematic script at 15s and use directly
+      console.log('30s mode: splitting cinematic script at 15s boundary...')
+      const { part1, part2 } = splitCinematicScript(cinematicScript)
+      console.log(`Split: Part1=${part1.length} chars, Part2=${part2.length} chars`)
 
       const totalInputTokens = estimateTokens(
         MODULE_A_SYSTEM + moduleAInput +
-        MODULE_B_SYSTEM + moduleBInput +
-        MODULE_C_SYSTEM + moduleCInputPart1 +
-        MODULE_C_SYSTEM + moduleCInputPart2
+        MODULE_B_SYSTEM + moduleBInput
       )
-      const totalOutputTokens = estimateTokens(visualDNA + cinematicScript + motherPromptPart1 + motherPromptPart2)
+      const totalOutputTokens = estimateTokens(visualDNA + cinematicScript)
 
       await logApiUsage({
         userId: user.id,
@@ -278,8 +245,8 @@ Nota: Este clip se generará usando el último frame del clip anterior como imag
       })
 
       return res.status(200).json({
-        motherPromptPart1,
-        motherPromptPart2,
+        motherPromptPart1: part1,
+        motherPromptPart2: part2,
         splitMode: true,
         visualDNA,
         cinematicScript,
