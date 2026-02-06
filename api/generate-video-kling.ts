@@ -42,7 +42,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       motherPrompt,
       duration = 5,
       aspect_ratio = '9:16',
-      mode = 'pro',
+      generate_audio = false,
+      cfg_scale = 0.5,
       image_url,
       image_urls,
       negative_prompt
@@ -220,11 +221,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Kling via fal.ai: snap to nearest 5s increment (5, 10, 15, 20, 25, 30)
     const validDuration = Math.max(5, Math.min(30, Math.round(duration / 5) * 5))
 
+    // Validate aspect_ratio for Kling (only 16:9, 9:16, 1:1 supported)
+    const validAspectRatios = ['16:9', '9:16', '1:1']
+    const validAspectRatio = validAspectRatios.includes(aspect_ratio) ? aspect_ratio : '9:16'
+
+    // Clamp cfg_scale to 0-1 range
+    const validCfgScale = Math.max(0, Math.min(1, Number(cfg_scale) || 0.5))
+
     // Build fal.ai input
     const falInput: Record<string, unknown> = {
       prompt: finalPrompt,
       duration: String(validDuration),
-      aspect_ratio
+      aspect_ratio: validAspectRatio,
+      cfg_scale: validCfgScale,
+      generate_audio: !!generate_audio
     }
 
     if (negative_prompt) {
@@ -240,8 +250,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       modelId,
       promptLength: finalPrompt.length,
       duration: validDuration,
-      aspect_ratio,
-      mode,
+      aspect_ratio: validAspectRatio,
+      generate_audio,
+      cfg_scale: validCfgScale,
       hasImage: !!hasImages
     })
 
@@ -264,8 +275,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metadata: {
         falRequestId,
         duration: validDuration,
-        aspect_ratio,
-        mode,
+        aspect_ratio: validAspectRatio,
+        generate_audio: !!generate_audio,
+        cfg_scale: validCfgScale,
         genType: hasImages ? 'image2video' : 'text2video',
         hasImage: !!hasImages
       }
@@ -276,8 +288,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       requestId: `${modelId}::${falRequestId}`,
       model: modelId,
       duration: validDuration,
-      aspect_ratio,
-      mode
+      aspect_ratio: validAspectRatio,
+      generate_audio: !!generate_audio,
+      cfg_scale: validCfgScale
     })
 
   } catch (error) {

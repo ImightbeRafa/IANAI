@@ -91,7 +91,7 @@ Reglas:
         userId: user.id,
         userEmail: user.email,
         feature: 'prompt_enhance',
-        model: 'grok',
+        model: 'grok-3-mini',
         success: false,
         errorMessage: errorText,
         metadata: { type }
@@ -119,7 +119,7 @@ Reglas:
       userId: user.id,
       userEmail: user.email,
       feature: 'prompt_enhance',
-      model: 'grok',
+      model: 'grok-3-mini',
       inputTokens,
       outputTokens,
       success: true,

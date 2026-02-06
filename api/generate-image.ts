@@ -14,6 +14,20 @@ const GEMINI_IMAGE_MODELS: Record<string, string> = {
 
 type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
 
+// Map width/height to aspect ratio string
+function getAspectRatio(width: number, height: number): string {
+  const ratio = width / height
+  if (Math.abs(ratio - 1) < 0.01) return '1:1'
+  if (Math.abs(ratio - 4/5) < 0.01) return '4:5'
+  if (Math.abs(ratio - 9/16) < 0.01) return '9:16'
+  if (Math.abs(ratio - 16/9) < 0.01) return '16:9'
+  if (Math.abs(ratio - 4/3) < 0.01) return '4:3'
+  if (Math.abs(ratio - 3/4) < 0.01) return '3:4'
+  if (Math.abs(ratio - 3/2) < 0.01) return '3:2'
+  if (Math.abs(ratio - 2/3) < 0.01) return '2:3'
+  return '1:1'
+}
+
 // System prompt for Flux (no text support)
 const FLUX_PROMPT_PREFIX = `Crea una fotografía profesional de alta calidad para marketing en redes sociales.
 NO crees una captura de pantalla o mockup de Instagram u otra red social.
@@ -211,12 +225,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
+        // Determine aspect ratio from dimensions
+        const geminiAspectRatio = getAspectRatio(
+          imageParams.width || 1080,
+          imageParams.height || 1080
+        )
+
         // Generate image using SDK (format from official docs)
         const response = await ai.models.generateContent({
           model: geminiModelId,
           contents: promptParts,
           config: {
-            responseModalities: ['TEXT', 'IMAGE']
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              aspectRatio: geminiAspectRatio
+            }
           }
         })
 
@@ -299,11 +322,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         // Use b64_json to avoid CORS issues with xAI's image hosting
         // Model: grok-2-image-1212 ($0.07/image, 300 rpm)
+        // Determine aspect ratio from dimensions
+        const grokAspectRatio = getAspectRatio(
+          imageParams.width || 1080,
+          imageParams.height || 1080
+        )
+
         const grokRequest: Record<string, unknown> = {
           model: 'grok-2-image-1212',
           prompt: enhancedPrompt,
           n: 1,
-          response_format: 'b64_json'
+          response_format: 'b64_json',
+          aspect_ratio: grokAspectRatio
         }
 
         const response = await fetch(GROK_IMAGINE_API_URL, {

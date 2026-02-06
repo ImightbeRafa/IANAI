@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getProduct } from '../services/database'
-import type { Product, AspectRatio, VideoResolution } from '../types'
+import type { Product, VideoResolution } from '../types'
 import Layout from '../components/Layout'
 import { 
   ArrowLeft,
@@ -75,7 +75,9 @@ export default function BRollWorkspace() {
   const [duration, setDuration] = useState<number>(15)
   const [resolution, setResolution] = useState<VideoResolution>('720p')
   const [videoModel, setVideoModel] = useState<VideoModel>('kling')
-  const [klingMode, setKlingMode] = useState<'std' | 'pro'>('std')
+  const [generateAudio, setGenerateAudio] = useState(false)
+  const [cfgScale, setCfgScale] = useState(0.5)
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('9:16')
 
   const labels = {
     es: {
@@ -109,11 +111,17 @@ export default function BRollWorkspace() {
       modelLabel: 'Modelo de Video',
       modelGrok: 'Grok (xAI)',
       modelKling: 'Kling 2.6 Pro (fal.ai)',
-      klingMode: 'Modo',
-      klingStd: 'Estándar',
-      klingPro: 'Profesional',
-      klingStdDesc: 'Rápido, buena calidad. Ideal para borradores y pruebas.',
-      klingProDesc: 'Máxima calidad y coherencia visual. Ideal para entrega final.'
+      audioLabel: 'Audio nativo',
+      audioOn: 'Con audio',
+      audioOff: 'Sin audio',
+      audioDesc: 'Genera voz sincronizada (soporta español e inglés). Costo: $0.14/seg vs $0.07/seg.',
+      cfgLabel: 'Adherencia al prompt',
+      cfgLow: 'Creativo',
+      cfgHigh: 'Preciso',
+      aspectLabel: 'Formato',
+      aspectVertical: 'Vertical (9:16)',
+      aspectHorizontal: 'Horizontal (16:9)',
+      aspectSquare: 'Cuadrado (1:1)'
     },
     en: {
       back: 'Back',
@@ -146,11 +154,17 @@ export default function BRollWorkspace() {
       modelLabel: 'Video Model',
       modelGrok: 'Grok (xAI)',
       modelKling: 'Kling 2.6 Pro (fal.ai)',
-      klingMode: 'Mode',
-      klingStd: 'Standard',
-      klingPro: 'Professional',
-      klingStdDesc: 'Fast, good quality. Ideal for drafts and testing.',
-      klingProDesc: 'Maximum quality and visual coherence. Ideal for final delivery.'
+      audioLabel: 'Native audio',
+      audioOn: 'With audio',
+      audioOff: 'No audio',
+      audioDesc: 'Generates synced voice (supports Spanish & English). Cost: $0.14/sec vs $0.07/sec.',
+      cfgLabel: 'Prompt adherence',
+      cfgLow: 'Creative',
+      cfgHigh: 'Precise',
+      aspectLabel: 'Format',
+      aspectVertical: 'Vertical (9:16)',
+      aspectHorizontal: 'Landscape (16:9)',
+      aspectSquare: 'Square (1:1)'
     }
   }
 
@@ -379,13 +393,14 @@ export default function BRollWorkspace() {
         prompt: scriptText.trim() || 'Ad video generation',
         motherPrompt: motherPrompt || undefined,
         duration,
-        aspect_ratio: '9:16' as AspectRatio,
+        aspect_ratio: aspectRatio,
         resolution
       }
 
       // Model-specific params
       if (videoModel === 'kling') {
-        requestBody.mode = klingMode
+        requestBody.generate_audio = generateAudio
+        requestBody.cfg_scale = cfgScale
         // fal.ai Kling supports image_url and image_urls for multi-image
         if (uploadedImages.length > 0) {
           requestBody.image_url = uploadedImages[0]
@@ -607,7 +622,33 @@ export default function BRollWorkspace() {
                 </div>
               </div>
 
-              {/* Video Settings */}
+              {/* Aspect Ratio Selector */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-dark-600 mb-1.5">
+                  {t.aspectLabel}
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { value: '9:16' as const, label: t.aspectVertical },
+                    { value: '16:9' as const, label: t.aspectHorizontal },
+                    { value: '1:1' as const, label: t.aspectSquare }
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => setAspectRatio(option.value)}
+                      className={`p-1.5 rounded-lg text-xs transition-colors ${
+                        aspectRatio === option.value
+                          ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Duration + Model-specific settings */}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-xs font-medium text-dark-600 mb-1.5">
@@ -631,32 +672,32 @@ export default function BRollWorkspace() {
                   {videoModel === 'kling' ? (
                     <>
                       <label className="block text-xs font-medium text-dark-600 mb-1.5">
-                        {t.klingMode}
+                        {t.audioLabel}
                       </label>
                       <div className="grid grid-cols-2 gap-1.5">
                         <button
-                          onClick={() => setKlingMode('std')}
+                          onClick={() => setGenerateAudio(false)}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
-                            klingMode === 'std'
+                            !generateAudio
                               ? 'bg-primary-100 text-primary-700 border border-primary-500'
                               : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                           }`}
                         >
-                          {t.klingStd}
+                          {t.audioOff}
                         </button>
                         <button
-                          onClick={() => setKlingMode('pro')}
+                          onClick={() => setGenerateAudio(true)}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
-                            klingMode === 'pro'
+                            generateAudio
                               ? 'bg-primary-100 text-primary-700 border border-primary-500'
                               : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                           }`}
                         >
-                          {t.klingPro}
+                          {t.audioOn}
                         </button>
                       </div>
                       <p className="text-[10px] text-dark-400 mt-1.5 leading-tight">
-                        {klingMode === 'std' ? t.klingStdDesc : t.klingProDesc}
+                        {t.audioDesc}
                       </p>
                     </>
                   ) : (
@@ -690,6 +731,28 @@ export default function BRollWorkspace() {
                   )}
                 </div>
               </div>
+
+              {/* CFG Scale (Kling only) */}
+              {videoModel === 'kling' && (
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-dark-600 mb-1.5">
+                    {t.cfgLabel}: {cfgScale.toFixed(1)}
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={cfgScale}
+                    onChange={(e) => setCfgScale(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-dark-400 mt-0.5">
+                    <span>{t.cfgLow}</span>
+                    <span>{t.cfgHigh}</span>
+                  </div>
+                </div>
+              )}
 
               {/* Error */}
               {error && (
