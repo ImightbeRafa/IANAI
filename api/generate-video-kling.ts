@@ -82,11 +82,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const falStatus = queueStatus.status as string
 
         if (falStatus === 'COMPLETED') {
-          // Fetch the actual result
-          const result = await fal.queue.result(modelId, { requestId })
-          const data = result.data as Record<string, unknown>
-          const video = data?.video as Record<string, unknown> | undefined
+          // Fetch the actual result via REST to avoid SDK 422 ValidationError
+          const resultUrl = `https://queue.fal.run/${modelId}/requests/${requestId}`
+          const resultResponse = await fetch(resultUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Key ${falKey}`,
+              'Content-Type': 'application/json'
+            }
+          })
 
+          if (!resultResponse.ok) {
+            const errText = await resultResponse.text()
+            console.error('fal.ai result fetch error:', {
+              status: resultResponse.status,
+              body: errText,
+              requestId
+            })
+            return res.status(200).json({
+              status: 'Pending',
+              debug: {
+                requestId,
+                rawStatus: 'result_fetch_error',
+                httpStatus: resultResponse.status,
+                timestamp: new Date().toISOString()
+              }
+            })
+          }
+
+          const data = await resultResponse.json() as Record<string, unknown>
+          const video = data?.video as Record<string, unknown> | undefined
           const videoUrl = video?.url as string | undefined
 
           return res.status(200).json({
@@ -124,13 +149,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           })
         }
       } catch (pollErr) {
-        console.error('fal.ai poll error:', pollErr)
+        const errBody = (pollErr as Record<string, unknown>)?.body
+        const errStatus = (pollErr as Record<string, unknown>)?.status
+        console.error('fal.ai poll error:', {
+          message: pollErr instanceof Error ? pollErr.message : 'Unknown',
+          status: errStatus,
+          body: JSON.stringify(errBody),
+          requestId
+        })
         return res.status(200).json({
           status: 'Pending',
           debug: {
             requestId,
             rawStatus: 'poll_error',
             error: pollErr instanceof Error ? pollErr.message : 'Unknown',
+            errorBody: errBody,
             timestamp: new Date().toISOString()
           }
         })

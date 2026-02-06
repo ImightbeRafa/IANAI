@@ -860,7 +860,7 @@ export default function BRollWorkspace() {
                     <p className="text-sm font-medium text-primary-700">{t.processing}</p>
                     <p className="text-xs text-primary-500">
                       <Clock className="w-3 h-3 inline mr-1" />
-                      {duration}s @ {resolution} • 9:16
+                      {duration}s {videoModel !== 'kling' ? `@ ${resolution} ` : ''}• {aspectRatio}
                     </p>
                   </div>
                 </div>

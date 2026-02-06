@@ -84,7 +84,12 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       } else if ('perSecond' in modelCosts) {
         // Video model - cost per second (duration passed in metadata)
         const duration = (metadata?.duration as number) || 5
-        estimatedCostUsd = (modelCosts.perSecond as number) * duration
+        let perSecondRate = modelCosts.perSecond as number
+        // Kling with audio doubles the per-second cost ($0.07 → $0.14)
+        if (metadata?.generate_audio === true) {
+          perSecondRate *= 2
+        }
+        estimatedCostUsd = perSecondRate * duration
       } else if ('input' in modelCosts && 'output' in modelCosts) {
         // Text model - cost based on tokens
         const inputCost = (inputTokens / 1_000_000) * (modelCosts.input as number)

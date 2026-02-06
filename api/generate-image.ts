@@ -323,10 +323,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Use b64_json to avoid CORS issues with xAI's image hosting
         // Model: grok-2-image-1212 ($0.07/image, 300 rpm)
         // Determine aspect ratio from dimensions
-        const grokAspectRatio = getAspectRatio(
+        // Grok supports: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2
+        // Map unsupported ratios to closest supported ones (e.g. 4:5 → 3:4)
+        const GROK_SUPPORTED_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2']
+        const GROK_RATIO_FALLBACK: Record<string, string> = { '4:5': '3:4', '5:4': '4:3' }
+        let grokAspectRatio = getAspectRatio(
           imageParams.width || 1080,
           imageParams.height || 1080
         )
+        if (!GROK_SUPPORTED_RATIOS.includes(grokAspectRatio)) {
+          grokAspectRatio = GROK_RATIO_FALLBACK[grokAspectRatio] || '1:1'
+        }
 
         const grokRequest: Record<string, unknown> = {
           model: 'grok-2-image-1212',
