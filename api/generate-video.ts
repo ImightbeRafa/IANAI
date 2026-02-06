@@ -151,8 +151,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Prompt is required' })
     }
 
-    // Validate duration (1-30 seconds for generation)
-    const validDuration = Math.max(1, Math.min(30, duration))
+    // Validate duration (1-15 seconds per generation, xAI API limit)
+    const validDuration = Math.max(1, Math.min(15, duration))
 
     // Check if this is a structured ad video prompt (from build-ad-prompt pipeline)
     // or a legacy B-Roll free-form prompt

@@ -12,6 +12,7 @@ export const MODEL_COSTS = {
   // Script generation models (per 1M tokens)
   'grok': { input: 3.00, output: 15.00 },
   'grok-3-mini': { input: 0.30, output: 0.50 },
+  'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
   'gemini': { input: 0.15, output: 0.60 },
   
   // Image generation models (per image)

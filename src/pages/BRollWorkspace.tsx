@@ -29,6 +29,7 @@ import { supabase } from '../lib/supabase'
 interface GeneratedVideo {
   id: string
   videoUrl: string
+  videoUrl2?: string
   prompt: string
   duration: number
   createdAt: Date
@@ -79,6 +80,11 @@ export default function BRollWorkspace() {
   const [cfgScale, setCfgScale] = useState(0.5)
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('9:16')
 
+  // 30s split mode state (2×15s chained via last-frame image reference)
+  const [splitPhase, setSplitPhase] = useState<'idle' | 'part1' | 'transitioning' | 'part2'>('idle')
+  const [splitPromptPart2, setSplitPromptPart2] = useState<string | null>(null)
+  const [splitVideo1Url, setSplitVideo1Url] = useState<string | null>(null)
+
   const labels = {
     es: {
       back: 'Volver',
@@ -115,6 +121,10 @@ export default function BRollWorkspace() {
       audioOn: 'Con audio',
       audioOff: 'Sin audio',
       audioDesc: 'Genera voz sincronizada (soporta español e inglés). Costo: ~$0.34/seg vs ~$0.22/seg.',
+      splitPart1: 'Generando Parte 1/2...',
+      splitTransition: 'Extrayendo frame de transición...',
+      splitPart2: 'Generando Parte 2/2...',
+      extendedLabel: '30s Extendido',
       cfgLabel: 'Adherencia al prompt',
       cfgLow: 'Creativo',
       cfgHigh: 'Preciso',
@@ -158,6 +168,10 @@ export default function BRollWorkspace() {
       audioOn: 'With audio',
       audioOff: 'No audio',
       audioDesc: 'Generates synced voice (supports Spanish & English). Cost: ~$0.34/sec vs ~$0.22/sec.',
+      splitPart1: 'Generating Part 1/2...',
+      splitTransition: 'Extracting transition frame...',
+      splitPart2: 'Generating Part 2/2...',
+      extendedLabel: '30s Extended',
       cfgLabel: 'Prompt adherence',
       cfgLow: 'Creative',
       cfgHigh: 'Precise',
@@ -241,23 +255,41 @@ export default function BRollWorkspace() {
         setLastPollStatus(`${result.status} | ${debugInfo.rawStatus || '...'}`)
 
         if (result.status === 'Ready' && result.result?.sample) {
-          setGeneratedVideos(prev => [{
-            id: pollingRequestId,
-            videoUrl: result.result.sample,
-            prompt: motherPrompt || scriptText,
-            duration: result.result.duration || duration,
-            createdAt: new Date()
-          }, ...prev])
-          setPollingRequestId(null)
-          setGenerating(false)
-          setPollStartTime(null)
-          setLastPollStatus(null)
+          if (splitPhase === 'part1') {
+            // Part 1 done — save URL and transition to frame extraction
+            setSplitVideo1Url(result.result.sample)
+            setSplitPhase('transitioning')
+            setPollingRequestId(null)
+            setPollStartTime(null)
+            setLastPollStatus(language === 'es' ? 'Extrayendo frame...' : 'Extracting frame...')
+          } else {
+            // Normal completion OR Part 2 completion
+            const isSplitDone = splitPhase === 'part2' && splitVideo1Url
+            setGeneratedVideos(prev => [{
+              id: pollingRequestId,
+              videoUrl: isSplitDone ? splitVideo1Url! : result.result.sample,
+              videoUrl2: isSplitDone ? result.result.sample : undefined,
+              prompt: motherPrompt || scriptText,
+              duration: isSplitDone ? 30 : (result.result.duration || duration),
+              createdAt: new Date()
+            }, ...prev])
+            setPollingRequestId(null)
+            setGenerating(false)
+            setPollStartTime(null)
+            setLastPollStatus(null)
+            setSplitPhase('idle')
+            setSplitPromptPart2(null)
+            setSplitVideo1Url(null)
+          }
         } else if (result.status === 'Error' || result.status === 'Failed') {
           setError(`Error: ${result.error || result.debug?.rawStatus || t.error}`)
           setPollingRequestId(null)
           setGenerating(false)
           setPollStartTime(null)
           setLastPollStatus(null)
+          setSplitPhase('idle')
+          setSplitPromptPart2(null)
+          setSplitVideo1Url(null)
         }
         
         const elapsedMs = pollStartTime ? Date.now() - pollStartTime : 0
@@ -269,6 +301,9 @@ export default function BRollWorkspace() {
           setGenerating(false)
           setPollStartTime(null)
           setLastPollStatus(null)
+          setSplitPhase('idle')
+          setSplitPromptPart2(null)
+          setSplitVideo1Url(null)
         }
       } catch (err) {
         console.error('Polling error:', err)
@@ -277,7 +312,119 @@ export default function BRollWorkspace() {
     }, 3000)
 
     return () => clearInterval(pollInterval)
-  }, [pollingRequestId, motherPrompt, scriptText, duration, t.error, pollStartTime, pollCount, language, videoModel])
+  }, [pollingRequestId, motherPrompt, scriptText, duration, t.error, pollStartTime, pollCount, language, videoModel, splitPhase, splitVideo1Url])
+
+  // 30s split mode: transition effect (extract last frame from Part 1 → submit Part 2)
+  useEffect(() => {
+    if (splitPhase !== 'transitioning' || !splitVideo1Url || !splitPromptPart2) return
+
+    let cancelled = false
+
+    async function doTransition() {
+      try {
+        setLastPollStatus(language === 'es' ? 'Descargando video...' : 'Downloading video...')
+
+        const { data: { session } } = await supabase.auth.getSession()
+        const token = session?.access_token
+        if (!token) throw new Error('Not authenticated')
+
+        // Fetch video through proxy (for CORS-safe canvas access)
+        const proxyUrl = import.meta.env.PROD
+          ? `/api/proxy-video?url=${encodeURIComponent(splitVideo1Url!)}`
+          : `http://localhost:3000/api/proxy-video?url=${encodeURIComponent(splitVideo1Url!)}`
+
+        const videoResponse = await fetch(proxyUrl, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (!videoResponse.ok) throw new Error('Failed to fetch video for frame extraction')
+
+        const blob = await videoResponse.blob()
+        const blobUrl = URL.createObjectURL(blob)
+        if (cancelled) { URL.revokeObjectURL(blobUrl); return }
+
+        setLastPollStatus(language === 'es' ? 'Extrayendo último frame...' : 'Extracting last frame...')
+
+        // Extract last frame via canvas
+        const lastFrame = await new Promise<string>((resolve, reject) => {
+          const vid = document.createElement('video')
+          vid.preload = 'auto'
+          vid.muted = true
+          vid.src = blobUrl
+
+          vid.onloadedmetadata = () => {
+            vid.currentTime = Math.max(0, vid.duration - 0.1)
+          }
+
+          vid.onseeked = () => {
+            try {
+              const canvas = document.createElement('canvas')
+              canvas.width = vid.videoWidth
+              canvas.height = vid.videoHeight
+              const ctx = canvas.getContext('2d')!
+              ctx.drawImage(vid, 0, 0)
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+              URL.revokeObjectURL(blobUrl)
+              resolve(dataUrl)
+            } catch (err) {
+              URL.revokeObjectURL(blobUrl)
+              reject(new Error('Canvas capture failed'))
+            }
+          }
+
+          vid.onerror = () => {
+            URL.revokeObjectURL(blobUrl)
+            reject(new Error('Video load failed'))
+          }
+
+          setTimeout(() => {
+            URL.revokeObjectURL(blobUrl)
+            reject(new Error('Frame extraction timeout'))
+          }, 30000)
+        })
+
+        if (cancelled) return
+
+        setLastPollStatus(language === 'es' ? 'Iniciando Parte 2...' : 'Starting Part 2...')
+
+        // Submit Part 2 with last frame as image reference
+        const response = await fetch(VIDEO_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            prompt: splitPromptPart2,
+            motherPrompt: splitPromptPart2,
+            duration: 15,
+            aspect_ratio: aspectRatio,
+            resolution,
+            image_url: lastFrame
+          })
+        })
+
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Part 2 submission failed')
+        if (cancelled) return
+
+        setSplitPhase('part2')
+        setPollStartTime(Date.now())
+        setPollCount(0)
+        setPollingRequestId(result.requestId)
+      } catch (err) {
+        if (cancelled) return
+        console.error('Split transition error:', err)
+        setError(err instanceof Error ? err.message : 'Transition failed')
+        setGenerating(false)
+        setSplitPhase('idle')
+        setSplitPromptPart2(null)
+        setSplitVideo1Url(null)
+      }
+    }
+
+    doTransition()
+    return () => { cancelled = true }
+  }, [splitPhase, splitVideo1Url, splitPromptPart2, language, aspectRatio, resolution])
 
   // Handle multiple image uploads
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -323,6 +470,8 @@ export default function BRollWorkspace() {
     setBuildingPrompt(true)
     setError('')
     setMotherPrompt('')
+    setSplitPromptPart2(null)
+    setSplitPhase('idle')
     setVisualDNA('')
     setCinematicScript('')
 
@@ -362,7 +511,13 @@ export default function BRollWorkspace() {
         throw new Error(result.error || result.message || 'Failed to build prompt')
       }
 
-      setMotherPrompt(result.motherPrompt)
+      if (result.splitMode) {
+        setMotherPrompt(result.motherPromptPart1)
+        setSplitPromptPart2(result.motherPromptPart2)
+      } else {
+        setMotherPrompt(result.motherPrompt)
+        setSplitPromptPart2(null)
+      }
       setVisualDNA(result.visualDNA || '')
       setCinematicScript(result.cinematicScript || '')
       setShowPromptPreview(true)
@@ -390,10 +545,13 @@ export default function BRollWorkspace() {
       
       const apiUrl = videoModel === 'kling' ? KLING_VIDEO_API_URL : VIDEO_API_URL
 
+      const isSplitMode = !!splitPromptPart2 && videoModel === 'grok'
+      const effectiveDuration = isSplitMode ? 15 : duration
+
       const requestBody: Record<string, unknown> = {
         prompt: scriptText.trim() || 'Ad video generation',
         motherPrompt: motherPrompt || undefined,
-        duration,
+        duration: effectiveDuration,
         aspect_ratio: aspectRatio,
         resolution
       }
@@ -432,11 +590,15 @@ export default function BRollWorkspace() {
       }
 
       if (result.requestId) {
+        if (isSplitMode) {
+          setSplitPhase('part1')
+        }
         setPollingRequestId(result.requestId)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t.error)
       setGenerating(false)
+      setSplitPhase('idle')
     }
   }
 
@@ -601,7 +763,7 @@ export default function BRollWorkspace() {
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
-                    onClick={() => { setVideoModel('kling'); setDuration(d => Math.max(3, Math.min(15, d))); }}
+                    onClick={() => { setVideoModel('kling'); setDuration(d => Math.max(3, Math.min(15, d))); setSplitPromptPart2(null); setSplitPhase('idle'); setMotherPrompt(''); }}
                     className={`p-2 rounded-lg text-xs font-medium transition-colors ${
                       videoModel === 'kling'
                         ? 'bg-primary-100 text-primary-700 border border-primary-500'
@@ -611,7 +773,7 @@ export default function BRollWorkspace() {
                     {t.modelKling}
                   </button>
                   <button
-                    onClick={() => { setVideoModel('grok'); setDuration(d => Math.max(5, Math.min(30, d))); }}
+                    onClick={() => { setVideoModel('grok'); setDuration(d => d === 30 ? 30 : Math.max(5, Math.min(15, d))); setMotherPrompt(''); }}
                     className={`p-2 rounded-lg text-xs font-medium transition-colors ${
                       videoModel === 'grok'
                         ? 'bg-primary-100 text-primary-700 border border-primary-500'
@@ -658,16 +820,29 @@ export default function BRollWorkspace() {
                   <input
                     type="range"
                     min={videoModel === 'kling' ? '3' : '5'}
-                    max={videoModel === 'kling' ? '15' : '30'}
+                    max="15"
                     step="1"
-                    value={duration}
+                    value={duration > 15 ? 15 : duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
+                    disabled={duration === 30}
                     className="w-full"
                   />
                   <div className="flex justify-between text-xs text-dark-400 mt-0.5">
                     <span>{videoModel === 'kling' ? '3s' : '5s'}</span>
-                    <span>{videoModel === 'kling' ? '15s' : '30s'}</span>
+                    <span>15s</span>
                   </div>
+                  {videoModel === 'grok' && (
+                    <button
+                      onClick={() => { setDuration(d => d === 30 ? 10 : 30); setMotherPrompt(''); setSplitPromptPart2(null); }}
+                      className={`mt-2 w-full p-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        duration === 30
+                          ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                      }`}
+                    >
+                      {t.extendedLabel} (2×15s)
+                    </button>
+                  )}
                 </div>
                 <div>
                   {videoModel === 'kling' ? (
@@ -815,9 +990,17 @@ export default function BRollWorkspace() {
                         </div>
                       )}
                       <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                        <p className="text-xs font-semibold text-green-700 mb-1">{t.motherPromptLabel}</p>
+                        <p className="text-xs font-semibold text-green-700 mb-1">
+                          {t.motherPromptLabel}{splitPromptPart2 ? ' (Part 1 — 0-15s)' : ''}
+                        </p>
                         <p className="text-xs text-green-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{motherPrompt}</p>
                       </div>
+                      {splitPromptPart2 && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                          <p className="text-xs font-semibold text-emerald-700 mb-1">{t.motherPromptLabel} (Part 2 — 15-30s)</p>
+                          <p className="text-xs text-emerald-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{splitPromptPart2}</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -833,12 +1016,14 @@ export default function BRollWorkspace() {
                   {generating ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      {t.generating}
+                      {splitPhase !== 'idle' 
+                        ? (splitPhase === 'part1' ? t.splitPart1 : splitPhase === 'transitioning' ? t.splitTransition : t.splitPart2)
+                        : t.generating}
                     </>
                   ) : (
                     <>
                       <Video className="w-5 h-5" />
-                      {t.generate}
+                      {t.generate}{splitPromptPart2 ? ' (2×15s)' : ''}
                     </>
                   )}
                 </button>
@@ -853,15 +1038,20 @@ export default function BRollWorkspace() {
               {t.generatedVideos}
             </h2>
 
-            {generating && pollingRequestId && (
+            {generating && (pollingRequestId || splitPhase === 'transitioning') && (
               <div className="mb-4 p-4 bg-primary-50 rounded-lg">
                 <div className="flex items-center gap-3 mb-2">
                   <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
                   <div>
-                    <p className="text-sm font-medium text-primary-700">{t.processing}</p>
+                    <p className="text-sm font-medium text-primary-700">
+                      {splitPhase === 'part1' ? t.splitPart1
+                        : splitPhase === 'transitioning' ? t.splitTransition
+                        : splitPhase === 'part2' ? t.splitPart2
+                        : t.processing}
+                    </p>
                     <p className="text-xs text-primary-500">
                       <Clock className="w-3 h-3 inline mr-1" />
-                      {duration}s {videoModel !== 'kling' ? `@ ${resolution} ` : ''}• {aspectRatio}
+                      {duration === 30 ? '2×15s' : `${duration}s`} {videoModel !== 'kling' ? `@ ${resolution} ` : ''}• {aspectRatio}
                     </p>
                   </div>
                 </div>
@@ -882,24 +1072,49 @@ export default function BRollWorkspace() {
               <div className="space-y-4">
                 {generatedVideos.map((video, index) => (
                   <div key={video.id} className="relative group">
+                    {video.videoUrl2 && (
+                      <p className="text-xs font-medium text-primary-600 mb-1">Part 1 (0-15s)</p>
+                    )}
                     <video
                       src={video.videoUrl}
                       controls
                       className="w-full rounded-lg bg-black"
                       style={{ maxHeight: '400px' }}
                     />
+                    {video.videoUrl2 && (
+                      <>
+                        <p className="text-xs font-medium text-primary-600 mt-2 mb-1">Part 2 (15-30s)</p>
+                        <video
+                          src={video.videoUrl2}
+                          controls
+                          className="w-full rounded-lg bg-black"
+                          style={{ maxHeight: '400px' }}
+                        />
+                      </>
+                    )}
                     <div className="mt-2 flex items-center justify-between">
                       <div className="text-xs text-dark-500">
                         <Clock className="w-3 h-3 inline mr-1" />
-                        {video.duration}s • {new Date(video.createdAt).toLocaleTimeString()}
+                        {video.duration}s{video.videoUrl2 ? ' (2×15s)' : ''} • {new Date(video.createdAt).toLocaleTimeString()}
                       </div>
-                      <button
-                        onClick={() => handleDownload(video.videoUrl, index)}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-dark-100 text-dark-700 rounded-lg hover:bg-dark-200 transition-colors text-sm"
-                      >
-                        <Download className="w-4 h-4" />
-                        {t.download}
-                      </button>
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => handleDownload(video.videoUrl, index)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-dark-100 text-dark-700 rounded-lg hover:bg-dark-200 transition-colors text-sm"
+                        >
+                          <Download className="w-4 h-4" />
+                          {video.videoUrl2 ? 'P1' : t.download}
+                        </button>
+                        {video.videoUrl2 && (
+                          <button
+                            onClick={() => handleDownload(video.videoUrl2!, index)}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-dark-100 text-dark-700 rounded-lg hover:bg-dark-200 transition-colors text-sm"
+                          >
+                            <Download className="w-4 h-4" />
+                            P2
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
