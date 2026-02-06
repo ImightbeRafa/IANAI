@@ -260,10 +260,11 @@ export default function BRollWorkspace() {
           setLastPollStatus(null)
         }
         
-        if (pollCount > 100) {
+        const elapsedMs = pollStartTime ? Date.now() - pollStartTime : 0
+        if (elapsedMs > 10 * 60 * 1000) {
           setError(language === 'es' 
-            ? 'Generación de video agotó el tiempo (5 min). Intenta de nuevo.'
-            : 'Video generation timed out (5 min). Please try again.')
+            ? 'Generación de video agotó el tiempo (10 min). Intenta de nuevo.'
+            : 'Video generation timed out (10 min). Please try again.')
           setPollingRequestId(null)
           setGenerating(false)
           setPollStartTime(null)
