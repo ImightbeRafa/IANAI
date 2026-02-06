@@ -24,9 +24,9 @@ export const MODEL_COSTS = {
   // Grok Imagine Video: $0.07/sec (including audio)
   'grok-imagine-video-480p': { perSecond: 0.05 },
   'grok-imagine-video-720p': { perSecond: 0.07 },
-  // Kling via fal.ai v2.6 Pro: $0.07/sec (no audio), $0.14/sec (with audio)
-  'fal-ai/kling-video/v2.6/pro/text-to-video': { perSecond: 0.07 },
-  'fal-ai/kling-video/v2.6/pro/image-to-video': { perSecond: 0.07 },
+  // Kling 3.0 via fal.ai: $0.224/sec (no audio), $0.336/sec (with audio)
+  'fal-ai/kling-video/v3/pro/text-to-video': { perSecond: 0.224 },
+  'fal-ai/kling-video/o3/standard/image-to-video': { perSecond: 0.224 },
 }
 
 // Feature types for tracking
@@ -85,9 +85,9 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
         // Video model - cost per second (duration passed in metadata)
         const duration = (metadata?.duration as number) || 5
         let perSecondRate = modelCosts.perSecond as number
-        // Kling with audio doubles the per-second cost ($0.07 → $0.14)
+        // Kling 3.0 with audio: $0.224 → $0.336 (1.5x multiplier)
         if (metadata?.generate_audio === true) {
-          perSecondRate *= 2
+          perSecondRate *= 1.5
         }
         estimatedCostUsd = perSecondRate * duration
       } else if ('input' in modelCosts && 'output' in modelCosts) {

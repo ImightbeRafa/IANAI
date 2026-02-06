@@ -4,7 +4,7 @@ import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 
 /**
- * KLING AI VIDEO GENERATION via fal.ai
+ * KLING 3.0 VIDEO GENERATION via fal.ai
  * Supports: text-to-video, image-to-video
  * Uses the same Module A+B+C pipeline output (motherPrompt) as Grok
  * 
@@ -12,16 +12,16 @@ import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
  * We use fal.queue.submit + fal.queue.status + fal.queue.result for polling.
  * 
  * Models:
- *   Image-to-video: fal-ai/kling-video/v2.6/pro/image-to-video
- *   Text-to-video:  fal-ai/kling-video/v2.6/pro/text-to-video
+ *   Text-to-video:  fal-ai/kling-video/v3/pro/text-to-video  (3-15s, multi_prompt, audio)
+ *   Image-to-video: fal-ai/kling-video/o3/standard/image-to-video (3-15s, start/end frames, audio)
  * 
- * Pricing: ~$0.07/sec (no audio), ~$0.14/sec (with audio)
- * Duration: 5 or 10 seconds per generation (longer videos require scene extension chaining)
+ * Pricing: ~$0.224/sec (no audio), ~$0.336/sec (with audio), ~$0.392/sec (voice control)
+ * Duration: 3-15 seconds per generation
  */
 
-// Model IDs on fal.ai
-const FAL_KLING_IMAGE_TO_VIDEO = 'fal-ai/kling-video/v2.6/pro/image-to-video'
-const FAL_KLING_TEXT_TO_VIDEO = 'fal-ai/kling-video/v2.6/pro/text-to-video'
+// Model IDs on fal.ai (Kling 3.0)
+const FAL_KLING_IMAGE_TO_VIDEO = 'fal-ai/kling-video/o3/standard/image-to-video'
+const FAL_KLING_TEXT_TO_VIDEO = 'fal-ai/kling-video/v3/pro/text-to-video'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -225,8 +225,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const imageRef = image_url || (image_urls && image_urls[0])
     const modelId = hasImages ? FAL_KLING_IMAGE_TO_VIDEO : FAL_KLING_TEXT_TO_VIDEO
 
-    // Kling via fal.ai: only 5 or 10 seconds permitted
-    const validDuration = duration >= 10 ? 10 : 5
+    // Kling 3.0 via fal.ai: 3-15 seconds permitted (integer)
+    const validDuration = Math.max(3, Math.min(15, Math.round(Number(duration) || 5)))
 
     // Validate aspect_ratio for Kling (only 16:9, 9:16, 1:1 supported)
     const validAspectRatios = ['16:9', '9:16', '1:1']
@@ -249,6 +249,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Image-to-video: attach image reference
+    // O3 model uses image_url for start frame
     if (hasImages && imageRef) {
       falInput.image_url = imageRef
     }

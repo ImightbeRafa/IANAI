@@ -75,7 +75,7 @@ export default function BRollWorkspace() {
   const [duration, setDuration] = useState<number>(10)
   const [resolution, setResolution] = useState<VideoResolution>('720p')
   const [videoModel, setVideoModel] = useState<VideoModel>('kling')
-  const [generateAudio, setGenerateAudio] = useState(false)
+  const [generateAudio, setGenerateAudio] = useState(true)
   const [cfgScale, setCfgScale] = useState(0.5)
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('9:16')
 
@@ -110,11 +110,11 @@ export default function BRollWorkspace() {
       motherPromptLabel: 'Prompt Madre',
       modelLabel: 'Modelo de Video',
       modelGrok: 'Grok (xAI)',
-      modelKling: 'Kling 2.6 Pro (fal.ai)',
+      modelKling: 'Kling 3.0 Pro (fal.ai)',
       audioLabel: 'Audio nativo',
       audioOn: 'Con audio',
       audioOff: 'Sin audio',
-      audioDesc: 'Genera voz sincronizada (soporta español e inglés). Costo: $0.14/seg vs $0.07/seg.',
+      audioDesc: 'Genera voz sincronizada (soporta español e inglés). Costo: ~$0.34/seg vs ~$0.22/seg.',
       cfgLabel: 'Adherencia al prompt',
       cfgLow: 'Creativo',
       cfgHigh: 'Preciso',
@@ -153,11 +153,11 @@ export default function BRollWorkspace() {
       motherPromptLabel: 'Mother Prompt',
       modelLabel: 'Video Model',
       modelGrok: 'Grok (xAI)',
-      modelKling: 'Kling 2.6 Pro (fal.ai)',
+      modelKling: 'Kling 3.0 Pro (fal.ai)',
       audioLabel: 'Native audio',
       audioOn: 'With audio',
       audioOff: 'No audio',
-      audioDesc: 'Generates synced voice (supports Spanish & English). Cost: $0.14/sec vs $0.07/sec.',
+      audioDesc: 'Generates synced voice (supports Spanish & English). Cost: ~$0.34/sec vs ~$0.22/sec.',
       cfgLabel: 'Prompt adherence',
       cfgLow: 'Creative',
       cfgHigh: 'Precise',
@@ -600,7 +600,7 @@ export default function BRollWorkspace() {
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
-                    onClick={() => setVideoModel('kling')}
+                    onClick={() => { setVideoModel('kling'); setDuration(d => Math.max(3, Math.min(15, d))); }}
                     className={`p-2 rounded-lg text-xs font-medium transition-colors ${
                       videoModel === 'kling'
                         ? 'bg-primary-100 text-primary-700 border border-primary-500'
@@ -610,7 +610,7 @@ export default function BRollWorkspace() {
                     {t.modelKling}
                   </button>
                   <button
-                    onClick={() => setVideoModel('grok')}
+                    onClick={() => { setVideoModel('grok'); setDuration(d => Math.max(5, Math.min(30, d))); }}
                     className={`p-2 rounded-lg text-xs font-medium transition-colors ${
                       videoModel === 'grok'
                         ? 'bg-primary-100 text-primary-700 border border-primary-500'
@@ -654,46 +654,19 @@ export default function BRollWorkspace() {
                   <label className="block text-xs font-medium text-dark-600 mb-1.5">
                     {t.duration}: {duration}s
                   </label>
-                  {videoModel === 'kling' ? (
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        onClick={() => setDuration(5)}
-                        className={`p-1.5 rounded-lg text-xs transition-colors ${
-                          duration <= 5
-                            ? 'bg-primary-100 text-primary-700 border border-primary-500'
-                            : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
-                        }`}
-                      >
-                        5s
-                      </button>
-                      <button
-                        onClick={() => setDuration(10)}
-                        className={`p-1.5 rounded-lg text-xs transition-colors ${
-                          duration >= 10
-                            ? 'bg-primary-100 text-primary-700 border border-primary-500'
-                            : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
-                        }`}
-                      >
-                        10s
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <input
-                        type="range"
-                        min="5"
-                        max="30"
-                        step="1"
-                        value={duration}
-                        onChange={(e) => setDuration(Number(e.target.value))}
-                        className="w-full"
-                      />
-                      <div className="flex justify-between text-xs text-dark-400 mt-0.5">
-                        <span>5s</span>
-                        <span>30s</span>
-                      </div>
-                    </>
-                  )}
+                  <input
+                    type="range"
+                    min={videoModel === 'kling' ? '3' : '5'}
+                    max={videoModel === 'kling' ? '15' : '30'}
+                    step="1"
+                    value={duration}
+                    onChange={(e) => setDuration(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-dark-400 mt-0.5">
+                    <span>{videoModel === 'kling' ? '3s' : '5s'}</span>
+                    <span>{videoModel === 'kling' ? '15s' : '30s'}</span>
+                  </div>
                 </div>
                 <div>
                   {videoModel === 'kling' ? (
