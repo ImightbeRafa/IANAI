@@ -707,7 +707,9 @@ The user has provided the following documents/links as additional context for sc
   const docsContent = docs.map((doc, i) => {
     const docType = doc.type === 'link' 
       ? (language === 'es' ? 'Enlace web' : 'Web link')
-      : (language === 'es' ? 'Texto' : 'Text')
+      : doc.type === 'pdf'
+        ? (language === 'es' ? 'Documento PDF' : 'PDF Document')
+        : (language === 'es' ? 'Texto' : 'Text')
     
     return `
 --- ${docType}: ${doc.name} ---
@@ -959,7 +961,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Increment usage counter after successful generation
     await incrementUsage(user.id, 'script')
 
-    return res.status(200).json({ content, remaining: remaining - 1, model: selectedModel })
+    return res.status(200).json({ content, remaining: remaining - 1, model: selectedModel, _debug: { systemPrompt } })
   } catch (error) {
     console.error('Chat API error:', error)
     return res.status(500).json({ 

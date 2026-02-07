@@ -63,7 +63,7 @@ export async function sendMessageToGrok(
   productType?: ProductType,
   icp?: ICP | null,
   contextDocs?: ContextDocument[]
-): Promise<string> {
+): Promise<{ content: string; _debug?: { systemPrompt: string } }> {
   // Get the current session token for authentication
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -114,7 +114,10 @@ export async function sendMessageToGrok(
     throw new Error(data.error || `API error: ${response.status}`)
   }
 
-  return data.content || 'No response generated'
+  return {
+    content: data.content || 'No response generated',
+    _debug: data._debug
+  }
 }
 
 export function getInitialPrompt(language: Language = 'es'): string {

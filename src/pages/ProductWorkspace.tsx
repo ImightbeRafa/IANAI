@@ -45,7 +45,10 @@ import {
   Link2,
   FileText,
   Trash2,
-  Upload
+  Upload,
+  Pencil,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -77,8 +80,14 @@ export default function ProductWorkspace() {
   const [newLinkUrl, setNewLinkUrl] = useState('')
   const [newTextContent, setNewTextContent] = useState('')
   const [addingDoc, setAddingDoc] = useState(false)
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [debugDocId, setDebugDocId] = useState<string | null>(null)
+  const [debugSystemPrompt, setDebugSystemPrompt] = useState<string | null>(null)
+  const [showDebugPrompt, setShowDebugPrompt] = useState(false)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -135,6 +144,24 @@ export default function ProductWorkspace() {
     loadData()
   }, [productId, sessionId, user, navigate])
 
+  const handleRenameSession = async (sessionId: string) => {
+    if (!renameValue.trim()) {
+      setRenamingSessionId(null)
+      return
+    }
+    try {
+      await updateChatSession(sessionId, { title: renameValue.trim() })
+      setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: renameValue.trim() } : s))
+      if (currentSession?.id === sessionId) {
+        setCurrentSession(prev => prev ? { ...prev, title: renameValue.trim() } : prev)
+      }
+    } catch (error) {
+      console.error('Failed to rename session:', error)
+    } finally {
+      setRenamingSessionId(null)
+    }
+  }
+
   const handleNewSession = async () => {
     if (!product || !user) return
     
@@ -179,9 +206,10 @@ export default function ProductWorkspace() {
       const messageForApi = { ...savedUserMessage, content: messageWithSettings }
       const allMessages = [...messages, messageForApi]
       
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
+      if (aiResponse._debug?.systemPrompt) setDebugSystemPrompt(aiResponse._debug.systemPrompt)
       
-      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse)
+      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content)
       setMessages(prev => [...prev, savedAiMessage])
 
     } catch (error) {
@@ -454,8 +482,9 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
+      if (aiResponse._debug?.systemPrompt) setDebugSystemPrompt(aiResponse._debug.systemPrompt)
       
-      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse)
+      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content)
       setMessages(prev => [...prev, savedAiMessage])
 
     } catch (error) {
@@ -664,55 +693,97 @@ export default function ProductWorkspace() {
     <Layout>
       <div className="flex h-[calc(100vh-64px)] lg:h-screen">
         {/* Left Sidebar - Sessions */}
-        <div className="w-64 bg-dark-50 border-r border-dark-100 flex flex-col">
-          <div className="p-4 border-b border-dark-100">
+        <div className="w-64 bg-white border-r border-dark-100 flex flex-col">
+          <div className="px-4 pt-4 pb-3">
             <Link 
               to="/dashboard" 
-              className="flex items-center gap-2 text-dark-500 hover:text-dark-700 text-sm mb-4"
+              className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-3"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
               {t.back}
             </Link>
-            <h2 className="font-semibold text-dark-900 truncate">{product.name}</h2>
-            <p className="text-xs text-dark-400 capitalize">{product.type}</p>
+            <h2 className="font-semibold text-dark-900 truncate text-base">{product.name}</h2>
+            <p className="text-xs text-dark-400 capitalize mt-0.5">{product.type}</p>
           </div>
 
-          <div className="p-3">
+          <div className="px-3 pb-3">
             <button 
               onClick={handleNewSession}
-              className="btn-primary w-full flex items-center justify-center gap-2 text-sm"
+              className="w-full flex items-center justify-center gap-2 text-sm font-medium px-3 py-2.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
             >
               <Plus className="w-4 h-4" />
               {t.newSession}
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
-            <p className="px-4 py-2 text-xs font-medium text-dark-400 uppercase">
+          <div className="border-t border-dark-100" />
+
+          <div className="flex-1 overflow-y-auto py-2">
+            <p className="px-4 py-1.5 text-[10px] font-semibold text-dark-400 uppercase tracking-wider">
               {t.sessions}
             </p>
             {sessions.length === 0 ? (
-              <p className="px-4 py-2 text-sm text-dark-400">{t.noSessions}</p>
+              <p className="px-4 py-3 text-sm text-dark-400">{t.noSessions}</p>
             ) : (
-              <div className="space-y-1 px-2">
+              <div className="space-y-0.5 px-2">
                 {sessions.map((session) => (
-                  <button
+                  <div
                     key={session.id}
-                    onClick={() => navigate(`/product/${productId}/session/${session.id}`)}
-                    className={`w-full text-left p-3 rounded-lg transition-colors ${
+                    className={`group relative rounded-lg transition-all duration-150 ${
                       currentSession?.id === session.id
-                        ? 'bg-primary-100 text-primary-700'
-                        : 'hover:bg-dark-100 text-dark-600'
+                        ? 'bg-dark-100'
+                        : 'hover:bg-dark-50'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                      <span className="truncate text-sm">{session.title}</span>
-                    </div>
-                    <p className="text-xs text-dark-400 mt-1">
-                      {new Date(session.updated_at).toLocaleDateString()}
-                    </p>
-                  </button>
+                    {renamingSessionId === session.id ? (
+                      <div className="p-2">
+                        <input
+                          ref={renameInputRef}
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleRenameSession(session.id)
+                            if (e.key === 'Escape') setRenamingSessionId(null)
+                          }}
+                          onBlur={() => handleRenameSession(session.id)}
+                          className="w-full px-2 py-1 text-sm border border-primary-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 bg-white"
+                          autoFocus
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => navigate(`/product/${productId}/session/${session.id}`)}
+                        onDoubleClick={() => {
+                          setRenamingSessionId(session.id)
+                          setRenameValue(session.title)
+                        }}
+                        className="w-full text-left px-3 py-2.5 rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${
+                            currentSession?.id === session.id ? 'text-dark-700' : 'text-dark-400'
+                          }`} />
+                          <span className={`truncate text-sm ${
+                            currentSession?.id === session.id ? 'font-medium text-dark-800' : 'text-dark-600'
+                          }`}>{session.title}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setRenamingSessionId(session.id)
+                              setRenameValue(session.title)
+                            }}
+                            className="ml-auto opacity-0 group-hover:opacity-100 p-0.5 rounded text-dark-400 hover:text-dark-600 transition-opacity"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-dark-400 mt-0.5 pl-5.5">
+                          {new Date(session.updated_at).toLocaleDateString()}
+                        </p>
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -720,52 +791,85 @@ export default function ProductWorkspace() {
         </div>
 
         {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col bg-gray-50/50">
           {/* Header */}
-          <div className="bg-white border-b border-dark-100 px-6 py-4 flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-dark-900">
-                {currentSession?.title || product.name}
-              </h1>
-            </div>
-            <div className="flex items-center gap-2">
+          <div className="bg-white border-b border-dark-100 px-6 py-3 flex items-center justify-between">
+            <h1 className="text-sm font-semibold text-dark-800 truncate">
+              {currentSession?.title || product.name}
+            </h1>
+            <div className="flex items-center gap-1">
               {messages.length > 0 && (
-                <button onClick={exportAsText} className="btn-secondary flex items-center gap-2 text-sm">
-                  <Download className="w-4 h-4" />
+                <button onClick={exportAsText} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-dark-500 hover:text-dark-700 hover:bg-dark-50 rounded-md transition-colors">
+                  <Download className="w-3.5 h-3.5" />
                   {t.export}
+                </button>
+              )}
+              {debugSystemPrompt && (
+                <button
+                  onClick={() => setShowDebugPrompt(!showDebugPrompt)}
+                  className={`p-2 rounded-md transition-colors ${
+                    showDebugPrompt ? 'bg-amber-100 text-amber-700' : 'hover:bg-dark-50 text-dark-400'
+                  }`}
+                  title="Debug: View full system prompt"
+                >
+                  <Eye className="w-4 h-4" />
                 </button>
               )}
               <button 
                 onClick={() => setShowSettings(!showSettings)}
-                className={`p-2 rounded-lg transition-colors ${
-                  showSettings ? 'bg-amber-100 text-amber-600' : 'hover:bg-dark-100 text-dark-500'
+                className={`p-2 rounded-md transition-colors ${
+                  showSettings ? 'bg-amber-50 text-amber-600' : 'hover:bg-dark-50 text-dark-400'
                 }`}
                 title={t.scriptSettings}
               >
-                <Settings className="w-5 h-5" />
+                <Settings className="w-4 h-4" />
               </button>
               <button 
                 onClick={() => setShowProductInfo(!showProductInfo)}
-                className={`p-2 rounded-lg transition-colors ${
-                  showProductInfo ? 'bg-primary-100 text-primary-600' : 'hover:bg-dark-100 text-dark-500'
+                className={`p-2 rounded-md transition-colors ${
+                  showProductInfo ? 'bg-primary-50 text-primary-600' : 'hover:bg-dark-50 text-dark-400'
                 }`}
               >
-                <Info className="w-5 h-5" />
+                <Info className="w-4 h-4" />
               </button>
             </div>
           </div>
 
+          {/* Debug: Full System Prompt */}
+          {showDebugPrompt && debugSystemPrompt && (
+            <div className="border-b border-amber-300 bg-amber-50/80 px-6 py-3 max-h-[50vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-mono font-bold text-amber-800">
+                  DEBUG — Full System Prompt ({debugSystemPrompt.length.toLocaleString()} chars / ~{Math.ceil(debugSystemPrompt.length / 4).toLocaleString()} tokens)
+                </p>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(debugSystemPrompt)
+                  }}
+                  className="text-[10px] px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="text-[11px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-3 rounded-lg border border-amber-200 leading-relaxed">
+                {debugSystemPrompt}
+              </pre>
+            </div>
+          )}
+
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="flex-1 overflow-y-auto px-6 py-8 space-y-5">
             {messages.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <Sparkles className="w-12 h-12 text-primary-400 mx-auto mb-4" />
-                  <p className="text-dark-500 mb-6">{t.startConversation}</p>
+                <div className="text-center max-w-sm">
+                  <div className="w-14 h-14 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-5">
+                    <Sparkles className="w-7 h-7 text-primary-500" />
+                  </div>
+                  <p className="text-dark-400 text-sm mb-8">{t.startConversation}</p>
                   <button
                     onClick={handleGenerateScript}
                     disabled={loading}
-                    className="btn-primary inline-flex items-center gap-2 text-lg px-8 py-3"
+                    className="inline-flex items-center gap-2.5 text-base font-medium px-8 py-3 rounded-xl bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -783,57 +887,57 @@ export default function ProductWorkspace() {
                   className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-3xl rounded-2xl px-5 py-4 ${
+                    className={`max-w-3xl px-5 py-4 ${
                       message.role === 'user'
-                        ? 'bg-primary-600 text-white'
-                        : 'bg-white border border-dark-100 text-dark-800'
+                        ? 'bg-primary-600 text-white rounded-2xl rounded-br-md'
+                        : 'bg-white border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm'
                     }`}
                   >
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">
                       {message.content}
                     </div>
                     {message.role === 'assistant' && message.content.length > 100 && (
-                      <div className="mt-3 pt-3 border-t border-dark-100 flex items-center gap-3">
+                      <div className="mt-3 pt-3 border-t border-dark-100/60 flex items-center gap-3">
                         <button
                           onClick={() => handleSaveScript(message.content, message.id)}
                           disabled={savingScript || !!savedScriptIds[message.id]}
-                          className={`text-xs flex items-center gap-1 ${
+                          className={`text-xs flex items-center gap-1 transition-colors ${
                             savedScriptIds[message.id] 
                               ? 'text-green-600' 
-                              : 'text-primary-600 hover:text-primary-700'
+                              : 'text-dark-400 hover:text-primary-600'
                           }`}
                         >
-                          <BookmarkPlus className="w-4 h-4" />
+                          <BookmarkPlus className="w-3.5 h-3.5" />
                           {savedScriptIds[message.id] ? (language === 'es' ? '¡Guardado!' : 'Saved!') : t.saveScript}
                         </button>
-                        <span className="text-dark-200">|</span>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-dark-400">{t.rateScript}:</span>
+                        <span className="text-dark-200">·</span>
+                        <div className="flex items-center gap-0.5">
+                          <span className="text-xs text-dark-400 mr-1">{t.rateScript}:</span>
                           <button 
                             onClick={() => handleRateScript(message.id, message.content, 'up')}
                             disabled={!!ratedMessages[message.id]}
-                            className={`p-1 rounded transition-colors ${
+                            className={`p-1 rounded-md transition-colors ${
                               ratedMessages[message.id] === 'up'
-                                ? 'bg-green-100 text-green-600'
+                                ? 'bg-green-50 text-green-600'
                                 : ratedMessages[message.id] === 'down'
                                   ? 'text-dark-200 cursor-not-allowed'
                                   : 'hover:bg-green-50 text-dark-400 hover:text-green-600'
                             }`}
                           >
-                            <ThumbsUp className="w-4 h-4" />
+                            <ThumbsUp className="w-3.5 h-3.5" />
                           </button>
                           <button 
                             onClick={() => handleRateScript(message.id, message.content, 'down')}
                             disabled={!!ratedMessages[message.id]}
-                            className={`p-1 rounded transition-colors ${
+                            className={`p-1 rounded-md transition-colors ${
                               ratedMessages[message.id] === 'down'
-                                ? 'bg-red-100 text-red-600'
+                                ? 'bg-red-50 text-red-600'
                                 : ratedMessages[message.id] === 'up'
                                   ? 'text-dark-200 cursor-not-allowed'
                                   : 'hover:bg-red-50 text-dark-400 hover:text-red-600'
                             }`}
                           >
-                            <ThumbsDown className="w-4 h-4" />
+                            <ThumbsDown className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -851,16 +955,16 @@ export default function ProductWorkspace() {
           </div>
 
           {/* Input */}
-          <div className="bg-white border-t border-dark-100 p-4">
+          <div className="bg-white border-t border-dark-100 px-6 py-3">
             <div className="max-w-4xl mx-auto">
-              <div className="flex items-end gap-3">
+              <div className="flex items-end gap-2">
                 <div className="flex-1 relative">
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={t.placeholder}
-                    className="input-field resize-none min-h-[52px] max-h-32 pr-12"
+                    className="w-full px-4 py-3 text-sm bg-gray-50 border border-dark-100 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-300 focus:bg-white transition-colors"
                     rows={1}
                     disabled={loading}
                   />
@@ -868,12 +972,12 @@ export default function ProductWorkspace() {
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || loading}
-                  className="btn-primary h-[52px] px-5"
+                  className="h-[48px] w-[48px] flex items-center justify-center rounded-xl bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   {loading ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <Send className="w-5 h-5" />
+                    <Send className="w-4 h-4" />
                   )}
                 </button>
               </div>
@@ -1396,17 +1500,39 @@ export default function ProductWorkspace() {
                       {language === 'es' ? 'Documentos agregados:' : 'Added documents:'}
                     </p>
                     {contextDocs.map(doc => (
-                      <div key={doc.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-dark-100">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {doc.type === 'link' ? <Link2 className="w-4 h-4 text-blue-500 flex-shrink-0" /> : <FileText className="w-4 h-4 text-green-500 flex-shrink-0" />}
-                          <span className="text-xs text-dark-700 truncate">{doc.name}</span>
+                      <div key={doc.id} className="bg-white rounded-lg border border-dark-100 overflow-hidden">
+                        <div className="flex items-center justify-between p-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {doc.type === 'link' ? <Link2 className="w-4 h-4 text-blue-500 flex-shrink-0" /> : <FileText className="w-4 h-4 text-green-500 flex-shrink-0" />}
+                            <span className="text-xs text-dark-700 truncate">{doc.name}</span>
+                            <span className="text-[10px] text-dark-400 bg-dark-50 px-1.5 py-0.5 rounded font-mono flex-shrink-0">
+                              {doc.content ? `${doc.content.length}c` : '0c'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-0.5 flex-shrink-0">
+                            <button
+                              onClick={() => setDebugDocId(debugDocId === doc.id ? null : doc.id)}
+                              className="p-1 text-dark-400 hover:text-amber-600 transition-colors"
+                              title="Debug: view extracted content"
+                            >
+                              {debugDocId === doc.id ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDoc(doc.id)}
+                              className="p-1 text-dark-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => handleDeleteDoc(doc.id)}
-                          className="p-1 text-dark-400 hover:text-red-500 transition-colors flex-shrink-0"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {debugDocId === doc.id && (
+                          <div className="border-t border-dark-100 bg-amber-50/50 p-2">
+                            <p className="text-[10px] font-mono text-amber-700 mb-1">DEBUG — Raw extracted content ({doc.content?.length || 0} chars) | type: {doc.type}{doc.url ? ` | url: ${doc.url}` : ''}</p>
+                            <pre className="text-[11px] text-dark-600 whitespace-pre-wrap break-words max-h-60 overflow-y-auto font-mono bg-white p-2 rounded border border-amber-200">
+                              {doc.content || '(empty — no content extracted)'}
+                            </pre>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
