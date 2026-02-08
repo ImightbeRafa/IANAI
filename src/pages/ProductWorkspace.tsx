@@ -85,6 +85,7 @@ export default function ProductWorkspace() {
   const [debugDocId, setDebugDocId] = useState<string | null>(null)
   const [debugSystemPrompt, setDebugSystemPrompt] = useState<string | null>(null)
   const [showDebugPrompt, setShowDebugPrompt] = useState(false)
+  const [bulkLinkProgress, setBulkLinkProgress] = useState<{ current: number; total: number } | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -306,8 +307,20 @@ export default function ProductWorkspace() {
     if (!currentSession || !user || !newLinkUrl.trim() || addingDoc) return
     setAddingDoc(true)
     
+    // Parse multiple URLs (one per line, filter empty lines)
+    const urls = newLinkUrl
+      .split('\n')
+      .map(u => u.trim())
+      .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')))
+    
+    if (urls.length === 0) {
+      setAddingDoc(false)
+      return
+    }
+
+    setBulkLinkProgress({ current: 0, total: urls.length })
+    
     try {
-      // Fetch URL content via API
       const { data: { session: authSession } } = await supabase.auth.getSession()
       const token = authSession?.access_token
 
@@ -315,36 +328,47 @@ export default function ProductWorkspace() {
         ? '/api/fetch-url' 
         : 'http://localhost:3000/api/fetch-url'
 
-      const response = await fetch(fetchUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ url: newLinkUrl })
-      })
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i]
+        setBulkLinkProgress({ current: i + 1, total: urls.length })
+        
+        try {
+          const response = await fetch(fetchUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ url })
+          })
 
-      const result = await response.json()
-      
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to fetch URL')
+          const result = await response.json()
+          
+          if (!response.ok) {
+            console.warn(`Failed to fetch ${url}:`, result.error)
+            continue
+          }
+
+          const newDoc = await createContextDocument(currentSession.id, user.id, {
+            type: 'link',
+            name: result.title || url,
+            content: result.content,
+            url
+          })
+
+          setContextDocs(prev => [newDoc, ...prev])
+        } catch (err) {
+          console.warn(`Failed to add link ${url}:`, err)
+        }
       }
 
-      // Save to database
-      const newDoc = await createContextDocument(currentSession.id, user.id, {
-        type: 'link',
-        name: result.title || newLinkUrl,
-        content: result.content,
-        url: newLinkUrl
-      })
-
-      setContextDocs(prev => [newDoc, ...prev])
       setNewLinkUrl('')
       setShowAddLink(false)
     } catch (error) {
-      console.error('Failed to add link:', error)
+      console.error('Failed to add links:', error)
     } finally {
       setAddingDoc(false)
+      setBulkLinkProgress(null)
     }
   }
 
@@ -815,15 +839,37 @@ export default function ProductWorkspace() {
                   <Eye className="w-4 h-4" />
                 </button>
               )}
-              <button 
-                onClick={() => setShowSettings(!showSettings)}
-                className={`p-2 rounded-md transition-colors ${
-                  showSettings ? 'bg-amber-50 text-amber-600' : 'hover:bg-dark-50 text-dark-400'
-                }`}
-                title={t.scriptSettings}
-              >
-                <Settings className="w-4 h-4" />
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowSettings(!showSettings)}
+                  className={`p-2 rounded-md transition-colors ${
+                    showSettings ? 'bg-amber-50 text-amber-600' : 'hover:bg-dark-50 text-dark-400'
+                  }`}
+                  title={t.scriptSettings}
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                {showSettings && (
+                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-dark-100 z-50 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-semibold text-dark-900 flex items-center gap-2 text-sm">
+                        <Settings className="w-4 h-4 text-amber-600" />
+                        {t.scriptSettings}
+                      </h3>
+                      <button onClick={() => setShowSettings(false)} className="p-1 hover:bg-dark-50 rounded-md text-dark-400">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <ScriptSettingsPanel
+                      settings={scriptSettings}
+                      onChange={setScriptSettings}
+                      language={language}
+                      onGenerate={() => { setShowSettings(false); handleGenerateScript() }}
+                      loading={loading}
+                    />
+                  </div>
+                )}
+              </div>
               <button 
                 onClick={() => setShowProductInfo(!showProductInfo)}
                 className={`p-2 rounded-md transition-colors ${
@@ -987,9 +1033,9 @@ export default function ProductWorkspace() {
 
         {/* Right Sidebar - Product Info & Context */}
         {showProductInfo && (
-          <div className="w-80 bg-white border-l border-dark-100 flex flex-col overflow-hidden">
+          <div className="w-80 bg-white border-l border-dark-100 flex flex-col overflow-y-auto">
             {/* Product Info */}
-            <div className="p-4 border-b border-dark-100 flex-1 overflow-y-auto">
+            <div className="p-4 border-b border-dark-100">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-dark-900">{t.productInfo}</h3>
                 {!editingProduct ? (
@@ -1379,23 +1425,6 @@ export default function ProductWorkspace() {
               </div>
             )}
 
-            {/* Script Settings Panel */}
-            {showSettings && (
-              <div className="p-4 border-t border-dark-100 bg-amber-50/50 max-h-[50vh] overflow-y-auto">
-                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2 sticky top-0 bg-amber-50/50 pb-2">
-                  <Settings className="w-4 h-4 text-amber-600" />
-                  {t.scriptSettings}
-                </h3>
-                <ScriptSettingsPanel
-                  settings={scriptSettings}
-                  onChange={setScriptSettings}
-                  language={language}
-                  onGenerate={handleGenerateScript}
-                  loading={loading}
-                />
-              </div>
-            )}
-
             {/* Session Context */}
             <div className="p-4 border-t border-dark-100">
               <h3 className="font-semibold text-dark-900 mb-3">{t.context}</h3>
@@ -1447,13 +1476,23 @@ export default function ProductWorkspace() {
                 {/* Add Link Form */}
                 {showAddLink && (
                   <div className="space-y-2">
-                    <input
-                      type="url"
+                    <textarea
                       value={newLinkUrl}
                       onChange={(e) => setNewLinkUrl(e.target.value)}
-                      placeholder="https://..."
-                      className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                      placeholder={language === 'es' 
+                        ? 'Pega uno o varios enlaces (uno por línea):\nhttps://ejemplo.com\nhttps://otro-enlace.com' 
+                        : 'Paste one or multiple links (one per line):\nhttps://example.com\nhttps://another-link.com'}
+                      className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500 resize-none h-20"
+                      disabled={addingDoc}
                     />
+                    {bulkLinkProgress && (
+                      <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 px-3 py-1.5 rounded-lg">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        {language === 'es' 
+                          ? `Procesando ${bulkLinkProgress.current} de ${bulkLinkProgress.total}...` 
+                          : `Processing ${bulkLinkProgress.current} of ${bulkLinkProgress.total}...`}
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button
                         onClick={handleAddLink}
@@ -1465,7 +1504,8 @@ export default function ProductWorkspace() {
                       </button>
                       <button
                         onClick={() => { setShowAddLink(false); setNewLinkUrl('') }}
-                        className="px-3 py-2 text-dark-500 hover:bg-dark-100 rounded-lg text-sm"
+                        disabled={addingDoc}
+                        className="px-3 py-2 text-dark-500 hover:bg-dark-100 rounded-lg text-sm disabled:opacity-50"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1509,13 +1549,13 @@ export default function ProductWorkspace() {
                               {doc.content ? `${doc.content.length}c` : '0c'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <div className="flex items-center gap-1 flex-shrink-0">
                             <button
                               onClick={() => setDebugDocId(debugDocId === doc.id ? null : doc.id)}
                               className="p-1 text-dark-400 hover:text-amber-600 transition-colors"
                               title="Debug: view extracted content"
                             >
-                              {debugDocId === doc.id ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              {debugDocId === doc.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                             <button
                               onClick={() => handleDeleteDoc(doc.id)}
