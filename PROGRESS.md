@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 5, 2026 at 5:44 PM (UTC-06:00)
+## Last Updated: February 7, 2026 at 11:19 PM (UTC-06:00)
 
 ---
 
@@ -388,6 +388,87 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - Added: `FAL_KEY` (fal.ai API key)
   - Removed: `KLING_ACCESS_KEY`, `KLING_SECRET_KEY` (no longer needed)
 
+### February 7, 2026 - Context Links in Product Form (11:19 PM)
+- [x] **NEW FEATURE: Context Links in Product Creation Form**
+  - Add reference URLs (landing pages, competitor sites, etc.) when creating any product type
+  - New `context_links` field (text[] array) on `products` table
+  - Bulk paste support: textarea accepts multiple URLs (one per line)
+  - Link chips UI with remove button (hover to reveal X)
+  - Available on the **last step** of every form type:
+    - Product/Service → Step 5 (awareness level)
+    - Restaurant → Step 2 (menu/location/schedule)
+    - Real Estate → Step 3 (property details/CTA)
+  - Marked as "Optional" — doesn't block form progression
+  - Links passed to AI via `buildProductContext` for script generation
+  - Bilingual labels (ES/EN)
+  - Existing chat workspace context documents (URL scraping + PDFs per session) remain unchanged
+- [x] **Files Created:**
+  - `supabase/migrations/016_context_links.sql` — adds `context_links text[]` column
+- [x] **Files Updated:**
+  - `src/types/index.ts` — Added `context_links?: string[]` to `Product` and `ProductFormData`
+  - `src/services/database.ts` — `createProduct` now persists `context_links`
+  - `src/components/ProductForm.tsx` — Links UI on last step of each form type, `handleAddLinks`/`handleRemoveLink` helpers
+  - `src/pages/ProductWorkspace.tsx` — `buildProductContext` includes `context_links`
+
+### February 7, 2026 - Bulk URL Paste, Search, Script Settings Fix (11:02 PM)
+- [x] **ENHANCED: Bulk URL Paste in Context Documents**
+  - Replaced single URL input with textarea in chat workspace context documents
+  - Users can paste multiple links (one per line) and process them all at once
+  - Sequential processing with progress indicator ("Processing 2 of 5...")
+  - Invalid lines silently skipped; individual URL failures don't block the rest
+  - Cancel button disabled during processing
+- [x] **NEW FEATURE: Search in Dashboard**
+  - Search bars with magnifying glass icon in all list sections
+  - Appears automatically when there are **more than 3 items** (keeps UI clean for small lists)
+  - **Clients list** (team view) — filters by client name
+  - **Products in client** (team → client drill-down) — filters by name/description
+  - **Unassigned products** (team view) — filters by name/description
+  - **Individual products** (single account view) — filters by name/description
+  - Instant client-side filtering, case-insensitive
+  - Bilingual labels: "Buscar clientes/productos..." / "Search clients/products..."
+- [x] **FIX: Script Settings Panel Superposition**
+  - Removed settings panel from right sidebar entirely
+  - Moved to **floating dropdown** (z-50, absolute, shadow-lg) anchored below the ⚙ gear icon in chat header
+  - Has its own close button (X) and auto-closes on "Generate"
+  - No longer competes for space with Product Info, ICP, Context, or Documents sections
+- [x] **Files Updated:**
+  - `src/pages/ProductWorkspace.tsx` — Bulk URL textarea, floating settings dropdown, removed old sidebar settings
+  - `src/pages/Dashboard.tsx` — Search state, filtered lists, Search icon import, bilingual labels
+
+### February 7, 2026 - UI Fixes: Eye Icon & Sidebar Layout (11:00 PM)
+- [x] **FIX: Right Sidebar Layout (Root cause of both issues)**
+  - Parent container changed from `overflow-hidden` → `overflow-y-auto`
+  - Product Info section: removed `flex-1` (was hogging all vertical space)
+  - Script Settings: removed `max-h-[50vh]` (flows naturally in scrollable sidebar)
+  - All sections (Product Info → ICP → Context → Documents) now scroll together
+- [x] **FIX: Eye Icon Visibility on macOS**
+  - Increased icon size from `w-3.5 h-3.5` (14px) → `w-4 h-4` (16px)
+  - Increased button gap from `gap-0.5` → `gap-1` for better touch targets
+  - Root cause: sections containing eye icons were clipped by `overflow-hidden` on parent
+- [x] **Files Updated:**
+  - `src/pages/ProductWorkspace.tsx` — Sidebar layout fix, icon size increase
+
+### February 7, 2026 - Context Documents Pipeline Audit & Debug Tools (Earlier)
+- [x] **AUDIT: Context Documents Pipeline**
+  - Verified end-to-end flow: DB → frontend state → API payload → AI prompt
+  - **Fix:** `handleSend` was missing `selectedICP` and `contextDocs` parameters — follow-up messages now include full context
+  - **Fix:** `buildContextDocumentsPrompt` in `api/chat.ts` now correctly labels PDFs as "Documento PDF" / "PDF Document" (was mislabeled as generic "Text")
+- [x] **NEW: Debug Tool — Context Document Content Viewer**
+  - Eye/EyeOff toggle on each context document in the sidebar
+  - Expands to show raw extracted content, character count, type, and URL
+  - Amber-themed debug panel with monospaced text
+- [x] **NEW: Debug Tool — Full System Prompt Viewer**
+  - Eye toggle button in chat header (appears after first AI response)
+  - Collapsible panel showing the full assembled system prompt
+  - Shows character count and approximate token count
+  - Copy button for easy clipboard export
+  - Backend returns `_debug.systemPrompt` in API response
+  - `sendMessageToGrok` return type updated to `{ content: string; _debug?: { systemPrompt: string } }`
+- [x] **Files Updated:**
+  - `src/pages/ProductWorkspace.tsx` — Debug states, context doc debug UI, system prompt debug UI, fixed `handleSend` params
+  - `src/services/grokApi.ts` — Return type changed to include `_debug`
+  - `api/chat.ts` — PDF label fix, `_debug.systemPrompt` in response
+
 ### February 5, 2026 - ICP Profiles Feature (Earlier)
 - [x] **NEW FEATURE: ICP (Ideal Customer Profile) Management**
   - Database: `icps` table with fields: name, description, awareness_level, sophistication_level, urgency_type, gender, age_range
@@ -681,16 +762,16 @@ The main problem with social media sales is NOT the price, it's **friction from 
 ## Product Types
 
 ### 1. Product (Physical)
-Form fields: name, description, main problem, best customers, failed attempts, attention grabber, expected result, differentiation, key objection, shipping info, awareness level
+Form fields: name, description, main problem, best customers, failed attempts, attention grabber, expected result, differentiation, key objection, shipping info, awareness level, context links (optional)
 
 ### 2. Service
-Form fields: name, description, main problem, best customers, failed attempts, attention grabber, real pain, pain consequences, expected result, differentiation, awareness level
+Form fields: name, description, main problem, best customers, failed attempts, attention grabber, real pain, pain consequences, expected result, differentiation, awareness level, context links (optional)
 
 ### 3. Restaurant
-Form fields: name, menu text, location, schedule, is new restaurant
+Form fields: name, menu text, location, schedule, is new restaurant, context links (optional)
 
-### 4. Real Estate (NEW)
-Form fields: name, business type (sale/rent/airbnb), price, location, construction size, bedrooms, capacity, bathrooms, parking, highlights, location reference, CTA
+### 4. Real Estate
+Form fields: name, business type (sale/rent/airbnb), price, location, construction size, bedrooms, capacity, bathrooms, parking, highlights, location reference, CTA, context links (optional)
 
 ---
 
@@ -711,15 +792,17 @@ Form fields: name, business type (sale/rent/airbnb), price, location, constructi
 - [x] **Ian Methodology in AI Prompts** - Certeza Total philosophy, Tríada Estructural, Zero Greetings Rule
 
 ### Recently Completed ✅
-1. ~~**Team Member Management**~~ - Invite/remove team members, view roles ✓
-2. ~~**PDF Upload for Context**~~ - Upload PDFs as context documents in Guiones ✓
-3. ~~**Google Login**~~ - Added to login page (was only on signup) ✓
-4. ~~**Delete Functionality**~~ - Delete clients/products with confirmation ✓
-5. ~~**API Usage Tracking**~~ - Track PDF extraction, URL fetch, prompt enhance ✓
-6. ~~**ICP Profiles**~~ - Ideal Customer Profile management ✓
-7. ~~**B-Roll Ad Prompt Pipeline**~~ - 3-module pipeline (Visual DNA + Cinematic Script + Mother Prompt) ✓
-8. ~~**Kling 2.6 Pro via fal.ai**~~ - Dual video model support (Grok + Kling) ✓
-9. ~~**Usage Tracking Overhaul**~~ - All features tracked with accurate pricing ✓
+1. ~~**Context Links in Product Form**~~ - Add reference URLs when creating products (all types) ✓
+2. ~~**Bulk URL Paste**~~ - Paste multiple links at once in context documents ✓
+3. ~~**Dashboard Search**~~ - Search clients and products across all sections ✓
+4. ~~**Script Settings Fix**~~ - Floating dropdown instead of sidebar superposition ✓
+5. ~~**Sidebar Layout Fix**~~ - Eye icon visibility on macOS, proper scroll ✓
+6. ~~**Context Docs Pipeline Audit**~~ - Fixed missing params, PDF labels, debug tools ✓
+7. ~~**Team Member Management**~~ - Invite/remove team members, view roles ✓
+8. ~~**PDF Upload for Context**~~ - Upload PDFs as context documents in Guiones ✓
+9. ~~**ICP Profiles**~~ - Ideal Customer Profile management ✓
+10. ~~**Kling 2.6 Pro via fal.ai**~~ - Dual video model support (Grok + Kling) ✓
+11. ~~**Usage Tracking Overhaul**~~ - All features tracked with accurate pricing ✓
 
 ### High Priority
 1. **Script Library Page** - Dedicated page to view all saved scripts with filters

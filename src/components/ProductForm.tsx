@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { ProductFormData, ProductType } from '../types'
-import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home, UtensilsCrossed, Link2, Plus } from 'lucide-react'
+import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home, UtensilsCrossed, Link2, Plus, Globe } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface ProductFormProps {
@@ -19,6 +19,10 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
   const [pasteText, setPasteText] = useState('')
   const [processingPaste, setProcessingPaste] = useState(false)
   const [linkInput, setLinkInput] = useState('')
+  const [showUrlModal, setShowUrlModal] = useState(false)
+  const [autoFillUrl, setAutoFillUrl] = useState('')
+  const [processingUrl, setProcessingUrl] = useState(false)
+  const [urlStatus, setUrlStatus] = useState('')
   const [formData, setFormData] = useState<ProductFormData>({
     name: initialData?.name || '',
     type: initialData?.type || 'product',
@@ -148,6 +152,17 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         placeholder: 'Pega uno o varios enlaces (uno por línea):\nhttps://mi-producto.com\nhttps://competencia.com',
         add: 'Agregar',
         optional: 'Opcional'
+      },
+      autoFillUrl: {
+        button: 'Llenar desde URL',
+        title: 'Auto-llenar desde enlace',
+        subtitle: 'Pega el enlace de tu producto o servicio y extraeremos toda la información automáticamente',
+        placeholder: 'https://tu-producto.com',
+        extract: 'Extraer información',
+        extracting: 'Extrayendo página...',
+        analyzing: 'Analizando contenido con IA...',
+        success: '¡Formulario completado! Revisa y ajusta los campos.',
+        error: 'No se pudo extraer información. Intenta con otro enlace o llena manualmente.'
       }
     },
     en: {
@@ -260,6 +275,17 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         placeholder: 'Paste one or multiple links (one per line):\nhttps://my-product.com\nhttps://competitor.com',
         add: 'Add',
         optional: 'Optional'
+      },
+      autoFillUrl: {
+        button: 'Fill from URL',
+        title: 'Auto-fill from link',
+        subtitle: 'Paste your product or service link and we\'ll extract all the information automatically',
+        placeholder: 'https://your-product.com',
+        extract: 'Extract information',
+        extracting: 'Extracting page...',
+        analyzing: 'Analyzing content with AI...',
+        success: 'Form completed! Review and adjust the fields.',
+        error: 'Could not extract information. Try another link or fill manually.'
       }
     }
   }
@@ -360,6 +386,102 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
       console.error('Failed to process paste:', error)
     } finally {
       setProcessingPaste(false)
+    }
+  }
+
+  const handleAutoFillFromUrl = async () => {
+    if (!autoFillUrl.trim() || processingUrl) return
+    setProcessingUrl(true)
+    setUrlStatus('')
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) { setUrlStatus('error'); return }
+
+      // Step 1: Scrape the URL
+      setUrlStatus('extracting')
+      const fetchUrl = import.meta.env.PROD ? '/api/fetch-url' : 'http://localhost:3000/api/fetch-url'
+      const scrapeRes = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ url: autoFillUrl })
+      })
+      const scrapeData = await scrapeRes.json()
+      if (!scrapeRes.ok || !scrapeData.content) {
+        setUrlStatus('error')
+        return
+      }
+
+      // Step 2: AI extracts form fields from the scraped content
+      setUrlStatus('analyzing')
+      const pageContent = scrapeData.content.slice(0, 12000)
+      const pageTitle = scrapeData.title || ''
+
+      let aiPrompt = ''
+      let jsonFields = ''
+
+      if (formData.type === 'restaurant') {
+        aiPrompt = `Eres un experto en marketing de restaurantes. Analiza el siguiente contenido extraído de la página web de un restaurante y extrae la información relevante para crear scripts de publicidad.\n\nTítulo de la página: ${pageTitle}\n\nContenido:\n${pageContent}`
+        jsonFields = 'name (nombre del restaurante), menu_text (menú con platillos y precios que encuentres), location (ubicación), schedule (horario si lo encuentras)'
+      } else if (formData.type === 'real_estate') {
+        aiPrompt = `Eres un experto en marketing inmobiliario. Analiza el siguiente contenido extraído de una página de propiedad y extrae toda la información relevante.\n\nTítulo de la página: ${pageTitle}\n\nContenido:\n${pageContent}`
+        jsonFields = 'name (nombre o referencia de la propiedad), re_business_type ("sale" o "rent" o "airbnb"), re_price (precio), re_location (ubicación), re_construction_size (metros de construcción), re_bedrooms (habitaciones), re_bathrooms (baños), re_parking (estacionamientos), re_highlights (puntos destacados, máximo 3), re_location_reference (referencia de ubicación), re_cta (qué deben hacer los interesados)'
+      } else if (formData.type === 'service') {
+        aiPrompt = `Eres un experto en marketing de servicios. Analiza el siguiente contenido extraído de la página web de un servicio y extrae toda la información relevante para crear scripts de publicidad de alta conversión.\n\nTítulo de la página: ${pageTitle}\n\nContenido:\n${pageContent}`
+        jsonFields = 'name (nombre del servicio), product_description (qué servicio ofrece y qué hace exactamente), main_problem (qué problema principal resuelve), best_customers (cómo son sus mejores clientes), failed_attempts (qué han intentado antes sin éxito), attention_grabber (qué es lo que más llama la atención), real_pain (qué es lo que más les molesta del problema), pain_consequences (qué pasa si no lo resuelven), expected_result (qué resultado concreto esperan), differentiation (qué hace distinto o mejor que otros), awareness_level ("active" si lo buscan, "passive" si no lo buscan pero lo necesitan, "impulse" si no lo buscaban)'
+      } else {
+        aiPrompt = `Eres un experto en marketing de productos. Analiza el siguiente contenido extraído de la página web de un producto y extrae toda la información relevante para crear scripts de publicidad de alta conversión.\n\nTítulo de la página: ${pageTitle}\n\nContenido:\n${pageContent}`
+        jsonFields = 'name (nombre del producto), product_description (qué producto vende y para qué sirve), main_problem (qué problema principal resuelve), best_customers (cómo son sus mejores clientes), failed_attempts (qué han intentado antes sin éxito), attention_grabber (qué es lo que más llama la atención), expected_result (qué resultado esperan lograr), differentiation (qué lo hace distinto o mejor), key_objection (qué duda o pregunta la gente antes de comprar), shipping_info (cómo funciona el envío si se menciona), awareness_level ("active" si lo buscan, "passive" si no lo buscan pero lo necesitan, "impulse" si no lo buscaban)'
+      }
+
+      aiPrompt += `\n\nResponde SOLO con un JSON válido con estos campos: ${jsonFields}\n\nSi no encuentras información para un campo, déjalo como string vacío "". Infiere inteligentemente basándote en el contexto de la página. No inventes datos que no puedas inferir del contenido.`
+
+      const chatUrl = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
+      const aiRes = await fetch(chatUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: aiPrompt }],
+          businessDetails: {},
+          language
+        })
+      })
+
+      const aiData = await aiRes.json()
+      if (aiData.content) {
+        const jsonMatch = aiData.content.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0])
+          // Only overwrite non-empty fields, preserve what user already typed
+          const updates: Record<string, string> = {}
+          for (const [key, value] of Object.entries(parsed)) {
+            if (typeof value === 'string' && value.trim()) {
+              updates[key] = value as string
+            }
+          }
+          setFormData(prev => ({ ...prev, ...updates }))
+          // Also save the URL as a context link
+          setFormData(prev => ({
+            ...prev,
+            context_links: [...(prev.context_links || []).filter(l => l !== autoFillUrl), autoFillUrl]
+          }))
+          setUrlStatus('success')
+          setTimeout(() => {
+            setShowUrlModal(false)
+            setAutoFillUrl('')
+            setUrlStatus('')
+            setStep(2)
+          }, 1500)
+          return
+        }
+      }
+      setUrlStatus('error')
+    } catch (error) {
+      console.error('Auto-fill from URL failed:', error)
+      setUrlStatus('error')
+    } finally {
+      setProcessingUrl(false)
     }
   }
 
@@ -512,20 +634,35 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 </div>
               </div>
 
-              {/* Quick Paste Button - requires name and type to be set first */}
-              <button
-                type="button"
-                onClick={() => setShowPasteModal(true)}
-                disabled={!formData.name.trim() || !formData.type}
-                className={`w-full p-4 border-2 border-dashed rounded-xl transition-all flex items-center justify-center gap-3 ${
-                  formData.name.trim() && formData.type
-                    ? 'border-dark-200 hover:border-primary-400 hover:bg-primary-50 text-dark-500 hover:text-primary-600 cursor-pointer'
-                    : 'border-dark-100 text-dark-300 cursor-not-allowed'
-                }`}
-              >
-                <ClipboardPaste className="w-5 h-5" />
-                <span className="font-medium">{t.quickPaste}</span>
-              </button>
+              {/* Quick Fill Options */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowUrlModal(true)}
+                  disabled={!formData.name.trim() || !formData.type}
+                  className={`p-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center justify-center gap-2 ${
+                    formData.name.trim() && formData.type
+                      ? 'border-blue-200 hover:border-blue-400 hover:bg-blue-50 text-dark-500 hover:text-blue-600 cursor-pointer'
+                      : 'border-dark-100 text-dark-300 cursor-not-allowed'
+                  }`}
+                >
+                  <Globe className="w-5 h-5" />
+                  <span className="font-medium text-sm">{t.autoFillUrl.button}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPasteModal(true)}
+                  disabled={!formData.name.trim() || !formData.type}
+                  className={`p-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center justify-center gap-2 ${
+                    formData.name.trim() && formData.type
+                      ? 'border-dark-200 hover:border-primary-400 hover:bg-primary-50 text-dark-500 hover:text-primary-600 cursor-pointer'
+                      : 'border-dark-100 text-dark-300 cursor-not-allowed'
+                  }`}
+                >
+                  <ClipboardPaste className="w-5 h-5" />
+                  <span className="font-medium text-sm">{t.quickPaste}</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1139,6 +1276,86 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                       {t.organize}
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* URL Auto-Fill Modal */}
+        {showUrlModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden flex flex-col">
+              <div className="p-6 border-b border-dark-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-dark-900 flex items-center gap-2">
+                    <Globe className="w-5 h-5 text-blue-500" />
+                    {t.autoFillUrl.title}
+                  </h3>
+                  <p className="text-sm text-dark-500 mt-1">{t.autoFillUrl.subtitle}</p>
+                </div>
+                <button
+                  onClick={() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus('') }}
+                  disabled={processingUrl}
+                  className="p-2 hover:bg-dark-100 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <X className="w-5 h-5 text-dark-500" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <input
+                  type="url"
+                  value={autoFillUrl}
+                  onChange={(e) => setAutoFillUrl(e.target.value)}
+                  placeholder={t.autoFillUrl.placeholder}
+                  className="input-field w-full"
+                  autoFocus
+                  disabled={processingUrl}
+                />
+
+                {urlStatus === 'extracting' && (
+                  <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 px-4 py-3 rounded-lg">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {t.autoFillUrl.extracting}
+                  </div>
+                )}
+                {urlStatus === 'analyzing' && (
+                  <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 px-4 py-3 rounded-lg">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {t.autoFillUrl.analyzing}
+                  </div>
+                )}
+                {urlStatus === 'success' && (
+                  <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-4 py-3 rounded-lg">
+                    <Sparkles className="w-4 h-4" />
+                    {t.autoFillUrl.success}
+                  </div>
+                )}
+                {urlStatus === 'error' && (
+                  <div className="text-sm text-red-600 bg-red-50 px-4 py-3 rounded-lg">
+                    {t.autoFillUrl.error}
+                  </div>
+                )}
+              </div>
+              <div className="p-6 border-t border-dark-100 flex justify-end gap-3">
+                <button
+                  onClick={() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus('') }}
+                  disabled={processingUrl}
+                  className="btn-secondary"
+                >
+                  {t.cancel}
+                </button>
+                <button
+                  onClick={handleAutoFillFromUrl}
+                  disabled={!autoFillUrl.trim() || processingUrl || !autoFillUrl.startsWith('http')}
+                  className="bg-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {processingUrl ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Globe className="w-4 h-4" />
+                  )}
+                  {t.autoFillUrl.extract}
                 </button>
               </div>
             </div>

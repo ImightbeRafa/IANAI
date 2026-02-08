@@ -525,18 +525,16 @@ export default function Dashboard() {
                   <p className="text-sm text-dark-500">{t.unassignedDesc}</p>
                 </div>
               </div>
-              {products.length > 3 && (
-                <div className="relative mb-4">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                  <input
-                    type="text"
-                    value={searchProducts}
-                    onChange={(e) => setSearchProducts(e.target.value)}
-                    placeholder={t.searchProducts}
-                    className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                  />
-                </div>
-              )}
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+                <input
+                  type="text"
+                  value={searchProducts}
+                  onChange={(e) => setSearchProducts(e.target.value)}
+                  placeholder={t.searchProducts}
+                  className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredProducts.map(p => renderProductCard(p, true))}
               </div>
@@ -570,18 +568,16 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {clientProducts.length > 3 && (
-                  <div className="relative mb-4">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                    <input
-                      type="text"
-                      value={searchProducts}
-                      onChange={(e) => setSearchProducts(e.target.value)}
-                      placeholder={t.searchProducts}
-                      className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                    />
-                  </div>
-                )}
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+                  <input
+                    type="text"
+                    value={searchProducts}
+                    onChange={(e) => setSearchProducts(e.target.value)}
+                    placeholder={t.searchProducts}
+                    className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  />
+                </div>
 
                 {clientProducts.length === 0 ? (
                   <div className="text-center py-12">
@@ -609,18 +605,16 @@ export default function Dashboard() {
                   <h2 className="text-lg font-semibold text-dark-900">{t.yourClients}</h2>
                 </div>
 
-                {clients.length > 3 && (
-                  <div className="relative mb-4">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                    <input
-                      type="text"
-                      value={searchClients}
-                      onChange={(e) => setSearchClients(e.target.value)}
-                      placeholder={t.searchClients}
-                      className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                    />
-                  </div>
-                )}
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+                  <input
+                    type="text"
+                    value={searchClients}
+                    onChange={(e) => setSearchClients(e.target.value)}
+                    placeholder={t.searchClients}
+                    className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  />
+                </div>
 
                 {loading ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -659,7 +653,7 @@ export default function Dashboard() {
               <h2 className="text-lg font-semibold text-dark-900">{t.yourProducts}</h2>
             </div>
 
-            {products.length > 3 && !loading && (
+            {!loading && (
               <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
                 <input
