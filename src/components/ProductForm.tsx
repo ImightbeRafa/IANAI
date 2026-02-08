@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { ProductFormData, ProductType } from '../types'
-import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home, UtensilsCrossed } from 'lucide-react'
+import { Package, Briefcase, Loader2, ClipboardPaste, Sparkles, X, Home, UtensilsCrossed, Link2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface ProductFormProps {
@@ -18,6 +18,7 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
   const [showPasteModal, setShowPasteModal] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [processingPaste, setProcessingPaste] = useState(false)
+  const [linkInput, setLinkInput] = useState('')
   const [formData, setFormData] = useState<ProductFormData>({
     name: initialData?.name || '',
     type: initialData?.type || 'product',
@@ -32,7 +33,8 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
     differentiation: initialData?.differentiation || '',
     key_objection: initialData?.key_objection || '',
     shipping_info: initialData?.shipping_info || '',
-    awareness_level: initialData?.awareness_level || ''
+    awareness_level: initialData?.awareness_level || '',
+    context_links: initialData?.context_links || []
   })
 
   const labels = {
@@ -139,6 +141,13 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         shipping_info: 'Ej: Envío gratis en 24-48 horas...',
         real_pain: 'Ej: Les frustra no ver resultados...',
         pain_consequences: 'Ej: Pierden tiempo y dinero...'
+      },
+      contextLinks: {
+        title: 'Enlaces de Referencia',
+        subtitle: 'Agrega enlaces de tu producto, landing pages, competencia o cualquier referencia útil',
+        placeholder: 'Pega uno o varios enlaces (uno por línea):\nhttps://mi-producto.com\nhttps://competencia.com',
+        add: 'Agregar',
+        optional: 'Opcional'
       }
     },
     en: {
@@ -244,6 +253,13 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
         shipping_info: 'E.g.: Free shipping in 24-48 hours...',
         real_pain: 'E.g.: They\'re frustrated not seeing results...',
         pain_consequences: 'E.g.: They lose time and money...'
+      },
+      contextLinks: {
+        title: 'Reference Links',
+        subtitle: 'Add links to your product, landing pages, competitors or any useful reference',
+        placeholder: 'Paste one or multiple links (one per line):\nhttps://my-product.com\nhttps://competitor.com',
+        add: 'Add',
+        optional: 'Optional'
       }
     }
   }
@@ -345,6 +361,24 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
     } finally {
       setProcessingPaste(false)
     }
+  }
+
+  const handleAddLinks = () => {
+    const newLinks = linkInput
+      .split('\n')
+      .map(u => u.trim())
+      .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')))
+    
+    if (newLinks.length === 0) return
+    
+    const existing = formData.context_links || []
+    const unique = newLinks.filter(l => !existing.includes(l))
+    setFormData(prev => ({ ...prev, context_links: [...(prev.context_links || []), ...unique] }))
+    setLinkInput('')
+  }
+
+  const handleRemoveLink = (url: string) => {
+    setFormData(prev => ({ ...prev, context_links: (prev.context_links || []).filter(l => l !== url) }))
   }
 
   const canProceed = () => {
@@ -655,6 +689,36 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                   </button>
                 </div>
               </div>
+
+              {/* Context Links */}
+              <div className="border-t border-dark-100 pt-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Link2 className="w-4 h-4 text-blue-500" />
+                  <label className="text-sm font-medium text-dark-700">{t.contextLinks.title}</label>
+                  <span className="text-xs text-dark-400 bg-dark-50 px-1.5 py-0.5 rounded">{t.contextLinks.optional}</span>
+                </div>
+                <p className="text-xs text-dark-400 mb-3">{t.contextLinks.subtitle}</p>
+                {(formData.context_links || []).length > 0 && (
+                  <div className="space-y-1.5 mb-3">
+                    {(formData.context_links || []).map((link, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 group">
+                        <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                        <span className="text-xs text-dark-700 truncate flex-1">{link}</span>
+                        <button type="button" onClick={() => handleRemoveLink(link)} className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" />
+                {linkInput.trim() && (
+                  <button type="button" onClick={handleAddLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5" />
+                    {t.contextLinks.add}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -829,6 +893,36 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                   className="input-field"
                 />
               </div>
+
+              {/* Context Links */}
+              <div className="border-t border-dark-100 pt-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Link2 className="w-4 h-4 text-blue-500" />
+                  <label className="text-sm font-medium text-dark-700">{t.contextLinks.title}</label>
+                  <span className="text-xs text-dark-400 bg-dark-50 px-1.5 py-0.5 rounded">{t.contextLinks.optional}</span>
+                </div>
+                <p className="text-xs text-dark-400 mb-3">{t.contextLinks.subtitle}</p>
+                {(formData.context_links || []).length > 0 && (
+                  <div className="space-y-1.5 mb-3">
+                    {(formData.context_links || []).map((link, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 group">
+                        <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                        <span className="text-xs text-dark-700 truncate flex-1">{link}</span>
+                        <button type="button" onClick={() => handleRemoveLink(link)} className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" />
+                {linkInput.trim() && (
+                  <button type="button" onClick={handleAddLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5" />
+                    {t.contextLinks.add}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -938,6 +1032,51 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     </span>
                   </button>
                 </div>
+              </div>
+
+              {/* Context Links */}
+              <div className="border-t border-dark-100 pt-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Link2 className="w-4 h-4 text-blue-500" />
+                  <label className="text-sm font-medium text-dark-700">{t.contextLinks.title}</label>
+                  <span className="text-xs text-dark-400 bg-dark-50 px-1.5 py-0.5 rounded">{t.contextLinks.optional}</span>
+                </div>
+                <p className="text-xs text-dark-400 mb-3">{t.contextLinks.subtitle}</p>
+                
+                {(formData.context_links || []).length > 0 && (
+                  <div className="space-y-1.5 mb-3">
+                    {(formData.context_links || []).map((link, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 group">
+                        <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                        <span className="text-xs text-dark-700 truncate flex-1">{link}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLink(link)}
+                          className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <textarea
+                  value={linkInput}
+                  onChange={(e) => setLinkInput(e.target.value)}
+                  placeholder={t.contextLinks.placeholder}
+                  className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16"
+                />
+                {linkInput.trim() && (
+                  <button
+                    type="button"
+                    onClick={handleAddLinks}
+                    className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {t.contextLinks.add}
+                  </button>
+                )}
               </div>
             </div>
           )}

@@ -252,7 +252,8 @@ export default function ProductWorkspace() {
       purchase_reason: product.purchase_reason,
       target_audience: product.target_audience,
       call_to_action: product.call_to_action,
-      additional_context: additionalContext
+      additional_context: additionalContext,
+      context_links: product.context_links || []
     }
 
     // Add restaurant-specific fields if applicable

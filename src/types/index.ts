@@ -109,6 +109,7 @@ export interface Product {
   re_highlights?: string
   re_location_reference?: string
   re_cta?: string
+  context_links?: string[]
   created_at: string
   updated_at: string
   // Joined data
@@ -228,6 +229,8 @@ export interface ProductFormData {
   re_highlights?: string
   re_location_reference?: string
   re_cta?: string
+  // Context links added during product creation
+  context_links?: string[]
   // Legacy fields for backward compatibility
   description?: string
   offer?: string

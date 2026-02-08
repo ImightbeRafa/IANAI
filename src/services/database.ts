@@ -218,6 +218,8 @@ export async function createProduct(
     key_objection: data.key_objection,
     shipping_info: data.shipping_info,
     awareness_level: data.awareness_level,
+    // Context links
+    context_links: data.context_links || [],
     // Legacy fields for backward compatibility
     description: data.description,
     offer: data.offer,
