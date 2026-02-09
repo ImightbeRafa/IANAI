@@ -393,11 +393,15 @@ export async function deleteChatSession(sessionId: string): Promise<void> {
 export async function addMessage(
   sessionId: string,
   role: 'user' | 'assistant' | 'system',
-  content: string
+  content: string,
+  systemPrompt?: string
 ): Promise<Message> {
+  const insertData: Record<string, unknown> = { session_id: sessionId, role, content }
+  if (systemPrompt) insertData.system_prompt = systemPrompt
+
   const { data, error } = await supabase
     .from('messages')
-    .insert({ session_id: sessionId, role, content })
+    .insert(insertData)
     .select()
     .single()
 

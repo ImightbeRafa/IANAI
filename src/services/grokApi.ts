@@ -120,6 +120,57 @@ export async function sendMessageToGrok(
   }
 }
 
+export async function previewPrompt(
+  messages: Message[],
+  productContext: ProductContext,
+  language: Language = 'es',
+  scriptSettings?: ScriptGenerationSettings,
+  productType?: ProductType,
+  icp?: ICP | null,
+  contextDocs?: ContextDocument[]
+): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) throw new Error('Not authenticated')
+
+  const contextDocuments = contextDocs?.map(doc => ({
+    type: doc.type,
+    name: doc.name,
+    content: doc.content,
+    url: doc.url
+  })) || []
+
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      businessDetails: productContext,
+      language,
+      scriptSettings,
+      productType: productType || productContext.product_type,
+      icp: icp ? {
+        name: icp.name,
+        description: icp.description,
+        awareness_level: icp.awareness_level,
+        sophistication_level: icp.sophistication_level,
+        urgency_type: icp.urgency_type,
+        gender: icp.gender,
+        age_range: icp.age_range
+      } : null,
+      contextDocuments,
+      previewOnly: true
+    })
+  })
+
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error || 'Preview failed')
+  return data.systemPrompt || ''
+}
+
 export function getInitialPrompt(language: Language = 'es'): string {
   if (language === 'en') {
     return `Let's create high-converting ad scripts for your business. I'll ask you a few quick questions to understand your product.

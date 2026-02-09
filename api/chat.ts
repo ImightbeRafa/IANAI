@@ -288,6 +288,7 @@ interface RequestBody {
   productType?: 'product' | 'service' | 'restaurant' | 'real_estate'
   icp?: ICPData | null
   contextDocuments?: ContextDocumentData[]
+  previewOnly?: boolean
 }
 
 const FRAMEWORK_PROMPTS = {
@@ -848,6 +849,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `\n\nCurrent business context:\n${JSON.stringify(businessDetails, null, 2)}`
         : ''
     )
+
+    // Preview mode: return the prompt without calling the AI
+    if (req.body.previewOnly) {
+      return res.status(200).json({ preview: true, systemPrompt })
+    }
 
     let content: string
 

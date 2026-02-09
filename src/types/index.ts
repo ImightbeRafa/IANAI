@@ -142,6 +142,7 @@ export interface Message {
   session_id: string
   role: 'user' | 'assistant' | 'system'
   content: string
+  system_prompt?: string
   created_at: string
 }
 

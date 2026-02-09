@@ -21,15 +21,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.warn('Session recovery failed, signing out:', error.message)
+        supabase.auth.signOut()
+        setSession(null)
+        setUser(null)
+      } else {
+        setSession(session)
+        setUser(session?.user ?? null)
+      }
       setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setUser(session?.user ?? null)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        console.warn('Token refresh failed, signing out')
+        supabase.auth.signOut()
+        setSession(null)
+        setUser(null)
+      } else if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setUser(null)
+      } else {
+        setSession(session)
+        setUser(session?.user ?? null)
+      }
       setLoading(false)
     })
 

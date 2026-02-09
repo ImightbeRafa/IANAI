@@ -19,7 +19,7 @@ import {
   createContextDocument,
   deleteContextDocument
 } from '../services/database'
-import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
+import { sendMessageToGrok, previewPrompt, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
 import type { Product, ChatSession, Message, ScriptGenerationSettings, ICP, ContextDocument } from '../types'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
@@ -83,8 +83,9 @@ export default function ProductWorkspace() {
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [debugDocId, setDebugDocId] = useState<string | null>(null)
-  const [debugSystemPrompt, setDebugSystemPrompt] = useState<string | null>(null)
-  const [showDebugPrompt, setShowDebugPrompt] = useState(false)
+  const [expandedPrompts, setExpandedPrompts] = useState<Record<string, boolean>>({})
+  const [previewSystemPrompt, setPreviewSystemPrompt] = useState<string | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
   const [bulkLinkProgress, setBulkLinkProgress] = useState<{ current: number; total: number } | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -208,9 +209,9 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
-      if (aiResponse._debug?.systemPrompt) setDebugSystemPrompt(aiResponse._debug.systemPrompt)
+      const usedPrompt = aiResponse._debug?.systemPrompt || undefined
       
-      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content)
+      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
       setMessages(prev => [...prev, savedAiMessage])
 
     } catch (error) {
@@ -507,9 +508,9 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
-      if (aiResponse._debug?.systemPrompt) setDebugSystemPrompt(aiResponse._debug.systemPrompt)
+      const usedPrompt = aiResponse._debug?.systemPrompt || undefined
       
-      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content)
+      const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
       setMessages(prev => [...prev, savedAiMessage])
 
     } catch (error) {
@@ -524,6 +525,28 @@ export default function ProductWorkspace() {
       setMessages(prev => [...prev, errorMessage])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handlePreviewPrompt = async () => {
+    if (!product || loadingPreview) return
+    setLoadingPreview(true)
+    try {
+      const productContext = buildProductContext(product, context)
+      const prompt = await previewPrompt(
+        messages,
+        productContext,
+        language,
+        scriptSettings,
+        undefined,
+        selectedICP,
+        contextDocs
+      )
+      setPreviewSystemPrompt(prompt)
+    } catch (error) {
+      console.error('Failed to preview prompt:', error)
+    } finally {
+      setLoadingPreview(false)
     }
   }
 
@@ -716,7 +739,7 @@ export default function ProductWorkspace() {
 
   return (
     <Layout>
-      <div className="flex h-[calc(100vh-64px)] lg:h-screen">
+      <div className="flex h-[calc(100vh-64px)] lg:h-screen" style={{ height: 'calc(100dvh - 64px)' }}>
         {/* Left Sidebar - Sessions */}
         <div className="w-64 bg-white border-r border-dark-100 flex flex-col">
           <div className="px-4 pt-4 pb-3">
@@ -829,17 +852,16 @@ export default function ProductWorkspace() {
                   {t.export}
                 </button>
               )}
-              {debugSystemPrompt && (
-                <button
-                  onClick={() => setShowDebugPrompt(!showDebugPrompt)}
-                  className={`p-2 rounded-md transition-colors ${
-                    showDebugPrompt ? 'bg-amber-100 text-amber-700' : 'hover:bg-dark-50 text-dark-400'
-                  }`}
-                  title="Debug: View full system prompt"
-                >
-                  <Eye className="w-4 h-4" />
-                </button>
-              )}
+              <button
+                onClick={handlePreviewPrompt}
+                disabled={loadingPreview}
+                className={`p-2 rounded-md transition-colors ${
+                  previewSystemPrompt ? 'bg-amber-100 text-amber-700' : 'hover:bg-dark-50 text-dark-400'
+                }`}
+                title={language === 'es' ? 'Vista previa del prompt' : 'Preview prompt'}
+              >
+                {loadingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+              </button>
               <div className="relative">
                 <button 
                   onClick={() => setShowSettings(!showSettings)}
@@ -882,24 +904,30 @@ export default function ProductWorkspace() {
             </div>
           </div>
 
-          {/* Debug: Full System Prompt */}
-          {showDebugPrompt && debugSystemPrompt && (
+          {/* Preview: Full System Prompt */}
+          {previewSystemPrompt && (
             <div className="border-b border-amber-300 bg-amber-50/80 px-6 py-3 max-h-[50vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-mono font-bold text-amber-800">
-                  DEBUG — Full System Prompt ({debugSystemPrompt.length.toLocaleString()} chars / ~{Math.ceil(debugSystemPrompt.length / 4).toLocaleString()} tokens)
+                  {language === 'es' ? 'VISTA PREVIA DEL PROMPT' : 'PROMPT PREVIEW'} ({previewSystemPrompt.length.toLocaleString()} chars / ~{Math.ceil(previewSystemPrompt.length / 4).toLocaleString()} tokens)
                 </p>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(debugSystemPrompt)
-                  }}
-                  className="text-[10px] px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
-                >
-                  Copy
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => navigator.clipboard.writeText(previewSystemPrompt)}
+                    className="text-[10px] px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    onClick={() => setPreviewSystemPrompt(null)}
+                    className="text-[10px] px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
               <pre className="text-[11px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-3 rounded-lg border border-amber-200 leading-relaxed">
-                {debugSystemPrompt}
+                {previewSystemPrompt}
               </pre>
             </div>
           )}
@@ -987,6 +1015,41 @@ export default function ProductWorkspace() {
                             <ThumbsDown className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                        {message.system_prompt && (
+                          <>
+                            <span className="text-dark-200">·</span>
+                            <button
+                              onClick={() => setExpandedPrompts(prev => ({ ...prev, [message.id]: !prev[message.id] }))}
+                              className={`text-xs flex items-center gap-1 transition-colors ${
+                                expandedPrompts[message.id]
+                                  ? 'text-amber-600'
+                                  : 'text-dark-400 hover:text-amber-600'
+                              }`}
+                              title="View master prompt used for this generation"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              {language === 'es' ? 'Prompt' : 'Prompt'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {message.role === 'assistant' && message.system_prompt && expandedPrompts[message.id] && (
+                      <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[10px] font-mono font-bold text-amber-800">
+                            MASTER PROMPT ({message.system_prompt.length.toLocaleString()} chars / ~{Math.ceil(message.system_prompt.length / 4).toLocaleString()} tokens)
+                          </p>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(message.system_prompt!)}
+                            className="text-[10px] px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
+                          {message.system_prompt}
+                        </pre>
                       </div>
                     )}
                   </div>

@@ -264,22 +264,22 @@ export default function Dashboard() {
       restaurantDesc: 'Restaurante con menú',
       realEstateDesc: 'Venta o alquiler de propiedades',
       // Team labels
-      yourClients: 'Tus Clientes',
-      newClient: 'Nuevo Cliente',
-      noClients: 'No tienes clientes aún',
-      createFirstClient: 'Crea tu primer cliente para organizar tus productos y servicios',
+      yourClients: 'Tus Categorías',
+      newClient: 'Nueva Categoría',
+      noClients: 'No tienes categorías aún',
+      createFirstClient: 'Crea tu primera categoría para organizar tus productos y servicios',
       unassignedProducts: 'Productos Sin Asignar',
-      unassignedDesc: 'Estos productos no están asignados a ningún cliente',
+      unassignedDesc: 'Estos productos no están asignados a ninguna categoría',
       assignTo: 'Asignar a',
-      selectClient: 'Selecciona un cliente para asignar este producto',
-      clientName: 'Nombre del Cliente',
+      selectClient: 'Selecciona una categoría para asignar este producto',
+      clientName: 'Nombre de la Categoría',
       create: 'Crear',
       cancel: 'Cancelar',
       back: 'Volver',
       productsIn: 'Productos en',
-      noProductsInClient: 'No hay productos en este cliente',
-      addProductToClient: 'Agrega un producto o servicio a este cliente',
-      searchClients: 'Buscar clientes...',
+      noProductsInClient: 'No hay productos en esta categoría',
+      addProductToClient: 'Agrega un producto o servicio a esta categoría',
+      searchClients: 'Buscar categorías...',
       searchProducts: 'Buscar productos...'
     },
     en: {
@@ -305,22 +305,22 @@ export default function Dashboard() {
       restaurantDesc: 'Restaurant with menu',
       realEstateDesc: 'Property sale or rental',
       // Team labels
-      yourClients: 'Your Clients',
-      newClient: 'New Client',
-      noClients: 'No clients yet',
-      createFirstClient: 'Create your first client to organize your products and services',
+      yourClients: 'Your Categories',
+      newClient: 'New Category',
+      noClients: 'No categories yet',
+      createFirstClient: 'Create your first category to organize your products and services',
       unassignedProducts: 'Unassigned Products',
-      unassignedDesc: 'These products are not assigned to any client',
+      unassignedDesc: 'These products are not assigned to any category',
       assignTo: 'Assign to',
-      selectClient: 'Select a client to assign this product to',
-      clientName: 'Client Name',
+      selectClient: 'Select a category to assign this product to',
+      clientName: 'Category Name',
       create: 'Create',
       cancel: 'Cancel',
       back: 'Back',
       productsIn: 'Products in',
-      noProductsInClient: 'No products in this client',
-      addProductToClient: 'Add a product or service to this client',
-      searchClients: 'Search clients...',
+      noProductsInClient: 'No products in this category',
+      addProductToClient: 'Add a product or service to this category',
+      searchClients: 'Search categories...',
       searchProducts: 'Search products...'
     }
   }
@@ -532,7 +532,7 @@ export default function Dashboard() {
                   value={searchProducts}
                   onChange={(e) => setSearchProducts(e.target.value)}
                   placeholder={t.searchProducts}
-                  className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -575,7 +575,7 @@ export default function Dashboard() {
                     value={searchProducts}
                     onChange={(e) => setSearchProducts(e.target.value)}
                     placeholder={t.searchProducts}
-                    className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
                 </div>
 
@@ -612,7 +612,7 @@ export default function Dashboard() {
                     value={searchClients}
                     onChange={(e) => setSearchClients(e.target.value)}
                     placeholder={t.searchClients}
-                    className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
                 </div>
 
@@ -661,7 +661,7 @@ export default function Dashboard() {
                   value={searchProducts}
                   onChange={(e) => setSearchProducts(e.target.value)}
                   placeholder={t.searchProducts}
-                  className="w-full pl-9 pr-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 />
               </div>
             )}

@@ -9,13 +9,23 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #f8fafc;
   color: #0f172a;
+  /* Safe area insets for MacBook notch & iOS */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+/* Webkit (Chrome, Safari, Edge) scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -69,6 +79,17 @@ body {
 .animation-delay-2 { animation-delay: 1s; }
 .animation-delay-3 { animation-delay: 1.5s; }
 .animation-delay-4 { animation-delay: 2s; }
+
+/* Dynamic viewport height fallback for Safari */
+.h-dvh-safe {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.min-h-dvh-safe {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
 
 @layer components {
   .btn-primary {

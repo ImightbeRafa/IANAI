@@ -16,6 +16,8 @@ import ICPForm from './pages/ICPForm'
 import Settings from './pages/Settings'
 import TeamManagement from './pages/TeamManagement'
 import AdminDashboard from './pages/AdminDashboard'
+import DescriptionsDashboard from './pages/DescriptionsDashboard'
+import DescriptionsWorkspace from './pages/DescriptionsWorkspace'
 
 export default function App() {
   return (
@@ -127,6 +129,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <ICPForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/descriptions"
+              element={
+                <ProtectedRoute>
+                  <DescriptionsDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/descriptions/product/:productId"
+              element={
+                <ProtectedRoute>
+                  <DescriptionsWorkspace />
                 </ProtectedRoute>
               }
             />

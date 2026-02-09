@@ -11,7 +11,8 @@ import {
   ImageIcon,
   Film,
   BarChart3,
-  Users
+  Users,
+  AlignLeft
 } from 'lucide-react'
 
 const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio', 'ian@iankupfer.com']
@@ -35,6 +36,7 @@ export default function Layout({ children }: LayoutProps) {
   const labels = {
     es: {
       scripts: 'Guiones',
+      descriptions: 'Descripciones',
       posts: 'Posts',
       broll: 'Ad Videos',
       icps: 'Perfiles ICP',
@@ -44,6 +46,7 @@ export default function Layout({ children }: LayoutProps) {
     },
     en: {
       scripts: 'Scripts',
+      descriptions: 'Descriptions',
       posts: 'Posts',
       broll: 'Ad Videos',
       icps: 'ICP Profiles',
@@ -56,17 +59,20 @@ export default function Layout({ children }: LayoutProps) {
   const t = labels[language]
   const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email)
 
-  const navItems = [
-    { path: '/dashboard', label: t.scripts, icon: FileText, beta: true },
-    { path: '/posts', label: t.posts, icon: ImageIcon, beta: true },
-    { path: '/broll', label: t.broll, icon: Film, beta: true },
-    { path: '/icps', label: t.icps, icon: Users, beta: true },
-    { path: '/settings', label: t.settings, icon: Settings, beta: false },
-    ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false }] : []),
+  const allNavItems = [
+    { path: '/dashboard', label: t.scripts, icon: FileText, beta: true, adminOnly: false },
+    { path: '/descriptions', label: t.descriptions, icon: AlignLeft, beta: true, adminOnly: false },
+    { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: true },
+    { path: '/broll', label: t.broll, icon: Film, beta: true, adminOnly: true },
+    { path: '/icps', label: t.icps, icon: Users, beta: true, adminOnly: false },
+    { path: '/settings', label: t.settings, icon: Settings, beta: false, adminOnly: false },
+    ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false, adminOnly: false }] : []),
   ]
 
+  const navItems = allNavItems.filter(item => !item.adminOnly || isAdmin)
+
   return (
-    <div className="min-h-screen bg-dark-50 flex">
+    <div className="min-h-screen min-h-dvh-safe bg-dark-50 flex">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div 
