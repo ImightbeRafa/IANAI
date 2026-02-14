@@ -89,11 +89,8 @@ const MODEL_PRICING: Record<string, string> = {
   'web-scraper': 'Free (local)',
 }
 
-// Admin emails (only these can access)
-const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio', 'ian@iankupfer.com']
-
 export default function AdminDashboard() {
-  const { user } = useAuth()
+  const { isAdmin } = useAuth()
   const { language } = useLanguage()
   
   const [loading, setLoading] = useState(true)
@@ -184,8 +181,6 @@ export default function AdminDashboard() {
   }
 
   const t = labels[language]
-
-  const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email)
 
   const fetchData = async () => {
     if (!isAdmin) return

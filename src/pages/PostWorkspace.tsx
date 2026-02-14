@@ -20,6 +20,7 @@ import {
   ChevronUp
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
 
 interface GeneratedPost {
   id: string
@@ -489,8 +490,15 @@ export default function PostWorkspace() {
           <div className="p-6">
             <h2 className="text-sm font-semibold text-dark-700 tracking-wide uppercase mb-4">{t.generatedImages}</h2>
 
-            {generatedPosts.length > 0 ? (
+            {generatedPosts.length > 0 || generating ? (
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                {generating && (
+                  <GeneratingPlaceholder
+                    aspectRatio="9/16"
+                    label={t.generating}
+                    sublabel={imageModel}
+                  />
+                )}
                 {generatedPosts.map((post, index) => (
                   <div key={post.id} className="bg-white rounded-xl shadow-sm border border-dark-100 overflow-hidden group">
                     <div className="relative">

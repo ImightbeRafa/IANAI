@@ -25,6 +25,7 @@ import {
   Clapperboard
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
 
 interface GeneratedVideo {
   id: string
@@ -1039,26 +1040,19 @@ export default function BRollWorkspace() {
             </h2>
 
             {generating && (pollingRequestId || splitPhase === 'transitioning') && (
-              <div className="mb-4 p-4 bg-primary-50 rounded-lg">
-                <div className="flex items-center gap-3 mb-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-primary-600" />
-                  <div>
-                    <p className="text-sm font-medium text-primary-700">
-                      {splitPhase === 'part1' ? t.splitPart1
-                        : splitPhase === 'transitioning' ? t.splitTransition
-                        : splitPhase === 'part2' ? t.splitPart2
-                        : t.processing}
-                    </p>
-                    <p className="text-xs text-primary-500">
-                      <Clock className="w-3 h-3 inline mr-1" />
-                      {duration === 30 ? '2×15s' : `${duration}s`} {videoModel !== 'kling' ? `@ ${resolution} ` : ''}• {aspectRatio}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-primary-100 text-xs text-primary-600 space-y-1">
-                  <p>⏱️ {elapsedSeconds}s</p>
-                  <p>🔄 {pollCount}</p>
-                  {lastPollStatus && <p>📡 {lastPollStatus}</p>}
+              <div className="mb-4 space-y-3">
+                <GeneratingPlaceholder
+                  aspectRatio="16/9"
+                  label={splitPhase === 'part1' ? t.splitPart1
+                    : splitPhase === 'transitioning' ? t.splitTransition
+                    : splitPhase === 'part2' ? t.splitPart2
+                    : t.processing}
+                  sublabel={`${duration === 30 ? '2×15s' : `${duration}s`} ${videoModel !== 'kling' ? `@ ${resolution} ` : ''}• ${aspectRatio}`}
+                />
+                <div className="px-3 py-2 bg-dark-50 rounded-lg text-xs text-dark-500 flex items-center gap-4">
+                  <span>⏱️ {elapsedSeconds}s</span>
+                  <span>🔄 {pollCount}</span>
+                  {lastPollStatus && <span>📡 {lastPollStatus}</span>}
                 </div>
               </div>
             )}

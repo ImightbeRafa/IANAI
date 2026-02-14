@@ -9,6 +9,7 @@ export interface ParsedScript {
  * Handles various formats:
  * - "GUION 1 — TITLE" / "GUIÓN 1 — TITLE"
  * - "SCRIPT 1 — TITLE" / "Script 1: TITLE"
+ * - "OPCIÓN 1 — TITLE" / "OPCION 1 - TITLE"
  * - "**GUION 1:**" / "**Script 1:**"
  * - "---" separators between numbered scripts
  * - Numbered headers like "1." "2." "3." at top level
@@ -18,8 +19,8 @@ export function parseScripts(text: string): ParsedScript[] {
   if (!trimmed) return []
 
   // Try pattern-based splitting first
-  // Match: GUION/GUIÓN/SCRIPT + number + optional separator + optional title
-  const scriptHeaderRegex = /^(?:\*{0,2})(?:GUI[OÓ]N|SCRIPT|Gui[oó]n|Script)\s*#?\s*(\d+)\s*[:\-—–.]?\s*(.*?)(?:\*{0,2})$/gm
+  // Match: GUION/GUIÓN/SCRIPT/OPCIÓN/OPCION + number + optional separator + optional title
+  const scriptHeaderRegex = /^(?:\*{0,2})(?:GUI[OÓ]N|SCRIPT|Gui[oó]n|Script|OPCI[OÓ]N|Opci[oó]n)\s*#?\s*(\d+)\s*[:\-—–.]?\s*(.*?)(?:\*{0,2})$/gm
 
   const headers: { index: number; pos: number; title: string }[] = []
   let match: RegExpExecArray | null
@@ -95,7 +96,7 @@ function extractTitleFromBlock(block: string): string {
     .replace(/\*{1,2}$/, '')
     .replace(/^#+\s*/, '')
     .replace(/^\d+\.\s*/, '')
-    .replace(/^(?:GUI[OÓ]N|SCRIPT|Gui[oó]n|Script)\s*#?\s*\d+\s*[:\-—–.]?\s*/i, '')
+    .replace(/^(?:GUI[OÓ]N|SCRIPT|Gui[oó]n|Script|OPCI[OÓ]N|Opci[oó]n)\s*#?\s*\d+\s*[:\-—–.]?\s*/i, '')
     .trim()
 
   if (title.length > 80) title = title.slice(0, 77) + '...'
@@ -112,6 +113,7 @@ export function isScriptContent(text: string): boolean {
   const scriptIndicators = [
     /GUI[OÓ]N\s*#?\s*\d/i,
     /SCRIPT\s*#?\s*\d/i,
+    /OPCI[OÓ]N\s*#?\s*\d/i,
     /Gancho|Hook/i,
     /Desarrollo|Development/i,
     /Cierre|Closing|CTA/i,

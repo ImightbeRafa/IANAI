@@ -972,23 +972,22 @@ export default function ProductWorkspace() {
           <div className="flex-1 overflow-y-auto px-6 py-8 space-y-5">
             {messages.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-center max-w-sm">
-                  <div className="w-14 h-14 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-5">
-                    <Sparkles className="w-7 h-7 text-primary-500" />
+                <div className="w-full max-w-sm">
+                  <div className="text-center mb-6">
+                    <div className="w-14 h-14 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                      <Sparkles className="w-7 h-7 text-primary-500" />
+                    </div>
+                    <p className="text-dark-400 text-sm">{t.startConversation}</p>
                   </div>
-                  <p className="text-dark-400 text-sm mb-8">{t.startConversation}</p>
-                  <button
-                    onClick={handleGenerateScript}
-                    disabled={loading}
-                    className="inline-flex items-center gap-2.5 text-base font-medium px-8 py-3 rounded-xl bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
-                  >
-                    {loading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-5 h-5" />
-                    )}
-                    {t.generateScript}
-                  </button>
+                  <div className="bg-white rounded-2xl border border-dark-100 p-5 shadow-sm">
+                    <ScriptSettingsPanel
+                      settings={scriptSettings}
+                      onChange={setScriptSettings}
+                      language={language}
+                      onGenerate={handleGenerateScript}
+                      loading={loading}
+                    />
+                  </div>
                 </div>
               </div>
             ) : (

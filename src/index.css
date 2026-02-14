@@ -91,6 +91,73 @@ body {
   min-height: 100dvh;
 }
 
+/* ===== Generating Placeholder Animations ===== */
+@keyframes gen-bg-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes gen-sweep {
+  0%   { transform: translateX(-100%) skewX(-15deg); opacity: 0; }
+  40%  { opacity: 0.15; }
+  100% { transform: translateX(200%) skewX(-15deg); opacity: 0; }
+}
+
+@keyframes gen-ring-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50%      { opacity: 0.6; transform: scale(1.05); }
+}
+
+@keyframes gen-ring-outer-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(1.08); }
+}
+
+@keyframes gen-icon-glow {
+  0%, 100% { opacity: 0.8; filter: drop-shadow(0 0 4px rgba(255,255,255,0.2)); }
+  50%      { opacity: 1;   filter: drop-shadow(0 0 12px rgba(255,255,255,0.5)); }
+}
+
+@keyframes gen-dot-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+  40%           { transform: scale(1);   opacity: 1; }
+}
+
+.gen-placeholder-bg {
+  background: linear-gradient(
+    135deg,
+    #0c4a6e 0%,
+    #0369a1 20%,
+    #0ea5e9 40%,
+    #075985 60%,
+    #0284c7 80%,
+    #0c4a6e 100%
+  );
+  background-size: 300% 300%;
+  animation: gen-bg-shift 6s ease-in-out infinite;
+}
+
+.gen-placeholder-sweep {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.08) 45%,
+    rgba(255,255,255,0.15) 50%,
+    rgba(255,255,255,0.08) 55%,
+    transparent 100%
+  );
+  animation: gen-sweep 3s ease-in-out infinite;
+}
+
+.gen-placeholder-icon  { animation: gen-icon-glow 2.5s ease-in-out infinite; }
+.gen-placeholder-ring  { animation: gen-ring-pulse 2.5s ease-in-out infinite; }
+.gen-placeholder-ring-outer { animation: gen-ring-outer-pulse 3s ease-in-out infinite 0.3s; }
+
+.gen-dot-1 { animation: gen-dot-bounce 1.4s ease-in-out infinite; }
+.gen-dot-2 { animation: gen-dot-bounce 1.4s ease-in-out infinite 0.2s; }
+.gen-dot-3 { animation: gen-dot-bounce 1.4s ease-in-out infinite 0.4s; }
+
 @layer components {
   .btn-primary {
     @apply bg-primary-600 text-white px-4 py-2 rounded-lg font-medium 

@@ -15,14 +15,12 @@ import {
   AlignLeft
 } from 'lucide-react'
 
-const ADMIN_EMAILS = ['ralauas@gmail.com', 'admin@advanceai.studio', 'ian@iankupfer.com']
-
 interface LayoutProps {
   children: ReactNode
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, signOut } = useAuth()
+  const { user, signOut, isAdmin } = useAuth()
   const { language } = useLanguage()
   const location = useLocation()
   const navigate = useNavigate()
@@ -57,7 +55,6 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   const t = labels[language]
-  const isAdmin = user?.email && ADMIN_EMAILS.includes(user.email)
 
   const allNavItems = [
     { path: '/dashboard', label: t.scripts, icon: FileText, beta: true, adminOnly: false },
