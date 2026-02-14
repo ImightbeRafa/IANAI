@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
@@ -7,23 +8,34 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import ProductWorkspace from './pages/ProductWorkspace'
-import PostsDashboard from './pages/PostsDashboard'
-import PostWorkspace from './pages/PostWorkspace'
-import BRollDashboard from './pages/BRollDashboard'
-import BRollWorkspace from './pages/BRollWorkspace'
-import ICPDashboard from './pages/ICPDashboard'
-import ICPForm from './pages/ICPForm'
-import Settings from './pages/Settings'
-import TeamManagement from './pages/TeamManagement'
-import AdminDashboard from './pages/AdminDashboard'
-import DescriptionsDashboard from './pages/DescriptionsDashboard'
-import DescriptionsWorkspace from './pages/DescriptionsWorkspace'
+
+// Lazy-loaded pages (code-split for smaller initial bundle)
+const PostsDashboard = lazy(() => import('./pages/PostsDashboard'))
+const PostWorkspace = lazy(() => import('./pages/PostWorkspace'))
+const BRollDashboard = lazy(() => import('./pages/BRollDashboard'))
+const BRollWorkspace = lazy(() => import('./pages/BRollWorkspace'))
+const ICPDashboard = lazy(() => import('./pages/ICPDashboard'))
+const ICPForm = lazy(() => import('./pages/ICPForm'))
+const Settings = lazy(() => import('./pages/Settings'))
+const TeamManagement = lazy(() => import('./pages/TeamManagement'))
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
+const DescriptionsDashboard = lazy(() => import('./pages/DescriptionsDashboard'))
+const DescriptionsWorkspace = lazy(() => import('./pages/DescriptionsWorkspace'))
+
+function LazyFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+    </div>
+  )
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <LanguageProvider>
         <AuthProvider>
+          <Suspense fallback={<LazyFallback />}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
@@ -166,6 +178,7 @@ export default function App() {
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </AuthProvider>
       </LanguageProvider>
     </BrowserRouter>

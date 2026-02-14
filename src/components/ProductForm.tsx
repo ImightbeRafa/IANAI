@@ -357,7 +357,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
         return
       }
 
-      const response = await fetch('/api/chat', {
+      const chatUrl = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
+      const response = await fetch(chatUrl, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -485,7 +486,10 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
     }
   }
 
-  const handleAddLinks = () => {
+  const [scrapingLinks, setScrapingLinks] = useState(false)
+  const [linkErrors, setLinkErrors] = useState<string[]>([])
+
+  const handleAddLinks = async () => {
     const newLinks = linkInput
       .split('\n')
       .map(u => u.trim())
@@ -495,8 +499,57 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
     
     const existing = formData.context_links || []
     const unique = newLinks.filter(l => !existing.includes(l))
-    setFormData(prev => ({ ...prev, context_links: [...(prev.context_links || []), ...unique] }))
-    setLinkInput('')
+    if (unique.length === 0) { setLinkInput(''); return }
+
+    setScrapingLinks(true)
+    setLinkErrors([])
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      const fetchUrl = import.meta.env.PROD ? '/api/fetch-url' : 'http://localhost:3000/api/fetch-url'
+      const scraped: string[] = []
+      const failed: string[] = []
+
+      for (const url of unique) {
+        try {
+          const res = await fetch(fetchUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ url })
+          })
+          const data = await res.json()
+          if (res.ok && data.content && !data.warning) {
+            scraped.push(`[${data.title || url}]\n${data.content}`)
+          } else {
+            failed.push(url)
+          }
+        } catch {
+          failed.push(url)
+        }
+      }
+
+      // Update URLs and scraped content
+      const existingContent = formData.context_links_content || ''
+      const newContent = scraped.length > 0
+        ? (existingContent ? existingContent + '\n\n---\n\n' : '') + scraped.join('\n\n---\n\n')
+        : existingContent
+
+      setFormData(prev => ({
+        ...prev,
+        context_links: [...(prev.context_links || []), ...unique],
+        context_links_content: newContent
+      }))
+
+      if (failed.length > 0) {
+        setLinkErrors(failed)
+      }
+    } catch (err) {
+      console.error('Failed to scrape links:', err)
+    } finally {
+      setScrapingLinks(false)
+      setLinkInput('')
+    }
   }
 
   const handleRemoveLink = (url: string) => {
@@ -848,12 +901,15 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     ))}
                   </div>
                 )}
-                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" />
+                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" disabled={scrapingLinks} />
                 {linkInput.trim() && (
-                  <button type="button" onClick={handleAddLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1.5">
-                    <Plus className="w-3.5 h-3.5" />
-                    {t.contextLinks.add}
+                  <button type="button" onClick={handleAddLinks} disabled={scrapingLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1.5">
+                    {scrapingLinks ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    {scrapingLinks ? (language === 'es' ? 'Extrayendo...' : 'Extracting...') : t.contextLinks.add}
                   </button>
+                )}
+                {linkErrors.length > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">{language === 'es' ? `No se pudo extraer: ${linkErrors.join(', ')}` : `Failed to extract: ${linkErrors.join(', ')}`}</p>
                 )}
               </div>
             </div>
@@ -1052,12 +1108,15 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     ))}
                   </div>
                 )}
-                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" />
+                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" disabled={scrapingLinks} />
                 {linkInput.trim() && (
-                  <button type="button" onClick={handleAddLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1.5">
-                    <Plus className="w-3.5 h-3.5" />
-                    {t.contextLinks.add}
+                  <button type="button" onClick={handleAddLinks} disabled={scrapingLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1.5">
+                    {scrapingLinks ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    {scrapingLinks ? (language === 'es' ? 'Extrayendo...' : 'Extracting...') : t.contextLinks.add}
                   </button>
+                )}
+                {linkErrors.length > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">{language === 'es' ? `No se pudo extraer: ${linkErrors.join(', ')}` : `Failed to extract: ${linkErrors.join(', ')}`}</p>
                 )}
               </div>
             </div>
@@ -1203,16 +1262,21 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                   onChange={(e) => setLinkInput(e.target.value)}
                   placeholder={t.contextLinks.placeholder}
                   className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16"
+                  disabled={scrapingLinks}
                 />
                 {linkInput.trim() && (
                   <button
                     type="button"
                     onClick={handleAddLinks}
-                    className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1.5"
+                    disabled={scrapingLinks}
+                    className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1.5"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    {t.contextLinks.add}
+                    {scrapingLinks ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                    {scrapingLinks ? (language === 'es' ? 'Extrayendo...' : 'Extracting...') : t.contextLinks.add}
                   </button>
+                )}
+                {linkErrors.length > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">{language === 'es' ? `No se pudo extraer: ${linkErrors.join(', ')}` : `Failed to extract: ${linkErrors.join(', ')}`}</p>
                 )}
               </div>
             </div>

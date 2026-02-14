@@ -220,6 +220,7 @@ export async function createProduct(
     awareness_level: data.awareness_level,
     // Context links
     context_links: data.context_links || [],
+    context_links_content: data.context_links_content || '',
     // Legacy fields for backward compatibility
     description: data.description,
     offer: data.offer,
@@ -598,7 +599,6 @@ export interface Post {
   prompt: string
   input_images?: string[]
   generated_image_url?: string
-  flux_task_id?: string
   status: 'pending' | 'generating' | 'completed' | 'failed'
   width: number
   height: number
@@ -618,7 +618,6 @@ export async function createPost(
     width?: number
     height?: number
     output_format?: string
-    flux_task_id?: string
     model?: string
   }
 ): Promise<Post> {
@@ -632,8 +631,7 @@ export async function createPost(
       width: data.width || 1080,
       height: data.height || 1080,
       output_format: data.output_format || 'jpeg',
-      flux_task_id: data.flux_task_id,
-      model: data.model || 'flux',
+      model: data.model || 'nano-banana-pro',
       status: 'generating'
     })
     .select()

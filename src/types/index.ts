@@ -14,7 +14,7 @@ export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'in
 export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
 export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
 export type AIModel = 'grok' | 'gemini'
-export type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
+export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
 export type VideoModel = 'grok-imagine-video'
 export type AspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | '3:4' | '3:2' | '2:3'
 export type VideoResolution = '720p' | '480p'
@@ -110,6 +110,7 @@ export interface Product {
   re_location_reference?: string
   re_cta?: string
   context_links?: string[]
+  context_links_content?: string
   created_at: string
   updated_at: string
   // Joined data
@@ -232,6 +233,7 @@ export interface ProductFormData {
   re_cta?: string
   // Context links added during product creation
   context_links?: string[]
+  context_links_content?: string
   // Legacy fields for backward compatibility
   description?: string
   offer?: string

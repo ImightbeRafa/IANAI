@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPosts, createPost, updatePostStatus } from '../services/database'
-import type { Product, ImageModel } from '../types'
+import { getProduct, getProductPosts, createPost, updatePostStatus, getScripts } from '../services/database'
+import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
 import { uploadPostImage } from '../utils/imageCompression'
 import { 
@@ -13,14 +13,11 @@ import {
   X,
   Sparkles,
   Download,
-  RefreshCw,
-  Package,
-  Briefcase,
-  UtensilsCrossed,
-  Home,
+  FileText,
   Loader2,
   Cpu,
-  Wand2
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -42,81 +39,66 @@ export default function PostWorkspace() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [product, setProduct] = useState<Product | null>(null)
+  const [scripts, setScripts] = useState<Script[]>([])
+  const [selectedScript, setSelectedScript] = useState<Script | null>(null)
+  const [scriptText, setScriptText] = useState('')
+  const [showScriptPicker, setShowScriptPicker] = useState(false)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [prompt, setPrompt] = useState('')
   const [uploadedImages, setUploadedImages] = useState<string[]>([])
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
-  const [pollingTaskId, setPollingTaskId] = useState<string | null>(null)
-  const [textWarning, setTextWarning] = useState(false)
-  const [enhancing, setEnhancing] = useState(false)
-
-  // Image settings
-  const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5' | '9:16'>('1:1')
-  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana')
+  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
 
   const labels = {
     es: {
       back: 'Volver',
       title: 'Generar Post',
-      subtitle: 'Crea imágenes para redes sociales',
-      promptLabel: 'Describe tu imagen',
-      promptPlaceholder: 'Ej: Mi producto en una mesa de madera con luz natural...',
-      enhancePrompt: 'Mejorar con IA',
-      enhancing: 'Mejorando...',
-      uploadImages: 'Subir imágenes de referencia',
-      uploadHint: 'Arrastra imágenes o haz clic para subir (máx. 4)',
-      generate: 'Generar Imagen',
-      generating: 'Generando...',
-      aspectRatio: 'Formato',
-      square: 'Cuadrado (1:1)',
-      portrait: 'Vertical (4:5)',
-      story: 'Historia (9:16)',
-      generatedImages: 'Imágenes Generadas',
-      noImages: 'Aún no hay imágenes generadas',
+      subtitle: 'Transforma un guión en un post de venta directa',
+      scriptLabel: 'Guión',
+      selectScript: 'Seleccionar guión guardado',
+      pasteScript: 'O pega un guión directamente',
+      scriptPlaceholder: 'Pega aquí tu guión con estructura Gancho / Desarrollo / CTA...',
+      noScripts: 'No hay guiones guardados. Genera guiones primero en Scripts.',
+      scriptsFor: 'Guiones de',
+      selectedScript: 'Guión seleccionado',
+      refImages: 'Imágenes del producto (opcional)',
+      refHint: 'Sube fotos del producto para mayor precisión visual (máx. 4)',
+      generate: 'Generar Post',
+      generating: 'Generando post...',
+      generatedImages: 'Posts Generados',
+      noImages: 'Selecciona un guión y genera tu primer post',
       download: 'Descargar',
-      regenerate: 'Regenerar',
-      productInfo: 'Información del producto',
-      useProductContext: 'Usar contexto del producto',
-      error: 'Error al generar imagen',
-      textWarningTitle: 'Nota sobre texto en imágenes',
-      textWarningMessage: 'La IA no puede generar texto legible en imágenes. El texto solicitado se ha removido del prompt. Usa herramientas de edición (Canva, Photoshop) para agregar texto después.',
+      error: 'Error al generar post',
       imageModel: 'Modelo de IA',
-      flux: 'Flux',
-      nanoBanana: 'Nano Banana',
-      nanoBananaPro: 'Nano Banana Pro',
+      format: 'Formato: 9:16 (1080×1920)',
+      nanoBanana: 'Gemini Flash',
+      nanoBananaPro: 'Gemini Pro',
       grokImagine: 'Grok Imagine'
     },
     en: {
       back: 'Back',
       title: 'Generate Post',
-      subtitle: 'Create images for social media',
-      promptLabel: 'Describe your image',
-      promptPlaceholder: 'E.g: My product on a wooden table with natural light...',
-      enhancePrompt: 'Enhance with AI',
-      enhancing: 'Enhancing...',
-      uploadImages: 'Upload reference images',
-      uploadHint: 'Drag images or click to upload (max 4)',
-      generate: 'Generate Image',
-      generating: 'Generating...',
-      aspectRatio: 'Format',
-      square: 'Square (1:1)',
-      portrait: 'Portrait (4:5)',
-      story: 'Story (9:16)',
-      generatedImages: 'Generated Images',
-      noImages: 'No images generated yet',
+      subtitle: 'Transform a script into a direct sale post',
+      scriptLabel: 'Script',
+      selectScript: 'Select saved script',
+      pasteScript: 'Or paste a script directly',
+      scriptPlaceholder: 'Paste your script with Hook / Development / CTA structure...',
+      noScripts: 'No saved scripts. Generate scripts first in Scripts workspace.',
+      scriptsFor: 'Scripts for',
+      selectedScript: 'Selected script',
+      refImages: 'Product images (optional)',
+      refHint: 'Upload product photos for better visual accuracy (max 4)',
+      generate: 'Generate Post',
+      generating: 'Generating post...',
+      generatedImages: 'Generated Posts',
+      noImages: 'Select a script and generate your first post',
       download: 'Download',
-      regenerate: 'Regenerate',
-      productInfo: 'Product info',
-      useProductContext: 'Use product context',
-      error: 'Error generating image',
-      textWarningTitle: 'Note about text in images',
-      textWarningMessage: 'AI cannot generate readable text in images. Text requests have been removed from the prompt. Use editing tools (Canva, Photoshop) to add text afterwards.',
+      error: 'Error generating post',
       imageModel: 'AI Model',
-      flux: 'Flux',
-      nanoBanana: 'Nano Banana',
-      nanoBananaPro: 'Nano Banana Pro',
+      format: 'Format: 9:16 (1080×1920)',
+      nanoBanana: 'Gemini Flash',
+      nanoBananaPro: 'Gemini Pro',
       grokImagine: 'Grok Imagine'
     }
   }
@@ -124,14 +106,17 @@ export default function PostWorkspace() {
   const t = labels[language]
 
   useEffect(() => {
-    async function loadProductAndPosts() {
+    async function loadData() {
       if (!productId || !user) return
       try {
-        const productData = await getProduct(productId)
+        const [productData, scriptsData, savedPosts] = await Promise.all([
+          getProduct(productId),
+          getScripts(productId),
+          getProductPosts(productId)
+        ])
         setProduct(productData)
+        setScripts(scriptsData)
 
-        // Load saved posts for this product
-        const savedPosts = await getProductPosts(productId)
         const loadedPosts: GeneratedPost[] = savedPosts
           .filter(post => post.status === 'completed' && post.generated_image_url)
           .map(post => ({
@@ -143,173 +128,30 @@ export default function PostWorkspace() {
             saved: true
           }))
         setGeneratedPosts(loadedPosts)
-      } catch (error) {
-        console.error('Failed to load product:', error)
+      } catch (err) {
+        console.error('Failed to load data:', err)
       } finally {
         setLoading(false)
       }
     }
-    loadProductAndPosts()
+    loadData()
   }, [productId, user])
 
-  // Polling for generation result
-  useEffect(() => {
-    if (!pollingTaskId) return
-
-    const pollInterval = setInterval(async () => {
-      try {
-        // Get auth token for polling
-        const { data: { session } } = await supabase.auth.getSession()
-        const token = session?.access_token
-        
-        if (!token) {
-          console.error('No auth token for polling')
-          setPollingTaskId(null)
-          setGenerating(false)
-          return
-        }
-
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ action: 'poll', taskId: pollingTaskId })
-        })
-
-        const result = await response.json()
-
-        if (result.status === 'Ready' && result.result?.sample) {
-          // Save to storage and database
-          const imageUrl = result.result.sample
-          let savedUrl = imageUrl
-          let postId = pollingTaskId
-          
-          try {
-            if (user && productId) {
-              // Upload compressed image to storage
-              savedUrl = await uploadPostImage(user.id, productId, imageUrl)
-              
-              // Save post to database
-              const post = await createPost(productId, user.id, {
-                prompt,
-                width: 1080,
-                height: 1080,
-                output_format: 'webp',
-                flux_task_id: pollingTaskId,
-                model: 'flux'
-              })
-              postId = post.id
-              
-              // Update with the saved URL
-              await updatePostStatus(postId, 'completed', savedUrl)
-            }
-          } catch (saveErr) {
-            console.error('Failed to save image:', saveErr)
-            // Continue with unsaved image - user can still see and download it
-          }
-          
-          setGeneratedPosts(prev => [{
-            id: postId,
-            imageUrl: savedUrl,
-            prompt: prompt,
-            createdAt: new Date(),
-            model: 'flux',
-            saved: !!user && !!productId
-          }, ...prev])
-          setPollingTaskId(null)
-          setGenerating(false)
-        } else if (result.status === 'Error' || result.status === 'Failed') {
-          setError(result.error || t.error)
-          setPollingTaskId(null)
-          setGenerating(false)
-        }
-      } catch (err) {
-        console.error('Polling error:', err)
-      }
-    }, 1000)
-
-    return () => clearInterval(pollInterval)
-  }, [pollingTaskId, prompt, t.error])
-
-  const ENHANCE_API_URL = import.meta.env.PROD ? '/api/enhance-prompt' : 'http://localhost:3000/api/enhance-prompt'
-
-  const handleEnhancePrompt = async () => {
-    if (!prompt.trim() || enhancing) return
-
-    setEnhancing(true)
-    setError('')
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      
-      if (!token) {
-        throw new Error('No estás autenticado. Por favor inicia sesión.')
-      }
-
-      // Build product context for better enhancement
-      let productContext = ''
-      if (product) {
-        const parts: string[] = []
-        if (product.name) parts.push(`Producto: ${product.name}`)
-        if (product.description || product.product_description) {
-          parts.push(`Descripción: ${product.description || product.product_description}`)
-        }
-        if (product.type) parts.push(`Tipo: ${product.type}`)
-        productContext = parts.join('. ')
-      }
-
-      const response = await fetch(ENHANCE_API_URL, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ 
-          prompt: prompt.trim(),
-          type: 'image',
-          productContext
-        })
-      })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Error al mejorar el prompt')
-      }
-
-      if (result.enhancedPrompt) {
-        setPrompt(result.enhancedPrompt)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al mejorar el prompt')
-    } finally {
-      setEnhancing(false)
-    }
-  }
-
-  const getAspectDimensions = () => {
-    switch (aspectRatio) {
-      case '4:5': return { width: 1080, height: 1350 }
-      case '9:16': return { width: 1080, height: 1920 }
-      default: return { width: 1080, height: 1080 }
-    }
+  const getScriptPrompt = (): string => {
+    if (selectedScript) return selectedScript.content
+    return scriptText.trim()
   }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
-
     const newImages: string[] = []
     const maxImages = 4 - uploadedImages.length
-
     Array.from(files).slice(0, maxImages).forEach(file => {
       const reader = new FileReader()
-      reader.onload = (e) => {
-        if (e.target?.result) {
-          newImages.push(e.target.result as string)
+      reader.onload = (ev) => {
+        if (ev.target?.result) {
+          newImages.push(ev.target.result as string)
           if (newImages.length === Math.min(files.length, maxImages)) {
             setUploadedImages(prev => [...prev, ...newImages])
           }
@@ -324,42 +166,35 @@ export default function PostWorkspace() {
   }
 
   const handleGenerate = async () => {
-    if (!prompt.trim()) return
+    const script = getScriptPrompt()
+    if (!script) return
 
     setGenerating(true)
     setError('')
-    setTextWarning(false)
 
     try {
-      // Get auth token
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
-      
-      if (!token) {
-        throw new Error('No estás autenticado. Por favor inicia sesión.')
-      }
+      if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
-      const { width, height } = getAspectDimensions()
-      
       const requestBody: Record<string, unknown> = {
-        prompt: prompt,
-        width,
-        height,
+        prompt: script,
+        mode: 'post',
+        width: 1080,
+        height: 1920,
         output_format: 'jpeg',
         model: imageModel
       }
 
-      // Add reference images if uploaded
       if (uploadedImages.length > 0) {
         uploadedImages.forEach((img, i) => {
-          const key = i === 0 ? 'input_image' : `input_image_${i + 1}`
-          requestBody[key] = img
+          requestBody[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img
         })
       }
 
       const response = await fetch(API_URL, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -367,59 +202,42 @@ export default function PostWorkspace() {
       })
 
       const result = await response.json()
+      if (!response.ok) throw new Error(result.error || t.error)
 
-      if (!response.ok) {
-        throw new Error(result.error || t.error)
-      }
-
-      // Check if text was requested (and filtered out)
-      if (result.textWarning) {
-        setTextWarning(true)
-      }
-
-      // For Gemini models, result is immediate (no polling needed)
       if (result.status === 'Ready' && result.result?.sample) {
         const imageUrl = result.result.sample
         let savedUrl = imageUrl
-        let postId = `gemini-${Date.now()}`
-        
+        let postId = `post-${Date.now()}`
+
         try {
           if (user && productId) {
-            // Upload compressed image to storage
             savedUrl = await uploadPostImage(user.id, productId, imageUrl)
-            
-            // Save post to database
             const post = await createPost(productId, user.id, {
-              prompt,
-              width: requestBody.width as number || 1080,
-              height: requestBody.height as number || 1080,
+              prompt: script,
+              width: 1080,
+              height: 1920,
               output_format: 'webp',
               model: imageModel
             })
             postId = post.id
-            
-            // Update with the saved URL
             await updatePostStatus(postId, 'completed', savedUrl)
           }
         } catch (saveErr) {
           console.error('Failed to save image:', saveErr)
         }
-        
+
         setGeneratedPosts(prev => [{
           id: postId,
           imageUrl: savedUrl,
-          prompt: prompt,
+          prompt: script,
           createdAt: new Date(),
           model: imageModel,
           saved: !!user && !!productId
         }, ...prev])
-        setGenerating(false)
-      } else if (result.taskId) {
-        // For Flux, start polling for result
-        setPollingTaskId(result.taskId)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t.error)
+    } finally {
       setGenerating(false)
     }
   }
@@ -441,20 +259,11 @@ export default function PostWorkspace() {
     }
   }
 
-  const getProductIcon = (type: string) => {
-    switch (type) {
-      case 'service': return Briefcase
-      case 'restaurant': return UtensilsCrossed
-      case 'real_estate': return Home
-      default: return Package
-    }
-  }
-
   if (loading) {
     return (
       <Layout>
         <div className="flex items-center justify-center h-full">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
         </div>
       </Layout>
     )
@@ -470,78 +279,124 @@ export default function PostWorkspace() {
     )
   }
 
-  const ProductIcon = getProductIcon(product.type)
+  const hasScript = !!selectedScript || !!scriptText.trim()
 
   return (
     <Layout>
       <div className="h-full flex flex-col lg:flex-row">
-        {/* Left Panel - Product Info & Settings */}
-        <div className="w-full lg:w-96 bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col">
+        {/* Left Panel — Script Input & Settings */}
+        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col">
           {/* Header */}
-          <div className="p-4 border-b border-dark-100">
+          <div className="px-5 py-4 border-b border-dark-100">
             <Link
               to="/posts"
-              className="flex items-center gap-2 text-dark-600 hover:text-dark-900 mb-4"
+              className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-3"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5" />
               {t.back}
             </Link>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
-                <ProductIcon className="w-5 h-5 text-primary-600" />
-              </div>
-              <div>
-                <h1 className="font-semibold text-dark-900">{product.name}</h1>
-                <p className="text-sm text-dark-500 capitalize">{product.type}</p>
-              </div>
-            </div>
+            <h1 className="text-lg font-semibold text-dark-900">{product.name}</h1>
+            <p className="text-xs text-dark-400 mt-0.5">{t.subtitle}</p>
           </div>
 
-          {/* Prompt Input */}
-          <div className="p-4 flex-1 overflow-auto space-y-4">
+          {/* Content */}
+          <div className="flex-1 overflow-auto px-5 py-4 space-y-5">
+            {/* Script selector */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-dark-700">
-                  {t.promptLabel}
-                </label>
+              <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                {t.scriptLabel}
+              </label>
+
+              {/* Saved scripts picker */}
+              <div className="relative">
                 <button
-                  onClick={handleEnhancePrompt}
-                  disabled={!prompt.trim() || enhancing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  onClick={() => setShowScriptPicker(!showScriptPicker)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 bg-dark-50 rounded-lg text-sm text-dark-700 hover:bg-dark-100 transition-colors"
                 >
-                  {enhancing ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      {t.enhancing}
-                    </>
-                  ) : (
-                    <>
-                      <Wand2 className="w-3.5 h-3.5" />
-                      {t.enhancePrompt}
-                    </>
-                  )}
+                  <span className="flex items-center gap-2 truncate">
+                    <FileText className="w-4 h-4 text-dark-400 flex-shrink-0" />
+                    {selectedScript
+                      ? selectedScript.title
+                      : t.selectScript
+                    }
+                  </span>
+                  {showScriptPicker ? <ChevronUp className="w-4 h-4 text-dark-400" /> : <ChevronDown className="w-4 h-4 text-dark-400" />}
                 </button>
+
+                {showScriptPicker && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-dark-100 z-50 max-h-[50vh] overflow-y-auto">
+                    {scripts.length > 0 ? (
+                      <div className="p-2 space-y-0.5">
+                        {scripts.map(script => (
+                          <button
+                            key={script.id}
+                            onClick={() => {
+                              setSelectedScript(script)
+                              setScriptText('')
+                              setShowScriptPicker(false)
+                            }}
+                            className={`w-full text-left p-3 rounded-lg transition-colors ${
+                              selectedScript?.id === script.id
+                                ? 'bg-primary-50 border border-primary-200'
+                                : 'hover:bg-dark-50'
+                            }`}
+                          >
+                            <p className="text-xs font-medium text-dark-800 truncate">{script.title}</p>
+                            <p className="text-[10px] text-dark-400 mt-1 line-clamp-2">{script.content.slice(0, 120)}...</p>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center">
+                        <p className="text-xs text-dark-400">{t.noScripts}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder={t.promptPlaceholder}
-                rows={4}
-                className="input w-full resize-none"
-              />
+
+              {/* Selected script preview */}
+              {selectedScript && (
+                <div className="mt-2 bg-primary-50/50 border border-primary-100 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-semibold text-primary-700 uppercase tracking-wide">{t.selectedScript}</p>
+                    <button
+                      onClick={() => setSelectedScript(null)}
+                      className="text-[10px] text-primary-500 hover:text-primary-700 font-medium"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-dark-600 leading-relaxed line-clamp-6 whitespace-pre-wrap">{selectedScript.content}</p>
+                </div>
+              )}
+
+              {/* Or paste directly */}
+              {!selectedScript && (
+                <>
+                  <p className="text-[10px] text-dark-400 text-center my-2">{t.pasteScript}</p>
+                  <textarea
+                    value={scriptText}
+                    onChange={(e) => setScriptText(e.target.value)}
+                    placeholder={t.scriptPlaceholder}
+                    rows={6}
+                    className="w-full text-sm border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                  />
+                </>
+              )}
             </div>
 
-            {/* Image Upload */}
+            {/* Product images (optional) */}
             <div>
-              <label className="block text-sm font-medium text-dark-700 mb-2">
-                {t.uploadImages}
+              <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                {t.refImages}
               </label>
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-dark-200 rounded-xl p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition-colors"
+                className="border border-dashed border-dark-200 rounded-lg p-3 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
               >
-                <Upload className="w-8 h-8 text-dark-400 mx-auto mb-2" />
-                <p className="text-sm text-dark-500">{t.uploadHint}</p>
+                <Upload className="w-5 h-5 text-dark-300 mx-auto mb-1" />
+                <p className="text-[10px] text-dark-400">{t.refHint}</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -551,22 +406,16 @@ export default function PostWorkspace() {
                   className="hidden"
                 />
               </div>
-              
-              {/* Uploaded images preview */}
               {uploadedImages.length > 0 && (
-                <div className="flex gap-2 mt-3 flex-wrap">
+                <div className="flex gap-2 mt-2 flex-wrap">
                   {uploadedImages.map((img, i) => (
                     <div key={i} className="relative">
-                      <img
-                        src={img}
-                        alt={`Reference ${i + 1}`}
-                        className="w-16 h-16 object-cover rounded-lg"
-                      />
+                      <img src={img} alt={`Ref ${i + 1}`} className="w-14 h-14 object-cover rounded-lg" />
                       <button
                         onClick={() => removeImage(i)}
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600"
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-dark-600 text-white rounded-full flex items-center justify-center hover:bg-dark-800 transition-colors"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-2.5 h-2.5" />
                       </button>
                     </div>
                   ))}
@@ -574,116 +423,51 @@ export default function PostWorkspace() {
               )}
             </div>
 
-            {/* Aspect Ratio */}
+            {/* AI Model */}
             <div>
-              <label className="block text-sm font-medium text-dark-700 mb-2">
-                {t.aspectRatio}
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                <Cpu className="w-3.5 h-3.5 text-primary-500" />
+                {t.imageModel}
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { value: '1:1', label: t.square },
-                  { value: '4:5', label: t.portrait },
-                  { value: '9:16', label: t.story }
-                ].map((option) => (
+              <div className="grid grid-cols-3 gap-1.5">
+                {([
+                  { id: 'nano-banana' as ImageModel, name: t.nanoBanana, sub: 'Gemini 2.5' },
+                  { id: 'nano-banana-pro' as ImageModel, name: t.nanoBananaPro, sub: 'Gemini 3' },
+                  { id: 'grok-imagine' as ImageModel, name: t.grokImagine, sub: 'xAI' },
+                ] as const).map(m => (
                   <button
-                    key={option.value}
-                    onClick={() => setAspectRatio(option.value as '1:1' | '4:5' | '9:16')}
-                    className={`p-2 rounded-lg text-sm font-medium transition-colors ${
-                      aspectRatio === option.value
-                        ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
-                        : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
+                    key={m.id}
+                    onClick={() => setImageModel(m.id)}
+                    className={`p-2.5 rounded-lg text-xs transition-colors ${
+                      imageModel === m.id
+                        ? 'bg-primary-50 text-primary-700 border border-primary-300'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                     }`}
                   >
-                    {option.label}
+                    <div className="font-medium">{m.name}</div>
+                    <div className={`text-[10px] mt-0.5 ${imageModel === m.id ? 'text-primary-500' : 'text-dark-400'}`}>
+                      {m.sub}
+                    </div>
                   </button>
                 ))}
               </div>
+              <p className="text-[10px] text-dark-300 mt-1.5 text-center">{t.format}</p>
             </div>
 
-            {/* AI Model Selector */}
-            <div>
-              <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">
-                <Cpu className="w-4 h-4 text-primary-500" />
-                {t.imageModel}
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setImageModel('flux')}
-                  className={`p-3 rounded-lg text-sm transition-colors ${
-                    imageModel === 'flux'
-                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
-                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
-                  }`}
-                >
-                  <div className="font-medium">{t.flux}</div>
-                  <div className={`text-xs mt-0.5 ${imageModel === 'flux' ? 'text-primary-600' : 'text-dark-400'}`}>
-                    BFL Klein
-                  </div>
-                </button>
-                <button
-                  onClick={() => setImageModel('nano-banana')}
-                  className={`p-3 rounded-lg text-sm transition-colors ${
-                    imageModel === 'nano-banana'
-                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
-                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
-                  }`}
-                >
-                  <div className="font-medium">{t.nanoBanana}</div>
-                  <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana' ? 'text-primary-600' : 'text-dark-400'}`}>
-                    Gemini 2.5
-                  </div>
-                </button>
-                <button
-                  onClick={() => setImageModel('nano-banana-pro')}
-                  className={`p-3 rounded-lg text-sm transition-colors ${
-                    imageModel === 'nano-banana-pro'
-                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
-                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
-                  }`}
-                >
-                  <div className="font-medium">{t.nanoBananaPro}</div>
-                  <div className={`text-xs mt-0.5 ${imageModel === 'nano-banana-pro' ? 'text-primary-600' : 'text-dark-400'}`}>
-                    Gemini 3
-                  </div>
-                </button>
-                <button
-                  onClick={() => setImageModel('grok-imagine')}
-                  className={`p-3 rounded-lg text-sm transition-colors ${
-                    imageModel === 'grok-imagine'
-                      ? 'bg-primary-100 text-primary-700 border-2 border-primary-500'
-                      : 'bg-dark-50 text-dark-600 border-2 border-transparent hover:bg-dark-100'
-                  }`}
-                >
-                  <div className="font-medium">{t.grokImagine}</div>
-                  <div className={`text-xs mt-0.5 ${imageModel === 'grok-imagine' ? 'text-primary-600' : 'text-dark-400'}`}>
-                    xAI
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Text warning message */}
-            {textWarning && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm font-medium text-amber-800">{t.textWarningTitle}</p>
-                <p className="text-sm text-amber-700 mt-1">{t.textWarningMessage}</p>
-              </div>
-            )}
-
-            {/* Error message */}
+            {/* Error */}
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-sm text-red-600">{error}</p>
+                <p className="text-xs text-red-600">{error}</p>
               </div>
             )}
           </div>
 
           {/* Generate Button */}
-          <div className="p-4 border-t border-dark-100">
+          <div className="px-5 py-4 border-t border-dark-100">
             <button
               onClick={handleGenerate}
-              disabled={generating || !prompt.trim()}
-              className="btn-primary w-full flex items-center justify-center gap-2"
+              disabled={generating || !hasScript}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary-600 text-white font-medium text-sm hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {generating ? (
                 <>
@@ -700,46 +484,48 @@ export default function PostWorkspace() {
           </div>
         </div>
 
-        {/* Right Panel - Generated Images */}
-        <div className="flex-1 bg-dark-50 p-6 overflow-auto">
-          <h2 className="text-lg font-semibold text-dark-900 mb-4">{t.generatedImages}</h2>
-          
-          {generatedPosts.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {generatedPosts.map((post, index) => (
-                <div key={post.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <img
-                    src={post.imageUrl}
-                    alt={`Generated post ${index + 1}`}
-                    className="w-full aspect-square object-cover"
-                  />
-                  <div className="p-3 flex gap-2">
-                    <button
-                      onClick={() => handleDownload(post.imageUrl, index)}
-                      className="btn-secondary flex-1 flex items-center justify-center gap-2 text-sm"
-                    >
-                      <Download className="w-4 h-4" />
-                      {t.download}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setPrompt(post.prompt)
-                        handleGenerate()
-                      }}
-                      className="btn-secondary flex items-center justify-center gap-2 text-sm"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                    </button>
+        {/* Right Panel — Generated Posts */}
+        <div className="flex-1 bg-dark-50/50 overflow-auto">
+          <div className="p-6">
+            <h2 className="text-sm font-semibold text-dark-700 tracking-wide uppercase mb-4">{t.generatedImages}</h2>
+
+            {generatedPosts.length > 0 ? (
+              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                {generatedPosts.map((post, index) => (
+                  <div key={post.id} className="bg-white rounded-xl shadow-sm border border-dark-100 overflow-hidden group">
+                    <div className="relative">
+                      <img
+                        src={post.imageUrl}
+                        alt={`Post ${index + 1}`}
+                        className="w-full aspect-[9/16] object-cover"
+                      />
+                      {post.model && (
+                        <span className="absolute top-2 right-2 text-[9px] font-mono px-1.5 py-0.5 bg-black/40 text-white/80 rounded-md backdrop-blur-sm">
+                          {post.model}
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-3">
+                      <button
+                        onClick={() => handleDownload(post.imageUrl, index)}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dark-200 text-dark-600 text-xs font-medium hover:bg-dark-50 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        {t.download}
+                      </button>
+                    </div>
                   </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-80 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-dark-100 flex items-center justify-center mb-4">
+                  <ImageIcon className="w-8 h-8 text-dark-300" />
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-64 text-center">
-              <ImageIcon className="w-16 h-16 text-dark-300 mb-4" />
-              <p className="text-dark-500">{t.noImages}</p>
-            </div>
-          )}
+                <p className="text-sm text-dark-400">{t.noImages}</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </Layout>

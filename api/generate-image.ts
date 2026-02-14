@@ -3,7 +3,6 @@ import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { GoogleGenAI } from '@google/genai'
 
-const FLUX_API_URL = 'https://api.bfl.ai/v1/flux-2-klein-9b'
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
 // Gemini Image Generation Models (from official SDK documentation)
@@ -12,7 +11,7 @@ const GEMINI_IMAGE_MODELS: Record<string, string> = {
   'nano-banana-pro': 'gemini-3-pro-image-preview'   // High quality, reasoning (up to 4K)
 }
 
-type ImageModel = 'flux' | 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
+type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
 
 // Map width/height to aspect ratio string
 function getAspectRatio(width: number, height: number): string {
@@ -28,16 +27,7 @@ function getAspectRatio(width: number, height: number): string {
   return '1:1'
 }
 
-// System prompt for Flux (no text support)
-const FLUX_PROMPT_PREFIX = `Crea una fotografía profesional de alta calidad para marketing en redes sociales.
-NO crees una captura de pantalla o mockup de Instagram u otra red social.
-NO incluyas texto, letras, palabras, marcas de agua ni logos en la imagen.
-Enfócate en: composición limpia, iluminación profesional, colores vibrantes, atractivo comercial.
-Estilo: Fotografía de producto moderna, imágenes lifestyle, contenido promocional.
-
-Solicitud del usuario: `
-
-// System prompt for Gemini (CAN render text in images)
+// System prompt for Gemini (CAN render text) — used for generic image gen only
 const GEMINI_PROMPT_PREFIX = `Crea una imagen profesional de alta calidad para marketing en redes sociales.
 NO crees una captura de pantalla o mockup de Instagram u otra red social.
 Enfócate en: composición limpia, iluminación profesional, colores vibrantes, atractivo comercial.
@@ -46,68 +36,151 @@ Puedes incluir texto legible si el usuario lo solicita.
 
 Solicitud del usuario: `
 
-// Detect if user is asking for text in the image
-function containsTextRequest(prompt: string): boolean {
-  const textIndicators = [
-    /que diga/i,
-    /con texto/i,
-    /with text/i,
-    /that says/i,
-    /saying/i,
-    /write/i,
-    /escrib/i,
-    /font/i,
-    /tipograf/i,
-    /letter/i,
-    /palabra/i,
-    /frase/i,
-  ]
-  return textIndicators.some(pattern => pattern.test(prompt))
-}
+// =============================================
+// MASTER POST PROMPT — Director de Arte + Diseñador Gráfico + Copywriter
+// Used when mode === 'post'. The user's script (GANCHO/DESARROLLO/CTA) is appended.
+// =============================================
+const POST_MASTER_PROMPT = `ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
 
-// Remove text-related instructions from prompt
-function cleanPromptForImageGen(prompt: string): string {
-  // Remove common text request patterns
-  let cleaned = prompt
-    .replace(/que diga[^,.]*/gi, '')
-    .replace(/con texto[^,.]*/gi, '')
-    .replace(/with text[^,.]*/gi, '')
-    .replace(/that says[^,.]*/gi, '')
-    .replace(/saying[^,.]*/gi, '')
-    .replace(/en font[^,.]*/gi, '')
-    .replace(/in font[^,.]*/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  
-  return cleaned
-}
+CONTEXTO FIJO (NO PREGUNTAR NADA):
+En tu contexto ya recibiste un guión escrito con esta estructura:
+- [GANCHO]
+- [DESARROLLO]
+- [CTA]
+Ese guión NO incluye instrucciones visuales. Vos debés inferirlas de forma inteligente.
 
-interface FluxRequest {
-  prompt: string
-  input_image?: string
-  input_image_2?: string
-  input_image_3?: string
-  input_image_4?: string
-  width?: number
-  height?: number
-  seed?: number
-  output_format?: 'jpeg' | 'png'
-  safety_tolerance?: number
-}
+OBJETIVO:
+Transformar ese guión en UN (1) post publicitario de venta directa en un solo slide, formato vertical 9:16 (1080x1920), con:
+1) Gancho (headline)
+2) Desarrollo (bullets ultra tangibles)
+3) CTA (acción única tipo botón)
+Todo en el MISMO slide, con diseño profesional, legible y ordenado.
 
-interface FluxSubmitResponse {
-  id: string
-  polling_url: string
-  cost?: number
-}
+REGLAS DE COPY (PERFORMANCE):
+- Cero saludos.
+- 2–3 segundos de gancho (headline corto).
+- No párrafos largos en el diseño.
+- Convertí el [DESARROLLO] del guión a 3–5 bullets máximos.
+- Cada bullet debe ser tangible: entrega, logística, garantía, tiempo, cobertura, pago, proceso, "qué recibís".
+- Eliminá adjetivos vacíos ("premium", "alta calidad") si no vienen con evidencia. Si el guión trae adjetivos, aterrizalos a hechos.
+- CTA debe ser UNO solo, directo, operativo. No mezclar acciones.
 
-interface FluxPollResponse {
-  status: 'Pending' | 'Ready' | 'Error' | 'Failed'
-  result?: {
-    sample: string
-  }
-  error?: string
-}
+EXTRACCIÓN AUTOMÁTICA DESDE EL GUION (OBLIGATORIO):
+1) Del [GANCHO] extraé:
+   - Qué se vende (producto/servicio literal)
+   - Público buyer (segmento implícito)
+   - Función/propuesta principal (1 sola)
+   - Ángulo/diferenciador (1) (garantía, entrega, rapidez, anti-alternativa, variedad, certeza)
+2) Del [DESARROLLO] extraé y priorizá:
+   - 3–5 hechos verificables (máximo) que eliminan dudas.
+   - Si el guión menciona una alternativa/competidor (ej "supermercados"), convertí eso en 1 bullet de contraste máximo (sin explicar de más).
+   - Si el guión menciona garantía, reposición, devolución o riesgo cero, eso va sí o sí como bullet.
+3) Del [CTA] extraé:
+   - Acción única (mensaje, WhatsApp, DM, pedir, agendar, cotizar)
+   - Resultado inmediato (qué pasa después de que escribe)
+
+REGLAS DE DISEÑO (CALIDAD VISUAL PRO):
+FORMATO: Vertical 9:16 — 1080x1920 px
+
+SAFE AREAS / MÁRGENES OBLIGATORIOS (ESTRICTO):
+- Top safe: mínimo 220 px sin texto importante.
+- Bottom safe: mínimo 260 px sin texto importante.
+- Lados: mínimo 110 px sin texto importante.
+Todo lo crítico (headline, bullets, CTA) debe quedar dentro de estas zonas seguras.
+PROHIBIDO: texto pegado a bordes.
+PROHIBIDO: número de slide (1/1, 2/2, etc.).
+
+DIRECCIÓN DE ARTE (LOOK & FEEL PREMIUM) — ESTILO APPLE/IG/SPOTIFY:
+El diseño debe verse como una marca grande: minimalista premium + editorial + quiet luxury.
+Objetivo visual: aunque haya texto (headline + 3–5 bullets + CTA), el post se siente limpio, caro, ordenado y ultra intencional.
+
+Reglas visuales (estrictas):
+- No saturación: máximo 1 imagen principal + 1 badge opcional + texto + CTA.
+- Mucho aire: espacios generosos entre bloques (headline / bullets / CTA).
+- Alineación perfecta: todo basado en grid, márgenes consistentes, baseline visual estable.
+- Consistencia: radios de esquina, sombras, grosor de líneas, estilos de badges e íconos coherentes.
+- Cero "plantilla barata": NO bursts, NO stickers, NO íconos caricaturescos, NO flechas exageradas, NO emojis, NO outlines pesados.
+
+GRID Y JERARQUÍA:
+- Alineación principal: izquierda.
+- Máximo 2 bloques de texto arriba/medio: (Headline + Bullets).
+- CTA en una barra tipo "botón" al final (pero dentro del bottom safe).
+- Headline: 8–12 palabras ideal (máximo 14). Si el gancho es largo, reescribilo sin perder sentido.
+- Bullets: 3–5. 1 línea cada uno (máximo 2 si es inevitable).
+- Interlineado headline: 0.95–1.05 (compacto).
+- Interlineado bullets: 1.1–1.2 (respira y se lee).
+- Espaciado vertical entre bullets: consistente, uniforme, "editorial".
+- El texto debe ser legible en pantalla de celular.
+
+TIPOGRAFÍA (SOLO 2 FAMILIAS) — APPLE-LIKE:
+- Mantener solo 2 familias.
+- Elegí tipografías sans de estética sistema / tech premium (estilo SF / Inter / Helvetica / Neue).
+- Tracking levemente cerrado o neutro (evitar letras "infladas").
+- Jerarquía fuerte: headline realmente domina; bullets limpios; CTA sólido.
+PROHIBIDO: tipografías decorativas, condensadas extremas o "futuristas baratas".
+
+COLOR SYSTEM (SOBRIO + 1 ACENTO) — ESTILO SPOTIFY/IG:
+- Mantener: 1 color primario + 1 acento + neutrales.
+- Paletas recomendadas:
+  - Apple-like: blanco/negro/grises + acento mínimo.
+  - Instagram-like: degradado MUY sutil y controlado (no arcoíris), solo como wash/overlay.
+  - Spotify-like: base oscura + 1 acento vibrante controlado (solo para CTA o 1 palabra clave).
+- El acento solo puede usarse para UNA de estas cosas: 1) Botón CTA o 2) Badge o 3) 1–3 palabras clave (NO usar el acento en todo a la vez si compite).
+PROHIBIDO: múltiples acentos, fondos chillones, combinaciones neón sin control.
+
+TRATAMIENTO DE IMAGEN (70–80% del post) — PRODUCT-LED:
+- Calidad premium: iluminación limpia, sombras suaves, contraste controlado, recorte perfecto.
+- Fondo limpio y moderno: sin ruido visual, sin elementos irrelevantes.
+- Profundidad sutil: blur leve o separación por luz/sombra; nada agresivo.
+- Overlay para texto: degradado suave, elegante, casi imperceptible (para legibilidad sin tapar el producto).
+PROHIBIDO: filtros fuertes, HDR exagerado, texturas baratas, collages.
+
+VISUAL (OBLIGATORIO: PRODUCTO/SERVICIO EN ACCIÓN, NO EN EXHIBICIÓN):
+Como el guión no trae visuales, vos debés inferir la mejor escena que demuestre la función principal del guión.
+Elegí UNA escena y construí la imagen alrededor:
+- Si el guión habla de entrega/rutas/puerta: mostrar acción de entrega (mano recibiendo, caja/bolsa en puerta, timbre, etc.).
+- Si el guión habla de frescura/punto perfecto: mostrar acción de uso (cortar/abrir/preparar/servir/comer).
+- Si el guión habla de garantía/reposición: incluir un sello visual de garantía y una escena que refuerce "cero riesgo" (sin saturar).
+- Si el guión compara contra alternativa (supermercado): que la escena muestre claramente el beneficio opuesto (producto intacto, bien seleccionado, listo para usar).
+
+BULLETS CON MUCHA INFO — PERO QUE SE LEA "CARO" (NO REDUCIR PALABRAS):
+- Los bullets deben ser escaneables:
+  - iniciar con palabra clave (Entrega / Garantía / Pago / Tiempo / Cobertura / Proceso) y luego el dato.
+  - usar separadores sutiles (•, —, |) solo si mejora lectura.
+  - máximo 1–2 líneas por bullet, con espacio vertical constante.
+- Checkmarks opcionales: si se usan, deben ser minimalistas, mismo grosor, mismo estilo, sin color fuerte (a menos que el acento sea exactamente para eso).
+
+BADGE / SELLOS — QUIET LUXURY:
+- Badge opcional solo si refuerza la promesa principal del guión.
+- Estilo: pill o escudo minimalista, borde fino o relleno sutil.
+- Texto en mayúsculas, corto, sin sombras duras.
+- Nunca compite con headline ni con CTA.
+
+CTA BOTÓN — SISTEMA / UI PREMIUM (OBLIGATORIO):
+- Botón con radio consistente (2xl), sombra suave o borde fino.
+- Alta legibilidad: texto grande, peso fuerte, sin efectos.
+- Ícono del canal solo si aplica, en estilo lineal minimalista.
+PROHIBIDO: brillos, biseles, contornos dobles, gradientes fuertes, estilos "baratos".
+
+COMPOSICIÓN FINAL (RECOMENDADA):
+- Área superior (dentro safe): Headline + badge (opcional).
+- Área media: bullets (3–5) con checkmarks minimalistas opcional.
+- Área inferior: botón CTA.
+- Imagen de acción ocupa 70–80% del post, con overlay elegante donde haya texto.
+- Nada debe quedar pegado al borde.
+
+ENTREGABLE:
+Generá el arte final (UNA imagen) del post, cumpliendo TODO:
+- 1080x1920 (9:16)
+- Headline + 3–5 bullets + CTA en un solo slide
+- Visual en acción inferida inteligentemente del guión
+- Márgenes/safe areas estrictos
+- Dirección de arte premium (Apple/IG/Spotify) con mucho aire y coherencia visual
+- Sin número de slide
+- Sin texto tapable por la UI de Instagram
+
+GUIÓN DEL USUARIO:
+`
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -145,46 +218,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Poll for Flux result (Gemini is synchronous, no polling needed)
-    if (action === 'poll' && taskId) {
-      const bflApiKey = process.env.BFL_API_KEY
-      if (!bflApiKey) {
-        return res.status(500).json({ error: 'Flux API key not configured' })
-      }
-      
-      const pollResponse = await fetch(`https://api.bfl.ai/v1/get_result?id=${taskId}`, {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'x-key': bflApiKey
-        }
-      })
-
-      if (!pollResponse.ok) {
-        const errorText = await pollResponse.text()
-        console.error('Flux poll error:', errorText)
-        return res.status(pollResponse.status).json({ error: 'Failed to check generation status' })
-      }
-
-      const pollResult: FluxPollResponse = await pollResponse.json()
-      return res.status(200).json(pollResult)
-    }
-
     // Submit new generation request
-    let userPrompt = imageParams.prompt || ''
+    const userPrompt = imageParams.prompt || ''
     const isGeminiModel = selectedModel === 'nano-banana' || selectedModel === 'nano-banana-pro'
+    const isPostMode = imageParams.mode === 'post'
     
-    // Check if user is requesting text in the image
-    const hasTextRequest = containsTextRequest(userPrompt)
-    
-    // Only strip text for Flux models - Gemini CAN render text in images
-    if (hasTextRequest && !isGeminiModel) {
-      userPrompt = cleanPromptForImageGen(userPrompt)
+    let enhancedPrompt: string
+
+    if (isPostMode) {
+      // POST MODE: Use the full director/designer master prompt + user's script
+      // Force 9:16 dimensions for posts
+      imageParams.width = 1080
+      imageParams.height = 1920
+      enhancedPrompt = POST_MASTER_PROMPT + userPrompt
+    } else {
+      // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
+      enhancedPrompt = GEMINI_PROMPT_PREFIX + userPrompt
     }
-    
-    // Use appropriate prompt prefix based on model
-    const promptPrefix = isGeminiModel ? GEMINI_PROMPT_PREFIX : FLUX_PROMPT_PREFIX
-    const enhancedPrompt = promptPrefix + userPrompt
 
     // =============================================
     // GEMINI IMAGE GENERATION (Nano Banana models)
@@ -424,91 +474,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // =============================================
-    // FLUX IMAGE GENERATION (default/legacy)
-    // =============================================
-    const bflApiKey = process.env.BFL_API_KEY
-    if (!bflApiKey) {
-      return res.status(500).json({ error: 'Flux API key not configured' })
-    }
-    
-    const fluxRequest: FluxRequest = {
-      prompt: enhancedPrompt,
-      width: imageParams.width || 1080,
-      height: imageParams.height || 1080,
-      output_format: imageParams.output_format || 'jpeg',
-      safety_tolerance: 2
-    }
-
-    // Add input images if provided (for img2img)
-    if (imageParams.input_image) {
-      fluxRequest.input_image = imageParams.input_image
-    }
-    if (imageParams.input_image_2) {
-      fluxRequest.input_image_2 = imageParams.input_image_2
-    }
-    if (imageParams.input_image_3) {
-      fluxRequest.input_image_3 = imageParams.input_image_3
-    }
-    if (imageParams.input_image_4) {
-      fluxRequest.input_image_4 = imageParams.input_image_4
-    }
-
-    // Add seed if provided
-    if (imageParams.seed) {
-      fluxRequest.seed = imageParams.seed
-    }
-
-    console.log('Submitting to Flux API:', { 
-      prompt: fluxRequest.prompt.substring(0, 100) + '...',
-      hasInputImage: !!fluxRequest.input_image,
-      width: fluxRequest.width,
-      height: fluxRequest.height
-    })
-
-    const response = await fetch(FLUX_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-key': bflApiKey
-      },
-      body: JSON.stringify(fluxRequest)
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Flux API error:', errorText)
-      return res.status(response.status).json({ error: 'Image generation failed', details: errorText })
-    }
-
-    const result: FluxSubmitResponse = await response.json()
-    
-    // Increment usage counter after successful submission
-    await incrementUsage(user.id, 'image')
-
-    // Log Flux usage
-    await logApiUsage({
-      userId: user.id,
-      userEmail: user.email,
-      feature: 'image',
-      model: 'flux',
-      success: true,
-      metadata: { 
-        width: fluxRequest.width, 
-        height: fluxRequest.height, 
-        hasInputImage: !!fluxRequest.input_image,
-        taskId: result.id,
-        cost: result.cost
-      }
-    })
-
-    return res.status(200).json({
-      taskId: result.id,
-      pollingUrl: result.polling_url,
-      cost: result.cost,
-      model: selectedModel,
-      textWarning: hasTextRequest
-    })
+    // Unsupported model fallback
+    return res.status(400).json({ error: `Unsupported model: ${selectedModel}` })
 
   } catch (error) {
     console.error('Image generation error:', error)

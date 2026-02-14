@@ -22,7 +22,10 @@
     "react-router-dom": "^6.26.2"
   },
   "overrides": {
-    "undici": "^5.28.5"
+    "undici": "^5.28.5",
+    "pdf-parse": {
+      "test": false
+    }
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",

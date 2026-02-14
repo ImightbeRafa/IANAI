@@ -62,7 +62,7 @@ export default function Layout({ children }: LayoutProps) {
   const allNavItems = [
     { path: '/dashboard', label: t.scripts, icon: FileText, beta: true, adminOnly: false },
     { path: '/descriptions', label: t.descriptions, icon: AlignLeft, beta: true, adminOnly: false },
-    { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: true },
+    { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: false },
     { path: '/broll', label: t.broll, icon: Film, beta: true, adminOnly: true },
     { path: '/icps', label: t.icps, icon: Users, beta: true, adminOnly: false },
     { path: '/settings', label: t.settings, icon: Settings, beta: false, adminOnly: false },

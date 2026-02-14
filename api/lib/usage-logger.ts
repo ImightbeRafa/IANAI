@@ -16,7 +16,6 @@ export const MODEL_COSTS = {
   'gemini': { input: 0.15, output: 0.60 },
   
   // Image generation models (per image)
-  'flux': { perImage: 0.003 },
   'nano-banana': { perImage: 0.02 },
   'nano-banana-pro': { perImage: 0.05 },
   'grok-imagine': { perImage: 0.07 },

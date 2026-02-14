@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { RestaurantFormData } from '../types'
+import { supabase } from '../lib/supabase'
 import { UtensilsCrossed, Upload, FileText, Loader2, MapPin, Clock, X } from 'lucide-react'
 
 interface RestaurantFormProps {
@@ -111,11 +112,18 @@ export default function RestaurantForm({ onSubmit, onCancel, initialData, isEdit
     setPdfFileName(file.name)
 
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+
       const formDataUpload = new FormData()
       formDataUpload.append('file', file)
 
-      const response = await fetch('/api/parse-pdf', {
+      const parsePdfUrl = import.meta.env.PROD ? '/api/parse-pdf' : 'http://localhost:3000/api/parse-pdf'
+      const response = await fetch(parsePdfUrl, {
         method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
         body: formDataUpload
       })
 

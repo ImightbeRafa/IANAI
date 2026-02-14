@@ -1,6 +1,8 @@
 import type { Message, ScriptGenerationSettings, ProductType, ICP, ContextDocument } from '../types'
 import { supabase } from '../lib/supabase'
 
+const CHAT_API_URL = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
+
 type Language = 'en' | 'es'
 
 export interface ProductContext {
@@ -80,7 +82,7 @@ export async function sendMessageToGrok(
     url: doc.url
   })) || []
 
-  const response = await fetch('/api/chat', {
+  const response = await fetch(CHAT_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -140,7 +142,7 @@ export async function previewPrompt(
     url: doc.url
   })) || []
 
-  const response = await fetch('/api/chat', {
+  const response = await fetch(CHAT_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

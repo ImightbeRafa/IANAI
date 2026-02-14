@@ -12,7 +12,6 @@ import {
   updateChatSession,
   updateProduct,
   saveScript,
-  rateScript,
   getICPs,
   getClientICPs,
   getContextDocuments,
@@ -25,6 +24,8 @@ import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
 import ScriptSettingsPanel from '../components/ScriptSettingsPanel'
+import ScriptCard from '../components/ScriptCard'
+import { parseScripts, isScriptContent } from '../utils/scriptParser'
 import { 
   Send, 
   Loader2, 
@@ -36,11 +37,8 @@ import {
   X,
   Download,
   Sparkles,
-  BookmarkPlus,
   Info,
   Settings,
-  ThumbsUp,
-  ThumbsDown,
   Users,
   Link2,
   FileText,
@@ -71,8 +69,6 @@ export default function ProductWorkspace() {
   const [savingScript, setSavingScript] = useState(false)
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(DEFAULT_SCRIPT_SETTINGS)
   const [showSettings, setShowSettings] = useState(false)
-  const [ratedMessages, setRatedMessages] = useState<Record<string, 'up' | 'down'>>({})
-  const [savedScriptIds, setSavedScriptIds] = useState<Record<string, string>>({})
   const [icps, setICPs] = useState<ICP[]>([])
   const [selectedICP, setSelectedICP] = useState<ICP | null>(null)
   const [contextDocs, setContextDocs] = useState<ContextDocument[]>([])
@@ -87,6 +83,7 @@ export default function ProductWorkspace() {
   const [previewSystemPrompt, setPreviewSystemPrompt] = useState<string | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [bulkLinkProgress, setBulkLinkProgress] = useState<{ current: number; total: number } | null>(null)
+  const [failedLinks, setFailedLinks] = useState<string[]>([])
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -254,7 +251,8 @@ export default function ProductWorkspace() {
       target_audience: product.target_audience,
       call_to_action: product.call_to_action,
       additional_context: additionalContext,
-      context_links: product.context_links || []
+      context_links: product.context_links || [],
+      context_links_content: product.context_links_content || ''
     }
 
     // Add restaurant-specific fields if applicable
@@ -321,6 +319,7 @@ export default function ProductWorkspace() {
     }
 
     setBulkLinkProgress({ current: 0, total: urls.length })
+    setFailedLinks([])
     
     try {
       const { data: { session: authSession } } = await supabase.auth.getSession()
@@ -329,6 +328,8 @@ export default function ProductWorkspace() {
       const fetchUrl = import.meta.env.PROD 
         ? '/api/fetch-url' 
         : 'http://localhost:3000/api/fetch-url'
+
+      const failed: string[] = []
 
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i]
@@ -347,8 +348,12 @@ export default function ProductWorkspace() {
           const result = await response.json()
           
           if (!response.ok) {
-            console.warn(`Failed to fetch ${url}:`, result.error)
+            failed.push(url)
             continue
+          }
+
+          if (result.warning === 'minimal_content') {
+            failed.push(url)
           }
 
           const newDoc = await createContextDocument(currentSession.id, user.id, {
@@ -361,11 +366,16 @@ export default function ProductWorkspace() {
           setContextDocs(prev => [newDoc, ...prev])
         } catch (err) {
           console.warn(`Failed to add link ${url}:`, err)
+          failed.push(url)
         }
       }
 
-      setNewLinkUrl('')
-      setShowAddLink(false)
+      if (failed.length > 0) {
+        setFailedLinks(failed)
+      } else {
+        setNewLinkUrl('')
+        setShowAddLink(false)
+      }
     } catch (error) {
       console.error('Failed to add links:', error)
     } finally {
@@ -403,67 +413,79 @@ export default function ProductWorkspace() {
     }
   }
 
+  const [pdfError, setPdfError] = useState<string | null>(null)
+
   const handlePdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file || !currentSession || !user || addingDoc) return
     
     if (!file.type.includes('pdf')) {
-      console.error('Please upload a PDF file')
+      setPdfError(language === 'es' ? 'Por favor sube un archivo PDF' : 'Please upload a PDF file')
       return
     }
 
     setAddingDoc(true)
+    setPdfError(null)
     
     try {
       // Read file as base64
       const reader = new FileReader()
       reader.onload = async (e) => {
-        const base64 = (e.target?.result as string)?.split(',')[1]
-        if (!base64) {
+        try {
+          const base64 = (e.target?.result as string)?.split(',')[1]
+          if (!base64) {
+            setAddingDoc(false)
+            return
+          }
+
+          // Extract text via API
+          const { data: { session: authSession } } = await supabase.auth.getSession()
+          const token = authSession?.access_token
+
+          const extractUrl = import.meta.env.PROD 
+            ? '/api/extract-pdf' 
+            : 'http://localhost:3000/api/extract-pdf'
+
+          const response = await fetch(extractUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ base64Content: base64, fileName: file.name })
+          })
+
+          const result = await response.json()
+          
+          if (!response.ok) {
+            setPdfError(result.error || (language === 'es' ? 'Error al extraer el PDF' : 'Failed to extract PDF'))
+            setAddingDoc(false)
+            return
+          }
+
+          // Save to database
+          const newDoc = await createContextDocument(currentSession.id, user.id, {
+            type: 'pdf',
+            name: file.name,
+            content: result.content
+          })
+
+          setContextDocs(prev => [newDoc, ...prev])
           setAddingDoc(false)
-          return
+        } catch (err) {
+          console.error('Failed to process PDF:', err)
+          setPdfError(language === 'es' ? 'Error al procesar el PDF' : 'Failed to process PDF')
+          setAddingDoc(false)
         }
-
-        // Extract text via API
-        const { data: { session: authSession } } = await supabase.auth.getSession()
-        const token = authSession?.access_token
-
-        const extractUrl = import.meta.env.PROD 
-          ? '/api/extract-pdf' 
-          : 'http://localhost:3000/api/extract-pdf'
-
-        const response = await fetch(extractUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ base64Content: base64, fileName: file.name })
-        })
-
-        const result = await response.json()
-        
-        if (!response.ok) {
-          throw new Error(result.error || 'Failed to extract PDF')
-        }
-
-        // Save to database
-        const newDoc = await createContextDocument(currentSession.id, user.id, {
-          type: 'pdf',
-          name: file.name,
-          content: result.content
-        })
-
-        setContextDocs(prev => [newDoc, ...prev])
-        setAddingDoc(false)
       }
       reader.onerror = () => {
-        console.error('Failed to read file')
+        setPdfError(language === 'es' ? 'Error al leer el archivo' : 'Failed to read file')
         setAddingDoc(false)
       }
       reader.readAsDataURL(file)
     } catch (error) {
       console.error('Failed to upload PDF:', error)
+      setPdfError(language === 'es' ? 'Error al subir el PDF' : 'Failed to upload PDF')
       setAddingDoc(false)
     }
     
@@ -550,19 +572,16 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleSaveScript = async (content: string, messageId?: string): Promise<string | null> => {
+  const handleSaveScript = async (content: string, title?: string): Promise<string | null> => {
     if (!currentSession || !product || savingScript) return null
     setSavingScript(true)
     try {
       const script = await saveScript(
         currentSession.id,
         product.id,
-        `Script - ${new Date().toLocaleDateString()}`,
+        title || `Script - ${new Date().toLocaleDateString()}`,
         content
       )
-      if (messageId) {
-        setSavedScriptIds(prev => ({ ...prev, [messageId]: script.id }))
-      }
       return script.id
     } catch (error) {
       console.error('Failed to save script:', error)
@@ -572,27 +591,10 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleRateScript = async (messageId: string, content: string, rating: 'up' | 'down') => {
-    if (!currentSession || !product) return
-    
-    try {
-      // Check if already saved, if not save it first
-      let scriptId = savedScriptIds[messageId]
-      if (!scriptId) {
-        scriptId = await handleSaveScript(content, messageId) as string
-        if (!scriptId) return
-      }
-      
-      // Rate the script (5 for thumbs up, 1 for thumbs down)
-      const ratingValue = rating === 'up' ? 5 : 1
-      await rateScript(scriptId, ratingValue)
-      
-      // Update UI state
-      setRatedMessages(prev => ({ ...prev, [messageId]: rating }))
-    } catch (error) {
-      console.error('Failed to rate script:', error)
-    }
+  const handleSaveIndividualScript = async (content: string, title: string): Promise<string | null> => {
+    return handleSaveScript(content, title)
   }
+
 
   const exportAsText = () => {
     const text = messages
@@ -956,68 +958,36 @@ export default function ProductWorkspace() {
                 </div>
               </div>
             ) : (
-              messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-3xl px-5 py-4 ${
-                      message.role === 'user'
-                        ? 'bg-primary-600 text-white rounded-2xl rounded-br-md'
-                        : 'bg-white border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm'
-                    }`}
-                  >
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                      {message.content}
-                    </div>
-                    {message.role === 'assistant' && message.content.length > 100 && (
-                      <div className="mt-3 pt-3 border-t border-dark-100/60 flex items-center gap-3">
-                        <button
-                          onClick={() => handleSaveScript(message.content, message.id)}
-                          disabled={savingScript || !!savedScriptIds[message.id]}
-                          className={`text-xs flex items-center gap-1 transition-colors ${
-                            savedScriptIds[message.id] 
-                              ? 'text-green-600' 
-                              : 'text-dark-400 hover:text-primary-600'
-                          }`}
-                        >
-                          <BookmarkPlus className="w-3.5 h-3.5" />
-                          {savedScriptIds[message.id] ? (language === 'es' ? '¡Guardado!' : 'Saved!') : t.saveScript}
-                        </button>
-                        <span className="text-dark-200">·</span>
-                        <div className="flex items-center gap-0.5">
-                          <span className="text-xs text-dark-400 mr-1">{t.rateScript}:</span>
-                          <button 
-                            onClick={() => handleRateScript(message.id, message.content, 'up')}
-                            disabled={!!ratedMessages[message.id]}
-                            className={`p-1 rounded-md transition-colors ${
-                              ratedMessages[message.id] === 'up'
-                                ? 'bg-green-50 text-green-600'
-                                : ratedMessages[message.id] === 'down'
-                                  ? 'text-dark-200 cursor-not-allowed'
-                                  : 'hover:bg-green-50 text-dark-400 hover:text-green-600'
-                            }`}
-                          >
-                            <ThumbsUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button 
-                            onClick={() => handleRateScript(message.id, message.content, 'down')}
-                            disabled={!!ratedMessages[message.id]}
-                            className={`p-1 rounded-md transition-colors ${
-                              ratedMessages[message.id] === 'down'
-                                ? 'bg-red-50 text-red-600'
-                                : ratedMessages[message.id] === 'up'
-                                  ? 'text-dark-200 cursor-not-allowed'
-                                  : 'hover:bg-red-50 text-dark-400 hover:text-red-600'
-                            }`}
-                          >
-                            <ThumbsDown className="w-3.5 h-3.5" />
-                          </button>
+              messages.map((message) => {
+                const hasScripts = message.role === 'assistant' && isScriptContent(message.content)
+                const parsedScripts = hasScripts ? parseScripts(message.content) : []
+                const showAsCards = parsedScripts.length >= 1 && hasScripts
+
+                return (
+                  <div key={message.id}>
+                    {message.role === 'user' ? (
+                      <div className="flex justify-end">
+                        <div className="max-w-3xl px-5 py-4 bg-primary-600 text-white rounded-2xl rounded-br-md">
+                          <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {message.content}
+                          </div>
                         </div>
+                      </div>
+                    ) : showAsCards ? (
+                      /* Script cards — each script rendered individually */
+                      <div className="space-y-3 max-w-3xl">
+                        {parsedScripts.map((script) => (
+                          <ScriptCard
+                            key={`${message.id}-script-${script.index}`}
+                            script={script}
+                            language={language}
+                            onSave={handleSaveIndividualScript}
+                            savingScript={savingScript}
+                          />
+                        ))}
+                        {/* Prompt toggle for script messages */}
                         {message.system_prompt && (
-                          <>
-                            <span className="text-dark-200">·</span>
+                          <div className="flex items-center gap-2 pt-1">
                             <button
                               onClick={() => setExpandedPrompts(prev => ({ ...prev, [message.id]: !prev[message.id] }))}
                               className={`text-xs flex items-center gap-1 transition-colors ${
@@ -1028,33 +998,75 @@ export default function ProductWorkspace() {
                               title="View master prompt used for this generation"
                             >
                               <Eye className="w-3.5 h-3.5" />
-                              {language === 'es' ? 'Prompt' : 'Prompt'}
+                              Prompt
                             </button>
-                          </>
+                          </div>
+                        )}
+                        {message.system_prompt && expandedPrompts[message.id] && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-[10px] font-mono font-bold text-amber-800">
+                                MASTER PROMPT ({message.system_prompt.length.toLocaleString()} chars / ~{Math.ceil(message.system_prompt.length / 4).toLocaleString()} tokens)
+                              </p>
+                              <button
+                                onClick={() => navigator.clipboard.writeText(message.system_prompt!)}
+                                className="text-[10px] px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                            <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
+                              {message.system_prompt}
+                            </pre>
+                          </div>
                         )}
                       </div>
-                    )}
-                    {message.role === 'assistant' && message.system_prompt && expandedPrompts[message.id] && (
-                      <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-[10px] font-mono font-bold text-amber-800">
-                            MASTER PROMPT ({message.system_prompt.length.toLocaleString()} chars / ~{Math.ceil(message.system_prompt.length / 4).toLocaleString()} tokens)
-                          </p>
-                          <button
-                            onClick={() => navigator.clipboard.writeText(message.system_prompt!)}
-                            className="text-[10px] px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
-                          >
-                            Copy
-                          </button>
+                    ) : (
+                      /* Non-script assistant message (conversational) */
+                      <div className="flex justify-start">
+                        <div className="max-w-3xl px-5 py-4 bg-white border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm">
+                          <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {message.content}
+                          </div>
+                          {message.system_prompt && (
+                            <div className="mt-3 pt-3 border-t border-dark-100/60 flex items-center gap-2">
+                              <button
+                                onClick={() => setExpandedPrompts(prev => ({ ...prev, [message.id]: !prev[message.id] }))}
+                                className={`text-xs flex items-center gap-1 transition-colors ${
+                                  expandedPrompts[message.id]
+                                    ? 'text-amber-600'
+                                    : 'text-dark-400 hover:text-amber-600'
+                                }`}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Prompt
+                              </button>
+                            </div>
+                          )}
+                          {message.system_prompt && expandedPrompts[message.id] && (
+                            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-[10px] font-mono font-bold text-amber-800">
+                                  MASTER PROMPT ({message.system_prompt.length.toLocaleString()} chars / ~{Math.ceil(message.system_prompt.length / 4).toLocaleString()} tokens)
+                                </p>
+                                <button
+                                  onClick={() => navigator.clipboard.writeText(message.system_prompt!)}
+                                  className="text-[10px] px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded font-mono transition-colors"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                              <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
+                                {message.system_prompt}
+                              </pre>
+                            </div>
+                          )}
                         </div>
-                        <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
-                          {message.system_prompt}
-                        </pre>
                       </div>
                     )}
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
             {loading && (
               <div className="flex justify-start">
@@ -1536,6 +1548,9 @@ export default function ProductWorkspace() {
                     />
                   </label>
                 </div>
+                {pdfError && (
+                  <p className="text-xs text-red-600 bg-red-50 px-3 py-1.5 rounded-lg">{pdfError}</p>
+                )}
 
                 {/* Add Link Form */}
                 {showAddLink && (
@@ -1557,6 +1572,14 @@ export default function ProductWorkspace() {
                           : `Processing ${bulkLinkProgress.current} of ${bulkLinkProgress.total}...`}
                       </div>
                     )}
+                    {failedLinks.length > 0 && (
+                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
+                        <p className="font-medium">{language === 'es' ? 'No se pudo extraer contenido de:' : 'Failed to extract content from:'}</p>
+                        {failedLinks.map((link, i) => (
+                          <p key={i} className="truncate mt-0.5 text-amber-600">{link}</p>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button
                         onClick={handleAddLink}
@@ -1567,7 +1590,7 @@ export default function ProductWorkspace() {
                         {language === 'es' ? 'Agregar' : 'Add'}
                       </button>
                       <button
-                        onClick={() => { setShowAddLink(false); setNewLinkUrl('') }}
+                        onClick={() => { setShowAddLink(false); setNewLinkUrl(''); setFailedLinks([]) }}
                         disabled={addingDoc}
                         className="px-3 py-2 text-dark-500 hover:bg-dark-100 rounded-lg text-sm disabled:opacity-50"
                       >

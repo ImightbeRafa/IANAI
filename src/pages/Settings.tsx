@@ -345,7 +345,8 @@ export default function Settings() {
                           return
                         }
 
-                        const response = await fetch('/api/tilopay/create-checkout', {
+                        const checkoutUrl = import.meta.env.PROD ? '/api/tilopay/create-checkout' : 'http://localhost:3000/api/tilopay/create-checkout'
+                        const response = await fetch(checkoutUrl, {
                           method: 'POST',
                           headers: {
                             'Content-Type': 'application/json',
