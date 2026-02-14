@@ -54,7 +54,15 @@ export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
   duration: '30s',
   platform: 'general',
   variations: 3,
-  model: 'grok'
+  model: 'grok',
+  generationMode: 'mixed',
+  scriptTypeConfig: {
+    venta_directa: 1,
+    desvalidar_alternativas: 1,
+    mostrar_servicio: 1,
+    variedad_productos: 0,
+    paso_a_paso: 0
+  }
 }
 
 export async function sendMessageToGrok(

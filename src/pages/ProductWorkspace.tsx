@@ -191,9 +191,17 @@ export default function ProductWorkspace() {
       }
 
       // Add settings context to feedback messages so AI applies current config
-      const settingsContext = language === 'es'
-        ? `\n\n[Config: ${scriptSettings.variations} guión(es)]`
-        : `\n\n[Config: ${scriptSettings.variations} script(s)]`
+      let settingsContext: string
+      if (scriptSettings.generationMode === 'by_type') {
+        const total = Object.values(scriptSettings.scriptTypeConfig).reduce((s, n) => s + n, 0)
+        settingsContext = language === 'es'
+          ? `\n\n[Config: ${total} guión(es) por tipo]`
+          : `\n\n[Config: ${total} script(s) by type]`
+      } else {
+        settingsContext = language === 'es'
+          ? `\n\n[Config: ${scriptSettings.variations} guión(es)]`
+          : `\n\n[Config: ${scriptSettings.variations} script(s)]`
+      }
       
       const messageWithSettings = messages.length > 0 ? userMessage + settingsContext : userMessage
 
@@ -518,10 +526,36 @@ export default function ProductWorkspace() {
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
       }
 
-      // Add system message asking for scripts - only variations count matters now
-      const generatePrompt = language === 'es' 
-        ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta.`
-        : `Generate exactly ${scriptSettings.variations} sales script(s).`
+      // Build generation prompt based on mode
+      let generatePrompt: string
+
+      if (scriptSettings.generationMode === 'by_type') {
+        const typeLabels: Record<string, { es: string; en: string }> = {
+          venta_directa: { es: 'Venta Directa', en: 'Direct Sale' },
+          desvalidar_alternativas: { es: 'Desvalidar Alternativas', en: 'Invalidate Alternatives' },
+          mostrar_servicio: { es: 'Mostrar el Servicio/Producto', en: 'Show Service/Product' },
+          variedad_productos: { es: 'Variedad de Productos', en: 'Product Variety' },
+          paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' }
+        }
+        const config = scriptSettings.scriptTypeConfig
+        const parts: string[] = []
+        for (const [key, count] of Object.entries(config)) {
+          if (count > 0) {
+            const label = typeLabels[key]?.[language] || key
+            parts.push(language === 'es' 
+              ? `${count} guión(es) de tipo "${label}"`
+              : `${count} "${label}" script(s)`)
+          }
+        }
+        const total = parts.reduce((sum, _) => sum, Object.values(config).reduce((s, n) => s + n, 0))
+        generatePrompt = language === 'es'
+          ? `Genera exactamente ${total} guión(es) de venta: ${parts.join(', ')}.`
+          : `Generate exactly ${total} sales script(s): ${parts.join(', ')}.`
+      } else {
+        generatePrompt = language === 'es' 
+          ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta.`
+          : `Generate exactly ${scriptSettings.variations} sales script(s).`
+      }
       
       const userMessage = await addMessage(session.id, 'user', generatePrompt)
       setMessages(prev => [...prev, userMessage])

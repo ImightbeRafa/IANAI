@@ -254,6 +254,14 @@ interface ChatMessage {
   content: string
 }
 
+interface ScriptTypeConfig {
+  venta_directa: number
+  desvalidar_alternativas: number
+  mostrar_servicio: number
+  variedad_productos: number
+  paso_a_paso: number
+}
+
 interface ScriptSettings {
   framework: 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso'
   tone: 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
@@ -261,6 +269,8 @@ interface ScriptSettings {
   platform: 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
   variations: number
   model?: AIModel
+  generationMode?: 'mixed' | 'by_type'
+  scriptTypeConfig?: ScriptTypeConfig
 }
 
 interface ICPData {
@@ -684,7 +694,48 @@ const PLATFORM_PROMPTS = {
 
 function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, language: 'en' | 'es'): string {
   if (!settings) return ''
-  
+
+  // By-type mode: explicit per-type instructions
+  if (settings.generationMode === 'by_type' && settings.scriptTypeConfig) {
+    const typeLabels: Record<string, { es: string; en: string }> = {
+      venta_directa: { es: 'Venta Directa', en: 'Direct Sale' },
+      desvalidar_alternativas: { es: 'Desvalidar Alternativas', en: 'Invalidate Alternatives' },
+      mostrar_servicio: { es: 'Mostrar el Servicio/Producto', en: 'Show Service/Product' },
+      variedad_productos: { es: 'Variedad de Productos (Beneficios)', en: 'Product Variety (Benefits)' },
+      paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' }
+    }
+
+    const config = settings.scriptTypeConfig
+    const total = Object.values(config).reduce((s, n) => s + n, 0)
+    const parts: string[] = []
+
+    for (const [key, count] of Object.entries(config)) {
+      if (count > 0) {
+        const label = typeLabels[key]?.[language] || key
+        parts.push(language === 'es'
+          ? `- ${count} guión(es) de tipo "${label}"`
+          : `- ${count} "${label}" script(s)`)
+      }
+    }
+
+    if (language === 'es') {
+      return `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:
+- CANTIDAD TOTAL: Genera EXACTAMENTE ${total} guión(es). NI MÁS NI MENOS.
+- TIPOS ESPECÍFICOS SOLICITADOS:
+${parts.join('\n')}
+- Cada guión debe estar claramente etiquetado con su tipo (ej: "OPCIÓN #1 - Venta Directa").
+- Si se piden múltiples guiones del mismo tipo, varía el enfoque/gancho entre ellos.`
+    } else {
+      return `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:
+- TOTAL QUANTITY: Generate EXACTLY ${total} script(s). NO MORE, NO LESS.
+- SPECIFIC TYPES REQUESTED:
+${parts.join('\n')}
+- Each script must be clearly labeled with its type (e.g., "OPTION #1 - Direct Sale").
+- If multiple scripts of the same type are requested, vary the approach/hook between them.`
+    }
+  }
+
+  // Mixed mode: just count
   const variationInstruction = language === 'es'
     ? `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:\n- CANTIDAD: Genera EXACTAMENTE ${settings.variations} guión(es). NI MÁS NI MENOS.`
     : `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:\n- QUANTITY: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS.`

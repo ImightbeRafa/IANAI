@@ -10,6 +10,15 @@ export type SessionStatus = 'active' | 'completed' | 'archived'
 // Script Enhancement Types
 // =============================================
 export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso'
+export type GenerationMode = 'mixed' | 'by_type'
+
+export interface ScriptTypeConfig {
+  venta_directa: number
+  desvalidar_alternativas: number
+  mostrar_servicio: number
+  variedad_productos: number
+  paso_a_paso: number
+}
 export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
 export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
 export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
@@ -277,6 +286,8 @@ export interface ScriptGenerationSettings {
   platform: ScriptPlatform
   variations: number
   model: AIModel
+  generationMode: GenerationMode
+  scriptTypeConfig: ScriptTypeConfig
 }
 
 // =============================================
