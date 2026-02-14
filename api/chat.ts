@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
+import { checkRateLimit } from './lib/rate-limit.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent'
@@ -849,6 +850,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Verify user authentication
   const user = await requireAuth(req, res)
   if (!user) return // Response already sent by requireAuth
+
+  // Rate limit: 20 requests per 60 seconds per user
+  const rateCheck = checkRateLimit(user.id, { maxRequests: 20, windowSeconds: 60 })
+  if (!rateCheck.allowed) {
+    return res.status(429).json({
+      error: 'Demasiadas solicitudes',
+      message: `Por favor espera ${rateCheck.resetInSeconds} segundos antes de intentar de nuevo.`,
+      retryAfter: rateCheck.resetInSeconds
+    })
+  }
 
   // Check usage limits
   const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'script')

@@ -3,13 +3,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
-import Dashboard from './pages/Dashboard'
-import ProductWorkspace from './pages/ProductWorkspace'
 
 // Lazy-loaded pages (code-split for smaller initial bundle)
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const ProductWorkspace = lazy(() => import('./pages/ProductWorkspace'))
 const PostsDashboard = lazy(() => import('./pages/PostsDashboard'))
 const PostWorkspace = lazy(() => import('./pages/PostWorkspace'))
 const BRollDashboard = lazy(() => import('./pages/BRollDashboard'))
@@ -21,6 +22,7 @@ const TeamManagement = lazy(() => import('./pages/TeamManagement'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const DescriptionsDashboard = lazy(() => import('./pages/DescriptionsDashboard'))
 const DescriptionsWorkspace = lazy(() => import('./pages/DescriptionsWorkspace'))
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 
 function LazyFallback() {
   return (
@@ -32,6 +34,7 @@ function LazyFallback() {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <LanguageProvider>
         <AuthProvider>
@@ -40,6 +43,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route
               path="/dashboard"
               element={
@@ -182,5 +186,6 @@ export default function App() {
         </AuthProvider>
       </LanguageProvider>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }

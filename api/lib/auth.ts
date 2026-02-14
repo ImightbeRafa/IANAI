@@ -94,7 +94,8 @@ export async function checkUsageLimit(
   action: 'script' | 'image' | 'video'
 ): Promise<{ allowed: boolean; remaining: number; limit: number }> {
   if (!supabaseAdmin) {
-    return { allowed: true, remaining: -1, limit: -1 } // Allow if not configured
+    console.error('Usage limit check: Supabase not configured — denying request')
+    return { allowed: false, remaining: 0, limit: 0 }
   }
 
   try {
@@ -151,12 +152,12 @@ export async function checkUsageLimit(
     return { allowed, remaining, limit }
   } catch (err) {
     console.error('Usage limit check error:', err)
-    return { allowed: true, remaining: -1, limit: -1 } // Allow on error
+    return { allowed: false, remaining: 0, limit: 0 }
   }
 }
 
 /**
- * Increment usage counter for a user
+ * Increment usage counter for a user (atomic via Postgres function)
  */
 export async function incrementUsage(
   userId: string,
@@ -165,42 +166,13 @@ export async function incrementUsage(
   if (!supabaseAdmin) return
 
   try {
-    const currentMonth = new Date()
-    const periodStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)
-    const periodEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0)
+    const { error } = await supabaseAdmin.rpc('increment_usage', {
+      p_user_id: userId,
+      p_action: action
+    })
 
-    // Upsert usage record
-    const { data: existing } = await supabaseAdmin
-      .from('usage')
-      .select('id, scripts_generated, images_generated, videos_generated')
-      .eq('user_id', userId)
-      .eq('period_start', periodStart.toISOString().slice(0, 10))
-      .single()
-
-    if (existing) {
-      // Update existing record
-      const updates = action === 'script'
-        ? { scripts_generated: (existing.scripts_generated || 0) + 1 }
-        : action === 'image'
-          ? { images_generated: (existing.images_generated || 0) + 1 }
-          : { videos_generated: (existing.videos_generated || 0) + 1 }
-
-      await supabaseAdmin
-        .from('usage')
-        .update(updates)
-        .eq('id', existing.id)
-    } else {
-      // Create new record
-      await supabaseAdmin
-        .from('usage')
-        .insert({
-          user_id: userId,
-          period_start: periodStart.toISOString().slice(0, 10),
-          period_end: periodEnd.toISOString().slice(0, 10),
-          scripts_generated: action === 'script' ? 1 : 0,
-          images_generated: action === 'image' ? 1 : 0,
-          videos_generated: action === 'video' ? 1 : 0
-        })
+    if (error) {
+      console.error('Increment usage RPC error:', error)
     }
   } catch (err) {
     console.error('Increment usage error:', err)

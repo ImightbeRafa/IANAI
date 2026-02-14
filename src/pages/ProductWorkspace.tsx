@@ -26,6 +26,8 @@ import ThinkingAnimation from '../components/ThinkingAnimation'
 import ScriptSettingsPanel from '../components/ScriptSettingsPanel'
 import ScriptCard from '../components/ScriptCard'
 import { parseScripts, isScriptContent } from '../utils/scriptParser'
+import UsageBanner from '../components/UsageBanner'
+import { useUsageLimits } from '../hooks/useUsageLimits'
 import { 
   Send, 
   Loader2, 
@@ -84,6 +86,7 @@ export default function ProductWorkspace() {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [bulkLinkProgress, setBulkLinkProgress] = useState<{ current: number; total: number } | null>(null)
   const [failedLinks, setFailedLinks] = useState<string[]>([])
+  const usageLimits = useUsageLimits()
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -1108,6 +1111,9 @@ export default function ProductWorkspace() {
             )}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Usage Banner */}
+          <UsageBanner usage={usageLimits} resource="script" />
 
           {/* Input */}
           <div className="bg-white border-t border-dark-100 px-6 py-3">

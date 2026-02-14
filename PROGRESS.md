@@ -1,6 +1,6 @@
 # Advance AI - Development Progress
 
-## Last Updated: February 7, 2026 at 11:19 PM (UTC-06:00)
+## Last Updated: February 14, 2026 at 2:36 PM (UTC-06:00)
 
 ---
 
@@ -387,6 +387,70 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] **Environment Variables:**
   - Added: `FAL_KEY` (fal.ai API key)
   - Removed: `KLING_ACCESS_KEY`, `KLING_SECRET_KEY` (no longer needed)
+
+### February 14, 2026 - Configurable Script Type Selection (2:36 PM)
+- [x] **NEW FEATURE: Script Generation Mode — "Mixto" vs "Por Tipo"**
+  - ScriptSettingsPanel redesigned with two generation modes:
+    - **Mixto (Mixed)**: AI picks the best script types, you choose total count (1/2/3/5) — same as before
+    - **Por Tipo (By Type)**: Pick specific script types and quantities for each
+  - 5 script types with +/- quantity controls (0–5 each): Venta Directa, Desvalidar Alternativas, Mostrar Servicio, Variedad de Productos, Paso a Paso
+  - Total count shown below type list, generate button disabled when total is 0
+  - Backend `buildScriptSettingsPrompt` sends explicit per-type instructions to AI (labels, totals, variation requirements)
+  - User prompt in chat reflects exact types/quantities: e.g. `"Genera 3 guión(es): 2 de Venta Directa, 1 de Desvalidar Alternativas"`
+- [x] **NEW: Empty State Shows Full Settings Panel**
+  - Initial empty state (before first generation) now shows the full ScriptSettingsPanel inline
+  - Model selector, generation mode toggle, type quantities, and generate button all visible upfront
+  - Replaces the old bare "Generar Guiones" button
+- [x] **FIX: Script Parser — OPCIÓN Headers**
+  - AI was outputting `OPCIÓN #1 - Venta Directa` headers but parser only recognized `GUION/SCRIPT`
+  - Added `OPCIÓN/OPCION/Opción/Opcion` to header regex, title extraction, and script detection
+  - Scripts now correctly split into individual ScriptCards with separate Copy/Save buttons
+- [x] **NEW: Generating Placeholder Animation (OpenAI-style)**
+  - New `GeneratingPlaceholder` component with animated gradient shimmer
+  - 6-second gradient cycle through site's blue palette, sweeping light bar, subtle grid overlay
+  - Pulsing rings, glowing Sparkles icon, staggered bouncing dots
+  - Configurable aspect ratio (9/16, 16/9, 1/1), label, and sublabel
+  - Integrated into **PostWorkspace** (9:16 placeholder in posts grid) and **BRollWorkspace** (16:9 replacing plain spinner)
+  - CSS animations added to `src/index.css`
+- [x] **SECURITY: Admin Access Moved to Database**
+  - Removed all hardcoded `ADMIN_EMAILS` arrays from `Layout.tsx` and `AdminDashboard.tsx`
+  - Added `is_admin BOOLEAN DEFAULT FALSE` column to `profiles` table
+  - Trigger `protect_admin_flag` prevents users from changing their own admin status via RLS (only `service_role` can modify)
+  - `AuthContext` now fetches `is_admin` from profiles table on login/session change, exposes `isAdmin` to all components
+  - Layout and AdminDashboard use `isAdmin` from `useAuth()` instead of email checks
+  - Created `supabase/grant_admins.sql` — run manually in Supabase SQL Editor to grant admin + enterprise plan to specific users
+- [x] **SECURITY: Codebase Review & Cleanup**
+  - Removed `VITE_GROK_API_KEY` from `src/vite-env.d.ts` (API keys should never be frontend env vars)
+  - Verified all 12 API routes have Bearer token auth
+  - Verified `.env` is gitignored, all API keys are server-side only (`process.env`)
+  - Verified Supabase RLS enabled on all sensitive tables
+  - CORS `*` acceptable since all routes require valid JWT
+  - SSRF protection confirmed in `fetch-url.ts`
+- [x] **New Types:**
+  - `GenerationMode` (`'mixed' | 'by_type'`), `ScriptTypeConfig` interface
+  - Added `generationMode` and `scriptTypeConfig` to `ScriptGenerationSettings`
+  - Added `is_admin` to `Profile` interface
+- [x] **New Files Created:**
+  - `src/components/GeneratingPlaceholder.tsx` — Animated generation placeholder
+  - `supabase/migrations/019_admin_flag.sql` — `is_admin` column + protection trigger
+  - `supabase/grant_admins.sql` — One-time script to grant admin access (run in SQL Editor)
+- [x] **Files Updated:**
+  - `src/types/index.ts` — `GenerationMode`, `ScriptTypeConfig`, `ScriptGenerationSettings`, `Profile`
+  - `src/services/grokApi.ts` — `DEFAULT_SCRIPT_SETTINGS` with new fields
+  - `src/components/ScriptSettingsPanel.tsx` — Full redesign with Mixed/By Type modes
+  - `src/pages/ProductWorkspace.tsx` — Type-specific prompts, inline settings in empty state
+  - `api/chat.ts` — `ScriptTypeConfig` interface, `buildScriptSettingsPrompt` by-type mode
+  - `src/utils/scriptParser.ts` — OPCIÓN header support in regex, title extraction, detection
+  - `src/index.css` — Generating placeholder CSS animations
+  - `src/pages/PostWorkspace.tsx` — GeneratingPlaceholder integration
+  - `src/pages/BRollWorkspace.tsx` — GeneratingPlaceholder integration
+  - `src/contexts/AuthContext.tsx` — `isAdmin` state, `fetchAdminStatus` from DB
+  - `src/components/Layout.tsx` — Removed `ADMIN_EMAILS`, uses `isAdmin` from context
+  - `src/pages/AdminDashboard.tsx` — Removed `ADMIN_EMAILS`, uses `isAdmin` from context
+  - `src/vite-env.d.ts` — Removed `VITE_GROK_API_KEY`
+- [x] **Action Required After Deploy:**
+  - Run `supabase/migrations/019_admin_flag.sql` in Supabase SQL Editor
+  - Run `supabase/grant_admins.sql` in Supabase SQL Editor to grant admin + enterprise to designated users
 
 ### February 7, 2026 - Context Links in Product Form (11:19 PM)
 - [x] **NEW FEATURE: Context Links in Product Creation Form**

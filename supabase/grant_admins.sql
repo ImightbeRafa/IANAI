@@ -22,18 +22,9 @@ WHERE p.email IN (
   'ian@iankupfer.com',
   'deepsleepp.cr@gmail.com'
 )
-ON CONFLICT ON CONSTRAINT subscriptions_pkey DO NOTHING;
-
--- If they already have subscriptions, update them to enterprise
-UPDATE subscriptions SET plan = 'enterprise', status = 'active'
-WHERE user_id IN (
-  SELECT id FROM profiles WHERE email IN (
-    'ralauas@gmail.com',
-    'admin@advanceai.studio',
-    'ian@iankupfer.com',
-    'deepsleepp.cr@gmail.com'
-  )
-);
+ON CONFLICT (user_id) DO UPDATE SET
+  plan = 'enterprise',
+  status = 'active';
 
 -- 3. Verify the changes
 SELECT p.email, p.is_admin, s.plan, s.status

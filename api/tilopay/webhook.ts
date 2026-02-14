@@ -12,15 +12,16 @@ import { createClient } from '@supabase/supabase-js'
  * - webhook_reactive: Subscription reactivated
  * 
  * Configure these URLs in TiloPay dashboard when creating/editing plans:
- * https://advanceai.studio/api/tilopay/webhook?event=subscribe
- * https://advanceai.studio/api/tilopay/webhook?event=payment
- * https://advanceai.studio/api/tilopay/webhook?event=rejected
- * https://advanceai.studio/api/tilopay/webhook?event=unsubscribe
- * https://advanceai.studio/api/tilopay/webhook?event=reactive
+ * https://advanceai.studio/api/tilopay/webhook?event=subscribe&secret=YOUR_SECRET
+ * https://advanceai.studio/api/tilopay/webhook?event=payment&secret=YOUR_SECRET
+ * https://advanceai.studio/api/tilopay/webhook?event=rejected&secret=YOUR_SECRET
+ * https://advanceai.studio/api/tilopay/webhook?event=unsubscribe&secret=YOUR_SECRET
+ * https://advanceai.studio/api/tilopay/webhook?event=reactive&secret=YOUR_SECRET
  */
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const WEBHOOK_SECRET = process.env.TILOPAY_WEBHOOK_SECRET
 
 const supabase = supabaseUrl && supabaseServiceKey 
   ? createClient(supabaseUrl, supabaseServiceKey) 
@@ -45,19 +46,24 @@ interface TiloPayWebhookData {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Handle GET request (endpoint verification)
-  if (req.method === 'GET') {
-    return res.status(200).json({ 
-      status: 'TiloPay webhook endpoint active',
-      usage: 'Add ?event=subscribe|payment|rejected|unsubscribe|reactive'
-    })
-  }
-
+  // Only allow POST (no GET info leak)
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
   try {
+    // Verify webhook secret (must match TILOPAY_WEBHOOK_SECRET env var)
+    // TiloPay dashboard URLs should include: ?event=subscribe&secret=YOUR_SECRET
+    const secret = req.query.secret as string
+    if (!WEBHOOK_SECRET || secret !== WEBHOOK_SECRET) {
+      console.error('Webhook secret mismatch or not configured', {
+        hasSecret: !!WEBHOOK_SECRET,
+        receivedSecret: secret ? `${secret.slice(0, 4)}...` : 'none',
+        ip: req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || 'unknown'
+      })
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
     if (!supabase) {
       console.error('Supabase not configured')
       return res.status(500).json({ error: 'Server not configured' })
@@ -311,11 +317,11 @@ function determinePlanFromData(data: TiloPayWebhookData): string {
   // First try to determine from amount (most reliable)
   const amount = parseFloat(String(data.amount || '0'))
   
-  if (amount >= 400) {
-    return 'pro' // Team/Pro plan at $400/month
+  if (amount >= 90) {
+    return 'pro' // Pro plan at $99/month
   }
-  if (amount >= 25) {
-    return 'starter' // Starter plan at $30/month
+  if (amount >= 20) {
+    return 'starter' // Starter plan at $27/month
   }
   
   // Fallback: try to determine plan from modality or plan_title

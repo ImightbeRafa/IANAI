@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
+import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
@@ -204,8 +205,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { action, taskId, model = 'nano-banana', ...imageParams } = req.body
     const selectedModel: ImageModel = model
 
-    // For polling requests, skip usage check (already counted on initial request)
+    // For polling requests, skip usage check and rate limit (already counted on initial request)
     if (action !== 'poll') {
+      // Rate limit: 15 requests per 60 seconds per user
+      const rateCheck = checkRateLimit(`img:${user.id}`, { maxRequests: 15, windowSeconds: 60 })
+      if (!rateCheck.allowed) {
+        return res.status(429).json({
+          error: 'Demasiadas solicitudes',
+          message: `Por favor espera ${rateCheck.resetInSeconds} segundos antes de intentar de nuevo.`,
+          retryAfter: rateCheck.resetInSeconds
+        })
+      }
+
       // Check usage limits for new generation requests
       const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'image')
       if (!allowed) {

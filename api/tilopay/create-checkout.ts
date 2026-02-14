@@ -77,8 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Return the direct payment link (don't modify shortened URLs)
     // User matching happens via pending_subscriptions table using email
     return res.status(200).json({
-      checkoutUrl: BASE_PAYMENT_LINKS[plan],
-      userId: user.id
+      checkoutUrl: BASE_PAYMENT_LINKS[plan]
     })
 
   } catch (error) {

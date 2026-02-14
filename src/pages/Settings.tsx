@@ -22,17 +22,17 @@ interface Usage {
 const PLAN_DETAILS = {
   free: { name: 'Gratis', price: 0, scripts: 10, images: 5, color: 'gray', paymentLink: null },
   starter: { 
-    name: 'Individual', 
-    price: 30, 
-    scripts: 100, 
+    name: 'Starter', 
+    price: 27, 
+    scripts: -1, 
     images: 50, 
     color: 'blue',
     paymentLink: 'https://tp.cr/l/TkRnM01RPT18MQ=='
   },
   pro: { 
-    name: 'Teams', 
-    price: 400, 
-    scripts: 500, 
+    name: 'Pro', 
+    price: 99, 
+    scripts: -1, 
     images: 200, 
     color: 'purple',
     paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ=='
@@ -154,12 +154,12 @@ export default function Settings() {
     <Layout>
       <div className="p-6 lg:p-8 max-w-2xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-dark-900">Settings</h1>
-          <p className="text-dark-500 mt-1">Manage your account settings</p>
+          <h1 className="text-2xl font-bold text-dark-900">{t.settings}</h1>
+          <p className="text-dark-500 mt-1">{t.manageAccount}</p>
         </div>
 
         <div className="card">
-          <h2 className="text-lg font-semibold text-dark-900 mb-6">Profile Information</h2>
+          <h2 className="text-lg font-semibold text-dark-900 mb-6">{t.profileInfo}</h2>
           
           <form onSubmit={handleSubmit} className="space-y-5">
             {message && (
@@ -179,7 +179,7 @@ export default function Settings() {
 
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-dark-700 mb-1.5">
-                Email
+                {t.email}
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
@@ -191,12 +191,12 @@ export default function Settings() {
                   className="input-field pl-10 bg-dark-50 text-dark-500 cursor-not-allowed"
                 />
               </div>
-              <p className="text-xs text-dark-400 mt-1">Email cannot be changed</p>
+              <p className="text-xs text-dark-400 mt-1">{t.emailCantChange}</p>
             </div>
 
             <div>
               <label htmlFor="fullName" className="block text-sm font-medium text-dark-700 mb-1.5">
-                Full Name
+                {t.fullName}
               </label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
@@ -217,16 +217,16 @@ export default function Settings() {
               className="btn-primary flex items-center gap-2"
             >
               <Save className="w-4 h-4" />
-              {loading ? 'Saving...' : 'Save Changes'}
+              {loading ? t.saving : t.saveChanges}
             </button>
           </form>
         </div>
 
         <div className="card mt-6">
-          <h2 className="text-lg font-semibold text-dark-900 mb-6">AI Preferences</h2>
+          <h2 className="text-lg font-semibold text-dark-900 mb-6">{t.aiPreferences}</h2>
           <div>
             <label htmlFor="language" className="block text-sm font-medium text-dark-700 mb-1.5">
-              AI Language
+              {t.aiLanguage}
             </label>
             <div className="relative">
               <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
@@ -241,7 +241,7 @@ export default function Settings() {
               </select>
             </div>
             <p className="text-xs text-dark-400 mt-1">
-              Language for AI conversations and generated scripts
+              {t.languageDesc}
             </p>
           </div>
         </div>

@@ -18,9 +18,9 @@ CREATE INDEX IF NOT EXISTS idx_profiles_is_admin ON profiles(is_admin) WHERE is_
 CREATE OR REPLACE FUNCTION protect_admin_flag()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- If the update is not from a service_role (i.e., it's from a normal user via RLS),
-  -- preserve the old is_admin value
-  IF current_setting('role') != 'service_role' THEN
+  -- Only allow admin flag changes from privileged roles (postgres, service_role)
+  -- Block changes from authenticated users (normal users via RLS/client)
+  IF current_setting('role') = 'authenticated' THEN
     NEW.is_admin := OLD.is_admin;
   END IF;
   RETURN NEW;

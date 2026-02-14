@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
+import UsageBanner from '../components/UsageBanner'
+import { useUsageLimits } from '../hooks/useUsageLimits'
 
 interface GeneratedPost {
   id: string
@@ -50,6 +52,7 @@ export default function PostWorkspace() {
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
   const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
+  const usageLimits = useUsageLimits()
 
   const labels = {
     es: {
@@ -286,7 +289,7 @@ export default function PostWorkspace() {
     <Layout>
       <div className="h-full flex flex-col lg:flex-row">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col">
+        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 lg:overflow-hidden">
           {/* Header */}
           <div className="px-5 py-4 border-b border-dark-100">
             <Link
@@ -463,6 +466,9 @@ export default function PostWorkspace() {
             )}
           </div>
 
+          {/* Usage Banner */}
+          <UsageBanner usage={usageLimits} resource="image" />
+
           {/* Generate Button */}
           <div className="px-5 py-4 border-t border-dark-100">
             <button
@@ -506,6 +512,7 @@ export default function PostWorkspace() {
                         src={post.imageUrl}
                         alt={`Post ${index + 1}`}
                         className="w-full aspect-[9/16] object-cover"
+                        loading="lazy"
                       />
                       {post.model && (
                         <span className="absolute top-2 right-2 text-[9px] font-mono px-1.5 py-0.5 bg-black/40 text-white/80 rounded-md backdrop-blur-sm">

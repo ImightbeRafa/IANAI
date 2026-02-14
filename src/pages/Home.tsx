@@ -115,7 +115,7 @@ export default function Home() {
       },
       footer: {
         tagline: 'Anuncios ganadores potenciados por IA',
-        rights: '© 2025 Advance AI. Todos los derechos reservados.'
+        rights: `© ${new Date().getFullYear()} Advance AI. Todos los derechos reservados.`
       }
     },
     en: {
@@ -211,7 +211,7 @@ export default function Home() {
       },
       footer: {
         tagline: 'AI-powered winning ads',
-        rights: '© 2025 Advance AI. All rights reserved.'
+        rights: `© ${new Date().getFullYear()} Advance AI. All rights reserved.`
       }
     }
   }
