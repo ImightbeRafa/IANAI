@@ -391,10 +391,40 @@ export default function PostWorkspace() {
           console.error('Failed to save edited image:', saveErr)
         }
 
-        // Replace the post's image in-place
-        setGeneratedPosts(prev => prev.map(p =>
-          p.id === postId ? { ...p, imageUrl: savedUrl } : p
-        ))
+        // Add the edited image as a NEW post card right after the original (before + after)
+        const editedPost: GeneratedPost = {
+          id: `edit-${Date.now()}`,
+          imageUrl: savedUrl,
+          prompt: `✏️ ${editPrompt.trim()}`,
+          createdAt: new Date(),
+          model: 'nano-banana-pro',
+          saved: true
+        }
+
+        // Save to DB as a new post if possible
+        try {
+          if (user && productId) {
+            const dbPost = await createPost(productId, user.id, {
+              prompt: `Edit: ${editPrompt.trim()}`,
+              width: 0,
+              height: 0,
+              output_format: 'png',
+              model: 'nano-banana-pro'
+            })
+            editedPost.id = dbPost.id
+            await updatePostStatus(dbPost.id, 'completed', savedUrl)
+          }
+        } catch (dbErr) {
+          console.error('Failed to save edited post to DB:', dbErr)
+        }
+
+        // Insert right after the original post
+        setGeneratedPosts(prev => {
+          const idx = prev.findIndex(p => p.id === postId)
+          const next = [...prev]
+          next.splice(idx + 1, 0, editedPost)
+          return next
+        })
 
         // Clear edit state
         setEditPrompt('')
