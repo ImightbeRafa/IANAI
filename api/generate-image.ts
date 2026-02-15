@@ -360,10 +360,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Always use Gemini 3 Pro for edits (best quality + reasoning)
       const editModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
 
-      const systemEditPrompt = `You are an expert image editor. You will receive an image and an edit instruction.
+      const editRefImages: string[] = Array.isArray(imageParams.editReferenceImages) ? imageParams.editReferenceImages : []
+      const hasRefs = editRefImages.length > 0
+
+      const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images — use them as visual guidance for the requested change.' : ''}
 Your task: Apply ONLY the requested change to the image while preserving everything else exactly as-is.
 Keep the same composition, layout, colors, style, typography, and overall look.
-Make the minimum change necessary to fulfill the user's request.
+Make the minimum change necessary to fulfill the user's request.${hasRefs ? '\nUse the reference images to understand what the user wants — match their style, colors, elements, or content as needed.' : ''}
 Return the edited image.
 
 Edit instruction: ${editPrompt}`
@@ -382,6 +385,14 @@ Edit instruction: ${editPrompt}`
           { text: systemEditPrompt },
           { inlineData: { mimeType: base64Match[1], data: base64Match[2] } }
         ]
+
+        // Add reference images if provided (up to 4)
+        for (const refImg of editRefImages.slice(0, 4)) {
+          const refMatch = refImg.match(/^data:([^;]+);base64,(.+)$/)
+          if (refMatch) {
+            promptParts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } })
+          }
+        }
 
         const response = await ai.models.generateContent({
           model: editModelId,

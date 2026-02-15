@@ -62,6 +62,8 @@ export default function PostWorkspace() {
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
   const [editPrompt, setEditPrompt] = useState('')
   const [editing, setEditing] = useState(false)
+  const [editRefImages, setEditRefImages] = useState<string[]>([])
+  const editFileInputRef = useRef<HTMLInputElement>(null)
   const usageLimits = useUsageLimits()
 
   const labels = {
@@ -90,6 +92,7 @@ export default function PostWorkspace() {
       download: 'Descargar',
       edit: 'Editar',
       editPlaceholder: 'Describe qué cambiar... ej: "hacé el fondo más oscuro"',
+      editRefHint: 'Imágenes de referencia (opcional)',
       editing: 'Editando...',
       editError: 'Error al editar imagen',
       error: 'Error al generar post',
@@ -126,6 +129,7 @@ export default function PostWorkspace() {
       download: 'Download',
       edit: 'Edit',
       editPlaceholder: 'Describe what to change... e.g. "make the background darker"',
+      editRefHint: 'Reference images (optional)',
       editing: 'Editing...',
       editError: 'Error editing image',
       error: 'Error generating post',
@@ -366,7 +370,8 @@ export default function PostWorkspace() {
         body: JSON.stringify({
           action: 'edit',
           editPrompt: editPrompt.trim(),
-          editImage: base64Image
+          editImage: base64Image,
+          ...(editRefImages.length > 0 ? { editReferenceImages: editRefImages } : {})
         })
       })
 
@@ -393,6 +398,7 @@ export default function PostWorkspace() {
 
         // Clear edit state
         setEditPrompt('')
+        setEditRefImages([])
         setEditingPostId(null)
       }
     } catch (err) {
@@ -400,6 +406,22 @@ export default function PostWorkspace() {
     } finally {
       setEditing(false)
     }
+  }
+
+  const handleEditRefUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const newImages: string[] = []
+    for (const file of Array.from(files).slice(0, 4 - editRefImages.length)) {
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onloadend = () => resolve(reader.result as string)
+        reader.readAsDataURL(file)
+      })
+      newImages.push(dataUrl)
+    }
+    setEditRefImages(prev => [...prev, ...newImages].slice(0, 4))
+    if (editFileInputRef.current) editFileInputRef.current.value = ''
   }
 
   if (loading) {
@@ -738,9 +760,11 @@ export default function PostWorkspace() {
                             if (editingPostId === post.id) {
                               setEditingPostId(null)
                               setEditPrompt('')
+                              setEditRefImages([])
                             } else {
                               setEditingPostId(post.id)
                               setEditPrompt('')
+                              setEditRefImages([])
                             }
                           }}
                           disabled={editing}
@@ -756,28 +780,64 @@ export default function PostWorkspace() {
                       </div>
 
                       {editingPostId === post.id && (
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            value={editPrompt}
-                            onChange={(e) => setEditPrompt(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && editPrompt.trim()) {
-                                handleEdit(post.id, post.imageUrl)
-                              }
-                            }}
-                            placeholder={t.editPlaceholder}
-                            disabled={editing}
-                            className="flex-1 text-xs border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 disabled:opacity-50"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => handleEdit(post.id, post.imageUrl)}
-                            disabled={editing || !editPrompt.trim()}
-                            className="px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </button>
+                        <div className="space-y-2">
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text"
+                              value={editPrompt}
+                              onChange={(e) => setEditPrompt(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && editPrompt.trim()) {
+                                  handleEdit(post.id, post.imageUrl)
+                                }
+                              }}
+                              placeholder={t.editPlaceholder}
+                              disabled={editing}
+                              className="flex-1 text-xs border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 disabled:opacity-50"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleEdit(post.id, post.imageUrl)}
+                              disabled={editing || !editPrompt.trim()}
+                              className="px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {editRefImages.map((img, i) => (
+                              <div key={i} className="relative">
+                                <img src={img} alt={`Ref ${i + 1}`} className="w-10 h-10 object-cover rounded-md border border-dark-200" />
+                                <button
+                                  onClick={() => setEditRefImages(prev => prev.filter((_, idx) => idx !== i))}
+                                  className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-dark-600 text-white rounded-full flex items-center justify-center hover:bg-dark-800"
+                                >
+                                  <X className="w-2 h-2" />
+                                </button>
+                              </div>
+                            ))}
+                            {editRefImages.length < 4 && (
+                              <button
+                                onClick={() => editFileInputRef.current?.click()}
+                                disabled={editing}
+                                className="w-10 h-10 rounded-md border border-dashed border-dark-300 flex items-center justify-center text-dark-400 hover:border-primary-400 hover:text-primary-500 transition-colors disabled:opacity-50"
+                                title={t.editRefHint}
+                              >
+                                <Upload className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <input
+                              ref={editFileInputRef}
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/*"
+                              multiple
+                              onChange={handleEditRefUpload}
+                              className="hidden"
+                            />
+                            {editRefImages.length === 0 && (
+                              <span className="text-[10px] text-dark-400">{t.editRefHint}</span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
