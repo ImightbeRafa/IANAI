@@ -32,6 +32,7 @@ export const MODEL_COSTS = {
 // Feature types for tracking
 export type FeatureType = 
   | 'script'           // Script generation
+  | 'description'      // Description generation
   | 'image'            // Image generation
   | 'video'            // Video generation
   | 'paste_organize'   // Auto-fill/paste organize

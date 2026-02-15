@@ -971,7 +971,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await logApiUsage({
         userId: user.id,
         userEmail: user.email,
-        feature: 'script',
+        feature: usageAction,
         model: 'gemini',
         inputTokens: estimateTokens(inputText),
         outputTokens: estimateTokens(content),
@@ -1021,7 +1021,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await logApiUsage({
         userId: user.id,
         userEmail: user.email,
-        feature: 'script',
+        feature: usageAction,
         model: 'grok',
         inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
         outputTokens: usage.completion_tokens || estimateTokens(content),

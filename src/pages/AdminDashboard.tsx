@@ -124,6 +124,7 @@ export default function AdminDashboard() {
       last30days: 'Últimos 30 días',
       last90days: 'Últimos 90 días',
       script: 'Guiones',
+      description: 'Descripciones',
       image: 'Imágenes',
       video: 'Videos (Grok)',
       kling_video: 'Videos (Kling)',
@@ -162,6 +163,7 @@ export default function AdminDashboard() {
       last30days: 'Last 30 days',
       last90days: 'Last 90 days',
       script: 'Scripts',
+      description: 'Descriptions',
       image: 'Images',
       video: 'Videos (Grok)',
       kling_video: 'Videos (Kling)',
@@ -416,6 +418,7 @@ export default function AdminDashboard() {
                     <div key={feature} className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         {feature === 'script' && <FileText className="w-5 h-5 text-blue-500" />}
+                        {feature === 'description' && <FileText className="w-5 h-5 text-indigo-500" />}
                         {feature === 'image' && <ImageIcon className="w-5 h-5 text-green-500" />}
                         {feature === 'video' && <Video className="w-5 h-5 text-red-500" />}
                         {feature === 'kling_video' && <Video className="w-5 h-5 text-cyan-500" />}
