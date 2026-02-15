@@ -153,23 +153,60 @@ export default function PostWorkspace() {
     return scriptText.trim()
   }
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files) return
-    const newImages: string[] = []
-    const maxImages = 4 - uploadedImages.length
-    Array.from(files).slice(0, maxImages).forEach(file => {
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        if (ev.target?.result) {
-          newImages.push(ev.target.result as string)
-          if (newImages.length === Math.min(files.length, maxImages)) {
-            setUploadedImages(prev => [...prev, ...newImages])
-          }
+  const normalizeImageToJpeg = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file)
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          const ctx = canvas.getContext('2d')
+          if (!ctx) { reject(new Error('Canvas not supported')); return }
+          ctx.drawImage(img, 0, 0)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+          URL.revokeObjectURL(url)
+          resolve(dataUrl)
+        } catch (err) {
+          URL.revokeObjectURL(url)
+          reject(err)
         }
       }
-      reader.readAsDataURL(file)
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        const ext = file.name.split('.').pop()?.toLowerCase() || ''
+        if (['heic', 'heif'].includes(ext)) {
+          reject(new Error(language === 'es'
+            ? 'Formato HEIC no soportado. Exporta la foto como JPEG desde tu iPhone o usa Safari.'
+            : 'HEIC format not supported. Export the photo as JPEG from your iPhone or use Safari.'))
+        } else {
+          reject(new Error(language === 'es' ? `Formato no soportado: .${ext}` : `Unsupported format: .${ext}`))
+        }
+      }
+      img.src = url
     })
+  }
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const maxImages = 4 - uploadedImages.length
+    const filesToProcess = Array.from(files).slice(0, maxImages)
+
+    const results: string[] = []
+    for (const file of filesToProcess) {
+      try {
+        const jpeg = await normalizeImageToJpeg(file)
+        results.push(jpeg)
+      } catch (err) {
+        console.error('Image processing failed:', err)
+        setError(err instanceof Error ? err.message : (language === 'es' ? 'Error al procesar imagen' : 'Error processing image'))
+      }
+    }
+    if (results.length > 0) {
+      setUploadedImages(prev => [...prev, ...results])
+    }
   }
 
   const removeImage = (index: number) => {
@@ -413,7 +450,7 @@ export default function PostWorkspace() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
                   multiple
                   onChange={handleImageUpload}
                   className="hidden"

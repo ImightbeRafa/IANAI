@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
  */
 export async function compressImageToWebP(
   imageSource: string,
-  quality: number = 0.85
+  quality: number = 0.95
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image()

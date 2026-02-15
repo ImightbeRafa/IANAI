@@ -23,6 +23,7 @@ export default function ProductForm({ onSubmit, onCancel, initialData, isEditing
   const [autoFillUrl, setAutoFillUrl] = useState('')
   const [processingUrl, setProcessingUrl] = useState(false)
   const [urlStatus, setUrlStatus] = useState('')
+  const [urlErrorDetail, setUrlErrorDetail] = useState('')
   const [formData, setFormData] = useState<ProductFormData>({
     name: initialData?.name || '',
     type: initialData?.type || 'product',
@@ -394,23 +395,45 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
     if (!autoFillUrl.trim() || processingUrl) return
     setProcessingUrl(true)
     setUrlStatus('')
+    setUrlErrorDetail('')
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
-      if (!token) { setUrlStatus('error'); return }
+      if (!token) {
+        setUrlStatus('error')
+        setUrlErrorDetail(language === 'es' ? 'No estás autenticado. Recarga la página.' : 'Not authenticated. Reload the page.')
+        return
+      }
 
       // Step 1: Scrape the URL
       setUrlStatus('extracting')
       const fetchUrl = import.meta.env.PROD ? '/api/fetch-url' : 'http://localhost:3000/api/fetch-url'
-      const scrapeRes = await fetch(fetchUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ url: autoFillUrl })
-      })
-      const scrapeData = await scrapeRes.json()
+      let scrapeRes: Response
+      try {
+        scrapeRes = await fetch(fetchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ url: autoFillUrl })
+        })
+      } catch (fetchErr) {
+        setUrlStatus('error')
+        setUrlErrorDetail(language === 'es' ? 'No se pudo conectar con el servidor. Verifica tu conexión.' : 'Could not connect to server. Check your connection.')
+        return
+      }
+
+      let scrapeData: any
+      try {
+        scrapeData = await scrapeRes.json()
+      } catch {
+        setUrlStatus('error')
+        setUrlErrorDetail(language === 'es' ? 'Respuesta inválida del servidor.' : 'Invalid server response.')
+        return
+      }
+
       if (!scrapeRes.ok || !scrapeData.content) {
         setUrlStatus('error')
+        setUrlErrorDetail(scrapeData?.error || (language === 'es' ? 'No se pudo extraer contenido de esta URL.' : 'Could not extract content from this URL.'))
         return
       }
 
@@ -449,7 +472,21 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
         })
       })
 
-      const aiData = await aiRes.json()
+      let aiData: any
+      try {
+        aiData = await aiRes.json()
+      } catch {
+        setUrlStatus('error')
+        setUrlErrorDetail(language === 'es' ? 'Error al procesar la respuesta de IA.' : 'Error processing AI response.')
+        return
+      }
+
+      if (!aiRes.ok) {
+        setUrlStatus('error')
+        setUrlErrorDetail(aiData?.message || aiData?.error || (language === 'es' ? 'Error del servidor de IA.' : 'AI server error.'))
+        return
+      }
+
       if (aiData.content) {
         const jsonMatch = aiData.content.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
@@ -478,9 +515,11 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
         }
       }
       setUrlStatus('error')
+      setUrlErrorDetail(language === 'es' ? 'La IA no pudo extraer campos del contenido.' : 'AI could not extract fields from the content.')
     } catch (error) {
       console.error('Auto-fill from URL failed:', error)
       setUrlStatus('error')
+      setUrlErrorDetail(error instanceof Error ? error.message : (language === 'es' ? 'Error inesperado.' : 'Unexpected error.'))
     } finally {
       setProcessingUrl(false)
     }
@@ -1397,7 +1436,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 )}
                 {urlStatus === 'error' && (
                   <div className="text-sm text-red-600 bg-red-50 px-4 py-3 rounded-lg">
-                    {t.autoFillUrl.error}
+                    <p className="font-medium">{t.autoFillUrl.error}</p>
+                    {urlErrorDetail && <p className="mt-1 text-xs text-red-500">{urlErrorDetail}</p>}
                   </div>
                 )}
               </div>

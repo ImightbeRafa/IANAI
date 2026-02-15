@@ -9,8 +9,8 @@ import Layout from '../components/Layout'
 import {
   FileText,
   ImageIcon,
-  BarChart3,
-  Clock,
+  Package,
+  TrendingUp,
   ArrowRight,
   Sparkles,
   Crown
@@ -26,7 +26,7 @@ interface RecentScript {
 interface ActivityStat {
   totalProducts: number
   totalScripts: number
-  totalSessions: number
+  totalPosts: number
   scriptsThisMonth: number
 }
 
@@ -38,7 +38,7 @@ export default function OverviewDashboard() {
   const [stats, setStats] = useState<ActivityStat>({
     totalProducts: 0,
     totalScripts: 0,
-    totalSessions: 0,
+    totalPosts: 0,
     scriptsThisMonth: 0,
   })
   const [recentScripts, setRecentScripts] = useState<RecentScript[]>([])
@@ -50,8 +50,13 @@ export default function OverviewDashboard() {
     async function loadOverview() {
       try {
         // Use the proven getDashboardStats function (correct column joins)
-        const [statsData, recentRes] = await Promise.all([
+        const [statsData, postsRes, recentRes] = await Promise.all([
           getDashboardStats(user!.id),
+          supabase
+            .from('posts')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user!.id)
+            .eq('status', 'completed'),
           supabase
             .from('scripts')
             .select('id, title, created_at, product:products!inner(name, owner_id)')
@@ -63,7 +68,7 @@ export default function OverviewDashboard() {
         setStats({
           totalProducts: statsData.totalProducts,
           totalScripts: statsData.totalScripts,
-          totalSessions: statsData.totalSessions,
+          totalPosts: postsRes.count || 0,
           scriptsThisMonth: statsData.scriptsThisMonth,
         })
 
@@ -89,9 +94,9 @@ export default function OverviewDashboard() {
       welcome: '¡Bienvenido de nuevo',
       subtitle: 'Resumen de tu actividad',
       products: 'Productos',
-      scripts: 'Guiones',
-      sessions: 'Sesiones',
-      thisMonth: 'Este Mes',
+      scripts: 'Guiones Totales',
+      posts: 'Posts Generados',
+      thisMonth: 'Guiones este Mes',
       usage: 'Uso del Plan',
       plan: 'Plan',
       scriptsUsed: 'Guiones usados',
@@ -117,9 +122,9 @@ export default function OverviewDashboard() {
       welcome: 'Welcome back',
       subtitle: 'Overview of your activity',
       products: 'Products',
-      scripts: 'Scripts',
-      sessions: 'Sessions',
-      thisMonth: 'This Month',
+      scripts: 'Total Scripts',
+      posts: 'Posts Generated',
+      thisMonth: 'Scripts this Month',
       usage: 'Plan Usage',
       plan: 'Plan',
       scriptsUsed: 'Scripts used',
@@ -151,10 +156,10 @@ export default function OverviewDashboard() {
   }
 
   const statCards = [
-    { label: t.products, value: stats.totalProducts, icon: BarChart3, color: 'bg-blue-500' },
+    { label: t.products, value: stats.totalProducts, icon: Package, color: 'bg-blue-500' },
     { label: t.scripts, value: stats.totalScripts, icon: FileText, color: 'bg-green-500' },
-    { label: t.sessions, value: stats.totalSessions, icon: Sparkles, color: 'bg-purple-500' },
-    { label: t.thisMonth, value: stats.scriptsThisMonth, icon: Clock, color: 'bg-orange-500' },
+    { label: t.posts, value: stats.totalPosts, icon: ImageIcon, color: 'bg-purple-500' },
+    { label: t.thisMonth, value: stats.scriptsThisMonth, icon: TrendingUp, color: 'bg-orange-500' },
   ]
 
   const formatLimit = (used: number, limit: number) => {
