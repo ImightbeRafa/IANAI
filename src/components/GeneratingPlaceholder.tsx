@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react'
 
 interface GeneratingPlaceholderProps {
-  aspectRatio?: '9/16' | '16/9' | '1/1'
+  aspectRatio?: '9/16' | '16/9' | '1/1' | '3/4'
   label?: string
   sublabel?: string
 }

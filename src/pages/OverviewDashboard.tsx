@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useUsageLimits } from '../hooks/useUsageLimits'
+import { getDashboardStats } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
 import {
@@ -48,34 +49,22 @@ export default function OverviewDashboard() {
 
     async function loadOverview() {
       try {
-        // Fetch stats in parallel
-        const [productsRes, scriptsRes, sessionsRes, recentRes] = await Promise.all([
-          supabase.from('products').select('id', { count: 'exact', head: true }).eq('user_id', user!.id),
-          supabase.from('scripts').select('id', { count: 'exact', head: true }).eq('user_id', user!.id),
-          supabase.from('chat_sessions').select('id', { count: 'exact', head: true }).eq('user_id', user!.id),
+        // Use the proven getDashboardStats function (correct column joins)
+        const [statsData, recentRes] = await Promise.all([
+          getDashboardStats(user!.id),
           supabase
             .from('scripts')
-            .select('id, title, created_at, product:products(name)')
-            .eq('user_id', user!.id)
+            .select('id, title, created_at, product:products!inner(name, owner_id)')
+            .eq('product.owner_id', user!.id)
             .order('created_at', { ascending: false })
             .limit(5),
         ])
 
-        // Scripts this month
-        const monthStart = new Date()
-        monthStart.setDate(1)
-        monthStart.setHours(0, 0, 0, 0)
-        const monthRes = await supabase
-          .from('scripts')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user!.id)
-          .gte('created_at', monthStart.toISOString())
-
         setStats({
-          totalProducts: productsRes.count || 0,
-          totalScripts: scriptsRes.count || 0,
-          totalSessions: sessionsRes.count || 0,
-          scriptsThisMonth: monthRes.count || 0,
+          totalProducts: statsData.totalProducts,
+          totalScripts: statsData.totalScripts,
+          totalSessions: statsData.totalSessions,
+          scriptsThisMonth: statsData.scriptsThisMonth,
         })
 
         const scripts = (recentRes.data || []).map((s: any) => ({

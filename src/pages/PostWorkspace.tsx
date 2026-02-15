@@ -24,6 +24,8 @@ import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
 import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 
+type PostAspectRatio = '9:16' | '3:4'
+
 interface GeneratedPost {
   id: string
   imageUrl: string
@@ -52,6 +54,7 @@ export default function PostWorkspace() {
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
   const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
+  const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const usageLimits = useUsageLimits()
 
   const labels = {
@@ -75,10 +78,12 @@ export default function PostWorkspace() {
       download: 'Descargar',
       error: 'Error al generar post',
       imageModel: 'Modelo de IA',
-      format: 'Formato: 9:16 (1080×1920)',
       nanoBanana: 'Gemini Flash',
       nanoBananaPro: 'Gemini Pro',
-      grokImagine: 'Grok Imagine'
+      grokImagine: 'Grok Imagine',
+      formatLabel: 'Formato',
+      reelStory: 'Reel / Story',
+      squarePost: 'Post Feed'
     },
     en: {
       back: 'Back',
@@ -100,10 +105,12 @@ export default function PostWorkspace() {
       download: 'Download',
       error: 'Error generating post',
       imageModel: 'AI Model',
-      format: 'Format: 9:16 (1080×1920)',
       nanoBanana: 'Gemini Flash',
       nanoBananaPro: 'Gemini Pro',
-      grokImagine: 'Grok Imagine'
+      grokImagine: 'Grok Imagine',
+      formatLabel: 'Format',
+      reelStory: 'Reel / Story',
+      squarePost: 'Feed Post'
     }
   }
 
@@ -181,11 +188,13 @@ export default function PostWorkspace() {
       const token = session?.access_token
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
+      const isVertical = aspectRatio === '9:16'
       const requestBody: Record<string, unknown> = {
         prompt: script,
         mode: 'post',
-        width: 1080,
-        height: 1920,
+        aspectRatio,
+        width: isVertical ? 1080 : 1080,
+        height: isVertical ? 1920 : 1440,
         output_format: 'jpeg',
         model: imageModel
       }
@@ -218,8 +227,8 @@ export default function PostWorkspace() {
             savedUrl = await uploadPostImage(user.id, productId, imageUrl)
             const post = await createPost(productId, user.id, {
               prompt: script,
-              width: 1080,
-              height: 1920,
+              width: aspectRatio === '9:16' ? 1080 : 1080,
+              height: aspectRatio === '9:16' ? 1920 : 1440,
               output_format: 'webp',
               model: imageModel
             })
@@ -455,7 +464,35 @@ export default function PostWorkspace() {
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-dark-300 mt-1.5 text-center">{t.format}</p>
+            </div>
+
+            {/* Aspect Ratio */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                <ImageIcon className="w-3.5 h-3.5 text-primary-500" />
+                {t.formatLabel}
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {([
+                  { id: '9:16' as PostAspectRatio, name: t.reelStory, sub: '9:16' },
+                  { id: '3:4' as PostAspectRatio, name: t.squarePost, sub: '3:4' },
+                ] as const).map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => setAspectRatio(f.id)}
+                    className={`p-2.5 rounded-lg text-xs transition-colors ${
+                      aspectRatio === f.id
+                        ? 'bg-primary-50 text-primary-700 border border-primary-300'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    <div className="font-medium">{f.name}</div>
+                    <div className={`text-[10px] mt-0.5 ${aspectRatio === f.id ? 'text-primary-500' : 'text-dark-400'}`}>
+                      {f.sub}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Error */}
@@ -500,7 +537,7 @@ export default function PostWorkspace() {
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {generating && (
                   <GeneratingPlaceholder
-                    aspectRatio="9/16"
+                    aspectRatio={aspectRatio === '9:16' ? '9/16' : '3/4'}
                     label={t.generating}
                     sublabel={imageModel}
                   />
@@ -511,7 +548,7 @@ export default function PostWorkspace() {
                       <img
                         src={post.imageUrl}
                         alt={`Post ${index + 1}`}
-                        className="w-full aspect-[9/16] object-cover"
+                        className={`w-full object-cover ${post.imageUrl.includes('1440') || (post as any).aspectRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-[9/16]'}`}
                         loading="lazy"
                       />
                       {post.model && (

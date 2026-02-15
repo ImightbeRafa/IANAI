@@ -39,9 +39,19 @@ Solicitud del usuario: `
 
 // =============================================
 // MASTER POST PROMPT — Director de Arte + Diseñador Gráfico + Copywriter
-// Used when mode === 'post'. The user's script (GANCHO/DESARROLLO/CTA) is appended.
+// Used when mode === 'post'. Built dynamically based on aspect ratio.
+// CRITICAL: No pixel values, no dimension annotations — the AI renders them.
 // =============================================
-const POST_MASTER_PROMPT = `ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
+type PostAspectRatio = '9:16' | '3:4'
+
+function buildPostPrompt(aspectRatio: PostAspectRatio): string {
+  const isVertical = aspectRatio === '9:16'
+  const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
+  const layoutTip = isVertical
+    ? 'La composición es alta y estrecha: headline arriba, bullets en el medio, CTA abajo. La imagen de fondo ocupa todo el canvas.'
+    : 'La composición es casi cuadrada: headline arriba, bullets compactos, CTA abajo. Aprovechá el ancho para un layout más editorial con la imagen de producto al lado o como fondo.'
+
+  return `ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
 
 CONTEXTO FIJO (NO PREGUNTAR NADA):
 En tu contexto ya recibiste un guión escrito con esta estructura:
@@ -51,11 +61,12 @@ En tu contexto ya recibiste un guión escrito con esta estructura:
 Ese guión NO incluye instrucciones visuales. Vos debés inferirlas de forma inteligente.
 
 OBJETIVO:
-Transformar ese guión en UN (1) post publicitario de venta directa en un solo slide, formato vertical 9:16 (1080x1920), con:
+Transformar ese guión en UN (1) post publicitario de venta directa en un solo slide, formato ${formatLabel}, con:
 1) Gancho (headline)
 2) Desarrollo (bullets ultra tangibles)
 3) CTA (acción única tipo botón)
 Todo en el MISMO slide, con diseño profesional, legible y ordenado.
+${layoutTip}
 
 REGLAS DE COPY (PERFORMANCE):
 - Cero saludos.
@@ -81,15 +92,15 @@ EXTRACCIÓN AUTOMÁTICA DESDE EL GUION (OBLIGATORIO):
    - Resultado inmediato (qué pasa después de que escribe)
 
 REGLAS DE DISEÑO (CALIDAD VISUAL PRO):
-FORMATO: Vertical 9:16 — 1080x1920 px
 
-SAFE AREAS / MÁRGENES OBLIGATORIOS (ESTRICTO):
-- Top safe: mínimo 220 px sin texto importante.
-- Bottom safe: mínimo 260 px sin texto importante.
-- Lados: mínimo 110 px sin texto importante.
+MÁRGENES OBLIGATORIOS (ESTRICTO):
+- Dejá un margen generoso arriba (aprox 12% del alto) libre de texto importante.
+- Dejá un margen generoso abajo (aprox 14% del alto) libre de texto importante.
+- Dejá márgenes laterales amplios (aprox 10% del ancho) sin texto importante.
 Todo lo crítico (headline, bullets, CTA) debe quedar dentro de estas zonas seguras.
 PROHIBIDO: texto pegado a bordes.
 PROHIBIDO: número de slide (1/1, 2/2, etc.).
+PROHIBIDO: mostrar dimensiones, medidas, píxeles, resolución o cualquier anotación técnica dentro de la imagen.
 
 DIRECCIÓN DE ARTE (LOOK & FEEL PREMIUM) — ESTILO APPLE/IG/SPOTIFY:
 El diseño debe verse como una marca grande: minimalista premium + editorial + quiet luxury.
@@ -105,11 +116,11 @@ Reglas visuales (estrictas):
 GRID Y JERARQUÍA:
 - Alineación principal: izquierda.
 - Máximo 2 bloques de texto arriba/medio: (Headline + Bullets).
-- CTA en una barra tipo "botón" al final (pero dentro del bottom safe).
+- CTA en una barra tipo "botón" al final (pero dentro del margen inferior seguro).
 - Headline: 8–12 palabras ideal (máximo 14). Si el gancho es largo, reescribilo sin perder sentido.
 - Bullets: 3–5. 1 línea cada uno (máximo 2 si es inevitable).
-- Interlineado headline: 0.95–1.05 (compacto).
-- Interlineado bullets: 1.1–1.2 (respira y se lee).
+- Interlineado headline: compacto.
+- Interlineado bullets: que respire y se lea bien.
 - Espaciado vertical entre bullets: consistente, uniforme, "editorial".
 - El texto debe ser legible en pantalla de celular.
 
@@ -158,7 +169,7 @@ BADGE / SELLOS — QUIET LUXURY:
 - Nunca compite con headline ni con CTA.
 
 CTA BOTÓN — SISTEMA / UI PREMIUM (OBLIGATORIO):
-- Botón con radio consistente (2xl), sombra suave o borde fino.
+- Botón con radio consistente, sombra suave o borde fino.
 - Alta legibilidad: texto grande, peso fuerte, sin efectos.
 - Ícono del canal solo si aplica, en estilo lineal minimalista.
 PROHIBIDO: brillos, biseles, contornos dobles, gradientes fuertes, estilos "baratos".
@@ -172,16 +183,17 @@ COMPOSICIÓN FINAL (RECOMENDADA):
 
 ENTREGABLE:
 Generá el arte final (UNA imagen) del post, cumpliendo TODO:
-- 1080x1920 (9:16)
 - Headline + 3–5 bullets + CTA en un solo slide
 - Visual en acción inferida inteligentemente del guión
-- Márgenes/safe areas estrictos
+- Márgenes generosos respetados estrictamente
 - Dirección de arte premium (Apple/IG/Spotify) con mucho aire y coherencia visual
 - Sin número de slide
 - Sin texto tapable por la UI de Instagram
+- NUNCA incluir anotaciones técnicas, dimensiones, píxeles o medidas visibles en la imagen
 
 GUIÓN DEL USUARIO:
 `
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -238,10 +250,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (isPostMode) {
       // POST MODE: Use the full director/designer master prompt + user's script
-      // Force 9:16 dimensions for posts
-      imageParams.width = 1080
-      imageParams.height = 1920
-      enhancedPrompt = POST_MASTER_PROMPT + userPrompt
+      // Determine aspect ratio from request (default 9:16 for backward compat)
+      const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+      if (postAspectRatio === '9:16') {
+        imageParams.width = 1080
+        imageParams.height = 1920
+      } else {
+        imageParams.width = 1080
+        imageParams.height = 1440
+      }
+      enhancedPrompt = buildPostPrompt(postAspectRatio) + userPrompt
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
       enhancedPrompt = GEMINI_PROMPT_PREFIX + userPrompt
