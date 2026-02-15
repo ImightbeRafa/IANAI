@@ -107,7 +107,7 @@ export default function ProductWorkspace() {
       try {
         const productData = await getProduct(productId)
         if (!productData) {
-          navigate('/dashboard')
+          navigate('/scripts')
           return
         }
         setProduct(productData)
@@ -783,7 +783,7 @@ export default function ProductWorkspace() {
         <div className="w-64 bg-white border-r border-dark-100 flex flex-col">
           <div className="px-4 pt-4 pb-3">
             <Link 
-              to="/dashboard" 
+              to="/scripts" 
               className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-3"
             >
               <ChevronLeft className="w-3.5 h-3.5" />

@@ -278,7 +278,7 @@ export default function BRollDashboard() {
             <h2 className="text-xl font-semibold text-dark-700 mb-2">{t.noProducts}</h2>
             <p className="text-dark-500 mb-6">{t.createProduct}</p>
             <Link
-              to="/dashboard"
+              to="/scripts"
               className="inline-flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 transition-colors"
             >
               <Plus className="w-5 h-5" />

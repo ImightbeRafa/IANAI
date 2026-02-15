@@ -12,7 +12,8 @@ import {
   Film,
   BarChart3,
   Users,
-  AlignLeft
+  AlignLeft,
+  LayoutDashboard
 } from 'lucide-react'
 
 interface LayoutProps {
@@ -33,6 +34,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const labels = {
     es: {
+      dashboard: 'Inicio',
       scripts: 'Guiones',
       descriptions: 'Descripciones',
       posts: 'Posts',
@@ -43,6 +45,7 @@ export default function Layout({ children }: LayoutProps) {
       admin: 'Admin'
     },
     en: {
+      dashboard: 'Dashboard',
       scripts: 'Scripts',
       descriptions: 'Descriptions',
       posts: 'Posts',
@@ -57,7 +60,8 @@ export default function Layout({ children }: LayoutProps) {
   const t = labels[language]
 
   const allNavItems = [
-    { path: '/dashboard', label: t.scripts, icon: FileText, beta: true, adminOnly: false },
+    { path: '/dashboard', label: t.dashboard, icon: LayoutDashboard, beta: false, adminOnly: false },
+    { path: '/scripts', label: t.scripts, icon: FileText, beta: true, adminOnly: false },
     { path: '/descriptions', label: t.descriptions, icon: AlignLeft, beta: true, adminOnly: false },
     { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: false },
     { path: '/broll', label: t.broll, icon: Film, beta: true, adminOnly: true },

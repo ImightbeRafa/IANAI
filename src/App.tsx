@@ -9,7 +9,8 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 
 // Lazy-loaded pages (code-split for smaller initial bundle)
-const Dashboard = lazy(() => import('./pages/Dashboard'))
+const OverviewDashboard = lazy(() => import('./pages/OverviewDashboard'))
+const ScriptsDashboard = lazy(() => import('./pages/Dashboard'))
 const ProductWorkspace = lazy(() => import('./pages/ProductWorkspace'))
 const PostsDashboard = lazy(() => import('./pages/PostsDashboard'))
 const PostWorkspace = lazy(() => import('./pages/PostWorkspace'))
@@ -48,7 +49,15 @@ export default function App() {
               path="/dashboard"
               element={
                 <ProtectedRoute>
-                  <Dashboard />
+                  <OverviewDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/scripts"
+              element={
+                <ProtectedRoute>
+                  <ScriptsDashboard />
                 </ProtectedRoute>
               }
             />
