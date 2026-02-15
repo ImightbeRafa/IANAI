@@ -5,7 +5,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import { getProduct, getProductPosts, createPost, updatePostStatus, getScripts } from '../services/database'
 import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
-import { uploadPostImage } from '../utils/imageCompression'
+import { uploadPostImageOriginal } from '../utils/imageCompression'
 import { 
   ArrowLeft,
   ImageIcon,
@@ -17,7 +17,9 @@ import {
   Loader2,
   Cpu,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Pencil,
+  Send
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
@@ -57,6 +59,9 @@ export default function PostWorkspace() {
   const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const [postStyle, setPostStyle] = useState<PostStyle>('venta-directa')
+  const [editingPostId, setEditingPostId] = useState<string | null>(null)
+  const [editPrompt, setEditPrompt] = useState('')
+  const [editing, setEditing] = useState(false)
   const usageLimits = useUsageLimits()
 
   const labels = {
@@ -83,6 +88,10 @@ export default function PostWorkspace() {
       generatedImages: 'Posts Generados',
       noImages: 'Selecciona un guión y genera tu primer post',
       download: 'Descargar',
+      edit: 'Editar',
+      editPlaceholder: 'Describe qué cambiar... ej: "hacé el fondo más oscuro"',
+      editing: 'Editando...',
+      editError: 'Error al editar imagen',
       error: 'Error al generar post',
       imageModel: 'Modelo de IA',
       nanoBanana: 'Gemini Flash',
@@ -115,6 +124,10 @@ export default function PostWorkspace() {
       generatedImages: 'Generated Posts',
       noImages: 'Select a script and generate your first post',
       download: 'Download',
+      edit: 'Edit',
+      editPlaceholder: 'Describe what to change... e.g. "make the background darker"',
+      editing: 'Editing...',
+      editError: 'Error editing image',
       error: 'Error generating post',
       imageModel: 'AI Model',
       nanoBanana: 'Gemini Flash',
@@ -245,7 +258,6 @@ export default function PostWorkspace() {
         aspectRatio,
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,
-        output_format: 'jpeg',
         model: imageModel
       }
 
@@ -274,12 +286,12 @@ export default function PostWorkspace() {
 
         try {
           if (user && productId) {
-            savedUrl = await uploadPostImage(user.id, productId, imageUrl)
+            savedUrl = await uploadPostImageOriginal(user.id, productId, imageUrl)
             const post = await createPost(productId, user.id, {
               prompt: script,
               width: aspectRatio === '9:16' ? 1080 : 1080,
               height: aspectRatio === '9:16' ? 1920 : 1440,
-              output_format: 'webp',
+              output_format: 'png',
               model: imageModel
             })
             postId = post.id
@@ -319,6 +331,74 @@ export default function PostWorkspace() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Download failed:', err)
+    }
+  }
+
+  const handleEdit = async (postId: string, imageUrl: string) => {
+    if (!editPrompt.trim() || editing) return
+
+    setEditing(true)
+    setError('')
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
+
+      // Convert image URL to base64 data URL if it isn't already
+      let base64Image = imageUrl
+      if (!imageUrl.startsWith('data:')) {
+        const imgRes = await fetch(imageUrl)
+        const blob = await imgRes.blob()
+        base64Image = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.readAsDataURL(blob)
+        })
+      }
+
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'edit',
+          editPrompt: editPrompt.trim(),
+          editImage: base64Image
+        })
+      })
+
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || t.editError)
+
+      if (result.status === 'Ready' && result.result?.sample) {
+        const editedUrl = result.result.sample
+
+        // Try to upload the edited image to storage
+        let savedUrl = editedUrl
+        try {
+          if (user && productId) {
+            savedUrl = await uploadPostImageOriginal(user.id, productId, editedUrl)
+          }
+        } catch (saveErr) {
+          console.error('Failed to save edited image:', saveErr)
+        }
+
+        // Replace the post's image in-place
+        setGeneratedPosts(prev => prev.map(p =>
+          p.id === postId ? { ...p, imageUrl: savedUrl } : p
+        ))
+
+        // Clear edit state
+        setEditPrompt('')
+        setEditingPostId(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t.editError)
+    } finally {
+      setEditing(false)
     }
   }
 
@@ -635,15 +715,71 @@ export default function PostWorkspace() {
                           {post.model}
                         </span>
                       )}
+                      {editing && editingPostId === post.id && (
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
+                          <div className="flex items-center gap-2 text-white text-sm font-medium">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            {t.editing}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="p-3">
-                      <button
-                        onClick={() => handleDownload(post.imageUrl, index)}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dark-200 text-dark-600 text-xs font-medium hover:bg-dark-50 transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        {t.download}
-                      </button>
+                    <div className="p-3 space-y-2">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleDownload(post.imageUrl, index)}
+                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dark-200 text-dark-600 text-xs font-medium hover:bg-dark-50 transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          {t.download}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (editingPostId === post.id) {
+                              setEditingPostId(null)
+                              setEditPrompt('')
+                            } else {
+                              setEditingPostId(post.id)
+                              setEditPrompt('')
+                            }
+                          }}
+                          disabled={editing}
+                          className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                            editingPostId === post.id
+                              ? 'bg-primary-50 text-primary-700 border border-primary-300'
+                              : 'border border-dark-200 text-dark-600 hover:bg-dark-50'
+                          }`}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          {t.edit}
+                        </button>
+                      </div>
+
+                      {editingPostId === post.id && (
+                        <div className="flex gap-1.5">
+                          <input
+                            type="text"
+                            value={editPrompt}
+                            onChange={(e) => setEditPrompt(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && editPrompt.trim()) {
+                                handleEdit(post.id, post.imageUrl)
+                              }
+                            }}
+                            placeholder={t.editPlaceholder}
+                            disabled={editing}
+                            className="flex-1 text-xs border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 disabled:opacity-50"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleEdit(post.id, post.imageUrl)}
+                            disabled={editing || !editPrompt.trim()}
+                            className="px-3 py-2 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

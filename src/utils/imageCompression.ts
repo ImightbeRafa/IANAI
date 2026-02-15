@@ -101,6 +101,66 @@ export async function uploadPostImage(
 }
 
 /**
+ * Upload an AI-generated image WITHOUT compression.
+ * Preserves the original PNG quality from Gemini output.
+ * Use this for AI-generated post images to avoid quality loss.
+ */
+export async function uploadPostImageOriginal(
+  userId: string,
+  productId: string,
+  imageSource: string,
+  filename?: string
+): Promise<string> {
+  // Convert base64 data URL to Blob without re-encoding
+  const base64Match = imageSource.match(/^data:([^;]+);base64,(.+)$/)
+  if (!base64Match) {
+    throw new Error('Invalid image source — expected base64 data URL')
+  }
+
+  const mimeType = base64Match[1]
+  const base64Data = base64Match[2]
+  const byteChars = atob(base64Data)
+  const byteArray = new Uint8Array(byteChars.length)
+  for (let i = 0; i < byteChars.length; i++) {
+    byteArray[i] = byteChars.charCodeAt(i)
+  }
+  const blob = new Blob([byteArray], { type: mimeType })
+
+  // Determine extension from mime type
+  const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg'
+
+  const timestamp = Date.now()
+  const rawName = filename || `${timestamp}.${ext}`
+  const safeUserId = sanitizePathSegment(userId)
+  const safeProductId = sanitizePathSegment(productId)
+  const safeFileName = sanitizePathSegment(rawName)
+
+  if (!safeUserId || !safeProductId || !safeFileName) {
+    throw new Error('Invalid file path parameters')
+  }
+
+  const filePath = `${safeUserId}/${safeProductId}/${safeFileName}`
+
+  const { data, error } = await supabase.storage
+    .from('post-images')
+    .upload(filePath, blob, {
+      contentType: mimeType,
+      upsert: true
+    })
+
+  if (error) {
+    console.error('Upload error:', error)
+    throw error
+  }
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('post-images')
+    .getPublicUrl(data.path)
+
+  return publicUrl
+}
+
+/**
  * Delete a post image from storage
  */
 export async function deletePostImage(imagePath: string): Promise<void> {

@@ -340,6 +340,117 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // =============================================
+    // IMAGE EDIT MODE (Gemini only)
+    // Send existing image + edit instruction → get edited image back
+    // =============================================
+    if (action === 'edit') {
+      const geminiApiKey = process.env.GEMINI_API_KEY
+      if (!geminiApiKey) {
+        return res.status(500).json({ error: 'Gemini API key not configured' })
+      }
+
+      const editPrompt = imageParams.editPrompt || ''
+      const editImage = imageParams.editImage || ''
+
+      if (!editPrompt || !editImage) {
+        return res.status(400).json({ error: 'editPrompt and editImage are required for edit action' })
+      }
+
+      // Always use Gemini 3 Pro for edits (best quality + reasoning)
+      const editModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
+
+      const systemEditPrompt = `You are an expert image editor. You will receive an image and an edit instruction.
+Your task: Apply ONLY the requested change to the image while preserving everything else exactly as-is.
+Keep the same composition, layout, colors, style, typography, and overall look.
+Make the minimum change necessary to fulfill the user's request.
+Return the edited image.
+
+Edit instruction: ${editPrompt}`
+
+      try {
+        const ai = new GoogleGenAI({ apiKey: geminiApiKey })
+
+        // Extract base64 from data URL
+        const base64Match = editImage.match(/^data:([^;]+);base64,(.+)$/)
+        if (!base64Match) {
+          return res.status(400).json({ error: 'Invalid image format — expected base64 data URL' })
+        }
+
+        type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
+        const promptParts: PromptPart[] = [
+          { text: systemEditPrompt },
+          { inlineData: { mimeType: base64Match[1], data: base64Match[2] } }
+        ]
+
+        const response = await ai.models.generateContent({
+          model: editModelId,
+          contents: promptParts,
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              imageSize: '2K'
+            }
+          }
+        })
+
+        const candidates = response.candidates || []
+        const parts = candidates[0]?.content?.parts || []
+
+        let imageUrl: string | null = null
+        for (const part of parts) {
+          if ('inlineData' in part && part.inlineData?.data) {
+            const mimeType = part.inlineData.mimeType || 'image/png'
+            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`
+            break
+          }
+        }
+
+        if (!imageUrl) {
+          console.error('No image in Gemini edit response:', JSON.stringify(response, null, 2))
+          return res.status(500).json({ error: 'Gemini did not return an edited image' })
+        }
+
+        // Count edit as image usage
+        await incrementUsage(user.id, 'image')
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: 'image',
+          model: 'nano-banana-pro',
+          success: true,
+          metadata: { action: 'edit', editPrompt: editPrompt.substring(0, 100) }
+        })
+
+        return res.status(200).json({
+          status: 'Ready',
+          result: { sample: imageUrl },
+          model: 'nano-banana-pro',
+          textWarning: false,
+          edited: true
+        })
+
+      } catch (editError) {
+        console.error('Gemini edit error:', editError)
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: 'image',
+          model: 'nano-banana-pro',
+          success: false,
+          errorMessage: editError instanceof Error ? editError.message : 'Unknown error',
+          metadata: { action: 'edit' }
+        })
+
+        return res.status(500).json({
+          error: 'Image edit failed',
+          details: editError instanceof Error ? editError.message : 'Unknown error'
+        })
+      }
+    }
+
     // Submit new generation request
     const userPrompt = imageParams.prompt || ''
     const isGeminiModel = selectedModel === 'nano-banana' || selectedModel === 'nano-banana-pro'
@@ -413,14 +524,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         )
 
         // Generate image using SDK (format from official docs)
+        // nano-banana-pro supports imageSize: '1K' | '2K' | '4K' (default 1K)
+        const imageConfig: Record<string, string> = { aspectRatio: geminiAspectRatio }
+        if (selectedModel === 'nano-banana-pro') {
+          imageConfig.imageSize = '2K'
+        }
+
         const response = await ai.models.generateContent({
           model: geminiModelId,
           contents: promptParts,
           config: {
             responseModalities: ['TEXT', 'IMAGE'],
-            imageConfig: {
-              aspectRatio: geminiAspectRatio
-            }
+            imageConfig
           }
         })
 
