@@ -72,7 +72,8 @@ export async function sendMessageToGrok(
   scriptSettings?: ScriptGenerationSettings,
   productType?: ProductType,
   icp?: ICP | null,
-  contextDocs?: ContextDocument[]
+  contextDocs?: ContextDocument[],
+  feature?: 'script' | 'description'
 ): Promise<{ content: string; _debug?: { systemPrompt: string } }> {
   // Get the current session token for authentication
   const { data: { session } } = await supabase.auth.getSession()
@@ -114,7 +115,8 @@ export async function sendMessageToGrok(
         gender: icp.gender,
         age_range: icp.age_range
       } : null,
-      contextDocuments
+      contextDocuments,
+      ...(feature ? { feature } : {})
     })
   })
 

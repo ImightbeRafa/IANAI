@@ -861,12 +861,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
   }
 
+  // Determine usage action: 'description' if feature param says so, otherwise 'script'
+  const usageAction: 'script' | 'description' = req.body?.feature === 'description' ? 'description' : 'script'
+
   // Check usage limits
-  const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'script')
+  const { allowed, remaining, limit } = await checkUsageLimit(user.id, usageAction)
   if (!allowed) {
+    const label = usageAction === 'description' ? 'descripciones' : 'scripts'
     return res.status(429).json({ 
-      error: 'Límite de scripts alcanzado',
-      message: `Has alcanzado el límite de ${limit} scripts este mes. Actualiza tu plan para continuar.`,
+      error: `Límite de ${label} alcanzado`,
+      message: `Has alcanzado el límite de ${limit} ${label} este mes. Actualiza tu plan para continuar.`,
       limit,
       remaining: 0
     })
@@ -1027,7 +1031,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Increment usage counter after successful generation
-    await incrementUsage(user.id, 'script')
+    await incrementUsage(user.id, usageAction)
 
     return res.status(200).json({ content, remaining: remaining - 1, model: selectedModel, _debug: { systemPrompt } })
   } catch (error) {

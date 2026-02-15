@@ -91,7 +91,7 @@ export async function requireAuth(
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image' | 'video'
+  action: 'script' | 'image' | 'video' | 'description'
 ): Promise<{ allowed: boolean; remaining: number; limit: number }> {
   if (!supabaseAdmin) {
     console.error('Usage limit check: Supabase not configured — denying request')
@@ -124,7 +124,9 @@ export async function checkUsageLimit(
       ? limits.scripts_per_month 
       : action === 'image' 
         ? limits.images_per_month 
-        : limits.videos_per_month || 10
+        : action === 'description'
+          ? (limits.descriptions_per_month ?? -1)
+          : limits.videos_per_month || 10
 
     // -1 means unlimited
     if (limit === -1) {
@@ -144,7 +146,9 @@ export async function checkUsageLimit(
       ? (usage?.scripts_generated || 0)
       : action === 'image'
         ? (usage?.images_generated || 0)
-        : (usage?.videos_generated || 0)
+        : action === 'description'
+          ? (usage?.descriptions_generated || 0)
+          : (usage?.videos_generated || 0)
 
     const remaining = limit - currentUsage
     const allowed = remaining > 0
@@ -161,7 +165,7 @@ export async function checkUsageLimit(
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image' | 'video'
+  action: 'script' | 'image' | 'video' | 'description'
 ): Promise<void> {
   if (!supabaseAdmin) return
 

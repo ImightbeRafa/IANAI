@@ -158,7 +158,11 @@ export default function DescriptionsWorkspace() {
         apiMessages,
         descriptionContext,
         language,
-        settings
+        settings,
+        undefined,
+        undefined,
+        undefined,
+        'description'
       )
 
       const aiMsg: LocalMessage = {

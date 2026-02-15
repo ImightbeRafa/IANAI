@@ -43,6 +43,105 @@ Solicitud del usuario: `
 // CRITICAL: No pixel values, no dimension annotations — the AI renders them.
 // =============================================
 type PostAspectRatio = '9:16' | '3:4'
+type PostStyle = 'venta-directa' | 'organico'
+
+// =============================================
+// ORGANIC POST PROMPT — Minimalistic, educational, non-sales
+// Product in action + one phrase. Clean, editorial, quiet.
+// =============================================
+function buildOrganicPostPrompt(aspectRatio: PostAspectRatio): string {
+  const isVertical = aspectRatio === '9:16'
+  const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
+  const layoutTip = isVertical
+    ? 'La composición es alta y estrecha. La imagen ocupa prácticamente todo el canvas. La frase se ubica con suficiente aire, sin competir con la imagen.'
+    : 'La composición es casi cuadrada. La imagen es protagonista absoluta. La frase puede ir superpuesta con overlay sutil o en un bloque limpio arriba o abajo.'
+
+  return `ACTÚA COMO: Director de Arte Senior + Fotógrafo Editorial. Tu meta es crear un post de contenido orgánico para redes sociales — NO es un post de venta.
+
+CONTEXTO FIJO (NO PREGUNTAR NADA):
+Recibiste un guión o descripción de producto/servicio. NO debés usarlo para vender. Debés extraer UN concepto, beneficio o dato interesante y transformarlo en una pieza visual minimalista y educativa.
+
+OBJETIVO:
+Crear UN (1) post orgánico de contenido, formato ${formatLabel}, con:
+1) Imagen del producto/servicio EN ACCIÓN (protagonista absoluta, 85–95% del canvas)
+2) UNA frase corta — educativa, informativa o aspiracional — NO de venta
+Eso es todo. Nada más. Minimalismo extremo.
+${layoutTip}
+
+REGLAS DE LA FRASE (ESTRICTO):
+- UNA sola frase. Máximo 8–12 palabras.
+- Tono: educativo, informativo, aspiracional o que genere curiosidad.
+- PROHIBIDO: llamados a la acción (comprar, escribir, pedir, agendar, cotizar).
+- PROHIBIDO: precios, descuentos, ofertas, urgencia de venta.
+- PROHIBIDO: múltiples frases, bullets, listas, subtítulos.
+- La frase debe apuntar a UN concepto específico extraído del guión:
+  - Un dato interesante del producto
+  - Un beneficio tangible (sin vender)
+  - Un hecho educativo sobre el problema que resuelve
+  - Una afirmación aspiracional que conecte emocionalmente
+- Ejemplos de buen tono:
+  - "El café recién tostado pierde 60% de aroma en 2 semanas"
+  - "Tu piel se regenera mientras dormís"
+  - "Cultivado a 1,800 metros sobre el nivel del mar"
+  - "Menos químicos. Más tierra."
+
+EXTRACCIÓN INTELIGENTE DESDE EL GUIÓN:
+Lee el guión y elegí UNO de estos ángulos para la frase:
+1) Un dato verificable o curioso sobre el producto/proceso
+2) Un beneficio real expresado sin lenguaje de venta
+3) Un contraste sutil (sin nombrar competidores directamente)
+4) Una referencia al origen, proceso o calidad intrínseca
+5) Una observación educativa sobre el problema que resuelve
+
+REGLAS DE DISEÑO (CALIDAD VISUAL PRO):
+
+COMPOSICIÓN — FOTO-FIRST:
+- La imagen del producto/servicio en acción es la PROTAGONISTA ABSOLUTA.
+- Mínimo 85% del canvas es imagen.
+- La frase ocupa un espacio pequeño, bien integrada, sin competir.
+- Mucho aire visual. Si se ve vacío, está bien — eso es minimalismo.
+
+MÁRGENES OBLIGATORIOS:
+- Márgenes generosos: aprox 10–12% en todos los bordes.
+- La frase debe quedar dentro de la zona segura.
+PROHIBIDO: texto pegado a bordes.
+PROHIBIDO: número de slide.
+PROHIBIDO: dimensiones, píxeles o anotaciones técnicas.
+
+TIPOGRAFÍA — MINIMALISTA:
+- UNA sola familia tipográfica, sans-serif, peso limpio.
+- La frase puede ser regular o medium — NO bold agresivo.
+- Tamaño moderado: legible pero NO grita.
+- Color que contraste limpiamente con la imagen (blanco, negro, o neutral).
+- Opcional: overlay sutil detrás del texto para legibilidad.
+PROHIBIDO: tipografías decorativas, múltiples familias, efectos de texto.
+
+COLOR:
+- Los colores vienen de la imagen misma. No agregar paletas artificiales.
+- Si se necesita overlay, usar degradado transparente sutil (negro o blanco).
+- Cero badges, cero botones, cero elementos gráficos extra.
+
+IMAGEN — PRODUCTO EN ACCIÓN (OBLIGATORIO):
+- El producto/servicio debe mostrarse EN USO, no en exhibición estática.
+- Escena realista: manos interactuando, producto siendo usado, servicio siendo entregado.
+- Iluminación natural o de estudio limpia. Nada forzado.
+- Fondo contextual pero no distractivo.
+- Calidad editorial: como si fuera la foto de una revista o un feed de marca premium.
+PROHIBIDO: fondos blancos vacíos, mockups, collages, filtros agresivos.
+
+ENTREGABLE:
+Generá UNA imagen del post orgánico cumpliendo TODO:
+- Imagen del producto en acción como protagonista absoluta
+- UNA frase corta, educativa, NO de venta
+- Minimalismo extremo — si dudás, quitá elementos
+- Márgenes generosos
+- Calidad editorial premium
+- Sin CTA, sin bullets, sin badges, sin botones
+- NUNCA incluir anotaciones técnicas, dimensiones o medidas visibles
+
+GUIÓN DEL USUARIO:
+`
+}
 
 function buildPostPrompt(aspectRatio: PostAspectRatio): string {
   const isVertical = aspectRatio === '9:16'
@@ -249,9 +348,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let enhancedPrompt: string
 
     if (isPostMode) {
-      // POST MODE: Use the full director/designer master prompt + user's script
+      // POST MODE: Use the appropriate master prompt based on postStyle
       // Determine aspect ratio from request (default 9:16 for backward compat)
       const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+      const postStyle: PostStyle = imageParams.postStyle === 'organico' ? 'organico' : 'venta-directa'
       if (postAspectRatio === '9:16') {
         imageParams.width = 1080
         imageParams.height = 1920
@@ -259,7 +359,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         imageParams.width = 1080
         imageParams.height = 1440
       }
-      enhancedPrompt = buildPostPrompt(postAspectRatio) + userPrompt
+      enhancedPrompt = postStyle === 'organico'
+        ? buildOrganicPostPrompt(postAspectRatio) + userPrompt
+        : buildPostPrompt(postAspectRatio) + userPrompt
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
       enhancedPrompt = GEMINI_PROMPT_PREFIX + userPrompt

@@ -8,6 +8,8 @@ export interface UsageLimits {
   scriptsLimit: number
   imagesUsed: number
   imagesLimit: number
+  descriptionsUsed: number
+  descriptionsLimit: number
   loading: boolean
 }
 
@@ -23,7 +25,9 @@ export function useUsageLimits(): UsageLimits {
     scriptsUsed: 0,
     scriptsLimit: 10,
     imagesUsed: 0,
-    imagesLimit: 5,
+    imagesLimit: 1,
+    descriptionsUsed: 0,
+    descriptionsLimit: 10,
     loading: true
   })
 
@@ -45,7 +49,7 @@ export function useUsageLimits(): UsageLimits {
         // Fetch plan limits
         const { data: limits } = await supabase
           .from('plan_limits')
-          .select('scripts_per_month, images_per_month')
+          .select('scripts_per_month, images_per_month, descriptions_per_month')
           .eq('plan', plan)
           .single()
 
@@ -53,7 +57,7 @@ export function useUsageLimits(): UsageLimits {
         const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
         const { data: usage } = await supabase
           .from('usage')
-          .select('scripts_generated, images_generated')
+          .select('scripts_generated, images_generated, descriptions_generated')
           .eq('user_id', user!.id)
           .eq('period_start', currentMonth)
           .single()
@@ -63,7 +67,9 @@ export function useUsageLimits(): UsageLimits {
           scriptsUsed: usage?.scripts_generated || 0,
           scriptsLimit: limits?.scripts_per_month ?? 10,
           imagesUsed: usage?.images_generated || 0,
-          imagesLimit: limits?.images_per_month ?? 5,
+          imagesLimit: limits?.images_per_month ?? 1,
+          descriptionsUsed: usage?.descriptions_generated || 0,
+          descriptionsLimit: limits?.descriptions_per_month ?? 10,
           loading: false
         })
       } catch {

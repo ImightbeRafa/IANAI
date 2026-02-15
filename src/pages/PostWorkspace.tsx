@@ -25,6 +25,7 @@ import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 
 type PostAspectRatio = '9:16' | '3:4'
+type PostStyle = 'venta-directa' | 'organico'
 
 interface GeneratedPost {
   id: string
@@ -55,13 +56,19 @@ export default function PostWorkspace() {
   const [error, setError] = useState('')
   const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
+  const [postStyle, setPostStyle] = useState<PostStyle>('venta-directa')
   const usageLimits = useUsageLimits()
 
   const labels = {
     es: {
       back: 'Volver',
       title: 'Generar Post',
-      subtitle: 'Transforma un guión en un post de venta directa',
+      subtitle: 'Transforma un guión en un post visual profesional',
+      styleLabel: 'Tipo de Post',
+      styleDirectSale: 'Venta Directa',
+      styleDirectSaleDesc: 'Headline + bullets + CTA',
+      styleOrganic: 'Contenido Orgánico',
+      styleOrganicDesc: 'Foto + frase educativa',
       scriptLabel: 'Guión',
       selectScript: 'Seleccionar guión guardado',
       pasteScript: 'O pega un guión directamente',
@@ -88,7 +95,12 @@ export default function PostWorkspace() {
     en: {
       back: 'Back',
       title: 'Generate Post',
-      subtitle: 'Transform a script into a direct sale post',
+      subtitle: 'Transform a script into a professional visual post',
+      styleLabel: 'Post Type',
+      styleDirectSale: 'Direct Sale',
+      styleDirectSaleDesc: 'Headline + bullets + CTA',
+      styleOrganic: 'Organic Content',
+      styleOrganicDesc: 'Photo + educational phrase',
       scriptLabel: 'Script',
       selectScript: 'Select saved script',
       pasteScript: 'Or paste a script directly',
@@ -229,6 +241,7 @@ export default function PostWorkspace() {
       const requestBody: Record<string, unknown> = {
         prompt: script,
         mode: 'post',
+        postStyle,
         aspectRatio,
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,
@@ -351,6 +364,35 @@ export default function PostWorkspace() {
 
           {/* Content */}
           <div className="flex-1 overflow-auto px-5 py-4 space-y-5">
+            {/* Post Style selector */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                <Sparkles className="w-3.5 h-3.5 text-primary-500" />
+                {t.styleLabel}
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {([
+                  { id: 'venta-directa' as PostStyle, name: t.styleDirectSale, desc: t.styleDirectSaleDesc },
+                  { id: 'organico' as PostStyle, name: t.styleOrganic, desc: t.styleOrganicDesc },
+                ] as const).map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => setPostStyle(s.id)}
+                    className={`p-2.5 rounded-lg text-xs text-left transition-colors ${
+                      postStyle === s.id
+                        ? 'bg-primary-50 text-primary-700 border border-primary-300'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    <div className="font-medium">{s.name}</div>
+                    <div className={`text-[10px] mt-0.5 ${postStyle === s.id ? 'text-primary-500' : 'text-dark-400'}`}>
+                      {s.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Script selector */}
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">

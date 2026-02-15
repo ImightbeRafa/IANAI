@@ -17,27 +17,30 @@ interface Subscription {
 interface Usage {
   scripts_generated: number
   images_generated: number
+  descriptions_generated: number
 }
 
 const PLAN_DETAILS = {
-  free: { name: 'Gratis', price: 0, scripts: 10, images: 5, color: 'gray', paymentLink: null },
+  free: { name: 'Free', price: 0, scripts: 10, descriptions: 10, images: 1, color: 'gray', paymentLink: null },
   starter: { 
     name: 'Starter', 
-    price: 27, 
-    scripts: -1, 
-    images: 50, 
+    price: 33, 
+    scripts: 30, 
+    descriptions: -1, 
+    images: 5, 
     color: 'blue',
     paymentLink: 'https://tp.cr/l/TkRnM01RPT18MQ=='
   },
   pro: { 
-    name: 'Pro', 
-    price: 99, 
+    name: 'Premium', 
+    price: 49, 
     scripts: -1, 
-    images: 200, 
+    descriptions: -1, 
+    images: 100, 
     color: 'purple',
     paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ=='
   },
-  enterprise: { name: 'Enterprise', price: null, scripts: -1, images: -1, color: 'amber', paymentLink: null }
+  enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: null }
 }
 
 export default function Settings() {
@@ -76,7 +79,7 @@ export default function Settings() {
       const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
       const { data: usageData } = await supabase
         .from('usage')
-        .select('scripts_generated, images_generated')
+        .select('scripts_generated, images_generated, descriptions_generated')
         .eq('user_id', user.id)
         .eq('period_start', currentMonth)
         .single()
@@ -84,7 +87,7 @@ export default function Settings() {
       if (usageData) {
         setUsage(usageData as Usage)
       } else {
-        setUsage({ scripts_generated: 0, images_generated: 0 })
+        setUsage({ scripts_generated: 0, images_generated: 0, descriptions_generated: 0 })
       }
     }
     loadData()
@@ -267,15 +270,15 @@ export default function Settings() {
 
           {/* Current Usage */}
           {usage && subscription && (
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="p-4 bg-dark-50 rounded-xl">
                 <div className="flex items-center gap-2 mb-2">
                   <Zap className="w-4 h-4 text-amber-500" />
-                  <span className="text-sm font-medium text-dark-700">
+                  <span className="text-xs font-medium text-dark-700">
                     {language === 'es' ? 'Guiones' : 'Scripts'}
                   </span>
                 </div>
-                <div className="text-2xl font-bold text-dark-900">
+                <div className="text-xl font-bold text-dark-900">
                   {usage.scripts_generated}
                   <span className="text-sm font-normal text-dark-400">
                     / {PLAN_DETAILS[subscription.plan].scripts === -1 ? '∞' : PLAN_DETAILS[subscription.plan].scripts}
@@ -284,12 +287,26 @@ export default function Settings() {
               </div>
               <div className="p-4 bg-dark-50 rounded-xl">
                 <div className="flex items-center gap-2 mb-2">
-                  <Crown className="w-4 h-4 text-purple-500" />
-                  <span className="text-sm font-medium text-dark-700">
-                    {language === 'es' ? 'Imágenes' : 'Images'}
+                  <Zap className="w-4 h-4 text-blue-500" />
+                  <span className="text-xs font-medium text-dark-700">
+                    {language === 'es' ? 'Descripciones' : 'Descriptions'}
                   </span>
                 </div>
-                <div className="text-2xl font-bold text-dark-900">
+                <div className="text-xl font-bold text-dark-900">
+                  {usage.descriptions_generated}
+                  <span className="text-sm font-normal text-dark-400">
+                    / {PLAN_DETAILS[subscription.plan].descriptions === -1 ? '∞' : PLAN_DETAILS[subscription.plan].descriptions}
+                  </span>
+                </div>
+              </div>
+              <div className="p-4 bg-dark-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Crown className="w-4 h-4 text-purple-500" />
+                  <span className="text-xs font-medium text-dark-700">
+                    {language === 'es' ? 'Diseños' : 'Designs'}
+                  </span>
+                </div>
+                <div className="text-xl font-bold text-dark-900">
                   {usage.images_generated}
                   <span className="text-sm font-normal text-dark-400">
                     / {PLAN_DETAILS[subscription.plan].images === -1 ? '∞' : PLAN_DETAILS[subscription.plan].images}
@@ -321,7 +338,7 @@ export default function Settings() {
                       )}
                     </div>
                     <p className="text-sm text-dark-500 mt-1">
-                      {PLAN_DETAILS[plan].scripts} {language === 'es' ? 'guiones' : 'scripts'} + {PLAN_DETAILS[plan].images} {language === 'es' ? 'imágenes' : 'images'} / {language === 'es' ? 'mes' : 'month'}
+                      {PLAN_DETAILS[plan].scripts === -1 ? '∞' : PLAN_DETAILS[plan].scripts} {language === 'es' ? 'guiones' : 'scripts'} + {PLAN_DETAILS[plan].images} {language === 'es' ? 'diseños' : 'designs'} / {language === 'es' ? 'mes' : 'month'}
                     </p>
                   </div>
                   <div className="text-right">

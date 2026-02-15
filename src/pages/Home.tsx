@@ -65,32 +65,44 @@ export default function Home() {
         title: 'Planes simples, resultados reales',
         subtitle: 'Elegí el plan que mejor se adapte a tu negocio.',
         monthly: '/mes',
+        free: {
+          name: 'Free',
+          price: '$0',
+          features: [
+            '10 guiones al mes',
+            '10 descripciones al mes',
+            '1 diseño gráfico de regalo al mes'
+          ],
+          cta: 'Empezá gratis'
+        },
         starter: {
           name: 'Starter',
-          price: '$27',
+          price: '$33',
           features: [
-            'Guiones ilimitados'
+            '30 guiones al mes',
+            'Descripciones ilimitadas',
+            '5 diseños publicitarios de regalo al mes'
           ],
           cta: 'Comenzar'
         },
-        pro: {
-          name: 'Pro',
-          price: '$99',
+        premium: {
+          name: 'Premium',
           badge: 'Más popular',
+          price: '$49',
           features: [
             'Guiones ilimitados',
-            'IA + integraciones',
-            '30 posts generados con IA',
-            '10 videos generados con IA'
+            'Descripciones ilimitadas',
+            'Perfiles de clientes ideales (ICP)',
+            '100 diseños publicitarios al mes'
           ],
           cta: 'Comenzar'
         },
-        teams: {
-          name: 'Teams',
+        enterprise: {
+          name: 'Enterprise',
+          price: '$299',
           features: [
-            'Todo en Pro',
-            'Gestión de clientes',
-            'Colaboración en equipo',
+            'Todo ilimitado',
+            'Personalización del comportamiento de la IA',
             'Soporte prioritario'
           ],
           cta: 'Contactanos'
@@ -103,7 +115,8 @@ export default function Home() {
           'Genera guiones ganadores de venta',
           'Crea descripciones optimizadas para Ads',
           'Crea diferentes perfiles de consumidor',
-          'Genera posts personalizados para redes sociales',
+          'Genera posts de venta directa con IA',
+          'Genera posts de contenido orgánico con IA',
           'Generación de videos con IA'
         ]
       },
@@ -161,32 +174,44 @@ export default function Home() {
         title: 'Simple plans, real results',
         subtitle: 'Choose the plan that best fits your business.',
         monthly: '/mo',
+        free: {
+          name: 'Free',
+          price: '$0',
+          features: [
+            '10 scripts per month',
+            '10 descriptions per month',
+            '1 free graphic design per month'
+          ],
+          cta: 'Start for free'
+        },
         starter: {
           name: 'Starter',
-          price: '$27',
+          price: '$33',
           features: [
-            'Unlimited scripts'
+            '30 scripts per month',
+            'Unlimited descriptions',
+            '5 free ad designs per month'
           ],
           cta: 'Get Started'
         },
-        pro: {
-          name: 'Pro',
-          price: '$99',
+        premium: {
+          name: 'Premium',
           badge: 'Most popular',
+          price: '$49',
           features: [
             'Unlimited scripts',
-            'AI + integrations',
-            '30 AI-generated posts',
-            '10 AI-generated videos'
+            'Unlimited descriptions',
+            'Ideal Customer Profiles (ICP)',
+            '100 ad designs per month'
           ],
           cta: 'Get Started'
         },
-        teams: {
-          name: 'Teams',
+        enterprise: {
+          name: 'Enterprise',
+          price: '$299',
           features: [
-            'Everything in Pro',
-            'Client management',
-            'Team collaboration',
+            'Everything unlimited',
+            'AI behavior customization',
             'Priority support'
           ],
           cta: 'Contact us'
@@ -199,7 +224,8 @@ export default function Home() {
           'Generate winning sales scripts',
           'Create optimized descriptions for Ads',
           'Create different consumer profiles',
-          'Generate personalized posts for social media',
+          'Generate direct sale posts with AI',
+          'Generate organic content posts with AI',
           'AI video generation'
         ]
       },
@@ -223,6 +249,7 @@ export default function Home() {
     <PenTool className="w-6 h-6" />,
     <Users className="w-6 h-6" />,
     <Image className="w-6 h-6" />,
+    <Sparkles className="w-6 h-6" />,
     <Video className="w-6 h-6" />
   ]
 
@@ -518,7 +545,30 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
+            {/* Free Plan */}
+            <div className="bg-white border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.free.name}</h3>
+              <div className="flex items-baseline gap-1 mb-6 mt-2">
+                <span className="text-4xl font-bold text-dark-900">{labels.pricing.free.price}</span>
+                <span className="text-dark-500">{labels.pricing.monthly}</span>
+              </div>
+              <Link 
+                to="/signup"
+                className="w-full py-3 px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-8"
+              >
+                {labels.pricing.free.cta}
+              </Link>
+              <ul className="space-y-3 flex-1">
+                {labels.pricing.free.features.map((feature: string, i: number) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
             {/* Starter Plan */}
             <div className="bg-white border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.starter.name}</h3>
@@ -533,7 +583,7 @@ export default function Home() {
                 {labels.pricing.starter.cta}
               </Link>
               <ul className="space-y-3 flex-1">
-                {labels.pricing.starter.features.map((feature, i) => (
+                {labels.pricing.starter.features.map((feature: string, i: number) => (
                   <li key={i} className="flex items-start gap-3">
                     <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
                     <span className="text-dark-600">{feature}</span>
@@ -542,26 +592,26 @@ export default function Home() {
               </ul>
             </div>
 
-            {/* Pro Plan */}
+            {/* Premium Plan (highlighted) */}
             <div className="bg-gradient-to-b from-primary-50 to-white border-2 border-primary-200 rounded-2xl p-8 relative shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                 <div className="px-4 py-1 bg-primary-600 rounded-full text-sm font-medium text-white shadow-lg shadow-primary-500/30">
-                  {labels.pricing.pro.badge}
+                  {labels.pricing.premium.badge}
                 </div>
               </div>
-              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.pro.name}</h3>
+              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.premium.name}</h3>
               <div className="flex items-baseline gap-1 mb-6 mt-2">
-                <span className="text-4xl font-bold text-dark-900">{labels.pricing.pro.price}</span>
+                <span className="text-4xl font-bold text-dark-900">{labels.pricing.premium.price}</span>
                 <span className="text-dark-500">{labels.pricing.monthly}</span>
               </div>
               <Link 
                 to="/signup"
                 className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-medium transition-all shadow-lg shadow-primary-500/25 flex items-center justify-center gap-2 mb-8"
               >
-                {labels.pricing.pro.cta}
+                {labels.pricing.premium.cta}
               </Link>
               <ul className="space-y-3 flex-1">
-                {labels.pricing.pro.features.map((feature, i) => (
+                {labels.pricing.premium.features.map((feature: string, i: number) => (
                   <li key={i} className="flex items-start gap-3">
                     <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
                     <span className="text-dark-600">{feature}</span>
@@ -570,20 +620,21 @@ export default function Home() {
               </ul>
             </div>
 
-            {/* Teams Plan */}
+            {/* Enterprise Plan */}
             <div className="bg-white border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
-              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.teams.name}</h3>
+              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.enterprise.name}</h3>
               <div className="flex items-baseline gap-1 mb-6 mt-2">
-                <span className="text-4xl font-bold text-dark-900">Custom</span>
+                <span className="text-4xl font-bold text-dark-900">{labels.pricing.enterprise.price}</span>
+                <span className="text-dark-500">{labels.pricing.monthly}</span>
               </div>
               <Link 
                 to="/signup"
                 className="w-full py-3 px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-8"
               >
-                {labels.pricing.teams.cta}
+                {labels.pricing.enterprise.cta}
               </Link>
               <ul className="space-y-3 flex-1">
-                {labels.pricing.teams.features.map((feature, i) => (
+                {labels.pricing.enterprise.features.map((feature: string, i: number) => (
                   <li key={i} className="flex items-start gap-3">
                     <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
                     <span className="text-dark-600">{feature}</span>
