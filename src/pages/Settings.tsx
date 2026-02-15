@@ -40,7 +40,7 @@ const PLAN_DETAILS = {
     color: 'purple',
     paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ=='
   },
-  enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: null }
+  enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: 'https://tp.cr/l/TkRrMk53PT18MQ==' }
 }
 
 export default function Settings() {
@@ -318,7 +318,7 @@ export default function Settings() {
 
           {/* Plan Options */}
           <div className="space-y-3">
-            {(['starter', 'pro'] as const).map((plan) => (
+            {(['starter', 'pro', 'enterprise'] as const).map((plan) => (
               <div 
                 key={plan}
                 className={`p-4 rounded-xl border-2 transition-all ${
@@ -348,7 +348,10 @@ export default function Settings() {
                     <p className="text-xs text-dark-400">/ {language === 'es' ? 'mes' : 'month'}</p>
                   </div>
                 </div>
-                {subscription?.plan !== plan && subscription?.plan === 'free' && PLAN_DETAILS[plan].paymentLink && (
+                {subscription?.plan !== plan && PLAN_DETAILS[plan].paymentLink && (() => {
+                  const rank: Record<string, number> = { free: 0, starter: 1, pro: 2, enterprise: 3 }
+                  return (rank[subscription?.plan || 'free'] || 0) < (rank[plan] || 0)
+                })() && (
                   <button 
                     className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
                     disabled={loading}

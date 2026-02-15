@@ -317,17 +317,23 @@ function determinePlanFromData(data: TiloPayWebhookData): string {
   // First try to determine from amount (most reliable)
   const amount = parseFloat(String(data.amount || '0'))
   
-  if (amount >= 90) {
-    return 'pro' // Pro plan at $99/month
+  if (amount >= 200) {
+    return 'enterprise' // Enterprise plan at $299/month
+  }
+  if (amount >= 40) {
+    return 'pro' // Premium plan at $49/month
   }
   if (amount >= 20) {
-    return 'starter' // Starter plan at $27/month
+    return 'starter' // Starter plan at $33/month
   }
   
   // Fallback: try to determine plan from modality or plan_title
   const title = (data.modality || data.plan_title || '').toLowerCase()
   
-  if (title.includes('team') || title.includes('pro') || title.includes('empresa')) {
+  if (title.includes('enterprise') || title.includes('empresa')) {
+    return 'enterprise'
+  }
+  if (title.includes('premium') || title.includes('pro')) {
     return 'pro'
   }
   if (title.includes('starter') || title.includes('individual') || title.includes('básico')) {

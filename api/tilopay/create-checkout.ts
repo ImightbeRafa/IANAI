@@ -16,8 +16,9 @@ const TILOPAY_API_PASSWORD = process.env.TILOPAY_API_PASSWORD
 
 // TiloPay payment links (direct checkout links from TiloPay dashboard)
 const BASE_PAYMENT_LINKS: Record<string, string> = {
-  starter: 'https://tp.cr/l/TkRnM01RPT18MQ==',  // Individual plan
-  pro: 'https://tp.cr/l/TkRnM01nPT18MQ=='       // Teams plan
+  starter: 'https://tp.cr/l/TkRnM01RPT18MQ==',     // Starter $33/mo
+  pro: 'https://tp.cr/l/TkRnM01nPT18MQ==',          // Premium $49/mo
+  enterprise: 'https://tp.cr/l/TkRrMk53PT18MQ=='    // Enterprise $299/mo
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
