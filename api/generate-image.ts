@@ -4,6 +4,7 @@ import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
+import { findColorPaletteById } from './data/color-palettes.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -488,18 +489,26 @@ Edit instruction: ${editPrompt}`
         imageParams.height = 1440
       }
 
+      // Resolve color palette override (if any)
+      const colorPalette = imageParams.colorPaletteId
+        ? findColorPaletteById(imageParams.colorPaletteId as string)
+        : undefined
+      const colorOverride = colorPalette && colorPalette.promptEs
+        ? '\n\n' + colorPalette.promptEs + '\n'
+        : ''
+
       if (postStyle === 'preset' && imageParams.presetId) {
-        // PRESET MODE: Use preset master prompt + user script
+        // PRESET MODE: Use preset master prompt + color override + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = preset.masterPromptEs + colorOverride + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
           // Fallback to venta-directa if preset not found
-          enhancedPrompt = buildPostPrompt(postAspectRatio) + userPrompt
+          enhancedPrompt = buildPostPrompt(postAspectRatio) + colorOverride + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = buildPostPrompt(postAspectRatio) + userPrompt
+        enhancedPrompt = buildPostPrompt(postAspectRatio) + colorOverride + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)

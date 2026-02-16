@@ -3,7 +3,6 @@ import { useLanguage } from '../contexts/LanguageContext'
 import { 
   Check, 
   ArrowRight,
-  Sparkles,
   TrendingDown,
   UserCheck,
   BarChart3,
@@ -13,9 +12,7 @@ import {
   Image,
   Video,
   ChevronRight,
-  Play,
-  Heart,
-  Eye
+  Layers
 } from 'lucide-react'
 
 export default function Home() {
@@ -32,7 +29,7 @@ export default function Home() {
       hero: {
         title: 'Tu nueva herramienta para crear',
         titleHighlight: 'anuncios ganadores',
-        subtitle: 'Advance AI es un generador de guiones entrenado con +1K anuncios ganadores, con enfoque en ventas.',
+        subtitle: 'Genera guiones de venta y posts profesionales con IA. Entrenado con +1K anuncios de alto rendimiento.',
         cta: 'Empezá hoy'
       },
       benefits: {
@@ -45,10 +42,9 @@ export default function Home() {
       },
       howItWorks: {
         title: 'Cómo funciona',
-        steps: [
-          'Solo nos das el contexto de tu negocio',
-          'Te entregamos guiones ganadores listos para grabar'
-        ]
+        step1: { num: '01', title: 'Tu negocio', desc: 'Describí tu producto, servicio y audiencia objetivo' },
+        step2: { num: '02', title: 'IA genera', desc: 'Guiones ganadores + posts profesionales al instante' },
+        step3: { num: '03', title: 'Publicá', desc: 'Contenido listo para grabar, diseñar y publicar' }
       },
       socialProof: {
         title: 'Creado con Advance AI',
@@ -120,6 +116,32 @@ export default function Home() {
           'Generación de videos con IA'
         ]
       },
+      scripts: {
+        badge: 'Guiones con IA',
+        title: 'Guiones ganadores listos para grabar',
+        subtitle: 'Entrenado con +1K anuncios ganadores. Solo danos el contexto de tu negocio y te entregamos guiones con estructura probada que vende.',
+        bullets: [
+          'Estructura Gancho → Desarrollo → CTA',
+          'Entrenado con anuncios de alto rendimiento',
+          'Personalizado para tu producto y audiencia',
+          'Descripciones optimizadas para Ads incluidas'
+        ]
+      },
+      posts: {
+        badge: 'Posts con IA',
+        title: '9 estilos de post profesional',
+        subtitle: 'Desde venta directa hasta testimonios y comparaciones. Generá posts de nivel agencia en segundos.',
+        bullets: [
+          'Venta directa + 8 presets de diseño profesional',
+          'Imágenes generadas por IA de alta calidad',
+          'Formatos: Reel / Story y Feed',
+          'Cada preset con prompt maestro optimizado'
+        ]
+      },
+      presets: {
+        title: 'Estilos de post disponibles',
+        subtitle: 'Cada preset tiene un prompt maestro entrenado para generar diseños profesionales.'
+      },
       cta: {
         title: 'Empezá a crear anuncios que venden',
         subtitle: 'Unite a negocios que ya generan guiones de alto impacto con IA.',
@@ -141,7 +163,7 @@ export default function Home() {
       hero: {
         title: 'Your new tool to create',
         titleHighlight: 'winning ads',
-        subtitle: 'Advance AI is a script generator trained with +1K winning ads, focused on sales.',
+        subtitle: 'Generate sales scripts and professional posts with AI. Trained with +1K high-performance ads.',
         cta: 'Get Started'
       },
       benefits: {
@@ -154,10 +176,9 @@ export default function Home() {
       },
       howItWorks: {
         title: 'How it works',
-        steps: [
-          'Just give us the context of your business',
-          'We deliver winning scripts ready to record'
-        ]
+        step1: { num: '01', title: 'Your business', desc: 'Describe your product, service and target audience' },
+        step2: { num: '02', title: 'AI generates', desc: 'Winning scripts + professional posts instantly' },
+        step3: { num: '03', title: 'Publish', desc: 'Content ready to record, design and publish' }
       },
       socialProof: {
         title: 'Created with Advance AI',
@@ -229,6 +250,32 @@ export default function Home() {
           'AI video generation'
         ]
       },
+      scripts: {
+        badge: 'AI Scripts',
+        title: 'Winning scripts ready to record',
+        subtitle: 'Trained with +1K winning ads. Just give us your business context and we deliver scripts with a proven structure that sells.',
+        bullets: [
+          'Proven structure: Hook → Development → CTA',
+          'Trained with high-performance ads',
+          'Personalized for your product and audience',
+          'Optimized ad descriptions included'
+        ]
+      },
+      posts: {
+        badge: 'AI Posts',
+        title: '9 professional post styles',
+        subtitle: 'From direct sale to testimonials and comparisons. Generate agency-level posts in seconds.',
+        bullets: [
+          'Direct sale + 8 professional design presets',
+          'High quality AI-generated images',
+          'Formats: Reel / Story and Feed',
+          'Each preset with optimized master prompt'
+        ]
+      },
+      presets: {
+        title: 'Available post styles',
+        subtitle: 'Each preset has a trained master prompt to generate professional designs.'
+      },
       cta: {
         title: 'Start creating ads that sell',
         subtitle: 'Join businesses already generating high-impact scripts with AI.',
@@ -244,22 +291,13 @@ export default function Home() {
 
   const labels = t[language]
 
-  const featureIcons = [
-    <FileText className="w-6 h-6" />,
-    <PenTool className="w-6 h-6" />,
-    <Users className="w-6 h-6" />,
-    <Image className="w-6 h-6" />,
-    <Sparkles className="w-6 h-6" />,
-    <Video className="w-6 h-6" />
-  ]
-
-  const reelCards = [
-    { color: 'from-rose-400 to-pink-500', views: '2.4M', likes: '184K', pos: 'left-[2%] top-[15%]', anim: 'animate-float-up', delay: '' },
-    { color: 'from-violet-400 to-purple-500', views: '890K', likes: '72K', pos: 'left-[8%] top-[55%]', anim: 'animate-float-down', delay: 'animation-delay-2' },
-    { color: 'from-amber-400 to-orange-500', views: '1.1M', likes: '95K', pos: 'right-[2%] top-[20%]', anim: 'animate-float-slow', delay: 'animation-delay-1' },
-    { color: 'from-emerald-400 to-teal-500', views: '3.2M', likes: '210K', pos: 'right-[8%] top-[58%]', anim: 'animate-float-up', delay: 'animation-delay-3' },
-    { color: 'from-sky-400 to-blue-500', views: '567K', likes: '41K', pos: 'left-[18%] top-[35%]', anim: 'animate-float-down', delay: 'animation-delay-4' },
-    { color: 'from-fuchsia-400 to-pink-600', views: '1.8M', likes: '132K', pos: 'right-[18%] top-[40%]', anim: 'animate-float-slow', delay: 'animation-delay-2' },
+  const floatingPosts = [
+    { img: '/presets/01_Features_Benefits/020_Access_183.png', label: 'Features', pos: 'left-[2%] top-[15%]', anim: 'animate-float-up', delay: '' },
+    { img: '/presets/03_Social_Proof/007_Access_93.png', label: 'Social Proof', pos: 'left-[8%] top-[55%]', anim: 'animate-float-down', delay: 'animation-delay-2' },
+    { img: '/presets/07_Deals_Discounts/014_Access_136.png', label: 'Deals', pos: 'right-[2%] top-[20%]', anim: 'animate-float-slow', delay: 'animation-delay-1' },
+    { img: '/presets/08_Testimonial/013_Access_147.png', label: 'Testimonial', pos: 'right-[8%] top-[58%]', anim: 'animate-float-up', delay: 'animation-delay-3' },
+    { img: '/presets/06_Collage/009_Access_255-256.png', label: 'Collage', pos: 'left-[18%] top-[35%]', anim: 'animate-float-down', delay: 'animation-delay-4' },
+    { img: '/presets/05_Before_After/005_Access_99.png', label: 'Before/After', pos: 'right-[18%] top-[40%]', anim: 'animate-float-slow', delay: 'animation-delay-2' },
   ]
 
   return (
@@ -301,33 +339,18 @@ export default function Home() {
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-sky-500/5 rounded-full blur-3xl animate-pulse-soft animation-delay-2" />
         </div>
 
-        {/* Floating Reel Cards — hidden on mobile for cleanliness */}
+        {/* Floating Post Thumbnails — hidden on mobile */}
         <div className="hidden lg:block absolute inset-0 pointer-events-none">
-          {reelCards.map((card, i) => (
+          {floatingPosts.map((post, i) => (
             <div
               key={i}
-              className={`absolute ${card.pos} ${card.anim} ${card.delay}`}
-              style={{ opacity: 0.45 }}
+              className={`absolute ${post.pos} ${post.anim} ${post.delay}`}
+              style={{ opacity: 0.35 }}
             >
-              <div className="w-[100px] rounded-2xl overflow-hidden shadow-xl border border-dark-100 bg-white/90 backdrop-blur-sm">
-                {/* Video thumbnail */}
-                <div className={`h-[140px] bg-gradient-to-br ${card.color} relative`}>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-8 h-8 bg-white/30 backdrop-blur-sm rounded-full flex items-center justify-center">
-                      <Play className="w-4 h-4 text-white fill-white" />
-                    </div>
-                  </div>
-                </div>
-                {/* Engagement bar */}
-                <div className="px-2 py-2 flex items-center justify-between">
-                  <div className="flex items-center gap-1">
-                    <Heart className="w-3 h-3 text-rose-400" />
-                    <span className="text-[9px] text-dark-500 font-medium">{card.likes}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Eye className="w-3 h-3 text-dark-400" />
-                    <span className="text-[9px] text-dark-500 font-medium">{card.views}</span>
-                  </div>
+              <div className="w-[110px] rounded-2xl overflow-hidden shadow-2xl border border-dark-100 bg-white">
+                <img src={post.img} alt={post.label} className="w-full h-[140px] object-cover" />
+                <div className="px-2 py-1.5 text-center">
+                  <span className="text-[9px] text-dark-500 font-semibold">{post.label}</span>
                 </div>
               </div>
             </div>
@@ -401,26 +424,183 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Features List Section — moved up */}
-      <section id="features" className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-50/50">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-14">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full">
-              <Sparkles className="w-4 h-4 text-primary-600" />
-              <span className="text-sm text-primary-700 font-medium">{labels.features.badge}</span>
+      {/* How it Works */}
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-white to-dark-50/30">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 text-center mb-16">
+            {labels.howItWorks.title}
+          </h2>
+          <div className="grid md:grid-cols-3 gap-8">
+            {[labels.howItWorks.step1, labels.howItWorks.step2, labels.howItWorks.step3].map((step, i) => (
+              <div key={i} className="relative text-center group">
+                {i < 2 && (
+                  <div className="hidden md:block absolute top-8 left-[60%] w-[80%] h-px bg-gradient-to-r from-primary-300 to-transparent" />
+                )}
+                <div className="w-16 h-16 bg-primary-100 rounded-2xl flex items-center justify-center mx-auto mb-5 group-hover:bg-primary-600 group-hover:text-white transition-all duration-300 text-primary-600">
+                  <span className="text-xl font-bold">{step.num}</span>
+                </div>
+                <h3 className="text-lg font-bold text-dark-900 mb-2">{step.title}</h3>
+                <p className="text-dark-500 text-sm leading-relaxed">{step.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Guiones Showcase */}
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-white">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+            {/* Left — Script Mockup */}
+            <div className="relative">
+              <div className="bg-dark-900 rounded-2xl p-6 shadow-2xl border border-dark-700">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-3 h-3 rounded-full bg-red-400" />
+                  <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                  <div className="w-3 h-3 rounded-full bg-green-400" />
+                  <span className="text-dark-400 text-xs ml-2">Advance AI — Script Generator</span>
+                </div>
+                <div className="space-y-3">
+                  <div className="bg-primary-500/10 border border-primary-500/20 rounded-xl px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-wider text-primary-400 font-semibold mb-1">GANCHO</div>
+                    <p className="text-sm text-dark-200">{language === 'es' ? '¿Sabías que el 80% de los anuncios fallan en los primeros 3 segundos?' : 'Did you know 80% of ads fail in the first 3 seconds?'}</p>
+                  </div>
+                  <div className="bg-dark-800 rounded-xl px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-wider text-dark-400 font-semibold mb-1">{language === 'es' ? 'DESARROLLO' : 'DEVELOPMENT'}</div>
+                    <p className="text-sm text-dark-300">{language === 'es' ? 'Nuestro método usa la estructura de los anuncios más exitosos del mercado para que tu mensaje conecte al instante...' : 'Our method uses the structure of the most successful ads on the market so your message connects instantly...'}</p>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-400 font-semibold mb-1">CTA</div>
+                    <p className="text-sm text-dark-200">{language === 'es' ? 'Empezá hoy — los primeros 10 guiones son gratis.' : 'Start today — the first 10 scripts are free.'}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="absolute -bottom-4 -right-4 w-24 h-24 bg-primary-500/10 rounded-full blur-2xl" />
+            </div>
+
+            {/* Right — Text */}
+            <div>
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-6">
+                <FileText className="w-4 h-4 text-primary-600" />
+                <span className="text-sm text-primary-700 font-medium">{labels.scripts.badge}</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 mb-4 leading-tight">
+                {labels.scripts.title}
+              </h2>
+              <p className="text-lg text-dark-500 mb-8 leading-relaxed">
+                {labels.scripts.subtitle}
+              </p>
+              <ul className="space-y-3">
+                {labels.scripts.bullets.map((b: string, i: number) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600 font-medium">{b}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
+        </div>
+      </section>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {labels.features.list.map((feature, i) => (
-              <div 
-                key={i}
-                className="flex flex-col items-center text-center gap-4 bg-white border border-dark-100 rounded-2xl p-6 hover:border-primary-200 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 group"
-              >
-                <div className="w-14 h-14 bg-primary-50 rounded-2xl flex items-center justify-center flex-shrink-0 text-primary-600 group-hover:bg-primary-600 group-hover:text-white transition-all duration-300">
-                  {featureIcons[i]}
+      {/* Posts Showcase */}
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-50/30">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+            {/* Left — Text */}
+            <div className="order-2 lg:order-1">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-6">
+                <Image className="w-4 h-4 text-primary-600" />
+                <span className="text-sm text-primary-700 font-medium">{labels.posts.badge}</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 mb-4 leading-tight">
+                {labels.posts.title}
+              </h2>
+              <p className="text-lg text-dark-500 mb-8 leading-relaxed">
+                {labels.posts.subtitle}
+              </p>
+              <ul className="space-y-3">
+                {labels.posts.bullets.map((b: string, i: number) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600 font-medium">{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Right — Post Thumbnails Grid */}
+            <div className="order-1 lg:order-2">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { img: '/presets/01_Features_Benefits/020_Access_183.png', name: language === 'es' ? 'Características' : 'Features' },
+                  { img: '/presets/07_Deals_Discounts/014_Access_136.png', name: language === 'es' ? 'Ofertas' : 'Deals' },
+                  { img: '/presets/04_Comparison/014_Access_71.png', name: language === 'es' ? 'Comparación' : 'Comparison' },
+                  { img: '/presets/08_Testimonial/013_Access_147.png', name: language === 'es' ? 'Testimonio' : 'Testimonial' },
+                ].map((item, i) => (
+                  <div key={i} className="relative group overflow-hidden rounded-2xl shadow-lg border border-dark-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <img src={item.img} alt={item.name} className="w-full aspect-[3/4] object-cover" />
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-3">
+                      <span className="text-white text-xs font-semibold">{item.name}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Presets Gallery */}
+      <section id="features" className="py-24 px-4 sm:px-6 lg:px-8 bg-white overflow-hidden">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-14">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-4">
+              <Layers className="w-4 h-4 text-primary-600" />
+              <span className="text-sm text-primary-700 font-medium">{labels.features.badge}</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 mb-3">
+              {labels.presets.title}
+            </h2>
+            <p className="text-lg text-dark-500 max-w-2xl mx-auto">
+              {labels.presets.subtitle}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { img: '/presets/01_Features_Benefits/020_Access_183.png', name: language === 'es' ? 'Características y Beneficios' : 'Features & Benefits', count: 78 },
+              { img: '/presets/02_Product_Showcase/018_Access_132.png', name: language === 'es' ? 'Exhibición de Producto' : 'Product Showcase', count: 70 },
+              { img: '/presets/03_Social_Proof/007_Access_93.png', name: language === 'es' ? 'Prueba Social' : 'Social Proof', count: 27 },
+              { img: '/presets/04_Comparison/014_Access_71.png', name: language === 'es' ? 'Comparación' : 'Comparison', count: 27 },
+              { img: '/presets/05_Before_After/005_Access_99.png', name: language === 'es' ? 'Antes y Después' : 'Before & After', count: 18 },
+              { img: '/presets/06_Collage/009_Access_255-256.png', name: language === 'es' ? 'Collage' : 'Collage', count: 34 },
+              { img: '/presets/07_Deals_Discounts/014_Access_136.png', name: language === 'es' ? 'Ofertas y Descuentos' : 'Deals & Discounts', count: 53 },
+              { img: '/presets/08_Testimonial/013_Access_147.png', name: language === 'es' ? 'Testimonio' : 'Testimonial', count: 49 },
+            ].map((preset, i) => (
+              <div key={i} className="group relative overflow-hidden rounded-2xl shadow-md border border-dark-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-default">
+                <img src={preset.img} alt={preset.name} className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-transform duration-500" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                <div className="absolute bottom-0 inset-x-0 p-3">
+                  <span className="text-white text-xs sm:text-sm font-bold block leading-tight">{preset.name}</span>
+                  <span className="text-white/60 text-[10px] mt-0.5 block">{preset.count} {language === 'es' ? 'plantillas' : 'templates'}</span>
                 </div>
-                <span className="text-base text-dark-700 font-medium leading-snug">{feature}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Additional Features row */}
+          <div className="grid sm:grid-cols-3 gap-4 mt-12">
+            {[
+              { icon: <PenTool className="w-5 h-5" />, text: language === 'es' ? 'Descripciones optimizadas para Ads' : 'Optimized ad descriptions' },
+              { icon: <Users className="w-5 h-5" />, text: language === 'es' ? 'Perfiles de cliente ideal (ICP)' : 'Ideal Customer Profiles (ICP)' },
+              { icon: <Video className="w-5 h-5" />, text: language === 'es' ? 'Generación de videos con IA' : 'AI video generation' },
+            ].map((feat, i) => (
+              <div key={i} className="flex items-center gap-3 bg-dark-50 border border-dark-100 rounded-xl p-4 hover:border-primary-200 transition-colors">
+                <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center text-primary-600 flex-shrink-0">
+                  {feat.icon}
+                </div>
+                <span className="text-sm text-dark-700 font-medium">{feat.text}</span>
               </div>
             ))}
           </div>

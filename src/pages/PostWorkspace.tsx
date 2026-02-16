@@ -26,6 +26,7 @@ import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
 import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import { IMAGE_PRESETS } from '../data/image-presets'
+import { COLOR_PALETTES } from '../data/color-palettes'
 
 type PostAspectRatio = '9:16' | '3:4'
 
@@ -60,6 +61,7 @@ export default function PostWorkspace() {
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const [postStyle, setPostStyle] = useState<string>('venta-directa')
   const [showStyleDropdown, setShowStyleDropdown] = useState(false)
+  const [colorPaletteId, setColorPaletteId] = useState<string>('auto')
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
   const [editPrompt, setEditPrompt] = useState('')
   const [editing, setEditing] = useState(false)
@@ -103,7 +105,8 @@ export default function PostWorkspace() {
       grokImagine: 'Grok Imagine',
       formatLabel: 'Formato',
       reelStory: 'Reel / Story',
-      squarePost: 'Post Feed'
+      squarePost: 'Post Feed',
+      colorLabel: 'Paleta de Colores'
     },
     en: {
       back: 'Back',
@@ -140,7 +143,8 @@ export default function PostWorkspace() {
       grokImagine: 'Grok Imagine',
       formatLabel: 'Format',
       reelStory: 'Reel / Story',
-      squarePost: 'Feed Post'
+      squarePost: 'Feed Post',
+      colorLabel: 'Color Palette'
     }
   }
 
@@ -264,7 +268,8 @@ export default function PostWorkspace() {
         aspectRatio,
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,
-        model: imageModel
+        model: imageModel,
+        colorPaletteId: colorPaletteId !== 'auto' ? colorPaletteId : undefined
       }
 
       if (uploadedImages.length > 0) {
@@ -482,7 +487,7 @@ export default function PostWorkspace() {
     <Layout>
       <div className="h-full flex flex-col lg:flex-row">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 lg:overflow-hidden">
+        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh] lg:max-h-none">
           {/* Header */}
           <div className="px-5 py-4 border-b border-dark-100">
             <Link
@@ -568,6 +573,42 @@ export default function PostWorkspace() {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Color Palette selector */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                <Sparkles className="w-3.5 h-3.5 text-primary-500" />
+                {t.colorLabel}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {COLOR_PALETTES.map(palette => (
+                  <button
+                    key={palette.id}
+                    onClick={() => setColorPaletteId(palette.id)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
+                      colorPaletteId === palette.id
+                        ? 'bg-primary-50 text-primary-700 border border-primary-300 shadow-sm'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    {palette.colors.length > 0 ? (
+                      <span className="flex gap-0.5">
+                        {palette.colors.slice(0, 3).map((c, i) => (
+                          <span
+                            key={i}
+                            className="w-3 h-3 rounded-full border border-dark-200/50"
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="w-3 h-3 rounded-full bg-gradient-to-br from-primary-300 to-sky-300 border border-dark-200/50" />
+                    )}
+                    {language === 'es' ? palette.nameEs : palette.name}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Script selector */}
