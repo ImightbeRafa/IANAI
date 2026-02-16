@@ -493,22 +493,24 @@ Edit instruction: ${editPrompt}`
       const colorPalette = imageParams.colorPaletteId
         ? findColorPaletteById(imageParams.colorPaletteId as string)
         : undefined
-      const colorOverride = colorPalette && colorPalette.promptEs
-        ? '\n\n' + colorPalette.promptEs + '\n'
+      // Short directive prefix — placed BEFORE the master prompt so Gemini
+      // reads it as a hard constraint, not a design-consultation paragraph.
+      const colorPrefix = colorPalette && colorPalette.promptEs
+        ? 'IMPORTANTE: ' + colorPalette.promptEs + ' Ignora cualquier otro color mencionado en las instrucciones siguientes.\n\n'
         : ''
 
       if (postStyle === 'preset' && imageParams.presetId) {
-        // PRESET MODE: Use preset master prompt + color override + user script
+        // PRESET MODE: color prefix + preset master prompt + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = preset.masterPromptEs + colorOverride + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
           // Fallback to venta-directa if preset not found
-          enhancedPrompt = buildPostPrompt(postAspectRatio) + colorOverride + userPrompt
+          enhancedPrompt = colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = buildPostPrompt(postAspectRatio) + colorOverride + userPrompt
+        enhancedPrompt = colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
