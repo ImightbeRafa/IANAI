@@ -93,50 +93,56 @@ Lee el guión y elegí UNO de estos ángulos para la frase:
 4) Una referencia al origen, proceso o calidad intrínseca
 5) Una observación educativa sobre el problema que resuelve
 
-REGLAS DE DISEÑO (CALIDAD VISUAL PRO):
+REGLAS DE DISEÑO (CALIDAD VISUAL PRO — ESTILO EDITORIAL DE MARCA PREMIUM):
 
-COMPOSICIÓN — FOTO-FIRST:
+COMPOSICIÓN — FOTO-FIRST, EDGE-TO-EDGE:
 - La imagen del producto/servicio en acción es la PROTAGONISTA ABSOLUTA.
-- Mínimo 85% del canvas es imagen.
-- La frase ocupa un espacio pequeño, bien integrada, sin competir.
-- Mucho aire visual. Si se ve vacío, está bien — eso es minimalismo.
+- La fotografía cubre el 100% del canvas, de borde a borde, SIN marcos, SIN bordes blancos, SIN padding externo.
+- La frase va directamente sobre la imagen, integrada con la composición fotográfica.
+- El resultado debe verse como un post de una marca de lujo: limpio, seguro, editorial.
+PROHIBIDO: bordes blancos, marcos, padding blanco alrededor de la imagen, fondos sólidos detrás de la foto.
+PROHIBIDO: cajas de texto rectangulares blancas o de color sólido.
 
-MÁRGENES OBLIGATORIOS:
-- Márgenes generosos: aprox 10–12% en todos los bordes.
-- La frase debe quedar dentro de la zona segura.
+MÁRGENES INTERNOS:
+- Márgenes internos del texto: aprox 8–10% desde los bordes del canvas.
+- La frase debe quedar dentro de la zona segura, pero la IMAGEN llega hasta los bordes.
 PROHIBIDO: texto pegado a bordes.
 PROHIBIDO: número de slide.
 PROHIBIDO: dimensiones, píxeles o anotaciones técnicas.
 
-TIPOGRAFÍA — MINIMALISTA:
-- UNA sola familia tipográfica, sans-serif, peso limpio.
-- La frase puede ser regular o medium — NO bold agresivo.
-- Tamaño moderado: legible pero NO grita.
-- Color que contraste limpiamente con la imagen (blanco, negro, o neutral).
-- Opcional: overlay sutil detrás del texto para legibilidad.
-PROHIBIDO: tipografías decorativas, múltiples familias, efectos de texto.
+TIPOGRAFÍA — BOLD, LIMPIA, CON PRESENCIA:
+- UNA sola familia tipográfica, sans-serif moderna (estilo Helvetica Neue, Inter, Montserrat, o similar).
+- Peso: BOLD o SEMIBOLD — la frase debe tener presencia visual fuerte y ser fácil de leer.
+- Tamaño: grande y confiado. Debe verse bien en un teléfono móvil.
+- Color: BLANCO puro (#FFFFFF) sobre zonas oscuras de la imagen, o NEGRO puro sobre zonas claras.
+- Tracking (espaciado entre letras): ligeramente expandido para un look premium.
+- Para garantizar legibilidad, usar UN degradado oscuro sutil (de negro transparente a transparente) detrás del texto — NO un rectángulo sólido, solo un gradient natural que se funde con la foto.
+- Mayúsculas o title case — lo que se vea más limpio según la frase.
+PROHIBIDO: tipografías decorativas, script, serif, sombras de texto gruesas, glow, outline de texto.
+PROHIBIDO: cajas o rectángulos de color detrás del texto.
 
-COLOR:
-- Los colores vienen de la imagen misma. No agregar paletas artificiales.
-- Si se necesita overlay, usar degradado transparente sutil (negro o blanco).
-- Cero badges, cero botones, cero elementos gráficos extra.
+COLOR Y ATMÓSFERA:
+- Los colores vienen de la fotografía misma. Tonos naturales, cálidos o moody según el producto.
+- La imagen debe tener un tratamiento de color editorial: ligeramente desaturada, con contraste elevado, o con tonos cálidos — como una foto de revista.
+- Si se necesita legibilidad para el texto, usar degradado oscuro transparente (nunca blanco sólido).
+- Cero badges, cero botones, cero elementos gráficos extra, cero bordes.
 
 IMAGEN — PRODUCTO EN ACCIÓN (OBLIGATORIO):
 - El producto/servicio debe mostrarse EN USO, no en exhibición estática.
 - Escena realista: manos interactuando, producto siendo usado, servicio siendo entregado.
-- Iluminación natural o de estudio limpia. Nada forzado.
-- Fondo contextual pero no distractivo.
-- Calidad editorial: como si fuera la foto de una revista o un feed de marca premium.
-PROHIBIDO: fondos blancos vacíos, mockups, collages, filtros agresivos.
+- Iluminación: natural, cálida, o de estudio con carácter. Con mood y personalidad.
+- Fondo contextual con profundidad (bokeh, ambiente, textura) — no plano ni distractivo.
+- Calidad editorial: como la portada de Kinfolk, Cereal Magazine, o el feed de una marca como Aesop.
+PROHIBIDO: fondos blancos vacíos, fondos sólidos planos, mockups, collages, filtros agresivos.
 
 ENTREGABLE:
 Generá UNA imagen del post orgánico cumpliendo TODO:
-- Imagen del producto en acción como protagonista absoluta
-- UNA frase corta, educativa, NO de venta
-- Minimalismo extremo — si dudás, quitá elementos
-- Márgenes generosos
-- Calidad editorial premium
-- Sin CTA, sin bullets, sin badges, sin botones
+- Fotografía edge-to-edge, SIN bordes blancos ni marcos de ningún tipo
+- Producto en acción como protagonista absoluta
+- UNA frase corta, BOLD, legible, educativa, NO de venta
+- Texto directamente sobre la foto con degradado sutil para legibilidad
+- Estética editorial premium — como si fuera de una marca de lujo minimalista
+- Sin CTA, sin bullets, sin badges, sin botones, sin marcos
 - NUNCA incluir anotaciones técnicas, dimensiones o medidas visibles
 
 GUIÓN DEL USUARIO:
