@@ -3,6 +3,7 @@ import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
+import { findPresetById } from './data/image-presets.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -43,7 +44,6 @@ Solicitud del usuario: `
 // CRITICAL: No pixel values, no dimension annotations — the AI renders them.
 // =============================================
 type PostAspectRatio = '9:16' | '3:4'
-type PostStyle = 'venta-directa' | 'organico'
 
 // =============================================
 // ORGANIC POST PROMPT — Minimalistic, educational, non-sales
@@ -479,7 +479,7 @@ Edit instruction: ${editPrompt}`
       // POST MODE: Use the appropriate master prompt based on postStyle
       // Determine aspect ratio from request (default 9:16 for backward compat)
       const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
-      const postStyle: PostStyle = imageParams.postStyle === 'organico' ? 'organico' : 'venta-directa'
+      const postStyle: string = imageParams.postStyle || 'venta-directa'
       if (postAspectRatio === '9:16') {
         imageParams.width = 1080
         imageParams.height = 1920
@@ -487,9 +487,20 @@ Edit instruction: ${editPrompt}`
         imageParams.width = 1080
         imageParams.height = 1440
       }
-      enhancedPrompt = postStyle === 'organico'
-        ? buildOrganicPostPrompt(postAspectRatio) + userPrompt
-        : buildPostPrompt(postAspectRatio) + userPrompt
+
+      if (postStyle === 'preset' && imageParams.presetId) {
+        // PRESET MODE: Use preset master prompt + user script
+        const preset = findPresetById(imageParams.presetId as string)
+        if (preset) {
+          enhancedPrompt = preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+        } else {
+          // Fallback to venta-directa if preset not found
+          enhancedPrompt = buildPostPrompt(postAspectRatio) + userPrompt
+        }
+      } else {
+        // VENTA DIRECTA (default)
+        enhancedPrompt = buildPostPrompt(postAspectRatio) + userPrompt
+      }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
       enhancedPrompt = GEMINI_PROMPT_PREFIX + userPrompt
