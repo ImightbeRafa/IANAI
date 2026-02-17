@@ -816,3 +816,159 @@ export async function deleteContextDocument(docId: string): Promise<void> {
 
   if (error) throw error
 }
+
+// =============================================
+// CUSTOM COLOR PALETTE FUNCTIONS
+// =============================================
+export interface CustomColorPalette {
+  id: string
+  user_id: string
+  name: string
+  color_1: string
+  color_2: string
+  color_3: string
+  created_at: string
+}
+
+export async function getCustomPalettes(userId: string): Promise<CustomColorPalette[]> {
+  const { data, error } = await supabase
+    .from('custom_color_palettes')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createCustomPalette(
+  userId: string,
+  name: string,
+  colors: [string, string, string]
+): Promise<CustomColorPalette> {
+  const { data, error } = await supabase
+    .from('custom_color_palettes')
+    .insert({
+      user_id: userId,
+      name,
+      color_1: colors[0],
+      color_2: colors[1],
+      color_3: colors[2]
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteCustomPalette(paletteId: string): Promise<void> {
+  const { error } = await supabase
+    .from('custom_color_palettes')
+    .delete()
+    .eq('id', paletteId)
+
+  if (error) throw error
+}
+
+// =============================================
+// FEEDBACK TICKETS
+// =============================================
+export interface FeedbackTicket {
+  id: string
+  user_id: string
+  user_email: string | null
+  subject: string
+  description: string
+  category: 'bug' | 'feature' | 'question' | 'other'
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  status: 'open' | 'in_progress' | 'resolved' | 'closed'
+  page_url: string | null
+  browser_info: string | null
+  screen_size: string | null
+  console_errors: unknown[]
+  screenshot_url: string | null
+  admin_notes: string | null
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export async function createFeedbackTicket(ticket: {
+  user_id: string
+  user_email?: string
+  subject: string
+  description: string
+  category: 'bug' | 'feature' | 'question' | 'other'
+  priority: 'low' | 'medium' | 'high' | 'urgent'
+  page_url?: string
+  browser_info?: string
+  screen_size?: string
+  console_errors?: unknown[]
+  screenshot_url?: string
+}): Promise<FeedbackTicket> {
+  const { data, error } = await supabase
+    .from('feedback_tickets')
+    .insert(ticket)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function getUserTickets(userId: string): Promise<FeedbackTicket[]> {
+  const { data, error } = await supabase
+    .from('feedback_tickets')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getAllTickets(): Promise<FeedbackTicket[]> {
+  const { data, error } = await supabase
+    .from('feedback_tickets')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function updateTicketStatus(
+  ticketId: string,
+  status: 'open' | 'in_progress' | 'resolved' | 'closed',
+  adminNotes?: string
+): Promise<void> {
+  const update: Record<string, unknown> = { status }
+  if (adminNotes !== undefined) update.admin_notes = adminNotes
+  if (status === 'resolved') update.resolved_at = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('feedback_tickets')
+    .update(update)
+    .eq('id', ticketId)
+
+  if (error) throw error
+}
+
+export async function uploadFeedbackScreenshot(
+  userId: string,
+  file: Blob
+): Promise<string> {
+  const fileName = `${userId}/${Date.now()}.png`
+  const { error } = await supabase.storage
+    .from('feedback-screenshots')
+    .upload(fileName, file, { contentType: 'image/png' })
+
+  if (error) throw error
+
+  const { data } = supabase.storage
+    .from('feedback-screenshots')
+    .getPublicUrl(fileName)
+
+  return data.publicUrl
+}

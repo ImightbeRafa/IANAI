@@ -11,7 +11,6 @@ import {
   Users,
   Image,
   Video,
-  ChevronRight,
   Layers
 } from 'lucide-react'
 
@@ -292,23 +291,32 @@ export default function Home() {
   const labels = t[language]
 
   const floatingPosts = [
-    { img: '/presets/01_Features_Benefits/020_Access_183.png', label: 'Features', pos: 'left-[2%] top-[15%]', anim: 'animate-float-up', delay: '' },
-    { img: '/presets/03_Social_Proof/007_Access_93.png', label: 'Social Proof', pos: 'left-[8%] top-[55%]', anim: 'animate-float-down', delay: 'animation-delay-2' },
-    { img: '/presets/07_Deals_Discounts/014_Access_136.png', label: 'Deals', pos: 'right-[2%] top-[20%]', anim: 'animate-float-slow', delay: 'animation-delay-1' },
-    { img: '/presets/08_Testimonial/013_Access_147.png', label: 'Testimonial', pos: 'right-[8%] top-[58%]', anim: 'animate-float-up', delay: 'animation-delay-3' },
-    { img: '/presets/06_Collage/009_Access_255-256.png', label: 'Collage', pos: 'left-[18%] top-[35%]', anim: 'animate-float-down', delay: 'animation-delay-4' },
-    { img: '/presets/05_Before_After/005_Access_99.png', label: 'Before/After', pos: 'right-[18%] top-[40%]', anim: 'animate-float-slow', delay: 'animation-delay-2' },
+    // Left side
+    { img: '/presets/01_Features_Benefits/020_Access_183.png', label: 'Features', pos: 'left-[1%] top-[10%]', anim: 'animate-float-up', delay: '' },
+    { img: '/presets/03_Social_Proof/007_Access_93.png', label: 'Social Proof', pos: 'left-[4%] top-[50%]', anim: 'animate-float-down', delay: 'animation-delay-2' },
+    { img: '/presets/06_Collage/009_Access_255-256.png', label: 'Collage', pos: 'left-[14%] top-[28%]', anim: 'animate-float-down', delay: 'animation-delay-4' },
+    { img: '/presets/02_Product_Showcase/036_Access_204.png', label: 'Showcase', pos: 'left-[10%] top-[68%]', anim: 'animate-float-slow', delay: 'animation-delay-1' },
+    { img: '/presets/04_Comparison/021_Access_312-313.png', label: 'Comparison', pos: 'left-[22%] top-[8%]', anim: 'animate-float-up', delay: 'animation-delay-3' },
+    // Right side
+    { img: '/presets/07_Deals_Discounts/014_Access_136.png', label: 'Deals', pos: 'right-[1%] top-[12%]', anim: 'animate-float-slow', delay: 'animation-delay-1' },
+    { img: '/presets/08_Testimonial/013_Access_147.png', label: 'Testimonial', pos: 'right-[4%] top-[52%]', anim: 'animate-float-up', delay: 'animation-delay-3' },
+    { img: '/presets/05_Before_After/005_Access_99.png', label: 'Before/After', pos: 'right-[14%] top-[32%]', anim: 'animate-float-slow', delay: 'animation-delay-2' },
+    { img: '/presets/02_Product_Showcase/018_Access_132.png', label: 'Product', pos: 'right-[10%] top-[70%]', anim: 'animate-float-down', delay: 'animation-delay-4' },
+    { img: '/presets/04_Comparison/014_Access_71.png', label: 'Compare', pos: 'right-[22%] top-[6%]', anim: 'animate-float-down', delay: '' },
+    // Extra inner ring
+    { img: '/presets/02_Product_Showcase/053_Access_310-311.png', label: 'Product', pos: 'left-[26%] top-[55%]', anim: 'animate-float-up', delay: 'animation-delay-2' },
+    { img: '/presets/07_Deals_Discounts/014_Access_136.png', label: 'Deals', pos: 'right-[26%] top-[60%]', anim: 'animate-float-slow', delay: 'animation-delay-1' },
   ]
 
   return (
-    <div className="min-h-screen bg-white overflow-x-hidden">
+    <div className="min-h-screen bg-dark-100 overflow-x-hidden">
       {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-lg border-b border-dark-100">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-dark-100/80 backdrop-blur-lg border-b border-dark-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
               <img src="/logo.png" alt="Advance AI" className="w-10 h-10 object-contain rounded-xl" />
-              <span className="text-xl font-bold italic" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
+              <span className="text-xl font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
             </div>
             <div className="hidden md:flex items-center gap-8">
               <a href="#features" className="text-dark-600 hover:text-primary-600 transition-colors text-sm font-medium">
@@ -332,11 +340,11 @@ export default function Home() {
       </nav>
 
       {/* Hero Section with Floating Reels */}
-      <section className="relative pt-28 pb-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-primary-50 via-white to-white overflow-hidden min-h-[90vh] flex items-center">
+      <section className="relative pt-28 pb-24 px-4 sm:px-6 lg:px-8 bg-dark-100 overflow-hidden min-h-[90vh] flex items-center">
         {/* Ambient glow */}
         <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-500/5 rounded-full blur-3xl animate-pulse-soft" />
-          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-sky-500/5 rounded-full blur-3xl animate-pulse-soft animation-delay-2" />
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl animate-pulse-soft" />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl animate-pulse-soft animation-delay-2" />
         </div>
 
         {/* Floating Post Thumbnails — hidden on mobile */}
@@ -347,7 +355,7 @@ export default function Home() {
               className={`absolute ${post.pos} ${post.anim} ${post.delay}`}
               style={{ opacity: 0.35 }}
             >
-              <div className="w-[110px] rounded-2xl overflow-hidden shadow-2xl border border-dark-100 bg-white">
+              <div className="w-[110px] rounded-2xl overflow-hidden shadow-2xl border border-dark-100 bg-dark-100">
                 <img src={post.img} alt={post.label} className="w-full h-[140px] object-cover" />
                 <div className="px-2 py-1.5 text-center">
                   <span className="text-[9px] text-dark-500 font-semibold">{post.label}</span>
@@ -381,25 +389,12 @@ export default function Home() {
               </Link>
             </div>
 
-            {/* Subtle social proof line */}
-            <div className="mt-12 flex items-center justify-center gap-6 animate-fade-in-up animation-delay-3">
-              <div className="flex items-center gap-2">
-                <div className="flex -space-x-2">
-                  {['bg-primary-400', 'bg-sky-400', 'bg-emerald-400', 'bg-amber-400'].map((bg, i) => (
-                    <div key={i} className={`w-7 h-7 rounded-full ${bg} border-2 border-white`} />
-                  ))}
-                </div>
-                <span className="text-sm text-dark-500">
-                  {language === 'es' ? '+500 negocios activos' : '+500 active businesses'}
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       </section>
 
       {/* Benefits Section */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-white">
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 text-center mb-14">
             {labels.benefits.title}
@@ -413,7 +408,7 @@ export default function Home() {
               ]
               return (
                 <div key={i} className="flex items-start gap-5 bg-dark-50/50 border border-dark-100 rounded-2xl p-6 hover:border-primary-200 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
-                  <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                  <div className="w-12 h-12 bg-primary-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
                     {icons[i]}
                   </div>
                   <p className="text-lg text-dark-700 font-medium pt-2">{benefit}</p>
@@ -424,36 +419,13 @@ export default function Home() {
         </div>
       </section>
 
-      {/* How it Works */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-white to-dark-50/30">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 text-center mb-16">
-            {labels.howItWorks.title}
-          </h2>
-          <div className="grid md:grid-cols-3 gap-8">
-            {[labels.howItWorks.step1, labels.howItWorks.step2, labels.howItWorks.step3].map((step, i) => (
-              <div key={i} className="relative text-center group">
-                {i < 2 && (
-                  <div className="hidden md:block absolute top-8 left-[60%] w-[80%] h-px bg-gradient-to-r from-primary-300 to-transparent" />
-                )}
-                <div className="w-16 h-16 bg-primary-100 rounded-2xl flex items-center justify-center mx-auto mb-5 group-hover:bg-primary-600 group-hover:text-white transition-all duration-300 text-primary-600">
-                  <span className="text-xl font-bold">{step.num}</span>
-                </div>
-                <h3 className="text-lg font-bold text-dark-900 mb-2">{step.title}</h3>
-                <p className="text-dark-500 text-sm leading-relaxed">{step.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Guiones Showcase */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-white">
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-6xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
             {/* Left — Script Mockup */}
             <div className="relative">
-              <div className="bg-dark-900 rounded-2xl p-6 shadow-2xl border border-dark-700">
+              <div className="bg-dark-50 rounded-2xl p-6 shadow-2xl border border-dark-200">
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-3 h-3 rounded-full bg-red-400" />
                   <div className="w-3 h-3 rounded-full bg-yellow-400" />
@@ -463,15 +435,15 @@ export default function Home() {
                 <div className="space-y-3">
                   <div className="bg-primary-500/10 border border-primary-500/20 rounded-xl px-4 py-3">
                     <div className="text-[10px] uppercase tracking-wider text-primary-400 font-semibold mb-1">GANCHO</div>
-                    <p className="text-sm text-dark-200">{language === 'es' ? '¿Sabías que el 80% de los anuncios fallan en los primeros 3 segundos?' : 'Did you know 80% of ads fail in the first 3 seconds?'}</p>
+                    <p className="text-sm text-dark-700">{language === 'es' ? '¿Sabías que el 80% de los anuncios fallan en los primeros 3 segundos?' : 'Did you know 80% of ads fail in the first 3 seconds?'}</p>
                   </div>
-                  <div className="bg-dark-800 rounded-xl px-4 py-3">
+                  <div className="bg-dark-100 rounded-xl px-4 py-3">
                     <div className="text-[10px] uppercase tracking-wider text-dark-400 font-semibold mb-1">{language === 'es' ? 'DESARROLLO' : 'DEVELOPMENT'}</div>
-                    <p className="text-sm text-dark-300">{language === 'es' ? 'Nuestro método usa la estructura de los anuncios más exitosos del mercado para que tu mensaje conecte al instante...' : 'Our method uses the structure of the most successful ads on the market so your message connects instantly...'}</p>
+                    <p className="text-sm text-dark-600">{language === 'es' ? 'Nuestro método usa la estructura de los anuncios más exitosos del mercado para que tu mensaje conecte al instante...' : 'Our method uses the structure of the most successful ads on the market so your message connects instantly...'}</p>
                   </div>
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
                     <div className="text-[10px] uppercase tracking-wider text-emerald-400 font-semibold mb-1">CTA</div>
-                    <p className="text-sm text-dark-200">{language === 'es' ? 'Empezá hoy — los primeros 10 guiones son gratis.' : 'Start today — the first 10 scripts are free.'}</p>
+                    <p className="text-sm text-dark-700">{language === 'es' ? 'Empezá hoy — los primeros 10 guiones son gratis.' : 'Start today — the first 10 scripts are free.'}</p>
                   </div>
                 </div>
               </div>
@@ -480,7 +452,7 @@ export default function Home() {
 
             {/* Right — Text */}
             <div>
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-6">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-6">
                 <FileText className="w-4 h-4 text-primary-600" />
                 <span className="text-sm text-primary-700 font-medium">{labels.scripts.badge}</span>
               </div>
@@ -504,12 +476,12 @@ export default function Home() {
       </section>
 
       {/* Posts Showcase */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-50/30">
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-6xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
             {/* Left — Text */}
             <div className="order-2 lg:order-1">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-6">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-6">
                 <Image className="w-4 h-4 text-primary-600" />
                 <span className="text-sm text-primary-700 font-medium">{labels.posts.badge}</span>
               </div>
@@ -552,10 +524,10 @@ export default function Home() {
       </section>
 
       {/* Presets Gallery */}
-      <section id="features" className="py-24 px-4 sm:px-6 lg:px-8 bg-white overflow-hidden">
+      <section id="features" className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100 overflow-hidden">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-14">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-4">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-4">
               <Layers className="w-4 h-4 text-primary-600" />
               <span className="text-sm text-primary-700 font-medium">{labels.features.badge}</span>
             </div>
@@ -597,7 +569,7 @@ export default function Home() {
               { icon: <Video className="w-5 h-5" />, text: language === 'es' ? 'Generación de videos con IA' : 'AI video generation' },
             ].map((feat, i) => (
               <div key={i} className="flex items-center gap-3 bg-dark-50 border border-dark-100 rounded-xl p-4 hover:border-primary-200 transition-colors">
-                <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center text-primary-600 flex-shrink-0">
+                <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center text-primary-600 flex-shrink-0">
                   {feat.icon}
                 </div>
                 <span className="text-sm text-dark-700 font-medium">{feat.text}</span>
@@ -607,114 +579,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Social Proof / Mockup Section */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-50/50">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 text-center mb-3">
-            {labels.socialProof.title}
-          </h2>
-          <p className="text-dark-500 text-center mb-14 text-lg">
-            {language === 'es' ? 'Resultados reales generados por nuestra IA' : 'Real results generated by our AI'}
-          </p>
-
-          <div className="grid md:grid-cols-2 gap-8">
-            {/* Meta Ads Mockup */}
-            <div className="bg-white rounded-2xl border border-dark-100 shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-              <div className="px-6 py-4 bg-dark-50 border-b border-dark-100">
-                <span className="text-sm font-semibold text-dark-700">{labels.socialProof.metaAds}</span>
-              </div>
-              <div className="p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-dark-500">{language === 'es' ? 'Costo por lead' : 'Cost per lead'}</span>
-                  <span className="text-2xl font-bold text-green-600">$2.40</span>
-                </div>
-                <div className="h-px bg-dark-100" />
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-dark-500">{language === 'es' ? 'Conversiones' : 'Conversions'}</span>
-                  <span className="text-2xl font-bold text-primary-600">147</span>
-                </div>
-                <div className="h-px bg-dark-100" />
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-dark-500">ROAS</span>
-                  <span className="text-2xl font-bold text-primary-600">4.2x</span>
-                </div>
-                <div className="mt-4 flex gap-2">
-                  {[40, 65, 55, 80, 70, 90, 85].map((h, i) => (
-                    <div key={i} className="flex-1 bg-primary-100 rounded-t-sm flex flex-col justify-end" style={{ height: '80px' }}>
-                      <div className="bg-primary-500 rounded-t-sm transition-all duration-500" style={{ height: `${h}%` }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Chat Messages Mockup */}
-            <div className="bg-white rounded-2xl border border-dark-100 shadow-lg overflow-hidden hover:shadow-xl transition-shadow duration-300">
-              <div className="px-6 py-4 bg-dark-50 border-b border-dark-100">
-                <span className="text-sm font-semibold text-dark-700">{labels.socialProof.chatMessages}</span>
-              </div>
-              <div className="p-6 space-y-3">
-                <div className="flex justify-end">
-                  <div className="bg-primary-500 text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]">
-                    <p className="text-sm">{language === 'es' ? 'Hola! Vi tu video sobre el tratamiento. Me interesa saber más' : 'Hi! I saw your video about the treatment. I\'d like to know more'}</p>
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <div className="bg-primary-500 text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]">
-                    <p className="text-sm">{language === 'es' ? 'Quiero agendar una cita para esta semana' : 'I want to schedule an appointment this week'}</p>
-                  </div>
-                </div>
-                <div className="flex justify-start">
-                  <div className="bg-dark-100 text-dark-700 rounded-2xl rounded-bl-md px-4 py-3 max-w-[80%]">
-                    <p className="text-sm">{language === 'es' ? 'Claro! Te agendo para el jueves a las 3pm' : 'Sure! I\'ll schedule you for Thursday at 3pm'}</p>
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <div className="bg-primary-500 text-white rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]">
-                    <p className="text-sm">{language === 'es' ? 'Perfecto, ahí estaré!' : 'Perfect, I\'ll be there!'}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Visual Flow */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-white">
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-2xl sm:text-3xl font-bold text-dark-900 text-center mb-12">
-            {labels.flow.title}
-          </h2>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-0">
-            {labels.flow.steps.map((step, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <div className="px-8 py-4 bg-dark-50 border border-dark-200 rounded-2xl shadow-sm hover:shadow-md hover:border-primary-200 transition-all duration-300">
-                  <span className="font-semibold text-dark-800">{step}</span>
-                </div>
-                {i < labels.flow.steps.length - 1 && (
-                  <ChevronRight className="w-5 h-5 text-primary-400 hidden sm:block" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Reinforcement Phrase */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-50/50">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-sky-500 leading-tight">
-            {labels.reinforcement}
-          </h2>
-        </div>
-      </section>
-
       {/* Pricing Section */}
-      <section id="pricing" className="py-24 px-4 sm:px-6 lg:px-8 bg-white">
+      <section id="pricing" className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 border border-primary-200 rounded-full mb-4">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-4">
               <span className="text-sm text-primary-700 font-medium">{labels.pricing.badge}</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 mb-4">
@@ -727,7 +596,7 @@ export default function Home() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
             {/* Free Plan */}
-            <div className="bg-white border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.free.name}</h3>
               <div className="flex items-baseline gap-1 mb-6 mt-2">
                 <span className="text-4xl font-bold text-dark-900">{labels.pricing.free.price}</span>
@@ -750,7 +619,7 @@ export default function Home() {
             </div>
 
             {/* Starter Plan */}
-            <div className="bg-white border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.starter.name}</h3>
               <div className="flex items-baseline gap-1 mb-6 mt-2">
                 <span className="text-4xl font-bold text-dark-900">{labels.pricing.starter.price}</span>
@@ -773,7 +642,7 @@ export default function Home() {
             </div>
 
             {/* Premium Plan (highlighted) */}
-            <div className="bg-gradient-to-b from-primary-50 to-white border-2 border-primary-200 rounded-2xl p-8 relative shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+            <div className="bg-dark-100 border-2 border-primary-500 rounded-2xl p-8 relative shadow-lg shadow-primary-500/10 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                 <div className="px-4 py-1 bg-primary-600 rounded-full text-sm font-medium text-white shadow-lg shadow-primary-500/30">
                   {labels.pricing.premium.badge}
@@ -801,7 +670,7 @@ export default function Home() {
             </div>
 
             {/* Enterprise Plan */}
-            <div className="bg-white border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.enterprise.name}</h3>
               <div className="flex items-baseline gap-1 mb-6 mt-2">
                 <span className="text-4xl font-bold text-dark-900">{labels.pricing.enterprise.price}</span>
@@ -827,21 +696,21 @@ export default function Home() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-50/50">
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="bg-gradient-to-br from-dark-900 via-dark-800 to-dark-900 rounded-3xl p-14 text-white relative overflow-hidden">
+          <div className="bg-dark-50 border border-dark-200 rounded-3xl p-14 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-primary-500/10 rounded-full blur-3xl" />
             <div className="absolute bottom-0 left-0 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl" />
             <div className="relative z-10">
-              <h2 className="text-3xl sm:text-4xl font-bold mb-4">
+              <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 mb-4">
                 {labels.cta.title}
               </h2>
-              <p className="text-lg text-dark-300 mb-10 max-w-2xl mx-auto">
+              <p className="text-lg text-dark-500 mb-10 max-w-2xl mx-auto">
                 {labels.cta.subtitle}
               </p>
               <Link 
                 to="/signup"
-                className="inline-flex items-center gap-2 px-8 py-4 bg-white text-dark-900 rounded-2xl font-semibold text-lg transition-all hover:bg-dark-50 shadow-2xl shadow-white/10 group"
+                className="inline-flex items-center gap-2 px-8 py-4 bg-primary-600 hover:bg-primary-700 text-white rounded-2xl font-semibold text-lg transition-all shadow-lg shadow-primary-500/25 group"
               >
                 {labels.cta.button}
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -853,12 +722,12 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="py-12 px-4 sm:px-6 lg:px-8 bg-white border-t border-dark-100">
+      <footer className="py-12 px-4 sm:px-6 lg:px-8 bg-dark-100 border-t border-dark-100">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <img src="/logo.png" alt="Advance AI" className="w-8 h-8 object-contain rounded-lg" />
-              <span className="font-bold italic" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
+              <span className="font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
               <span className="text-dark-400 text-sm">• {labels.footer.tagline}</span>
             </div>
             <p className="text-dark-400 text-sm">{labels.footer.rights}</p>

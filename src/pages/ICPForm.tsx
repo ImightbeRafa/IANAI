@@ -241,13 +241,13 @@ export default function ICPForm() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+            <div className="p-4 bg-red-900/20 border border-red-700/30 rounded-lg text-red-400">
               {error}
             </div>
           )}
 
           {/* Name */}
-          <div className="bg-white rounded-xl border border-dark-100 p-6">
+          <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
             <label className="block text-sm font-medium text-dark-900 mb-2">
               {t.nameLabel}
             </label>
@@ -256,7 +256,7 @@ export default function ICPForm() {
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder={t.namePlaceholder}
-              className="w-full px-4 py-3 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="w-full px-4 py-3 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-dark-400"
             />
             <p className="mt-2 text-xs text-dark-500 flex items-center gap-1">
               <HelpCircle className="w-3.5 h-3.5" />
@@ -265,7 +265,7 @@ export default function ICPForm() {
           </div>
 
           {/* Description */}
-          <div className="bg-white rounded-xl border border-dark-100 p-6">
+          <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
             <label className="block text-sm font-medium text-dark-900 mb-2">
               {t.descriptionLabel}
             </label>
@@ -274,7 +274,7 @@ export default function ICPForm() {
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder={t.descriptionPlaceholder}
               rows={3}
-              className="w-full px-4 py-3 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+              className="w-full px-4 py-3 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none placeholder:text-dark-400"
             />
             <p className="mt-2 text-xs text-dark-500 flex items-center gap-1">
               <HelpCircle className="w-3.5 h-3.5" />
@@ -283,7 +283,7 @@ export default function ICPForm() {
           </div>
 
           {/* Awareness Level */}
-          <div className="bg-white rounded-xl border border-dark-100 p-6">
+          <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
             <label className="block text-sm font-medium text-dark-900 mb-2">
               {t.awarenessLabel}
             </label>
@@ -306,7 +306,7 @@ export default function ICPForm() {
           </div>
 
           {/* Sophistication Level */}
-          <div className="bg-white rounded-xl border border-dark-100 p-6">
+          <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
             <label className="block text-sm font-medium text-dark-900 mb-2">
               {t.sophisticationLabel}
             </label>
@@ -329,7 +329,7 @@ export default function ICPForm() {
           </div>
 
           {/* Urgency Type */}
-          <div className="bg-white rounded-xl border border-dark-100 p-6">
+          <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
             <label className="block text-sm font-medium text-dark-900 mb-2">
               {t.urgencyLabel}
             </label>
@@ -354,7 +354,7 @@ export default function ICPForm() {
           {/* Gender & Age Row */}
           <div className="grid md:grid-cols-2 gap-6">
             {/* Gender */}
-            <div className="bg-white rounded-xl border border-dark-100 p-6">
+            <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
               <label className="block text-sm font-medium text-dark-900 mb-3">
                 {t.genderLabel}
               </label>
@@ -367,7 +367,7 @@ export default function ICPForm() {
                     className={`flex-1 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
                       formData.gender === g
                         ? 'bg-primary-500 text-white border-primary-500'
-                        : 'bg-white text-dark-600 border-dark-200 hover:border-primary-300'
+                        : 'bg-dark-100 text-dark-600 border-dark-200 hover:border-primary-300'
                     }`}
                   >
                     {t.genderOptions[g]}
@@ -377,14 +377,14 @@ export default function ICPForm() {
             </div>
 
             {/* Age Range */}
-            <div className="bg-white rounded-xl border border-dark-100 p-6">
+            <div className="bg-dark-100 rounded-xl border border-dark-100 p-6">
               <label className="block text-sm font-medium text-dark-900 mb-3">
                 {t.ageLabel}
               </label>
               <select
                 value={formData.age_range}
                 onChange={(e) => setFormData({ ...formData, age_range: e.target.value as AgeRange })}
-                className="w-full px-4 py-2 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                className="w-full px-4 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
                 {(['18-24', '25-34', '35-44', '45-54', '55+'] as AgeRange[]).map((age) => (
                   <option key={age} value={age}>{t.ageOptions[age]}</option>

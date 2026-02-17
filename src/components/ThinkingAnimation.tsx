@@ -44,7 +44,7 @@ export default function ThinkingAnimation({ language = 'en' }: ThinkingAnimation
   }, [])
 
   return (
-    <div className="bg-white border border-dark-100 rounded-2xl px-5 py-4 max-w-md">
+    <div className="bg-dark-100 border border-dark-200 rounded-2xl px-5 py-4 max-w-md">
       <div className="flex items-start gap-3">
         <div className="relative">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">

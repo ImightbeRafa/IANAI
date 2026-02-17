@@ -85,7 +85,7 @@ export default function Layout({ children }: LayoutProps) {
       {/* Sidebar */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
-        w-64 bg-white border-r border-dark-100
+        w-64 bg-dark-100 border-r border-dark-200
         transform transition-transform duration-200 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
@@ -94,7 +94,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="p-6 border-b border-dark-100">
             <Link to="/dashboard" className="flex items-center justify-center gap-3">
               <img src="/logo.png" alt="Advance AI" className="w-10 h-10 rounded-lg object-cover" />
-              <span className="text-xl font-bold italic" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
+              <span className="text-xl font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
             </Link>
           </div>
 
@@ -108,14 +108,14 @@ export default function Layout({ children }: LayoutProps) {
                 className={`
                   flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
                   ${location.pathname === path || location.pathname.startsWith(path + '/')
-                    ? 'bg-primary-50 text-primary-700' 
-                    : 'text-dark-600 hover:bg-dark-50 hover:text-dark-900'}
+                    ? 'bg-primary-900/20 text-primary-400' 
+                    : 'text-dark-500 hover:bg-dark-200 hover:text-dark-900'}
                 `}
               >
                 <Icon className="w-5 h-5" />
                 <span className="font-medium">{label}</span>
                 {beta && (
-                  <span className="text-[10px] px-1.5 py-0.5 bg-primary-100 text-primary-600 rounded font-medium opacity-70">
+                  <span className="text-[10px] px-1.5 py-0.5 bg-primary-900/30 text-primary-400 rounded font-medium opacity-70">
                     beta
                   </span>
                 )}
@@ -138,7 +138,7 @@ export default function Layout({ children }: LayoutProps) {
             </div>
             <button
               onClick={handleSignOut}
-              className="flex items-center gap-3 px-4 py-3 w-full text-dark-600 hover:bg-dark-50 hover:text-dark-900 rounded-lg transition-colors mt-2"
+              className="flex items-center gap-3 px-4 py-3 w-full text-dark-500 hover:bg-dark-200 hover:text-dark-900 rounded-lg transition-colors mt-2"
             >
               <LogOut className="w-5 h-5" />
               <span className="font-medium">{t.signOut}</span>
@@ -150,7 +150,7 @@ export default function Layout({ children }: LayoutProps) {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header */}
-        <header className="lg:hidden bg-white border-b border-dark-100 px-4 py-3 flex items-center justify-between">
+        <header className="lg:hidden bg-dark-100 border-b border-dark-200 px-4 py-3 flex items-center justify-between">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 text-dark-600 hover:text-dark-900"
@@ -159,7 +159,7 @@ export default function Layout({ children }: LayoutProps) {
           </button>
           <div className="flex items-center gap-2">
             <img src="/logo.png" alt="Advance AI" className="w-6 h-6 rounded object-cover" />
-            <span className="text-xl font-bold italic" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.03em' }}>Advance AI</span>
+            <span className="text-xl font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.03em' }}>Advance AI</span>
           </div>
           <div className="w-10" />
         </header>

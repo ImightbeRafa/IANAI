@@ -323,7 +323,7 @@ export default function OverviewDashboard() {
                     key={script.id}
                     className="flex items-center gap-3 p-3 bg-dark-50 rounded-xl hover:bg-dark-100 transition-colors"
                   >
-                    <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-9 h-9 bg-green-900/20 rounded-lg flex items-center justify-center flex-shrink-0">
                       <FileText className="w-4 h-4 text-green-600" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -351,7 +351,7 @@ export default function OverviewDashboard() {
               className="card hover:border-primary-200 hover:shadow-md transition-all group"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center group-hover:bg-green-200 transition-colors">
+                <div className="w-10 h-10 bg-green-900/20 rounded-xl flex items-center justify-center group-hover:bg-green-200 transition-colors">
                   <FileText className="w-5 h-5 text-green-600" />
                 </div>
                 <div>
@@ -366,7 +366,7 @@ export default function OverviewDashboard() {
               className="card hover:border-primary-200 hover:shadow-md transition-all group"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center group-hover:bg-blue-200 transition-colors">
+                <div className="w-10 h-10 bg-blue-900/20 rounded-xl flex items-center justify-center group-hover:bg-blue-200 transition-colors">
                   <ImageIcon className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
@@ -381,7 +381,7 @@ export default function OverviewDashboard() {
               className="card hover:border-primary-200 hover:shadow-md transition-all group"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center group-hover:bg-purple-200 transition-colors">
+                <div className="w-10 h-10 bg-purple-900/20 rounded-xl flex items-center justify-center group-hover:bg-purple-200 transition-colors">
                   <Sparkles className="w-5 h-5 text-purple-600" />
                 </div>
                 <div>

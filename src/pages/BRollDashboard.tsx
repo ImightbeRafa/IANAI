@@ -207,7 +207,7 @@ export default function BRollDashboard() {
             </div>
 
             {showNewClientForm && (
-              <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-4 mb-4">
+              <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-4 mb-4">
                 <div className="flex gap-3">
                   <input
                     type="text"
@@ -240,11 +240,11 @@ export default function BRollDashboard() {
                   <button
                     key={client.id}
                     onClick={() => setSelectedClient(client)}
-                    className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
+                    className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                        <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center">
                           <Briefcase className="w-5 h-5 text-primary-600" />
                         </div>
                         <span className="font-semibold text-dark-800 group-hover:text-primary-600 transition-colors">
@@ -257,7 +257,7 @@ export default function BRollDashboard() {
                 ))}
               </div>
             ) : !showNewClientForm && (
-              <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
+              <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-12 text-center">
                 <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-dark-700 mb-2">{t.noClients}</h3>
                 <p className="text-dark-500 mb-6">{t.createFirstClient}</p>
@@ -273,7 +273,7 @@ export default function BRollDashboard() {
         )}
 
         {hasNoProducts && !selectedClient ? (
-          <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
+          <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-12 text-center">
             <Video className="w-16 h-16 text-dark-300 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-dark-700 mb-2">{t.noProducts}</h2>
             <p className="text-dark-500 mb-6">{t.createProduct}</p>
@@ -295,10 +295,10 @@ export default function BRollDashboard() {
                   <Link
                     key={product.id}
                     to={`/broll/product/${product.id}`}
-                    className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all group"
+                    className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all group"
                   >
                     <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center group-hover:bg-primary-200 transition-colors">
+                      <div className="w-12 h-12 bg-primary-900/30 rounded-lg flex items-center justify-center group-hover:bg-primary-200 transition-colors">
                         <ProductIcon className="w-6 h-6 text-primary-600" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -320,7 +320,7 @@ export default function BRollDashboard() {
             </div>
           </>
         ) : selectedClient && (
-          <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
+          <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-12 text-center">
             <Video className="w-16 h-16 text-dark-300 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-dark-700 mb-2">{t.noProducts}</h2>
             <p className="text-dark-500 mb-6">{t.createProduct}</p>

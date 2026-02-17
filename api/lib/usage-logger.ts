@@ -34,6 +34,7 @@ export type FeatureType =
   | 'script'           // Script generation
   | 'description'      // Description generation
   | 'image'            // Image generation
+  | 'enhance'          // Image enhance (magic wand) — costs 0.5 image credit
   | 'video'            // Video generation
   | 'paste_organize'   // Auto-fill/paste organize
   | 'prompt_enhance'   // Prompt enhancement

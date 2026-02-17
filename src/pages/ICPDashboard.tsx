@@ -230,7 +230,7 @@ export default function ICPDashboard() {
   const renderICPList = () => (
     <>
       {icps.length === 0 ? (
-        <div className="bg-white rounded-xl border border-dark-100 p-12 text-center">
+        <div className="bg-dark-100 rounded-xl border border-dark-100 p-12 text-center">
           <Users className="w-16 h-16 text-dark-300 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-dark-900 mb-2">
             {isTeamAccount ? t.noICPsClient : t.noICPs}
@@ -251,7 +251,7 @@ export default function ICPDashboard() {
           {icps.map((icp) => (
             <div
               key={icp.id}
-              className="bg-white rounded-xl border border-dark-100 p-6 hover:shadow-md transition-shadow"
+              className="bg-dark-100 rounded-xl border border-dark-100 p-6 hover:shadow-md transition-shadow"
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
@@ -259,19 +259,19 @@ export default function ICPDashboard() {
                   <p className="text-dark-600 text-sm mb-4">{icp.description}</p>
                   
                   <div className="flex flex-wrap gap-3">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-900/20 text-blue-400 rounded-full text-xs font-medium">
                       <Target className="w-3.5 h-3.5" />
                       {t.awareness}: {t.awarenessLevels[icp.awareness_level]}
                     </span>
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-900/20 text-purple-400 rounded-full text-xs font-medium">
                       <AlertCircle className="w-3.5 h-3.5" />
                       {t.sophistication}: {t.sophisticationLevels[icp.sophistication_level]}
                     </span>
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-900/20 text-orange-400 rounded-full text-xs font-medium">
                       <Clock className="w-3.5 h-3.5" />
                       {t.urgency}: {t.urgencyTypes[icp.urgency_type]}
                     </span>
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-dark-300 text-dark-700 rounded-full text-xs font-medium">
                       <User className="w-3.5 h-3.5" />
                       {icp.gender === 'any' ? (language === 'es' ? 'Indistinto' : 'Any') : icp.gender === 'male' ? (language === 'es' ? 'Masculino' : 'Male') : (language === 'es' ? 'Femenino' : 'Female')} • {icp.age_range}
                     </span>
@@ -288,7 +288,7 @@ export default function ICPDashboard() {
                   <button
                     onClick={() => handleDelete(icp.id)}
                     disabled={deleting === icp.id}
-                    className="p-2 text-dark-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                    className="p-2 text-dark-500 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
                   >
                     {deleting === icp.id ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -344,7 +344,7 @@ export default function ICPDashboard() {
         </div>
 
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+          <div className="mb-6 p-4 bg-red-900/20 border border-red-700/30 rounded-lg flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-500" />
             <p className="text-red-700">{error}</p>
           </div>
@@ -359,11 +359,11 @@ export default function ICPDashboard() {
                   <button
                     key={client.id}
                     onClick={() => handleSelectClient(client)}
-                    className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
+                    className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all text-left group"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                        <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center">
                           <Briefcase className="w-5 h-5 text-primary-600" />
                         </div>
                         <span className="font-semibold text-dark-800 group-hover:text-primary-600 transition-colors">
@@ -376,7 +376,7 @@ export default function ICPDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-12 text-center">
+              <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-12 text-center">
                 <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-dark-700 mb-2">{t.noClients}</h3>
                 <p className="text-dark-500 mb-6">{t.createFirstClient}</p>
@@ -398,7 +398,7 @@ export default function ICPDashboard() {
                   {orphanedICPs.map((icp) => (
                     <div
                       key={icp.id}
-                      className="bg-white rounded-xl border border-amber-200 p-4 flex items-center justify-between gap-4"
+                      className="bg-dark-100 rounded-xl border border-amber-200 p-4 flex items-center justify-between gap-4"
                     >
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium text-dark-900 truncate">{icp.name}</h4>
@@ -409,7 +409,7 @@ export default function ICPDashboard() {
                           if (e.target.value) handleAssignICP(icp.id, e.target.value)
                         }}
                         disabled={assigningICP === icp.id}
-                        className="px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 min-w-[160px]"
+                        className="px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 min-w-[160px]"
                         defaultValue=""
                       >
                         <option value="" disabled>{assigningICP === icp.id ? '...' : t.assignTo}</option>

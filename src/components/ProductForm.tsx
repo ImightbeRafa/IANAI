@@ -623,9 +623,9 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-dark-100 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-6 border-b border-dark-100">
+        <div className="p-6 border-b border-dark-200">
           <h2 className="text-xl font-bold text-dark-900">{t.title}</h2>
           <p className="text-dark-500 mt-1">{t.subtitle}</p>
           <div className="flex items-center gap-2 mt-4">
@@ -672,7 +672,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleTypeSelect('product')}
                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                       formData.type === 'product'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -686,7 +686,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleTypeSelect('service')}
                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                       formData.type === 'service'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -700,7 +700,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleTypeSelect('restaurant')}
                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                       formData.type === 'restaurant'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -714,7 +714,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleTypeSelect('real_estate')}
                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
                       formData.type === 'real_estate'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -734,7 +734,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                   disabled={!formData.name.trim() || !formData.type}
                   className={`p-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center justify-center gap-2 ${
                     formData.name.trim() && formData.type
-                      ? 'border-blue-200 hover:border-blue-400 hover:bg-blue-50 text-dark-500 hover:text-blue-600 cursor-pointer'
+                      ? 'border-blue-200 hover:border-blue-400 hover:bg-blue-900/20 text-dark-500 hover:text-blue-600 cursor-pointer'
                       : 'border-dark-100 text-dark-300 cursor-not-allowed'
                   }`}
                 >
@@ -747,7 +747,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                   disabled={!formData.name.trim() || !formData.type}
                   className={`p-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center justify-center gap-2 ${
                     formData.name.trim() && formData.type
-                      ? 'border-dark-200 hover:border-primary-400 hover:bg-primary-50 text-dark-500 hover:text-primary-600 cursor-pointer'
+                      ? 'border-dark-200 hover:border-primary-400 hover:bg-primary-900/20 text-dark-500 hover:text-primary-600 cursor-pointer'
                       : 'border-dark-100 text-dark-300 cursor-not-allowed'
                   }`}
                 >
@@ -803,7 +803,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                       onClick={() => handleChange('re_business_type', bType)}
                       className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
                         formData.re_business_type === bType
-                          ? 'border-primary-600 bg-primary-50'
+                          ? 'border-primary-600 bg-primary-900/20'
                           : 'border-dark-200 hover:border-dark-300'
                       }`}
                     >
@@ -895,7 +895,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => setFormData(prev => ({ ...prev, is_new_restaurant: true }))}
                     className={`p-4 rounded-xl border-2 transition-all ${
                       formData.is_new_restaurant === true
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -908,7 +908,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => setFormData(prev => ({ ...prev, is_new_restaurant: false }))}
                     className={`p-4 rounded-xl border-2 transition-all ${
                       formData.is_new_restaurant === false
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -930,7 +930,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 {(formData.context_links || []).length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {(formData.context_links || []).map((link, i) => (
-                      <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 group">
+                      <div key={i} className="flex items-center gap-2 bg-blue-900/20 rounded-lg px-3 py-1.5 group">
                         <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                         <span className="text-xs text-dark-700 truncate flex-1">{link}</span>
                         <button type="button" onClick={() => handleRemoveLink(link)} className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -940,7 +940,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     ))}
                   </div>
                 )}
-                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" disabled={scrapingLinks} />
+                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16 placeholder:text-dark-400" disabled={scrapingLinks} />
                 {linkInput.trim() && (
                   <button type="button" onClick={handleAddLinks} disabled={scrapingLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1.5">
                     {scrapingLinks ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -1137,7 +1137,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 {(formData.context_links || []).length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {(formData.context_links || []).map((link, i) => (
-                      <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 group">
+                      <div key={i} className="flex items-center gap-2 bg-blue-900/20 rounded-lg px-3 py-1.5 group">
                         <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                         <span className="text-xs text-dark-700 truncate flex-1">{link}</span>
                         <button type="button" onClick={() => handleRemoveLink(link)} className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1147,7 +1147,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     ))}
                   </div>
                 )}
-                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16" disabled={scrapingLinks} />
+                <textarea value={linkInput} onChange={(e) => setLinkInput(e.target.value)} placeholder={t.contextLinks.placeholder} className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16 placeholder:text-dark-400" disabled={scrapingLinks} />
                 {linkInput.trim() && (
                   <button type="button" onClick={handleAddLinks} disabled={scrapingLinks} className="mt-2 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 disabled:opacity-50 flex items-center gap-1.5">
                     {scrapingLinks ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
@@ -1232,7 +1232,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleChange('awareness_level', 'active')}
                     className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
                       formData.awareness_level === 'active'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -1245,7 +1245,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleChange('awareness_level', 'passive')}
                     className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
                       formData.awareness_level === 'passive'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -1258,7 +1258,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                     onClick={() => handleChange('awareness_level', 'impulse')}
                     className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
                       formData.awareness_level === 'impulse'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-primary-600 bg-primary-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -1281,7 +1281,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 {(formData.context_links || []).length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {(formData.context_links || []).map((link, i) => (
-                      <div key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 group">
+                      <div key={i} className="flex items-center gap-2 bg-blue-900/20 rounded-lg px-3 py-1.5 group">
                         <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                         <span className="text-xs text-dark-700 truncate flex-1">{link}</span>
                         <button
@@ -1300,7 +1300,7 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                   value={linkInput}
                   onChange={(e) => setLinkInput(e.target.value)}
                   placeholder={t.contextLinks.placeholder}
-                  className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16"
+                  className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 resize-none h-16 placeholder:text-dark-400"
                   disabled={scrapingLinks}
                 />
                 {linkInput.trim() && (
@@ -1325,8 +1325,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
         {/* Quick Paste Modal */}
         {showPasteModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-              <div className="p-6 border-b border-dark-100 flex items-center justify-between">
+            <div className="bg-dark-100 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="p-6 border-b border-dark-200 flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-dark-900 flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-primary-600" />
@@ -1388,8 +1388,8 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
         {/* URL Auto-Fill Modal */}
         {showUrlModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden flex flex-col">
-              <div className="p-6 border-b border-dark-100 flex items-center justify-between">
+            <div className="bg-dark-100 rounded-2xl w-full max-w-lg overflow-hidden flex flex-col">
+              <div className="p-6 border-b border-dark-200 flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-dark-900 flex items-center gap-2">
                     <Globe className="w-5 h-5 text-blue-500" />
@@ -1417,25 +1417,25 @@ Responde en JSON con estos campos: product_description, main_problem, best_custo
                 />
 
                 {urlStatus === 'extracting' && (
-                  <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 px-4 py-3 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm text-blue-400 bg-blue-900/20 px-4 py-3 rounded-lg">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     {t.autoFillUrl.extracting}
                   </div>
                 )}
                 {urlStatus === 'analyzing' && (
-                  <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 px-4 py-3 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm text-blue-400 bg-blue-900/20 px-4 py-3 rounded-lg">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     {t.autoFillUrl.analyzing}
                   </div>
                 )}
                 {urlStatus === 'success' && (
-                  <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-4 py-3 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm text-green-400 bg-green-900/20 px-4 py-3 rounded-lg">
                     <Sparkles className="w-4 h-4" />
                     {t.autoFillUrl.success}
                   </div>
                 )}
                 {urlStatus === 'error' && (
-                  <div className="text-sm text-red-600 bg-red-50 px-4 py-3 rounded-lg">
+                  <div className="text-sm text-red-400 bg-red-900/20 px-4 py-3 rounded-lg">
                     <p className="font-medium">{t.autoFillUrl.error}</p>
                     {urlErrorDetail && <p className="mt-1 text-xs text-red-500">{urlErrorDetail}</p>}
                   </div>

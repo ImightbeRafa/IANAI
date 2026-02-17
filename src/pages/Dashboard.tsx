@@ -338,11 +338,11 @@ export default function Dashboard() {
   const renderProductCard = (product: Product, showAssignButton = false) => {
     const getTypeStyles = () => {
       switch (product.type) {
-        case 'product': return { bg: 'bg-blue-100', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
-        case 'service': return { bg: 'bg-purple-100', icon: <Briefcase className="w-5 h-5 text-purple-600" />, label: t.service }
-        case 'restaurant': return { bg: 'bg-orange-100', icon: <UtensilsCrossed className="w-5 h-5 text-orange-600" />, label: t.restaurant }
-        case 'real_estate': return { bg: 'bg-teal-100', icon: <Home className="w-5 h-5 text-teal-600" />, label: t.realEstate }
-        default: return { bg: 'bg-blue-100', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
+        case 'product': return { bg: 'bg-blue-900/20', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
+        case 'service': return { bg: 'bg-purple-900/20', icon: <Briefcase className="w-5 h-5 text-purple-600" />, label: t.service }
+        case 'restaurant': return { bg: 'bg-orange-900/20', icon: <UtensilsCrossed className="w-5 h-5 text-orange-600" />, label: t.restaurant }
+        case 'real_estate': return { bg: 'bg-teal-900/20', icon: <Home className="w-5 h-5 text-teal-600" />, label: t.realEstate }
+        default: return { bg: 'bg-blue-900/20', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
       }
     }
     const typeStyles = getTypeStyles()
@@ -358,7 +358,7 @@ export default function Dashboard() {
             e.stopPropagation()
             handleDeleteProduct(product)
           }}
-          className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+          className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
           title={language === 'es' ? 'Eliminar' : 'Delete'}
         >
           <Trash2 className="w-4 h-4" />
@@ -416,7 +416,7 @@ export default function Dashboard() {
           e.stopPropagation()
           handleDeleteClient(client)
         }}
-        className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10"
+        className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10"
         title={language === 'es' ? 'Eliminar cliente' : 'Delete client'}
       >
         <Trash2 className="w-4 h-4" />
@@ -426,7 +426,7 @@ export default function Dashboard() {
         className="w-full text-left"
       >
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center">
+          <div className="w-12 h-12 bg-primary-900/30 rounded-xl flex items-center justify-center">
             <Briefcase className="w-6 h-6 text-primary-600" />
           </div>
           <div className="flex-1 min-w-0">
@@ -532,7 +532,7 @@ export default function Dashboard() {
                   value={searchProducts}
                   onChange={(e) => setSearchProducts(e.target.value)}
                   placeholder={t.searchProducts}
-                  className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -556,7 +556,7 @@ export default function Dashboard() {
                       <ArrowLeft className="w-5 h-5 text-dark-500" />
                     </button>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                      <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center">
                         <Briefcase className="w-5 h-5 text-primary-600" />
                       </div>
                       <div>
@@ -575,7 +575,7 @@ export default function Dashboard() {
                     value={searchProducts}
                     onChange={(e) => setSearchProducts(e.target.value)}
                     placeholder={t.searchProducts}
-                    className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
                 </div>
 
@@ -612,7 +612,7 @@ export default function Dashboard() {
                     value={searchClients}
                     onChange={(e) => setSearchClients(e.target.value)}
                     placeholder={t.searchClients}
-                    className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                    className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   />
                 </div>
 
@@ -661,7 +661,7 @@ export default function Dashboard() {
                   value={searchProducts}
                   onChange={(e) => setSearchProducts(e.target.value)}
                   placeholder={t.searchProducts}
-                  className="w-full pl-9 pr-3 py-2 bg-white border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                  className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 />
               </div>
             )}
@@ -713,7 +713,7 @@ export default function Dashboard() {
       {/* Assign Product Modal */}
       {assigningProduct && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+          <div className="bg-dark-100 rounded-2xl shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-dark-900 mb-2">
               {t.assignTo} "{assigningProduct.name}"
             </h3>
@@ -725,7 +725,7 @@ export default function Dashboard() {
                   onClick={() => handleAssignToClient(client.id)}
                   className="w-full p-3 text-left bg-dark-50 hover:bg-dark-100 rounded-lg transition-colors flex items-center gap-3"
                 >
-                  <div className="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
+                  <div className="w-8 h-8 bg-primary-900/30 rounded-lg flex items-center justify-center">
                     <Briefcase className="w-4 h-4 text-primary-600" />
                   </div>
                   <span className="font-medium text-dark-900">{client.name}</span>
@@ -747,7 +747,7 @@ export default function Dashboard() {
       {/* New Client Form Modal */}
       {showNewClientForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+          <div className="bg-dark-100 rounded-2xl shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-dark-900 mb-4">{t.newClient}</h3>
             <div className="mb-4">
               <label className="block text-sm font-medium text-dark-700 mb-1.5">

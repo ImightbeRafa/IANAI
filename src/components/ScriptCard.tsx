@@ -33,9 +33,9 @@ export default function ScriptCard({ script, language, onSave, isSaved, savingSc
   }
 
   return (
-    <div className="bg-white border border-dark-100 rounded-xl overflow-hidden transition-shadow hover:shadow-sm">
+    <div className="bg-dark-100 border border-dark-200 rounded-xl overflow-hidden transition-shadow hover:shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-50 bg-dark-50/40">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-200 bg-dark-200/40">
         <span className="text-xs font-semibold text-dark-600 tracking-wide">
           {script.title}
         </span>
@@ -52,13 +52,13 @@ export default function ScriptCard({ script, language, onSave, isSaved, savingSc
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-t border-dark-50">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-t border-dark-200">
         <button
           onClick={handleCopy}
           className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors ${
             copied
-              ? 'bg-green-50 text-green-600'
-              : 'text-dark-400 hover:bg-dark-50 hover:text-dark-700'
+              ? 'bg-green-900/20 text-green-400'
+              : 'text-dark-400 hover:bg-dark-200 hover:text-dark-700'
           }`}
         >
           {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -74,8 +74,8 @@ export default function ScriptCard({ script, language, onSave, isSaved, savingSc
             disabled={saved || saving || savingScript}
             className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors ${
               saved
-                ? 'bg-green-50 text-green-600'
-                : 'text-dark-400 hover:bg-primary-50 hover:text-primary-600'
+                ? 'bg-green-900/20 text-green-400'
+                : 'text-dark-400 hover:bg-primary-900/20 hover:text-primary-400'
             }`}
           >
             {saving ? (

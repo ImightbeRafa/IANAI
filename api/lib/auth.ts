@@ -91,7 +91,7 @@ export async function requireAuth(
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image' | 'video' | 'description'
+  action: 'script' | 'image' | 'video' | 'description' | 'enhance'
 ): Promise<{ allowed: boolean; remaining: number; limit: number }> {
   if (!supabaseAdmin) {
     console.error('Usage limit check: Supabase not configured — denying request')
@@ -120,17 +120,34 @@ export async function checkUsageLimit(
       return { allowed: true, remaining: -1, limit: -1 }
     }
 
-    const limit = action === 'script' 
+    // Enhance checks against the image limit (at half rate)
+    const effectiveAction = action === 'enhance' ? 'image' : action
+
+    let limit = effectiveAction === 'script' 
       ? limits.scripts_per_month 
-      : action === 'image' 
+      : effectiveAction === 'image' 
         ? limits.images_per_month 
-        : action === 'description'
+        : effectiveAction === 'description'
           ? (limits.descriptions_per_month ?? -1)
           : limits.videos_per_month || 10
 
     // -1 means unlimited
     if (limit === -1) {
       return { allowed: true, remaining: -1, limit: -1 }
+    }
+
+    // For images/enhances, add bonus_images from profiles (persistent pool, not monthly)
+    if (effectiveAction === 'image') {
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('bonus_images')
+        .eq('id', userId)
+        .single()
+      
+      const bonus = profile?.bonus_images || 0
+      if (bonus > 0) {
+        limit = limit + bonus
+      }
     }
 
     // Get current usage
@@ -142,11 +159,12 @@ export async function checkUsageLimit(
       .eq('period_start', currentMonth)
       .single()
 
-    const currentUsage = action === 'script' 
+    // For image limit: count full images + enhances at half rate (2 enhances = 1 image)
+    const currentUsage = effectiveAction === 'script' 
       ? (usage?.scripts_generated || 0)
-      : action === 'image'
-        ? (usage?.images_generated || 0)
-        : action === 'description'
+      : effectiveAction === 'image'
+        ? (usage?.images_generated || 0) + Math.floor((usage?.enhances_generated || 0) / 2)
+        : effectiveAction === 'description'
           ? (usage?.descriptions_generated || 0)
           : (usage?.videos_generated || 0)
 
@@ -161,11 +179,32 @@ export async function checkUsageLimit(
 }
 
 /**
+ * Deduct one bonus image from the user's persistent pool.
+ * Called after image generation when usage exceeds the base plan limit.
+ * Uses atomic RPC to prevent race conditions.
+ */
+export async function deductBonusImage(userId: string): Promise<void> {
+  if (!supabaseAdmin) return
+
+  try {
+    const { error } = await supabaseAdmin.rpc('deduct_bonus_image', {
+      p_user_id: userId
+    })
+
+    if (error) {
+      console.error('deduct_bonus_image RPC error:', error)
+    }
+  } catch (err) {
+    console.error('Deduct bonus image error:', err)
+  }
+}
+
+/**
  * Increment usage counter for a user (atomic via Postgres function)
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image' | 'video' | 'description'
+  action: 'script' | 'image' | 'video' | 'description' | 'enhance'
 ): Promise<void> {
   if (!supabaseAdmin) return
 

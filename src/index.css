@@ -12,17 +12,27 @@ body {
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: #0d1117;
+  color: #e2e8f0;
   /* Safe area insets for MacBook notch & iOS */
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
 
+/* Global dark theme for all native form elements */
+input, select, textarea, option {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #151d28;
+  color: #e2e8f0;
+}
+
 /* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 #f1f5f9;
+  scrollbar-color: #2a3a52 #151d28;
 }
 
 /* Webkit (Chrome, Safari, Edge) scrollbar */
@@ -32,16 +42,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #151d28;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #2a3a52;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #4a5f7a;
 }
 
 @keyframes float-up {
@@ -167,19 +177,19 @@ body {
   }
 
   .btn-secondary {
-    @apply bg-white text-dark-700 px-4 py-2 rounded-lg font-medium border border-dark-200
-           hover:bg-dark-50 transition-colors duration-200
-           focus:outline-none focus:ring-2 focus:ring-dark-300 focus:ring-offset-2
+    @apply bg-dark-200 text-dark-700 px-4 py-2 rounded-lg font-medium border border-dark-300
+           hover:bg-dark-300 transition-colors duration-200
+           focus:outline-none focus:ring-2 focus:ring-dark-400 focus:ring-offset-2 focus:ring-offset-dark-50
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .input-field {
-    @apply w-full px-4 py-2.5 border border-dark-200 rounded-lg
+    @apply w-full px-4 py-2.5 bg-dark-200 border border-dark-300 rounded-lg text-dark-900
            focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent
            placeholder:text-dark-400 transition-all duration-200;
   }
 
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-dark-100 p-6;
+    @apply bg-dark-100 rounded-xl shadow-sm border border-dark-200 p-6;
   }
 }

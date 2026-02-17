@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
+import FeedbackButton from './components/FeedbackButton'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
@@ -24,10 +25,11 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
 const DescriptionsDashboard = lazy(() => import('./pages/DescriptionsDashboard'))
 const DescriptionsWorkspace = lazy(() => import('./pages/DescriptionsWorkspace'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const AdminTickets = lazy(() => import('./pages/AdminTickets'))
 
 function LazyFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-dark-50">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
     </div>
   )
@@ -189,8 +191,17 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/admin/tickets"
+              element={
+                <ProtectedRoute>
+                  <AdminTickets />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          <FeedbackButton />
           </Suspense>
         </AuthProvider>
       </LanguageProvider>

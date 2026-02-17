@@ -16,8 +16,11 @@ import {
   Video,
   Sparkles,
   FileUp,
-  Link2
+  Link2,
+  Wand2,
+  MessageSquarePlus
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 interface UsageSummary {
   model: string
@@ -126,6 +129,7 @@ export default function AdminDashboard() {
       script: 'Guiones',
       description: 'Descripciones',
       image: 'Imágenes',
+      enhance: 'Mejoras de Imagen',
       video: 'Videos (Grok)',
       kling_video: 'Videos (Kling)',
       ad_prompt_build: 'Prompt de Anuncio (A+B+C)',
@@ -165,6 +169,7 @@ export default function AdminDashboard() {
       script: 'Scripts',
       description: 'Descriptions',
       image: 'Images',
+      enhance: 'Image Enhance',
       video: 'Videos (Grok)',
       kling_video: 'Videos (Kling)',
       ad_prompt_build: 'Ad Prompt Build (A+B+C)',
@@ -296,12 +301,19 @@ export default function AdminDashboard() {
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value as '7d' | '30d' | '90d')}
-              className="px-3 py-2 border border-dark-200 rounded-lg text-sm"
+              className="px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm"
             >
               <option value="7d">{t.last7days}</option>
               <option value="30d">{t.last30days}</option>
               <option value="90d">{t.last90days}</option>
             </select>
+            <Link
+              to="/admin/tickets"
+              className="btn-secondary flex items-center gap-2"
+            >
+              <MessageSquarePlus className="w-4 h-4" />
+              Tickets
+            </Link>
             <button
               onClick={fetchData}
               disabled={refreshing}
@@ -314,7 +326,7 @@ export default function AdminDashboard() {
         </div>
 
         {error && (
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg mb-6">
+          <div className="p-4 bg-red-900/20 border border-red-700/30 rounded-lg mb-6">
             <p className="text-red-600">{error}</p>
           </div>
         )}
@@ -332,9 +344,9 @@ export default function AdminDashboard() {
           <>
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-dark-100">
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-green-100 rounded-lg">
+                  <div className="p-2 bg-green-900/20 rounded-lg">
                     <DollarSign className="w-5 h-5 text-green-600" />
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCost}</span>
@@ -342,9 +354,9 @@ export default function AdminDashboard() {
                 <p className="text-3xl font-bold text-dark-900">${totalCost.toFixed(4)}</p>
               </div>
 
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-dark-100">
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-blue-100 rounded-lg">
+                  <div className="p-2 bg-blue-900/20 rounded-lg">
                     <BarChart3 className="w-5 h-5 text-blue-600" />
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCalls}</span>
@@ -352,9 +364,9 @@ export default function AdminDashboard() {
                 <p className="text-3xl font-bold text-dark-900">{totalCalls.toLocaleString()}</p>
               </div>
 
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-dark-100">
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-purple-100 rounded-lg">
+                  <div className="p-2 bg-purple-900/20 rounded-lg">
                     <TrendingUp className="w-5 h-5 text-purple-600" />
                   </div>
                   <span className="text-dark-500 text-sm">{t.successRate}</span>
@@ -364,7 +376,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Usage by Model */}
-            <div className="bg-white rounded-xl shadow-sm border border-dark-100 mb-8">
+            <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 mb-8">
               <div className="p-6 border-b border-dark-100">
                 <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
                   <Cpu className="w-5 h-5 text-primary-500" />
@@ -406,7 +418,7 @@ export default function AdminDashboard() {
 
             {/* Usage by Feature */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-              <div className="bg-white rounded-xl shadow-sm border border-dark-100">
+              <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100">
                 <div className="p-6 border-b border-dark-100">
                   <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
                     <FileText className="w-5 h-5 text-primary-500" />
@@ -420,6 +432,7 @@ export default function AdminDashboard() {
                         {feature === 'script' && <FileText className="w-5 h-5 text-blue-500" />}
                         {feature === 'description' && <FileText className="w-5 h-5 text-indigo-500" />}
                         {feature === 'image' && <ImageIcon className="w-5 h-5 text-green-500" />}
+                        {feature === 'enhance' && <Wand2 className="w-5 h-5 text-pink-500" />}
                         {feature === 'video' && <Video className="w-5 h-5 text-red-500" />}
                         {feature === 'kling_video' && <Video className="w-5 h-5 text-cyan-500" />}
                         {feature === 'ad_prompt_build' && <Sparkles className="w-5 h-5 text-violet-500" />}
@@ -442,7 +455,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Daily Trend (simplified) */}
-              <div className="bg-white rounded-xl shadow-sm border border-dark-100">
+              <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100">
                 <div className="p-6 border-b border-dark-100">
                   <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-primary-500" />
@@ -469,7 +482,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Recent Activity */}
-            <div className="bg-white rounded-xl shadow-sm border border-dark-100">
+            <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100">
               <div className="p-6 border-b border-dark-100">
                 <h2 className="text-lg font-semibold text-dark-900">{t.recentActivity}</h2>
               </div>
@@ -506,7 +519,7 @@ export default function AdminDashboard() {
                           ${Number(log.estimated_cost_usd).toFixed(6)}
                         </td>
                         <td className="px-6 py-3 text-center">
-                          <span className={`text-xs px-2 py-1 rounded ${log.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          <span className={`text-xs px-2 py-1 rounded ${log.success ? 'bg-green-900/20 text-green-700' : 'bg-red-900/20 text-red-700'}`}>
                             {log.success ? t.success : t.failed}
                           </span>
                         </td>

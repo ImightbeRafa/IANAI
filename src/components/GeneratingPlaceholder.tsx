@@ -12,7 +12,7 @@ export default function GeneratingPlaceholder({
   sublabel
 }: GeneratingPlaceholderProps) {
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-dark-100 overflow-hidden">
+    <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-200 overflow-hidden">
       <div
         className="relative overflow-hidden"
         style={{ aspectRatio }}

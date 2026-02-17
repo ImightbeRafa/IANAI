@@ -230,7 +230,7 @@ export default function PostsDashboard() {
         className="card hover:shadow-lg transition-all duration-200 group"
       >
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
+          <div className="w-12 h-12 bg-primary-900/30 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
             <Icon className="w-6 h-6 text-primary-600" />
           </div>
           <div className="flex-1 min-w-0">
@@ -286,7 +286,7 @@ export default function PostsDashboard() {
 
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center">
                     <Briefcase className="w-5 h-5 text-primary-600" />
                   </div>
                   <h2 className="text-xl font-semibold text-dark-900">{selectedClient.name}</h2>
@@ -370,7 +370,7 @@ export default function PostsDashboard() {
                       className="card hover:shadow-lg transition-all duration-200 text-left group"
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
+                        <div className="w-12 h-12 bg-primary-900/30 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
                           <Briefcase className="w-6 h-6 text-primary-600" />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -447,7 +447,7 @@ export default function PostsDashboard() {
           {/* Product Form Modal */}
           {showProductForm && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
+              <div className="bg-dark-100 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
                 <ProductForm
                   onSubmit={handleCreateProduct}
                   onCancel={() => setShowProductForm(false)}
@@ -459,7 +459,7 @@ export default function PostsDashboard() {
           {/* Restaurant Form Modal */}
           {showRestaurantForm && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
+              <div className="bg-dark-100 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
                 <RestaurantForm
                   onSubmit={handleCreateRestaurant}
                   onCancel={() => setShowRestaurantForm(false)}
@@ -511,7 +511,7 @@ export default function PostsDashboard() {
         {/* Product Form Modal */}
         {showProductForm && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
+            <div className="bg-dark-100 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
               <ProductForm
                 onSubmit={handleCreateProduct}
                 onCancel={() => setShowProductForm(false)}
@@ -523,7 +523,7 @@ export default function PostsDashboard() {
         {/* Restaurant Form Modal */}
         {showRestaurantForm && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
+            <div className="bg-dark-100 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
               <RestaurantForm
                 onSubmit={handleCreateRestaurant}
                 onCancel={() => setShowRestaurantForm(false)}

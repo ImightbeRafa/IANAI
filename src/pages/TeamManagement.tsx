@@ -213,8 +213,8 @@ export default function TeamManagement() {
         {message && (
           <div className={`mb-6 flex items-center gap-2 p-3 rounded-lg text-sm ${
             message.type === 'success' 
-              ? 'bg-green-50 border border-green-200 text-green-700'
-              : 'bg-red-50 border border-red-200 text-red-700'
+              ? 'bg-green-900/20 border border-green-700/30 text-green-400'
+              : 'bg-red-900/20 border border-red-700/30 text-red-400'
           }`}>
             {message.type === 'success' ? (
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
@@ -283,7 +283,7 @@ export default function TeamManagement() {
                 className="flex items-center justify-between p-3 bg-dark-50 rounded-lg"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+                  <div className="w-10 h-10 bg-primary-900/30 rounded-full flex items-center justify-center">
                     {member.profile?.avatar_url ? (
                       <img 
                         src={member.profile.avatar_url} 
@@ -313,7 +313,7 @@ export default function TeamManagement() {
                     <button
                       onClick={() => handleRemove(member.id, member.user_id, member.role)}
                       disabled={removing === member.id}
-                      className="p-2 text-dark-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-2 text-dark-400 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors"
                       title={t.remove}
                     >
                       {removing === member.id ? (

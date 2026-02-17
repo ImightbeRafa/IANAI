@@ -226,7 +226,7 @@ export default function DescriptionsWorkspace() {
     <Layout>
       <div className="flex flex-col h-[calc(100vh-64px)]" style={{ height: 'calc(100dvh - 64px)' }}>
         {/* Header */}
-        <div className="bg-white border-b border-dark-100 px-6 py-3 flex items-center justify-between">
+        <div className="bg-dark-100 border-b border-dark-100 px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
               to="/descriptions"
@@ -242,14 +242,14 @@ export default function DescriptionsWorkspace() {
           <div className="relative">
             <button
               onClick={() => setShowScriptPicker(!showScriptPicker)}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-primary-50 text-primary-700 hover:bg-primary-100 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-primary-900/20 text-primary-700 hover:bg-primary-900/30 rounded-lg transition-colors"
             >
               <FileText className="w-3.5 h-3.5" />
               {selectedScript ? t.changeScript : t.selectScript}
               {showScriptPicker ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
             {showScriptPicker && (
-              <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-xl shadow-lg border border-dark-100 z-50 max-h-[60vh] overflow-y-auto">
+              <div className="absolute right-0 top-full mt-2 w-96 bg-dark-100 rounded-xl shadow-lg border border-dark-100 z-50 max-h-[60vh] overflow-y-auto">
                 <div className="p-3 border-b border-dark-100">
                   <p className="text-xs font-semibold text-dark-700">{t.scriptsFor} {product.name}</p>
                 </div>
@@ -264,7 +264,7 @@ export default function DescriptionsWorkspace() {
                         }}
                         className={`w-full text-left p-3 rounded-lg transition-colors ${
                           selectedScript?.id === script.id
-                            ? 'bg-primary-50 border border-primary-200'
+                            ? 'bg-primary-900/20 border border-primary-200'
                             : 'hover:bg-dark-50'
                         }`}
                       >
@@ -285,7 +285,7 @@ export default function DescriptionsWorkspace() {
 
         {/* Selected script banner */}
         {selectedScript && (
-          <div className="bg-primary-50/50 border-b border-primary-100 px-6 py-2 flex items-center justify-between">
+          <div className="bg-primary-900/20 border-b border-primary-100 px-6 py-2 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <FileText className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
               <p className="text-xs text-primary-700 truncate">
@@ -306,7 +306,7 @@ export default function DescriptionsWorkspace() {
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-sm">
-                <div className="w-14 h-14 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-5">
+                <div className="w-14 h-14 rounded-2xl bg-primary-900/20 flex items-center justify-center mx-auto mb-5">
                   <Sparkles className="w-7 h-7 text-primary-500" />
                 </div>
                 <p className="text-dark-400 text-sm mb-4">{t.startPrompt}</p>
@@ -337,7 +337,7 @@ export default function DescriptionsWorkspace() {
                   className={`max-w-3xl px-5 py-4 ${
                     message.role === 'user'
                       ? 'bg-primary-600 text-white rounded-2xl rounded-br-md'
-                      : 'bg-white border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm'
+                      : 'bg-dark-100 border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm'
                   }`}
                 >
                   <div className="whitespace-pre-wrap text-sm leading-relaxed">
@@ -376,7 +376,7 @@ export default function DescriptionsWorkspace() {
         </div>
 
         {/* Input */}
-        <div className="bg-white border-t border-dark-100 px-6 py-3">
+        <div className="bg-dark-100 border-t border-dark-100 px-6 py-3">
           <div className="max-w-4xl mx-auto">
             <div className="flex items-end gap-2">
               <div className="flex-1 relative">
@@ -385,7 +385,7 @@ export default function DescriptionsWorkspace() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.placeholder}
-                  className="w-full px-4 py-3 text-sm bg-gray-50 border border-dark-100 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-300 focus:bg-white transition-colors"
+                  className="w-full px-4 py-3 text-sm bg-dark-200 border border-dark-300 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-400 focus:bg-dark-200 transition-colors"
                   rows={1}
                   disabled={loading}
                 />

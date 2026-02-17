@@ -1,0 +1,395 @@
+import { useState, useEffect, useRef } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
+import { useLocation } from 'react-router-dom'
+import { createFeedbackTicket, uploadFeedbackScreenshot } from '../services/database'
+import {
+  MessageSquarePlus,
+  X,
+  Camera,
+  Send,
+  Loader2,
+  CheckCircle,
+  Bug,
+  Lightbulb,
+  HelpCircle,
+  MoreHorizontal,
+  AlertTriangle,
+  Trash2
+} from 'lucide-react'
+import html2canvas from 'html2canvas'
+
+type Category = 'bug' | 'feature' | 'question' | 'other'
+type Priority = 'low' | 'medium' | 'high' | 'urgent'
+
+const consoleErrors: string[] = []
+
+// Capture console errors for context
+const originalConsoleError = console.error
+console.error = (...args: unknown[]) => {
+  consoleErrors.push(args.map(a => String(a)).join(' ').slice(0, 500))
+  if (consoleErrors.length > 20) consoleErrors.shift()
+  originalConsoleError.apply(console, args)
+}
+
+window.addEventListener('error', (e) => {
+  consoleErrors.push(`${e.message} at ${e.filename}:${e.lineno}`)
+  if (consoleErrors.length > 20) consoleErrors.shift()
+})
+
+export default function FeedbackButton() {
+  const { user } = useAuth()
+  const { language } = useLanguage()
+  const location = useLocation()
+
+  const [open, setOpen] = useState(false)
+  const [subject, setSubject] = useState('')
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState<Category>('bug')
+  const [priority, setPriority] = useState<Priority>('medium')
+  const [screenshot, setScreenshot] = useState<string | null>(null)
+  const [screenshotBlob, setScreenshotBlob] = useState<Blob | null>(null)
+  const [capturing, setCapturing] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState('')
+  const modalRef = useRef<HTMLDivElement>(null)
+
+  const t = language === 'es' ? {
+    title: 'Enviar Feedback',
+    subject: 'Asunto',
+    subjectPlaceholder: 'Resumen breve del problema o idea',
+    description: 'Descripción',
+    descriptionPlaceholder: 'Describe el problema con detalle, qué esperabas y qué pasó...',
+    category: 'Categoría',
+    bug: 'Bug',
+    feature: 'Idea',
+    question: 'Pregunta',
+    other: 'Otro',
+    priority: 'Prioridad',
+    low: 'Baja',
+    medium: 'Media',
+    high: 'Alta',
+    urgent: 'Urgente',
+    screenshot: 'Captura de pantalla',
+    capture: 'Capturar pantalla',
+    removeScreenshot: 'Quitar',
+    submit: 'Enviar',
+    submitting: 'Enviando...',
+    success: '¡Feedback enviado! Gracias.',
+    error: 'Error al enviar. Intenta de nuevo.',
+    close: 'Cerrar'
+  } : {
+    title: 'Send Feedback',
+    subject: 'Subject',
+    subjectPlaceholder: 'Brief summary of the issue or idea',
+    description: 'Description',
+    descriptionPlaceholder: 'Describe the problem in detail, what you expected and what happened...',
+    category: 'Category',
+    bug: 'Bug',
+    feature: 'Feature',
+    question: 'Question',
+    other: 'Other',
+    priority: 'Priority',
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
+    urgent: 'Urgent',
+    screenshot: 'Screenshot',
+    capture: 'Capture screen',
+    removeScreenshot: 'Remove',
+    submit: 'Submit',
+    submitting: 'Submitting...',
+    success: 'Feedback sent! Thank you.',
+    error: 'Failed to send. Please try again.',
+    close: 'Close'
+  }
+
+  const categories: { id: Category; label: string; icon: typeof Bug }[] = [
+    { id: 'bug', label: t.bug, icon: Bug },
+    { id: 'feature', label: t.feature, icon: Lightbulb },
+    { id: 'question', label: t.question, icon: HelpCircle },
+    { id: 'other', label: t.other, icon: MoreHorizontal },
+  ]
+
+  const priorities: { id: Priority; label: string; color: string }[] = [
+    { id: 'low', label: t.low, color: 'text-dark-500 border-dark-300' },
+    { id: 'medium', label: t.medium, color: 'text-blue-400 border-blue-500' },
+    { id: 'high', label: t.high, color: 'text-amber-400 border-amber-500' },
+    { id: 'urgent', label: t.urgent, color: 'text-red-400 border-red-500' },
+  ]
+
+  // Close on escape
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    if (open) window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [open])
+
+  const handleCapture = async () => {
+    setCapturing(true)
+    // Temporarily hide the feedback modal for clean capture
+    if (modalRef.current) modalRef.current.style.display = 'none'
+
+    try {
+      const canvas = await html2canvas(document.body, {
+        scale: 1,
+        useCORS: true,
+        logging: false,
+        windowWidth: document.documentElement.scrollWidth,
+        windowHeight: document.documentElement.scrollHeight,
+      })
+
+      canvas.toBlob((blob: Blob | null) => {
+        if (blob) {
+          setScreenshotBlob(blob)
+          setScreenshot(URL.createObjectURL(blob))
+        }
+      }, 'image/png', 0.8)
+    } catch (err) {
+      console.error('Screenshot capture failed:', err)
+    } finally {
+      if (modalRef.current) modalRef.current.style.display = ''
+      setCapturing(false)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!user || !subject.trim() || !description.trim()) return
+    setSubmitting(true)
+    setError('')
+
+    try {
+      let screenshotUrl: string | undefined
+
+      if (screenshotBlob) {
+        screenshotUrl = await uploadFeedbackScreenshot(user.id, screenshotBlob)
+      }
+
+      await createFeedbackTicket({
+        user_id: user.id,
+        user_email: user.email || undefined,
+        subject: subject.trim(),
+        description: description.trim(),
+        category,
+        priority,
+        page_url: location.pathname,
+        browser_info: navigator.userAgent,
+        screen_size: `${window.innerWidth}x${window.innerHeight}`,
+        console_errors: consoleErrors.slice(-10),
+        screenshot_url: screenshotUrl,
+      })
+
+      setSubmitted(true)
+      setTimeout(() => {
+        setOpen(false)
+        setSubmitted(false)
+        setSubject('')
+        setDescription('')
+        setCategory('bug')
+        setPriority('medium')
+        setScreenshot(null)
+        setScreenshotBlob(null)
+      }, 2000)
+    } catch (err) {
+      setError(t.error)
+      console.error('Feedback submission error:', err)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!user) return null
+
+  return (
+    <>
+      {/* Floating button */}
+      <button
+        onClick={() => setOpen(true)}
+        className="fixed bottom-6 right-6 z-40 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group"
+        title={t.title}
+      >
+        <MessageSquarePlus className="w-5 h-5 group-hover:scale-110 transition-transform" />
+      </button>
+
+      {/* Modal overlay */}
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !submitting && setOpen(false)} />
+
+          {/* Modal */}
+          <div
+            ref={modalRef}
+            className="relative w-full max-w-lg bg-dark-100 rounded-2xl shadow-2xl border border-dark-200 overflow-hidden max-h-[90vh] flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-dark-200">
+              <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
+                <MessageSquarePlus className="w-5 h-5 text-primary-500" />
+                {t.title}
+              </h2>
+              <button
+                onClick={() => !submitting && setOpen(false)}
+                className="p-1.5 hover:bg-dark-50 rounded-lg text-dark-400 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Success state */}
+            {submitted ? (
+              <div className="p-12 flex flex-col items-center justify-center gap-3">
+                <CheckCircle className="w-12 h-12 text-green-500" />
+                <p className="text-dark-800 font-medium">{t.success}</p>
+              </div>
+            ) : (
+              <>
+                {/* Body */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+                  {/* Category */}
+                  <div>
+                    <label className="text-xs font-semibold text-dark-500 uppercase tracking-wide mb-2 block">{t.category}</label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {categories.map(cat => {
+                        const Icon = cat.icon
+                        return (
+                          <button
+                            key={cat.id}
+                            onClick={() => setCategory(cat.id)}
+                            className={`flex flex-col items-center gap-1 p-2.5 rounded-lg text-[11px] font-medium transition-all ${
+                              category === cat.id
+                                ? 'bg-primary-900/20 text-primary-400 border border-primary-500'
+                                : 'bg-dark-50 text-dark-500 border border-transparent hover:bg-dark-200'
+                            }`}
+                          >
+                            <Icon className="w-4 h-4" />
+                            {cat.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Subject */}
+                  <div>
+                    <label className="text-xs font-semibold text-dark-500 uppercase tracking-wide mb-1.5 block">{t.subject}</label>
+                    <input
+                      type="text"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder={t.subjectPlaceholder}
+                      className="w-full px-3 py-2.5 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-400"
+                    />
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <label className="text-xs font-semibold text-dark-500 uppercase tracking-wide mb-1.5 block">{t.description}</label>
+                    <textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder={t.descriptionPlaceholder}
+                      rows={4}
+                      className="w-full px-3 py-2.5 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-400"
+                    />
+                  </div>
+
+                  {/* Priority */}
+                  <div>
+                    <label className="text-xs font-semibold text-dark-500 uppercase tracking-wide mb-2 block">{t.priority}</label>
+                    <div className="flex gap-1.5">
+                      {priorities.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => setPriority(p.id)}
+                          className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                            priority === p.id
+                              ? `${p.color} bg-dark-50`
+                              : 'text-dark-500 border-transparent bg-dark-50 hover:bg-dark-200'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Screenshot */}
+                  <div>
+                    <label className="text-xs font-semibold text-dark-500 uppercase tracking-wide mb-2 block">{t.screenshot}</label>
+                    {screenshot ? (
+                      <div className="relative group">
+                        <img
+                          src={screenshot}
+                          alt="Screenshot"
+                          className="w-full h-40 object-cover rounded-lg border border-dark-200"
+                        />
+                        <button
+                          onClick={() => { setScreenshot(null); setScreenshotBlob(null) }}
+                          className="absolute top-2 right-2 p-1.5 bg-dark-100/90 rounded-lg text-dark-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleCapture}
+                        disabled={capturing}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-dark-50 border border-dashed border-dark-300 rounded-lg text-sm text-dark-500 hover:border-primary-500 hover:text-primary-400 transition-colors disabled:opacity-50"
+                      >
+                        {capturing ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Camera className="w-4 h-4" />
+                        )}
+                        {t.capture}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Auto-captured info badge */}
+                  <div className="flex items-center gap-1.5 text-[10px] text-dark-400">
+                    <AlertTriangle className="w-3 h-3" />
+                    {language === 'es'
+                      ? 'Se adjuntará automáticamente: página actual, navegador, errores de consola'
+                      : 'Auto-attached: current page, browser info, console errors'}
+                  </div>
+
+                  {error && (
+                    <p className="text-sm text-red-400 bg-red-900/20 px-3 py-2 rounded-lg">{error}</p>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-dark-200 flex justify-end gap-3">
+                  <button
+                    onClick={() => setOpen(false)}
+                    disabled={submitting}
+                    className="px-4 py-2.5 text-sm font-medium text-dark-500 hover:bg-dark-50 rounded-lg transition-colors"
+                  >
+                    {t.close}
+                  </button>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting || !subject.trim() || !description.trim()}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+                  >
+                    {submitting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    {submitting ? t.submitting : t.submit}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

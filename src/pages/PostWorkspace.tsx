@@ -15,11 +15,14 @@ import {
   Download,
   FileText,
   Loader2,
-  Cpu,
   ChevronDown,
   ChevronUp,
   Pencil,
-  Send
+  Send,
+  Wand2,
+  Plus,
+  Trash2,
+  Pipette
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
@@ -27,6 +30,8 @@ import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import { IMAGE_PRESETS } from '../data/image-presets'
 import { COLOR_PALETTES } from '../data/color-palettes'
+import { getCustomPalettes, createCustomPalette, deleteCustomPalette } from '../services/database'
+import type { CustomColorPalette } from '../services/database'
 
 type PostAspectRatio = '9:16' | '3:4'
 
@@ -57,7 +62,7 @@ export default function PostWorkspace() {
   const [uploadedImages, setUploadedImages] = useState<string[]>([])
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
-  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
+  const imageModel: ImageModel = 'nano-banana-pro'
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const [postStyle, setPostStyle] = useState<string>('venta-directa')
   const [showStyleDropdown, setShowStyleDropdown] = useState(false)
@@ -68,6 +73,13 @@ export default function PostWorkspace() {
   const [editRefImages, setEditRefImages] = useState<string[]>([])
   const editFileInputRef = useRef<HTMLInputElement>(null)
   const usageLimits = useUsageLimits()
+  const [enhancingPostId, setEnhancingPostId] = useState<string | null>(null)
+  const [customPalettes, setCustomPalettes] = useState<CustomColorPalette[]>([])
+  const [showColorCreator, setShowColorCreator] = useState(false)
+  const [newPaletteName, setNewPaletteName] = useState('')
+  const [newPaletteColors, setNewPaletteColors] = useState<[string, string, string]>(['#000000', '#FFFFFF', '#0284c7'])
+  const [customColors, setCustomColors] = useState<string[] | null>(null)
+  const paletteImageInputRef = useRef<HTMLInputElement>(null)
 
   const labels = {
     es: {
@@ -99,14 +111,20 @@ export default function PostWorkspace() {
       editing: 'Editando...',
       editError: 'Error al editar imagen',
       error: 'Error al generar post',
-      imageModel: 'Modelo de IA',
-      nanoBanana: 'Gemini Flash',
-      nanoBananaPro: 'Gemini Pro',
-      grokImagine: 'Grok Imagine',
       formatLabel: 'Formato',
       reelStory: 'Reel / Story',
       squarePost: 'Post Feed',
-      colorLabel: 'Paleta de Colores'
+      colorLabel: 'Paleta de Colores',
+      enhance: 'Mejorar',
+      enhancing: 'Mejorando...',
+      enhanceError: 'Error al mejorar imagen',
+      createPalette: 'Crear paleta',
+      paletteName: 'Nombre',
+      paletteColors: 'Colores',
+      savePalette: 'Guardar',
+      orUploadImage: 'O sube una imagen para extraer colores',
+      customPalette: 'Personalizada',
+      deletePalette: 'Eliminar'
     },
     en: {
       back: 'Back',
@@ -137,14 +155,20 @@ export default function PostWorkspace() {
       editing: 'Editing...',
       editError: 'Error editing image',
       error: 'Error generating post',
-      imageModel: 'AI Model',
-      nanoBanana: 'Gemini Flash',
-      nanoBananaPro: 'Gemini Pro',
-      grokImagine: 'Grok Imagine',
       formatLabel: 'Format',
       reelStory: 'Reel / Story',
       squarePost: 'Feed Post',
-      colorLabel: 'Color Palette'
+      colorLabel: 'Color Palette',
+      enhance: 'Enhance',
+      enhancing: 'Enhancing...',
+      enhanceError: 'Error enhancing image',
+      createPalette: 'Create palette',
+      paletteName: 'Name',
+      paletteColors: 'Colors',
+      savePalette: 'Save',
+      orUploadImage: 'Or upload an image to extract colors',
+      customPalette: 'Custom',
+      deletePalette: 'Delete'
     }
   }
 
@@ -154,13 +178,15 @@ export default function PostWorkspace() {
     async function loadData() {
       if (!productId || !user) return
       try {
-        const [productData, scriptsData, savedPosts] = await Promise.all([
+        const [productData, scriptsData, savedPosts, userPalettes] = await Promise.all([
           getProduct(productId),
           getScripts(productId),
-          getProductPosts(productId)
+          getProductPosts(productId),
+          getCustomPalettes(user.id)
         ])
         setProduct(productData)
         setScripts(scriptsData)
+        setCustomPalettes(userPalettes)
 
         const loadedPosts: GeneratedPost[] = savedPosts
           .filter(post => post.status === 'completed' && post.generated_image_url)
@@ -269,7 +295,8 @@ export default function PostWorkspace() {
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,
         model: imageModel,
-        colorPaletteId: colorPaletteId !== 'auto' ? colorPaletteId : undefined
+        colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
+        customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined
       }
 
       if (uploadedImages.length > 0) {
@@ -461,6 +488,186 @@ export default function PostWorkspace() {
     if (editFileInputRef.current) editFileInputRef.current.value = ''
   }
 
+  const handleEnhance = async (postId: string, imageUrl: string) => {
+    if (enhancingPostId) return
+
+    setEnhancingPostId(postId)
+    setError('')
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
+
+      let base64Image = imageUrl
+      if (!imageUrl.startsWith('data:')) {
+        const imgRes = await fetch(imageUrl)
+        const blob = await imgRes.blob()
+        base64Image = await new Promise<string>((resolve) => {
+          const reader = new FileReader()
+          reader.onloadend = () => resolve(reader.result as string)
+          reader.readAsDataURL(blob)
+        })
+      }
+
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'enhance',
+          enhanceImage: base64Image
+        })
+      })
+
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || t.enhanceError)
+
+      if (result.status === 'Ready' && result.result?.sample) {
+        const enhancedUrl = result.result.sample
+
+        let savedUrl = enhancedUrl
+        try {
+          if (user && productId) {
+            savedUrl = await uploadPostImageOriginal(user.id, productId, enhancedUrl)
+          }
+        } catch (saveErr) {
+          console.error('Failed to save enhanced image:', saveErr)
+        }
+
+        const enhancedPost: GeneratedPost = {
+          id: `enhance-${Date.now()}`,
+          imageUrl: savedUrl,
+          prompt: `✨ Enhanced`,
+          createdAt: new Date(),
+          model: 'nano-banana-pro',
+          saved: true
+        }
+
+        try {
+          if (user && productId) {
+            const dbPost = await createPost(productId, user.id, {
+              prompt: 'Enhanced version',
+              width: 0,
+              height: 0,
+              output_format: 'png',
+              model: 'nano-banana-pro'
+            })
+            enhancedPost.id = dbPost.id
+            await updatePostStatus(dbPost.id, 'completed', savedUrl)
+          }
+        } catch (dbErr) {
+          console.error('Failed to save enhanced post to DB:', dbErr)
+        }
+
+        setGeneratedPosts(prev => {
+          const idx = prev.findIndex(p => p.id === postId)
+          const next = [...prev]
+          next.splice(idx + 1, 0, enhancedPost)
+          return next
+        })
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t.enhanceError)
+    } finally {
+      setEnhancingPostId(null)
+    }
+  }
+
+  const handleSavePalette = async () => {
+    if (!user) return
+    try {
+      const name = newPaletteName.trim() || (language === 'es' ? 'Mi paleta' : 'My palette')
+      const palette = await createCustomPalette(user.id, name, newPaletteColors)
+      setCustomPalettes(prev => [palette, ...prev])
+      setShowColorCreator(false)
+      setNewPaletteName('')
+      // Auto-select the newly created palette
+      setColorPaletteId('custom')
+      setCustomColors([palette.color_1, palette.color_2, palette.color_3])
+    } catch (err) {
+      console.error('Failed to save palette:', err)
+    }
+  }
+
+  const handleDeletePalette = async (paletteId: string) => {
+    try {
+      await deleteCustomPalette(paletteId)
+      setCustomPalettes(prev => prev.filter(p => p.id !== paletteId))
+      if (colorPaletteId === 'custom') {
+        setColorPaletteId('auto')
+        setCustomColors(null)
+      }
+    } catch (err) {
+      console.error('Failed to delete palette:', err)
+    }
+  }
+
+  const handleExtractColors = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      const size = 50
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(img, 0, 0, size, size)
+      const data = ctx.getImageData(0, 0, size, size).data
+
+      // Simple k-means-ish: sample pixels and find 3 dominant colors
+      const pixels: [number, number, number][] = []
+      for (let i = 0; i < data.length; i += 4) {
+        pixels.push([data[i], data[i + 1], data[i + 2]])
+      }
+
+      // Pick 3 spread-out colors: darkest, middle, brightest
+      pixels.sort((a, b) => (a[0] + a[1] + a[2]) - (b[0] + b[1] + b[2]))
+      const pick = (frac: number) => {
+        const idx = Math.min(Math.floor(frac * pixels.length), pixels.length - 1)
+        const [r, g, b] = pixels[idx]
+        return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('')
+      }
+
+      const c1 = pick(0.15)
+      const c2 = pick(0.5)
+      const c3 = pick(0.85)
+      setNewPaletteColors([c1, c2, c3])
+      URL.revokeObjectURL(url)
+    }
+    img.src = url
+    if (paletteImageInputRef.current) paletteImageInputRef.current.value = ''
+  }
+
+  const handleBuyBoost = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      const checkoutUrl = import.meta.env.PROD ? '/api/tilopay/create-checkout' : 'http://localhost:3000/api/tilopay/create-checkout'
+      const response = await fetch(checkoutUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ plan: 'image_boost' })
+      })
+      const data = await response.json()
+      if (data.checkoutUrl) {
+        window.open(data.checkoutUrl, '_blank')
+      }
+    } catch (err) {
+      console.error('Boost checkout error:', err)
+    }
+  }
+
   if (loading) {
     return (
       <Layout>
@@ -487,7 +694,7 @@ export default function PostWorkspace() {
     <Layout>
       <div className="h-full flex flex-col lg:flex-row lg:overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">
+        <div className="w-full lg:w-[420px] bg-dark-100 border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">
           {/* Header */}
           <div className="px-5 py-4 border-b border-dark-100">
             <Link
@@ -524,12 +731,12 @@ export default function PostWorkspace() {
               </button>
 
               {showStyleDropdown && (
-                <div className="absolute z-30 mt-1 w-full bg-white rounded-xl shadow-xl border border-dark-200 max-h-[400px] overflow-y-auto">
+                <div className="absolute z-30 mt-1 w-full bg-dark-100 rounded-xl shadow-xl border border-dark-200 max-h-[400px] overflow-y-auto">
                   {/* Venta Directa — always first */}
                   <button
                     onClick={() => { setPostStyle('venta-directa'); setShowStyleDropdown(false) }}
                     className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
-                      postStyle === 'venta-directa' ? 'bg-primary-50' : ''
+                      postStyle === 'venta-directa' ? 'bg-primary-900/20' : ''
                     }`}
                   >
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0">
@@ -550,7 +757,7 @@ export default function PostWorkspace() {
                       key={preset.id}
                       onClick={() => { setPostStyle(preset.id); setShowStyleDropdown(false) }}
                       className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 last:border-b-0 ${
-                        postStyle === preset.id ? 'bg-primary-50' : ''
+                        postStyle === preset.id ? 'bg-primary-900/20' : ''
                       }`}
                     >
                       <img
@@ -582,13 +789,14 @@ export default function PostWorkspace() {
                 {t.colorLabel}
               </label>
               <div className="flex flex-wrap gap-1.5">
+                {/* Predefined palettes */}
                 {COLOR_PALETTES.map(palette => (
                   <button
                     key={palette.id}
-                    onClick={() => setColorPaletteId(palette.id)}
+                    onClick={() => { setColorPaletteId(palette.id); setCustomColors(null) }}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
                       colorPaletteId === palette.id
-                        ? 'bg-primary-50 text-primary-700 border border-primary-300 shadow-sm'
+                        ? 'bg-primary-900/20 text-primary-700 border border-primary-300 shadow-sm'
                         : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                     }`}
                   >
@@ -608,7 +816,105 @@ export default function PostWorkspace() {
                     {language === 'es' ? palette.nameEs : palette.name}
                   </button>
                 ))}
+
+                {/* Saved custom palettes */}
+                {customPalettes.map(cp => (
+                  <button
+                    key={cp.id}
+                    onClick={() => {
+                      setColorPaletteId('custom')
+                      setCustomColors([cp.color_1, cp.color_2, cp.color_3])
+                    }}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all group/cp ${
+                      colorPaletteId === 'custom' && customColors?.[0] === cp.color_1 && customColors?.[1] === cp.color_2
+                        ? 'bg-primary-900/20 text-primary-700 border border-primary-300 shadow-sm'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    <span className="flex gap-0.5">
+                      {[cp.color_1, cp.color_2, cp.color_3].map((c, i) => (
+                        <span key={i} className="w-3 h-3 rounded-full border border-dark-200/50" style={{ backgroundColor: c }} />
+                      ))}
+                    </span>
+                    {cp.name}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeletePalette(cp.id) }}
+                      className="ml-0.5 opacity-0 group-hover/cp:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="w-2.5 h-2.5 text-dark-400 hover:text-red-500" />
+                    </button>
+                  </button>
+                ))}
+
+                {/* Create palette button */}
+                <button
+                  onClick={() => setShowColorCreator(!showColorCreator)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all ${
+                    showColorCreator
+                      ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                      : 'bg-dark-50 text-dark-600 border border-dashed border-dark-300 hover:bg-dark-100'
+                  }`}
+                >
+                  <Plus className="w-3 h-3" />
+                  {t.createPalette}
+                </button>
               </div>
+
+              {/* Color creator inline form */}
+              {showColorCreator && (
+                <div className="mt-2 p-3 bg-dark-50 rounded-lg border border-dark-200 space-y-2.5">
+                  <input
+                    type="text"
+                    value={newPaletteName}
+                    onChange={(e) => setNewPaletteName(e.target.value)}
+                    placeholder={t.paletteName}
+                    className="w-full text-xs bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                  />
+                  <div className="flex items-center gap-2">
+                    {newPaletteColors.map((color, i) => (
+                      <label key={i} className="relative cursor-pointer">
+                        <span
+                          className="block w-8 h-8 rounded-lg border-2 border-dark-200 shadow-sm"
+                          style={{ backgroundColor: color }}
+                        />
+                        <input
+                          type="color"
+                          value={color}
+                          onChange={(e) => {
+                            const updated = [...newPaletteColors] as [string, string, string]
+                            updated[i] = e.target.value
+                            setNewPaletteColors(updated)
+                          }}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        />
+                      </label>
+                    ))}
+                    <span className="text-[10px] text-dark-400 ml-1">{t.paletteColors}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => paletteImageInputRef.current?.click()}
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-medium bg-dark-100 border border-dark-200 text-dark-600 hover:bg-dark-50 transition-colors"
+                    >
+                      <Pipette className="w-3 h-3" />
+                      {t.orUploadImage}
+                    </button>
+                    <input
+                      ref={paletteImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleExtractColors}
+                      className="hidden"
+                    />
+                  </div>
+                  <button
+                    onClick={handleSavePalette}
+                    className="w-full px-3 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-medium hover:bg-primary-700 transition-colors"
+                  >
+                    {t.savePalette}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Script selector */}
@@ -634,7 +940,7 @@ export default function PostWorkspace() {
                 </button>
 
                 {showScriptPicker && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-dark-100 z-50 max-h-[50vh] overflow-y-auto">
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-dark-100 rounded-xl shadow-lg border border-dark-100 z-50 max-h-[50vh] overflow-y-auto">
                     {scripts.length > 0 ? (
                       <div className="p-2 space-y-0.5">
                         {scripts.map(script => (
@@ -647,7 +953,7 @@ export default function PostWorkspace() {
                             }}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
                               selectedScript?.id === script.id
-                                ? 'bg-primary-50 border border-primary-200'
+                                ? 'bg-primary-900/20 border border-primary-200'
                                 : 'hover:bg-dark-50'
                             }`}
                           >
@@ -667,7 +973,7 @@ export default function PostWorkspace() {
 
               {/* Selected script preview */}
               {selectedScript && (
-                <div className="mt-2 bg-primary-50/50 border border-primary-100 rounded-lg p-3">
+                <div className="mt-2 bg-primary-900/20 border border-primary-100 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[10px] font-semibold text-primary-700 uppercase tracking-wide">{t.selectedScript}</p>
                     <button
@@ -690,7 +996,7 @@ export default function PostWorkspace() {
                     onChange={(e) => setScriptText(e.target.value)}
                     placeholder={t.scriptPlaceholder}
                     rows={6}
-                    className="w-full text-sm border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
                   />
                 </>
               )}
@@ -703,7 +1009,7 @@ export default function PostWorkspace() {
               </label>
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border border-dashed border-dark-200 rounded-lg p-3 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50/30 transition-colors"
+                className="border border-dashed border-dark-200 rounded-lg p-3 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-900/20 transition-colors"
               >
                 <Upload className="w-5 h-5 text-dark-300 mx-auto mb-1" />
                 <p className="text-[10px] text-dark-400">{t.refHint}</p>
@@ -733,35 +1039,6 @@ export default function PostWorkspace() {
               )}
             </div>
 
-            {/* AI Model */}
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
-                <Cpu className="w-3.5 h-3.5 text-primary-500" />
-                {t.imageModel}
-              </label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {([
-                  { id: 'nano-banana' as ImageModel, name: t.nanoBanana, sub: 'Gemini 2.5' },
-                  { id: 'nano-banana-pro' as ImageModel, name: t.nanoBananaPro, sub: 'Gemini 3' },
-                  { id: 'grok-imagine' as ImageModel, name: t.grokImagine, sub: 'xAI' },
-                ] as const).map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => setImageModel(m.id)}
-                    className={`p-2.5 rounded-lg text-xs transition-colors ${
-                      imageModel === m.id
-                        ? 'bg-primary-50 text-primary-700 border border-primary-300'
-                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
-                    }`}
-                  >
-                    <div className="font-medium">{m.name}</div>
-                    <div className={`text-[10px] mt-0.5 ${imageModel === m.id ? 'text-primary-500' : 'text-dark-400'}`}>
-                      {m.sub}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {/* Aspect Ratio */}
             <div>
@@ -779,7 +1056,7 @@ export default function PostWorkspace() {
                     onClick={() => setAspectRatio(f.id)}
                     className={`p-2.5 rounded-lg text-xs transition-colors ${
                       aspectRatio === f.id
-                        ? 'bg-primary-50 text-primary-700 border border-primary-300'
+                        ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
                         : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                     }`}
                   >
@@ -794,14 +1071,14 @@ export default function PostWorkspace() {
 
             {/* Error */}
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-xs text-red-600">{error}</p>
+              <div className="p-3 bg-red-900/20 border border-red-700/30 rounded-lg">
+                <p className="text-xs text-red-400">{error}</p>
               </div>
             )}
           </div>
 
           {/* Usage Banner */}
-          <UsageBanner usage={usageLimits} resource="image" />
+          <UsageBanner usage={usageLimits} resource="image" onBuyBoost={handleBuyBoost} />
 
           {/* Generate Button */}
           <div className="px-5 py-4 border-t border-dark-100">
@@ -840,18 +1117,30 @@ export default function PostWorkspace() {
                   />
                 )}
                 {generatedPosts.map((post, index) => (
-                  <div key={post.id} className="bg-white rounded-xl shadow-sm border border-dark-100 overflow-hidden group">
+                  <div key={post.id} className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 overflow-hidden group">
                     <div className="relative">
                       <img
                         src={post.imageUrl}
                         alt={`Post ${index + 1}`}
-                        className={`w-full object-cover ${post.imageUrl.includes('1440') || (post as any).aspectRatio === '3:4' ? 'aspect-[3/4]' : 'aspect-[9/16]'}`}
+                        className="w-full h-auto"
                         loading="lazy"
                       />
-                      {post.model && (
-                        <span className="absolute top-2 right-2 text-[9px] font-mono px-1.5 py-0.5 bg-black/40 text-white/80 rounded-md backdrop-blur-sm">
-                          {post.model}
-                        </span>
+                      {/* Magic Wand — enhance button */}
+                      <button
+                        onClick={() => handleEnhance(post.id, post.imageUrl)}
+                        disabled={!!enhancingPostId || editing}
+                        className="absolute top-2 left-2 w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={t.enhance}
+                      >
+                        <Wand2 className="w-5 h-5" />
+                      </button>
+                      {enhancingPostId === post.id && (
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
+                          <div className="flex items-center gap-2 text-white text-sm font-medium">
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            {t.enhancing}
+                          </div>
+                        </div>
                       )}
                       {editing && editingPostId === post.id && (
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
@@ -886,7 +1175,7 @@ export default function PostWorkspace() {
                           disabled={editing}
                           className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                             editingPostId === post.id
-                              ? 'bg-primary-50 text-primary-700 border border-primary-300'
+                              ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
                               : 'border border-dark-200 text-dark-600 hover:bg-dark-50'
                           }`}
                         >

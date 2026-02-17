@@ -121,6 +121,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Determine plan from webhook data or pending subscription
     const plan = pendingPlan || determinePlanFromData(data)
 
+    // Handle one-time image boost purchase (not a subscription change)
+    if (plan === 'image_boost') {
+      await handleImageBoost(userId, email, data)
+      return res.status(200).json({ received: true, event: eventType, action: 'image_boost' })
+    }
+
     // Process based on event type
     switch (eventType) {
       case 'subscribe':
@@ -305,6 +311,47 @@ async function handleReactive(
   console.log(`Subscription reactivated`)
 }
 
+/**
+ * Handle one-time image boost purchase ($14.99 → +100 bonus images)
+ * Does NOT modify the user's subscription — only credits bonus_images.
+ */
+async function handleImageBoost(
+  userId: string,
+  email: string,
+  data: TiloPayWebhookData
+) {
+  console.log(`Image boost purchase for user ${userId} (${email})`)
+
+  // Credit 100 bonus images via atomic RPC
+  const { error } = await supabase!.rpc('credit_bonus_images', {
+    p_user_id: userId,
+    p_amount: 100
+  })
+
+  if (error) {
+    console.error('Failed to credit bonus images:', error)
+  }
+
+  // Mark pending as completed
+  await supabase!.from('pending_subscriptions')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('plan', 'image_boost')
+
+  // Record payment
+  if (data.amount) {
+    await supabase!.from('payments').insert({
+      user_id: userId,
+      amount: data.amount,
+      currency: data.currency || 'USD',
+      status: 'succeeded',
+      paid_at: new Date().toISOString()
+    })
+  }
+
+  console.log(`+100 bonus images credited to ${email}`)
+}
+
 // =============================================
 // HELPER FUNCTIONS
 // =============================================
@@ -316,6 +363,11 @@ async function handleReactive(
 function determinePlanFromData(data: TiloPayWebhookData): string {
   // First try to determine from amount (most reliable)
   const amount = parseFloat(String(data.amount || '0'))
+
+  // Check for image boost one-time purchase first
+  if (amount >= 14 && amount <= 16) {
+    return 'image_boost' // 100 extra images $14.99 one-time
+  }
   
   if (amount >= 200) {
     return 'enterprise' // Enterprise plan at $299/month
@@ -329,7 +381,10 @@ function determinePlanFromData(data: TiloPayWebhookData): string {
   
   // Fallback: try to determine plan from modality or plan_title
   const title = (data.modality || data.plan_title || '').toLowerCase()
-  
+
+  if (title.includes('boost') || title.includes('extra') || title.includes('100')) {
+    return 'image_boost'
+  }
   if (title.includes('enterprise') || title.includes('empresa')) {
     return 'enterprise'
   }

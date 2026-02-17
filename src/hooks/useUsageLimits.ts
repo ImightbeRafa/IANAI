@@ -8,6 +8,7 @@ export interface UsageLimits {
   scriptsLimit: number
   imagesUsed: number
   imagesLimit: number
+  bonusImages: number
   descriptionsUsed: number
   descriptionsLimit: number
   loading: boolean
@@ -26,6 +27,7 @@ export function useUsageLimits(): UsageLimits {
     scriptsLimit: 10,
     imagesUsed: 0,
     imagesLimit: 1,
+    bonusImages: 0,
     descriptionsUsed: 0,
     descriptionsLimit: 10,
     loading: true
@@ -62,12 +64,23 @@ export function useUsageLimits(): UsageLimits {
           .eq('period_start', currentMonth)
           .single()
 
+        // Fetch bonus images from profiles
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('bonus_images')
+          .eq('id', user!.id)
+          .single()
+
+        const bonus = profile?.bonus_images || 0
+        const baseImageLimit = limits?.images_per_month ?? 1
+
         setData({
           plan,
           scriptsUsed: usage?.scripts_generated || 0,
           scriptsLimit: limits?.scripts_per_month ?? 10,
           imagesUsed: usage?.images_generated || 0,
-          imagesLimit: limits?.images_per_month ?? 1,
+          imagesLimit: baseImageLimit === -1 ? -1 : baseImageLimit + bonus,
+          bonusImages: bonus,
           descriptionsUsed: usage?.descriptions_generated || 0,
           descriptionsLimit: limits?.descriptions_per_month ?? 10,
           loading: false

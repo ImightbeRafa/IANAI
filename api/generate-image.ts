@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
+import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
@@ -431,6 +431,7 @@ Edit instruction: ${editPrompt}`
 
         // Count edit as image usage
         await incrementUsage(user.id, 'image')
+        await deductBonusImage(user.id)
 
         await logApiUsage({
           userId: user.id,
@@ -469,6 +470,246 @@ Edit instruction: ${editPrompt}`
       }
     }
 
+    // =============================================
+    // MAGIC WAND ENHANCE MODE (Gemini only)
+    // Sends existing image + creative-director mega-prompt → upgraded design
+    // =============================================
+    if (action === 'enhance') {
+      // Check usage limit (enhance costs 0.5 image credit)
+      const enhanceUsage = await checkUsageLimit(user.id, 'enhance')
+      if (!enhanceUsage.allowed) {
+        return res.status(403).json({ error: 'Image limit reached. Upgrade your plan for more.' })
+      }
+
+      const geminiApiKey = process.env.GEMINI_API_KEY
+      if (!geminiApiKey) {
+        return res.status(500).json({ error: 'Gemini API key not configured' })
+      }
+
+      const enhanceImage = imageParams.enhanceImage || ''
+      if (!enhanceImage) {
+        return res.status(400).json({ error: 'enhanceImage is required for enhance action' })
+      }
+
+      const enhanceModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
+
+      const ENHANCE_SYSTEM_PROMPT = `ACTÚA COMO:
+Director Creativo + Director de Arte Senior + Diseñador Editorial de marcas globales (Apple / Aesop / Jacquemus / Nike Campaign Level).
+
+TAREA:
+Vas a REINTERPRETAR el diseño que te paso.
+No es solo "mejorarlo".
+Es llevarlo a una versión más inteligente, más conceptual, más coherente visualmente y con mayor impacto creativo.
+
+Puedes:
+- Cambiar composición
+- Cambiar estructura visual
+- Cambiar jerarquía
+- Cambiar distribución de elementos
+- Cambiar dirección de arte
+- Proponer una narrativa visual diferente
+
+No puedes:
+- Cambiar el mensaje central
+- Cambiar el texto
+- Alterar la intención comercial
+
+Tu objetivo es que el diseño tenga:
+- Más intención
+- Más concepto
+- Más carácter
+- Más tensión visual
+- Más autoridad
+
+---
+
+ENFOQUE CREATIVO (OBLIGATORIO)
+
+1) Primero analiza:
+   - ¿Qué quiere comunicar realmente esta pieza?
+   - ¿Es aspiracional? ¿Es técnico? ¿Es emocional? ¿Es agresivo?
+   - ¿La composición actual refleja eso o es genérica?
+
+2) Luego elige UNA dirección creativa clara:
+   Ejemplos posibles (elige la más lógica según el diseño):
+   - Editorial de revista de lujo
+   - Minimalismo brutalista
+   - High-fashion campaign
+   - Tech futurista limpio
+   - Conceptual con uso fuerte de espacio negativo
+   - Layout modular tipo sistema de diseño
+   - Composición asimétrica dinámica
+   - Enfoque tipográfico dominante
+   - Imagen dominante con microcopy sutil
+   - Dirección artística cinematográfica
+
+3) El diseño debe sentirse intencional.
+Nada centrado por default.
+Nada simétrico porque sí.
+Nada "Canva vibes".
+
+---
+
+REGLAS DE ALTO NIVEL
+
+* Diseña con concepto, no con decoración.
+* El espacio negativo es parte activa del diseño.
+* El contraste genera jerarquía.
+* La tipografía debe tener personalidad.
+* Si todo destaca, nada destaca.
+* El diseño debe tener un punto focal claro.
+* Menos elementos, pero más poder.
+
+---
+
+PERMITE CAMBIOS ESTRUCTURALES
+
+- Puedes eliminar elementos que no aporten.
+- Puedes cambiar proporciones.
+- Puedes convertir bullets en bloques visuales.
+- Puedes usar texto como elemento gráfico.
+- Puedes romper la cuadrícula si tiene intención.
+- Puedes crear tensión entre bloques.
+- Puedes usar sobreposición inteligente.
+- Puedes introducir ritmo visual.
+
+---
+
+TIPOGRAFÍA
+
+No te limites a Inter.
+Explora:
+- Serif moderna para contraste elegante
+- Sans ultra bold para impacto
+- Condensed para carácter
+- Tracking intencional
+- Uso de mayúsculas estratégico
+- Escalas tipográficas marcadas
+
+Máximo 2 familias.
+
+---
+
+COLOR
+
+Puedes:
+- Simplificar a monocromático
+- Usar contraste dramático
+- Usar un acento inesperado
+- Trabajar con bloques sólidos
+- Crear un mood más definido
+
+Evita:
+- Colores corporativos sin intención
+- Degradados genéricos
+- Saturación innecesaria
+
+---
+
+OBJETIVO FINAL
+
+Que esta pieza no se vea como:
+- Un diseño hecho por IA.
+- Una plantilla de Canva.
+- Un post genérico de Instagram.
+
+Debe verse como:
+Una campaña real de marca grande.
+Algo que alguien guardaría en Pinterest.
+Algo que podría estar en Behance.
+Algo que tenga identidad.
+Algo que tenga carácter.
+Algo creativo de verdad.
+
+REGLA CRÍTICA — PRODUCTO INTACTO (NO NEGOCIABLE):
+La forma del producto NO se modifica bajo ninguna circunstancia.
+- No rediseñar la silueta, proporciones, ángulos ni detalles físicos.
+- No "stylize", no cartoon, no 3D fake, no reinterpretación del objeto.
+- El producto debe mantenerse EXACTAMENTE como está en el input (misma forma real).
+- Solo se permite: mejora de recorte/limpieza, iluminación/contraste, nitidez, corrección de color, sombra sutil realista y fondo/entorno.
+Si el producto no está en imagen y es un vector: NO lo redibujes, solo optimiza su presentación (escala, ubicación, márgenes, halo/sombra suave).
+
+GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo. Devuelve SOLO la imagen resultante.`
+
+      try {
+        const ai = new GoogleGenAI({ apiKey: geminiApiKey })
+
+        const base64Match = enhanceImage.match(/^data:([^;]+);base64,(.+)$/)
+        if (!base64Match) {
+          return res.status(400).json({ error: 'Invalid image format — expected base64 data URL' })
+        }
+
+        type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
+        const promptParts: PromptPart[] = [
+          { text: ENHANCE_SYSTEM_PROMPT },
+          { inlineData: { mimeType: base64Match[1], data: base64Match[2] } }
+        ]
+
+        const response = await ai.models.generateContent({
+          model: enhanceModelId,
+          contents: promptParts,
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: { imageSize: '2K' }
+          }
+        })
+
+        const candidates = response.candidates || []
+        const parts = candidates[0]?.content?.parts || []
+
+        let imageUrl: string | null = null
+        for (const part of parts) {
+          if ('inlineData' in part && part.inlineData?.data) {
+            const mimeType = part.inlineData.mimeType || 'image/png'
+            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`
+            break
+          }
+        }
+
+        if (!imageUrl) {
+          console.error('No image in Gemini enhance response:', JSON.stringify(response, null, 2))
+          return res.status(500).json({ error: 'Gemini did not return an enhanced image' })
+        }
+
+        await incrementUsage(user.id, 'enhance')
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: 'enhance',
+          model: 'nano-banana-pro',
+          success: true,
+          metadata: { action: 'enhance' }
+        })
+
+        return res.status(200).json({
+          status: 'Ready',
+          result: { sample: imageUrl },
+          model: 'nano-banana-pro',
+          textWarning: false,
+          enhanced: true
+        })
+
+      } catch (enhanceError) {
+        console.error('Gemini enhance error:', enhanceError)
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: 'enhance',
+          model: 'nano-banana-pro',
+          success: false,
+          errorMessage: enhanceError instanceof Error ? enhanceError.message : 'Unknown error',
+          metadata: { action: 'enhance' }
+        })
+
+        return res.status(500).json({
+          error: 'Image enhance failed',
+          details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error'
+        })
+      }
+    }
+
     // Submit new generation request
     const userPrompt = imageParams.prompt || ''
     const isGeminiModel = selectedModel === 'nano-banana' || selectedModel === 'nano-banana-pro'
@@ -489,28 +730,35 @@ Edit instruction: ${editPrompt}`
         imageParams.height = 1440
       }
 
+      // Explicit aspect ratio enforcement prefix
+      const arLabel = postAspectRatio === '9:16' ? '9:16 vertical (1080×1920)' : '3:4 vertical (1080×1440)'
+      const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
+
       // Resolve color palette override (if any)
-      const colorPalette = imageParams.colorPaletteId
-        ? findColorPaletteById(imageParams.colorPaletteId as string)
-        : undefined
-      // Short directive prefix — placed BEFORE the master prompt so Gemini
-      // reads it as a hard constraint, not a design-consultation paragraph.
-      const colorPrefix = colorPalette && colorPalette.promptEs
-        ? 'IMPORTANTE: ' + colorPalette.promptEs + ' Ignora cualquier otro color mencionado en las instrucciones siguientes.\n\n'
-        : ''
+      // Supports both predefined palette IDs and custom hex colors
+      let colorPrefix = ''
+      if (imageParams.customColors && Array.isArray(imageParams.customColors) && imageParams.customColors.length > 0) {
+        // Custom user-defined palette: array of hex strings
+        const hexList = (imageParams.customColors as string[]).slice(0, 3).join(', ')
+        colorPrefix = `IMPORTANTE: USA SOLO ESTOS COLORES: ${hexList}. Ignora cualquier otro color mencionado en las instrucciones siguientes.\n\n`
+      } else if (imageParams.colorPaletteId) {
+        const colorPalette = findColorPaletteById(imageParams.colorPaletteId as string)
+        if (colorPalette && colorPalette.promptEs) {
+          colorPrefix = 'IMPORTANTE: ' + colorPalette.promptEs + ' Ignora cualquier otro color mencionado en las instrucciones siguientes.\n\n'
+        }
+      }
 
       if (postStyle === 'preset' && imageParams.presetId) {
-        // PRESET MODE: color prefix + preset master prompt + user script
+        // PRESET MODE: aspect ratio + color prefix + preset master prompt + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = aspectRatioPrefix + colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
-          // Fallback to venta-directa if preset not found
-          enhancedPrompt = colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
@@ -599,6 +847,7 @@ Edit instruction: ${editPrompt}`
 
         // Increment usage counter after successful generation
         await incrementUsage(user.id, 'image')
+        await deductBonusImage(user.id)
 
         // Log Gemini image usage
         await logApiUsage({
@@ -720,6 +969,7 @@ Edit instruction: ${editPrompt}`
 
         // Increment usage counter
         await incrementUsage(user.id, 'image')
+        await deductBonusImage(user.id)
 
         // Log usage
         await logApiUsage({

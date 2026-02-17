@@ -676,7 +676,7 @@ export default function BRollWorkspace() {
             <ArrowLeft className="w-5 h-5 text-dark-600" />
           </Link>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary-100 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-primary-900/30 rounded-lg flex items-center justify-center">
               <ProductIcon className="w-5 h-5 text-primary-600" />
             </div>
             <div>
@@ -690,7 +690,7 @@ export default function BRollWorkspace() {
           {/* Left: Ad Video Builder */}
           <div className="space-y-5">
             {/* STEP 1: Select Winning Script */}
-            <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-6">
+            <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6">
               <h2 className="text-sm font-semibold text-dark-500 uppercase tracking-wide mb-3 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary-600" />
                 {t.step1}
@@ -711,7 +711,7 @@ export default function BRollWorkspace() {
             </div>
 
             {/* STEP 2: Product Photos */}
-            <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-6">
+            <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6">
               <h2 className="text-sm font-semibold text-dark-500 uppercase tracking-wide mb-3 flex items-center gap-2">
                 <Upload className="w-4 h-4 text-primary-600" />
                 {t.step2}
@@ -719,7 +719,7 @@ export default function BRollWorkspace() {
 
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-dark-200 rounded-xl p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition-colors"
+                className="border-2 border-dashed border-dark-200 rounded-xl p-4 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-900/20 transition-colors"
               >
                 <Upload className="w-6 h-6 text-dark-400 mx-auto mb-1" />
                 <p className="text-sm text-dark-500">{t.uploadHint}</p>
@@ -751,7 +751,7 @@ export default function BRollWorkspace() {
             </div>
 
             {/* STEP 3: Build & Generate */}
-            <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-6">
+            <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6">
               <h2 className="text-sm font-semibold text-dark-500 uppercase tracking-wide mb-3 flex items-center gap-2">
                 <Clapperboard className="w-4 h-4 text-primary-600" />
                 {t.step3}
@@ -767,7 +767,7 @@ export default function BRollWorkspace() {
                     onClick={() => { setVideoModel('kling'); setDuration(d => Math.max(3, Math.min(15, d))); setSplitPromptPart2(null); setSplitPhase('idle'); setMotherPrompt(''); }}
                     className={`p-2 rounded-lg text-xs font-medium transition-colors ${
                       videoModel === 'kling'
-                        ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                        ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                         : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                     }`}
                   >
@@ -777,7 +777,7 @@ export default function BRollWorkspace() {
                     onClick={() => { setVideoModel('grok'); setDuration(d => d === 30 ? 30 : Math.max(5, Math.min(15, d))); setMotherPrompt(''); }}
                     className={`p-2 rounded-lg text-xs font-medium transition-colors ${
                       videoModel === 'grok'
-                        ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                        ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                         : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                     }`}
                   >
@@ -802,7 +802,7 @@ export default function BRollWorkspace() {
                       onClick={() => setAspectRatio(option.value)}
                       className={`p-1.5 rounded-lg text-xs transition-colors ${
                         aspectRatio === option.value
-                          ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                          ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                           : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                       }`}
                     >
@@ -837,7 +837,7 @@ export default function BRollWorkspace() {
                       onClick={() => { setDuration(d => d === 30 ? 10 : 30); setMotherPrompt(''); setSplitPromptPart2(null); }}
                       className={`mt-2 w-full p-1.5 rounded-lg text-xs font-medium transition-colors ${
                         duration === 30
-                          ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                          ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                           : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                       }`}
                     >
@@ -856,7 +856,7 @@ export default function BRollWorkspace() {
                           onClick={() => setGenerateAudio(false)}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
                             !generateAudio
-                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                               : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                           }`}
                         >
@@ -866,7 +866,7 @@ export default function BRollWorkspace() {
                           onClick={() => setGenerateAudio(true)}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
                             generateAudio
-                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                               : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                           }`}
                         >
@@ -887,7 +887,7 @@ export default function BRollWorkspace() {
                           onClick={() => setResolution('720p')}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
                             resolution === '720p'
-                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                               : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                           }`}
                         >
@@ -897,7 +897,7 @@ export default function BRollWorkspace() {
                           onClick={() => setResolution('480p')}
                           className={`p-1.5 rounded-lg text-xs transition-colors ${
                             resolution === '480p'
-                              ? 'bg-primary-100 text-primary-700 border border-primary-500'
+                              ? 'bg-primary-900/30 text-primary-700 border border-primary-500'
                               : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
                           }`}
                         >
@@ -933,7 +933,7 @@ export default function BRollWorkspace() {
 
               {/* Error */}
               {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg mb-4">
+                <div className="p-3 bg-red-900/20 border border-red-700/30 rounded-lg mb-4">
                   <p className="text-sm text-red-700">{error}</p>
                 </div>
               )}
@@ -979,25 +979,25 @@ export default function BRollWorkspace() {
                   {showPromptPreview && (
                     <div className="space-y-3">
                       {visualDNA && (
-                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg">
                           <p className="text-xs font-semibold text-blue-700 mb-1">{t.visualDNA}</p>
                           <p className="text-xs text-blue-600 whitespace-pre-wrap max-h-24 overflow-y-auto">{visualDNA}</p>
                         </div>
                       )}
                       {cinematicScript && (
-                        <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                        <div className="p-3 bg-purple-900/20 border border-purple-700/30 rounded-lg">
                           <p className="text-xs font-semibold text-purple-700 mb-1">{t.cinematicScript}</p>
                           <p className="text-xs text-purple-600 whitespace-pre-wrap max-h-32 overflow-y-auto">{cinematicScript}</p>
                         </div>
                       )}
-                      <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                        <p className="text-xs font-semibold text-green-700 mb-1">
+                      <div className="p-3 bg-green-900/20 border border-green-700/30 rounded-lg">
+                        <p className="text-xs font-semibold text-green-400 mb-1">
                           {t.motherPromptLabel}{splitPromptPart2 ? ' (Part 1 — 0-15s)' : ''}
                         </p>
                         <p className="text-xs text-green-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{motherPrompt}</p>
                       </div>
                       {splitPromptPart2 && (
-                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <div className="p-3 bg-emerald-900/20 border border-emerald-700/30 rounded-lg">
                           <p className="text-xs font-semibold text-emerald-700 mb-1">{t.motherPromptLabel} (Part 2 — 15-30s)</p>
                           <p className="text-xs text-emerald-600 whitespace-pre-wrap max-h-40 overflow-y-auto">{splitPromptPart2}</p>
                         </div>
@@ -1033,7 +1033,7 @@ export default function BRollWorkspace() {
           </div>
 
           {/* Right: Generated Videos */}
-          <div className="bg-white rounded-xl shadow-sm border border-dark-100 p-6 h-fit lg:sticky lg:top-24">
+          <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6 h-fit lg:sticky lg:top-24">
             <h2 className="text-lg font-semibold text-dark-800 mb-4 flex items-center gap-2">
               <Play className="w-5 h-5 text-primary-600" />
               {t.generatedVideos}

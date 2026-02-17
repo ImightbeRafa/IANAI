@@ -305,15 +305,6 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleSaveContext = async () => {
-    if (!currentSession) return
-    try {
-      await updateChatSession(currentSession.id, { context })
-    } catch (error) {
-      console.error('Failed to save context:', error)
-    }
-  }
-
   const handleAddLink = async () => {
     if (!currentSession || !user || !newLinkUrl.trim() || addingDoc) return
     setAddingDoc(true)
@@ -780,7 +771,7 @@ export default function ProductWorkspace() {
     <Layout>
       <div className="flex h-[calc(100vh-64px)] lg:h-screen" style={{ height: 'calc(100dvh - 64px)' }}>
         {/* Left Sidebar - Sessions */}
-        <div className="w-64 bg-white border-r border-dark-100 flex flex-col">
+        <div className="w-64 bg-dark-100 border-r border-dark-100 flex flex-col">
           <div className="px-4 pt-4 pb-3">
             <Link 
               to="/scripts" 
@@ -834,7 +825,7 @@ export default function ProductWorkspace() {
                             if (e.key === 'Escape') setRenamingSessionId(null)
                           }}
                           onBlur={() => handleRenameSession(session.id)}
-                          className="w-full px-2 py-1 text-sm border border-primary-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 bg-white"
+                          className="w-full px-2 py-1 text-sm border border-primary-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 bg-dark-100"
                           autoFocus
                         />
                       </div>
@@ -878,9 +869,9 @@ export default function ProductWorkspace() {
         </div>
 
         {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col bg-gray-50/50">
+        <div className="flex-1 flex flex-col bg-dark-50/50">
           {/* Header */}
-          <div className="bg-white border-b border-dark-100 px-6 py-3 flex items-center justify-between">
+          <div className="bg-dark-100 border-b border-dark-100 px-6 py-3 flex items-center justify-between">
             <h1 className="text-sm font-semibold text-dark-800 truncate">
               {currentSession?.title || product.name}
             </h1>
@@ -895,7 +886,7 @@ export default function ProductWorkspace() {
                 onClick={handlePreviewPrompt}
                 disabled={loadingPreview}
                 className={`p-2 rounded-md transition-colors ${
-                  previewSystemPrompt ? 'bg-amber-100 text-amber-700' : 'hover:bg-dark-50 text-dark-400'
+                  previewSystemPrompt ? 'bg-amber-900/20 text-amber-400' : 'hover:bg-dark-50 text-dark-400'
                 }`}
                 title={language === 'es' ? 'Vista previa del prompt' : 'Preview prompt'}
               >
@@ -905,14 +896,14 @@ export default function ProductWorkspace() {
                 <button 
                   onClick={() => setShowSettings(!showSettings)}
                   className={`p-2 rounded-md transition-colors ${
-                    showSettings ? 'bg-amber-50 text-amber-600' : 'hover:bg-dark-50 text-dark-400'
+                    showSettings ? 'bg-amber-900/20 text-amber-400' : 'hover:bg-dark-50 text-dark-400'
                   }`}
                   title={t.scriptSettings}
                 >
                   <Settings className="w-4 h-4" />
                 </button>
                 {showSettings && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-dark-100 z-50 p-4">
+                  <div className="absolute right-0 top-full mt-2 w-80 bg-dark-100 rounded-xl shadow-lg border border-dark-100 z-50 p-4">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="font-semibold text-dark-900 flex items-center gap-2 text-sm">
                         <Settings className="w-4 h-4 text-amber-600" />
@@ -935,7 +926,7 @@ export default function ProductWorkspace() {
               <button 
                 onClick={() => setShowProductInfo(!showProductInfo)}
                 className={`p-2 rounded-md transition-colors ${
-                  showProductInfo ? 'bg-primary-50 text-primary-600' : 'hover:bg-dark-50 text-dark-400'
+                  showProductInfo ? 'bg-primary-900/20 text-primary-600' : 'hover:bg-dark-50 text-dark-400'
                 }`}
               >
                 <Info className="w-4 h-4" />
@@ -945,7 +936,7 @@ export default function ProductWorkspace() {
 
           {/* Preview: Full System Prompt */}
           {previewSystemPrompt && (
-            <div className="border-b border-amber-300 bg-amber-50/80 px-6 py-3 max-h-[50vh] overflow-y-auto">
+            <div className="border-b border-amber-700/30 bg-amber-900/20 px-6 py-3 max-h-[50vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-mono font-bold text-amber-800">
                   {language === 'es' ? 'VISTA PREVIA DEL PROMPT' : 'PROMPT PREVIEW'} ({previewSystemPrompt.length.toLocaleString()} chars / ~{Math.ceil(previewSystemPrompt.length / 4).toLocaleString()} tokens)
@@ -965,7 +956,7 @@ export default function ProductWorkspace() {
                   </button>
                 </div>
               </div>
-              <pre className="text-[11px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-3 rounded-lg border border-amber-200 leading-relaxed">
+              <pre className="text-[11px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-dark-100 p-3 rounded-lg border border-amber-200 leading-relaxed">
                 {previewSystemPrompt}
               </pre>
             </div>
@@ -977,12 +968,12 @@ export default function ProductWorkspace() {
               <div className="flex items-center justify-center h-full">
                 <div className="w-full max-w-sm">
                   <div className="text-center mb-6">
-                    <div className="w-14 h-14 rounded-2xl bg-primary-50 flex items-center justify-center mx-auto mb-4">
+                    <div className="w-14 h-14 rounded-2xl bg-primary-900/20 flex items-center justify-center mx-auto mb-4">
                       <Sparkles className="w-7 h-7 text-primary-500" />
                     </div>
                     <p className="text-dark-400 text-sm">{t.startConversation}</p>
                   </div>
-                  <div className="bg-white rounded-2xl border border-dark-100 p-5 shadow-sm">
+                  <div className="bg-dark-100 rounded-2xl border border-dark-100 p-5 shadow-sm">
                     <ScriptSettingsPanel
                       settings={scriptSettings}
                       onChange={setScriptSettings}
@@ -1039,9 +1030,9 @@ export default function ProductWorkspace() {
                           </div>
                         )}
                         {message.system_prompt && expandedPrompts[message.id] && (
-                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                          <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3">
                             <div className="flex items-center justify-between mb-2">
-                              <p className="text-[10px] font-mono font-bold text-amber-800">
+                              <p className="text-[10px] font-mono font-bold text-amber-400">
                                 MASTER PROMPT ({message.system_prompt.length.toLocaleString()} chars / ~{Math.ceil(message.system_prompt.length / 4).toLocaleString()} tokens)
                               </p>
                               <button
@@ -1051,7 +1042,7 @@ export default function ProductWorkspace() {
                                 Copy
                               </button>
                             </div>
-                            <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
+                            <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-dark-100 p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
                               {message.system_prompt}
                             </pre>
                           </div>
@@ -1060,7 +1051,7 @@ export default function ProductWorkspace() {
                     ) : (
                       /* Non-script assistant message (conversational) */
                       <div className="flex justify-start">
-                        <div className="max-w-3xl px-5 py-4 bg-white border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm">
+                        <div className="max-w-3xl px-5 py-4 bg-dark-100 border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm">
                           <div className="whitespace-pre-wrap text-sm leading-relaxed">
                             {message.content}
                           </div>
@@ -1080,9 +1071,9 @@ export default function ProductWorkspace() {
                             </div>
                           )}
                           {message.system_prompt && expandedPrompts[message.id] && (
-                            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                            <div className="mt-3 bg-amber-900/20 border border-amber-700/30 rounded-lg p-3">
                               <div className="flex items-center justify-between mb-2">
-                                <p className="text-[10px] font-mono font-bold text-amber-800">
+                                <p className="text-[10px] font-mono font-bold text-amber-400">
                                   MASTER PROMPT ({message.system_prompt.length.toLocaleString()} chars / ~{Math.ceil(message.system_prompt.length / 4).toLocaleString()} tokens)
                                 </p>
                                 <button
@@ -1092,7 +1083,7 @@ export default function ProductWorkspace() {
                                   Copy
                                 </button>
                               </div>
-                              <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-white p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
+                              <pre className="text-[10px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-dark-100 p-2 rounded border border-amber-200 leading-relaxed max-h-[40vh] overflow-y-auto">
                                 {message.system_prompt}
                               </pre>
                             </div>
@@ -1116,7 +1107,7 @@ export default function ProductWorkspace() {
           <UsageBanner usage={usageLimits} resource="script" />
 
           {/* Input */}
-          <div className="bg-white border-t border-dark-100 px-6 py-3">
+          <div className="bg-dark-100 border-t border-dark-100 px-6 py-3">
             <div className="max-w-4xl mx-auto">
               <div className="flex items-end gap-2">
                 <div className="flex-1 relative">
@@ -1125,7 +1116,7 @@ export default function ProductWorkspace() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={t.placeholder}
-                    className="w-full px-4 py-3 text-sm bg-gray-50 border border-dark-100 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-300 focus:bg-white transition-colors"
+                    className="w-full px-4 py-3 text-sm bg-dark-200 border border-dark-300 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-400 focus:bg-dark-200 transition-colors"
                     rows={1}
                     disabled={loading}
                   />
@@ -1148,7 +1139,7 @@ export default function ProductWorkspace() {
 
         {/* Right Sidebar - Product Info & Context */}
         {showProductInfo && (
-          <div className="w-80 bg-white border-l border-dark-100 flex flex-col overflow-y-auto">
+          <div className="w-80 bg-dark-100 border-l border-dark-100 flex flex-col overflow-y-auto">
             {/* Product Info */}
             <div className="p-4 border-b border-dark-100">
               <div className="flex items-center justify-between mb-3">
@@ -1516,7 +1507,7 @@ export default function ProductWorkspace() {
 
             {/* ICP Selector */}
             {icps.length > 0 && (
-              <div className="p-4 border-t border-dark-100 bg-blue-50/50">
+              <div className="p-4 border-t border-dark-100 bg-blue-900/10">
                 <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
                   <Users className="w-4 h-4 text-blue-600" />
                   {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
@@ -1527,7 +1518,7 @@ export default function ProductWorkspace() {
                     const icp = icps.find(i => i.id === e.target.value) || null
                     setSelectedICP(icp)
                   }}
-                  className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
                   {icps.map(icp => (
@@ -1540,26 +1531,9 @@ export default function ProductWorkspace() {
               </div>
             )}
 
-            {/* Session Context */}
-            <div className="p-4 border-t border-dark-100">
-              <h3 className="font-semibold text-dark-900 mb-3">{t.context}</h3>
-              <textarea
-                value={context}
-                onChange={(e) => setContext(e.target.value)}
-                placeholder={t.contextPlaceholder}
-                className="input-field resize-none text-sm h-24"
-              />
-              <button
-                onClick={handleSaveContext}
-                className="btn-secondary mt-3 text-sm w-full"
-              >
-                {t.saveContext}
-              </button>
-            </div>
-
             {/* Context Documents */}
             {currentSession && (
-              <div className="p-4 border-t border-dark-100 bg-green-50/50">
+              <div className="p-4 border-t border-dark-100 bg-green-900/10">
                 <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-green-600" />
                   {language === 'es' ? 'Documentos de Contexto' : 'Context Documents'}
@@ -1588,7 +1562,7 @@ export default function ProductWorkspace() {
                   </label>
                 </div>
                 {pdfError && (
-                  <p className="text-xs text-red-600 bg-red-50 px-3 py-1.5 rounded-lg">{pdfError}</p>
+                  <p className="text-xs text-red-400 bg-red-900/20 px-3 py-1.5 rounded-lg">{pdfError}</p>
                 )}
 
                 {/* Add Link Form */}
@@ -1600,11 +1574,11 @@ export default function ProductWorkspace() {
                       placeholder={language === 'es' 
                         ? 'Pega uno o varios enlaces (uno por línea):\nhttps://ejemplo.com\nhttps://otro-enlace.com' 
                         : 'Paste one or multiple links (one per line):\nhttps://example.com\nhttps://another-link.com'}
-                      className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500 resize-none h-20"
+                      className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-green-500 resize-none h-20 placeholder:text-dark-400"
                       disabled={addingDoc}
                     />
                     {bulkLinkProgress && (
-                      <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 px-3 py-1.5 rounded-lg">
+                      <div className="flex items-center gap-2 text-xs text-green-400 bg-green-900/20 px-3 py-1.5 rounded-lg">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         {language === 'es' 
                           ? `Procesando ${bulkLinkProgress.current} de ${bulkLinkProgress.total}...` 
@@ -1612,7 +1586,7 @@ export default function ProductWorkspace() {
                       </div>
                     )}
                     {failedLinks.length > 0 && (
-                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
+                      <div className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/30 px-3 py-2 rounded-lg">
                         <p className="font-medium">{language === 'es' ? 'No se pudo extraer contenido de:' : 'Failed to extract content from:'}</p>
                         {failedLinks.map((link, i) => (
                           <p key={i} className="truncate mt-0.5 text-amber-600">{link}</p>
@@ -1645,7 +1619,7 @@ export default function ProductWorkspace() {
                     value={newTextContent}
                     onChange={(e) => setNewTextContent(e.target.value)}
                     placeholder={language === 'es' ? 'Agregar texto adicional...' : 'Add additional text...'}
-                    className="w-full px-3 py-2 border border-dark-200 rounded-lg text-sm h-16 resize-none focus:ring-2 focus:ring-green-500"
+                    className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm h-16 resize-none focus:ring-2 focus:ring-green-500 placeholder:text-dark-400"
                   />
                   {newTextContent.trim() && (
                     <button
@@ -1666,7 +1640,7 @@ export default function ProductWorkspace() {
                       {language === 'es' ? 'Documentos agregados:' : 'Added documents:'}
                     </p>
                     {contextDocs.map(doc => (
-                      <div key={doc.id} className="bg-white rounded-lg border border-dark-100 overflow-hidden">
+                      <div key={doc.id} className="bg-dark-100 rounded-lg border border-dark-100 overflow-hidden">
                         <div className="flex items-center justify-between p-2">
                           <div className="flex items-center gap-2 min-w-0">
                             {doc.type === 'link' ? <Link2 className="w-4 h-4 text-blue-500 flex-shrink-0" /> : <FileText className="w-4 h-4 text-green-500 flex-shrink-0" />}
@@ -1692,9 +1666,9 @@ export default function ProductWorkspace() {
                           </div>
                         </div>
                         {debugDocId === doc.id && (
-                          <div className="border-t border-dark-100 bg-amber-50/50 p-2">
+                          <div className="border-t border-dark-100 bg-amber-900/10 p-2">
                             <p className="text-[10px] font-mono text-amber-700 mb-1">DEBUG — Raw extracted content ({doc.content?.length || 0} chars) | type: {doc.type}{doc.url ? ` | url: ${doc.url}` : ''}</p>
-                            <pre className="text-[11px] text-dark-600 whitespace-pre-wrap break-words max-h-60 overflow-y-auto font-mono bg-white p-2 rounded border border-amber-200">
+                            <pre className="text-[11px] text-dark-600 whitespace-pre-wrap break-words max-h-60 overflow-y-auto font-mono bg-dark-100 p-2 rounded border border-amber-200">
                               {doc.content || '(empty — no content extracted)'}
                             </pre>
                           </div>

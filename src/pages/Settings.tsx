@@ -52,6 +52,7 @@ export default function Settings() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [usage, setUsage] = useState<Usage | null>(null)
+  const [bonusImages, setBonusImages] = useState(0)
 
   useEffect(() => {
     async function loadData() {
@@ -60,6 +61,7 @@ export default function Settings() {
       // Load profile
       const profileData = await getProfile(user.id)
       setProfile(profileData)
+      setBonusImages((profileData as any)?.bonus_images || 0)
       
       // Load subscription
       const { data: subData } = await supabase
@@ -168,8 +170,8 @@ export default function Settings() {
             {message && (
               <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
                 message.type === 'success' 
-                  ? 'bg-green-50 border border-green-200 text-green-700'
-                  : 'bg-red-50 border border-red-200 text-red-700'
+                  ? 'bg-green-900/20 border border-green-700/30 text-green-400'
+                  : 'bg-red-900/20 border border-red-700/30 text-red-400'
               }`}>
                 {message.type === 'success' ? (
                   <CheckCircle className="w-4 h-4 flex-shrink-0" />
@@ -258,10 +260,10 @@ export default function Settings() {
             </h2>
             {subscription && (
               <span className={`px-3 py-1 text-sm font-medium rounded-full ${
-                subscription.plan === 'free' ? 'bg-gray-100 text-gray-700' :
-                subscription.plan === 'starter' ? 'bg-blue-100 text-blue-700' :
-                subscription.plan === 'pro' ? 'bg-purple-100 text-purple-700' :
-                'bg-amber-100 text-amber-700'
+                subscription.plan === 'free' ? 'bg-dark-300 text-gray-700' :
+                subscription.plan === 'starter' ? 'bg-blue-900/20 text-blue-700' :
+                subscription.plan === 'pro' ? 'bg-purple-900/20 text-purple-700' :
+                'bg-amber-900/20 text-amber-400'
               }`}>
                 {PLAN_DETAILS[subscription.plan].name}
               </span>
@@ -323,7 +325,7 @@ export default function Settings() {
                 key={plan}
                 className={`p-4 rounded-xl border-2 transition-all ${
                   subscription?.plan === plan 
-                    ? 'border-primary-500 bg-primary-50' 
+                    ? 'border-primary-500 bg-primary-900/20' 
                     : 'border-dark-200 hover:border-dark-300'
                 }`}
               >
@@ -405,6 +407,78 @@ export default function Settings() {
               ? 'Los pagos se procesan de forma segura con TiloPay' 
               : 'Payments processed securely via TiloPay'}
           </p>
+
+          {/* Image Boost — only for pro plan users */}
+          {subscription?.plan === 'pro' && (
+            <div className="mt-4 p-4 rounded-xl border-2 border-dashed border-primary-300 bg-primary-900/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Crown className="w-4 h-4 text-primary-600" />
+                    <span className="font-semibold text-dark-900">
+                      {language === 'es' ? 'Más Diseños' : 'More Designs'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-dark-500 mt-1">
+                    {language === 'es' 
+                      ? '+100 diseños extra (pago único, no se reinician)' 
+                      : '+100 extra designs (one-time, no reset)'}
+                  </p>
+                  {bonusImages > 0 && (
+                    <p className="text-xs text-primary-600 mt-1 font-medium">
+                      {language === 'es' 
+                        ? `${bonusImages} diseños bonus disponibles` 
+                        : `${bonusImages} bonus designs available`}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <div className="text-xl font-bold text-dark-900">$14.99</div>
+                  <p className="text-xs text-dark-400">{language === 'es' ? 'único' : 'one-time'}</p>
+                </div>
+              </div>
+              <button
+                className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true)
+                  setMessage(null)
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession()
+                    if (!session) {
+                      setMessage({ type: 'error', text: language === 'es' ? 'Sesión expirada' : 'Session expired' })
+                      return
+                    }
+                    const checkoutUrl = import.meta.env.PROD ? '/api/tilopay/create-checkout' : 'http://localhost:3000/api/tilopay/create-checkout'
+                    const response = await fetch(checkoutUrl, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                      },
+                      body: JSON.stringify({ plan: 'image_boost' })
+                    })
+                    const data = await response.json()
+                    if (data.checkoutUrl) {
+                      window.open(data.checkoutUrl, '_blank')
+                    } else {
+                      setMessage({ type: 'error', text: data.error || 'Error al procesar' })
+                    }
+                  } catch (error) {
+                    console.error('Boost checkout error:', error)
+                    setMessage({ type: 'error', text: language === 'es' ? 'Error de conexión' : 'Connection error' })
+                  } finally {
+                    setLoading(false)
+                  }
+                }}
+              >
+                <Zap className="w-4 h-4" />
+                {loading 
+                  ? (language === 'es' ? 'Procesando...' : 'Processing...')
+                  : (language === 'es' ? 'Comprar +100 Diseños' : 'Buy +100 Designs')}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="card mt-6">
@@ -427,7 +501,7 @@ export default function Settings() {
             <div className="flex items-center justify-between py-3 border-b border-dark-100">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                  profile?.account_type === 'team' ? 'bg-purple-100' : 'bg-blue-100'
+                  profile?.account_type === 'team' ? 'bg-purple-900/20' : 'bg-blue-900/20'
                 }`}>
                   {profile?.account_type === 'team' ? (
                     <Users className="w-5 h-5 text-purple-600" />
@@ -444,8 +518,8 @@ export default function Settings() {
               </div>
               <span className={`px-3 py-1 text-sm font-medium rounded-full ${
                 profile?.account_type === 'team' 
-                  ? 'bg-purple-100 text-purple-700' 
-                  : 'bg-blue-100 text-blue-700'
+                  ? 'bg-purple-900/20 text-purple-700' 
+                  : 'bg-blue-900/20 text-blue-700'
               }`}>
                 {profile?.account_type === 'team' ? t.teamDesc : t.individualDesc}
               </span>
@@ -458,7 +532,7 @@ export default function Settings() {
                 className="flex items-center justify-between py-3 hover:bg-dark-50 -mx-4 px-4 rounded-lg transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-green-100">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-green-900/20">
                     <Users className="w-5 h-5 text-green-600" />
                   </div>
                   <div>

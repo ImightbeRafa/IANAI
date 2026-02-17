@@ -169,11 +169,11 @@ export default function RestaurantForm({ onSubmit, onCancel, initialData, isEdit
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-dark-100 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-6 border-b border-dark-100">
+        <div className="p-6 border-b border-dark-200">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-orange-900/20 rounded-xl flex items-center justify-center">
               <UtensilsCrossed className="w-5 h-5 text-orange-600" />
             </div>
             <div>
@@ -224,7 +224,7 @@ export default function RestaurantForm({ onSubmit, onCancel, initialData, isEdit
                     onClick={() => handleChange('is_new_restaurant', true)}
                     className={`p-4 rounded-xl border-2 transition-all text-left ${
                       formData.is_new_restaurant
-                        ? 'border-orange-500 bg-orange-50'
+                        ? 'border-orange-500 bg-orange-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -242,7 +242,7 @@ export default function RestaurantForm({ onSubmit, onCancel, initialData, isEdit
                     onClick={() => handleChange('is_new_restaurant', false)}
                     className={`p-4 rounded-xl border-2 transition-all text-left ${
                       !formData.is_new_restaurant
-                        ? 'border-orange-500 bg-orange-50'
+                        ? 'border-orange-500 bg-orange-900/20'
                         : 'border-dark-200 hover:border-dark-300'
                     }`}
                   >
@@ -283,8 +283,8 @@ export default function RestaurantForm({ onSubmit, onCancel, initialData, isEdit
                   disabled={pdfLoading}
                   className={`w-full p-4 border-2 border-dashed rounded-xl transition-all flex items-center justify-center gap-3 ${
                     pdfFileName 
-                      ? 'border-green-400 bg-green-50' 
-                      : 'border-dark-200 hover:border-orange-400 hover:bg-orange-50'
+                      ? 'border-green-400 bg-green-900/20' 
+                      : 'border-dark-200 hover:border-orange-400 hover:bg-orange-900/20'
                   }`}
                 >
                   {pdfLoading ? (

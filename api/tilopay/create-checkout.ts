@@ -18,7 +18,8 @@ const TILOPAY_API_PASSWORD = process.env.TILOPAY_API_PASSWORD
 const BASE_PAYMENT_LINKS: Record<string, string> = {
   starter: 'https://tp.cr/l/TkRnM01RPT18MQ==',     // Starter $33/mo
   pro: 'https://tp.cr/l/TkRnM01nPT18MQ==',          // Premium $49/mo
-  enterprise: 'https://tp.cr/l/TkRrMk53PT18MQ=='    // Enterprise $299/mo
+  enterprise: 'https://tp.cr/l/TkRrMk53PT18MQ==',   // Enterprise $299/mo
+  image_boost: 'https://tp.cr/l/MTg3NTc5'               // 100 extra images $14.99 one-time
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
