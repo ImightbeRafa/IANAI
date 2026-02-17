@@ -405,6 +405,7 @@ export default function PostWorkspace() {
           action: 'edit',
           editPrompt: editPrompt.trim(),
           editImage: base64Image,
+          aspectRatio,
           ...(editRefImages.length > 0 ? { editReferenceImages: editRefImages } : {})
         })
       })
@@ -518,7 +519,8 @@ export default function PostWorkspace() {
         },
         body: JSON.stringify({
           action: 'enhance',
-          enhanceImage: base64Image
+          enhanceImage: base64Image,
+          aspectRatio
         })
       })
 
@@ -1129,7 +1131,7 @@ export default function PostWorkspace() {
                       <button
                         onClick={() => handleEnhance(post.id, post.imageUrl)}
                         disabled={!!enhancingPostId || editing}
-                        className="absolute top-2 left-2 w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="absolute top-2 right-2 w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
                         title={t.enhance}
                       >
                         <Wand2 className="w-5 h-5" />

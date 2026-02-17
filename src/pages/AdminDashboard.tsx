@@ -18,7 +18,8 @@ import {
   FileUp,
   Link2,
   Wand2,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Pencil
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -129,6 +130,7 @@ export default function AdminDashboard() {
       script: 'Guiones',
       description: 'Descripciones',
       image: 'Imágenes',
+      edit: 'Ediciones de Imagen',
       enhance: 'Mejoras de Imagen',
       video: 'Videos (Grok)',
       kling_video: 'Videos (Kling)',
@@ -169,6 +171,7 @@ export default function AdminDashboard() {
       script: 'Scripts',
       description: 'Descriptions',
       image: 'Images',
+      edit: 'Image Edits',
       enhance: 'Image Enhance',
       video: 'Videos (Grok)',
       kling_video: 'Videos (Kling)',
@@ -432,6 +435,7 @@ export default function AdminDashboard() {
                         {feature === 'script' && <FileText className="w-5 h-5 text-blue-500" />}
                         {feature === 'description' && <FileText className="w-5 h-5 text-indigo-500" />}
                         {feature === 'image' && <ImageIcon className="w-5 h-5 text-green-500" />}
+                        {feature === 'edit' && <Pencil className="w-5 h-5 text-emerald-500" />}
                         {feature === 'enhance' && <Wand2 className="w-5 h-5 text-pink-500" />}
                         {feature === 'video' && <Video className="w-5 h-5 text-red-500" />}
                         {feature === 'kling_video' && <Video className="w-5 h-5 text-cyan-500" />}
