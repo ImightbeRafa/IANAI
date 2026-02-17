@@ -485,9 +485,9 @@ export default function PostWorkspace() {
 
   return (
     <Layout>
-      <div className="h-full flex flex-col lg:flex-row">
+      <div className="h-full flex flex-col lg:flex-row lg:overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh] lg:max-h-none">
+        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">
           {/* Header */}
           <div className="px-5 py-4 border-b border-dark-100">
             <Link
