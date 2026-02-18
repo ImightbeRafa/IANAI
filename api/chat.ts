@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
-import { checkRequiredEnvVars, ENV_GROUPS } from './lib/env-check.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -845,13 +844,6 @@ ${genderAgeNote}`
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
-  }
-
-  // Validate required environment variables
-  const envCheck = checkRequiredEnvVars([...ENV_GROUPS.supabase, ...ENV_GROUPS.grok])
-  if (!envCheck.ok) {
-    console.error('Missing required env vars:', envCheck.missing)
-    return res.status(500).json({ error: 'Server configuration error' })
   }
 
   // Verify user authentication

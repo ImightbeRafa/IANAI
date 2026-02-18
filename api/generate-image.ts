@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
-import { checkRequiredEnvVars, ENV_GROUPS } from './lib/env-check.js'
 import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
@@ -314,13 +313,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
-  }
-
-  // Validate required environment variables
-  const envCheck = checkRequiredEnvVars(ENV_GROUPS.supabase)
-  if (!envCheck.ok) {
-    console.error('Missing required env vars:', envCheck.missing)
-    return res.status(500).json({ error: 'Server configuration error' })
   }
 
   // Verify user authentication
