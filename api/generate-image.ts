@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
+import { checkRequiredEnvVars, ENV_GROUPS } from './lib/env-check.js'
 import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
@@ -315,13 +316,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // Validate required environment variables
+  const envCheck = checkRequiredEnvVars(ENV_GROUPS.supabase)
+  if (!envCheck.ok) {
+    console.error('Missing required env vars:', envCheck.missing)
+    return res.status(500).json({ error: 'Server configuration error' })
+  }
+
   // Verify user authentication
   const user = await requireAuth(req, res)
   if (!user) return // Response already sent by requireAuth
 
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Request body is required' })
+    }
+
     const { action, taskId, model = 'nano-banana', ...imageParams } = req.body
+
+    const VALID_ACTIONS = ['generate', 'edit', 'enhance', 'poll', 'post', 'organic']
+    if (action && !VALID_ACTIONS.includes(action)) {
+      return res.status(400).json({ error: `Invalid action. Must be one of: ${VALID_ACTIONS.join(', ')}` })
+    }
+
+    const VALID_MODELS: ImageModel[] = ['nano-banana', 'nano-banana-pro', 'grok-imagine']
+    if (!VALID_MODELS.includes(model)) {
+      return res.status(400).json({ error: `Invalid model. Must be one of: ${VALID_MODELS.join(', ')}` })
+    }
     const selectedModel: ImageModel = model
+
+    const MAX_PROMPT_LENGTH = 50_000
+    if (imageParams.prompt && typeof imageParams.prompt === 'string' && imageParams.prompt.length > MAX_PROMPT_LENGTH) {
+      return res.status(400).json({ error: `Prompt exceeds maximum length of ${MAX_PROMPT_LENGTH} characters` })
+    }
 
     // For polling requests, skip usage check and rate limit (already counted on initial request)
     if (action !== 'poll') {

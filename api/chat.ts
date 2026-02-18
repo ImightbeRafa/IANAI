@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
+import { checkRequiredEnvVars, ENV_GROUPS } from './lib/env-check.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -846,6 +847,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // Validate required environment variables
+  const envCheck = checkRequiredEnvVars([...ENV_GROUPS.supabase, ...ENV_GROUPS.grok])
+  if (!envCheck.ok) {
+    console.error('Missing required env vars:', envCheck.missing)
+    return res.status(500).json({ error: 'Server configuration error' })
+  }
+
   // Verify user authentication
   const user = await requireAuth(req, res)
   if (!user) return // Response already sent by requireAuth
@@ -876,11 +884,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Request body is required' })
+    }
+
     const { messages, businessDetails, language = 'en', scriptSettings, icp, contextDocuments } = req.body as RequestBody
     const selectedModel: AIModel = 'grok'
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' })
+    }
+
+    if (!['en', 'es'].includes(language)) {
+      return res.status(400).json({ error: 'Language must be "en" or "es"' })
+    }
+
+    const MAX_MESSAGE_LENGTH = 50_000
+    for (const msg of messages) {
+      if (!msg.content || typeof msg.content !== 'string') {
+        return res.status(400).json({ error: 'Each message must have a string content' })
+      }
+      if (msg.content.length > MAX_MESSAGE_LENGTH) {
+        return res.status(400).json({ error: `Message content exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` })
+      }
+    }
+
+    if (businessDetails && typeof businessDetails !== 'object') {
+      return res.status(400).json({ error: 'businessDetails must be an object' })
     }
 
     const grokApiKey = process.env.GROK_API_KEY
