@@ -44,7 +44,7 @@ type VideoModel = 'grok' | 'kling'
 
 export default function BRollWorkspace() {
   const { productId } = useParams<{ productId: string }>()
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const { language } = useLanguage()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -959,8 +959,8 @@ export default function BRollWorkspace() {
                 </button>
               )}
 
-              {/* Prompt Preview */}
-              {motherPrompt && (
+              {/* Prompt Preview (admin only) */}
+              {isAdmin && motherPrompt && (
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-green-700 flex items-center gap-1.5">

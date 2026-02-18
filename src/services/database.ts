@@ -557,6 +557,10 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
     supabase.from('scripts').select('id, product:products!inner(owner_id)', { count: 'exact' }).eq('product.owner_id', userId).gte('created_at', firstDayOfMonth)
   ])
 
+  if (productsResult.error || scriptsResult.error || sessionsResult.error || monthlyScriptsResult.error) {
+    console.error('Dashboard stats error:', productsResult.error || scriptsResult.error || sessionsResult.error || monthlyScriptsResult.error)
+  }
+
   return {
     totalProducts: productsResult.count || 0,
     totalScripts: scriptsResult.count || 0,
@@ -577,6 +581,11 @@ export async function getTeamDashboardStats(teamId: string): Promise<TeamDashboa
     supabase.from('chat_sessions').select('id, product:products!inner(client:clients!inner(team_id))', { count: 'exact' }).eq('product.client.team_id', teamId),
     supabase.from('scripts').select('id, product:products!inner(client:clients!inner(team_id))', { count: 'exact' }).eq('product.client.team_id', teamId).gte('created_at', firstDayOfMonth)
   ])
+
+  const anyError = clientsResult.error || membersResult.error || productsResult.error || scriptsResult.error || sessionsResult.error || monthlyScriptsResult.error
+  if (anyError) {
+    console.error('Team dashboard stats error:', anyError)
+  }
 
   return {
     totalClients: clientsResult.count || 0,
@@ -971,4 +980,123 @@ export async function uploadFeedbackScreenshot(
     .getPublicUrl(fileName)
 
   return data.publicUrl
+}
+
+// =============================================
+// PRODUCT SHARING / COLLABORATORS
+// =============================================
+
+export interface ProductCollaborator {
+  id: string
+  product_id: string
+  user_id: string | null
+  invited_email: string
+  role: 'viewer' | 'editor'
+  invited_by: string
+  status: 'pending' | 'accepted'
+  created_at: string
+  accepted_at: string | null
+}
+
+export async function getProductCollaborators(productId: string): Promise<ProductCollaborator[]> {
+  const { data, error } = await supabase
+    .from('product_collaborators')
+    .select('*')
+    .eq('product_id', productId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function inviteCollaborator(
+  productId: string,
+  email: string,
+  role: 'viewer' | 'editor',
+  invitedBy: string
+): Promise<ProductCollaborator> {
+  // Check if invited user already has an account
+  const { data: existingProfile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', email.toLowerCase())
+    .single()
+
+  const insertData: Record<string, unknown> = {
+    product_id: productId,
+    invited_email: email.toLowerCase(),
+    role,
+    invited_by: invitedBy,
+    status: existingProfile ? 'accepted' : 'pending',
+    user_id: existingProfile?.id || null,
+    accepted_at: existingProfile ? new Date().toISOString() : null
+  }
+
+  const { data, error } = await supabase
+    .from('product_collaborators')
+    .insert(insertData)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateCollaboratorRole(
+  collaboratorId: string,
+  role: 'viewer' | 'editor'
+): Promise<void> {
+  const { error } = await supabase
+    .from('product_collaborators')
+    .update({ role })
+    .eq('id', collaboratorId)
+
+  if (error) throw error
+}
+
+export async function removeCollaborator(collaboratorId: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_collaborators')
+    .delete()
+    .eq('id', collaboratorId)
+
+  if (error) throw error
+}
+
+export async function getSharedProducts(userId: string): Promise<(Product & { shared_role: string; shared_by_email: string })[]> {
+  // Get user email for matching pending invites
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email')
+    .eq('id', userId)
+    .single()
+
+  if (!profile) return []
+
+  const { data, error } = await supabase
+    .from('product_collaborators')
+    .select('role, product_id, products(*), invited_by_profile:profiles!product_collaborators_invited_by_fkey(email)')
+    .or(`user_id.eq.${userId},invited_email.eq.${profile.email}`)
+    .eq('status', 'accepted')
+
+  if (error) throw error
+  if (!data) return []
+
+  return data
+    .filter((d: Record<string, unknown>) => d.products)
+    .map((d: Record<string, unknown>) => ({
+      ...(d.products as Product),
+      shared_role: d.role as string,
+      shared_by_email: (d.invited_by_profile as Record<string, string>)?.email || ''
+    }))
+}
+
+export async function acceptPendingInvites(userId: string, email: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_collaborators')
+    .update({ user_id: userId, status: 'accepted', accepted_at: new Date().toISOString() })
+    .eq('invited_email', email.toLowerCase())
+    .eq('status', 'pending')
+
+  if (error) console.error('Error accepting pending invites:', error)
 }

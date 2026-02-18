@@ -13,12 +13,15 @@ import {
   createClient,
   assignProductToClient,
   deleteClient,
-  deleteProduct
+  deleteProduct,
+  getSharedProducts,
+  acceptPendingInvites
 } from '../services/database'
 import type { Profile, Product, DashboardStats, ProductFormData, RestaurantFormData, Team, Client } from '../types'
 import Layout from '../components/Layout'
 import ProductForm from '../components/ProductForm'
 import RestaurantForm from '../components/RestaurantForm'
+import ShareProductModal from '../components/ShareProductModal'
 import { 
   Package, 
   FileText, 
@@ -33,7 +36,8 @@ import {
   UtensilsCrossed,
   Home,
   Trash2,
-  Search
+  Search,
+  Share2
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -58,6 +62,8 @@ export default function Dashboard() {
   const [assigningProduct, setAssigningProduct] = useState<Product | null>(null)
   const [searchClients, setSearchClients] = useState('')
   const [searchProducts, setSearchProducts] = useState('')
+  const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
+  const [sharingProduct, setSharingProduct] = useState<Product | null>(null)
 
   const isTeamAccount = profile?.account_type === 'team'
 
@@ -79,6 +85,15 @@ export default function Dashboard() {
       try {
         const profileData = await getProfile(user.id)
         setProfile(profileData)
+
+        // Auto-accept any pending sharing invites for this user
+        if (profileData?.email) {
+          await acceptPendingInvites(user.id, profileData.email)
+        }
+
+        // Load shared products (products others shared with me)
+        const shared = await getSharedProducts(user.id)
+        setSharedProducts(shared)
 
         if (profileData?.account_type === 'team') {
           // Load team data
@@ -280,7 +295,12 @@ export default function Dashboard() {
       noProductsInClient: 'No hay productos en esta categoría',
       addProductToClient: 'Agrega un producto o servicio a esta categoría',
       searchClients: 'Buscar categorías...',
-      searchProducts: 'Buscar productos...'
+      searchProducts: 'Buscar productos...',
+      sharedWithMe: 'Compartidos Conmigo',
+      sharedBy: 'Compartido por',
+      share: 'Compartir',
+      roleViewer: 'Lector',
+      roleEditor: 'Editor'
     },
     en: {
       welcome: 'Welcome back',
@@ -321,7 +341,12 @@ export default function Dashboard() {
       noProductsInClient: 'No products in this category',
       addProductToClient: 'Add a product or service to this category',
       searchClients: 'Search categories...',
-      searchProducts: 'Search products...'
+      searchProducts: 'Search products...',
+      sharedWithMe: 'Shared With Me',
+      sharedBy: 'Shared by',
+      share: 'Share',
+      roleViewer: 'Viewer',
+      roleEditor: 'Editor'
     }
   }
 
@@ -352,17 +377,29 @@ export default function Dashboard() {
         key={product.id}
         className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group relative"
       >
-        {/* Delete button - only for team owners or individual accounts */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            handleDeleteProduct(product)
-          }}
-          className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-          title={language === 'es' ? 'Eliminar' : 'Delete'}
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+        {/* Share + Delete buttons */}
+        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setSharingProduct(product)
+            }}
+            className="p-1.5 text-dark-300 hover:text-primary-500 hover:bg-primary-900/20 rounded-lg transition-colors"
+            title={t.share}
+          >
+            <Share2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              handleDeleteProduct(product)
+            }}
+            className="p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors"
+            title={language === 'es' ? 'Eliminar' : 'Delete'}
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
         <div className="flex items-start gap-4">
           <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${typeStyles.bg}`}>
             {typeStyles.icon}
@@ -693,6 +730,63 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Shared With Me Section */}
+      {sharedProducts.length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+          <h2 className="text-lg font-semibold text-dark-900 mb-4 flex items-center gap-2">
+            <Share2 className="w-5 h-5 text-primary-500" />
+            {t.sharedWithMe}
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sharedProducts.map(product => (
+              <div
+                key={product.id}
+                className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group relative"
+              >
+                <div className="absolute top-3 right-3">
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                    product.shared_role === 'editor'
+                      ? 'bg-primary-900/20 text-primary-600'
+                      : 'bg-dark-200 text-dark-500'
+                  }`}>
+                    {product.shared_role === 'editor' ? t.roleEditor : t.roleViewer}
+                  </span>
+                </div>
+                <Link to={`/product/${product.id}`} className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary-900/20">
+                    <Share2 className="w-5 h-5 text-primary-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
+                      {product.name}
+                    </p>
+                    <p className="text-xs text-dark-400 mt-0.5">
+                      {t.sharedBy} {product.shared_by_email}
+                    </p>
+                    {product.description && (
+                      <p className="text-sm text-dark-500 mt-2 line-clamp-2">
+                        {product.description}
+                      </p>
+                    )}
+                  </div>
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Share Product Modal */}
+      {sharingProduct && user && (
+        <ShareProductModal
+          productId={sharingProduct.id}
+          productName={sharingProduct.name}
+          userId={user.id}
+          language={language}
+          onClose={() => setSharingProduct(null)}
+        />
+      )}
 
       {/* Product Form Modal */}
       {showProductForm && (

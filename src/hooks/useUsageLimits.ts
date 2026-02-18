@@ -59,7 +59,7 @@ export function useUsageLimits(): UsageLimits {
         const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
         const { data: usage } = await supabase
           .from('usage')
-          .select('scripts_generated, images_generated, descriptions_generated')
+          .select('scripts_generated, images_generated, descriptions_generated, enhances_generated')
           .eq('user_id', user!.id)
           .eq('period_start', currentMonth)
           .single()
@@ -78,7 +78,7 @@ export function useUsageLimits(): UsageLimits {
           plan,
           scriptsUsed: usage?.scripts_generated || 0,
           scriptsLimit: limits?.scripts_per_month ?? 10,
-          imagesUsed: usage?.images_generated || 0,
+          imagesUsed: (usage?.images_generated || 0) + Math.floor((usage?.enhances_generated || 0) / 2),
           imagesLimit: baseImageLimit === -1 ? -1 : baseImageLimit + bonus,
           bonusImages: bonus,
           descriptionsUsed: usage?.descriptions_generated || 0,

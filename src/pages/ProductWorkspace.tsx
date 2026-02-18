@@ -54,7 +54,7 @@ import {
 export default function ProductWorkspace() {
   const { productId, sessionId } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const { language } = useLanguage()
   
   const [product, setProduct] = useState<Product | null>(null)
@@ -882,16 +882,18 @@ export default function ProductWorkspace() {
                   {t.export}
                 </button>
               )}
-              <button
-                onClick={handlePreviewPrompt}
-                disabled={loadingPreview}
-                className={`p-2 rounded-md transition-colors ${
-                  previewSystemPrompt ? 'bg-amber-900/20 text-amber-400' : 'hover:bg-dark-50 text-dark-400'
-                }`}
-                title={language === 'es' ? 'Vista previa del prompt' : 'Preview prompt'}
-              >
-                {loadingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={handlePreviewPrompt}
+                  disabled={loadingPreview}
+                  className={`p-2 rounded-md transition-colors ${
+                    previewSystemPrompt ? 'bg-amber-900/20 text-amber-400' : 'hover:bg-dark-50 text-dark-400'
+                  }`}
+                  title={language === 'es' ? 'Vista previa del prompt' : 'Preview prompt'}
+                >
+                  {loadingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                </button>
+              )}
               <div className="relative">
                 <button 
                   onClick={() => setShowSettings(!showSettings)}
@@ -934,8 +936,8 @@ export default function ProductWorkspace() {
             </div>
           </div>
 
-          {/* Preview: Full System Prompt */}
-          {previewSystemPrompt && (
+          {/* Preview: Full System Prompt (admin only) */}
+          {isAdmin && previewSystemPrompt && (
             <div className="border-b border-amber-700/30 bg-amber-900/20 px-6 py-3 max-h-[50vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-mono font-bold text-amber-800">

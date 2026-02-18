@@ -340,7 +340,7 @@ export default function Home() {
       </nav>
 
       {/* Hero Section with Floating Reels */}
-      <section className="relative pt-28 pb-24 px-4 sm:px-6 lg:px-8 bg-dark-100 overflow-hidden min-h-[90vh] flex items-center">
+      <section className="relative pt-20 pb-14 sm:pt-28 sm:pb-24 px-4 sm:px-6 lg:px-8 bg-dark-100 overflow-hidden min-h-[70vh] sm:min-h-[90vh] flex items-center">
         {/* Ambient glow */}
         <div className="absolute inset-0 overflow-hidden">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl animate-pulse-soft" />
@@ -368,21 +368,21 @@ export default function Home() {
         {/* Hero Content */}
         <div className="max-w-7xl mx-auto relative z-10 w-full">
           <div className="text-center max-w-3xl mx-auto">
-            <h1 className="text-4xl sm:text-5xl lg:text-7xl font-bold text-dark-900 mb-6 leading-[1.1] tracking-tight animate-fade-in-up">
+            <h1 className="text-3xl sm:text-5xl lg:text-7xl font-bold text-dark-900 mb-4 sm:mb-6 leading-[1.1] tracking-tight animate-fade-in-up">
               {labels.hero.title}{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-sky-500">
                 {labels.hero.titleHighlight}
               </span>
             </h1>
 
-            <p className="text-lg sm:text-xl text-dark-500 mb-10 max-w-xl mx-auto leading-relaxed animate-fade-in-up animation-delay-1">
+            <p className="text-base sm:text-xl text-dark-500 mb-6 sm:mb-10 max-w-xl mx-auto leading-relaxed animate-fade-in-up animation-delay-1">
               {labels.hero.subtitle}
             </p>
 
             <div className="flex justify-center animate-fade-in-up animation-delay-2">
               <Link 
                 to="/signup" 
-                className="px-10 py-4 bg-primary-600 hover:bg-primary-700 text-white rounded-2xl font-semibold text-lg transition-all shadow-lg shadow-primary-500/25 flex items-center gap-3 group"
+                className="px-8 py-3 sm:px-10 sm:py-4 bg-primary-600 hover:bg-primary-700 text-white rounded-2xl font-semibold text-base sm:text-lg transition-all shadow-lg shadow-primary-500/25 flex items-center gap-3 group"
               >
                 {labels.hero.cta}
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -394,9 +394,9 @@ export default function Home() {
       </section>
 
       {/* Benefits Section */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
+      <section className="py-12 sm:py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 text-center mb-14">
+          <h2 className="text-2xl sm:text-4xl font-bold text-dark-900 text-center mb-8 sm:mb-14">
             {labels.benefits.title}
           </h2>
           <div className="grid gap-5">
@@ -420,9 +420,9 @@ export default function Home() {
       </section>
 
       {/* Guiones Showcase */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
+      <section className="py-12 sm:py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-6xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+          <div className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-center">
             {/* Left — Script Mockup */}
             <div className="relative">
               <div className="bg-dark-50 rounded-2xl p-6 shadow-2xl border border-dark-200">
@@ -476,9 +476,9 @@ export default function Home() {
       </section>
 
       {/* Posts Showcase */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
+      <section className="py-12 sm:py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-6xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+          <div className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-center">
             {/* Left — Text */}
             <div className="order-2 lg:order-1">
               <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-6">
@@ -524,9 +524,9 @@ export default function Home() {
       </section>
 
       {/* Presets Gallery */}
-      <section id="features" className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100 overflow-hidden">
+      <section id="features" className="py-12 sm:py-24 px-4 sm:px-6 lg:px-8 bg-dark-100 overflow-hidden">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-14">
+          <div className="text-center mb-8 sm:mb-14">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-4">
               <Layers className="w-4 h-4 text-primary-600" />
               <span className="text-sm text-primary-700 font-medium">{labels.features.badge}</span>
@@ -562,7 +562,7 @@ export default function Home() {
           </div>
 
           {/* Additional Features row */}
-          <div className="grid sm:grid-cols-3 gap-4 mt-12">
+          <div className="grid sm:grid-cols-3 gap-3 sm:gap-4 mt-8 sm:mt-12">
             {[
               { icon: <PenTool className="w-5 h-5" />, text: language === 'es' ? 'Descripciones optimizadas para Ads' : 'Optimized ad descriptions' },
               { icon: <Users className="w-5 h-5" />, text: language === 'es' ? 'Perfiles de cliente ideal (ICP)' : 'Ideal Customer Profiles (ICP)' },
@@ -580,9 +580,9 @@ export default function Home() {
       </section>
 
       {/* Pricing Section */}
-      <section id="pricing" className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
+      <section id="pricing" className="py-12 sm:py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
+          <div className="text-center mb-8 sm:mb-16">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-900/30 border border-primary-200 rounded-full mb-4">
               <span className="text-sm text-primary-700 font-medium">{labels.pricing.badge}</span>
             </div>
@@ -594,99 +594,99 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 max-w-6xl mx-auto">
             {/* Free Plan */}
-            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
-              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.free.name}</h3>
-              <div className="flex items-baseline gap-1 mb-6 mt-2">
-                <span className="text-4xl font-bold text-dark-900">{labels.pricing.free.price}</span>
-                <span className="text-dark-500">{labels.pricing.monthly}</span>
+            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-4 sm:p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+              <h3 className="text-base sm:text-xl font-semibold text-dark-900 mb-1 sm:mb-2">{labels.pricing.free.name}</h3>
+              <div className="flex items-baseline gap-1 mb-4 sm:mb-6 mt-1 sm:mt-2">
+                <span className="text-2xl sm:text-4xl font-bold text-dark-900">{labels.pricing.free.price}</span>
+                <span className="text-dark-500 text-xs sm:text-base">{labels.pricing.monthly}</span>
               </div>
               <Link 
                 to="/signup"
-                className="w-full py-3 px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-8"
+                className="w-full py-2 sm:py-3 px-3 sm:px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-4 sm:mb-8 text-sm sm:text-base"
               >
                 {labels.pricing.free.cta}
               </Link>
-              <ul className="space-y-3 flex-1">
+              <ul className="space-y-2 sm:space-y-3 flex-1">
                 {labels.pricing.free.features.map((feature: string, i: number) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
-                    <span className="text-dark-600">{feature}</span>
+                  <li key={i} className="flex items-start gap-2 sm:gap-3">
+                    <Check className="w-4 h-4 sm:w-5 sm:h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600 text-xs sm:text-base">{feature}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
             {/* Starter Plan */}
-            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
-              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.starter.name}</h3>
-              <div className="flex items-baseline gap-1 mb-6 mt-2">
-                <span className="text-4xl font-bold text-dark-900">{labels.pricing.starter.price}</span>
-                <span className="text-dark-500">{labels.pricing.monthly}</span>
+            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-4 sm:p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+              <h3 className="text-base sm:text-xl font-semibold text-dark-900 mb-1 sm:mb-2">{labels.pricing.starter.name}</h3>
+              <div className="flex items-baseline gap-1 mb-4 sm:mb-6 mt-1 sm:mt-2">
+                <span className="text-2xl sm:text-4xl font-bold text-dark-900">{labels.pricing.starter.price}</span>
+                <span className="text-dark-500 text-xs sm:text-base">{labels.pricing.monthly}</span>
               </div>
               <Link 
                 to="/signup"
-                className="w-full py-3 px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-8"
+                className="w-full py-2 sm:py-3 px-3 sm:px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-4 sm:mb-8 text-sm sm:text-base"
               >
                 {labels.pricing.starter.cta}
               </Link>
-              <ul className="space-y-3 flex-1">
+              <ul className="space-y-2 sm:space-y-3 flex-1">
                 {labels.pricing.starter.features.map((feature: string, i: number) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
-                    <span className="text-dark-600">{feature}</span>
+                  <li key={i} className="flex items-start gap-2 sm:gap-3">
+                    <Check className="w-4 h-4 sm:w-5 sm:h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600 text-xs sm:text-base">{feature}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
             {/* Premium Plan (highlighted) */}
-            <div className="bg-dark-100 border-2 border-primary-500 rounded-2xl p-8 relative shadow-lg shadow-primary-500/10 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+            <div className="bg-dark-100 border-2 border-primary-500 rounded-2xl p-4 sm:p-8 relative shadow-lg shadow-primary-500/10 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <div className="px-4 py-1 bg-primary-600 rounded-full text-sm font-medium text-white shadow-lg shadow-primary-500/30">
+                <div className="px-3 sm:px-4 py-1 bg-primary-600 rounded-full text-[10px] sm:text-sm font-medium text-white shadow-lg shadow-primary-500/30">
                   {labels.pricing.premium.badge}
                 </div>
               </div>
-              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.premium.name}</h3>
-              <div className="flex items-baseline gap-1 mb-6 mt-2">
-                <span className="text-4xl font-bold text-dark-900">{labels.pricing.premium.price}</span>
-                <span className="text-dark-500">{labels.pricing.monthly}</span>
+              <h3 className="text-base sm:text-xl font-semibold text-dark-900 mb-1 sm:mb-2">{labels.pricing.premium.name}</h3>
+              <div className="flex items-baseline gap-1 mb-4 sm:mb-6 mt-1 sm:mt-2">
+                <span className="text-2xl sm:text-4xl font-bold text-dark-900">{labels.pricing.premium.price}</span>
+                <span className="text-dark-500 text-xs sm:text-base">{labels.pricing.monthly}</span>
               </div>
               <Link 
                 to="/signup"
-                className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-medium transition-all shadow-lg shadow-primary-500/25 flex items-center justify-center gap-2 mb-8"
+                className="w-full py-2 sm:py-3 px-3 sm:px-4 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-medium transition-all shadow-lg shadow-primary-500/25 flex items-center justify-center gap-2 mb-4 sm:mb-8 text-sm sm:text-base"
               >
                 {labels.pricing.premium.cta}
               </Link>
-              <ul className="space-y-3 flex-1">
+              <ul className="space-y-2 sm:space-y-3 flex-1">
                 {labels.pricing.premium.features.map((feature: string, i: number) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
-                    <span className="text-dark-600">{feature}</span>
+                  <li key={i} className="flex items-start gap-2 sm:gap-3">
+                    <Check className="w-4 h-4 sm:w-5 sm:h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600 text-xs sm:text-base">{feature}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
             {/* Enterprise Plan */}
-            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
-              <h3 className="text-xl font-semibold text-dark-900 mb-2">{labels.pricing.enterprise.name}</h3>
-              <div className="flex items-baseline gap-1 mb-6 mt-2">
-                <span className="text-4xl font-bold text-dark-900">{labels.pricing.enterprise.price}</span>
-                <span className="text-dark-500">{labels.pricing.monthly}</span>
+            <div className="bg-dark-100 border border-dark-100 rounded-2xl p-4 sm:p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+              <h3 className="text-base sm:text-xl font-semibold text-dark-900 mb-1 sm:mb-2">{labels.pricing.enterprise.name}</h3>
+              <div className="flex items-baseline gap-1 mb-4 sm:mb-6 mt-1 sm:mt-2">
+                <span className="text-2xl sm:text-4xl font-bold text-dark-900">{labels.pricing.enterprise.price}</span>
+                <span className="text-dark-500 text-xs sm:text-base">{labels.pricing.monthly}</span>
               </div>
               <Link 
                 to="/signup"
-                className="w-full py-3 px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-8"
+                className="w-full py-2 sm:py-3 px-3 sm:px-4 bg-dark-100 hover:bg-dark-200 text-dark-700 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 mb-4 sm:mb-8 text-sm sm:text-base"
               >
                 {labels.pricing.enterprise.cta}
               </Link>
-              <ul className="space-y-3 flex-1">
+              <ul className="space-y-2 sm:space-y-3 flex-1">
                 {labels.pricing.enterprise.features.map((feature: string, i: number) => (
-                  <li key={i} className="flex items-start gap-3">
-                    <Check className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
-                    <span className="text-dark-600">{feature}</span>
+                  <li key={i} className="flex items-start gap-2 sm:gap-3">
+                    <Check className="w-4 h-4 sm:w-5 sm:h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                    <span className="text-dark-600 text-xs sm:text-base">{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -696,16 +696,16 @@ export default function Home() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
+      <section className="py-12 sm:py-24 px-4 sm:px-6 lg:px-8 bg-dark-100">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="bg-dark-50 border border-dark-200 rounded-3xl p-14 relative overflow-hidden">
+          <div className="bg-dark-50 border border-dark-200 rounded-3xl p-8 sm:p-14 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-primary-500/10 rounded-full blur-3xl" />
             <div className="absolute bottom-0 left-0 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl" />
             <div className="relative z-10">
               <h2 className="text-3xl sm:text-4xl font-bold text-dark-900 mb-4">
                 {labels.cta.title}
               </h2>
-              <p className="text-lg text-dark-500 mb-10 max-w-2xl mx-auto">
+              <p className="text-base sm:text-lg text-dark-500 mb-6 sm:mb-10 max-w-2xl mx-auto">
                 {labels.cta.subtitle}
               </p>
               <Link 
