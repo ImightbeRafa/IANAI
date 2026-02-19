@@ -43,7 +43,7 @@ const PLAN_DETAILS = {
   },
   enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: 'https://tp.cr/l/TkRrMk53PT18MQ==' },
   meta_advanze: {
-    name: 'Meta Advanze',
+    name: 'Meta AdVance',
     price: 24,
     scripts: -1,
     descriptions: -1,

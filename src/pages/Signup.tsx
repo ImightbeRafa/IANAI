@@ -146,7 +146,7 @@ export default function Signup() {
                 <Gift className="w-5 h-5 text-purple-400" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-purple-300">Meta Advanze Partner</p>
+                <p className="text-sm font-semibold text-purple-300">Meta AdVance Partner</p>
                 <p className="text-xs text-purple-400/80">3 meses gratis de Premium al registrarte</p>
               </div>
             </div>

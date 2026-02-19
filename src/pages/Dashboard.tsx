@@ -544,7 +544,7 @@ export default function Dashboard() {
                 <div>
                   <p className="text-sm font-semibold text-purple-300">
                     {language === 'es' ? 'Plan Premium Activo' : 'Premium Plan Active'}
-                    {trialPlan === 'meta_advanze' && ' — Meta Advanze'}
+                    {trialPlan === 'meta_advanze' && ' — Meta AdVance'}
                   </p>
                   <p className="text-xs text-purple-400/80">
                     {language === 'es'

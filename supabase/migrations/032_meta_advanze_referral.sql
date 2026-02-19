@@ -1,8 +1,8 @@
 -- =============================================
--- Migration 032: Meta Advanze Referral Plan
+-- Migration 032: Meta AdVance Referral Plan
 --
 -- Creates a referral system for partner campaigns.
--- First campaign: "Meta Advanze" — 3 months free premium,
+-- First campaign: "Meta AdVance" — 3 months free premium,
 -- then $24/mo for the meta_advanze plan.
 --
 -- Security:
@@ -114,12 +114,12 @@ CREATE POLICY "Admins can view all referral signups" ON referral_signups
   );
 
 -- =============================================
--- STEP 6: Insert the Meta Advanze campaign
+-- STEP 6: Insert the Meta AdVance campaign
 -- =============================================
 INSERT INTO referral_campaigns (code, name, plan, trial_days, max_signups, is_active, expires_at)
 VALUES (
   'META-ADVANZE-2026',
-  'Meta Advanze Partner Campaign',
+  'Meta AdVance Partner Campaign',
   'meta_advanze',
   90,        -- 3 months
   NULL,      -- unlimited signups (remove cap if needed later)
