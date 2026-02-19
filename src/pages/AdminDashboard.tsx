@@ -276,26 +276,52 @@ export default function AdminDashboard() {
 
       setCampaigns(campaignsData || [])
 
-      // Fetch referral signups with user info
+      // Fetch referral signups (no FK join — user_id references auth.users, not profiles)
       const { data: signupsData } = await supabase
         .from('referral_signups')
-        .select('*, profiles:user_id(email, full_name), subscriptions:user_id(plan, status)')
+        .select('*')
         .order('signed_up_at', { ascending: false })
 
-      const enrichedSignups: ReferralSignup[] = (signupsData || []).map((s: Record<string, unknown>) => {
-        const profile = s.profiles as Record<string, string> | null
-        const sub = s.subscriptions as Record<string, string> | null
+      const rawSignups = signupsData || []
+      const userIds = [...new Set(rawSignups.map((s: Record<string, unknown>) => s.user_id as string))]
+
+      // Fetch profiles and subscriptions for these users in bulk
+      let profilesMap: Record<string, { email: string; full_name: string }> = {}
+      let subsMap: Record<string, { plan: string; status: string }> = {}
+
+      if (userIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, email, full_name')
+          .in('id', userIds)
+
+        for (const p of (profilesData || []) as { id: string; email: string; full_name: string }[]) {
+          profilesMap[p.id] = { email: p.email, full_name: p.full_name }
+        }
+
+        const { data: subsData } = await supabase
+          .from('subscriptions')
+          .select('user_id, plan, status')
+          .in('user_id', userIds)
+
+        for (const s of (subsData || []) as { user_id: string; plan: string; status: string }[]) {
+          subsMap[s.user_id] = { plan: s.plan, status: s.status }
+        }
+      }
+
+      const enrichedSignups: ReferralSignup[] = rawSignups.map((s: Record<string, unknown>) => {
+        const uid = s.user_id as string
         return {
           id: s.id as string,
           campaign_id: s.campaign_id as string,
-          user_id: s.user_id as string,
+          user_id: uid,
           signed_up_at: s.signed_up_at as string,
           trial_ends_at: s.trial_ends_at as string,
           converted_to_paid: s.converted_to_paid as boolean,
-          user_email: profile?.email || 'Unknown',
-          user_name: profile?.full_name || '',
-          current_plan: sub?.plan || 'free',
-          current_status: sub?.status || 'unknown'
+          user_email: profilesMap[uid]?.email || 'Unknown',
+          user_name: profilesMap[uid]?.full_name || '',
+          current_plan: subsMap[uid]?.plan || 'free',
+          current_status: subsMap[uid]?.status || 'unknown'
         }
       })
       setReferralSignups(enrichedSignups)

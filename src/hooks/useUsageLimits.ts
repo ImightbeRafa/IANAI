@@ -43,8 +43,8 @@ export function useUsageLimits(): UsageLimits {
           .from('subscriptions')
           .select('plan, status')
           .eq('user_id', user!.id)
-          .eq('status', 'active')
-          .single()
+          .in('status', ['active', 'trialing'])
+          .maybeSingle()
 
         const plan = sub?.plan || 'free'
 
@@ -53,7 +53,7 @@ export function useUsageLimits(): UsageLimits {
           .from('plan_limits')
           .select('scripts_per_month, images_per_month, descriptions_per_month')
           .eq('plan', plan)
-          .single()
+          .maybeSingle()
 
         // Fetch current month usage
         const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
@@ -62,14 +62,14 @@ export function useUsageLimits(): UsageLimits {
           .select('scripts_generated, images_generated, descriptions_generated, enhances_generated')
           .eq('user_id', user!.id)
           .eq('period_start', currentMonth)
-          .single()
+          .maybeSingle()
 
         // Fetch bonus images from profiles
         const { data: profile } = await supabase
           .from('profiles')
           .select('bonus_images')
           .eq('id', user!.id)
-          .single()
+          .maybeSingle()
 
         const bonus = profile?.bonus_images || 0
         const baseImageLimit = limits?.images_per_month ?? 1
