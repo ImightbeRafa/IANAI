@@ -1020,7 +1020,7 @@ export async function inviteCollaborator(
     .from('profiles')
     .select('id')
     .eq('email', email.toLowerCase())
-    .single()
+    .maybeSingle()
 
   const insertData: Record<string, unknown> = {
     product_id: productId,

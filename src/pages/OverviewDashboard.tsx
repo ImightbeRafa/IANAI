@@ -55,7 +55,7 @@ export default function OverviewDashboard() {
           supabase
             .from('posts')
             .select('id', { count: 'exact', head: true })
-            .eq('user_id', user!.id)
+            .eq('created_by', user!.id)
             .eq('status', 'completed'),
           supabase
             .from('scripts')

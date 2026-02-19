@@ -37,21 +37,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        console.warn('Session recovery failed, signing out:', error.message)
-        supabase.auth.signOut()
-        setSession(null)
-        setUser(null)
-        setIsAdmin(false)
-      } else {
-        setSession(session)
-        setUser(session?.user ?? null)
-        if (session?.user) fetchAdminStatus(session.user.id)
-      }
-      setLoading(false)
-    })
+    // Detect if this is an OAuth callback (URL has code, access_token, or error params)
+    const params = new URLSearchParams(window.location.search)
+    const hashParams = new URLSearchParams(window.location.hash.substring(1))
+    const hasOAuthCallback = params.has('code') || hashParams.has('access_token') || params.has('error') || hashParams.has('error')
 
+    // Surface OAuth errors from the URL (Supabase appends these on failure)
+    const oauthError = params.get('error') || hashParams.get('error')
+    const oauthErrorDesc = params.get('error_description') || hashParams.get('error_description')
+    if (oauthError) {
+      console.error('OAuth error:', oauthError, oauthErrorDesc)
+    }
+
+    // Set up auth state listener FIRST (before getSession) to catch OAuth code exchange
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED' && !session) {
         console.warn('Token refresh failed, signing out')
@@ -70,6 +68,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setLoading(false)
     })
+
+    // For OAuth callbacks, let onAuthStateChange handle it (it will detect the code/token in URL)
+    // For normal page loads, use getSession to restore existing session
+    if (!hasOAuthCallback) {
+      supabase.auth.getSession().then(({ data: { session }, error }) => {
+        if (error) {
+          console.warn('Session recovery failed, signing out:', error.message)
+          supabase.auth.signOut()
+          setSession(null)
+          setUser(null)
+          setIsAdmin(false)
+        } else {
+          setSession(session)
+          setUser(session?.user ?? null)
+          if (session?.user) fetchAdminStatus(session.user.id)
+        }
+        setLoading(false)
+      })
+    } else {
+      // OAuth callback: give Supabase SDK time to process the code exchange
+      // If it doesn't resolve within 10s, stop loading to avoid infinite spinner
+      const timeout = setTimeout(() => {
+        if (oauthError) {
+          console.error('OAuth authentication failed:', oauthError, oauthErrorDesc)
+        }
+        setLoading(false)
+      }, 10000)
+
+      // Also try explicit code exchange for PKCE flow
+      if (params.has('code')) {
+        supabase.auth.exchangeCodeForSession(params.get('code')!).then(({ data, error }) => {
+          clearTimeout(timeout)
+          if (error) {
+            console.error('OAuth code exchange failed:', error.message)
+            setLoading(false)
+          } else if (data.session) {
+            setSession(data.session)
+            setUser(data.session.user)
+            fetchAdminStatus(data.session.user.id)
+            setLoading(false)
+            // Clean up URL params
+            window.history.replaceState({}, '', window.location.pathname)
+          }
+        })
+      }
+    }
 
     return () => subscription.unsubscribe()
   }, [])

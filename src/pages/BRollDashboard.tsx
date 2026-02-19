@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProfile, getProducts, getTeam, getClients, getClientProducts, createClient } from '../services/database'
+import { getProfile, getProducts, getTeam, getClients, getClientProducts, createClient, getSharedProducts, acceptPendingInvites } from '../services/database'
 import type { Product, Profile, Team, Client } from '../types'
 import Layout from '../components/Layout'
 import { 
@@ -17,7 +17,8 @@ import {
   ChevronRight,
   ArrowLeft,
   Users,
-  FolderOpen
+  FolderOpen,
+  Share2
 } from 'lucide-react'
 
 export default function BRollDashboard() {
@@ -35,6 +36,7 @@ export default function BRollDashboard() {
   const [showNewClientForm, setShowNewClientForm] = useState(false)
   const [newClientName, setNewClientName] = useState('')
   const [creatingClient, setCreatingClient] = useState(false)
+  const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
   
   const isTeamAccount = profile?.account_type === 'team'
 
@@ -54,7 +56,11 @@ export default function BRollDashboard() {
       back: 'Volver',
       noClients: 'No hay clientes aún',
       createFirstClient: 'Crea tu primer cliente para organizar tus productos',
-      generateBRoll: 'Generar Ad Video'
+      generateBRoll: 'Generar Ad Video',
+      sharedWithMe: 'Compartidos Conmigo',
+      sharedBy: 'por',
+      roleViewer: 'Lector',
+      roleEditor: 'Editor'
     },
     en: {
       title: 'Ad Videos',
@@ -71,7 +77,11 @@ export default function BRollDashboard() {
       back: 'Back',
       noClients: 'No clients yet',
       createFirstClient: 'Create your first client to organize your products',
-      generateBRoll: 'Generate Ad Video'
+      generateBRoll: 'Generate Ad Video',
+      sharedWithMe: 'Shared With Me',
+      sharedBy: 'by',
+      roleViewer: 'Viewer',
+      roleEditor: 'Editor'
     }
   }
 
@@ -83,6 +93,15 @@ export default function BRollDashboard() {
       try {
         const profileData = await getProfile(user.id)
         setProfile(profileData)
+
+        // Auto-accept pending sharing invites
+        if (profileData?.email) {
+          await acceptPendingInvites(user.id, profileData.email)
+        }
+
+        // Load shared products
+        const shared = await getSharedProducts(user.id)
+        setSharedProducts(shared)
 
         if (profileData?.account_type === 'team') {
           // Team account: load team, clients, and orphaned products
@@ -160,8 +179,8 @@ export default function BRollDashboard() {
   // Get products to display based on context
   const displayProducts = selectedClient ? clientProducts : products
   const hasNoProducts = isTeamAccount 
-    ? (clients.length === 0 && products.length === 0)
-    : products.length === 0
+    ? (clients.length === 0 && products.length === 0 && sharedProducts.length === 0)
+    : (products.length === 0 && sharedProducts.length === 0)
 
   return (
     <Layout>
@@ -318,6 +337,52 @@ export default function BRollDashboard() {
                 )
               })}
             </div>
+
+            {/* Shared products inline */}
+            {sharedProducts.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-sm font-semibold text-dark-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Share2 className="w-4 h-4 text-blue-500" />
+                  {t.sharedWithMe}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {sharedProducts.map((product) => {
+                    return (
+                      <Link
+                        key={product.id}
+                        to={`/broll/product/${product.id}`}
+                        className="bg-dark-100 rounded-xl shadow-sm border border-blue-500/20 p-6 hover:shadow-md hover:border-blue-400 transition-all group relative"
+                      >
+                        <div className="absolute top-3 right-3">
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            product.shared_role === 'editor'
+                              ? 'bg-primary-900/20 text-primary-600'
+                              : 'bg-dark-200 text-dark-500'
+                          }`}>
+                            {product.shared_role === 'editor' ? t.roleEditor : t.roleViewer}
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center group-hover:bg-blue-500/20 transition-colors">
+                            <Share2 className="w-6 h-6 text-blue-500" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-dark-800 truncate group-hover:text-blue-600 transition-colors">
+                              {product.name}
+                            </h3>
+                            <p className="text-xs text-dark-400">{t.sharedBy} {product.shared_by_email}</p>
+                          </div>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2 text-blue-500 text-sm font-medium">
+                          <Video className="w-4 h-4" />
+                          {t.generateBRoll}
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </>
         ) : selectedClient && (
           <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-12 text-center">

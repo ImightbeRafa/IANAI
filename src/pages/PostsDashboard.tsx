@@ -10,7 +10,9 @@ import {
   getClientProducts,
   createProduct,
   createClient,
-  assignProductToClient
+  assignProductToClient,
+  getSharedProducts,
+  acceptPendingInvites
 } from '../services/database'
 import type { Profile, Product, ProductFormData, RestaurantFormData, Team, Client } from '../types'
 import Layout from '../components/Layout'
@@ -26,7 +28,8 @@ import {
   ChevronRight,
   ArrowLeft,
   UtensilsCrossed,
-  Home
+  Home,
+  Share2
 } from 'lucide-react'
 
 export default function PostsDashboard() {
@@ -47,6 +50,7 @@ export default function PostsDashboard() {
   const [newClientName, setNewClientName] = useState('')
   const [creatingClient, setCreatingClient] = useState(false)
   const [assigningProduct, setAssigningProduct] = useState<Product | null>(null)
+  const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
 
   const isTeamAccount = profile?.account_type === 'team'
 
@@ -72,7 +76,11 @@ export default function PostsDashboard() {
       createFirstClient: 'Crea tu primer cliente para organizar tus productos',
       orphanedProducts: 'Productos sin asignar',
       assignTo: 'Asignar a cliente',
-      generatePosts: 'Generar Posts'
+      generatePosts: 'Generar Posts',
+      sharedWithMe: 'Compartidos Conmigo',
+      sharedBy: 'por',
+      roleViewer: 'Lector',
+      roleEditor: 'Editor'
     },
     en: {
       title: 'Instagram Posts',
@@ -95,7 +103,11 @@ export default function PostsDashboard() {
       createFirstClient: 'Create your first client to organize your products',
       orphanedProducts: 'Unassigned products',
       assignTo: 'Assign to client',
-      generatePosts: 'Generate Posts'
+      generatePosts: 'Generate Posts',
+      sharedWithMe: 'Shared With Me',
+      sharedBy: 'by',
+      roleViewer: 'Viewer',
+      roleEditor: 'Editor'
     }
   }
 
@@ -107,6 +119,15 @@ export default function PostsDashboard() {
       try {
         const profileData = await getProfile(user.id)
         setProfile(profileData)
+
+        // Auto-accept pending sharing invites
+        if (profileData?.email) {
+          await acceptPendingInvites(user.id, profileData.email)
+        }
+
+        // Load shared products
+        const shared = await getSharedProducts(user.id)
+        setSharedProducts(shared)
 
         if (profileData?.account_type === 'team') {
           const teamData = await getTeam(user.id)
@@ -221,23 +242,40 @@ export default function PostsDashboard() {
     }
   }
 
-  const renderProductCard = (product: Product) => {
+  const renderProductCard = (product: Product, sharedInfo?: { role: string; email: string }) => {
     const Icon = getProductIcon(product.type)
     return (
       <Link
         key={product.id}
         to={`/posts/product/${product.id}`}
-        className="card hover:shadow-lg transition-all duration-200 group"
+        className="card hover:shadow-lg transition-all duration-200 group relative"
       >
+        {sharedInfo && (
+          <div className="absolute top-3 right-3 flex items-center gap-1.5">
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+              sharedInfo.role === 'editor'
+                ? 'bg-primary-900/20 text-primary-600'
+                : 'bg-dark-200 text-dark-500'
+            }`}>
+              {sharedInfo.role === 'editor' ? t.roleEditor : t.roleViewer}
+            </span>
+          </div>
+        )}
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-primary-900/30 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
-            <Icon className="w-6 h-6 text-primary-600" />
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors ${
+            sharedInfo ? 'bg-blue-500/10' : 'bg-primary-900/30'
+          }`}>
+            {sharedInfo ? <Share2 className="w-6 h-6 text-blue-500" /> : <Icon className="w-6 h-6 text-primary-600" />}
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-dark-900 group-hover:text-primary-600 transition-colors truncate">
               {product.name}
             </h3>
-            <p className="text-sm text-dark-500 capitalize">{product.type}</p>
+            {sharedInfo ? (
+              <p className="text-xs text-dark-400">{t.sharedBy} {sharedInfo.email}</p>
+            ) : (
+              <p className="text-sm text-dark-500 capitalize">{product.type}</p>
+            )}
             {product.description && (
               <p className="text-sm text-dark-400 mt-1 line-clamp-2">{product.description}</p>
             )}
@@ -301,7 +339,7 @@ export default function PostsDashboard() {
 
               {clientProducts.length > 0 ? (
                 <div className="grid gap-4">
-                  {clientProducts.map(renderProductCard)}
+                  {clientProducts.map(p => renderProductCard(p))}
                 </div>
               ) : (
                 <div className="card text-center py-12">
@@ -441,6 +479,19 @@ export default function PostsDashboard() {
                   </div>
                 </div>
               )}
+
+              {/* Shared With Me section */}
+              {sharedProducts.length > 0 && (
+                <div className="mt-8">
+                  <h2 className="text-lg font-semibold text-dark-900 mb-4 flex items-center gap-2">
+                    <Share2 className="w-5 h-5 text-blue-500" />
+                    {t.sharedWithMe}
+                  </h2>
+                  <div className="grid gap-4">
+                    {sharedProducts.map(p => renderProductCard(p, { role: p.shared_role, email: p.shared_by_email }))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -490,9 +541,10 @@ export default function PostsDashboard() {
           </button>
         </div>
 
-        {products.length > 0 ? (
+        {(products.length > 0 || sharedProducts.length > 0) ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {products.map(renderProductCard)}
+            {products.map(p => renderProductCard(p))}
+            {sharedProducts.map(p => renderProductCard(p, { role: p.shared_role, email: p.shared_by_email }))}
           </div>
         ) : (
           <div className="card text-center py-16">
