@@ -19,7 +19,13 @@ import {
   Link2,
   Wand2,
   MessageSquarePlus,
-  Pencil
+  Pencil,
+  Gift,
+  Users,
+  Clock,
+  CheckCircle,
+  XCircle,
+  Copy
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -51,6 +57,32 @@ interface RecentLog {
   estimated_cost_usd: number
   success: boolean
   created_at: string
+}
+
+interface ReferralCampaign {
+  id: string
+  code: string
+  name: string
+  plan: string
+  trial_days: number
+  max_signups: number | null
+  current_signups: number
+  is_active: boolean
+  expires_at: string | null
+  created_at: string
+}
+
+interface ReferralSignup {
+  id: string
+  campaign_id: string
+  user_id: string
+  signed_up_at: string
+  trial_ends_at: string
+  converted_to_paid: boolean
+  user_email?: string
+  user_name?: string
+  current_plan?: string
+  current_status?: string
 }
 
 // Model display names and colors
@@ -104,6 +136,9 @@ export default function AdminDashboard() {
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
   const [recentLogs, setRecentLogs] = useState<RecentLog[]>([])
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
+  const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([])
+  const [referralSignups, setReferralSignups] = useState<ReferralSignup[]>([])
+  const [copiedCode, setCopiedCode] = useState<string | null>(null)
 
   const labels = {
     es: {
@@ -232,6 +267,38 @@ export default function AdminDashboard() {
 
       if (logsError) throw logsError
       setRecentLogs(logsData || [])
+
+      // Fetch referral campaigns
+      const { data: campaignsData } = await supabase
+        .from('referral_campaigns')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      setCampaigns(campaignsData || [])
+
+      // Fetch referral signups with user info
+      const { data: signupsData } = await supabase
+        .from('referral_signups')
+        .select('*, profiles:user_id(email, full_name), subscriptions:user_id(plan, status)')
+        .order('signed_up_at', { ascending: false })
+
+      const enrichedSignups: ReferralSignup[] = (signupsData || []).map((s: Record<string, unknown>) => {
+        const profile = s.profiles as Record<string, string> | null
+        const sub = s.subscriptions as Record<string, string> | null
+        return {
+          id: s.id as string,
+          campaign_id: s.campaign_id as string,
+          user_id: s.user_id as string,
+          signed_up_at: s.signed_up_at as string,
+          trial_ends_at: s.trial_ends_at as string,
+          converted_to_paid: s.converted_to_paid as boolean,
+          user_email: profile?.email || 'Unknown',
+          user_name: profile?.full_name || '',
+          current_plan: sub?.plan || 'free',
+          current_status: sub?.status || 'unknown'
+        }
+      })
+      setReferralSignups(enrichedSignups)
 
     } catch (err) {
       console.error('Failed to fetch admin data:', err)
@@ -377,6 +444,160 @@ export default function AdminDashboard() {
                 <p className="text-3xl font-bold text-dark-900">{successRate}%</p>
               </div>
             </div>
+
+            {/* Referral Tracking Section */}
+            {campaigns.length > 0 && (
+              <div className="mb-8">
+                <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2 mb-4">
+                  <Gift className="w-5 h-5 text-purple-500" />
+                  {language === 'es' ? 'Seguimiento de Referidos' : 'Referral Tracking'}
+                </h2>
+
+                {/* Referral Stats Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                  <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Users className="w-4 h-4 text-purple-500" />
+                      <span className="text-xs text-dark-500">{language === 'es' ? 'Total Referidos' : 'Total Signups'}</span>
+                    </div>
+                    <p className="text-2xl font-bold text-dark-900">{referralSignups.length}</p>
+                  </div>
+                  <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Clock className="w-4 h-4 text-blue-500" />
+                      <span className="text-xs text-dark-500">{language === 'es' ? 'Trials Activos' : 'Active Trials'}</span>
+                    </div>
+                    <p className="text-2xl font-bold text-dark-900">
+                      {referralSignups.filter(s => new Date(s.trial_ends_at) > new Date() && s.current_status === 'trialing').length}
+                    </p>
+                  </div>
+                  <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                    <div className="flex items-center gap-2 mb-1">
+                      <XCircle className="w-4 h-4 text-amber-500" />
+                      <span className="text-xs text-dark-500">{language === 'es' ? 'Trials Expirados' : 'Expired Trials'}</span>
+                    </div>
+                    <p className="text-2xl font-bold text-dark-900">
+                      {referralSignups.filter(s => new Date(s.trial_ends_at) <= new Date() && !s.converted_to_paid).length}
+                    </p>
+                  </div>
+                  <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <span className="text-xs text-dark-500">{language === 'es' ? 'Convertidos' : 'Converted'}</span>
+                    </div>
+                    <p className="text-2xl font-bold text-dark-900">
+                      {referralSignups.filter(s => s.converted_to_paid).length}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Campaign Cards */}
+                {campaigns.map(campaign => (
+                  <div key={campaign.id} className="bg-dark-100 rounded-xl border border-dark-100 mb-4">
+                    <div className="p-5 border-b border-dark-50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-2.5 h-2.5 rounded-full ${campaign.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
+                          <div>
+                            <h3 className="font-semibold text-dark-900">{campaign.name}</h3>
+                            <p className="text-xs text-dark-500">
+                              {campaign.plan} &middot; {campaign.trial_days} {language === 'es' ? 'días de prueba' : 'day trial'}
+                              {campaign.expires_at && ` &middot; ${language === 'es' ? 'Expira' : 'Expires'}: ${new Date(campaign.expires_at).toLocaleDateString()}`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium text-dark-700">
+                            {campaign.current_signups}{campaign.max_signups ? `/${campaign.max_signups}` : ''} {language === 'es' ? 'registros' : 'signups'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              const url = `${window.location.origin}/signup?ref=${campaign.code}`
+                              navigator.clipboard.writeText(url)
+                              setCopiedCode(campaign.code)
+                              setTimeout(() => setCopiedCode(null), 2000)
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-900/20 text-purple-400 hover:bg-purple-900/30 transition-colors"
+                          >
+                            {copiedCode === campaign.code ? (
+                              <><CheckCircle className="w-3.5 h-3.5" /> {language === 'es' ? 'Copiado' : 'Copied'}</>
+                            ) : (
+                              <><Copy className="w-3.5 h-3.5" /> {language === 'es' ? 'Copiar Link' : 'Copy Link'}</>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Signups Table for this campaign */}
+                    {referralSignups.filter(s => s.campaign_id === campaign.id).length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-dark-50">
+                            <tr>
+                              <th className="px-5 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Usuario' : 'User'}</th>
+                              <th className="px-5 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Registro' : 'Signed Up'}</th>
+                              <th className="px-5 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Trial Expira' : 'Trial Ends'}</th>
+                              <th className="px-5 py-2.5 text-center text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Días Rest.' : 'Days Left'}</th>
+                              <th className="px-5 py-2.5 text-center text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Plan Actual' : 'Current Plan'}</th>
+                              <th className="px-5 py-2.5 text-center text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Estado' : 'Status'}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-dark-50">
+                            {referralSignups.filter(s => s.campaign_id === campaign.id).map(signup => {
+                              const daysLeft = Math.max(0, Math.ceil((new Date(signup.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+                              const isExpired = daysLeft === 0
+                              const isConverted = signup.converted_to_paid || (signup.current_plan !== 'free' && signup.current_plan !== 'meta_advanze' && signup.current_status === 'active')
+                              return (
+                                <tr key={signup.id} className="hover:bg-dark-50">
+                                  <td className="px-5 py-3">
+                                    <div>
+                                      <p className="text-sm font-medium text-dark-900">{signup.user_name || '-'}</p>
+                                      <p className="text-xs text-dark-500">{signup.user_email}</p>
+                                    </div>
+                                  </td>
+                                  <td className="px-5 py-3 text-sm text-dark-600">
+                                    {new Date(signup.signed_up_at).toLocaleDateString()}
+                                  </td>
+                                  <td className="px-5 py-3 text-sm text-dark-600">
+                                    {new Date(signup.trial_ends_at).toLocaleDateString()}
+                                  </td>
+                                  <td className="px-5 py-3 text-center">
+                                    <span className={`text-sm font-semibold ${isExpired ? 'text-red-400' : daysLeft <= 14 ? 'text-amber-400' : 'text-green-400'}`}>
+                                      {isExpired ? '0' : daysLeft}
+                                    </span>
+                                  </td>
+                                  <td className="px-5 py-3 text-center">
+                                    <span className="text-xs px-2 py-1 rounded bg-dark-50 text-dark-700 capitalize">
+                                      {signup.current_plan}
+                                    </span>
+                                  </td>
+                                  <td className="px-5 py-3 text-center">
+                                    {isConverted ? (
+                                      <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-green-900/20 text-green-400">
+                                        <CheckCircle className="w-3 h-3" /> {language === 'es' ? 'Convertido' : 'Converted'}
+                                      </span>
+                                    ) : isExpired ? (
+                                      <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-red-900/20 text-red-400">
+                                        <XCircle className="w-3 h-3" /> {language === 'es' ? 'Expirado' : 'Expired'}
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-900/20 text-blue-400">
+                                        <Clock className="w-3 h-3" /> {language === 'es' ? 'En Trial' : 'Trialing'}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Usage by Model */}
             <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 mb-8">

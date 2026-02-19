@@ -29,7 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('profiles')
         .select('is_admin')
         .eq('id', userId)
-        .single()
+        .maybeSingle()
       setIsAdmin(data?.is_admin === true)
     } catch {
       setIsAdmin(false)
@@ -65,6 +65,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session)
         setUser(session?.user ?? null)
         if (session?.user) fetchAdminStatus(session.user.id)
+
+        // Universal referral code fallback — applies on any sign-in event
+        if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
+          const storedRef = localStorage.getItem('referral_code')
+          if (storedRef) {
+            supabase.rpc('apply_referral_code', {
+              p_user_id: session.user.id,
+              p_code: storedRef
+            }).then(({ data, error }) => {
+              if (error) {
+                console.warn('Referral apply (fallback) failed:', error.message)
+              } else if (data?.success) {
+                console.log('Referral applied successfully:', data)
+              }
+              // Always remove — either it worked, user already has it, or code is invalid
+              localStorage.removeItem('referral_code')
+            })
+          }
+        }
       }
       setLoading(false)
     })

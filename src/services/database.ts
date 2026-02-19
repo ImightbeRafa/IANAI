@@ -25,7 +25,7 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     .from('profiles')
     .select('*')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
 
   if (error) return null
   return data
@@ -1069,7 +1069,7 @@ export async function getSharedProducts(userId: string): Promise<(Product & { sh
     .from('profiles')
     .select('email')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
 
   if (!profile) return []
 
