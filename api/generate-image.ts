@@ -916,8 +916,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           metadata: { hasInputImage: !!imageParams.input_image }
         })
 
-        return res.status(500).json({ 
-          error: 'Gemini image generation failed',
+        // Pass through quota/rate limit errors with proper status code
+        const isQuotaError = geminiError instanceof Error && 
+          (geminiError.message.includes('RESOURCE_EXHAUSTED') || geminiError.message.includes('429'))
+        const statusCode = isQuotaError ? 429 : 500
+        const userMessage = isQuotaError 
+          ? 'El servicio de generación de imágenes ha alcanzado su límite temporal. Por favor intenta de nuevo en unos minutos.'
+          : 'Gemini image generation failed'
+
+        return res.status(statusCode).json({ 
+          error: userMessage,
           details: geminiError instanceof Error ? geminiError.message : 'Unknown error'
         })
       }
