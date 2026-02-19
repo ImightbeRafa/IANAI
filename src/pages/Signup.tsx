@@ -248,20 +248,23 @@ export default function Signup() {
               </div>
               {/* Password requirements */}
               <div className="mt-2 space-y-1">
-                {['Mínimo 8 caracteres', 'Una letra mayúscula', 'Una letra minúscula', 'Un número'].map((req, i) => {
-                  const checks = [
-                    password.length >= 8,
-                    /[A-Z]/.test(password),
-                    /[a-z]/.test(password),
-                    /[0-9]/.test(password)
-                  ]
-                  return (
-                    <div key={req} className={`flex items-center gap-1.5 text-xs ${checks[i] ? 'text-green-600' : 'text-dark-400'}`}>
-                      {checks[i] ? <CheckCircle className="w-3 h-3" /> : <div className="w-3 h-3 rounded-full border border-dark-300" />}
-                      {req}
-                    </div>
-                  )
-                })}
+                {[
+                  { label: 'Mínimo 8 caracteres', met: password.length >= 8 },
+                  { label: 'Una letra mayúscula', met: /[A-Z]/.test(password) },
+                  { label: 'Una letra minúscula', met: /[a-z]/.test(password) },
+                  { label: 'Un número', met: /[0-9]/.test(password) },
+                ].map((req) => (
+                  <div key={req.label} className={`flex items-center gap-1.5 text-xs transition-colors ${req.met ? 'text-green-600' : 'text-dark-400'}`}>
+                    <span className={`inline-flex items-center justify-center w-3 h-3 rounded-full flex-shrink-0 ${req.met ? 'bg-green-600' : 'border border-dark-300'}`}>
+                      {req.met && (
+                        <svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                    <span>{req.label}</span>
+                  </div>
+                ))}
               </div>
             </div>
 

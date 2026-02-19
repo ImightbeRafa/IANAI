@@ -40,7 +40,6 @@ import {
   Download,
   Sparkles,
   Info,
-  Settings,
   Users,
   Link2,
   FileText,
@@ -70,7 +69,7 @@ export default function ProductWorkspace() {
   const [editedProduct, setEditedProduct] = useState<Partial<Product>>({})
   const [savingScript, setSavingScript] = useState(false)
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(DEFAULT_SCRIPT_SETTINGS)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showMobileConfig, setShowMobileConfig] = useState(false)
   const [icps, setICPs] = useState<ICP[]>([])
   const [selectedICP, setSelectedICP] = useState<ICP | null>(null)
   const [contextDocs, setContextDocs] = useState<ContextDocument[]>([])
@@ -770,9 +769,10 @@ export default function ProductWorkspace() {
   return (
     <Layout>
       <div className="flex h-[calc(100vh-64px)] lg:h-screen" style={{ height: 'calc(100dvh - 64px)' }}>
-        {/* Left Sidebar - Sessions */}
-        <div className="w-64 bg-dark-100 border-r border-dark-100 flex flex-col">
-          <div className="px-4 pt-4 pb-3">
+        {/* Left Panel — Script Config & Sessions */}
+        <div className="hidden lg:flex w-[420px] bg-dark-100 border-r border-dark-100 flex-col min-h-0 overflow-hidden max-h-[100dvh]">
+          {/* Header */}
+          <div className="px-5 py-4 border-b border-dark-100">
             <Link 
               to="/scripts" 
               className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-3"
@@ -780,91 +780,128 @@ export default function ProductWorkspace() {
               <ChevronLeft className="w-3.5 h-3.5" />
               {t.back}
             </Link>
-            <h2 className="font-semibold text-dark-900 truncate text-base">{product.name}</h2>
+            <h1 className="text-lg font-semibold text-dark-900 truncate">{product.name}</h1>
             <p className="text-xs text-dark-400 capitalize mt-0.5">{product.type}</p>
           </div>
 
-          <div className="px-3 pb-3">
-            <button 
-              onClick={handleNewSession}
-              className="w-full flex items-center justify-center gap-2 text-sm font-medium px-3 py-2.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              {t.newSession}
-            </button>
-          </div>
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-auto px-5 py-4 space-y-5">
+            {/* Script Settings — always visible */}
+            <ScriptSettingsPanel
+              settings={scriptSettings}
+              onChange={setScriptSettings}
+              language={language}
+              onGenerate={handleGenerateScript}
+              loading={loading}
+            />
 
-          <div className="border-t border-dark-100" />
-
-          <div className="flex-1 overflow-y-auto py-2">
-            <p className="px-4 py-1.5 text-[10px] font-semibold text-dark-400 uppercase tracking-wider">
-              {t.sessions}
-            </p>
-            {sessions.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-dark-400">{t.noSessions}</p>
-            ) : (
-              <div className="space-y-0.5 px-2">
-                {sessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className={`group relative rounded-lg transition-all duration-150 ${
-                      currentSession?.id === session.id
-                        ? 'bg-dark-100'
-                        : 'hover:bg-dark-50'
-                    }`}
-                  >
-                    {renamingSessionId === session.id ? (
-                      <div className="p-2">
-                        <input
-                          ref={renameInputRef}
-                          type="text"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleRenameSession(session.id)
-                            if (e.key === 'Escape') setRenamingSessionId(null)
-                          }}
-                          onBlur={() => handleRenameSession(session.id)}
-                          className="w-full px-2 py-1 text-sm border border-primary-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 bg-dark-100"
-                          autoFocus
-                        />
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => navigate(`/product/${productId}/session/${session.id}`)}
-                        onDoubleClick={() => {
-                          setRenamingSessionId(session.id)
-                          setRenameValue(session.title)
-                        }}
-                        className="w-full text-left px-3 py-2.5 rounded-lg"
-                      >
-                        <div className="flex items-center gap-2">
-                          <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${
-                            currentSession?.id === session.id ? 'text-dark-700' : 'text-dark-400'
-                          }`} />
-                          <span className={`truncate text-sm ${
-                            currentSession?.id === session.id ? 'font-medium text-dark-800' : 'text-dark-600'
-                          }`}>{session.title}</span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setRenamingSessionId(session.id)
-                              setRenameValue(session.title)
-                            }}
-                            className="ml-auto opacity-0 group-hover:opacity-100 p-0.5 rounded text-dark-400 hover:text-dark-600 transition-opacity"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                        </div>
-                        <p className="text-[11px] text-dark-400 mt-0.5 pl-5.5">
-                          {new Date(session.updated_at).toLocaleDateString()}
-                        </p>
-                      </button>
-                    )}
-                  </div>
-                ))}
+            {/* ICP Selector */}
+            {icps.length > 0 && (
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                  <Users className="w-3.5 h-3.5 text-blue-500" />
+                  {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
+                </label>
+                <select
+                  value={selectedICP?.id || ''}
+                  onChange={(e) => {
+                    const icp = icps.find(i => i.id === e.target.value) || null
+                    setSelectedICP(icp)
+                  }}
+                  className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
+                  {icps.map(icp => (
+                    <option key={icp.id} value={icp.id}>{icp.name}</option>
+                  ))}
+                </select>
+                {selectedICP && (
+                  <p className="text-xs text-dark-500 mt-1.5 line-clamp-2">{selectedICP.description}</p>
+                )}
               </div>
             )}
+
+            {/* Sessions */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                  <MessageSquare className="w-3.5 h-3.5 text-dark-400" />
+                  {t.sessions}
+                </label>
+                <button 
+                  onClick={handleNewSession}
+                  className="flex items-center gap-1 text-xs font-medium text-primary-500 hover:text-primary-400 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {t.newSession}
+                </button>
+              </div>
+              {sessions.length === 0 ? (
+                <p className="text-sm text-dark-400 py-2">{t.noSessions}</p>
+              ) : (
+                <div className="space-y-0.5">
+                  {sessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className={`group relative rounded-lg transition-all duration-150 ${
+                        currentSession?.id === session.id
+                          ? 'bg-dark-200/60 border border-dark-200'
+                          : 'hover:bg-dark-50 border border-transparent'
+                      }`}
+                    >
+                      {renamingSessionId === session.id ? (
+                        <div className="p-2">
+                          <input
+                            ref={renameInputRef}
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleRenameSession(session.id)
+                              if (e.key === 'Escape') setRenamingSessionId(null)
+                            }}
+                            onBlur={() => handleRenameSession(session.id)}
+                            className="w-full px-2 py-1 text-sm border border-primary-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 bg-dark-100"
+                            autoFocus
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/product/${productId}/session/${session.id}`)}
+                          onDoubleClick={() => {
+                            setRenamingSessionId(session.id)
+                            setRenameValue(session.title)
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg"
+                        >
+                          <div className="flex items-center gap-2">
+                            <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${
+                              currentSession?.id === session.id ? 'text-dark-700' : 'text-dark-400'
+                            }`} />
+                            <span className={`truncate text-sm ${
+                              currentSession?.id === session.id ? 'font-medium text-dark-800' : 'text-dark-600'
+                            }`}>{session.title}</span>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setRenamingSessionId(session.id)
+                                setRenameValue(session.title)
+                              }}
+                              className="ml-auto opacity-0 group-hover:opacity-100 p-0.5 rounded text-dark-400 hover:text-dark-600 transition-opacity"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-dark-400 mt-0.5 pl-5.5">
+                            {new Date(session.updated_at).toLocaleDateString()}
+                          </p>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -872,9 +909,19 @@ export default function ProductWorkspace() {
         <div className="flex-1 flex flex-col bg-dark-50/50">
           {/* Header */}
           <div className="bg-dark-100 border-b border-dark-100 px-6 py-3 flex items-center justify-between">
-            <h1 className="text-sm font-semibold text-dark-800 truncate">
-              {currentSession?.title || product.name}
-            </h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={() => setShowMobileConfig(!showMobileConfig)}
+                className={`lg:hidden p-2 rounded-md transition-colors ${
+                  showMobileConfig ? 'bg-primary-900/20 text-primary-500' : 'hover:bg-dark-50 text-dark-400'
+                }`}
+              >
+                <Sparkles className="w-4 h-4" />
+              </button>
+              <h1 className="text-sm font-semibold text-dark-800 truncate">
+                {currentSession?.title || product.name}
+              </h1>
+            </div>
             <div className="flex items-center gap-1">
               {messages.length > 0 && (
                 <button onClick={exportAsText} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-dark-500 hover:text-dark-700 hover:bg-dark-50 rounded-md transition-colors">
@@ -894,37 +941,6 @@ export default function ProductWorkspace() {
                   {loadingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
                 </button>
               )}
-              <div className="relative">
-                <button 
-                  onClick={() => setShowSettings(!showSettings)}
-                  className={`p-2 rounded-md transition-colors ${
-                    showSettings ? 'bg-amber-900/20 text-amber-400' : 'hover:bg-dark-50 text-dark-400'
-                  }`}
-                  title={t.scriptSettings}
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-                {showSettings && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-dark-100 rounded-xl shadow-lg border border-dark-100 z-50 p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-dark-900 flex items-center gap-2 text-sm">
-                        <Settings className="w-4 h-4 text-amber-600" />
-                        {t.scriptSettings}
-                      </h3>
-                      <button onClick={() => setShowSettings(false)} className="p-1 hover:bg-dark-50 rounded-md text-dark-400">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <ScriptSettingsPanel
-                      settings={scriptSettings}
-                      onChange={setScriptSettings}
-                      language={language}
-                      onGenerate={() => { setShowSettings(false); handleGenerateScript() }}
-                      loading={loading}
-                    />
-                  </div>
-                )}
-              </div>
               <button 
                 onClick={() => setShowProductInfo(!showProductInfo)}
                 className={`p-2 rounded-md transition-colors ${
@@ -935,6 +951,40 @@ export default function ProductWorkspace() {
               </button>
             </div>
           </div>
+
+          {/* Mobile Config Panel */}
+          {showMobileConfig && (
+            <div className="lg:hidden border-b border-dark-100 bg-dark-100 px-5 py-4 max-h-[60vh] overflow-y-auto space-y-4">
+              <ScriptSettingsPanel
+                settings={scriptSettings}
+                onChange={setScriptSettings}
+                language={language}
+                onGenerate={() => { setShowMobileConfig(false); handleGenerateScript() }}
+                loading={loading}
+              />
+              {icps.length > 0 && (
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                    <Users className="w-3.5 h-3.5 text-blue-500" />
+                    {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
+                  </label>
+                  <select
+                    value={selectedICP?.id || ''}
+                    onChange={(e) => {
+                      const icp = icps.find(i => i.id === e.target.value) || null
+                      setSelectedICP(icp)
+                    }}
+                    className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm"
+                  >
+                    <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
+                    {icps.map(icp => (
+                      <option key={icp.id} value={icp.id}>{icp.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Preview: Full System Prompt (admin only) */}
           {isAdmin && previewSystemPrompt && (
@@ -968,22 +1018,14 @@ export default function ProductWorkspace() {
           <div className="flex-1 overflow-y-auto px-6 py-8 space-y-5">
             {messages.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="w-full max-w-sm">
-                  <div className="text-center mb-6">
-                    <div className="w-14 h-14 rounded-2xl bg-primary-900/20 flex items-center justify-center mx-auto mb-4">
-                      <Sparkles className="w-7 h-7 text-primary-500" />
-                    </div>
-                    <p className="text-dark-400 text-sm">{t.startConversation}</p>
+                <div className="text-center max-w-xs">
+                  <div className="w-14 h-14 rounded-2xl bg-primary-900/20 flex items-center justify-center mx-auto mb-4">
+                    <Sparkles className="w-7 h-7 text-primary-500" />
                   </div>
-                  <div className="bg-dark-100 rounded-2xl border border-dark-100 p-5 shadow-sm">
-                    <ScriptSettingsPanel
-                      settings={scriptSettings}
-                      onChange={setScriptSettings}
-                      language={language}
-                      onGenerate={handleGenerateScript}
-                      loading={loading}
-                    />
-                  </div>
+                  <p className="text-dark-500 text-sm mb-1">{t.startConversation}</p>
+                  <p className="text-dark-400 text-xs">
+                    {language === 'es' ? 'Configura las opciones a la izquierda y presiona "Generar Guiones"' : 'Configure options on the left and press "Generate Scripts"'}
+                  </p>
                 </div>
               </div>
             ) : (
@@ -1506,32 +1548,6 @@ export default function ProductWorkspace() {
                 )}
               </div>
             </div>
-
-            {/* ICP Selector */}
-            {icps.length > 0 && (
-              <div className="p-4 border-t border-dark-100 bg-blue-900/10">
-                <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-blue-600" />
-                  {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
-                </h3>
-                <select
-                  value={selectedICP?.id || ''}
-                  onChange={(e) => {
-                    const icp = icps.find(i => i.id === e.target.value) || null
-                    setSelectedICP(icp)
-                  }}
-                  className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
-                  {icps.map(icp => (
-                    <option key={icp.id} value={icp.id}>{icp.name}</option>
-                  ))}
-                </select>
-                {selectedICP && (
-                  <p className="text-xs text-dark-500 mt-2 line-clamp-2">{selectedICP.description}</p>
-                )}
-              </div>
-            )}
 
             {/* Context Documents */}
             {currentSession && (
