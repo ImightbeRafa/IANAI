@@ -9,9 +9,10 @@ import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, C
 import { Link } from 'react-router-dom'
 
 interface Subscription {
-  plan: 'free' | 'starter' | 'pro' | 'enterprise'
+  plan: 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
   status: string
   current_period_end?: string
+  trial_ends_at?: string
 }
 
 interface Usage {
@@ -40,8 +41,17 @@ const PLAN_DETAILS = {
     color: 'purple',
     paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ=='
   },
-  enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: 'https://tp.cr/l/TkRrMk53PT18MQ==' }
-}
+  enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: 'https://tp.cr/l/TkRrMk53PT18MQ==' },
+  meta_advanze: {
+    name: 'Meta Advanze',
+    price: 24,
+    scripts: -1,
+    descriptions: -1,
+    images: 100,
+    color: 'purple',
+    paymentLink: null
+  }
+} as const
 
 export default function Settings() {
   const { user, updateProfile } = useAuth()
@@ -66,9 +76,9 @@ export default function Settings() {
       // Load subscription
       const { data: subData } = await supabase
         .from('subscriptions')
-        .select('plan, status, current_period_end')
+        .select('plan, status, current_period_end, trial_ends_at')
         .eq('user_id', user.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'trialing'])
         .single()
       
       if (subData) {
@@ -351,7 +361,7 @@ export default function Settings() {
                   </div>
                 </div>
                 {subscription?.plan !== plan && PLAN_DETAILS[plan].paymentLink && (() => {
-                  const rank: Record<string, number> = { free: 0, starter: 1, pro: 2, enterprise: 3 }
+                  const rank: Record<string, number> = { free: 0, starter: 1, pro: 2, meta_advanze: 2, enterprise: 3 }
                   return (rank[subscription?.plan || 'free'] || 0) < (rank[plan] || 0)
                 })() && (
                   <button 
@@ -409,7 +419,7 @@ export default function Settings() {
           </p>
 
           {/* Image Boost — only for pro plan users */}
-          {subscription?.plan === 'pro' && (
+          {(subscription?.plan === 'pro' || subscription?.plan === 'meta_advanze') && (
             <div className="mt-4 p-4 rounded-xl border-2 border-dashed border-primary-300 bg-primary-900/20">
               <div className="flex items-center justify-between">
                 <div>

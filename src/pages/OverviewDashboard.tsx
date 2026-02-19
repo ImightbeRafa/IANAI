@@ -113,6 +113,7 @@ export default function OverviewDashboard() {
       starter: 'Starter',
       pro: 'Pro',
       enterprise: 'Enterprise',
+      meta_advanze: 'Meta Advanze',
       quickActions: 'Acciones Rápidas',
       newScript: 'Nuevo Guión',
       newPost: 'Nuevo Post',
@@ -141,6 +142,7 @@ export default function OverviewDashboard() {
       starter: 'Starter',
       pro: 'Pro',
       enterprise: 'Enterprise',
+      meta_advanze: 'Meta Advanze',
       quickActions: 'Quick Actions',
       newScript: 'New Script',
       newPost: 'New Post',
@@ -153,6 +155,7 @@ export default function OverviewDashboard() {
     starter: t.starter,
     pro: t.pro,
     enterprise: t.enterprise,
+    meta_advanze: t.meta_advanze,
   }
 
   const statCards = [

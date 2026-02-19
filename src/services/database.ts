@@ -1091,6 +1091,37 @@ export async function getSharedProducts(userId: string): Promise<(Product & { sh
     }))
 }
 
+// =============================================
+// SUBSCRIPTION & REFERRAL
+// =============================================
+
+export async function getSubscription(userId: string): Promise<{
+  plan: string
+  status: string
+  trial_ends_at: string | null
+  referral_campaign_id: string | null
+} | null> {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('plan, status, trial_ends_at, referral_campaign_id')
+    .eq('user_id', userId)
+    .in('status', ['active', 'trialing'])
+    .single()
+
+  if (error || !data) return null
+  return data
+}
+
+export async function applyReferralCode(userId: string, code: string): Promise<{ success: boolean; error?: string; plan?: string; trial_ends_at?: string }> {
+  const { data, error } = await supabase.rpc('apply_referral_code', {
+    p_user_id: userId,
+    p_code: code
+  })
+
+  if (error) return { success: false, error: error.message }
+  return data as { success: boolean; error?: string; plan?: string; trial_ends_at?: string }
+}
+
 export async function acceptPendingInvites(userId: string, email: string): Promise<void> {
   const { error } = await supabase
     .from('product_collaborators')

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
 
@@ -11,6 +11,20 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false)
   const { signIn, signInWithGoogle } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [referralCode, setReferralCode] = useState<string | null>(null)
+
+  // Capture referral code from URL and persist in localStorage
+  useEffect(() => {
+    const ref = searchParams.get('ref')
+    if (ref) {
+      setReferralCode(ref)
+      localStorage.setItem('referral_code', ref)
+    } else {
+      const stored = localStorage.getItem('referral_code')
+      if (stored) setReferralCode(stored)
+    }
+  }, [searchParams])
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true)
@@ -138,7 +152,7 @@ export default function Login() {
 
           <p className="text-center text-sm text-dark-500 mt-6">
             Don't have an account?{' '}
-            <Link to="/signup" className="text-primary-600 hover:text-primary-700 font-medium">
+            <Link to={referralCode ? `/signup?ref=${referralCode}` : '/signup'} className="text-primary-600 hover:text-primary-700 font-medium">
               Sign up
             </Link>
           </p>

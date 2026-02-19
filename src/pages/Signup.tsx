@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff } from 'lucide-react'
+import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff, Gift } from 'lucide-react'
 
 // Password validation
 function validatePassword(password: string): { valid: boolean; errors: string[] } {
@@ -24,7 +24,21 @@ export default function Signup() {
   const [emailSent, setEmailSent] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [referralCode, setReferralCode] = useState<string | null>(null)
   const { signUp, signInWithGoogle } = useAuth()
+  const [searchParams] = useSearchParams()
+
+  // Capture referral code from URL and persist in localStorage
+  useEffect(() => {
+    const ref = searchParams.get('ref')
+    if (ref) {
+      setReferralCode(ref)
+      localStorage.setItem('referral_code', ref)
+    } else {
+      const stored = localStorage.getItem('referral_code')
+      if (stored) setReferralCode(stored)
+    }
+  }, [searchParams])
   
   const passwordValidation = validatePassword(password)
 
@@ -53,7 +67,7 @@ export default function Signup() {
     setLoading(true)
 
     try {
-      await signUp(email, password, fullName)
+      await signUp(email, password, fullName, referralCode || undefined)
       setEmailSent(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al crear la cuenta')
@@ -124,6 +138,20 @@ export default function Signup() {
           </div>
           <p className="text-dark-500">Crea tu cuenta para comenzar</p>
         </div>
+
+        {referralCode && (
+          <div className="mb-4 p-4 bg-gradient-to-r from-purple-900/30 to-primary-900/30 border border-purple-500/30 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+                <Gift className="w-5 h-5 text-purple-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-purple-300">Meta Advanze Partner</p>
+                <p className="text-xs text-purple-400/80">3 meses gratis de Premium al registrarte</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="card">
           {/* Google Sign-In Button */}

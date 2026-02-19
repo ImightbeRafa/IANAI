@@ -46,7 +46,7 @@ export default function UsageBanner({ usage, resource, onBuyBoost }: UsageBanner
     : (language === 'es' ? 'diseños' : 'designs')
 
   // Premium users (pro) get a "buy more" option for images
-  const isPremium = usage.plan === 'pro'
+  const isPremium = usage.plan === 'pro' || usage.plan === 'meta_advanze'
   const showBuyMore = resource === 'image' && isPremium && onBuyBoost
 
   const t = {

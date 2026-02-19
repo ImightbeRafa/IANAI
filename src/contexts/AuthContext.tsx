@@ -7,7 +7,7 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   isAdmin: boolean
-  signUp: (email: string, password: string, fullName?: string) => Promise<void>
+  signUp: (email: string, password: string, fullName?: string, referralCode?: string) => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
   signOut: () => Promise<void>
@@ -107,6 +107,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(data.session)
             setUser(data.session.user)
             fetchAdminStatus(data.session.user.id)
+            // Apply referral code from localStorage (Google OAuth flow)
+            const storedRef = localStorage.getItem('referral_code')
+            if (storedRef) {
+              Promise.resolve(
+                supabase.rpc('apply_referral_code', {
+                  p_user_id: data.session.user.id,
+                  p_code: storedRef
+                })
+              ).then(() => {
+                localStorage.removeItem('referral_code')
+              }).catch((err: unknown) => {
+                console.warn('Referral apply failed:', err)
+              })
+            }
             setLoading(false)
             // Clean up URL params
             window.history.replaceState({}, '', window.location.pathname)
@@ -118,12 +132,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async (email: string, password: string, fullName?: string) => {
+  const signUp = async (email: string, password: string, fullName?: string, referralCode?: string) => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { full_name: fullName }
+        data: {
+          full_name: fullName,
+          ...(referralCode ? { referral_code: referralCode } : {})
+        }
       }
     })
     if (error) throw error

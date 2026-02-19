@@ -15,7 +15,8 @@ import {
   deleteClient,
   deleteProduct,
   getSharedProducts,
-  acceptPendingInvites
+  acceptPendingInvites,
+  getSubscription
 } from '../services/database'
 import type { Profile, Product, DashboardStats, ProductFormData, RestaurantFormData, Team, Client } from '../types'
 import Layout from '../components/Layout'
@@ -37,7 +38,8 @@ import {
   Home,
   Trash2,
   Search,
-  Share2
+  Share2,
+  Sparkles
 } from 'lucide-react'
 
 export default function Dashboard() {
@@ -64,6 +66,8 @@ export default function Dashboard() {
   const [searchProducts, setSearchProducts] = useState('')
   const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
   const [sharingProduct, setSharingProduct] = useState<Product | null>(null)
+  const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null)
+  const [trialPlan, setTrialPlan] = useState<string | null>(null)
 
   const isTeamAccount = profile?.account_type === 'team'
 
@@ -94,6 +98,14 @@ export default function Dashboard() {
         // Load shared products (products others shared with me)
         const shared = await getSharedProducts(user.id)
         setSharedProducts(shared)
+
+        // Load subscription for trial banner
+        const sub = await getSubscription(user.id)
+        if (sub?.status === 'trialing' && sub.trial_ends_at) {
+          const daysLeft = Math.max(0, Math.ceil((new Date(sub.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+          setTrialDaysLeft(daysLeft)
+          setTrialPlan(sub.plan)
+        }
 
         if (profileData?.account_type === 'team') {
           // Load team data
@@ -520,6 +532,33 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {/* Trial Banner */}
+        {trialDaysLeft !== null && trialDaysLeft > 0 && (
+          <div className="mb-6 p-4 bg-gradient-to-r from-purple-900/30 via-primary-900/20 to-purple-900/30 border border-purple-500/30 rounded-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-purple-300">
+                    {language === 'es' ? 'Plan Premium Activo' : 'Premium Plan Active'}
+                    {trialPlan === 'meta_advanze' && ' — Meta Advanze'}
+                  </p>
+                  <p className="text-xs text-purple-400/80">
+                    {language === 'es'
+                      ? `Te quedan ${trialDaysLeft} días de prueba gratuita`
+                      : `${trialDaysLeft} days remaining in your free trial`}
+                  </p>
+                </div>
+              </div>
+              <div className="text-xs text-purple-400/60 hidden sm:block">
+                {language === 'es' ? 'Scripts, descripciones e imágenes ilimitadas' : 'Unlimited scripts, descriptions & images'}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats Grid - Only for individual accounts */}
         {!isTeamAccount && (

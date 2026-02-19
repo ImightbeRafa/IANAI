@@ -46,12 +46,12 @@ export async function verifyAuth(req: VercelRequest): Promise<AuthResult> {
       return { user: null, error: 'Invalid or expired token' }
     }
 
-    // Optionally fetch user's subscription/plan
+    // Optionally fetch user's subscription/plan (include trialing for referral users)
     const { data: subscription } = await supabaseAdmin
       .from('subscriptions')
       .select('plan, status')
       .eq('user_id', user.id)
-      .eq('status', 'active')
+      .in('status', ['active', 'trialing'])
       .single()
 
     return {
@@ -99,15 +99,29 @@ export async function checkUsageLimit(
   }
 
   try {
-    // Get user's plan
+    // Get user's plan (check both active and trialing)
     const { data: subscription } = await supabaseAdmin
       .from('subscriptions')
-      .select('plan')
+      .select('plan, status, trial_ends_at')
       .eq('user_id', userId)
-      .eq('status', 'active')
+      .in('status', ['active', 'trialing'])
       .single()
 
-    const plan = subscription?.plan || 'free'
+    let plan = subscription?.plan || 'free'
+
+    // Lazy trial expiry: if trial has ended, downgrade to free
+    if (subscription?.status === 'trialing' && subscription?.trial_ends_at) {
+      const trialEnd = new Date(subscription.trial_ends_at)
+      if (trialEnd < new Date()) {
+        // Trial expired — downgrade
+        await supabaseAdmin
+          .from('subscriptions')
+          .update({ plan: 'free', status: 'active', trial_ends_at: null, updated_at: new Date().toISOString() })
+          .eq('user_id', userId)
+          .eq('status', 'trialing')
+        plan = 'free'
+      }
+    }
 
     // Get plan limits
     const { data: limits } = await supabaseAdmin
