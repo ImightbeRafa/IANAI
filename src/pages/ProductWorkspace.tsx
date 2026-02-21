@@ -181,10 +181,11 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleSend = async () => {
-    if (!input.trim() || loading || !user || !product) return
+  const handleSend = async (directMessage?: string) => {
+    const msg = directMessage ?? input
+    if (!msg.trim() || loading || !user || !product) return
 
-    const userMessage = input.trim()
+    const userMessage = msg.trim()
     setInput('')
     setLoading(true)
 
@@ -373,7 +374,7 @@ export default function ProductWorkspace() {
 
           const result = await response.json()
           if (response.ok && result.text) {
-            setInput(prev => prev ? prev + ' ' + result.text : result.text)
+            handleSend(result.text)
           } else {
             console.error('Transcription failed:', result.error)
           }
@@ -1280,7 +1281,7 @@ export default function ProductWorkspace() {
                   )}
                 </button>
                 <button
-                  onClick={handleSend}
+                  onClick={() => handleSend()}
                   disabled={!input.trim() || loading}
                   className="h-[48px] w-[48px] flex items-center justify-center rounded-xl bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
