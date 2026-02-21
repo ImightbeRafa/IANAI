@@ -20,6 +20,10 @@ export const MODEL_COSTS = {
   'nano-banana-pro': { perImage: 0.05 },
   'grok-imagine': { perImage: 0.07 },
   
+  // Voice transcription (per minute of audio)
+  // xAI Whisper: ~$0.006/min
+  'whisper-large-v3': { perMinute: 0.006 },
+
   // Video generation models (per second of output)
   // Grok Imagine Video: $0.07/sec (including audio)
   'grok-imagine-video-480p': { perSecond: 0.05 },
@@ -44,6 +48,7 @@ export type FeatureType =
   | 'ad_prompt_build'  // Ad video prompt pipeline (Module A+B+C)
   | 'kling_video'      // Kling AI video generation (fal.ai)
   | 'prompt_condense'  // Prompt condensing for video APIs
+  | 'voice_transcription' // Voice-to-text transcription
 
 interface UsageLogParams {
   userId?: string
@@ -81,7 +86,11 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
     const modelCosts = MODEL_COSTS[model as keyof typeof MODEL_COSTS]
     
     if (modelCosts) {
-      if ('perImage' in modelCosts) {
+      if ('perMinute' in modelCosts) {
+        // Voice model - cost per minute (duration estimated from metadata)
+        const durationSec = (metadata?.estimatedDurationSec as number) || 10
+        estimatedCostUsd = (modelCosts.perMinute as number) * (durationSec / 60)
+      } else if ('perImage' in modelCosts) {
         // Image model - fixed cost per image
         estimatedCostUsd = modelCosts.perImage as number
       } else if ('perSecond' in modelCosts) {

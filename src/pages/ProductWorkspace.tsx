@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -47,7 +47,9 @@ import {
   Upload,
   Pencil,
   Eye,
-  EyeOff
+  EyeOff,
+  Mic,
+  Square
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -85,6 +87,10 @@ export default function ProductWorkspace() {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [bulkLinkProgress, setBulkLinkProgress] = useState<{ current: number; total: number } | null>(null)
   const [failedLinks, setFailedLinks] = useState<string[]>([])
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const usageLimits = useUsageLimits()
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -303,6 +309,88 @@ export default function ProductWorkspace() {
       handleSend()
     }
   }
+
+  const handleVoiceToggle = useCallback(async () => {
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+      return
+    }
+
+    // Start recording
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4'
+
+      const recorder = new MediaRecorder(stream, { mimeType })
+      audioChunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: mimeType })
+        if (blob.size < 100) return // too small, ignore
+
+        setIsTranscribing(true)
+        try {
+          const reader = new FileReader()
+          const base64 = await new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => {
+              const result = reader.result as string
+              resolve(result.split(',')[1])
+            }
+            reader.onerror = reject
+            reader.readAsDataURL(blob)
+          })
+
+          const { data: { session: authSession } } = await supabase.auth.getSession()
+          const token = authSession?.access_token
+
+          const apiUrl = import.meta.env.PROD
+            ? '/api/transcribe-audio'
+            : 'http://localhost:3000/api/transcribe-audio'
+
+          const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              audio: base64,
+              mimeType: mimeType.split(';')[0],
+              language
+            })
+          })
+
+          const result = await response.json()
+          if (response.ok && result.text) {
+            setInput(prev => prev ? prev + ' ' + result.text : result.text)
+          } else {
+            console.error('Transcription failed:', result.error)
+          }
+        } catch (err) {
+          console.error('Voice transcription error:', err)
+        } finally {
+          setIsTranscribing(false)
+        }
+      }
+
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setIsRecording(true)
+    } catch (err) {
+      console.error('Microphone access denied:', err)
+    }
+  }, [isRecording, language])
 
   const handleAddLink = async () => {
     if (!currentSession || !user || !newLinkUrl.trim() || addingDoc) return
@@ -1159,12 +1247,38 @@ export default function ProductWorkspace() {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={t.placeholder}
+                    placeholder={isRecording
+                      ? (language === 'es' ? 'Grabando... presiona ■ para detener' : 'Recording... press ■ to stop')
+                      : isTranscribing
+                        ? (language === 'es' ? 'Transcribiendo audio...' : 'Transcribing audio...')
+                        : t.placeholder}
                     className="w-full px-4 py-3 text-sm bg-dark-200 border border-dark-300 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-400 focus:bg-dark-200 transition-colors"
                     rows={1}
-                    disabled={loading}
+                    disabled={loading || isTranscribing}
                   />
                 </div>
+                <button
+                  onClick={handleVoiceToggle}
+                  disabled={loading || isTranscribing}
+                  className={`h-[48px] w-[48px] flex items-center justify-center rounded-xl transition-colors ${
+                    isRecording
+                      ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse'
+                      : isTranscribing
+                        ? 'bg-dark-200 text-dark-400'
+                        : 'bg-dark-200 text-dark-500 hover:bg-dark-300 hover:text-dark-700'
+                  }`}
+                  title={isRecording
+                    ? (language === 'es' ? 'Detener grabación' : 'Stop recording')
+                    : (language === 'es' ? 'Grabar audio' : 'Record audio')}
+                >
+                  {isTranscribing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : isRecording ? (
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  ) : (
+                    <Mic className="w-4 h-4" />
+                  )}
+                </button>
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || loading}

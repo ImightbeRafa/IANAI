@@ -25,7 +25,8 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Copy
+  Copy,
+  Mic
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -175,6 +176,7 @@ export default function AdminDashboard() {
       prompt_enhance: 'Mejora de Prompts',
       pdf_extract: 'Extracción PDF',
       url_fetch: 'Lectura de URLs',
+      voice_transcription: 'Transcripción de Voz',
       noData: 'No hay datos de uso aún',
       user: 'Usuario',
       time: 'Hora',
@@ -216,6 +218,7 @@ export default function AdminDashboard() {
       prompt_enhance: 'Prompt Enhancement',
       pdf_extract: 'PDF Extraction',
       url_fetch: 'URL Fetching',
+      voice_transcription: 'Voice Transcription',
       noData: 'No usage data yet',
       user: 'User',
       time: 'Time',
@@ -692,6 +695,7 @@ export default function AdminDashboard() {
                         {feature === 'prompt_enhance' && <Sparkles className="w-5 h-5 text-amber-500" />}
                         {feature === 'pdf_extract' && <FileUp className="w-5 h-5 text-orange-500" />}
                         {feature === 'url_fetch' && <Link2 className="w-5 h-5 text-teal-500" />}
+                        {feature === 'voice_transcription' && <Mic className="w-5 h-5 text-rose-500" />}
                         <span className="font-medium text-dark-900">
                           {t[feature as keyof typeof t] || feature}
                         </span>
