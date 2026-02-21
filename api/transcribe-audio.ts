@@ -3,7 +3,7 @@ import { requireAuth } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 
-const XAI_TRANSCRIPTION_URL = 'https://api.x.ai/v1/audio/transcriptions'
+const OPENAI_TRANSCRIPTION_URL = 'https://api.openai.com/v1/audio/transcriptions'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -34,15 +34,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Audio data (base64) is required' })
     }
 
-    const xaiApiKey = process.env.GROK_API_KEY
-    if (!xaiApiKey) {
-      return res.status(500).json({ error: 'API key not configured' })
+    const openaiApiKey = process.env.OPENAI_API_KEY
+    if (!openaiApiKey) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' })
     }
 
     // Convert base64 to Buffer
     const audioBuffer = Buffer.from(audio, 'base64')
 
-    // Validate size (max 25MB — xAI/Whisper limit)
+    // Validate size (max 25MB — OpenAI Whisper limit)
     if (audioBuffer.length > 25 * 1024 * 1024) {
       return res.status(400).json({ error: 'Audio file too large (max 25MB)' })
     }
@@ -59,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const ext = extMap[mimeType] || 'webm'
 
-    // Build multipart form data manually for the xAI API
+    // Build multipart form data for OpenAI Whisper API
     const boundary = '----VoiceBoundary' + Date.now()
     const formParts: Buffer[] = []
 
@@ -70,9 +70,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     formParts.push(audioBuffer)
     formParts.push(Buffer.from('\r\n'))
 
-    // Model field
+    // Model field — whisper-1 is OpenAI's production Whisper model
     formParts.push(Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3\r\n`
+      `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n`
     ))
 
     // Language field
@@ -92,10 +92,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const startTime = Date.now()
 
-    const response = await fetch(XAI_TRANSCRIPTION_URL, {
+    const response = await fetch(OPENAI_TRANSCRIPTION_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${xaiApiKey}`,
+        'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': `multipart/form-data; boundary=${boundary}`
       },
       body: formBody
@@ -105,13 +105,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error('xAI Transcription error:', { status: response.status, error: errorText, latency })
+      console.error('OpenAI Whisper error:', { status: response.status, error: errorText, latency })
 
       await logApiUsage({
         userId: user.id,
         userEmail: user.email,
         feature: 'voice_transcription',
-        model: 'whisper-large-v3',
+        model: 'whisper-1',
         success: false,
         errorMessage: errorText,
         metadata: { latency, audioSizeBytes: audioBuffer.length }
@@ -133,7 +133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'voice_transcription',
-      model: 'whisper-large-v3',
+      model: 'whisper-1',
       success: true,
       metadata: {
         latency,
@@ -153,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'voice_transcription',
-      model: 'whisper-large-v3',
+      model: 'whisper-1',
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

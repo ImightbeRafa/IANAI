@@ -21,8 +21,8 @@ export const MODEL_COSTS = {
   'grok-imagine': { perImage: 0.07 },
   
   // Voice transcription (per minute of audio)
-  // xAI Whisper: ~$0.006/min
-  'whisper-large-v3': { perMinute: 0.006 },
+  // OpenAI Whisper: ~$0.006/min
+  'whisper-1': { perMinute: 0.006 },
 
   // Video generation models (per second of output)
   // Grok Imagine Video: $0.07/sec (including audio)
