@@ -9,7 +9,7 @@ export type SessionStatus = 'active' | 'completed' | 'archived'
 // =============================================
 // Script Enhancement Types
 // =============================================
-export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso'
+export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso' | 'reconocimiento'
 export type GenerationMode = 'mixed' | 'by_type'
 
 export interface ScriptTypeConfig {
@@ -18,6 +18,7 @@ export interface ScriptTypeConfig {
   mostrar_servicio: number
   variedad_productos: number
   paso_a_paso: number
+  reconocimiento: number
 }
 export type AIModel = 'grok' | 'gemini'
 export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'

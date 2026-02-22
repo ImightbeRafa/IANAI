@@ -125,7 +125,8 @@ export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
     desvalidar_alternativas: 1,
     mostrar_servicio: 1,
     variedad_productos: 0,
-    paso_a_paso: 0
+    paso_a_paso: 0,
+    reconocimiento: 0
   }
 }
 

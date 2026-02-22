@@ -53,10 +53,11 @@ const SCRIPT_TYPE_LABELS: Record<ScriptFramework, { es: string; en: string; shor
   desvalidar_alternativas: { es: 'Desvalidar Alternativas', en: 'Invalidate Alternatives', shortEs: 'Desvalidar', shortEn: 'Invalidate' },
   mostrar_servicio: { es: 'Mostrar Servicio', en: 'Show Service', shortEs: 'Mostrar', shortEn: 'Show' },
   variedad_productos: { es: 'Variedad de Productos', en: 'Product Variety', shortEs: 'Variedad', shortEn: 'Variety' },
-  paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step', shortEs: 'Pasos', shortEn: 'Steps' }
+  paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step', shortEs: 'Pasos', shortEn: 'Steps' },
+  reconocimiento: { es: 'Reconocimiento', en: 'Brand Awareness', shortEs: 'Reconoc.', shortEn: 'Awareness' }
 }
 
-const ALL_TYPES: ScriptFramework[] = ['venta_directa', 'desvalidar_alternativas', 'mostrar_servicio', 'variedad_productos', 'paso_a_paso']
+const ALL_TYPES: ScriptFramework[] = ['venta_directa', 'desvalidar_alternativas', 'mostrar_servicio', 'variedad_productos', 'paso_a_paso', 'reconocimiento']
 
 function getTotalByType(config: ScriptTypeConfig): number {
   return Object.values(config).reduce((sum, n) => sum + n, 0)

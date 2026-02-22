@@ -1,9 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
-import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
 
 type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
+
+interface EditHistoryEntry {
+  content: string
+  source: EditSource
+  label: string
+}
 
 interface ScriptCardProps {
   script: ParsedScript
@@ -16,72 +22,85 @@ interface ScriptCardProps {
 }
 
 export default function ScriptCard({ script, language, onSave, onEdit, isSaved, savingScript, productType }: ScriptCardProps) {
-  const [copied, setCopied] = useState<'original' | 'edited' | null>(null)
+  const [copiedVersion, setCopiedVersion] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(isSaved || false)
-  const [savedEdited, setSavedEdited] = useState(false)
+  const [savedOriginal, setSavedOriginal] = useState(isSaved || false)
+  const [savedVersions, setSavedVersions] = useState<Set<number>>(new Set())
 
   const [showEditInput, setShowEditInput] = useState(false)
   const [editInstruction, setEditInstruction] = useState('')
-  const [editedContent, setEditedContent] = useState<string | null>(null)
+  const [editingFromVersion, setEditingFromVersion] = useState<number>(-1)
   const [editing, setEditing] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
 
   const [enhancing, setEnhancing] = useState(false)
 
-  const [showHookPicker, setShowHookPicker] = useState(false)
+  const [editHistory, setEditHistory] = useState<EditHistoryEntry[]>([])
+
+  const [hookPickerVersion, setHookPickerVersion] = useState<number | null>(null)
   const hookPickerRef = useRef<HTMLDivElement>(null)
 
-  const [showConsciousnessPicker, setShowConsciousnessPicker] = useState(false)
+  const [consciousnessPickerVersion, setConsciousnessPickerVersion] = useState<number | null>(null)
   const consciousnessPickerRef = useRef<HTMLDivElement>(null)
 
-  const [editSource, setEditSource] = useState<EditSource>(null)
-  const [editSourceLabel, setEditSourceLabel] = useState('')
-  const [showOriginalFull, setShowOriginalFull] = useState(false)
-
   useEffect(() => {
-    if (!showHookPicker) return
+    if (hookPickerVersion === null) return
     const handleClickOutside = (e: MouseEvent) => {
       if (hookPickerRef.current && !hookPickerRef.current.contains(e.target as Node)) {
-        setShowHookPicker(false)
+        setHookPickerVersion(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showHookPicker])
+  }, [hookPickerVersion])
 
   useEffect(() => {
-    if (!showConsciousnessPicker) return
+    if (consciousnessPickerVersion === null) return
     const handleClickOutside = (e: MouseEvent) => {
       if (consciousnessPickerRef.current && !consciousnessPickerRef.current.contains(e.target as Node)) {
-        setShowConsciousnessPicker(false)
+        setConsciousnessPickerVersion(null)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showConsciousnessPicker])
+  }, [consciousnessPickerVersion])
 
-  const handleCopy = (content: string, which: 'original' | 'edited') => {
-    navigator.clipboard.writeText(content)
-    setCopied(which)
-    setTimeout(() => setCopied(null), 2000)
+  const getVersionContent = (versionIndex: number): string => {
+    return versionIndex === -1 ? script.content : editHistory[versionIndex].content
   }
 
-  const handleSave = async (content: string, title: string, isEdited: boolean) => {
+  const handleCopy = (versionIndex: number) => {
+    navigator.clipboard.writeText(getVersionContent(versionIndex))
+    setCopiedVersion(versionIndex)
+    setTimeout(() => setCopiedVersion(null), 2000)
+  }
+
+  const handleSave = async (versionIndex: number) => {
     if (!onSave || saving) return
-    if (isEdited && savedEdited) return
-    if (!isEdited && saved) return
+    if (versionIndex === -1 && savedOriginal) return
+    if (versionIndex >= 0 && savedVersions.has(versionIndex)) return
     setSaving(true)
     try {
+      const content = getVersionContent(versionIndex)
+      const entry = versionIndex >= 0 ? editHistory[versionIndex] : null
+      const title = versionIndex === -1
+        ? script.title
+        : `${script.title} (${entry?.source || 'edited'})`
       const id = await onSave(content, title)
       if (id) {
-        if (isEdited) setSavedEdited(true)
-        else setSaved(true)
+        if (versionIndex === -1) setSavedOriginal(true)
+        else setSavedVersions(prev => new Set(prev).add(versionIndex))
       }
     } finally {
       setSaving(false)
     }
+  }
+
+  const openEditInput = (fromVersion: number) => {
+    setEditingFromVersion(fromVersion)
+    setShowEditInput(true)
+    setTimeout(() => editInputRef.current?.focus(), 100)
   }
 
   const handleEdit = async () => {
@@ -89,12 +108,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     setEditing(true)
     setEditError(null)
     try {
-      const source = editedContent || script.content
+      const source = getVersionContent(editingFromVersion)
       const result = await onEdit(source, editInstruction.trim())
-      setEditedContent(result)
-      setEditSource('manual')
-      setEditSourceLabel('')
-      setSavedEdited(false)
+      setEditHistory(prev => [...prev, { content: result, source: 'manual', label: '' }])
       setShowEditInput(false)
       setEditInstruction('')
     } catch (err) {
@@ -104,27 +120,28 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     }
   }
 
-  const handleDiscardEdit = () => {
-    setEditedContent(null)
-    setSavedEdited(false)
-    setEditSource(null)
-    setEditSourceLabel('')
-    setShowOriginalFull(false)
+  const handleDiscardVersion = (index: number) => {
+    setEditHistory(prev => prev.filter((_, i) => i !== index))
+    setSavedVersions(prev => {
+      const next = new Set<number>()
+      for (const v of prev) {
+        if (v < index) next.add(v)
+        else if (v > index) next.add(v - 1)
+      }
+      return next
+    })
   }
 
   const ENHANCE_PROMPT = `Corrige el guión: El video se dirige únicamente a potenciales compradores que en este momento están activamente buscando o potencialmente interesados en adquirir en corto plazo el producto o servicio a promover. No debes dirigir estos guiones a personas que probablemente no necesiten/quieran/interese el producto o servicio a promover. Busca y comprende quién es el perfil de cliente ideal que está listo para adquirir producto o servicio, y háblale directamente a su mente. El gancho debe estrictamente dar contexto sobre qué es lo que se está promoviendo y tocar ya sea un dolor o un deseo del potencial comprador. Puedes añadir solamente si vale la pena, una propuesta única de valor que ofrezca un outcome directo que facilite o mejore la vida del potencial cliente en relación al producto o servicio que está comprando. O bien, un diferenciador clave. Pero solamente si la propuesta única de valor o el diferenciador es tangible y de gran impacto. Los ganchos deben dar a entender que el video mostrara "nuestro producto o servicio" para que se entienda que se está promoviendo algo y que no se confunda con un video educativo o de entretenimiento. En el desarrollo debe responder la premisa de ambos ganchos A y B, no cometas el error de dar una premisa en el gancho y no responderla correctamente en el desarrollo. Independientemente de la estructura que se esté utilizando... es importante que siempre se incluyan las propuestas de valor - pero pásalas de propuestas abstractas a frases que venden a la mente. Haz una revisión para verificar que los guiones tienen sentido, el objetivo es promover los productos o servicios de forma directa, segmentando y llamando la atención correctamente desde el inicio en el gancho, generando deseo y claridad sobre la oferta, producto o servicio en el desarrollo y guiando al siguiente paso (en este caso enviar un mensaje) para llevarlos al proceso de compra. Instrucciones adicionales: Cuando hablas de un "dolor" o "frustración", debe ser real. No utilices términos como "sin estrés", "sin complicarte", ya que son muy genéricos y no impactan al espectador emocionalmente, ya que ni si quiera se lo cuestiona. Utiliza dolores o frustraciones solamente si puedes verificar que los potenciales clientes de este producto o servicio lo piensan o expresan realmente. Tangibilidad. No uses frases de relleno para extender el video. Cada frase en el desarrollo debe referise a una propuesta de valor tangible, medible, outcomes reales y directos. Siempre relacionado a la premisa que se dió en los ganchos A y B. El método de comunicación en el desarrollo debe ser en formato de bulletpoints para mantener el dinamismo, directo al grano. La totalidad del video debe vender tangiblemente los outcomes a la mente del espectador. Que sean tan tangibles que no quede duda a qué nos referimos. Por ejemplo, no digas "te brindamos acompañamiento en todo el proceso" ya que eso no es tangible, no se sabe... Mejor evitarlo a menos que tengas información que te indique por ejemplo: "Hacemos llamadas 1:1 todas las semanas para... [acción tangible]". De lo contrario, mejor no mencionarlo. Revisa la información del negocio y fíjate que todo haga sentido.\nEntrega el guión nuevamente con el mismo formato que entregaste antes pero con las correcciones correspondientes.`
 
-  const handleEnhance = async () => {
+  const handleEnhanceFrom = async (fromVersion: number) => {
     if (!onEdit || enhancing || editing) return
     setEnhancing(true)
     setEditError(null)
     try {
-      const source = editedContent || script.content
+      const source = getVersionContent(fromVersion)
       const result = await onEdit(source, ENHANCE_PROMPT)
-      setEditedContent(result)
-      setEditSource('enhance')
-      setEditSourceLabel('')
-      setSavedEdited(false)
+      setEditHistory(prev => [...prev, { content: result, source: 'enhance', label: '' }])
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Enhance failed')
     } finally {
@@ -208,18 +225,15 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     },
   ]
 
-  const handleConsciousnessChange = async (prompt: string, label: string) => {
+  const handleConsciousnessChangeFrom = async (fromVersion: number, prompt: string, label: string) => {
     if (!onEdit || editing || enhancing) return
-    setShowConsciousnessPicker(false)
+    setConsciousnessPickerVersion(null)
     setEditing(true)
     setEditError(null)
     try {
-      const source = editedContent || script.content
+      const source = getVersionContent(fromVersion)
       const result = await onEdit(source, prompt)
-      setEditedContent(result)
-      setEditSource('consciousness')
-      setEditSourceLabel(label)
-      setSavedEdited(false)
+      setEditHistory(prev => [...prev, { content: result, source: 'consciousness', label }])
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Consciousness change failed')
     } finally {
@@ -227,18 +241,15 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     }
   }
 
-  const handleHookChange = async (hookPrompt: string, hookLabel: string) => {
+  const handleHookChangeFrom = async (fromVersion: number, hookPrompt: string, hookLabel: string) => {
     if (!onEdit || editing || enhancing) return
-    setShowHookPicker(false)
+    setHookPickerVersion(null)
     setEditing(true)
     setEditError(null)
     try {
-      const source = editedContent || script.content
+      const source = getVersionContent(fromVersion)
       const result = await onEdit(source, hookPrompt)
-      setEditedContent(result)
-      setEditSource('hook')
-      setEditSourceLabel(hookLabel)
-      setSavedEdited(false)
+      setEditHistory(prev => [...prev, { content: result, source: 'hook', label: hookLabel }])
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Hook change failed')
     } finally {
@@ -262,43 +273,42 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     enhancing: language === 'es' ? 'Mejorando...' : 'Enhancing...',
     changeHooks: '+ Hooks',
     pickHook: language === 'es' ? 'Selecciona un tipo de gancho' : 'Select a hook type',
-    showOriginal: language === 'es' ? 'Ver original' : 'Show original',
-    hideOriginal: language === 'es' ? 'Ocultar original' : 'Hide original',
   }
 
-  const getEditBadge = () => {
-    switch (editSource) {
+  const getBadgeForSource = (source: EditSource, label: string) => {
+    switch (source) {
       case 'enhance':
         return { label: t.enhanced, color: 'text-amber-500', icon: <Wand2 className="w-3 h-3" /> }
       case 'hook':
-        return { label: `Hook: ${editSourceLabel}`, color: 'text-blue-500', icon: <Anchor className="w-3 h-3" /> }
+        return { label: `Hook: ${label}`, color: 'text-blue-500', icon: <Anchor className="w-3 h-3" /> }
       case 'consciousness':
-        return { label: `${language === 'es' ? 'Conciencia' : 'Consciousness'}: ${editSourceLabel}`, color: 'text-violet-500', icon: <Sparkles className="w-3 h-3" /> }
+        return { label: `${language === 'es' ? 'Conciencia' : 'Consciousness'}: ${label}`, color: 'text-violet-500', icon: <Sparkles className="w-3 h-3" /> }
       case 'manual':
       default:
         return { label: t.edited, color: 'text-primary-500', icon: <Pencil className="w-3 h-3" /> }
     }
   }
 
-  const CopyButton = ({ content, which }: { content: string; which: 'original' | 'edited' }) => (
+  const CopyBtn = ({ versionIndex }: { versionIndex: number }) => (
     <button
-      onClick={() => handleCopy(content, which)}
+      onClick={() => handleCopy(versionIndex)}
       className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
-        copied === which
+        copiedVersion === versionIndex
           ? 'bg-green-900/20 text-green-400'
           : 'text-dark-400 hover:bg-dark-200 hover:text-dark-700'
       }`}
     >
-      {copied === which ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-      {copied === which ? t.copied : t.copy}
+      {copiedVersion === versionIndex ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copiedVersion === versionIndex ? t.copied : t.copy}
     </button>
   )
 
-  const SaveButton = ({ content, title, isEdited, isSavedState }: { content: string; title: string; isEdited: boolean; isSavedState: boolean }) => {
+  const SaveBtn = ({ versionIndex }: { versionIndex: number }) => {
     if (!onSave) return null
+    const isSavedState = versionIndex === -1 ? savedOriginal : savedVersions.has(versionIndex)
     return (
       <button
-        onClick={() => handleSave(content, title, isEdited)}
+        onClick={() => handleSave(versionIndex)}
         disabled={isSavedState || saving || savingScript}
         className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
           isSavedState
@@ -312,12 +322,20 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     )
   }
 
-  const EditActions = () => {
+  const VersionActions = ({ versionIndex }: { versionIndex: number }) => {
     if (!onEdit) return null
     return (
       <>
         <button
-          onClick={handleEnhance}
+          onClick={() => openEditInput(versionIndex)}
+          disabled={isProcessing || showEditInput}
+          className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-primary-500 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
+        >
+          <Pencil className="w-3 h-3" />
+          {t.edit}
+        </button>
+        <button
+          onClick={() => handleEnhanceFrom(versionIndex)}
           disabled={enhancing || editing}
           className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-amber-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
           title={t.enhance}
@@ -325,16 +343,16 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
           {enhancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
           {enhancing ? t.enhancing : t.enhance}
         </button>
-        <div className="relative" ref={hookPickerRef}>
+        <div className="relative" ref={hookPickerVersion === versionIndex ? hookPickerRef : undefined}>
           <button
-            onClick={() => setShowHookPicker(!showHookPicker)}
+            onClick={() => setHookPickerVersion(hookPickerVersion === versionIndex ? null : versionIndex)}
             disabled={editing || enhancing}
             className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-blue-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
           >
             <Anchor className="w-3 h-3" />
             {t.changeHooks}
           </button>
-          {showHookPicker && (
+          {hookPickerVersion === versionIndex && (
             <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
               <div className="px-3 py-2 border-b border-dark-200">
                 <p className="text-[11px] font-semibold text-dark-500">{t.pickHook}</p>
@@ -342,7 +360,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
               {getHookTemplates().map((hook, i) => (
                 <button
                   key={i}
-                  onClick={() => handleHookChange(hook.prompt, hook.label)}
+                  onClick={() => handleHookChangeFrom(versionIndex, hook.prompt, hook.label)}
                   className="w-full text-left px-3 py-2 text-xs text-dark-600 hover:bg-primary-900/10 hover:text-primary-400 transition-colors border-b border-dark-200/50 last:border-0"
                 >
                   {hook.label}
@@ -351,16 +369,16 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
             </div>
           )}
         </div>
-        <div className="relative" ref={consciousnessPickerRef}>
+        <div className="relative" ref={consciousnessPickerVersion === versionIndex ? consciousnessPickerRef : undefined}>
           <button
-            onClick={() => setShowConsciousnessPicker(!showConsciousnessPicker)}
+            onClick={() => setConsciousnessPickerVersion(consciousnessPickerVersion === versionIndex ? null : versionIndex)}
             disabled={editing || enhancing}
             className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-violet-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
           >
             <Sparkles className="w-3 h-3" />
             {language === 'es' ? 'Conciencia' : 'Consciousness'}
           </button>
-          {showConsciousnessPicker && (
+          {consciousnessPickerVersion === versionIndex && (
             <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
               <div className="px-3 py-2 border-b border-dark-200">
                 <p className="text-[11px] font-semibold text-dark-500">{language === 'es' ? 'Nivel de conciencia' : 'Consciousness level'}</p>
@@ -368,7 +386,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
               {getConsciousnessTemplates().map((level, i) => (
                 <button
                   key={i}
-                  onClick={() => handleConsciousnessChange(level.prompt, level.label)}
+                  onClick={() => handleConsciousnessChangeFrom(versionIndex, level.prompt, level.label)}
                   className="w-full text-left px-3 py-2 text-xs text-dark-600 hover:bg-violet-900/10 hover:text-violet-400 transition-colors border-b border-dark-200/50 last:border-0"
                 >
                   <span className="mr-1.5">{level.emoji}</span>
@@ -391,21 +409,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
         <span className="text-xs font-semibold text-dark-600 tracking-wide">
           {script.title}
         </span>
-        <div className="flex items-center gap-2">
-          {onEdit && !showEditInput && (
-            <button
-              onClick={() => { setShowEditInput(true); setTimeout(() => editInputRef.current?.focus(), 100) }}
-              disabled={isProcessing}
-              className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-primary-500 transition-colors disabled:opacity-40"
-            >
-              <Pencil className="w-3 h-3" />
-              {t.edit}
-            </button>
-          )}
-          <span className="text-[10px] text-dark-300 font-mono">
-            #{script.index}
-          </span>
-        </div>
+        <span className="text-[10px] text-dark-300 font-mono">
+          #{script.index}
+        </span>
       </div>
 
       {/* Edit instruction input */}
@@ -452,77 +458,52 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
         </div>
       )}
 
-      {editedContent ? (
-        <div>
-          {/* Edited content (primary) */}
-          <div className="px-4 pt-3 pb-3">
-            <div className="flex items-center justify-between mb-2">
-              {/* Source badge */}
-              <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${getEditBadge().color}`}>
-                {getEditBadge().icon}
-                {getEditBadge().label}
-              </div>
-              <div className="flex items-center gap-1">
+      {/* Original version — always visible and editable */}
+      <div className="px-4 py-3">
+        <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-dark-400 mb-2">
+          {t.original}
+        </div>
+        <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
+          {script.content}
+        </div>
+      </div>
+      <div className="flex items-center flex-wrap gap-1.5 px-4 py-2 border-t border-dark-200">
+        <CopyBtn versionIndex={-1} />
+        <SaveBtn versionIndex={-1} />
+        <VersionActions versionIndex={-1} />
+      </div>
+
+      {/* Edit history entries */}
+      {editHistory.map((entry, index) => {
+        const badge = getBadgeForSource(entry.source, entry.label)
+        return (
+          <div key={index} className="border-t-2 border-dark-200">
+            <div className="px-4 pt-3 pb-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${badge.color}`}>
+                  {badge.icon}
+                  {badge.label}
+                </div>
                 <button
-                  onClick={handleDiscardEdit}
+                  onClick={() => handleDiscardVersion(index)}
                   className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
                   title={t.discard}
                 >
                   <X className="w-3 h-3" />
                 </button>
               </div>
-            </div>
-            <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
-              {editedContent}
-            </div>
-          </div>
-
-          {/* Actions for edited content */}
-          <div className="flex items-center gap-1.5 px-4 py-2 border-t border-dark-200">
-            <CopyButton content={editedContent} which="edited" />
-            <SaveButton content={editedContent} title={`${script.title} (${editSource || 'edited'})`} isEdited isSavedState={savedEdited} />
-            <EditActions />
-          </div>
-
-          {/* Collapsible original */}
-          <div className="border-t border-dashed border-dark-200">
-            <button
-              onClick={() => setShowOriginalFull(!showOriginalFull)}
-              className="w-full flex items-center justify-between px-4 py-2 text-[11px] text-dark-400 hover:text-dark-600 transition-colors"
-            >
-              <span className="flex items-center gap-1.5 font-medium uppercase tracking-wider">
-                {t.original}
-              </span>
-              <div className="flex items-center gap-2">
-                <CopyButton content={script.content} which="original" />
-                {showOriginalFull ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
+                {entry.content}
               </div>
-            </button>
-            {showOriginalFull && (
-              <div className="px-4 pb-3">
-                <div className="text-sm text-dark-500 leading-relaxed whitespace-pre-wrap opacity-60">
-                  {script.content}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Single content view */}
-          <div className="px-4 py-3">
-            <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
-              {script.content}
+            </div>
+            <div className="flex items-center flex-wrap gap-1.5 px-4 py-2 border-t border-dark-200">
+              <CopyBtn versionIndex={index} />
+              <SaveBtn versionIndex={index} />
+              <VersionActions versionIndex={index} />
             </div>
           </div>
-          {/* Actions */}
-          <div className="flex items-center gap-1.5 px-4 py-2.5 border-t border-dark-200 rounded-b-xl">
-            <CopyButton content={script.content} which="original" />
-            <SaveButton content={script.content} title={script.title} isEdited={false} isSavedState={saved} />
-            <EditActions />
-          </div>
-        </>
-      )}
+        )
+      })}
     </div>
   )
 }

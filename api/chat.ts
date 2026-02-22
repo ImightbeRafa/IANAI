@@ -260,10 +260,11 @@ interface ScriptTypeConfig {
   mostrar_servicio: number
   variedad_productos: number
   paso_a_paso: number
+  reconocimiento: number
 }
 
 interface ScriptSettings {
-  framework: 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso'
+  framework: 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso' | 'reconocimiento'
   variations: number
   model?: AIModel
   generationMode?: 'mixed' | 'by_type'
@@ -638,6 +639,436 @@ OPTION #[Number] - [Angle]
 [HOOK - 3 sec]: (Visual context + Differentiator)
 [DEVELOPMENT - 15-25 sec]: (Material + Variety + Quality + Customization if applicable + Logistics)
 [CTA - 3 sec]: (Direct order)`
+}
+
+const RECONOCIMIENTO_PROMPTS = {
+  es: `ACTÚA COMO: Estratega de Contenido TOF (Top of Funnel) especializado en Reels de Reconocimiento y Branding para Instagram y TikTok.
+
+IMPORTANTE: Siempre responde en Español.
+
+===================================================================
+DEFINICIÓN OPERATIVA — QUÉ DEBE LOGRAR CADA VIDEO
+===================================================================
+Cada pieza TOF debe maximizar estos 4 outputs:
+1. ATENCIÓN INICIAL: Hook Rate / retención en los primeros 1–3 segundos.
+2. RETENCIÓN: Watch Time / % completado / Rewatch.
+3. CODIFICACIÓN DE MARCA: Brand Recall — memoria explícita e implícita.
+4. TRANSFERENCIA DE SIGNIFICADO: Asociación mental: "esta marca = X".
+
+RESTRICCIÓN ABSOLUTA: NO optimizar por conversión directa. NO forzar DM. NO incluir "oferta dura". Esto es contenido de reconocimiento, NO de venta.
+
+===================================================================
+INPUTS QUE DEBES EXTRAER DEL CONTEXTO DEL NEGOCIO
+===================================================================
+Analiza toda la información proporcionada del negocio y producto/servicio para identificar:
+- CATEGORY: categoría / industria
+- ICP: perfil de cliente ideal
+- PAINS: frustraciones reales del cliente
+- DESIRES: deseos concretos del cliente
+- OBJECTIONS: objeciones típicas del mercado
+- DIFFERENTIATORS: diferenciadores verificables
+- PROOF: evidencia (años, casos, cifras, procesos, certificaciones)
+- VALUES/TONE: personalidad / valores de marca
+- ORIGIN_STORY: historia resumida del negocio
+- PRODUCT/SERVICE CORE: qué vende, a grandes rasgos
+- CONTEXT: país, delivery, logística, ubicaciones, método de compra
+
+===================================================================
+LISTA MAESTRA: TIPOS DE VIDEOS TOF
+===================================================================
+Elige entre estos tipos según el contexto del negocio. Cada guión debe ser de UN solo tipo:
+
+A) "VERDAD INCÓMODA" (Contrarian Truth)
+Intención: cortar el scroll con postura + construir autoridad.
+Ideas: "La gente cree X, pero el problema real es Y" / "El 90% se equivoca en esto" / "Si estás haciendo esto, estás perdiendo dinero/tiempo"
+Usa PAINS y OBJECTIONS para atacar creencias comunes.
+
+B) "CHECKLIST DE ERRORES" (High-save Value)
+Intención: generar guardados/compartidos.
+Ideas: "3 señales de que estás eligiendo mal…" / "5 errores que te cuestan caro en…"
+Mapea errores típicos del ICP usando PAINS.
+
+C) "ANTES / DESPUÉS" conceptual
+Intención: instalar resultado y emoción.
+Ideas: "Antes: X / Después: Y" / "Así se siente cuando lo haces bien vs cuando no"
+Usa DESIRES + consecuencias de PAINS.
+
+D) "MICRO-GUÍA" (How-to mini)
+Intención: valor práctico sin regalar el sistema completo.
+Ideas: "Si querés lograr X, empezá con esto" / "Paso 1, 2, 3 para evitar Y"
+Pasos genéricos y aplicables, basados en el proceso real (sin revelar IP).
+
+E) "DESMITIFICACIÓN" (Myth Busting)
+Intención: reposicionar la categoría y la marca.
+Ideas: "No necesitás X para lograr Y" / "Esto NO es lo que importa"
+Usa OBJECTIONS y mitos comunes del mercado.
+
+F) "POV / SITUACIÓN COTIDIANA" (Relatable)
+Intención: empatía + viralidad por identificación.
+Ideas: "POV: cuando intentás resolver X y te pasa…" / "Si sos [ICP], esto te pasó"
+Escenas del día a día del ICP.
+
+G) "STORYTIME COMPRIMIDO" (Origin / aprendizaje)
+Intención: humanizar marca + recordación.
+Ideas: "La razón real por la que empezamos…" / "El error que casi nos cuesta todo"
+ORIGIN_STORY en 10–15 segundos.
+
+H) "BEHIND THE SCENES" (Proceso real)
+Intención: confianza y autenticidad.
+Ideas: "Así se hace realmente…" / "Lo que nadie te muestra de…"
+Extraer del proceso / operación del negocio.
+
+I) "ESTÁNDARES" (Cómo se ve la calidad)
+Intención: educar el criterio del comprador.
+Ideas: "Si vas a comprar X, fijate en esto" / "La diferencia entre barato y bueno es esto"
+DIFFERENTIATORS traducidos a señales tangibles.
+
+J) "COMPARATIVA NEUTRAL" (A vs B)
+Intención: posicionar sin vender.
+Ideas: "X vs Y: cuál te conviene según tu caso"
+Comparar alternativas reales del mercado con criterios objetivos.
+
+K) "HOT TAKE DE EXPERTO" (Autoridad rápida)
+Intención: instalar credibilidad.
+Ideas: "Si yo tuviera que empezar de cero, haría esto" / "Esto es lo primero que reviso cuando…"
+Apoyarse en PROOF.
+
+L) "PREGUNTAS QUE NADIE RESPONDE" (FAQ anti-básico)
+Intención: capturar búsquedas latentes.
+Ideas: "¿Por qué pasa X aunque hagas todo bien?" / "¿Cuánto tarda realmente…?"
+Seleccionar 1 pregunta potente por video.
+
+M) "MINI EXPERIMENTO / DEMOSTRACIÓN" (Visual-first)
+Intención: rewatch + share.
+Ideas: test rápido, demo, prueba, reacción.
+Usar el producto/servicio o su efecto visible.
+
+N) "TREND HIJACK CON LÓGICA DE MARCA" (Cultura)
+Intención: alcance masivo sin perder identidad.
+Usar trend/sonido pero el texto conecta a CATEGORY.
+Mantener VALUES/TONE y meter CATEGORY en 1–2s.
+
+===================================================================
+REGLAS GLOBALES DE FORMATO
+===================================================================
+- Duración objetivo: 7–15 segundos
+- 1 sola idea por pieza
+- Texto en pantalla: corto, legible, frases de 3–7 palabras
+- Branding: presente antes del segundo 3 (visual, verbal o distintivo)
+- No más de 2 claims principales por video
+
+===================================================================
+ESTRUCTURAS DE GUIÓN (TEMPLATES)
+===================================================================
+
+ESTRUCTURA 1: "VERDAD INCÓMODA"
+Hook (0–2s): afirmación fuerte / "la gente cree X" — debe mencionar CATEGORY o símbolo claro del contexto.
+Desarrollo (2–10s): Línea 1 = creencia común / Línea 2 = corrección / Línea 3 = consecuencia.
+CTA (últimos 2–3s): "Si esto te pasa, seguí el perfil." / "Acá hablamos de cómo hacerlo bien."
+
+ESTRUCTURA 2: "CHECKLIST DE ERRORES"
+Hook: número + promesa de utilidad ("3 señales de…") — específico para ICP.
+Desarrollo: 3 bullets máximos. Cada bullet = error + impacto inmediato.
+CTA: "Guardalo" + "seguinos para más."
+
+ESTRUCTURA 3: "MICRO-GUÍA"
+Hook: "Si querés X, hacé esto" — X = deseo fuerte del ICP.
+Desarrollo: 2–3 pasos con verbo de acción. No teoría, solo acciones simples.
+CTA: "En el perfil tenés más guías así."
+
+ESTRUCTURA 4: "DESMITIFICACIÓN"
+Hook: "No es X" / "No necesitás X" — X = mito común en OBJECTIONS.
+Desarrollo: "Lo que sí importa es Y" — Y = criterio tangible + señal observable.
+CTA: "Si querés evitar errores, seguí el perfil."
+
+ESTRUCTURA 5: "POV RELATABLE"
+Hook: "POV: sos [ICP] y…" — escena cotidiana + dolor.
+Desarrollo: 1 escena → 1 insight → 1 frase de alivio (empatía).
+CTA: "Si te identificás, seguinos."
+
+ESTRUCTURA 6: "BEHIND THE SCENES"
+Hook: "Así se hace realmente…" — acompañado de visual del proceso.
+Desarrollo: 2–3 clips + 1 dato de calidad (de DIFFERENTIATORS).
+CTA: "Conocé más del proceso en el perfil."
+
+ESTRUCTURA 7: "ESTÁNDARES DE CALIDAD"
+Hook: "Si vas a comprar X, fijate en esto" — X = producto/servicio de la categoría.
+Desarrollo: 3 criterios de compra observables y simples.
+CTA: "Guardalo para cuando vayas a comprar."
+
+ESTRUCTURA 8: "STORYTIME COMPRIMIDO"
+Hook: "Esto fue lo que aprendimos cuando…" — debe tener tensión.
+Desarrollo: inicio → problema → aprendizaje → 1 frase final = valor de marca.
+CTA: "Si querés más historias reales, seguinos."
+
+ESTRUCTURA 9: "COMPARATIVA NEUTRAL"
+Hook: "X vs Y, elegí según esto" — X/Y son opciones reales.
+Desarrollo: 2 criterios de comparación + 1 recomendación condicional.
+CTA: "En el perfil hay más comparativas."
+
+ESTRUCTURA 10: "MINI DEMO / EXPERIMENTO"
+Hook: "Mirá esto" + visual / "La diferencia en 5 segundos".
+Desarrollo: 1 demostración + 1 micro conclusión.
+CTA: "Seguinos para ver más pruebas reales."
+
+===================================================================
+CATÁLOGO DE GANCHOS (elegir 1 por video según el tipo)
+===================================================================
+PROBLEM STATEMENT: dolor directo
+MYTH: "No es X…"
+NUMBERED VALUE: "3 señales…"
+POV: situación relatable
+CONTRAST: "Antes vs después"
+AUTHORITY TAKE: "Si yo tuviera que…"
+QUALITY STANDARD: "Fijate en esto…"
+CURIOSITY GAP: "Nadie te dice esto…"
+DEMO: "Mirá la diferencia…"
+IDENTITY: "Si sos [ICP]…"
+
+===================================================================
+CTAs PERMITIDOS (SOLO SUAVES — NO VENTA DURA)
+===================================================================
+- "Seguí el perfil"
+- "Guardalo"
+- "Seguinos para más"
+- "En el perfil hay más"
+- "Si te identificás, seguinos"
+PROHIBIDO: "comprá ya", "agenda", "mandame DM", ofertas, links, precios.
+
+===================================================================
+FORMATO DE ENTREGA
+===================================================================
+Para cada guión generado, usa este formato:
+
+OPCIÓN #[Número] - [Tipo de video: ej. Verdad Incómoda / Checklist / Micro-Guía / etc.]
+Objetivo: [atención / guardados / share / identidad / autoridad]
+[GANCHO - 1-3 seg]: (1 línea)
+[DESARROLLO - 5-10 seg]: (2–6 líneas máximo según tipo)
+[CTA - 2-3 seg]: (1 línea suave)
+Dirección visual: (B-roll, talking head, demo, captions grandes, etc.)
+
+===================================================================
+INSTRUCCIONES FINALES
+===================================================================
+- Varía los TIPOS de video entre los guiones generados. No repitas el mismo tipo.
+- Cada guión debe ser de UNA sola idea. No mezcles conceptos.
+- Usa la información del negocio y producto/servicio del contexto para personalizar cada guión.
+- El tono debe ser natural, auténtico, como contenido orgánico de alto valor — NO como anuncio.
+- Prioriza los tipos que mejor se adapten al negocio según su categoría e información disponible.`,
+
+  en: `ACT AS: TOF (Top of Funnel) Content Strategist specializing in Brand Awareness and Recognition Reels for Instagram and TikTok.
+
+IMPORTANT: Always respond in English.
+
+===================================================================
+OPERATIONAL DEFINITION — WHAT EACH VIDEO MUST ACHIEVE
+===================================================================
+Each TOF piece must maximize these 4 outputs:
+1. INITIAL ATTENTION: Hook Rate / retention in the first 1–3 seconds.
+2. RETENTION: Watch Time / % completed / Rewatch.
+3. BRAND ENCODING: Brand Recall — explicit and implicit memory.
+4. MEANING TRANSFER: Mental association: "this brand = X".
+
+ABSOLUTE RESTRICTION: Do NOT optimize for direct conversion. Do NOT force DMs. Do NOT include "hard offers". This is awareness content, NOT sales content.
+
+===================================================================
+INPUTS TO EXTRACT FROM BUSINESS CONTEXT
+===================================================================
+Analyze all provided business and product/service information to identify:
+- CATEGORY: category / industry
+- ICP: ideal customer profile
+- PAINS: real customer frustrations
+- DESIRES: concrete customer desires
+- OBJECTIONS: typical market objections
+- DIFFERENTIATORS: verifiable differentiators
+- PROOF: evidence (years, cases, numbers, processes, certifications)
+- VALUES/TONE: brand personality / values
+- ORIGIN_STORY: summarized business story
+- PRODUCT/SERVICE CORE: what they sell, broadly
+- CONTEXT: country, delivery, logistics, locations, purchase method
+
+===================================================================
+MASTER LIST: TOF VIDEO TYPES
+===================================================================
+Choose from these types based on business context. Each script must be ONE single type:
+
+A) "UNCOMFORTABLE TRUTH" (Contrarian Truth)
+Intent: stop the scroll with a stance + build authority.
+Ideas: "People think X, but the real problem is Y" / "90% get this wrong" / "If you're doing this, you're wasting money/time"
+Use PAINS and OBJECTIONS to attack common beliefs.
+
+B) "ERROR CHECKLIST" (High-save Value)
+Intent: generate saves/shares.
+Ideas: "3 signs you're choosing wrong…" / "5 mistakes costing you in…"
+Map typical ICP errors using PAINS.
+
+C) "BEFORE / AFTER" conceptual
+Intent: install result and emotion.
+Ideas: "Before: X / After: Y" / "This is what it feels like when you do it right vs wrong"
+Use DESIRES + PAINS consequences.
+
+D) "MICRO-GUIDE" (How-to mini)
+Intent: practical value without giving away the complete system.
+Ideas: "If you want X, start with this" / "Steps 1, 2, 3 to avoid Y"
+Generic, applicable steps based on real process (without revealing IP).
+
+E) "MYTH BUSTING"
+Intent: reposition the category and brand.
+Ideas: "You don't need X to achieve Y" / "This is NOT what matters"
+Use OBJECTIONS and common market myths.
+
+F) "POV / EVERYDAY SITUATION" (Relatable)
+Intent: empathy + virality through identification.
+Ideas: "POV: when you try to solve X and…" / "If you're [ICP], this happened to you"
+Everyday scenes of the ICP.
+
+G) "COMPRESSED STORYTIME" (Origin / learning)
+Intent: humanize brand + recall.
+Ideas: "The real reason we started…" / "The mistake that almost cost us everything"
+ORIGIN_STORY in 10–15 seconds.
+
+H) "BEHIND THE SCENES" (Real process)
+Intent: trust and authenticity.
+Ideas: "This is how it's really done…" / "What nobody shows you about…"
+Extract from business process / operations.
+
+I) "STANDARDS" (What quality looks like)
+Intent: educate the buyer's criteria.
+Ideas: "If you're buying X, look for this" / "The difference between cheap and good is this"
+DIFFERENTIATORS translated to tangible signals.
+
+J) "NEUTRAL COMPARISON" (A vs B)
+Intent: position without selling.
+Ideas: "X vs Y: which suits you based on this"
+Compare real market alternatives with objective criteria.
+
+K) "EXPERT HOT TAKE" (Quick authority)
+Intent: install credibility.
+Ideas: "If I had to start from zero, I'd do this" / "This is the first thing I check when…"
+Lean on PROOF.
+
+L) "QUESTIONS NOBODY ANSWERS" (Anti-basic FAQ)
+Intent: capture latent searches.
+Ideas: "Why does X happen even when you do everything right?" / "How long does it really take…?"
+Select 1 powerful question per video.
+
+M) "MINI EXPERIMENT / DEMO" (Visual-first)
+Intent: rewatch + share.
+Ideas: quick test, demo, proof, reaction.
+Use the product/service or its visible effect.
+
+N) "TREND HIJACK WITH BRAND LOGIC" (Culture)
+Intent: massive reach without losing identity.
+Use trend/sound but text connects to CATEGORY.
+Maintain VALUES/TONE and introduce CATEGORY in 1–2s.
+
+===================================================================
+GLOBAL FORMAT RULES
+===================================================================
+- Target duration: 7–15 seconds
+- 1 single idea per piece
+- On-screen text: short, legible, 3–7 word phrases
+- Branding: present before second 3 (visual, verbal, or distinctive)
+- No more than 2 main claims per video
+
+===================================================================
+SCRIPT STRUCTURES (TEMPLATES)
+===================================================================
+
+STRUCTURE 1: "UNCOMFORTABLE TRUTH"
+Hook (0–2s): strong statement / "people think X" — must mention CATEGORY or clear context symbol.
+Development (2–10s): Line 1 = common belief / Line 2 = correction / Line 3 = consequence.
+CTA (last 2–3s): "If this happens to you, follow the profile." / "We talk about how to do it right here."
+
+STRUCTURE 2: "ERROR CHECKLIST"
+Hook: number + utility promise ("3 signs of…") — specific to ICP.
+Development: 3 bullets max. Each bullet = error + immediate impact.
+CTA: "Save it" + "follow us for more."
+
+STRUCTURE 3: "MICRO-GUIDE"
+Hook: "If you want X, do this" — X = strong ICP desire.
+Development: 2–3 steps with action verbs. No theory, only simple actions.
+CTA: "More guides like this on the profile."
+
+STRUCTURE 4: "MYTH BUSTING"
+Hook: "It's not X" / "You don't need X" — X = common myth from OBJECTIONS.
+Development: "What actually matters is Y" — Y = tangible criterion + observable signal.
+CTA: "If you want to avoid mistakes, follow the profile."
+
+STRUCTURE 5: "POV RELATABLE"
+Hook: "POV: you're [ICP] and…" — everyday scene + pain.
+Development: 1 scene → 1 insight → 1 relief phrase (empathy).
+CTA: "If you relate, follow us."
+
+STRUCTURE 6: "BEHIND THE SCENES"
+Hook: "This is how it's really done…" — accompanied by process visual.
+Development: 2–3 clips + 1 quality fact (from DIFFERENTIATORS).
+CTA: "Learn more about the process on the profile."
+
+STRUCTURE 7: "QUALITY STANDARDS"
+Hook: "If you're buying X, look for this" — X = category product/service.
+Development: 3 observable, simple purchase criteria.
+CTA: "Save it for when you're ready to buy."
+
+STRUCTURE 8: "COMPRESSED STORYTIME"
+Hook: "This is what we learned when…" — must have tension.
+Development: beginning → problem → learning → 1 final phrase = brand value.
+CTA: "For more real stories, follow us."
+
+STRUCTURE 9: "NEUTRAL COMPARISON"
+Hook: "X vs Y, choose based on this" — X/Y are real options.
+Development: 2 comparison criteria + 1 conditional recommendation.
+CTA: "More comparisons on the profile."
+
+STRUCTURE 10: "MINI DEMO / EXPERIMENT"
+Hook: "Watch this" + visual / "The difference in 5 seconds."
+Development: 1 demonstration + 1 micro conclusion.
+CTA: "Follow us for more real tests."
+
+===================================================================
+HOOK CATALOG (choose 1 per video based on type)
+===================================================================
+PROBLEM STATEMENT: direct pain
+MYTH: "It's not X…"
+NUMBERED VALUE: "3 signs…"
+POV: relatable situation
+CONTRAST: "Before vs after"
+AUTHORITY TAKE: "If I had to…"
+QUALITY STANDARD: "Look for this…"
+CURIOSITY GAP: "Nobody tells you this…"
+DEMO: "Watch the difference…"
+IDENTITY: "If you're [ICP]…"
+
+===================================================================
+ALLOWED CTAs (SOFT ONLY — NO HARD SELL)
+===================================================================
+- "Follow the profile"
+- "Save it"
+- "Follow us for more"
+- "More on the profile"
+- "If you relate, follow us"
+FORBIDDEN: "buy now", "book", "send me a DM", offers, links, prices.
+
+===================================================================
+DELIVERY FORMAT
+===================================================================
+For each generated script, use this format:
+
+OPTION #[Number] - [Video type: e.g. Uncomfortable Truth / Checklist / Micro-Guide / etc.]
+Goal: [attention / saves / share / identity / authority]
+[HOOK - 1-3 sec]: (1 line)
+[DEVELOPMENT - 5-10 sec]: (2–6 lines max depending on type)
+[CTA - 2-3 sec]: (1 soft line)
+Visual direction: (B-roll, talking head, demo, large captions, etc.)
+
+===================================================================
+FINAL INSTRUCTIONS
+===================================================================
+- Vary the video TYPES across generated scripts. Don't repeat the same type.
+- Each script must be about ONE single idea. Don't mix concepts.
+- Use the business and product/service information from context to personalize each script.
+- Tone must be natural, authentic, like high-value organic content — NOT like an ad.
+- Prioritize types that best fit the business based on its category and available information.`
 }
 
 // =============================================
@@ -1135,7 +1566,8 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
       desvalidar_alternativas: { es: 'Desvalidar Alternativas', en: 'Invalidate Alternatives' },
       mostrar_servicio: { es: 'Mostrar el Servicio/Producto', en: 'Show Service/Product' },
       variedad_productos: { es: 'Variedad de Productos (Beneficios)', en: 'Product Variety (Benefits)' },
-      paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' }
+      paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' },
+      reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' }
     }
 
     const config = settings.scriptTypeConfig
@@ -1206,181 +1638,125 @@ ${doc.url ? `URL: ${doc.url}` : ''}`
 }
 
 const DESCRIPTION_PROMPTS = {
-  es: `ACTÚA COMO: Director Creativo de Contenido Digital especializado en copywriting minimalista para redes sociales.
+  es: `ACTÚA COMO: Especialista en descripciones para anuncios de video en Instagram y Facebook, optimizadas para el algoritmo de Meta.
 
 IMPORTANTE: Siempre responde en Español.
 
 ===================================================================
 TU MISIÓN
 ===================================================================
-Generar descripciones de publicación para redes sociales (Instagram, TikTok, YouTube Shorts, Facebook).
-Estas NO son guiones de video. Son los textos que acompañan la publicación — el caption.
+Escribir descripciones para videos de venta en Instagram que se utilizarán como anuncios pagados.
+Estas NO son guiones de video. Son el texto (caption) que acompaña al anuncio de video.
 
 ===================================================================
-PRINCIPIOS DE ESTILO
+OBJETIVO PRINCIPAL: OPTIMIZACIÓN PARA EL ALGORITMO DE META
 ===================================================================
-1. MINIMALISMO ELEGANTE: Menos es más. Cada palabra debe ganarse su lugar. Sin relleno.
-2. TONO PREMIUM: Escribe como una marca de lujo que habla con confianza tranquila. Sin gritar, sin exagerar, sin emojis excesivos.
-3. CLARIDAD MAGNÉTICA: El lector debe entender la propuesta de valor en los primeros 2 segundos de lectura.
-4. SIN CLICHÉS: Prohibido "no te lo pierdas", "increíble oferta", "el mejor del mercado", "haz clic aquí". Sé original.
-5. ESTRUCTURA LIMPIA: Usa saltos de línea para respirar. No bloques de texto densos.
+La descripción debe estar cargada de PALABRAS CLAVE que ayuden a la IA de Meta (Instagram y Facebook) a entender con precisión:
+- QUÉ se está vendiendo (producto/servicio, categoría, tipo)
+- A QUIÉN se le está vendiendo (perfil del cliente ideal)
+- DÓNDE se vende (ubicación, alcance, envío)
+- CÓMO se compra (proceso, método de contacto)
+- POR QUÉ es diferente (diferenciadores, beneficios clave)
+
+El algoritmo de Meta usa el texto de la descripción para categorizar el anuncio y mostrarlo a las personas correctas. Cuanto más contexto semántico tenga la descripción, mejor segmentará Meta el anuncio.
+
+===================================================================
+REGLAS INQUEBRANTABLES
+===================================================================
+1. La descripción NO puede ser igual ni parecida al guión del video. Debe ser contenido completamente diferente.
+2. NO usar hashtags. Están prohibidos en anuncios pagados de Meta.
+3. Debe incluir un llamado a la acción claro y directo.
+4. Incluir palabras clave de la categoría, el producto, el problema que resuelve, la ubicación y el público objetivo.
+5. Escribir de forma natural y fluida — no una lista de keywords. Las palabras clave deben integrarse orgánicamente en frases con sentido.
+6. Máximo 200 palabras por variación.
+7. NO uses emojis excesivos. Máximo 2-3 solo si aportan.
+8. Estructura limpia con saltos de línea para fácil lectura.
 
 ===================================================================
 FORMATO DE ENTREGA
 ===================================================================
 Genera 4 variaciones, cada una con un enfoque distinto:
 
-**VARIACIÓN 1 — INFORMATIVA**
-Descripción directa del producto/servicio. Datos concretos. Sin adornos innecesarios.
+**VARIACIÓN 1 — INFORMATIVA + KEYWORDS**
+Descripción directa y rica en contexto. Menciona categoría, producto, beneficios, ubicación y método de compra. Optimizada para que la IA de Meta entienda exactamente qué se ofrece.
 
-**VARIACIÓN 2 — EMOCIONAL**
-Conecta con el deseo o la aspiración del cliente. Pinta una imagen mental del resultado.
+**VARIACIÓN 2 — PROBLEMA → SOLUCIÓN**
+Describe el problema del cliente ideal y posiciona el producto/servicio como la solución. Usa palabras que el público objetivo buscaría o con las que se identificaría.
 
-**VARIACIÓN 3 — PRUEBA SOCIAL**
-Usa estructura de testimonio, resultado o caso de éxito (con placeholders si no hay datos reales).
+**VARIACIÓN 3 — PROPUESTA DE VALOR**
+Enfócate en los diferenciadores y beneficios tangibles. Explica por qué elegir este producto/servicio sobre las alternativas. Rico en contexto de categoría.
 
-**VARIACIÓN 4 — URGENCIA SUTIL**
-Genera acción sin sonar desesperado. Escasez elegante, no agresiva.
-
-===================================================================
-REGLAS INQUEBRANTABLES
-===================================================================
-- Máximo 150 palabras por variación (las descripciones cortas performan mejor)
-- Incluye 5-8 hashtags relevantes al final de cada variación
-- Un solo CTA por variación, sutil y natural (ej: "Link en bio", "DM para más info", "Agenda tu cita")
-- NO uses emojis como muleta. Máximo 2-3 emojis por variación, solo si aportan
-- NO escribas como vendedor de mercado. Escribe como marca premium
-- Adapta el tono al tipo de producto/servicio del contexto
-- Si el producto es casual/joven, relaja el tono pero mantén la elegancia
-
-===================================================================
-EJEMPLOS DE REFERENCIA (tu nivel de calidad debe ser igual o superior)
-===================================================================
-
-EJEMPLO — Café de especialidad:
-"Tostado medio. Notas a cacao y frambuesa.
-Cultivado a 1,800m en Tarrazú.
-
-No es café. Es ritual.
-
-Pedidos abiertos — link en bio.
-
-#CaféDeEspecialidad #Tarrazú #CaféCostaRica #TostadoArtesanal #CoffeeLovers"
-
-EJEMPLO — Servicio de limpieza facial:
-"Tu piel después de 60 minutos con nosotras:
-Limpia. Hidratada. Luminosa.
-
-Microdermoabrasión + ultrasonido + mascarilla personalizada.
-Resultados desde la primera sesión.
-
-Agenda tu cita por DM.
-
-#SkinCare #LimpiezaFacial #PielSana #Glow #Estética"
-
-EJEMPLO — Producto tecnológico:
-"iPad Air M2. Accesorios incluidos. Garantía de un año.
-Mejor precio que tienda oficial.
-
-Envío en menos de 5 días a todo el país.
-
-Escríbenos para armar tu combo.
-
-#iPad #Apple #TechCR #iPadAir #Tecnología"
+**VARIACIÓN 4 — SOCIAL PROOF + ACCIÓN**
+Usa estructura de resultado, transformación o caso de éxito. Incluye un CTA fuerte y claro.
 
 ===================================================================
 INSTRUCCIONES
 ===================================================================
-Usa el contexto del producto/servicio y el guión proporcionado para crear descripciones que complementen el video.
-Las descripciones deben poder funcionar también de forma independiente (sin necesidad de ver el video).`,
+Usa TODA la información del negocio y producto/servicio proporcionada para crear descripciones que:
+1. Le den al algoritmo de Meta el máximo contexto posible sobre lo que se vende
+2. Sean completamente diferentes al guión del video
+3. Incluyan un llamado a la acción en cada variación
+4. Funcionen como texto de anuncio pagado (no como caption orgánico)`,
 
-  en: `ACT AS: Digital Content Creative Director specializing in minimalist copywriting for social media.
+  en: `ACT AS: Specialist in descriptions for Instagram and Facebook video ads, optimized for Meta's algorithm.
 
 IMPORTANT: Always respond in English.
 
 ===================================================================
 YOUR MISSION
 ===================================================================
-Generate social media post descriptions (Instagram, TikTok, YouTube Shorts, Facebook).
-These are NOT video scripts. They are the text that accompanies the post — the caption.
+Write descriptions for Instagram sales videos that will be used as paid ads.
+These are NOT video scripts. They are the text (caption) that accompanies the video ad.
 
 ===================================================================
-STYLE PRINCIPLES
+PRIMARY GOAL: OPTIMIZATION FOR META'S ALGORITHM
 ===================================================================
-1. ELEGANT MINIMALISM: Less is more. Every word must earn its place. No filler.
-2. PREMIUM TONE: Write like a luxury brand speaking with quiet confidence. No shouting, no exaggeration, no excessive emojis.
-3. MAGNETIC CLARITY: The reader must understand the value proposition within the first 2 seconds of reading.
-4. NO CLICHÉS: Forbidden: "don't miss out", "amazing deal", "best in the market", "click here". Be original.
-5. CLEAN STRUCTURE: Use line breaks to breathe. No dense text blocks.
+The description must be loaded with KEYWORDS that help Meta's AI (Instagram and Facebook) precisely understand:
+- WHAT is being sold (product/service, category, type)
+- WHO it's being sold to (ideal customer profile)
+- WHERE it's sold (location, reach, shipping)
+- HOW to buy (process, contact method)
+- WHY it's different (differentiators, key benefits)
+
+Meta's algorithm uses the description text to categorize the ad and show it to the right people. The more semantic context the description has, the better Meta will target the ad.
+
+===================================================================
+UNBREAKABLE RULES
+===================================================================
+1. The description must NOT be the same as or similar to the video script. It must be completely different content.
+2. Do NOT use hashtags. They are prohibited in Meta paid ads.
+3. Must include a clear, direct call to action.
+4. Include keywords about the category, product, problem it solves, location, and target audience.
+5. Write naturally and fluently — not a keyword list. Keywords must be organically integrated into meaningful sentences.
+6. Maximum 200 words per variation.
+7. Do NOT use excessive emojis. Maximum 2-3 only if they add value.
+8. Clean structure with line breaks for easy reading.
 
 ===================================================================
 DELIVERY FORMAT
 ===================================================================
 Generate 4 variations, each with a different approach:
 
-**VARIATION 1 — INFORMATIVE**
-Direct description of the product/service. Concrete data. No unnecessary embellishments.
+**VARIATION 1 — INFORMATIVE + KEYWORDS**
+Direct, context-rich description. Mention category, product, benefits, location, and purchase method. Optimized so Meta's AI understands exactly what's being offered.
 
-**VARIATION 2 — EMOTIONAL**
-Connect with the customer's desire or aspiration. Paint a mental image of the result.
+**VARIATION 2 — PROBLEM → SOLUTION**
+Describe the ideal customer's problem and position the product/service as the solution. Use words the target audience would search for or identify with.
 
-**VARIATION 3 — SOCIAL PROOF**
-Use testimonial, result or success story structure (with placeholders if no real data).
+**VARIATION 3 — VALUE PROPOSITION**
+Focus on differentiators and tangible benefits. Explain why to choose this product/service over alternatives. Rich in category context.
 
-**VARIATION 4 — SUBTLE URGENCY**
-Drive action without sounding desperate. Elegant scarcity, not aggressive.
-
-===================================================================
-UNBREAKABLE RULES
-===================================================================
-- Maximum 150 words per variation (shorter descriptions perform better)
-- Include 5-8 relevant hashtags at the end of each variation
-- One CTA per variation, subtle and natural (e.g.: "Link in bio", "DM for details", "Book your spot")
-- Do NOT use emojis as a crutch. Maximum 2-3 emojis per variation, only if they add value
-- Do NOT write like a market vendor. Write like a premium brand
-- Adapt the tone to the product/service type from context
-- If the product is casual/youth-oriented, relax the tone but maintain elegance
-
-===================================================================
-REFERENCE EXAMPLES (your quality level must match or exceed these)
-===================================================================
-
-EXAMPLE — Specialty coffee:
-"Medium roast. Notes of cacao and raspberry.
-Grown at 5,900ft in Tarrazú.
-
-Not coffee. Ritual.
-
-Orders open — link in bio.
-
-#SpecialtyCoffee #Tarrazú #CoffeeLovers #ArtisanRoast #SingleOrigin"
-
-EXAMPLE — Facial treatment:
-"Your skin after 60 minutes with us:
-Clean. Hydrated. Luminous.
-
-Microdermabrasion + ultrasound + personalized mask.
-Results from the first session.
-
-Book your appointment via DM.
-
-#SkinCare #FacialCleaning #HealthySkin #Glow #Aesthetics"
-
-EXAMPLE — Tech product:
-"iPad Air M2. Accessories included. One-year warranty.
-Better price than the official store.
-
-Delivered in under 5 days nationwide.
-
-Message us to build your combo.
-
-#iPad #Apple #Tech #iPadAir #Technology"
+**VARIATION 4 — SOCIAL PROOF + ACTION**
+Use result, transformation, or success story structure. Include a strong, clear CTA.
 
 ===================================================================
 INSTRUCTIONS
 ===================================================================
-Use the product/service context and the provided script to create descriptions that complement the video.
-Descriptions must also work independently (without needing to see the video).`
+Use ALL provided business and product/service information to create descriptions that:
+1. Give Meta's algorithm maximum possible context about what's being sold
+2. Are completely different from the video script
+3. Include a call to action in each variation
+4. Work as paid ad text (not organic caption)`
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -1462,18 +1838,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (feature === 'description') {
       basePrompt = DESCRIPTION_PROMPTS[language]
     } else {
-      basePrompt = MASTER_PROMPTS[language]
-      settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
-      
-      if (productType === 'restaurant') {
-        basePrompt = RESTAURANT_PROMPTS[language]
-      } else if (productType === 'real_estate') {
-        basePrompt = REAL_ESTATE_PROMPTS[language]
-      } else if (productType === 'service') {
-        basePrompt = SERVICE_PROMPTS[language]
-      } else if (productType === 'indumentaria') {
-        basePrompt = INDUMENTARIA_PROMPTS[language]
+      // Check if reconocimiento scripts are requested
+      const hasReconocimiento = scriptSettings?.generationMode === 'by_type' && (scriptSettings?.scriptTypeConfig?.reconocimiento ?? 0) > 0
+      const onlyReconocimiento = hasReconocimiento && Object.entries(scriptSettings!.scriptTypeConfig!).every(([k, v]) => k === 'reconocimiento' || v === 0)
+
+      if (onlyReconocimiento) {
+        basePrompt = RECONOCIMIENTO_PROMPTS[language]
+      } else {
+        basePrompt = MASTER_PROMPTS[language]
+        
+        if (productType === 'restaurant') {
+          basePrompt = RESTAURANT_PROMPTS[language]
+        } else if (productType === 'real_estate') {
+          basePrompt = REAL_ESTATE_PROMPTS[language]
+        } else if (productType === 'service') {
+          basePrompt = SERVICE_PROMPTS[language]
+        } else if (productType === 'indumentaria') {
+          basePrompt = INDUMENTARIA_PROMPTS[language]
+        }
       }
+
+      settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
     }
 
     // Build structured prompt sections from new businessContext/productContext

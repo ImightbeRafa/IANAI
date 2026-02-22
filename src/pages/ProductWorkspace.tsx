@@ -609,7 +609,8 @@ export default function ProductWorkspace() {
           desvalidar_alternativas: { es: 'Desvalidar Alternativas', en: 'Invalidate Alternatives' },
           mostrar_servicio: { es: 'Mostrar el Servicio/Producto', en: 'Show Service/Product' },
           variedad_productos: { es: 'Variedad de Productos', en: 'Product Variety' },
-          paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' }
+          paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' },
+          reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' }
         }
         const config = scriptSettings.scriptTypeConfig
         const parts: string[] = []
