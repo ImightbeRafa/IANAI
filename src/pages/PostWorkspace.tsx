@@ -2,10 +2,11 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPosts, createPost, updatePostStatus, getScripts } from '../services/database'
+import { getProduct, getProductPosts, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage } from '../services/database'
+import type { ProductImage } from '../services/database'
 import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
-import { uploadPostImageOriginal } from '../utils/imageCompression'
+import { uploadPostImageOriginal, uploadProductImage } from '../utils/imageCompression'
 import { 
   ArrowLeft,
   ImageIcon,
@@ -22,7 +23,8 @@ import {
   Wand2,
   Plus,
   Trash2,
-  Pipette
+  Pipette,
+  Check
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
@@ -50,7 +52,6 @@ export default function PostWorkspace() {
   const { productId } = useParams<{ productId: string }>()
   const { user } = useAuth()
   const { language } = useLanguage()
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [product, setProduct] = useState<Product | null>(null)
   const [scripts, setScripts] = useState<Script[]>([])
@@ -59,7 +60,6 @@ export default function PostWorkspace() {
   const [showScriptPicker, setShowScriptPicker] = useState(false)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [uploadedImages, setUploadedImages] = useState<string[]>([])
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
   const imageModel: ImageModel = 'nano-banana-pro'
@@ -80,6 +80,10 @@ export default function PostWorkspace() {
   const [newPaletteColors, setNewPaletteColors] = useState<[string, string, string]>(['#000000', '#FFFFFF', '#0284c7'])
   const [customColors, setCustomColors] = useState<string[] | null>(null)
   const paletteImageInputRef = useRef<HTMLInputElement>(null)
+  const [productImages, setProductImages] = useState<ProductImage[]>([])
+  const [selectedProductImageIds, setSelectedProductImageIds] = useState<Set<string>>(new Set())
+  const [uploadingProductImage, setUploadingProductImage] = useState(false)
+  const productImageInputRef = useRef<HTMLInputElement>(null)
 
   const labels = {
     es: {
@@ -178,15 +182,17 @@ export default function PostWorkspace() {
     async function loadData() {
       if (!productId || !user) return
       try {
-        const [productData, scriptsData, savedPosts, userPalettes] = await Promise.all([
+        const [productData, scriptsData, savedPosts, userPalettes, prodImages] = await Promise.all([
           getProduct(productId),
           getScripts(productId),
           getProductPosts(productId),
-          getCustomPalettes(user.id)
+          getCustomPalettes(user.id),
+          getProductImages(productId)
         ])
         setProduct(productData)
         setScripts(scriptsData)
         setCustomPalettes(userPalettes)
+        setProductImages(prodImages)
 
         const loadedPosts: GeneratedPost[] = savedPosts
           .filter(post => post.status === 'completed' && post.generated_image_url)
@@ -248,29 +254,71 @@ export default function PostWorkspace() {
     })
   }
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
-    if (!files) return
-    const maxImages = 4 - uploadedImages.length
-    const filesToProcess = Array.from(files).slice(0, maxImages)
+    if (!files || !user || !productId) return
+    const maxNew = 4 - productImages.length
+    if (maxNew <= 0) return
+    const filesToProcess = Array.from(files).slice(0, maxNew)
 
-    const results: string[] = []
-    for (const file of filesToProcess) {
-      try {
-        const jpeg = await normalizeImageToJpeg(file)
-        results.push(jpeg)
-      } catch (err) {
-        console.error('Image processing failed:', err)
-        setError(err instanceof Error ? err.message : (language === 'es' ? 'Error al procesar imagen' : 'Error processing image'))
+    setUploadingProductImage(true)
+    try {
+      for (const file of filesToProcess) {
+        const dataUrl = await normalizeImageToJpeg(file)
+        const publicUrl = await uploadProductImage(user.id, productId, dataUrl)
+        const saved = await createProductImage(productId, user.id, publicUrl, file.name)
+        setProductImages(prev => [saved, ...prev])
       }
-    }
-    if (results.length > 0) {
-      setUploadedImages(prev => [...prev, ...results])
+    } catch (err) {
+      console.error('Product image upload failed:', err)
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingProductImage(false)
+      if (productImageInputRef.current) productImageInputRef.current.value = ''
     }
   }
 
-  const removeImage = (index: number) => {
-    setUploadedImages(prev => prev.filter((_, i) => i !== index))
+  const handleDeleteProductImage = async (imgId: string) => {
+    try {
+      await deleteProductImage(imgId)
+      setProductImages(prev => prev.filter(i => i.id !== imgId))
+      setSelectedProductImageIds(prev => {
+        const next = new Set(prev)
+        next.delete(imgId)
+        return next
+      })
+    } catch (err) {
+      console.error('Delete product image failed:', err)
+    }
+  }
+
+  const toggleProductImageSelection = (imgId: string) => {
+    setSelectedProductImageIds(prev => {
+      const next = new Set(prev)
+      if (next.has(imgId)) {
+        next.delete(imgId)
+      } else {
+        next.add(imgId)
+      }
+      return next
+    })
+  }
+
+  const getSelectedProductImageUrls = (): string[] => {
+    return productImages
+      .filter(img => selectedProductImageIds.has(img.id))
+      .map(img => img.image_url)
+  }
+
+  const urlToBase64 = async (url: string): Promise<string> => {
+    if (url.startsWith('data:')) return url
+    const res = await fetch(url)
+    const blob = await res.blob()
+    return new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.readAsDataURL(blob)
+    })
   }
 
   const handleGenerate = async () => {
@@ -299,8 +347,10 @@ export default function PostWorkspace() {
         customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined
       }
 
-      if (uploadedImages.length > 0) {
-        uploadedImages.forEach((img, i) => {
+      const selectedUrls = getSelectedProductImageUrls()
+      if (selectedUrls.length > 0) {
+        const base64Images = await Promise.all(selectedUrls.map(urlToBase64))
+        base64Images.forEach((img, i) => {
           requestBody[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img
         })
       }
@@ -521,7 +571,10 @@ export default function PostWorkspace() {
           action: 'enhance',
           enhanceImage: base64Image,
           aspectRatio,
-          language
+          language,
+          productReferenceImages: selectedProductImageIds.size > 0
+            ? await Promise.all(getSelectedProductImageUrls().map(urlToBase64))
+            : undefined
         })
       })
 
@@ -1013,40 +1066,85 @@ export default function PostWorkspace() {
               )}
             </div>
 
-            {/* Product images (optional) */}
+            {/* Product images — persistent, selectable */}
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 {t.refImages}
               </label>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border border-dashed border-dark-200 rounded-lg p-3 text-center cursor-pointer hover:border-primary-400 hover:bg-primary-900/20 transition-colors"
-              >
-                <Upload className="w-5 h-5 text-dark-300 mx-auto mb-1" />
-                <p className="text-[10px] text-dark-400">{t.refHint}</p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
-                  multiple
-                  onChange={handleImageUpload}
-                  className="hidden"
-                />
-              </div>
-              {uploadedImages.length > 0 && (
-                <div className="flex gap-2 mt-2 flex-wrap">
-                  {uploadedImages.map((img, i) => (
-                    <div key={i} className="relative">
-                      <img src={img} alt={`Ref ${i + 1}`} className="w-14 h-14 object-cover rounded-lg" />
+              <p className="text-[10px] text-dark-400 mb-2">
+                {language === 'es'
+                  ? 'Sube fotos de tu producto. Selecciona las que quieras usar como referencia en generación y mejora.'
+                  : 'Upload product photos. Select the ones you want to use as reference for generation and enhancement.'}
+              </p>
+
+              {/* Image grid */}
+              <div className="flex gap-2 flex-wrap">
+                {productImages.map((img) => {
+                  const isSelected = selectedProductImageIds.has(img.id)
+                  return (
+                    <div key={img.id} className="relative group">
                       <button
-                        onClick={() => removeImage(i)}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-dark-600 text-white rounded-full flex items-center justify-center hover:bg-dark-800 transition-colors"
+                        onClick={() => toggleProductImageSelection(img.id)}
+                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                          isSelected
+                            ? 'border-primary-500 ring-2 ring-primary-500/30'
+                            : 'border-dark-200 hover:border-dark-300'
+                        }`}
+                      >
+                        <img src={img.image_url} alt="Product" className="w-full h-full object-cover" />
+                        {isSelected && (
+                          <div className="absolute inset-0 bg-primary-500/20 flex items-center justify-center">
+                            <div className="w-5 h-5 bg-primary-500 rounded-full flex items-center justify-center">
+                              <Check className="w-3 h-3 text-white" />
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProductImage(img.id)}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
                       >
                         <X className="w-2.5 h-2.5" />
                       </button>
                     </div>
-                  ))}
-                </div>
+                  )
+                })}
+
+                {/* Upload button */}
+                {productImages.length < 4 && (
+                  <button
+                    onClick={() => productImageInputRef.current?.click()}
+                    disabled={uploadingProductImage}
+                    className="w-16 h-16 rounded-lg border-2 border-dashed border-dark-200 flex flex-col items-center justify-center text-dark-400 hover:border-primary-400 hover:text-primary-500 transition-colors disabled:opacity-50"
+                  >
+                    {uploadingProductImage ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span className="text-[8px] mt-0.5">
+                          {language === 'es' ? 'Subir' : 'Upload'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <input
+                  ref={productImageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+                  multiple
+                  onChange={handleProductImageUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {selectedProductImageIds.size > 0 && (
+                <p className="text-[10px] text-primary-500 mt-1.5 font-medium">
+                  {language === 'es'
+                    ? `${selectedProductImageIds.size} imagen(es) seleccionada(s) como referencia`
+                    : `${selectedProductImageIds.size} image(s) selected as reference`}
+                </p>
               )}
             </div>
 

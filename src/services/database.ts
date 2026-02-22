@@ -928,6 +928,59 @@ export async function deleteCustomPalette(paletteId: string): Promise<void> {
 }
 
 // =============================================
+// PRODUCT IMAGES (persistent per-product reference images)
+// =============================================
+export interface ProductImage {
+  id: string
+  product_id: string
+  user_id: string
+  image_url: string
+  label: string | null
+  created_at: string
+}
+
+export async function getProductImages(productId: string): Promise<ProductImage[]> {
+  const { data, error } = await supabase
+    .from('product_images')
+    .select('*')
+    .eq('product_id', productId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createProductImage(
+  productId: string,
+  userId: string,
+  imageUrl: string,
+  label?: string
+): Promise<ProductImage> {
+  const { data, error } = await supabase
+    .from('product_images')
+    .insert({
+      product_id: productId,
+      user_id: userId,
+      image_url: imageUrl,
+      label: label || null
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteProductImage(imageId: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_images')
+    .delete()
+    .eq('id', imageId)
+
+  if (error) throw error
+}
+
+// =============================================
 // FEEDBACK TICKETS
 // =============================================
 export interface FeedbackTicket {

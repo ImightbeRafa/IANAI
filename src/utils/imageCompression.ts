@@ -161,6 +161,49 @@ export async function uploadPostImageOriginal(
 }
 
 /**
+ * Upload a product reference image (compressed to WebP).
+ * Stored under product-images/{userId}/{productId}/{timestamp}.webp
+ */
+export async function uploadProductImage(
+  userId: string,
+  productId: string,
+  imageSource: string,
+  filename?: string
+): Promise<string> {
+  const compressedBlob = await compressImageToWebP(imageSource, 0.90)
+
+  const timestamp = Date.now()
+  const rawName = filename || `${timestamp}.webp`
+  const safeUserId = sanitizePathSegment(userId)
+  const safeProductId = sanitizePathSegment(productId)
+  const safeFileName = sanitizePathSegment(rawName)
+
+  if (!safeUserId || !safeProductId || !safeFileName) {
+    throw new Error('Invalid file path parameters')
+  }
+
+  const filePath = `${safeUserId}/${safeProductId}/product-refs/${safeFileName}`
+
+  const { data, error } = await supabase.storage
+    .from('post-images')
+    .upload(filePath, compressedBlob, {
+      contentType: 'image/webp',
+      upsert: true
+    })
+
+  if (error) {
+    console.error('Product image upload error:', error)
+    throw error
+  }
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('post-images')
+    .getPublicUrl(data.path)
+
+  return publicUrl
+}
+
+/**
  * Delete a post image from storage
  */
 export async function deletePostImage(imagePath: string): Promise<void> {
