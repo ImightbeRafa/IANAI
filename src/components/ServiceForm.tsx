@@ -3,6 +3,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import type { NewServiceFormData, SuccessCaseFormData, ServiceFormat } from '../types'
 import { Loader2, X, Plus, Trash2, Link2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AutoFillButtons from './AutoFillButtons'
 
 interface ServiceFormProps {
   onSubmit: (data: NewServiceFormData) => Promise<void>
@@ -262,6 +263,24 @@ export default function ServiceForm({ onSubmit, onCancel, businessId, initialDat
                 </div>
                 {formData.svc_service_type === 'otro' && <input type="text" value={formData.svc_service_type_custom || ''} onChange={e => handleChange('svc_service_type_custom', e.target.value)} placeholder={t.typeCustomPh} className="input-field mt-3" />}
               </div>
+              <AutoFillButtons
+                formType="service"
+                language={language}
+                onResult={(data) => {
+                  const updates: Partial<NewServiceFormData> = {}
+                  const stringFields: (keyof NewServiceFormData)[] = ['name', 'svc_service_type', 'svc_problem', 'svc_current_pain', 'svc_alternatives_tried', 'svc_alternatives_failures', 'svc_concrete_result', 'svc_result_timeline', 'svc_life_change', 'svc_process_steps', 'svc_service_duration', 'svc_differentiation', 'svc_main_objection']
+                  for (const key of stringFields) {
+                    if (typeof data[key] === 'string' && (data[key] as string).trim()) {
+                      (updates as Record<string, unknown>)[key] = data[key]
+                    }
+                  }
+                  if (typeof data.svc_service_format === 'string' && ['one_on_one', 'group', 'automated', 'mixed'].includes(data.svc_service_format)) {
+                    updates.svc_service_format = data.svc_service_format as ServiceFormat
+                  }
+                  setFormData(prev => ({ ...prev, ...updates }))
+                  setStep(2)
+                }}
+              />
             </div>
           )}
 

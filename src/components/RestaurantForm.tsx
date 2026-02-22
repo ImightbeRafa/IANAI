@@ -3,6 +3,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import type { RestaurantFormData } from '../types'
 import { supabase } from '../lib/supabase'
 import { UtensilsCrossed, Upload, FileText, Loader2, MapPin, Clock, X } from 'lucide-react'
+import AutoFillButtons from './AutoFillButtons'
 
 interface RestaurantFormProps {
   onSubmit: (data: RestaurantFormData) => Promise<void>
@@ -215,6 +216,21 @@ export default function RestaurantForm({ onSubmit, onCancel, businessId, initial
                   autoFocus
                 />
               </div>
+
+              <AutoFillButtons
+                formType="restaurant"
+                language={language}
+                onResult={(data) => {
+                  setFormData(prev => ({
+                    ...prev,
+                    name: (data.name as string) || prev.name,
+                    menu_text: (data.menu_text as string) || prev.menu_text,
+                    location: (data.location as string) || prev.location,
+                    schedule: (data.schedule as string) || prev.schedule,
+                  }))
+                  setStep(2)
+                }}
+              />
 
               <div>
                 <label className="block text-sm font-medium text-dark-700 mb-3">

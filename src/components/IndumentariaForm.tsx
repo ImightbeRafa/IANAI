@@ -3,6 +3,7 @@ import { useLanguage } from '../contexts/LanguageContext'
 import type { IndumentariaFormData } from '../types'
 import { Loader2, X, Link2, Plus, Upload } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AutoFillButtons from './AutoFillButtons'
 
 interface IndumentariaFormProps {
   onSubmit: (data: IndumentariaFormData) => Promise<void>
@@ -233,6 +234,24 @@ export default function IndumentariaForm({ onSubmit, onCancel, businessId, initi
                 </div>
                 {formData.ind_article_type === 'otro' && <input type="text" value={formData.ind_article_type_custom || ''} onChange={e => handleChange('ind_article_type_custom', e.target.value)} placeholder={t.typeCustomPh} className="input-field mt-3" />}
               </div>
+              <AutoFillButtons
+                formType="indumentaria"
+                language={language}
+                onResult={(data) => {
+                  const updates: Partial<IndumentariaFormData> = {}
+                  const stringFields: (keyof IndumentariaFormData)[] = ['name', 'ind_article_type', 'ind_variations_description', 'ind_sizes', 'ind_main_material', 'ind_quality_description']
+                  for (const key of stringFields) {
+                    if (typeof data[key] === 'string' && (data[key] as string).trim()) {
+                      (updates as Record<string, unknown>)[key] = data[key]
+                    }
+                  }
+                  if (typeof data.ind_model_count === 'number' && data.ind_model_count >= 1) {
+                    updates.ind_model_count = data.ind_model_count
+                  }
+                  setFormData(prev => ({ ...prev, ...updates }))
+                  setStep(2)
+                }}
+              />
             </div>
           )}
 

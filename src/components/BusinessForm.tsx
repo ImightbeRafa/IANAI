@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { BusinessFormData, TargetAudienceFormData, SalesChannel, GeographicScope } from '../types'
 import { Store, Truck, Plus, Trash2, Loader2, MessageSquare, Globe, X } from 'lucide-react'
+import AutoFillButtons from './AutoFillButtons'
 
 interface BusinessFormProps {
   onSubmit: (data: BusinessFormData) => Promise<void>
@@ -245,6 +246,35 @@ export default function BusinessForm({ onSubmit, onCancel, initialData, isEditin
                   autoFocus
                 />
               </div>
+              <AutoFillButtons
+                formType="business"
+                language={language}
+                onResult={(data) => {
+                  const channels: SalesChannel[] = []
+                  if (Array.isArray(data.sales_channels)) {
+                    for (const ch of data.sales_channels) {
+                      if (['physical', 'messages', 'website'].includes(ch as string)) channels.push(ch as SalesChannel)
+                    }
+                  }
+                  setFormData(prev => ({
+                    ...prev,
+                    name: (data.name as string) || prev.name,
+                    sales_channels: channels.length > 0 ? channels : prev.sales_channels,
+                    location: (data.location as string) || prev.location,
+                    does_shipping: typeof data.does_shipping === 'boolean' ? data.does_shipping : prev.does_shipping,
+                    shipping_method: (data.shipping_method as string) || prev.shipping_method,
+                    target_audiences: [{
+                      sex: (['male', 'female', 'both'].includes(data.audience_sex as string) ? data.audience_sex : prev.target_audiences[0]?.sex || 'both') as 'male' | 'female' | 'both',
+                      age_min: typeof data.audience_age_min === 'number' ? data.audience_age_min : prev.target_audiences[0]?.age_min || 18,
+                      age_max: typeof data.audience_age_max === 'number' ? data.audience_age_max : prev.target_audiences[0]?.age_max || 65,
+                      geographic_scope: (['local', 'country', 'world'].includes(data.audience_geographic_scope as string) ? data.audience_geographic_scope : prev.target_audiences[0]?.geographic_scope || 'country') as GeographicScope,
+                      has_specific_profession: !!(data.audience_profession as string)?.trim(),
+                      profession_description: (data.audience_profession as string) || '',
+                    }],
+                  }))
+                  setStep(2)
+                }}
+              />
             </div>
           )}
 
