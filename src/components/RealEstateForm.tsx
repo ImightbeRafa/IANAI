@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { RealEstateFormData } from '../types'
-import { Loader2, X, Link2, Plus, Globe, Sparkles } from 'lucide-react'
+import { Loader2, X, Link2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AutoFillButtons from './AutoFillButtons'
 
 interface RealEstateFormProps {
   onSubmit: (data: RealEstateFormData) => Promise<void>
@@ -19,11 +20,6 @@ export default function RealEstateForm({ onSubmit, onCancel, businessId, initial
   const [linkInput, setLinkInput] = useState('')
   const [scrapingLinks, setScrapingLinks] = useState(false)
   const [linkErrors, setLinkErrors] = useState<string[]>([])
-  const [showUrlModal, setShowUrlModal] = useState(false)
-  const [autoFillUrl, setAutoFillUrl] = useState('')
-  const [processingUrl, setProcessingUrl] = useState(false)
-  const [urlStatus, setUrlStatus] = useState('')
-  const [urlErrorDetail, setUrlErrorDetail] = useState('')
 
   const [formData, setFormData] = useState<RealEstateFormData>({
     name: initialData?.name || '',
@@ -50,12 +46,6 @@ export default function RealEstateForm({ onSubmit, onCancel, businessId, initial
       subtitle: 'Completa la información de la propiedad',
       step: 'Paso', of: 'de', next: 'Siguiente', back: 'Atrás',
       save: isEditing ? 'Guardar' : 'Crear', cancel: 'Cancelar',
-      autoFillButton: 'Llenar desde URL',
-      autoFillTitle: 'Auto-llenar desde enlace',
-      autoFillSubtitle: 'Pega el enlace de la propiedad y extraeremos la información',
-      autoFillPlaceholder: 'https://propiedad.com',
-      autoFillExtract: 'Extraer', autoFillExtracting: 'Extrayendo...', autoFillAnalyzing: 'Analizando...',
-      autoFillSuccess: '¡Completado!', autoFillError: 'No se pudo extraer.',
       // S1
       nameLabel: '¿Cuál es el nombre o referencia de la propiedad?',
       namePh: 'Ej: Casa en La Guácima',
@@ -85,12 +75,6 @@ export default function RealEstateForm({ onSubmit, onCancel, businessId, initial
       subtitle: 'Complete the property information',
       step: 'Step', of: 'of', next: 'Next', back: 'Back',
       save: isEditing ? 'Save' : 'Create', cancel: 'Cancel',
-      autoFillButton: 'Fill from URL',
-      autoFillTitle: 'Auto-fill from link',
-      autoFillSubtitle: 'Paste the property link and we\'ll extract the info',
-      autoFillPlaceholder: 'https://property.com',
-      autoFillExtract: 'Extract', autoFillExtracting: 'Extracting...', autoFillAnalyzing: 'Analyzing...',
-      autoFillSuccess: 'Done!', autoFillError: 'Could not extract.',
       nameLabel: 'What is the name or reference of the property?',
       namePh: 'E.g.: House in La Guácima',
       businessTypeLabel: 'Business type',
@@ -125,38 +109,23 @@ export default function RealEstateForm({ onSubmit, onCancel, businessId, initial
     try { await onSubmit(formData) } finally { setLoading(false) }
   }
 
-  const handleAutoFillFromUrl = async () => {
-    if (!autoFillUrl.trim() || processingUrl) return
-    setProcessingUrl(true); setUrlStatus(''); setUrlErrorDetail('')
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) { setUrlStatus('error'); return }
-      setUrlStatus('extracting')
-      const fetchUrl = import.meta.env.PROD ? '/api/fetch-url' : 'http://localhost:3000/api/fetch-url'
-      const scrapeRes = await fetch(fetchUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ url: autoFillUrl }) })
-      const scrapeData = await scrapeRes.json()
-      if (!scrapeRes.ok || !scrapeData.content) { setUrlStatus('error'); setUrlErrorDetail(scrapeData?.error || ''); return }
-      setUrlStatus('analyzing')
-      const aiPrompt = `Analiza esta página de propiedad inmobiliaria y extrae: name, re_business_type ("sale"/"rent"/"airbnb"), re_price, re_location, re_construction_size, re_bedrooms, re_bathrooms, re_parking, re_highlights, re_location_reference, re_cta. Responde SOLO JSON.\n\nContenido:\n${scrapeData.content.slice(0, 12000)}`
-      const chatUrl = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
-      const aiRes = await fetch(chatUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ messages: [{ role: 'user', content: aiPrompt }], businessDetails: {}, language }) })
-      const aiData = await aiRes.json()
-      if (aiData.content) {
-        const jsonMatch = aiData.content.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0])
-          const updates: Record<string, string> = {}
-          for (const [key, value] of Object.entries(parsed)) { if (typeof value === 'string' && value.trim()) updates[key] = value as string }
-          setFormData(prev => ({ ...prev, ...updates, context_links: [...(prev.context_links || []).filter(l => l !== autoFillUrl), autoFillUrl] }))
-          setUrlStatus('success')
-          setTimeout(() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus(''); setStep(2) }, 1500)
-          return
-        }
+  const handleAutoFillResult = (data: Record<string, unknown>) => {
+    const stringFields: (keyof RealEstateFormData)[] = [
+      'name', 're_price', 're_location', 're_construction_size',
+      're_bedrooms', 're_capacity', 're_bathrooms', 're_parking',
+      're_highlights', 're_location_reference', 're_cta',
+    ]
+    const updates: Partial<RealEstateFormData> = {}
+    for (const key of stringFields) {
+      if (typeof data[key] === 'string' && (data[key] as string).trim()) {
+        (updates as Record<string, unknown>)[key] = data[key]
       }
-      setUrlStatus('error')
-    } catch (error) { console.error('Auto-fill failed:', error); setUrlStatus('error') }
-    finally { setProcessingUrl(false) }
+    }
+    if (typeof data.re_business_type === 'string' && ['sale', 'rent', 'airbnb'].includes(data.re_business_type)) {
+      updates.re_business_type = data.re_business_type as 'sale' | 'rent' | 'airbnb'
+    }
+    setFormData(prev => ({ ...prev, ...updates }))
+    setStep(2)
   }
 
   const handleAddLinks = async () => {
@@ -228,9 +197,11 @@ export default function RealEstateForm({ onSubmit, onCancel, businessId, initial
               </div>
               <div><label className="block text-sm font-medium text-dark-700 mb-2">{t.priceLabel}</label><input type="text" value={formData.re_price} onChange={e => handleChange('re_price', e.target.value)} placeholder={t.pricePh} className="input-field" /></div>
               <div><label className="block text-sm font-medium text-dark-700 mb-2">{t.locationLabel}</label><input type="text" value={formData.re_location} onChange={e => handleChange('re_location', e.target.value)} placeholder={t.locationPh} className="input-field" /></div>
-              <button type="button" onClick={() => setShowUrlModal(true)} disabled={!formData.name.trim()} className={`w-full p-4 border-2 border-dashed rounded-xl transition-all flex items-center justify-center gap-2 ${formData.name.trim() ? 'border-blue-200 hover:border-blue-400 hover:bg-blue-900/20 text-dark-500 hover:text-blue-600' : 'border-dark-100 text-dark-300 cursor-not-allowed'}`}>
-                <Globe className="w-5 h-5" /><span className="font-medium text-sm">{t.autoFillButton}</span>
-              </button>
+              <AutoFillButtons
+                formType="real_estate"
+                language={language}
+                onResult={handleAutoFillResult}
+              />
             </div>
           )}
 
@@ -275,31 +246,6 @@ export default function RealEstateForm({ onSubmit, onCancel, businessId, initial
             </div>
           )}
         </div>
-
-        {/* URL Modal */}
-        {showUrlModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-dark-100 rounded-2xl w-full max-w-lg overflow-hidden flex flex-col">
-              <div className="p-6 border-b border-dark-200 flex items-center justify-between">
-                <div><h3 className="text-lg font-bold text-dark-900 flex items-center gap-2"><Globe className="w-5 h-5 text-blue-500" />{t.autoFillTitle}</h3><p className="text-sm text-dark-500 mt-1">{t.autoFillSubtitle}</p></div>
-                <button onClick={() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus('') }} disabled={processingUrl} className="p-2 hover:bg-dark-100 rounded-lg disabled:opacity-50"><X className="w-5 h-5 text-dark-500" /></button>
-              </div>
-              <div className="p-6 space-y-4">
-                <input type="url" value={autoFillUrl} onChange={e => setAutoFillUrl(e.target.value)} placeholder={t.autoFillPlaceholder} className="input-field w-full" autoFocus disabled={processingUrl} />
-                {urlStatus === 'extracting' && <div className="flex items-center gap-2 text-sm text-blue-400 bg-blue-900/20 px-4 py-3 rounded-lg"><Loader2 className="w-4 h-4 animate-spin" />{t.autoFillExtracting}</div>}
-                {urlStatus === 'analyzing' && <div className="flex items-center gap-2 text-sm text-blue-400 bg-blue-900/20 px-4 py-3 rounded-lg"><Loader2 className="w-4 h-4 animate-spin" />{t.autoFillAnalyzing}</div>}
-                {urlStatus === 'success' && <div className="flex items-center gap-2 text-sm text-green-400 bg-green-900/20 px-4 py-3 rounded-lg"><Sparkles className="w-4 h-4" />{t.autoFillSuccess}</div>}
-                {urlStatus === 'error' && <div className="text-sm text-red-400 bg-red-900/20 px-4 py-3 rounded-lg"><p>{t.autoFillError}</p>{urlErrorDetail && <p className="text-xs mt-1">{urlErrorDetail}</p>}</div>}
-              </div>
-              <div className="p-6 border-t border-dark-100 flex justify-end gap-3">
-                <button onClick={() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus('') }} disabled={processingUrl} className="btn-secondary">{t.cancel}</button>
-                <button onClick={handleAutoFillFromUrl} disabled={!autoFillUrl.trim() || processingUrl || !autoFillUrl.startsWith('http')} className="bg-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
-                  {processingUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}{t.autoFillExtract}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className="p-6 border-t border-dark-100 flex items-center justify-between">
           <button onClick={step === 1 ? onCancel : () => setStep(s => s - 1)} className="btn-secondary" disabled={loading}>{step === 1 ? t.cancel : t.back}</button>

@@ -239,7 +239,11 @@ export default function IndumentariaForm({ onSubmit, onCancel, businessId, initi
                 language={language}
                 onResult={(data) => {
                   const updates: Partial<IndumentariaFormData> = {}
-                  const stringFields: (keyof IndumentariaFormData)[] = ['name', 'ind_article_type', 'ind_variations_description', 'ind_sizes', 'ind_main_material', 'ind_quality_description']
+                  const stringFields: (keyof IndumentariaFormData)[] = [
+                    'name', 'ind_article_type', 'ind_variations_description',
+                    'ind_sizes', 'ind_main_material', 'ind_quality_description',
+                    'ind_change_policy', 'guarantee_details', 'ind_customization_description',
+                  ]
                   for (const key of stringFields) {
                     if (typeof data[key] === 'string' && (data[key] as string).trim()) {
                       (updates as Record<string, unknown>)[key] = data[key]
@@ -247,6 +251,15 @@ export default function IndumentariaForm({ onSubmit, onCancel, businessId, initi
                   }
                   if (typeof data.ind_model_count === 'number' && data.ind_model_count >= 1) {
                     updates.ind_model_count = data.ind_model_count
+                  }
+                  if (typeof data.ind_accepts_changes === 'boolean') {
+                    updates.ind_accepts_changes = data.ind_accepts_changes
+                  }
+                  if (typeof data.has_guarantee === 'boolean') {
+                    updates.has_guarantee = data.has_guarantee
+                  }
+                  if (typeof data.ind_customizable === 'boolean') {
+                    updates.ind_customizable = data.ind_customizable
                   }
                   setFormData(prev => ({ ...prev, ...updates }))
                   setStep(2)

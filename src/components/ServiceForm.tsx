@@ -268,7 +268,13 @@ export default function ServiceForm({ onSubmit, onCancel, businessId, initialDat
                 language={language}
                 onResult={(data) => {
                   const updates: Partial<NewServiceFormData> = {}
-                  const stringFields: (keyof NewServiceFormData)[] = ['name', 'svc_service_type', 'svc_problem', 'svc_current_pain', 'svc_alternatives_tried', 'svc_alternatives_failures', 'svc_concrete_result', 'svc_result_timeline', 'svc_life_change', 'svc_process_steps', 'svc_service_duration', 'svc_differentiation', 'svc_main_objection']
+                  const stringFields: (keyof NewServiceFormData)[] = [
+                    'name', 'svc_service_type', 'svc_problem', 'svc_current_pain',
+                    'svc_alternatives_tried', 'svc_alternatives_failures',
+                    'svc_concrete_result', 'svc_result_timeline', 'svc_life_change',
+                    'svc_process_steps', 'svc_service_duration', 'svc_differentiation',
+                    'svc_main_objection', 'svc_method_name', 'svc_guarantee_details',
+                  ]
                   for (const key of stringFields) {
                     if (typeof data[key] === 'string' && (data[key] as string).trim()) {
                       (updates as Record<string, unknown>)[key] = data[key]
@@ -276,6 +282,12 @@ export default function ServiceForm({ onSubmit, onCancel, businessId, initialDat
                   }
                   if (typeof data.svc_service_format === 'string' && ['one_on_one', 'group', 'automated', 'mixed'].includes(data.svc_service_format)) {
                     updates.svc_service_format = data.svc_service_format as ServiceFormat
+                  }
+                  if (typeof data.svc_has_own_method === 'boolean') {
+                    updates.svc_has_own_method = data.svc_has_own_method
+                  }
+                  if (typeof data.svc_has_guarantee === 'boolean') {
+                    updates.svc_has_guarantee = data.svc_has_guarantee
                   }
                   setFormData(prev => ({ ...prev, ...updates }))
                   setStep(2)

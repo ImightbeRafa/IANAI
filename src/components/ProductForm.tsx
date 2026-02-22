@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useLanguage } from '../contexts/LanguageContext'
 import type { NewProductFormData } from '../types'
-import { Loader2, X, Link2, Plus, Globe, ClipboardPaste, Sparkles } from 'lucide-react'
+import { Loader2, X, Link2, Plus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AutoFillButtons from './AutoFillButtons'
 
 interface ProductFormProps {
   onSubmit: (data: NewProductFormData) => Promise<void>
@@ -27,14 +28,6 @@ export default function ProductForm({ onSubmit, onCancel, businessId, initialDat
   const [linkInput, setLinkInput] = useState('')
   const [scrapingLinks, setScrapingLinks] = useState(false)
   const [linkErrors, setLinkErrors] = useState<string[]>([])
-  const [showPasteModal, setShowPasteModal] = useState(false)
-  const [pasteText, setPasteText] = useState('')
-  const [processingPaste, setProcessingPaste] = useState(false)
-  const [showUrlModal, setShowUrlModal] = useState(false)
-  const [autoFillUrl, setAutoFillUrl] = useState('')
-  const [processingUrl, setProcessingUrl] = useState(false)
-  const [urlStatus, setUrlStatus] = useState('')
-  const [urlErrorDetail, setUrlErrorDetail] = useState('')
 
   const [formData, setFormData] = useState<NewProductFormData>({
     name: initialData?.name || '',
@@ -63,18 +56,6 @@ export default function ProductForm({ onSubmit, onCancel, businessId, initialDat
       subtitle: 'Completa la información de tu producto para generar scripts de venta',
       step: 'Paso', of: 'de', next: 'Siguiente', back: 'Atrás',
       save: isEditing ? 'Guardar' : 'Crear Producto', cancel: 'Cancelar',
-      quickPaste: 'Pegar Respuestas', quickPasteDesc: 'Pega toda la info y la IA la organizará',
-      pasteHere: 'Pega aquí la información del producto...', processing: 'Procesando...',
-      organize: 'Organizar con IA',
-      autoFillButton: 'Llenar desde URL',
-      autoFillTitle: 'Auto-llenar desde enlace',
-      autoFillSubtitle: 'Pega el enlace de tu producto y extraeremos la información',
-      autoFillPlaceholder: 'https://tu-producto.com',
-      autoFillExtract: 'Extraer información',
-      autoFillExtracting: 'Extrayendo página...',
-      autoFillAnalyzing: 'Analizando contenido con IA...',
-      autoFillSuccess: '¡Formulario completado! Revisa y ajusta.',
-      autoFillError: 'No se pudo extraer información.',
       // Section 1
       productName: 'Nombre del producto',
       productNamePlaceholder: 'Ej: Adaptador SmartDrive Pro',
@@ -126,18 +107,6 @@ export default function ProductForm({ onSubmit, onCancel, businessId, initialDat
       subtitle: 'Complete your product info to generate sales scripts',
       step: 'Step', of: 'of', next: 'Next', back: 'Back',
       save: isEditing ? 'Save' : 'Create Product', cancel: 'Cancel',
-      quickPaste: 'Paste Info', quickPasteDesc: 'Paste all info and AI will organize it',
-      pasteHere: 'Paste product information here...', processing: 'Processing...',
-      organize: 'Organize with AI',
-      autoFillButton: 'Fill from URL',
-      autoFillTitle: 'Auto-fill from link',
-      autoFillSubtitle: 'Paste your product link and we\'ll extract the info',
-      autoFillPlaceholder: 'https://your-product.com',
-      autoFillExtract: 'Extract info',
-      autoFillExtracting: 'Extracting page...',
-      autoFillAnalyzing: 'Analyzing with AI...',
-      autoFillSuccess: 'Form completed! Review and adjust.',
-      autoFillError: 'Could not extract information.',
       productName: 'Product name',
       productNamePlaceholder: 'E.g.: SmartDrive Pro Adapter',
       categoryLabel: 'Product category',
@@ -228,62 +197,33 @@ export default function ProductForm({ onSubmit, onCancel, businessId, initialDat
     setFormData(prev => ({ ...prev, context_links: (prev.context_links || []).filter(l => l !== url) }))
   }
 
-  const handleProcessPaste = async () => {
-    if (!pasteText.trim()) return
-    setProcessingPaste(true)
-    try {
-      const prompt = `Eres un asistente experto en marketing. Organiza la siguiente información sobre un producto físico. Responde SOLO con JSON válido con estos campos: name, product_category, product_description (beneficios), current_alternatives, alternatives_disadvantages, technical_specs, utility, result. Si no encuentras info para un campo, déjalo como "".`
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) return
-      const chatUrl = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
-      const response = await fetch(chatUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ messages: [{ role: 'user', content: `${prompt}\n\nInformación:\n${pasteText}` }], businessDetails: {}, language }) })
-      const data = await response.json()
-      if (data.content) {
-        const jsonMatch = data.content.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0])
-          setFormData(prev => ({ ...prev, ...parsed }))
-          setShowPasteModal(false); setPasteText(''); setStep(2)
-        }
+  const handleAutoFillResult = (data: Record<string, unknown>) => {
+    const stringFields: (keyof NewProductFormData)[] = [
+      'name', 'product_category', 'product_description',
+      'current_alternatives', 'alternatives_disadvantages',
+      'technical_specs', 'utility', 'result',
+      'guarantee_details', 'price_range',
+    ]
+    const updates: Partial<NewProductFormData> = {}
+    for (const key of stringFields) {
+      if (typeof data[key] === 'string' && (data[key] as string).trim()) {
+        (updates as Record<string, unknown>)[key] = data[key]
       }
-    } catch (error) { console.error('Failed to process paste:', error) }
-    finally { setProcessingPaste(false) }
-  }
-
-  const handleAutoFillFromUrl = async () => {
-    if (!autoFillUrl.trim() || processingUrl) return
-    setProcessingUrl(true); setUrlStatus(''); setUrlErrorDetail('')
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const token = session?.access_token
-      if (!token) { setUrlStatus('error'); return }
-      setUrlStatus('extracting')
-      const fetchUrl = import.meta.env.PROD ? '/api/fetch-url' : 'http://localhost:3000/api/fetch-url'
-      const scrapeRes = await fetch(fetchUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ url: autoFillUrl }) })
-      const scrapeData = await scrapeRes.json()
-      if (!scrapeRes.ok || !scrapeData.content) { setUrlStatus('error'); setUrlErrorDetail(scrapeData?.error || ''); return }
-      setUrlStatus('analyzing')
-      const pageContent = scrapeData.content.slice(0, 12000)
-      const aiPrompt = `Analiza este contenido de producto y extrae: name, product_category (tecnologia/hogar/salud/belleza/accesorio/otro), product_description (beneficios), current_alternatives, alternatives_disadvantages, technical_specs, utility, result. Responde SOLO JSON.\n\nContenido:\n${pageContent}`
-      const chatUrl = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
-      const aiRes = await fetch(chatUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ messages: [{ role: 'user', content: aiPrompt }], businessDetails: {}, language }) })
-      const aiData = await aiRes.json()
-      if (aiData.content) {
-        const jsonMatch = aiData.content.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0])
-          const updates: Record<string, string> = {}
-          for (const [key, value] of Object.entries(parsed)) { if (typeof value === 'string' && value.trim()) updates[key] = value as string }
-          setFormData(prev => ({ ...prev, ...updates, context_links: [...(prev.context_links || []).filter(l => l !== autoFillUrl), autoFillUrl] }))
-          setUrlStatus('success')
-          setTimeout(() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus(''); setStep(2) }, 1500)
-          return
-        }
-      }
-      setUrlStatus('error')
-    } catch (error) { console.error('Auto-fill failed:', error); setUrlStatus('error') }
-    finally { setProcessingUrl(false) }
+    }
+    if (Array.isArray(data.product_variations)) {
+      const validVariations = (data.product_variations as string[]).filter(v =>
+        ['colores', 'tamanos', 'modelos', 'versiones', 'personalizacion', 'otro'].includes(v)
+      )
+      if (validVariations.length > 0) updates.product_variations = validVariations
+    }
+    if (typeof data.has_guarantee === 'boolean') {
+      updates.has_guarantee = data.has_guarantee
+    }
+    if (typeof data.stock_limited === 'boolean') {
+      updates.stock_limited = data.stock_limited
+    }
+    setFormData(prev => ({ ...prev, ...updates }))
+    setStep(2)
   }
 
   const canProceed = () => {
@@ -337,15 +277,11 @@ export default function ProductForm({ onSubmit, onCancel, businessId, initialDat
                   <input type="text" value={formData.product_category_custom || ''} onChange={e => handleChange('product_category_custom', e.target.value)} placeholder={t.categoryCustomPlaceholder} className="input-field mt-3" />
                 )}
               </div>
-              {/* Quick Fill */}
-              <div className="grid grid-cols-2 gap-3">
-                <button type="button" onClick={() => setShowUrlModal(true)} disabled={!formData.name.trim()} className={`p-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center gap-2 ${formData.name.trim() ? 'border-blue-200 hover:border-blue-400 hover:bg-blue-900/20 text-dark-500 hover:text-blue-600' : 'border-dark-100 text-dark-300 cursor-not-allowed'}`}>
-                  <Globe className="w-5 h-5" /><span className="font-medium text-sm">{t.autoFillButton}</span>
-                </button>
-                <button type="button" onClick={() => setShowPasteModal(true)} disabled={!formData.name.trim()} className={`p-4 border-2 border-dashed rounded-xl transition-all flex flex-col items-center gap-2 ${formData.name.trim() ? 'border-dark-200 hover:border-primary-400 hover:bg-primary-900/20 text-dark-500 hover:text-primary-600' : 'border-dark-100 text-dark-300 cursor-not-allowed'}`}>
-                  <ClipboardPaste className="w-5 h-5" /><span className="font-medium text-sm">{t.quickPaste}</span>
-                </button>
-              </div>
+              <AutoFillButtons
+                formType="product"
+                language={language}
+                onResult={handleAutoFillResult}
+              />
             </div>
           )}
 
@@ -495,50 +431,6 @@ export default function ProductForm({ onSubmit, onCancel, businessId, initialDat
             </div>
           )}
         </div>
-
-        {/* Paste Modal */}
-        {showPasteModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-dark-100 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-              <div className="p-6 border-b border-dark-200 flex items-center justify-between">
-                <div><h3 className="text-lg font-bold text-dark-900 flex items-center gap-2"><Sparkles className="w-5 h-5 text-primary-600" />{t.quickPaste}</h3><p className="text-sm text-dark-500 mt-1">{t.quickPasteDesc}</p></div>
-                <button onClick={() => { setShowPasteModal(false); setPasteText('') }} className="p-2 hover:bg-dark-100 rounded-lg"><X className="w-5 h-5 text-dark-500" /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-6"><textarea value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={t.pasteHere} className="input-field min-h-[300px] w-full" autoFocus /></div>
-              <div className="p-6 border-t border-dark-100 flex justify-end gap-3">
-                <button onClick={() => { setShowPasteModal(false); setPasteText('') }} className="btn-secondary">{t.cancel}</button>
-                <button onClick={handleProcessPaste} disabled={!pasteText.trim() || processingPaste} className="btn-primary flex items-center gap-2">
-                  {processingPaste ? <><Loader2 className="w-4 h-4 animate-spin" />{t.processing}</> : <><Sparkles className="w-4 h-4" />{t.organize}</>}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* URL Modal */}
-        {showUrlModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-dark-100 rounded-2xl w-full max-w-lg overflow-hidden flex flex-col">
-              <div className="p-6 border-b border-dark-200 flex items-center justify-between">
-                <div><h3 className="text-lg font-bold text-dark-900 flex items-center gap-2"><Globe className="w-5 h-5 text-blue-500" />{t.autoFillTitle}</h3><p className="text-sm text-dark-500 mt-1">{t.autoFillSubtitle}</p></div>
-                <button onClick={() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus('') }} disabled={processingUrl} className="p-2 hover:bg-dark-100 rounded-lg disabled:opacity-50"><X className="w-5 h-5 text-dark-500" /></button>
-              </div>
-              <div className="p-6 space-y-4">
-                <input type="url" value={autoFillUrl} onChange={e => setAutoFillUrl(e.target.value)} placeholder={t.autoFillPlaceholder} className="input-field w-full" autoFocus disabled={processingUrl} />
-                {urlStatus === 'extracting' && <div className="flex items-center gap-2 text-sm text-blue-400 bg-blue-900/20 px-4 py-3 rounded-lg"><Loader2 className="w-4 h-4 animate-spin" />{t.autoFillExtracting}</div>}
-                {urlStatus === 'analyzing' && <div className="flex items-center gap-2 text-sm text-blue-400 bg-blue-900/20 px-4 py-3 rounded-lg"><Loader2 className="w-4 h-4 animate-spin" />{t.autoFillAnalyzing}</div>}
-                {urlStatus === 'success' && <div className="flex items-center gap-2 text-sm text-green-400 bg-green-900/20 px-4 py-3 rounded-lg"><Sparkles className="w-4 h-4" />{t.autoFillSuccess}</div>}
-                {urlStatus === 'error' && <div className="text-sm text-red-400 bg-red-900/20 px-4 py-3 rounded-lg"><p className="font-medium">{t.autoFillError}</p>{urlErrorDetail && <p className="mt-1 text-xs text-red-500">{urlErrorDetail}</p>}</div>}
-              </div>
-              <div className="p-6 border-t border-dark-100 flex justify-end gap-3">
-                <button onClick={() => { setShowUrlModal(false); setAutoFillUrl(''); setUrlStatus('') }} disabled={processingUrl} className="btn-secondary">{t.cancel}</button>
-                <button onClick={handleAutoFillFromUrl} disabled={!autoFillUrl.trim() || processingUrl || !autoFillUrl.startsWith('http')} className="bg-blue-500 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2">
-                  {processingUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}{t.autoFillExtract}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Footer */}
         <div className="p-6 border-t border-dark-100 flex items-center justify-between">

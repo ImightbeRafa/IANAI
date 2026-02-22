@@ -227,6 +227,7 @@ export default function RestaurantForm({ onSubmit, onCancel, businessId, initial
                     menu_text: (data.menu_text as string) || prev.menu_text,
                     location: (data.location as string) || prev.location,
                     schedule: (data.schedule as string) || prev.schedule,
+                    is_new_restaurant: typeof data.is_new_restaurant === 'boolean' ? data.is_new_restaurant : prev.is_new_restaurant,
                   }))
                   setStep(2)
                 }}
