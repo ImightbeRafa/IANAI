@@ -520,7 +520,8 @@ export default function PostWorkspace() {
         body: JSON.stringify({
           action: 'enhance',
           enhanceImage: base64Image,
-          aspectRatio
+          aspectRatio,
+          language
         })
       })
 
