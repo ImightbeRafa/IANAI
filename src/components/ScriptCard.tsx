@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, RotateCcw, Wand2, Anchor } from 'lucide-react'
+import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, ChevronDown, ChevronUp } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
+
+type EditSource = 'manual' | 'enhance' | 'hook' | null
 
 interface ScriptCardProps {
   script: ParsedScript
@@ -19,7 +21,6 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
   const [saved, setSaved] = useState(isSaved || false)
   const [savedEdited, setSavedEdited] = useState(false)
 
-  // Edit state
   const [showEditInput, setShowEditInput] = useState(false)
   const [editInstruction, setEditInstruction] = useState('')
   const [editedContent, setEditedContent] = useState<string | null>(null)
@@ -27,12 +28,14 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
   const [editError, setEditError] = useState<string | null>(null)
   const editInputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Enhance (magic wand) state
   const [enhancing, setEnhancing] = useState(false)
 
-  // Change hooks state
   const [showHookPicker, setShowHookPicker] = useState(false)
   const hookPickerRef = useRef<HTMLDivElement>(null)
+
+  const [editSource, setEditSource] = useState<EditSource>(null)
+  const [editSourceLabel, setEditSourceLabel] = useState('')
+  const [showOriginalFull, setShowOriginalFull] = useState(false)
 
   useEffect(() => {
     if (!showHookPicker) return
@@ -72,8 +75,12 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     setEditing(true)
     setEditError(null)
     try {
-      const result = await onEdit(script.content, editInstruction.trim())
+      const source = editedContent || script.content
+      const result = await onEdit(source, editInstruction.trim())
       setEditedContent(result)
+      setEditSource('manual')
+      setEditSourceLabel('')
+      setSavedEdited(false)
       setShowEditInput(false)
       setEditInstruction('')
     } catch (err) {
@@ -86,19 +93,24 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
   const handleDiscardEdit = () => {
     setEditedContent(null)
     setSavedEdited(false)
+    setEditSource(null)
+    setEditSourceLabel('')
+    setShowOriginalFull(false)
   }
 
-  const ENHANCE_PROMPT = `Corrige el guión: El video se dirige únicamente a potenciales compradores que en este momento están activamente buscando o potencialmente interesados en adquirir en corto plazo el producto o servicio a promover. No debes dirigir estos guiones a personas que probablemente no necesiten/quieran/interese el producto o servicio a promover. Busca y comprende quién es el perfil de cliente ideal que está listo para adquirir producto o servicio, y háblale directamente a su mente. El gancho debe estrictamente dar contexto sobre qué es lo que se está promoviendo y tocar ya sea un dolor o un deseo del potencial comprador. Puedes añadir solamente si vale la pena, una propuesta única de valor que ofrezca un outcome directo que facilite o mejore la vida del potencial cliente en relación al producto o servicio que está comprando. O bien, un diferenciador clave. Pero solamente si la propuesta única de valor o el diferenciador es tangible y de gran impacto. Los ganchos deben dar a entender que el video mostrara "nuestro producto o servicio" para que se entienda que se está promoviendo algo y que no se confunda con un video educativo o de entretenimiento. En el desarrollo debe responder la premisa de ambos ganchos A y B, no cometas el error de dar una premisa en el gancho y no responderla correctamente en el desarrollo. Independientemente de la estructura que se esté utilizando... es importante que siempre se incluyan las propuestas de valor - pero pásalas de propuestas abstractas a frases que venden a la mente. Haz una revisión para verificar que los guiones tienen sentido, el objetivo es promover los productos o servicios de forma directa, segmentando y llamando la atención correctamente desde el inicio en el gancho, generando deseo y claridad sobre la oferta, producto o servicio en el desarrollo y guiando al siguiente paso (en este caso enviar un mensaje) para llevarlos al proceso de compra. Instrucciones adicionales: Cuando hablas de un "dolor" o "frustración", debe ser real. No utilices términos como "sin estrés", "sin complicarte", ya que son muy genéricos y no impactan al espectador emocionalmente, ya que ni si quiera se lo cuestiona. Utiliza dolores o frustraciones solamente si puedes verificar que los potenciales clientes de este producto o servicio lo piensan o expresan realmente. Tangibilidad. No uses frases de relleno para extender el video. Cada frase en el desarrollo debe referise a una propuesta de valor tangible, medible, outcomes reales y directos. Siempre relacionado a la premisa que se dió en los ganchos A y B. El método de comunicación en el desarrollo debe ser en formato de bulletpoints para mantener el dinamismo, directo al grano. La totalidad del video debe vender tangiblemente los outcomes a la mente del espectador. Que sean tan tangibles que no quede duda a qué nos referimos. Por ejemplo, no digas "te brindamos acompañamiento en todo el proceso" ya que eso no es tangible, no se sabe... Mejor evitarlo a menos que tengas información que te indique por ejemplo: "Hacemos llamadas 1:1 todas las semanas para... [acción tangible]". De lo contrario, mejor no mencionarlo. Revisa la información del negocio y fíjate que todo haga sentido.
-Entrega el guión nuevamente con el mismo formato que entregaste antes pero con las correcciones correspondientes.`
+  const ENHANCE_PROMPT = `Corrige el guión: El video se dirige únicamente a potenciales compradores que en este momento están activamente buscando o potencialmente interesados en adquirir en corto plazo el producto o servicio a promover. No debes dirigir estos guiones a personas que probablemente no necesiten/quieran/interese el producto o servicio a promover. Busca y comprende quién es el perfil de cliente ideal que está listo para adquirir producto o servicio, y háblale directamente a su mente. El gancho debe estrictamente dar contexto sobre qué es lo que se está promoviendo y tocar ya sea un dolor o un deseo del potencial comprador. Puedes añadir solamente si vale la pena, una propuesta única de valor que ofrezca un outcome directo que facilite o mejore la vida del potencial cliente en relación al producto o servicio que está comprando. O bien, un diferenciador clave. Pero solamente si la propuesta única de valor o el diferenciador es tangible y de gran impacto. Los ganchos deben dar a entender que el video mostrara "nuestro producto o servicio" para que se entienda que se está promoviendo algo y que no se confunda con un video educativo o de entretenimiento. En el desarrollo debe responder la premisa de ambos ganchos A y B, no cometas el error de dar una premisa en el gancho y no responderla correctamente en el desarrollo. Independientemente de la estructura que se esté utilizando... es importante que siempre se incluyan las propuestas de valor - pero pásalas de propuestas abstractas a frases que venden a la mente. Haz una revisión para verificar que los guiones tienen sentido, el objetivo es promover los productos o servicios de forma directa, segmentando y llamando la atención correctamente desde el inicio en el gancho, generando deseo y claridad sobre la oferta, producto o servicio en el desarrollo y guiando al siguiente paso (en este caso enviar un mensaje) para llevarlos al proceso de compra. Instrucciones adicionales: Cuando hablas de un "dolor" o "frustración", debe ser real. No utilices términos como "sin estrés", "sin complicarte", ya que son muy genéricos y no impactan al espectador emocionalmente, ya que ni si quiera se lo cuestiona. Utiliza dolores o frustraciones solamente si puedes verificar que los potenciales clientes de este producto o servicio lo piensan o expresan realmente. Tangibilidad. No uses frases de relleno para extender el video. Cada frase en el desarrollo debe referise a una propuesta de valor tangible, medible, outcomes reales y directos. Siempre relacionado a la premisa que se dió en los ganchos A y B. El método de comunicación en el desarrollo debe ser en formato de bulletpoints para mantener el dinamismo, directo al grano. La totalidad del video debe vender tangiblemente los outcomes a la mente del espectador. Que sean tan tangibles que no quede duda a qué nos referimos. Por ejemplo, no digas "te brindamos acompañamiento en todo el proceso" ya que eso no es tangible, no se sabe... Mejor evitarlo a menos que tengas información que te indique por ejemplo: "Hacemos llamadas 1:1 todas las semanas para... [acción tangible]". De lo contrario, mejor no mencionarlo. Revisa la información del negocio y fíjate que todo haga sentido.\nEntrega el guión nuevamente con el mismo formato que entregaste antes pero con las correcciones correspondientes.`
 
   const handleEnhance = async () => {
-    if (!onEdit || enhancing) return
+    if (!onEdit || enhancing || editing) return
     setEnhancing(true)
     setEditError(null)
     try {
       const source = editedContent || script.content
       const result = await onEdit(source, ENHANCE_PROMPT)
       setEditedContent(result)
+      setEditSource('enhance')
+      setEditSourceLabel('')
+      setSavedEdited(false)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Enhance failed')
     } finally {
@@ -144,7 +156,6 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
       { label: language === 'es' ? 'Para quien valora calidad' : 'Quality seekers', prompt: 'Cambia los ganchos A y B usando la estructura: "Si sos de los que [acción que denota cuidado por calidad], escucha esto." Adapta al contexto del producto. Mantén el desarrollo y CTA igual.' },
       { label: language === 'es' ? 'Dolor estético' : 'Aesthetic pain', prompt: 'Cambia los ganchos A y B usando la estructura: "Si estás cansado de que tu ropa [problema común]…" Adapta al contexto del producto. Mantén el desarrollo y CTA igual.' },
     ]
-    // Default: product
     return [
       { label: language === 'es' ? 'Definición directa + funcionalidad' : 'Direct definition + function', prompt: 'Cambia los ganchos A y B usando la estructura: "Este es un [tipo de producto] y sirve para [funcionalidad]." Adapta al contexto del producto. Mantén el desarrollo y CTA igual.' },
       { label: language === 'es' ? 'Verbo + problema + propuesta' : 'Verb + problem + prop', prompt: 'Cambia los ganchos A y B usando la estructura: "[Verbo] + [problema o solución/objetivo] + [propuesta de valor única]." Adapta al contexto del producto. Mantén el desarrollo y CTA igual.' },
@@ -159,8 +170,8 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
     ]
   }
 
-  const handleHookChange = async (hookPrompt: string) => {
-    if (!onEdit || editing) return
+  const handleHookChange = async (hookPrompt: string, hookLabel: string) => {
+    if (!onEdit || editing || enhancing) return
     setShowHookPicker(false)
     setEditing(true)
     setEditError(null)
@@ -168,6 +179,9 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
       const source = editedContent || script.content
       const result = await onEdit(source, hookPrompt)
       setEditedContent(result)
+      setEditSource('hook')
+      setEditSourceLabel(hookLabel)
+      setSavedEdited(false)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Hook change failed')
     } finally {
@@ -185,94 +199,118 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
     editPlaceholder: language === 'es' ? 'Describe qué quieres cambiar...' : 'Describe what you want to change...',
     original: language === 'es' ? 'Original' : 'Original',
     edited: language === 'es' ? 'Editado' : 'Edited',
+    enhanced: language === 'es' ? 'Mejorado' : 'Enhanced',
     discard: language === 'es' ? 'Descartar' : 'Discard',
     enhance: language === 'es' ? 'Mejorar' : 'Enhance',
     enhancing: language === 'es' ? 'Mejorando...' : 'Enhancing...',
     changeHooks: '+ Hooks',
     pickHook: language === 'es' ? 'Selecciona un tipo de gancho' : 'Select a hook type',
+    showOriginal: language === 'es' ? 'Ver original' : 'Show original',
+    hideOriginal: language === 'es' ? 'Ocultar original' : 'Hide original',
   }
 
-  const ActionButtons = ({ content, which, isSavedState, title }: { content: string; which: 'original' | 'edited'; isSavedState: boolean; title: string }) => (
-    <div className="flex items-center gap-1.5">
-      <button
-        onClick={() => handleCopy(content, which)}
-        className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
-          copied === which
-            ? 'bg-green-900/20 text-green-400'
-            : 'text-dark-400 hover:bg-dark-200 hover:text-dark-700'
-        }`}
-      >
-        {copied === which ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-        {copied === which ? t.copied : t.copy}
-      </button>
-      {onSave && (
-        <button
-          onClick={() => handleSave(content, title, which === 'edited')}
-          disabled={isSavedState || saving || savingScript}
-          className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
-            isSavedState
-              ? 'bg-green-900/20 text-green-400'
-              : 'text-dark-400 hover:bg-primary-900/20 hover:text-primary-400'
-          }`}
-        >
-          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <BookmarkPlus className="w-3 h-3" />}
-          {isSavedState ? t.saved : t.save}
-        </button>
-      )}
-      {onEdit && (
-        <>
-          <button
-            onClick={handleEnhance}
-            disabled={enhancing || editing}
-            className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-amber-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
-            title={t.enhance}
-          >
-            {enhancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-            {enhancing ? t.enhancing : t.enhance}
-          </button>
-          <div className="relative" ref={hookPickerRef}>
-            <button
-              onClick={() => setShowHookPicker(!showHookPicker)}
-              disabled={editing || enhancing}
-              className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-blue-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
-            >
-              <Anchor className="w-3 h-3" />
-              {t.changeHooks}
-            </button>
-            {showHookPicker && (
-              <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
-                <div className="px-3 py-2 border-b border-dark-200">
-                  <p className="text-[11px] font-semibold text-dark-500">{t.pickHook}</p>
-                </div>
-                {getHookTemplates().map((hook, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleHookChange(hook.prompt)}
-                    className="w-full text-left px-3 py-2 text-xs text-dark-600 hover:bg-primary-900/10 hover:text-primary-400 transition-colors border-b border-dark-200/50 last:border-0"
-                  >
-                    {hook.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
+  const getEditBadge = () => {
+    switch (editSource) {
+      case 'enhance':
+        return { label: t.enhanced, color: 'text-amber-500', icon: <Wand2 className="w-3 h-3" /> }
+      case 'hook':
+        return { label: `Hook: ${editSourceLabel}`, color: 'text-blue-500', icon: <Anchor className="w-3 h-3" /> }
+      case 'manual':
+      default:
+        return { label: t.edited, color: 'text-primary-500', icon: <Pencil className="w-3 h-3" /> }
+    }
+  }
+
+  const CopyButton = ({ content, which }: { content: string; which: 'original' | 'edited' }) => (
+    <button
+      onClick={() => handleCopy(content, which)}
+      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
+        copied === which
+          ? 'bg-green-900/20 text-green-400'
+          : 'text-dark-400 hover:bg-dark-200 hover:text-dark-700'
+      }`}
+    >
+      {copied === which ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied === which ? t.copied : t.copy}
+    </button>
   )
 
+  const SaveButton = ({ content, title, isEdited, isSavedState }: { content: string; title: string; isEdited: boolean; isSavedState: boolean }) => {
+    if (!onSave) return null
+    return (
+      <button
+        onClick={() => handleSave(content, title, isEdited)}
+        disabled={isSavedState || saving || savingScript}
+        className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
+          isSavedState
+            ? 'bg-green-900/20 text-green-400'
+            : 'text-dark-400 hover:bg-primary-900/20 hover:text-primary-400'
+        }`}
+      >
+        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <BookmarkPlus className="w-3 h-3" />}
+        {isSavedState ? t.saved : t.save}
+      </button>
+    )
+  }
+
+  const EditActions = () => {
+    if (!onEdit) return null
+    return (
+      <>
+        <button
+          onClick={handleEnhance}
+          disabled={enhancing || editing}
+          className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-amber-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
+          title={t.enhance}
+        >
+          {enhancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+          {enhancing ? t.enhancing : t.enhance}
+        </button>
+        <div className="relative" ref={hookPickerRef}>
+          <button
+            onClick={() => setShowHookPicker(!showHookPicker)}
+            disabled={editing || enhancing}
+            className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-blue-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
+          >
+            <Anchor className="w-3 h-3" />
+            {t.changeHooks}
+          </button>
+          {showHookPicker && (
+            <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
+              <div className="px-3 py-2 border-b border-dark-200">
+                <p className="text-[11px] font-semibold text-dark-500">{t.pickHook}</p>
+              </div>
+              {getHookTemplates().map((hook, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleHookChange(hook.prompt, hook.label)}
+                  className="w-full text-left px-3 py-2 text-xs text-dark-600 hover:bg-primary-900/10 hover:text-primary-400 transition-colors border-b border-dark-200/50 last:border-0"
+                >
+                  {hook.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    )
+  }
+
+  const isProcessing = editing || enhancing
+
   return (
-    <div className="bg-dark-100 border border-dark-200 rounded-xl overflow-hidden transition-shadow hover:shadow-sm">
+    <div className="bg-dark-100 border border-dark-200 rounded-xl transition-shadow hover:shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-200 bg-dark-200/40">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-200 bg-dark-200/40 rounded-t-xl">
         <span className="text-xs font-semibold text-dark-600 tracking-wide">
           {script.title}
         </span>
         <div className="flex items-center gap-2">
-          {onEdit && !editedContent && !showEditInput && (
+          {onEdit && !showEditInput && (
             <button
               onClick={() => { setShowEditInput(true); setTimeout(() => editInputRef.current?.focus(), 100) }}
-              className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-primary-500 transition-colors"
+              disabled={isProcessing}
+              className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-primary-500 transition-colors disabled:opacity-40"
             >
               <Pencil className="w-3 h-3" />
               {t.edit}
@@ -318,32 +356,33 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
         </div>
       )}
 
-      {/* Content — show original vs edited when edited exists */}
+      {/* Processing indicator */}
+      {isProcessing && !showEditInput && (
+        <div className="px-4 py-2 border-b border-dark-200 bg-dark-200/30">
+          <div className="flex items-center gap-2 text-xs text-dark-400">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            {enhancing ? t.enhancing : (language === 'es' ? 'Procesando...' : 'Processing...')}
+          </div>
+        </div>
+      )}
+
       {editedContent ? (
         <div>
-          {/* Original */}
-          <div className="px-4 pt-3 pb-2">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-semibold text-dark-400 uppercase tracking-wider">{t.original}</span>
-              <ActionButtons content={script.content} which="original" isSavedState={saved} title={script.title} />
-            </div>
-            <div className="text-sm text-dark-500 leading-relaxed whitespace-pre-wrap line-clamp-6 opacity-70">
-              {script.content}
-            </div>
-          </div>
-          <div className="mx-4 border-t border-dashed border-dark-200" />
-          {/* Edited */}
-          <div className="px-4 pt-2 pb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-semibold text-primary-500 uppercase tracking-wider">{t.edited}</span>
-              <div className="flex items-center gap-1.5">
-                <ActionButtons content={editedContent} which="edited" isSavedState={savedEdited} title={`${script.title} (edited)`} />
+          {/* Edited content (primary) */}
+          <div className="px-4 pt-3 pb-3">
+            <div className="flex items-center justify-between mb-2">
+              {/* Source badge */}
+              <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${getEditBadge().color}`}>
+                {getEditBadge().icon}
+                {getEditBadge().label}
+              </div>
+              <div className="flex items-center gap-1">
                 <button
                   onClick={handleDiscardEdit}
-                  className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-red-400 px-2 py-0.5 rounded-md transition-colors"
+                  className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
+                  title={t.discard}
                 >
-                  <RotateCcw className="w-3 h-3" />
-                  {t.discard}
+                  <X className="w-3 h-3" />
                 </button>
               </div>
             </div>
@@ -351,18 +390,36 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
               {editedContent}
             </div>
           </div>
-          {/* Re-edit button */}
-          {onEdit && (
-            <div className="px-4 py-2 border-t border-dark-200">
-              <button
-                onClick={() => { setShowEditInput(true); setTimeout(() => editInputRef.current?.focus(), 100) }}
-                className="inline-flex items-center gap-1.5 text-[11px] text-dark-400 hover:text-primary-500 transition-colors"
-              >
-                <Pencil className="w-3 h-3" />
-                {t.edit}
-              </button>
-            </div>
-          )}
+
+          {/* Actions for edited content */}
+          <div className="flex items-center gap-1.5 px-4 py-2 border-t border-dark-200">
+            <CopyButton content={editedContent} which="edited" />
+            <SaveButton content={editedContent} title={`${script.title} (${editSource || 'edited'})`} isEdited isSavedState={savedEdited} />
+            <EditActions />
+          </div>
+
+          {/* Collapsible original */}
+          <div className="border-t border-dashed border-dark-200">
+            <button
+              onClick={() => setShowOriginalFull(!showOriginalFull)}
+              className="w-full flex items-center justify-between px-4 py-2 text-[11px] text-dark-400 hover:text-dark-600 transition-colors"
+            >
+              <span className="flex items-center gap-1.5 font-medium uppercase tracking-wider">
+                {t.original}
+              </span>
+              <div className="flex items-center gap-2">
+                <CopyButton content={script.content} which="original" />
+                {showOriginalFull ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </div>
+            </button>
+            {showOriginalFull && (
+              <div className="px-4 pb-3">
+                <div className="text-sm text-dark-500 leading-relaxed whitespace-pre-wrap opacity-60">
+                  {script.content}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -373,8 +430,10 @@ Entrega el guión nuevamente con el mismo formato que entregaste antes pero con 
             </div>
           </div>
           {/* Actions */}
-          <div className="flex items-center gap-2 px-4 py-2.5 border-t border-dark-200">
-            <ActionButtons content={script.content} which="original" isSavedState={saved} title={script.title} />
+          <div className="flex items-center gap-1.5 px-4 py-2.5 border-t border-dark-200 rounded-b-xl">
+            <CopyButton content={script.content} which="original" />
+            <SaveButton content={script.content} title={script.title} isEdited={false} isSavedState={saved} />
+            <EditActions />
           </div>
         </>
       )}

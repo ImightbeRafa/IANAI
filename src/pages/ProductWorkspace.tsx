@@ -214,7 +214,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -633,7 +633,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
