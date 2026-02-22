@@ -264,23 +264,10 @@ interface ScriptTypeConfig {
 
 interface ScriptSettings {
   framework: 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso'
-  tone: 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
-  duration: '15s' | '30s' | '60s' | '90s'
-  platform: 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
   variations: number
   model?: AIModel
   generationMode?: 'mixed' | 'by_type'
   scriptTypeConfig?: ScriptTypeConfig
-}
-
-interface ICPData {
-  name: string
-  description: string
-  awareness_level: 'unaware' | 'problem_aware' | 'solution_aware' | 'product_aware'
-  sophistication_level: 'low' | 'medium' | 'high'
-  urgency_type: 'immediate' | 'latent' | 'low'
-  gender: 'male' | 'female' | 'any'
-  age_range: '18-24' | '25-34' | '35-44' | '45-54' | '55+'
 }
 
 interface ContextDocumentData {
@@ -293,102 +280,15 @@ interface ContextDocumentData {
 interface RequestBody {
   messages: ChatMessage[]
   businessDetails: Record<string, string>
+  businessContext?: BusinessContext
+  productContext?: ProductContext
   language: 'en' | 'es'
   scriptSettings?: ScriptSettings
-  productType?: 'product' | 'service' | 'restaurant' | 'real_estate'
-  icp?: ICPData | null
+  productType?: 'product' | 'service' | 'restaurant' | 'real_estate' | 'indumentaria'
   contextDocuments?: ContextDocumentData[]
   previewOnly?: boolean
 }
 
-const FRAMEWORK_PROMPTS = {
-  es: {
-    venta_directa: `ESTRUCTURA: VENTA DIRECTA (La Madre)
-Ideal para: Productos de demanda conocida (iPads, Tecnología, Ropa).
-Fórmula: [Gancho con Producto + Diferenciador] + [Justificación de Precio] + [Garantía/Certeza] + [Logística] + [CTA].
-Enfócate en la oferta irresistible y el precio/valor. Justifica POR QUÉ puedes ofrecer mejor precio.`,
-
-    desvalidar_alternativas: `ESTRUCTURA: DESVALIDAR ALTERNATIVAS (El Posicionador)
-Ideal para: Productos superiores a la competencia común (vs. opciones tradicionales del mercado).
-Fórmula: [Gancho: "No compres X sin saber esto"] + [3 Defectos de la competencia] + ["En cambio nosotros..." + 3 Beneficios Opuestos] + [CTA].
-NOTA ÉTICA: No ataques a un negocio pequeño específico. Ataca a "los supermercados", "las opciones tradicionales" o "la competencia genérica".`,
-
-    mostrar_servicio: `ESTRUCTURA: MOSTRAR EL SERVICIO (Principio a Fin)
-Ideal para: Estética, Salud, Procesos Artesanales, cualquier servicio con proceso visible.
-Fórmula: [Nombre del Servicio] + [Paso 1, 2, 3 (descripción visual)] + [Sensación/Resultado Final] + [CTA Valoración].
-Describe QUÉ recibe el cliente exactamente para eliminar dudas. Ver el proceso genera confianza técnica.`,
-
-    variedad_productos: `ESTRUCTURA: VARIEDAD DE PRODUCTOS (El Menú)
-Ideal para: Tiendas con stock variado (Café, Joyas, Ropa, Restaurantes).
-Fórmula: [Gancho: "3 tipos de X que debes conocer"] + [Opción A (Perfil 1)] + [Opción B (Perfil 2)] + [Opción C (Perfil 3)] + [Logística] + [CTA].
-Psicología: Ayuda al indeciso a autoseleccionarse ("Ah, yo soy el del café para la tarde").`,
-
-    paso_a_paso: `ESTRUCTURA: PASO A PASO (Complementario/Retargeting)
-Ideal para: Explicar logística compleja. No suele ser el primer impacto, funciona mejor para retargeting.
-Fórmula: [Gancho: "Pide tu X en 3 pasos"] + [Paso 1: Catálogo] + [Paso 2: Asesoría] + [Paso 3: Envío/Entrega] + [CTA].
-Simplifica el proceso de compra para el cliente indeciso que ya conoce el producto.`
-  },
-  en: {
-    venta_directa: `STRUCTURE: DIRECT SALE (La Madre)
-Ideal for: Products with known demand (iPads, Technology, Clothing).
-Formula: [Hook with Product + Differentiator] + [Price Justification] + [Guarantee/Certainty] + [Logistics] + [CTA].
-Focus on the irresistible offer and price/value. Justify WHY you can offer a better price.`,
-
-    desvalidar_alternativas: `STRUCTURE: INVALIDATE ALTERNATIVES (The Positioner)
-Ideal for: Products superior to common competition (vs. traditional market options).
-Formula: [Hook: "Don't buy X without knowing this"] + [3 Competition Defects] + ["Instead we..." + 3 Opposite Benefits] + [CTA].
-ETHICAL NOTE: Don't attack a specific small business. Attack "supermarkets", "traditional options" or "generic competition".`,
-
-    mostrar_servicio: `STRUCTURE: SHOW THE SERVICE (Start to Finish)
-Ideal for: Aesthetics, Health, Artisanal Processes, any service with visible process.
-Formula: [Service Name] + [Step 1, 2, 3 (visual description)] + [Feeling/Final Result] + [Assessment CTA].
-Describe WHAT the customer receives exactly to eliminate doubts. Seeing the process generates technical trust.`,
-
-    variedad_productos: `STRUCTURE: PRODUCT VARIETY (The Menu)
-Ideal for: Stores with varied stock (Coffee, Jewelry, Clothing, Restaurants).
-Formula: [Hook: "3 types of X you need to know"] + [Option A (Profile 1)] + [Option B (Profile 2)] + [Option C (Profile 3)] + [Logistics] + [CTA].
-Psychology: Helps the undecided self-select ("Ah, I'm the afternoon coffee person").`,
-
-    paso_a_paso: `STRUCTURE: STEP BY STEP (Complementary/Retargeting)
-Ideal for: Explaining complex logistics. Usually not the first impact, works better for retargeting.
-Formula: [Hook: "Order your X in 3 steps"] + [Step 1: Catalog] + [Step 2: Advisory] + [Step 3: Shipping/Delivery] + [CTA].
-Simplify the purchase process for the undecided customer who already knows the product.`
-  }
-}
-
-const TONE_PROMPTS = {
-  es: {
-    professional: 'Tono: PROFESIONAL - Lenguaje claro, confiable, orientado a resultados.',
-    casual: 'Tono: CASUAL - Como hablarías con un amigo, relajado pero convincente.',
-    urgent: 'Tono: URGENTE - Crea escasez y FOMO, usa palabras como "ahora", "última oportunidad", "solo hoy".',
-    humorous: 'Tono: HUMORÍSTICO - Usa humor inteligente, ironía o situaciones graciosas para conectar.',
-    inspirational: 'Tono: INSPIRACIONAL - Motivador, aspiracional, enfocado en el potencial del cliente.',
-    controversial: 'Tono: CONTROVERSIAL - Polarizante, desafía creencias comunes, genera debate.'
-  },
-  en: {
-    professional: 'Tone: PROFESSIONAL - Clear, trustworthy, results-oriented language.',
-    casual: 'Tone: CASUAL - Like talking to a friend, relaxed but convincing.',
-    urgent: 'Tone: URGENT - Create scarcity and FOMO, use words like "now", "last chance", "today only".',
-    humorous: 'Tone: HUMOROUS - Use smart humor, irony or funny situations to connect.',
-    inspirational: 'Tone: INSPIRATIONAL - Motivating, aspirational, focused on customer potential.',
-    controversial: 'Tone: CONTROVERSIAL - Polarizing, challenge common beliefs, generate debate.'
-  }
-}
-
-const DURATION_PROMPTS = {
-  es: {
-    '15s': 'Duración: 15 SEGUNDOS - Ultra corto. Solo gancho + 1 beneficio + CTA. Máximo 40 palabras.',
-    '30s': 'Duración: 30 SEGUNDOS - Estándar. Gancho + 2-3 beneficios + logística + CTA. Máximo 80 palabras.',
-    '60s': 'Duración: 60 SEGUNDOS - Completo. Gancho + desarrollo completo + prueba social + CTA. Máximo 150 palabras.',
-    '90s': 'Duración: 90 SEGUNDOS - Extendido. Historia completa con problema, solución, beneficios, prueba y CTA. Máximo 220 palabras.'
-  },
-  en: {
-    '15s': 'Duration: 15 SECONDS - Ultra short. Hook + 1 benefit + CTA only. Maximum 40 words.',
-    '30s': 'Duration: 30 SECONDS - Standard. Hook + 2-3 benefits + logistics + CTA. Maximum 80 words.',
-    '60s': 'Duration: 60 SECONDS - Complete. Hook + full development + social proof + CTA. Maximum 150 words.',
-    '90s': 'Duration: 90 SECONDS - Extended. Full story with problem, solution, benefits, proof and CTA. Maximum 220 words.'
-  }
-}
 
 const RESTAURANT_PROMPTS = {
   es: `ACTÚA COMO: Copywriter experto en anuncios de venta directa para restaurantes (videos cortos tipo Reels/TikTok) con objetivo de atraer gente al local físico.
@@ -669,27 +569,446 @@ OPTION #[Number] - [Angle Name]
 [CTA - 5 sec]: (Direct instruction)`
 }
 
-const PLATFORM_PROMPTS = {
-  es: {
-    general: 'Plataforma: GENERAL - Formato versátil que funciona en múltiples canales.',
-    tiktok: 'Plataforma: TIKTOK - Gancho ultra rápido en primer segundo, lenguaje Gen-Z, ritmo acelerado, puede ser polémico.',
-    instagram: 'Plataforma: INSTAGRAM - Visual, aspiracional, lifestyle. Ganchos que funcionan con o sin sonido.',
-    youtube: 'Plataforma: YOUTUBE - Puede ser más largo, informativo, construye autoridad antes del pitch.',
-    facebook: 'Plataforma: FACEBOOK - Conversacional, puede apelar a emociones familiares, testimonios funcionan bien.',
-    linkedin: 'Plataforma: LINKEDIN - Profesional, B2B, enfocado en ROI y resultados de negocio.',
-    tv: 'Plataforma: TV - Más formal, ritmo tradicional, debe capturar atención sin depender de scroll.',
-    radio: 'Plataforma: RADIO - Solo audio, muy descriptivo, repetir información clave, incluir número/web claramente.'
-  },
-  en: {
-    general: 'Platform: GENERAL - Versatile format that works across multiple channels.',
-    tiktok: 'Platform: TIKTOK - Ultra-fast hook in first second, Gen-Z language, fast pace, can be controversial.',
-    instagram: 'Platform: INSTAGRAM - Visual, aspirational, lifestyle. Hooks that work with or without sound.',
-    youtube: 'Platform: YOUTUBE - Can be longer, informative, build authority before the pitch.',
-    facebook: 'Platform: FACEBOOK - Conversational, can appeal to family emotions, testimonials work well.',
-    linkedin: 'Platform: LINKEDIN - Professional, B2B, focused on ROI and business results.',
-    tv: 'Platform: TV - More formal, traditional pace, must capture attention without scroll dependency.',
-    radio: 'Platform: RADIO - Audio only, very descriptive, repeat key information, include number/website clearly.'
+const INDUMENTARIA_PROMPTS = {
+  es: `ACTÚA COMO: Experto en Guiones de Venta Directa para Indumentaria y Moda (ropa, zapatos, joyería, accesorios), entrenado bajo la metodología "Ian".
+OBJETIVO: Crear guiones que vendan prendas/accesorios generando deseo visual y certeza de calidad, sin sonar como vendedor de mercado.
+
+IMPORTANTE: Siempre responde en Español.
+
+TU PRINCIPAL HABILIDAD: HACER DESEABLE LO TANGIBLE.
+La ropa, accesorios y joyería se venden por IDENTIDAD y SENSACIÓN. El guión debe provocar que el espectador se vea usando el producto.
+
+---
+REGLAS ESPECÍFICAS DE INDUMENTARIA:
+1. VARIEDAD ES CLAVE: Si la marca tiene múltiples modelos/diseños, úsalo como fortaleza. "No es una sola opción, tenés X diseños para elegir."
+2. MATERIAL = CERTEZA: Menciona siempre el material y por qué es bueno. "Algodón 100%, no se deforma después de lavar."
+3. TALLAS = INCLUSIÓN: Si hay rango amplio de tallas, úsalo. "Desde S hasta XXL, para todos los cuerpos."
+4. PERSONALIZACIÓN = EXCLUSIVIDAD: Si se puede personalizar, destácalo como diferenciador premium.
+5. CAMBIOS/GARANTÍA = CONFIANZA: Si aceptan cambios, ponlo en el desarrollo. Elimina el miedo a comprar online.
+
+---
+TIPOS DE GANCHO PARA INDUMENTARIA:
+- Por novedad: "Nuevo drop: X diseños que no vas a encontrar en ningún lado."
+- Por material: "Esta chaqueta es de cuero genuino, no sintético. Sentí la diferencia."
+- Por variedad: "X modelos diferentes de [artículo]. ¿Cuál es el tuyo?"
+- Por personalización: "Te lo hacemos con tu nombre bordado. Sí, en serio."
+- Por precio/calidad: "Calidad premium sin el precio premium."
+
+---
+INSTRUCCIONES DE TRABAJO:
+Usa la información del producto proporcionada en el contexto del negocio para generar guiones.
+
+FORMATO DE ENTREGA:
+OPCIÓN #[Número] - [Ángulo]
+[GANCHO - 3 seg]: (Contexto visual + Diferenciador)
+[DESARROLLO - 15-25 seg]: (Material + Variedad + Calidad + Personalización si aplica + Logística)
+[CTA - 3 seg]: (Orden directa)`,
+
+  en: `ACT AS: Expert in Direct Sales Scripts for Fashion and Apparel (clothing, shoes, jewelry, accessories), trained under "Ian" methodology.
+OBJECTIVE: Create scripts that sell garments/accessories generating visual desire and quality certainty, without sounding like a market vendor.
+
+IMPORTANT: Always respond in English.
+
+YOUR MAIN SKILL: MAKING THE TANGIBLE DESIRABLE.
+Clothing, accessories and jewelry sell through IDENTITY and SENSATION. The script must make the viewer see themselves wearing the product.
+
+---
+FASHION-SPECIFIC RULES:
+1. VARIETY IS KEY: If the brand has multiple models/designs, use it as strength. "Not just one option, you have X designs to choose from."
+2. MATERIAL = CERTAINTY: Always mention the material and why it's good. "100% cotton, doesn't lose shape after washing."
+3. SIZES = INCLUSION: If there's a wide size range, use it. "From S to XXL, for every body type."
+4. CUSTOMIZATION = EXCLUSIVITY: If customizable, highlight it as a premium differentiator.
+5. EXCHANGES/WARRANTY = TRUST: If they accept returns, put it in the development. Eliminate the fear of buying online.
+
+---
+HOOK TYPES FOR FASHION:
+- By novelty: "New drop: X designs you won't find anywhere else."
+- By material: "This jacket is genuine leather, not synthetic. Feel the difference."
+- By variety: "X different models of [item]. Which one is yours?"
+- By customization: "We make it with your name embroidered. Yes, seriously."
+- By price/quality: "Premium quality without the premium price."
+
+---
+WORK INSTRUCTIONS:
+Use the product information provided in the business context to generate scripts.
+
+DELIVERY FORMAT:
+OPTION #[Number] - [Angle]
+[HOOK - 3 sec]: (Visual context + Differentiator)
+[DEVELOPMENT - 15-25 sec]: (Material + Variety + Quality + Customization if applicable + Logistics)
+[CTA - 3 sec]: (Direct order)`
+}
+
+// =============================================
+// Structured Prompt Builders
+// =============================================
+interface BusinessContext {
+  name?: string
+  sales_channels?: string[]
+  location?: string
+  does_shipping?: boolean
+  shipping_method?: string
+  target_audiences?: Array<{
+    sex?: string
+    age_min?: number
+    age_max?: number
+    geographic_scope?: string
+    geographic_scope_custom?: string
+    has_specific_profession?: boolean
+    profession_description?: string
+  }>
+}
+
+interface ProductContext {
+  name?: string
+  type?: string
+  // Product fields
+  product_category?: string
+  product_description?: string
+  current_alternatives?: string
+  alternatives_disadvantages?: string
+  product_variations?: string[]
+  technical_specs?: string
+  utility?: string
+  result?: string
+  has_guarantee?: boolean
+  guarantee_details?: string
+  price_range?: string
+  stock_limited?: boolean
+  // Service fields
+  svc_service_type?: string
+  svc_problem?: string
+  svc_current_pain?: string
+  svc_alternatives_tried?: string
+  svc_alternatives_failures?: string
+  svc_concrete_result?: string
+  svc_result_timeline?: string
+  svc_life_change?: string
+  svc_process_steps?: string
+  svc_service_format?: string
+  svc_service_duration?: string
+  svc_differentiation?: string
+  svc_has_own_method?: boolean
+  svc_method_name?: string
+  svc_main_objection?: string
+  svc_has_guarantee?: boolean
+  svc_guarantee_details?: string
+  svc_has_success_cases?: boolean
+  success_cases?: Array<{
+    client_name?: string
+    before_state?: string
+    what_they_did?: string
+    result?: string
+    timeline?: string
+    life_change?: string
+  }>
+  // Indumentaria fields
+  ind_article_type?: string
+  ind_model_count?: number
+  ind_variations_description?: string
+  ind_sizes?: string
+  ind_main_material?: string
+  ind_quality_description?: string
+  ind_accepts_changes?: boolean
+  ind_change_policy?: string
+  ind_customizable?: boolean
+  ind_customization_description?: string
+  // Restaurant fields
+  menu_text?: string
+  location?: string
+  schedule?: string
+  is_new_restaurant?: boolean
+  // Real estate fields
+  re_business_type?: string
+  re_price?: string
+  re_location?: string
+  re_construction_size?: string
+  re_bedrooms?: string
+  re_bathrooms?: string
+  re_parking?: string
+  re_highlights?: string
+  re_location_reference?: string
+  re_cta?: string
+  // Legacy
+  [key: string]: unknown
+}
+
+function buildBusinessRulesPrompt(biz: BusinessContext | undefined, language: 'en' | 'es'): string {
+  if (!biz || !biz.name) return ''
+  const rules: string[] = []
+  const isEs = language === 'es'
+
+  // Sales channel CTA rules
+  if (biz.sales_channels && biz.sales_channels.length > 0) {
+    const channels = biz.sales_channels
+    if (channels.includes('messages') && !channels.includes('website')) {
+      rules.push(isEs
+        ? 'REGLA CTA: El negocio vende por mensajes. El CTA debe dirigir a enviar mensaje/DM. Nunca menciones una página web.'
+        : 'CTA RULE: The business sells via messages. The CTA must direct to send a message/DM. Never mention a website.')
+    } else if (channels.includes('website') && !channels.includes('messages')) {
+      rules.push(isEs
+        ? 'REGLA CTA: El negocio vende por página web. El CTA debe dirigir a la web/link en bio. Evita pedir mensajes directos.'
+        : 'CTA RULE: The business sells via website. The CTA must direct to the web/link in bio. Avoid asking for direct messages.')
+    } else if (channels.includes('website') && channels.includes('messages')) {
+      rules.push(isEs
+        ? 'REGLA CTA: El negocio vende por web y mensajes. Puedes alternar CTAs entre "link en bio" y "envíanos un mensaje".'
+        : 'CTA RULE: The business sells via web and messages. You can alternate CTAs between "link in bio" and "send us a message".')
+    }
+    if (channels.includes('physical')) {
+      rules.push(isEs
+        ? 'REGLA LOCAL: El negocio tiene local físico. Puedes incluir invitaciones a visitar el local en el desarrollo o CTA.'
+        : 'LOCATION RULE: The business has a physical store. You can include invitations to visit the store in the development or CTA.')
+    }
   }
+
+  // Shipping rules
+  if (biz.does_shipping) {
+    if (biz.shipping_method) {
+      rules.push(isEs
+        ? `REGLA ENVÍOS: El negocio realiza envíos (${biz.shipping_method}). Menciona la logística de envío en el desarrollo para generar certeza.`
+        : `SHIPPING RULE: The business offers shipping (${biz.shipping_method}). Mention shipping logistics in the development to generate certainty.`)
+    } else {
+      rules.push(isEs
+        ? 'REGLA ENVÍOS: El negocio realiza envíos. Menciona disponibilidad de envíos en el desarrollo.'
+        : 'SHIPPING RULE: The business offers shipping. Mention shipping availability in the development.')
+    }
+  }
+
+  // Location rules
+  if (biz.location) {
+    rules.push(isEs
+      ? `REGLA UBICACIÓN: El negocio está en ${biz.location}. Usa esta ubicación para contextualizar y segmentar geográficamente en los ganchos.`
+      : `LOCATION RULE: The business is in ${biz.location}. Use this location to contextualize and geographically segment in hooks.`)
+  }
+
+  // Audience rules
+  if (biz.target_audiences && biz.target_audiences.length > 0) {
+    const audienceDescriptions = biz.target_audiences.map((a, i) => {
+      const parts: string[] = []
+      if (a.sex && a.sex !== 'both') parts.push(isEs ? (a.sex === 'male' ? 'hombres' : 'mujeres') : a.sex)
+      if (a.age_min && a.age_max) parts.push(`${a.age_min}-${a.age_max} ${isEs ? 'años' : 'years'}`)
+      if (a.geographic_scope === 'local') parts.push(isEs ? 'zona local' : 'local area')
+      else if (a.geographic_scope === 'country') parts.push(isEs ? 'todo el país' : 'nationwide')
+      else if (a.geographic_scope === 'world') parts.push(isEs ? 'mundial' : 'worldwide')
+      else if (a.geographic_scope === 'custom' && a.geographic_scope_custom) parts.push(a.geographic_scope_custom)
+      if (a.has_specific_profession && a.profession_description) parts.push(a.profession_description)
+      return `${isEs ? 'Público' : 'Audience'} ${i + 1}: ${parts.join(', ')}`
+    })
+
+    rules.push(isEs
+      ? `REGLA AUDIENCIA: Adapta el lenguaje, tono y ejemplos para estos públicos objetivo:\n${audienceDescriptions.join('\n')}`
+      : `AUDIENCE RULE: Adapt language, tone and examples for these target audiences:\n${audienceDescriptions.join('\n')}`)
+  }
+
+  if (rules.length === 0) return ''
+
+  const header = isEs
+    ? '\n\n===================================================================\nREGLAS DEL NEGOCIO (generadas automáticamente)\n==================================================================='
+    : '\n\n===================================================================\nBUSINESS RULES (auto-generated)\n==================================================================='
+
+  return header + '\n' + rules.join('\n\n')
+}
+
+function buildProductRulesPrompt(product: ProductContext | undefined, language: 'en' | 'es'): string {
+  if (!product || !product.type) return ''
+  const rules: string[] = []
+  const isEs = language === 'es'
+
+  if (product.type === 'product') {
+    if (product.product_category) {
+      rules.push(isEs
+        ? `CATEGORÍA: Este es un producto de tipo "${product.product_category}". Adapta el vocabulario técnico y las referencias a esta categoría.`
+        : `CATEGORY: This is a "${product.product_category}" type product. Adapt technical vocabulary and references to this category.`)
+    }
+    if (product.price_range) {
+      const priceMap: Record<string, { es: string; en: string }> = {
+        economico: { es: 'económico — enfócate en accesibilidad y valor por dinero', en: 'affordable — focus on accessibility and value for money' },
+        medio: { es: 'rango medio — equilibra calidad y precio', en: 'mid-range — balance quality and price' },
+        premium: { es: 'premium — enfócate en exclusividad, calidad superior y experiencia', en: 'premium — focus on exclusivity, superior quality and experience' },
+      }
+      const pr = priceMap[product.price_range]
+      if (pr) rules.push(isEs ? `REGLA PRECIO: Producto ${pr.es}.` : `PRICE RULE: Product is ${pr.en}.`)
+    }
+    if (product.has_guarantee && product.guarantee_details) {
+      rules.push(isEs
+        ? `REGLA GARANTÍA: Menciona la garantía (${product.guarantee_details}) en el desarrollo para eliminar riesgo percibido.`
+        : `GUARANTEE RULE: Mention the guarantee (${product.guarantee_details}) in the development to eliminate perceived risk.`)
+    }
+    if (product.stock_limited) {
+      rules.push(isEs
+        ? 'REGLA ESCASEZ: El stock es limitado. Puedes usar urgencia sutil: "últimas unidades", "stock limitado", "cuando se acaben no vuelven".'
+        : 'SCARCITY RULE: Stock is limited. You can use subtle urgency: "last units", "limited stock", "when they\'re gone, they\'re gone".')
+    }
+    if (product.product_variations && product.product_variations.length > 0) {
+      rules.push(isEs
+        ? `REGLA VARIEDAD: El producto tiene variaciones (${product.product_variations.join(', ')}). Menciónalo para ampliar el atractivo y dar opciones.`
+        : `VARIETY RULE: The product has variations (${product.product_variations.join(', ')}). Mention this to broaden appeal and give options.`)
+    }
+  }
+
+  if (product.type === 'service') {
+    if (product.svc_has_own_method && product.svc_method_name) {
+      rules.push(isEs
+        ? `REGLA MÉTODO: El servicio tiene un método propio llamado "${product.svc_method_name}". Úsalo como diferenciador de autoridad.`
+        : `METHOD RULE: The service has a proprietary method called "${product.svc_method_name}". Use it as an authority differentiator.`)
+    }
+    if (product.svc_has_guarantee && product.svc_guarantee_details) {
+      rules.push(isEs
+        ? `REGLA GARANTÍA: Menciona la garantía (${product.svc_guarantee_details}) para reducir la objeción principal.`
+        : `GUARANTEE RULE: Mention the guarantee (${product.svc_guarantee_details}) to reduce the main objection.`)
+    }
+    if (product.svc_has_success_cases && product.success_cases && product.success_cases.length > 0) {
+      rules.push(isEs
+        ? `REGLA CASOS: Hay ${product.success_cases.length} caso(s) de éxito reales. Úsalos para construir prueba social en lugar de placeholders genéricos.`
+        : `CASES RULE: There are ${product.success_cases.length} real success case(s). Use them to build social proof instead of generic placeholders.`)
+    }
+  }
+
+  if (product.type === 'indumentaria') {
+    if (product.ind_model_count && product.ind_model_count > 1) {
+      rules.push(isEs
+        ? `REGLA VARIEDAD: La marca tiene ${product.ind_model_count} modelos/diseños diferentes. Destaca la variedad en los ganchos.`
+        : `VARIETY RULE: The brand has ${product.ind_model_count} different models/designs. Highlight variety in hooks.`)
+    }
+    if (product.ind_customizable && product.ind_customization_description) {
+      rules.push(isEs
+        ? `REGLA PERSONALIZACIÓN: Los productos son personalizables (${product.ind_customization_description}). Úsalo como diferenciador premium exclusivo.`
+        : `CUSTOMIZATION RULE: Products are customizable (${product.ind_customization_description}). Use as an exclusive premium differentiator.`)
+    }
+    if (product.ind_accepts_changes) {
+      rules.push(isEs
+        ? `REGLA CONFIANZA: Aceptan cambios${product.ind_change_policy ? ` (${product.ind_change_policy})` : ''}. Menciónalo para eliminar miedo a comprar online.`
+        : `TRUST RULE: They accept returns/exchanges${product.ind_change_policy ? ` (${product.ind_change_policy})` : ''}. Mention to eliminate fear of buying online.`)
+    }
+  }
+
+  if (rules.length === 0) return ''
+
+  const header = isEs
+    ? '\n\n===================================================================\nREGLAS DEL PRODUCTO (generadas automáticamente)\n==================================================================='
+    : '\n\n===================================================================\nPRODUCT RULES (auto-generated)\n==================================================================='
+
+  return header + '\n' + rules.join('\n\n')
+}
+
+function buildStructuredContext(biz: BusinessContext | undefined, product: ProductContext | undefined, language: 'en' | 'es'): string {
+  const sections: string[] = []
+  const isEs = language === 'es'
+
+  // Business section
+  if (biz && biz.name) {
+    const bizLines: string[] = [
+      `${isEs ? 'Nombre del negocio' : 'Business name'}: ${biz.name}`,
+    ]
+    if (biz.sales_channels?.length) bizLines.push(`${isEs ? 'Canales de venta' : 'Sales channels'}: ${biz.sales_channels.join(', ')}`)
+    if (biz.location) bizLines.push(`${isEs ? 'Ubicación' : 'Location'}: ${biz.location}`)
+    if (biz.does_shipping) bizLines.push(`${isEs ? 'Envíos' : 'Shipping'}: ${isEs ? 'Sí' : 'Yes'}${biz.shipping_method ? ` (${biz.shipping_method})` : ''}`)
+
+    if (biz.target_audiences?.length) {
+      bizLines.push(`\n${isEs ? 'PÚBLICOS OBJETIVO:' : 'TARGET AUDIENCES:'}`)
+      biz.target_audiences.forEach((a, i) => {
+        const parts: string[] = []
+        const sexLabel = a.sex === 'male' ? (isEs ? 'Hombres' : 'Male') : a.sex === 'female' ? (isEs ? 'Mujeres' : 'Female') : (isEs ? 'Ambos' : 'Both')
+        parts.push(sexLabel)
+        if (a.age_min && a.age_max) parts.push(`${a.age_min}-${a.age_max}`)
+        if (a.geographic_scope) parts.push(a.geographic_scope === 'custom' && a.geographic_scope_custom ? a.geographic_scope_custom : a.geographic_scope)
+        if (a.has_specific_profession && a.profession_description) parts.push(a.profession_description)
+        bizLines.push(`  ${i + 1}. ${parts.join(' | ')}`)
+      })
+    }
+    sections.push(bizLines.join('\n'))
+  }
+
+  // Product section
+  if (product && product.name) {
+    const prodLines: string[] = [
+      `${isEs ? 'Nombre del producto/servicio' : 'Product/service name'}: ${product.name}`,
+      `${isEs ? 'Tipo' : 'Type'}: ${product.type}`,
+    ]
+
+    // Add all non-empty product fields as labeled text
+    const fieldLabels: Record<string, { es: string; en: string }> = {
+      product_description: { es: 'Beneficios', en: 'Benefits' },
+      product_category: { es: 'Categoría', en: 'Category' },
+      current_alternatives: { es: 'Alternativas actuales', en: 'Current alternatives' },
+      alternatives_disadvantages: { es: 'Desventajas de alternativas', en: 'Alternatives disadvantages' },
+      product_variations: { es: 'Variaciones', en: 'Variations' },
+      technical_specs: { es: 'Especificaciones técnicas', en: 'Technical specs' },
+      utility: { es: 'Utilidad', en: 'Utility' },
+      result: { es: 'Resultado esperado', en: 'Expected result' },
+      price_range: { es: 'Rango de precio', en: 'Price range' },
+      main_problem: { es: 'Problema principal', en: 'Main problem' },
+      differentiation: { es: 'Diferenciación', en: 'Differentiation' },
+      svc_problem: { es: 'Problema que resuelve', en: 'Problem it solves' },
+      svc_current_pain: { es: 'Dolor actual del cliente', en: 'Current client pain' },
+      svc_alternatives_tried: { es: 'Alternativas intentadas', en: 'Alternatives tried' },
+      svc_alternatives_failures: { es: 'Por qué fallan las alternativas', en: 'Why alternatives fail' },
+      svc_concrete_result: { es: 'Resultado concreto', en: 'Concrete result' },
+      svc_result_timeline: { es: 'Tiempo para resultados', en: 'Time to results' },
+      svc_life_change: { es: 'Cambio de vida', en: 'Life change' },
+      svc_process_steps: { es: 'Proceso paso a paso', en: 'Step-by-step process' },
+      svc_service_format: { es: 'Formato del servicio', en: 'Service format' },
+      svc_service_duration: { es: 'Duración del servicio', en: 'Service duration' },
+      svc_differentiation: { es: 'Diferenciación', en: 'Differentiation' },
+      svc_main_objection: { es: 'Objeción principal', en: 'Main objection' },
+      ind_article_type: { es: 'Tipo de artículo', en: 'Article type' },
+      ind_model_count: { es: 'Cantidad de modelos', en: 'Number of models' },
+      ind_variations_description: { es: 'Descripción de variaciones', en: 'Variations description' },
+      ind_sizes: { es: 'Tallas disponibles', en: 'Available sizes' },
+      ind_main_material: { es: 'Material principal', en: 'Main material' },
+      ind_quality_description: { es: 'Calidad', en: 'Quality' },
+      menu_text: { es: 'Menú', en: 'Menu' },
+      schedule: { es: 'Horario', en: 'Schedule' },
+      re_business_type: { es: 'Tipo de negocio inmobiliario', en: 'Real estate business type' },
+      re_price: { es: 'Precio', en: 'Price' },
+      re_location: { es: 'Ubicación de la propiedad', en: 'Property location' },
+      re_construction_size: { es: 'Tamaño de construcción', en: 'Construction size' },
+      re_bedrooms: { es: 'Habitaciones', en: 'Bedrooms' },
+      re_bathrooms: { es: 'Baños', en: 'Bathrooms' },
+      re_parking: { es: 'Estacionamientos', en: 'Parking' },
+      re_highlights: { es: 'Puntos destacados', en: 'Highlights' },
+      re_location_reference: { es: 'Referencia de ubicación', en: 'Location reference' },
+      re_cta: { es: 'CTA de la propiedad', en: 'Property CTA' },
+    }
+
+    for (const [key, labels] of Object.entries(fieldLabels)) {
+      const val = product[key]
+      if (val === null || val === undefined || val === '' || val === false) continue
+      if (Array.isArray(val) && val.length === 0) continue
+      const label = labels[language]
+      const display = Array.isArray(val) ? val.join(', ') : String(val)
+      prodLines.push(`${label}: ${display}`)
+    }
+
+    // Guarantee
+    if (product.has_guarantee || product.svc_has_guarantee) {
+      const details = product.guarantee_details || product.svc_guarantee_details
+      prodLines.push(`${isEs ? 'Garantía' : 'Guarantee'}: ${isEs ? 'Sí' : 'Yes'}${details ? ` — ${details}` : ''}`)
+    }
+
+    // Success cases
+    if (product.success_cases && product.success_cases.length > 0) {
+      prodLines.push(`\n${isEs ? 'CASOS DE ÉXITO:' : 'SUCCESS CASES:'}`)
+      product.success_cases.forEach((sc, i) => {
+        prodLines.push(`  ${isEs ? 'Caso' : 'Case'} ${i + 1}${sc.client_name ? ` (${sc.client_name})` : ''}:`)
+        prodLines.push(`    ${isEs ? 'Antes' : 'Before'}: ${sc.before_state}`)
+        prodLines.push(`    ${isEs ? 'Qué hizo' : 'What they did'}: ${sc.what_they_did}`)
+        prodLines.push(`    ${isEs ? 'Resultado' : 'Result'}: ${sc.result}`)
+        prodLines.push(`    ${isEs ? 'Tiempo' : 'Timeline'}: ${sc.timeline}`)
+        prodLines.push(`    ${isEs ? 'Cambio' : 'Life change'}: ${sc.life_change}`)
+      })
+    }
+
+    sections.push(prodLines.join('\n'))
+  }
+
+  if (sections.length === 0) return ''
+
+  const header = isEs
+    ? '\n\n===================================================================\nCONTEXTO DEL NEGOCIO Y PRODUCTO\n==================================================================='
+    : '\n\n===================================================================\nBUSINESS AND PRODUCT CONTEXT\n==================================================================='
+
+  return header + '\n\n' + sections.join('\n\n---\n\n')
 }
 
 function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, language: 'en' | 'es'): string {
@@ -770,75 +1089,6 @@ ${doc.url ? `URL: ${doc.url}` : ''}`
   }).join('\n')
 
   return `${header}\n${docsContent}`
-}
-
-function buildICPPrompt(icp: ICPData | null | undefined, language: 'en' | 'es'): string {
-  if (!icp) return ''
-
-  const awarenessRules = {
-    es: {
-      unaware: 'NIVEL DE CONCIENCIA: INCONSCIENTE - El ICP siente frustración pero no sabe qué le pasa. PROHIBIDO mencionar soluciones, productos o métodos al inicio. Los mensajes deben partir de síntomas o consecuencias.',
-      problem_aware: 'NIVEL DE CONCIENCIA: CONSCIENTE DEL PROBLEMA - El ICP sabe qué le duele, pero no conoce la solución. Se puede nombrar el problema. No asumir conocimiento de soluciones.',
-      solution_aware: 'NIVEL DE CONCIENCIA: CONSCIENTE DE LA SOLUCIÓN - El ICP sabe que existen soluciones. Se puede asumir que "algo" ya intentó. Enfocar en diferenciación y fricción previa.',
-      product_aware: 'NIVEL DE CONCIENCIA: CONSCIENTE DEL PRODUCTO - El ICP ya compara opciones. Se puede hablar de criterios, elección y comparación. El mensaje puede ser directo y decisivo.'
-    },
-    en: {
-      unaware: 'AWARENESS LEVEL: UNAWARE - The ICP feels frustration but doesn\'t know what\'s wrong. FORBIDDEN to mention solutions, products or methods at the beginning. Messages must start from symptoms or consequences.',
-      problem_aware: 'AWARENESS LEVEL: PROBLEM AWARE - The ICP knows what hurts, but doesn\'t know the solution. You can name the problem. Don\'t assume knowledge of solutions.',
-      solution_aware: 'AWARENESS LEVEL: SOLUTION AWARE - The ICP knows solutions exist. You can assume they\'ve tried "something". Focus on differentiation and previous friction.',
-      product_aware: 'AWARENESS LEVEL: PRODUCT AWARE - The ICP already compares options. You can talk about criteria, choice and comparison. The message can be direct and decisive.'
-    }
-  }
-
-  const sophisticationRules = {
-    es: {
-      low: 'SOFISTICACIÓN DEL MERCADO: BAJA - Permitir mensajes simples y directos. Claims claros sin necesidad de desvalidación.',
-      medium: 'SOFISTICACIÓN DEL MERCADO: MEDIA - Reconocer promesas comunes. Diferenciar sin confrontar agresivamente.',
-      high: 'SOFISTICACIÓN DEL MERCADO: ALTA - Restringir claims exagerados. Usar lenguaje preciso, sobrio y específico. Evitar hype, exageración y fórmulas genéricas.'
-    },
-    en: {
-      low: 'MARKET SOPHISTICATION: LOW - Allow simple and direct messages. Clear claims without need for invalidation.',
-      medium: 'MARKET SOPHISTICATION: MEDIUM - Recognize common promises. Differentiate without aggressive confrontation.',
-      high: 'MARKET SOPHISTICATION: HIGH - Restrict exaggerated claims. Use precise, sober and specific language. Avoid hype, exaggeration and generic formulas.'
-    }
-  }
-
-  const urgencyRules = {
-    es: {
-      immediate: 'URGENCIA: INMEDIATA - Ritmo rápido. CTA directo. Mensajes orientados a acción inmediata.',
-      latent: 'URGENCIA: LATENTE - Construir urgencia progresiva. CTA de primer paso.',
-      low: 'URGENCIA: BAJA - PROHIBIDO forzar cierre. Mensajes orientados a conciencia y preparación.'
-    },
-    en: {
-      immediate: 'URGENCY: IMMEDIATE - Fast pace. Direct CTA. Messages oriented to immediate action.',
-      latent: 'URGENCY: LATENT - Build progressive urgency. First step CTA.',
-      low: 'URGENCY: LOW - FORBIDDEN to force close. Messages oriented to awareness and preparation.'
-    }
-  }
-
-  const genderAgeNote = language === 'es'
-    ? `DEMOGRAFÍA: ${icp.gender === 'any' ? 'Indistinto' : icp.gender === 'male' ? 'Masculino' : 'Femenino'}, ${icp.age_range} años. Ajusta vocabulario, ejemplos y ritmo del mensaje según esta demografía.`
-    : `DEMOGRAPHICS: ${icp.gender === 'any' ? 'Any' : icp.gender === 'male' ? 'Male' : 'Female'}, ${icp.age_range} years. Adjust vocabulary, examples and message rhythm according to this demographic.`
-
-  const header = language === 'es'
-    ? `\n\n===================================================================
-PERFIL DE CLIENTE IDEAL (ICP): "${icp.name}"
-===================================================================
-DESCRIPCIÓN: ${icp.description}
-
-REGLAS DE COMUNICACIÓN PARA ESTE ICP:`
-    : `\n\n===================================================================
-IDEAL CLIENT PROFILE (ICP): "${icp.name}"
-===================================================================
-DESCRIPTION: ${icp.description}
-
-COMMUNICATION RULES FOR THIS ICP:`
-
-  return `${header}
-${awarenessRules[language][icp.awareness_level]}
-${sophisticationRules[language][icp.sophistication_level]}
-${urgencyRules[language][icp.urgency_type]}
-${genderAgeNote}`
 }
 
 const DESCRIPTION_PROMPTS = {
@@ -1058,7 +1308,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Request body is required' })
     }
 
-    const { messages, businessDetails, language = 'en', scriptSettings, icp, contextDocuments } = req.body as RequestBody
+    const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments } = req.body as RequestBody
     const selectedModel: AIModel = 'grok'
 
     if (!messages || !Array.isArray(messages)) {
@@ -1088,7 +1338,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Grok API key not configured' })
     }
 
-    const icpPrompt = buildICPPrompt(icp, language)
     const contextDocsPrompt = buildContextDocumentsPrompt(contextDocuments, language)
     
     const feature = req.body.feature as string | undefined
@@ -1097,10 +1346,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let settingsPrompt = ''
 
     if (feature === 'description') {
-      // Descriptions get their own dedicated prompt — no script frameworks/tones/durations
       basePrompt = DESCRIPTION_PROMPTS[language]
     } else {
-      // Script generation uses product-type-specific prompts
       basePrompt = MASTER_PROMPTS[language]
       settingsPrompt = buildScriptSettingsPrompt(scriptSettings, language)
       
@@ -1110,14 +1357,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         basePrompt = REAL_ESTATE_PROMPTS[language]
       } else if (productType === 'service') {
         basePrompt = SERVICE_PROMPTS[language]
+      } else if (productType === 'indumentaria') {
+        basePrompt = INDUMENTARIA_PROMPTS[language]
       }
     }
+
+    // Build structured prompt sections from new businessContext/productContext
+    const businessRulesPrompt = buildBusinessRulesPrompt(businessContext, language)
+    const productRulesPrompt = buildProductRulesPrompt(productContext, language)
+    const structuredContextPrompt = buildStructuredContext(businessContext, productContext, language)
     
-    const systemPrompt = basePrompt + settingsPrompt + icpPrompt + contextDocsPrompt + (
-      Object.keys(businessDetails || {}).length > 0
-        ? `\n\nCurrent business context:\n${JSON.stringify(businessDetails, null, 2)}`
-        : ''
-    )
+    // Legacy fallback: if no structured context, use old businessDetails JSON dump
+    let legacyContextPrompt = ''
+    if (!businessContext && !productContext) {
+      const cleanBusinessDetails = Object.fromEntries(
+        Object.entries(businessDetails || {}).filter(([, v]) => {
+          if (v === null || v === undefined || v === '') return false
+          if (Array.isArray(v) && v.length === 0) return false
+          return true
+        })
+      )
+      if (Object.keys(cleanBusinessDetails).length > 0) {
+        legacyContextPrompt = `\n\nCurrent business context:\n${JSON.stringify(cleanBusinessDetails, null, 2)}`
+      }
+    }
+
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {

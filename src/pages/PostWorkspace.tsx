@@ -694,6 +694,14 @@ export default function PostWorkspace() {
 
   return (
     <Layout>
+      {/* Maintenance Disclaimer */}
+      <div className="bg-amber-900/30 border-b border-amber-700/30 px-4 py-2 text-center">
+        <p className="text-xs text-amber-200">
+          {language === 'es'
+            ? '⚠️ Estamos realizando mejoras. Podrías experimentar cambios temporales. ¡Gracias por tu paciencia!'
+            : '⚠️ We\'re making improvements. You may experience temporary changes. Thanks for your patience!'}
+        </p>
+      </div>
       <div className="h-full flex flex-col lg:flex-row lg:overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
         <div className="w-full lg:w-[420px] bg-dark-100 border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">

@@ -161,7 +161,6 @@ export default function DescriptionsWorkspace() {
         settings,
         undefined,
         undefined,
-        undefined,
         'description'
       )
 

@@ -3,7 +3,7 @@
 // =============================================
 export type AccountType = 'single' | 'team'
 export type TeamRole = 'owner' | 'admin' | 'member'
-export type ProductType = 'product' | 'service' | 'restaurant' | 'real_estate'
+export type ProductType = 'product' | 'service' | 'restaurant' | 'real_estate' | 'indumentaria'
 export type SessionStatus = 'active' | 'completed' | 'archived'
 
 // =============================================
@@ -19,9 +19,6 @@ export interface ScriptTypeConfig {
   variedad_productos: number
   paso_a_paso: number
 }
-export type ScriptTone = 'professional' | 'casual' | 'urgent' | 'humorous' | 'inspirational' | 'controversial'
-export type ScriptDuration = '15s' | '30s' | '60s' | '90s'
-export type ScriptPlatform = 'general' | 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'linkedin' | 'tv' | 'radio'
 export type AIModel = 'grok' | 'gemini'
 export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
 export type VideoModel = 'grok-imagine-video'
@@ -73,13 +70,88 @@ export interface Client {
   products_count?: number
 }
 
+// =============================================
+// Business & Target Audience Types
+// =============================================
+export type SalesChannel = 'physical' | 'messages' | 'website'
+export type GeographicScope = 'local' | 'country' | 'world' | 'custom'
+export type ServiceFormat = 'one_on_one' | 'group' | 'automated' | 'mixed'
+
+export interface Business {
+  id: string
+  owner_id: string
+  client_id?: string
+  name: string
+  sales_channels: SalesChannel[]
+  location?: string
+  does_shipping: boolean
+  shipping_method?: string
+  created_at: string
+  updated_at: string
+  target_audiences?: TargetAudience[]
+}
+
+export interface BusinessFormData {
+  name: string
+  sales_channels: SalesChannel[]
+  location?: string
+  does_shipping: boolean
+  shipping_method?: string
+  target_audiences: TargetAudienceFormData[]
+}
+
+export interface TargetAudience {
+  id: string
+  business_id: string
+  sex: 'male' | 'female' | 'both'
+  age_min: number
+  age_max: number
+  geographic_scope: GeographicScope
+  geographic_scope_custom?: string
+  has_specific_profession: boolean
+  profession_description?: string
+  created_at: string
+}
+
+export interface TargetAudienceFormData {
+  sex: 'male' | 'female' | 'both'
+  age_min: number
+  age_max: number
+  geographic_scope: GeographicScope
+  geographic_scope_custom?: string
+  has_specific_profession: boolean
+  profession_description?: string
+}
+
+export interface SuccessCase {
+  id: string
+  product_id: string
+  client_name?: string
+  before_state: string
+  what_they_did: string
+  result: string
+  timeline: string
+  life_change: string
+  created_at: string
+}
+
+export interface SuccessCaseFormData {
+  client_name?: string
+  before_state: string
+  what_they_did: string
+  result: string
+  timeline: string
+  life_change: string
+}
+
 export interface Product {
   id: string
   owner_id?: string
   client_id?: string
+  business_id?: string
   name: string
   type: ProductType
-  // New form fields
+  // Legacy/shared form fields
   product_description?: string
   main_problem?: string
   best_customers?: string
@@ -101,6 +173,52 @@ export interface Product {
   target_audience?: string
   unique_value?: string
   call_to_action?: string
+  // New product-type fields
+  product_category?: string
+  product_category_custom?: string
+  current_alternatives?: string
+  alternatives_disadvantages?: string
+  product_variations?: string[]
+  technical_specs?: string
+  utility?: string
+  result?: string
+  has_guarantee?: boolean
+  guarantee_details?: string
+  price_range?: string
+  stock_limited?: boolean
+  // Indumentaria fields
+  ind_article_type?: string
+  ind_article_type_custom?: string
+  ind_model_count?: number
+  ind_variations_description?: string
+  ind_sizes?: string
+  ind_main_material?: string
+  ind_quality_description?: string
+  ind_accepts_changes?: boolean
+  ind_change_policy?: string
+  ind_customizable?: boolean
+  ind_customization_description?: string
+  ind_product_images?: string[]
+  // Service fields
+  svc_service_type?: string
+  svc_service_type_custom?: string
+  svc_problem?: string
+  svc_current_pain?: string
+  svc_alternatives_tried?: string
+  svc_alternatives_failures?: string
+  svc_concrete_result?: string
+  svc_result_timeline?: string
+  svc_life_change?: string
+  svc_process_steps?: string
+  svc_service_format?: ServiceFormat
+  svc_service_duration?: string
+  svc_differentiation?: string
+  svc_has_own_method?: boolean
+  svc_method_name?: string
+  svc_main_objection?: string
+  svc_has_guarantee?: boolean
+  svc_guarantee_details?: string
+  svc_has_success_cases?: boolean
   // Restaurant-specific fields
   menu_text?: string
   menu_pdf_url?: string
@@ -125,6 +243,7 @@ export interface Product {
   updated_at: string
   // Joined data
   client?: Client
+  business?: Business
   sessions_count?: number
   scripts_count?: number
 }
@@ -138,9 +257,9 @@ export interface ChatSession {
   context?: string
   // Script generation settings
   framework: ScriptFramework
-  tone: ScriptTone
-  duration: ScriptDuration
-  platform: ScriptPlatform
+  tone?: string
+  duration?: string
+  platform?: string
   created_at: string
   updated_at: string
   // Joined data
@@ -170,9 +289,9 @@ export interface Script {
   version: number
   parent_script_id?: string
   framework?: ScriptFramework
-  tone?: ScriptTone
-  duration?: ScriptDuration
-  platform?: ScriptPlatform
+  tone?: string
+  duration?: string
+  platform?: string
   variation_number: number
   created_at: string
   updated_at: string
@@ -189,9 +308,9 @@ export interface ScriptTemplate {
   description?: string
   content: string
   framework?: ScriptFramework
-  tone?: ScriptTone
-  duration?: ScriptDuration
-  platform?: ScriptPlatform
+  tone?: string
+  duration?: string
+  platform?: string
   usage_count: number
   created_at: string
   updated_at: string
@@ -257,6 +376,7 @@ export interface ProductFormData {
 export interface RestaurantFormData {
   name: string
   type: 'restaurant'
+  business_id?: string
   menu_text: string
   menu_pdf_url?: string
   location: string
@@ -267,6 +387,7 @@ export interface RestaurantFormData {
 export interface RealEstateFormData {
   name: string
   type: 'real_estate'
+  business_id?: string
   re_business_type: 'sale' | 'rent' | 'airbnb'
   re_price: string
   re_location: string
@@ -278,52 +399,87 @@ export interface RealEstateFormData {
   re_highlights: string
   re_location_reference: string
   re_cta: string
+  context_links?: string[]
+  context_links_content?: string
+}
+
+export interface NewProductFormData {
+  name: string
+  type: 'product'
+  business_id: string
+  product_category: string
+  product_category_custom?: string
+  product_description?: string
+  current_alternatives?: string
+  alternatives_disadvantages?: string
+  product_variations?: string[]
+  technical_specs?: string
+  utility?: string
+  result?: string
+  has_guarantee?: boolean
+  guarantee_details?: string
+  price_range?: string
+  stock_limited?: boolean
+  context_links?: string[]
+  context_links_content?: string
+}
+
+export interface NewServiceFormData {
+  name: string
+  type: 'service'
+  business_id: string
+  svc_service_type: string
+  svc_service_type_custom?: string
+  svc_problem: string
+  svc_current_pain: string
+  svc_alternatives_tried: string
+  svc_alternatives_failures: string
+  svc_concrete_result: string
+  svc_result_timeline: string
+  svc_life_change: string
+  svc_process_steps: string
+  svc_service_format: ServiceFormat
+  svc_service_duration: string
+  svc_differentiation: string
+  svc_has_own_method: boolean
+  svc_method_name?: string
+  svc_main_objection: string
+  svc_has_guarantee: boolean
+  svc_guarantee_details?: string
+  svc_has_success_cases: boolean
+  success_cases?: SuccessCaseFormData[]
+  context_links?: string[]
+  context_links_content?: string
+}
+
+export interface IndumentariaFormData {
+  name: string
+  type: 'indumentaria'
+  business_id: string
+  ind_article_type: string
+  ind_article_type_custom?: string
+  ind_model_count: number
+  ind_variations_description: string
+  ind_sizes?: string
+  ind_main_material: string
+  ind_quality_description?: string
+  ind_accepts_changes: boolean
+  ind_change_policy?: string
+  has_guarantee?: boolean
+  guarantee_details?: string
+  ind_customizable: boolean
+  ind_customization_description?: string
+  ind_product_images?: string[]
+  context_links?: string[]
+  context_links_content?: string
 }
 
 export interface ScriptGenerationSettings {
   framework: ScriptFramework
-  tone: ScriptTone
-  duration: ScriptDuration
-  platform: ScriptPlatform
   variations: number
   model: AIModel
   generationMode: GenerationMode
   scriptTypeConfig: ScriptTypeConfig
-}
-
-// =============================================
-// ICP (Ideal Client Profile) Types
-// =============================================
-export type AwarenessLevel = 'unaware' | 'problem_aware' | 'solution_aware' | 'product_aware'
-export type SophisticationLevel = 'low' | 'medium' | 'high'
-export type UrgencyType = 'immediate' | 'latent' | 'low'
-export type Gender = 'male' | 'female' | 'any'
-export type AgeRange = '18-24' | '25-34' | '35-44' | '45-54' | '55+'
-
-export interface ICP {
-  id: string
-  owner_id: string
-  client_id?: string
-  name: string
-  description: string  // Persona que [situación], quiere [resultado], pero está bloqueada por [bloqueo]
-  awareness_level: AwarenessLevel
-  sophistication_level: SophisticationLevel
-  urgency_type: UrgencyType
-  gender: Gender
-  age_range: AgeRange
-  created_at: string
-  updated_at: string
-}
-
-export interface ICPFormData {
-  name: string
-  description: string
-  awareness_level: AwarenessLevel
-  sophistication_level: SophisticationLevel
-  urgency_type: UrgencyType
-  gender: Gender
-  age_range: AgeRange
-  client_id?: string
 }
 
 // =============================================

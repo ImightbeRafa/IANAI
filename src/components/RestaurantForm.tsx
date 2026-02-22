@@ -7,11 +7,12 @@ import { UtensilsCrossed, Upload, FileText, Loader2, MapPin, Clock, X } from 'lu
 interface RestaurantFormProps {
   onSubmit: (data: RestaurantFormData) => Promise<void>
   onCancel: () => void
+  businessId: string
   initialData?: Partial<RestaurantFormData>
   isEditing?: boolean
 }
 
-export default function RestaurantForm({ onSubmit, onCancel, initialData, isEditing }: RestaurantFormProps) {
+export default function RestaurantForm({ onSubmit, onCancel, businessId, initialData, isEditing }: RestaurantFormProps) {
   const { language } = useLanguage()
   const [loading, setLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -22,6 +23,7 @@ export default function RestaurantForm({ onSubmit, onCancel, initialData, isEdit
   const [formData, setFormData] = useState<RestaurantFormData>({
     name: initialData?.name || '',
     type: 'restaurant',
+    business_id: businessId,
     menu_text: initialData?.menu_text || '',
     menu_pdf_url: initialData?.menu_pdf_url || '',
     location: initialData?.location || '',

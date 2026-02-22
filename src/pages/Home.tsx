@@ -8,7 +8,7 @@ import {
   BarChart3,
   FileText,
   PenTool,
-  Users,
+  Mic,
   Image,
   Video,
   Layers
@@ -87,7 +87,7 @@ export default function Home() {
           features: [
             'Guiones ilimitados',
             'Descripciones ilimitadas',
-            'Perfiles de clientes ideales (ICP)',
+            'Entrada de voz para guiones',
             '100 diseños publicitarios al mes'
           ],
           cta: 'Comenzar'
@@ -221,7 +221,7 @@ export default function Home() {
           features: [
             'Unlimited scripts',
             'Unlimited descriptions',
-            'Ideal Customer Profiles (ICP)',
+            'Voice input for scripts',
             '100 ad designs per month'
           ],
           cta: 'Get Started'
@@ -565,7 +565,7 @@ export default function Home() {
           <div className="grid sm:grid-cols-3 gap-3 sm:gap-4 mt-8 sm:mt-12">
             {[
               { icon: <PenTool className="w-5 h-5" />, text: language === 'es' ? 'Descripciones optimizadas para Ads' : 'Optimized ad descriptions' },
-              { icon: <Users className="w-5 h-5" />, text: language === 'es' ? 'Perfiles de cliente ideal (ICP)' : 'Ideal Customer Profiles (ICP)' },
+              { icon: <Mic className="w-5 h-5" />, text: language === 'es' ? 'Entrada de voz para guiones' : 'Voice input for scripts' },
               { icon: <Video className="w-5 h-5" />, text: language === 'es' ? 'Generación de videos con IA' : 'AI video generation' },
             ].map((feat, i) => (
               <div key={i} className="flex items-center gap-3 bg-dark-50 border border-dark-100 rounded-xl p-4 hover:border-primary-200 transition-colors">

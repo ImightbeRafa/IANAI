@@ -4,25 +4,27 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
   getProfile, 
-  getProducts,
-  getTeam,
-  getClients,
-  getClientProducts,
+  getUnassignedProducts,
   getDashboardStats,
   createProduct,
-  createClient,
-  assignProductToClient,
-  deleteClient,
   deleteProduct,
   getSharedProducts,
   acceptPendingInvites,
-  getSubscription
+  getSubscription,
+  getBusinessProducts,
+  deleteBusiness
 } from '../services/database'
-import type { Profile, Product, DashboardStats, ProductFormData, RestaurantFormData, Team, Client } from '../types'
+import type { Product, DashboardStats, RestaurantFormData, Business, ProductType, NewProductFormData, NewServiceFormData, IndumentariaFormData, RealEstateFormData } from '../types'
 import Layout from '../components/Layout'
 import ProductForm from '../components/ProductForm'
 import RestaurantForm from '../components/RestaurantForm'
+import RealEstateForm from '../components/RealEstateForm'
+import ServiceForm from '../components/ServiceForm'
+import IndumentariaForm from '../components/IndumentariaForm'
+import BusinessForm from '../components/BusinessForm'
+import ProductTypeSelector from '../components/ProductTypeSelector'
 import ShareProductModal from '../components/ShareProductModal'
+import { getBusinesses, createBusiness } from '../services/database'
 import { 
   Package, 
   FileText, 
@@ -30,7 +32,6 @@ import {
   Clock,
   Plus,
   Briefcase,
-  Users,
   FolderOpen,
   ChevronRight,
   ArrowLeft,
@@ -46,39 +47,35 @@ export default function Dashboard() {
   const { user } = useAuth()
   const { language } = useLanguage()
   const navigate = useNavigate()
-  const [profile, setProfile] = useState<Profile | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [showProductForm, setShowProductForm] = useState(false)
   const [showRestaurantForm, setShowRestaurantForm] = useState(false)
-  
-  // Team-specific state
-  const [team, setTeam] = useState<Team | null>(null)
-  const [clients, setClients] = useState<Client[]>([])
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
-  const [clientProducts, setClientProducts] = useState<Product[]>([])
-  const [showNewClientForm, setShowNewClientForm] = useState(false)
-  const [newClientName, setNewClientName] = useState('')
-  const [creatingClient, setCreatingClient] = useState(false)
-  const [assigningProduct, setAssigningProduct] = useState<Product | null>(null)
-  const [searchClients, setSearchClients] = useState('')
+  const [showTypeSelector, setShowTypeSelector] = useState(false)
+  const [showBusinessForm, setShowBusinessForm] = useState(false)
+  const [showServiceForm, setShowServiceForm] = useState(false)
+  const [showIndumentariaForm, setShowIndumentariaForm] = useState(false)
+  const [showRealEstateForm, setShowRealEstateForm] = useState(false)
+  const [businesses, setBusinesses] = useState<Business[]>([])
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null)
+  const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
+  const [businessProducts, setBusinessProducts] = useState<Product[]>([])
+  const [searchBusinesses, setSearchBusinesses] = useState('')
   const [searchProducts, setSearchProducts] = useState('')
   const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
   const [sharingProduct, setSharingProduct] = useState<Product | null>(null)
   const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null)
   const [trialPlan, setTrialPlan] = useState<string | null>(null)
 
-  const isTeamAccount = profile?.account_type === 'team'
-
-  const filteredClients = clients.filter(c =>
-    c.name.toLowerCase().includes(searchClients.toLowerCase())
+  const filteredBusinesses = businesses.filter(b =>
+    b.name.toLowerCase().includes(searchBusinesses.toLowerCase())
   )
   const filteredProducts = products.filter(p =>
     p.name.toLowerCase().includes(searchProducts.toLowerCase()) ||
     (p.description || '').toLowerCase().includes(searchProducts.toLowerCase())
   )
-  const filteredClientProducts = clientProducts.filter(p =>
+  const filteredBusinessProducts = businessProducts.filter(p =>
     p.name.toLowerCase().includes(searchProducts.toLowerCase()) ||
     (p.description || '').toLowerCase().includes(searchProducts.toLowerCase())
   )
@@ -88,7 +85,6 @@ export default function Dashboard() {
       if (!user) return
       try {
         const profileData = await getProfile(user.id)
-        setProfile(profileData)
 
         // Auto-accept any pending sharing invites for this user
         if (profileData?.email) {
@@ -107,26 +103,15 @@ export default function Dashboard() {
           setTrialPlan(sub.plan)
         }
 
-        if (profileData?.account_type === 'team') {
-          // Load team data
-          const teamData = await getTeam(user.id)
-          setTeam(teamData)
-          if (teamData) {
-            const clientsData = await getClients(teamData.id)
-            setClients(clientsData)
-          }
-          // Also load orphaned products (products without a client)
-          const orphanedProducts = await getProducts(user.id)
-          setProducts(orphanedProducts)
-        } else {
-          // Load individual user data
-          const [productsData, statsData] = await Promise.all([
-            getProducts(user.id),
-            getDashboardStats(user.id)
-          ])
-          setProducts(productsData)
-          setStats(statsData)
-        }
+        // Load businesses and products for all users
+        const [bizData, productsData, statsData] = await Promise.all([
+          getBusinesses(user.id),
+          getUnassignedProducts(user.id),
+          getDashboardStats(user.id)
+        ])
+        setBusinesses(bizData)
+        setProducts(productsData)
+        setStats(statsData)
       } catch (error) {
         console.error('Failed to load dashboard data:', error)
       } finally {
@@ -136,33 +121,33 @@ export default function Dashboard() {
     loadData()
   }, [user])
 
-  // Load products when a client is selected
   useEffect(() => {
-    async function loadClientProducts() {
-      if (!selectedClient) return
+    async function loadBusinessProducts() {
+      if (!selectedBusiness) return
       try {
-        const products = await getClientProducts(selectedClient.id)
-        setClientProducts(products)
+        const prods = await getBusinessProducts(selectedBusiness.id)
+        setBusinessProducts(prods)
       } catch (error) {
-        console.error('Failed to load client products:', error)
+        console.error('Failed to load business products:', error)
       }
     }
-    loadClientProducts()
-  }, [selectedClient])
+    loadBusinessProducts()
+  }, [selectedBusiness])
 
-  const handleCreateProduct = async (data: ProductFormData) => {
+  const handleCreateProduct = async (data: NewProductFormData | NewServiceFormData | IndumentariaFormData | RealEstateFormData) => {
     if (!user) return
     try {
-      // For team accounts, create product under the selected client
-      const clientId = isTeamAccount && selectedClient ? selectedClient.id : undefined
-      const newProduct = await createProduct(data, user.id, clientId)
+      const newProduct = await createProduct({ ...data } as Record<string, unknown> & { name: string; type: string }, user.id)
       
-      if (isTeamAccount && selectedClient) {
-        setClientProducts(prev => [newProduct, ...prev])
+      if (selectedBusiness) {
+        setBusinessProducts(prev => [newProduct, ...prev])
       } else {
         setProducts(prev => [newProduct, ...prev])
       }
       setShowProductForm(false)
+      setShowServiceForm(false)
+      setShowIndumentariaForm(false)
+      setShowRealEstateForm(false)
       navigate(`/product/${newProduct.id}`)
     } catch (error) {
       console.error('Failed to create product:', error)
@@ -172,30 +157,20 @@ export default function Dashboard() {
   const handleCreateRestaurant = async (data: RestaurantFormData) => {
     if (!user) return
     try {
-      const clientId = isTeamAccount && selectedClient ? selectedClient.id : undefined
-      // Restaurant uses different fields - pass directly to createProduct
       const restaurantData = {
         name: data.name,
         type: 'restaurant' as const,
-        product_description: '',
-        main_problem: '',
-        best_customers: '',
-        failed_attempts: '',
-        attention_grabber: '',
-        expected_result: '',
-        differentiation: '',
-        awareness_level: '',
-        // Restaurant-specific fields
+        business_id: data.business_id,
         menu_text: data.menu_text,
         menu_pdf_url: data.menu_pdf_url,
         location: data.location,
         schedule: data.schedule,
         is_new_restaurant: data.is_new_restaurant
       }
-      const newProduct = await createProduct(restaurantData, user.id, clientId)
+      const newProduct = await createProduct(restaurantData, user.id)
       
-      if (isTeamAccount && selectedClient) {
-        setClientProducts(prev => [newProduct, ...prev])
+      if (selectedBusiness) {
+        setBusinessProducts(prev => [newProduct, ...prev])
       } else {
         setProducts(prev => [newProduct, ...prev])
       }
@@ -206,46 +181,42 @@ export default function Dashboard() {
     }
   }
 
-  const handleCreateClient = async () => {
-    if (!user || !team || !newClientName.trim()) return
-    setCreatingClient(true)
+  const handleCreateBusiness = async (data: import('../types').BusinessFormData) => {
+    if (!user) return
     try {
-      const newClient = await createClient(team.id, user.id, newClientName.trim())
-      setClients(prev => [...prev, newClient])
-      setNewClientName('')
-      setShowNewClientForm(false)
+      const newBiz = await createBusiness(user.id, data)
+      setBusinesses(prev => [newBiz, ...prev])
+      setSelectedBusinessId(newBiz.id)
+      setShowBusinessForm(false)
     } catch (error) {
-      console.error('Failed to create client:', error)
-    } finally {
-      setCreatingClient(false)
+      console.error('Failed to create business:', error)
     }
   }
 
-  const handleAssignToClient = async (clientId: string) => {
-    if (!assigningProduct) return
-    try {
-      await assignProductToClient(assigningProduct.id, clientId)
-      // Remove from unassigned products
-      setProducts(prev => prev.filter(p => p.id !== assigningProduct.id))
-      setAssigningProduct(null)
-    } catch (error) {
-      console.error('Failed to assign product to client:', error)
-    }
-  }
-
-  const handleDeleteClient = async (client: Client) => {
-    const confirmMsg = language === 'es' 
-      ? `¿Eliminar "${client.name}" y todos sus productos, guiones y datos? Esta acción no se puede deshacer.`
-      : `Delete "${client.name}" and all its products, scripts, and data? This cannot be undone.`
-    
+  const handleDeleteBusiness = async (business: Business) => {
+    const confirmMsg = language === 'es'
+      ? `¿Eliminar "${business.name}" y todos sus productos, guiones y datos? Esta acción no se puede deshacer.`
+      : `Delete "${business.name}" and all its products, scripts, and data? This cannot be undone.`
     if (!confirm(confirmMsg)) return
-
     try {
-      await deleteClient(client.id)
-      setClients(prev => prev.filter(c => c.id !== client.id))
+      await deleteBusiness(business.id)
+      setBusinesses(prev => prev.filter(b => b.id !== business.id))
+      if (selectedBusiness?.id === business.id) {
+        setSelectedBusiness(null)
+        setBusinessProducts([])
+      }
     } catch (error) {
-      console.error('Failed to delete client:', error)
+      console.error('Failed to delete business:', error)
     }
+  }
+
+  const handleTypeSelected = (type: ProductType) => {
+    setShowTypeSelector(false)
+    if (type === 'product') setShowProductForm(true)
+    else if (type === 'service') setShowServiceForm(true)
+    else if (type === 'indumentaria') setShowIndumentariaForm(true)
+    else if (type === 'restaurant') setShowRestaurantForm(true)
+    else if (type === 'real_estate') setShowRealEstateForm(true)
   }
 
   const handleDeleteProduct = async (product: Product) => {
@@ -257,8 +228,8 @@ export default function Dashboard() {
 
     try {
       await deleteProduct(product.id)
-      if (selectedClient) {
-        setClientProducts(prev => prev.filter(p => p.id !== product.id))
+      if (selectedBusiness) {
+        setBusinessProducts(prev => prev.filter(p => p.id !== product.id))
       } else {
         setProducts(prev => prev.filter(p => p.id !== product.id))
       }
@@ -272,41 +243,26 @@ export default function Dashboard() {
       welcome: '¡Bienvenido de nuevo',
       overview: 'Resumen de tu actividad',
       newProduct: 'Nuevo',
-      upgradeTeam: 'Actualizar a Equipo',
       products: 'Productos',
       scripts: 'Scripts',
       sessions: 'Sesiones',
       thisMonth: 'Este Mes',
-      yourProducts: 'Tus Productos y Servicios',
-      noProducts: 'No tienes productos aún',
-      startFirst: 'Crea tu primer producto o servicio para empezar a generar scripts',
       product: 'Producto',
       service: 'Servicio',
       restaurant: 'Restaurante',
       realEstate: 'Inmobiliaria',
-      // Type selector
-      selectType: '¿Qué quieres crear?',
-      productDesc: 'Producto físico o digital',
-      serviceDesc: 'Servicio profesional',
-      restaurantDesc: 'Restaurante con menú',
-      realEstateDesc: 'Venta o alquiler de propiedades',
-      // Team labels
-      yourClients: 'Tus Categorías',
-      newClient: 'Nueva Categoría',
-      noClients: 'No tienes categorías aún',
-      createFirstClient: 'Crea tu primera categoría para organizar tus productos y servicios',
+      yourBusinesses: 'Tus Negocios',
+      newBusiness: 'Nuevo Negocio',
+      noBusinesses: 'No tienes negocios aún',
+      createFirstBusiness: 'Crea tu primer negocio para organizar tus productos y servicios',
       unassignedProducts: 'Productos Sin Asignar',
-      unassignedDesc: 'Estos productos no están asignados a ninguna categoría',
-      assignTo: 'Asignar a',
-      selectClient: 'Selecciona una categoría para asignar este producto',
-      clientName: 'Nombre de la Categoría',
-      create: 'Crear',
+      unassignedDesc: 'Estos productos no están asignados a ningún negocio',
       cancel: 'Cancelar',
       back: 'Volver',
       productsIn: 'Productos en',
-      noProductsInClient: 'No hay productos en esta categoría',
-      addProductToClient: 'Agrega un producto o servicio a esta categoría',
-      searchClients: 'Buscar categorías...',
+      noProductsInBusiness: 'No hay productos en este negocio',
+      addProductToBusiness: 'Agrega un producto o servicio a este negocio',
+      searchBusinesses: 'Buscar negocios...',
       searchProducts: 'Buscar productos...',
       sharedWithMe: 'Compartidos Conmigo',
       sharedBy: 'Compartido por',
@@ -318,41 +274,26 @@ export default function Dashboard() {
       welcome: 'Welcome back',
       overview: 'Overview of your activity',
       newProduct: 'New',
-      upgradeTeam: 'Upgrade to Team',
       products: 'Products',
       scripts: 'Scripts',
       sessions: 'Sessions',
       thisMonth: 'This Month',
-      yourProducts: 'Your Products & Services',
-      noProducts: 'No products yet',
-      startFirst: 'Create your first product or service to start generating scripts',
       product: 'Product',
       service: 'Service',
       restaurant: 'Restaurant',
       realEstate: 'Real Estate',
-      // Type selector
-      selectType: 'What do you want to create?',
-      productDesc: 'Physical or digital product',
-      serviceDesc: 'Professional service',
-      restaurantDesc: 'Restaurant with menu',
-      realEstateDesc: 'Property sale or rental',
-      // Team labels
-      yourClients: 'Your Categories',
-      newClient: 'New Category',
-      noClients: 'No categories yet',
-      createFirstClient: 'Create your first category to organize your products and services',
+      yourBusinesses: 'Your Businesses',
+      newBusiness: 'New Business',
+      noBusinesses: 'No businesses yet',
+      createFirstBusiness: 'Create your first business to organize your products and services',
       unassignedProducts: 'Unassigned Products',
-      unassignedDesc: 'These products are not assigned to any category',
-      assignTo: 'Assign to',
-      selectClient: 'Select a category to assign this product to',
-      clientName: 'Category Name',
-      create: 'Create',
+      unassignedDesc: 'These products are not assigned to any business',
       cancel: 'Cancel',
       back: 'Back',
       productsIn: 'Products in',
-      noProductsInClient: 'No products in this category',
-      addProductToClient: 'Add a product or service to this category',
-      searchClients: 'Search categories...',
+      noProductsInBusiness: 'No products in this business',
+      addProductToBusiness: 'Add a product or service to this business',
+      searchBusinesses: 'Search businesses...',
       searchProducts: 'Search products...',
       sharedWithMe: 'Shared With Me',
       sharedBy: 'Shared by',
@@ -371,8 +312,7 @@ export default function Dashboard() {
     { label: t.thisMonth, value: stats?.scriptsThisMonth || 0, icon: Clock, color: 'bg-orange-500' },
   ]
 
-  // Render product card component
-  const renderProductCard = (product: Product, showAssignButton = false) => {
+  const renderProductCard = (product: Product) => {
     const getTypeStyles = () => {
       switch (product.type) {
         case 'product': return { bg: 'bg-blue-900/20', icon: <Package className="w-5 h-5 text-blue-600" />, label: t.product }
@@ -389,7 +329,6 @@ export default function Dashboard() {
         key={product.id}
         className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group relative"
       >
-        {/* Share + Delete buttons */}
         <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100">
           <button
             onClick={(e) => {
@@ -435,43 +374,29 @@ export default function Dashboard() {
                 </p>
               )}
             </Link>
-            {showAssignButton && clients.length > 0 && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setAssigningProduct(product)
-                }}
-                className="mt-3 text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
-              >
-                <FolderOpen className="w-3 h-3" />
-                {t.assignTo}...
-              </button>
-            )}
           </div>
         </div>
       </div>
     )
   }
 
-  // Render client card component
-  const renderClientCard = (client: Client) => (
+  const renderBusinessCard = (business: Business) => (
     <div
-      key={client.id}
+      key={business.id}
       className="relative p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group"
     >
-      {/* Delete button - only for team owners */}
       <button
         onClick={(e) => {
           e.stopPropagation()
-          handleDeleteClient(client)
+          handleDeleteBusiness(business)
         }}
         className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10"
-        title={language === 'es' ? 'Eliminar cliente' : 'Delete client'}
+        title={language === 'es' ? 'Eliminar negocio' : 'Delete business'}
       >
         <Trash2 className="w-4 h-4" />
       </button>
       <button
-        onClick={() => setSelectedClient(client)}
+        onClick={() => { setSelectedBusiness(business); setSelectedBusinessId(business.id) }}
         className="w-full text-left"
       >
         <div className="flex items-center gap-4">
@@ -480,10 +405,10 @@ export default function Dashboard() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
-              {client.name}
+              {business.name}
             </p>
             <p className="text-sm text-dark-400">
-              {new Date(client.created_at).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US')}
+              {new Date(business.created_at).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US')}
             </p>
           </div>
           <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600" />
@@ -504,26 +429,18 @@ export default function Dashboard() {
             <p className="text-dark-500 mt-1">{t.overview}</p>
           </div>
           <div className="flex items-center gap-3">
-            {!isTeamAccount && (
-              <Link to="/settings" className="btn-secondary flex items-center gap-2">
-                <Users className="w-5 h-5" />
-                {t.upgradeTeam}
-              </Link>
-            )}
-            {/* Show new client button for team accounts when not viewing a client */}
-            {isTeamAccount && !selectedClient && (
+            {!selectedBusiness && (
               <button 
-                onClick={() => setShowNewClientForm(true)}
+                onClick={() => setShowBusinessForm(true)}
                 className="btn-secondary flex items-center gap-2"
               >
                 <Plus className="w-5 h-5" />
-                {t.newClient}
+                {t.newBusiness}
               </button>
             )}
-            {/* Show new product button for individual OR when viewing a client */}
-            {(!isTeamAccount || selectedClient) && (
+            {selectedBusiness && (
               <button 
-                onClick={() => setShowProductForm(true)}
+                onClick={() => setShowTypeSelector(true)}
                 className="btn-primary flex items-center gap-2"
               >
                 <Plus className="w-5 h-5" />
@@ -560,47 +477,87 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Stats Grid - Only for individual accounts */}
-        {!isTeamAccount && (
-          loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="card animate-pulse">
-                  <div className="h-16 bg-dark-100 rounded"></div>
+        {/* Stats Grid */}
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="card animate-pulse">
+                <div className="h-16 bg-dark-100 rounded"></div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {statCards.map(({ label, value, icon: Icon, color }) => (
+              <div key={label} className="card">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 ${color} rounded-xl flex items-center justify-center`}>
+                    <Icon className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-dark-900">{value}</p>
+                    <p className="text-sm text-dark-500">{label}</p>
+                  </div>
                 </div>
-              ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Unassigned Products */}
+        {products.length > 0 && !selectedBusiness && (
+          <div className="card mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-dark-900">{t.unassignedProducts}</h2>
+                <p className="text-sm text-dark-500">{t.unassignedDesc}</p>
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              {statCards.map(({ label, value, icon: Icon, color }) => (
-                <div key={label} className="card">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 ${color} rounded-xl flex items-center justify-center`}>
-                      <Icon className="w-6 h-6 text-white" />
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+              <input
+                type="text"
+                value={searchProducts}
+                onChange={(e) => setSearchProducts(e.target.value)}
+                placeholder={t.searchProducts}
+                className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredProducts.map(p => renderProductCard(p))}
+            </div>
+          </div>
+        )}
+
+        {/* Main Content: Business List or Business Products */}
+        <div className="card">
+          {selectedBusiness ? (
+            <>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      setSelectedBusiness(null)
+                      setSelectedBusinessId(null)
+                      setBusinessProducts([])
+                    }}
+                    className="p-2 hover:bg-dark-100 rounded-lg transition-colors"
+                  >
+                    <ArrowLeft className="w-5 h-5 text-dark-500" />
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center">
+                      <Briefcase className="w-5 h-5 text-primary-600" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-dark-900">{value}</p>
-                      <p className="text-sm text-dark-500">{label}</p>
+                      <h2 className="text-lg font-semibold text-dark-900">
+                        {t.productsIn} {selectedBusiness.name}
+                      </h2>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )
-        )}
-
-        {/* TEAM ACCOUNT VIEW */}
-        {isTeamAccount && (
-          <>
-          {/* Unassigned Products Section */}
-          {products.length > 0 && !selectedClient && (
-            <div className="card mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-dark-900">{t.unassignedProducts}</h2>
-                  <p className="text-sm text-dark-500">{t.unassignedDesc}</p>
-                </div>
               </div>
+
               <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
                 <input
@@ -611,163 +568,70 @@ export default function Dashboard() {
                   className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredProducts.map(p => renderProductCard(p, true))}
+
+              {businessProducts.length === 0 ? (
+                <div className="text-center py-12">
+                  <Package className="w-12 h-12 text-dark-300 mx-auto mb-4" />
+                  <p className="text-dark-500 mb-2">{t.noProductsInBusiness}</p>
+                  <p className="text-dark-400 text-sm mb-4">{t.addProductToBusiness}</p>
+                  <button 
+                    onClick={() => setShowTypeSelector(true)}
+                    className="btn-primary inline-flex items-center gap-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                    {t.newProduct}
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredBusinessProducts.map(p => renderProductCard(p))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-semibold text-dark-900">{t.yourBusinesses}</h2>
               </div>
-            </div>
+
+              <div className="relative mb-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+                <input
+                  type="text"
+                  value={searchBusinesses}
+                  onChange={(e) => setSearchBusinesses(e.target.value)}
+                  placeholder={t.searchBusinesses}
+                  className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+
+              {loading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="h-24 bg-dark-50 rounded-lg animate-pulse"></div>
+                  ))}
+                </div>
+              ) : businesses.length === 0 ? (
+                <div className="text-center py-12">
+                  <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
+                  <p className="text-dark-500 mb-2">{t.noBusinesses}</p>
+                  <p className="text-dark-400 text-sm mb-4">{t.createFirstBusiness}</p>
+                  <button 
+                    onClick={() => setShowBusinessForm(true)}
+                    className="btn-primary inline-flex items-center gap-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                    {t.newBusiness}
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredBusinesses.map(renderBusinessCard)}
+                </div>
+              )}
+            </>
           )}
-          <div className="card">
-            {/* Client View - Show products within selected client */}
-            {selectedClient ? (
-              <>
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => {
-                        setSelectedClient(null)
-                        setClientProducts([])
-                      }}
-                      className="p-2 hover:bg-dark-100 rounded-lg transition-colors"
-                    >
-                      <ArrowLeft className="w-5 h-5 text-dark-500" />
-                    </button>
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center">
-                        <Briefcase className="w-5 h-5 text-primary-600" />
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-semibold text-dark-900">
-                          {t.productsIn} {selectedClient.name}
-                        </h2>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="relative mb-4">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                  <input
-                    type="text"
-                    value={searchProducts}
-                    onChange={(e) => setSearchProducts(e.target.value)}
-                    placeholder={t.searchProducts}
-                    className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                  />
-                </div>
-
-                {clientProducts.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Package className="w-12 h-12 text-dark-300 mx-auto mb-4" />
-                    <p className="text-dark-500 mb-2">{t.noProductsInClient}</p>
-                    <p className="text-dark-400 text-sm mb-4">{t.addProductToClient}</p>
-                    <button 
-                      onClick={() => setShowProductForm(true)}
-                      className="btn-primary inline-flex items-center gap-2"
-                    >
-                      <Plus className="w-5 h-5" />
-                      {t.newProduct}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredClientProducts.map(p => renderProductCard(p, false))}
-                  </div>
-                )}
-              </>
-            ) : (
-              /* Clients List View */
-              <>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-lg font-semibold text-dark-900">{t.yourClients}</h2>
-                </div>
-
-                <div className="relative mb-4">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                  <input
-                    type="text"
-                    value={searchClients}
-                    onChange={(e) => setSearchClients(e.target.value)}
-                    placeholder={t.searchClients}
-                    className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                  />
-                </div>
-
-                {loading ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {[...Array(3)].map((_, i) => (
-                      <div key={i} className="h-24 bg-dark-50 rounded-lg animate-pulse"></div>
-                    ))}
-                  </div>
-                ) : clients.length === 0 ? (
-                  <div className="text-center py-12">
-                    <FolderOpen className="w-12 h-12 text-dark-300 mx-auto mb-4" />
-                    <p className="text-dark-500 mb-2">{t.noClients}</p>
-                    <p className="text-dark-400 text-sm mb-4">{t.createFirstClient}</p>
-                    <button 
-                      onClick={() => setShowNewClientForm(true)}
-                      className="btn-primary inline-flex items-center gap-2"
-                    >
-                      <Plus className="w-5 h-5" />
-                      {t.newClient}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredClients.map(renderClientCard)}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-          </>
-        )}
-
-        {/* INDIVIDUAL ACCOUNT VIEW - Products Grid */}
-        {!isTeamAccount && (
-          <div className="card">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold text-dark-900">{t.yourProducts}</h2>
-            </div>
-
-            {!loading && (
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                <input
-                  type="text"
-                  value={searchProducts}
-                  onChange={(e) => setSearchProducts(e.target.value)}
-                  placeholder={t.searchProducts}
-                  className="w-full pl-9 pr-3 py-2 bg-dark-100 border border-dark-300 rounded-lg text-sm text-dark-900 appearance-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-                />
-              </div>
-            )}
-
-            {loading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-32 bg-dark-50 rounded-lg animate-pulse"></div>
-                ))}
-              </div>
-            ) : products.length === 0 ? (
-              <div className="text-center py-12">
-                <Package className="w-12 h-12 text-dark-300 mx-auto mb-4" />
-                <p className="text-dark-500 mb-2">{t.noProducts}</p>
-                <p className="text-dark-400 text-sm mb-4">{t.startFirst}</p>
-                <button 
-                  onClick={() => setShowProductForm(true)}
-                  className="btn-primary inline-flex items-center gap-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  {t.newProduct}
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredProducts.map(p => renderProductCard(p, false))}
-              </div>
-            )}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Shared With Me Section */}
@@ -827,94 +691,60 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Product Form Modal */}
-      {showProductForm && (
-        <ProductForm
-          onSubmit={handleCreateProduct}
-          onCancel={() => setShowProductForm(false)}
+      {/* Type Selector */}
+      {showTypeSelector && (
+        <ProductTypeSelector
+          onSelect={handleTypeSelected}
+          onCancel={() => setShowTypeSelector(false)}
         />
       )}
 
-      {/* Restaurant Form Modal */}
-      {showRestaurantForm && (
+      {/* Business Form */}
+      {showBusinessForm && (
+        <BusinessForm
+          onSubmit={handleCreateBusiness}
+          onCancel={() => { setShowBusinessForm(false); setShowTypeSelector(true) }}
+        />
+      )}
+
+      {showProductForm && selectedBusinessId && (
+        <ProductForm
+          onSubmit={(data) => handleCreateProduct(data)}
+          onCancel={() => setShowProductForm(false)}
+          businessId={selectedBusinessId}
+        />
+      )}
+
+      {showServiceForm && selectedBusinessId && (
+        <ServiceForm
+          onSubmit={(data) => handleCreateProduct(data)}
+          onCancel={() => setShowServiceForm(false)}
+          businessId={selectedBusinessId}
+        />
+      )}
+
+      {showIndumentariaForm && selectedBusinessId && (
+        <IndumentariaForm
+          onSubmit={(data) => handleCreateProduct(data)}
+          onCancel={() => setShowIndumentariaForm(false)}
+          businessId={selectedBusinessId}
+        />
+      )}
+
+      {showRealEstateForm && selectedBusinessId && (
+        <RealEstateForm
+          onSubmit={(data) => handleCreateProduct(data)}
+          onCancel={() => setShowRealEstateForm(false)}
+          businessId={selectedBusinessId}
+        />
+      )}
+
+      {showRestaurantForm && selectedBusinessId && (
         <RestaurantForm
           onSubmit={handleCreateRestaurant}
           onCancel={() => setShowRestaurantForm(false)}
+          businessId={selectedBusinessId}
         />
-      )}
-
-      {/* Assign Product Modal */}
-      {assigningProduct && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-dark-100 rounded-2xl shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-dark-900 mb-2">
-              {t.assignTo} "{assigningProduct.name}"
-            </h3>
-            <p className="text-sm text-dark-500 mb-4">{t.selectClient}</p>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {clients.map(client => (
-                <button
-                  key={client.id}
-                  onClick={() => handleAssignToClient(client.id)}
-                  className="w-full p-3 text-left bg-dark-50 hover:bg-dark-100 rounded-lg transition-colors flex items-center gap-3"
-                >
-                  <div className="w-8 h-8 bg-primary-900/30 rounded-lg flex items-center justify-center">
-                    <Briefcase className="w-4 h-4 text-primary-600" />
-                  </div>
-                  <span className="font-medium text-dark-900">{client.name}</span>
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setAssigningProduct(null)}
-                className="btn-secondary"
-              >
-                {t.cancel}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* New Client Form Modal */}
-      {showNewClientForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-dark-100 rounded-2xl shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-dark-900 mb-4">{t.newClient}</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-dark-700 mb-1.5">
-                {t.clientName}
-              </label>
-              <input
-                type="text"
-                value={newClientName}
-                onChange={(e) => setNewClientName(e.target.value)}
-                className="input-field"
-                placeholder={language === 'es' ? 'Ej: Empresa ABC' : 'E.g., Company ABC'}
-                autoFocus
-              />
-            </div>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => {
-                  setShowNewClientForm(false)
-                  setNewClientName('')
-                }}
-                className="btn-secondary"
-              >
-                {t.cancel}
-              </button>
-              <button
-                onClick={handleCreateClient}
-                disabled={!newClientName.trim() || creatingClient}
-                className="btn-primary"
-              >
-                {creatingClient ? '...' : t.create}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </Layout>
   )

@@ -12,14 +12,13 @@ import {
   updateChatSession,
   updateProduct,
   saveScript,
-  getICPs,
-  getClientICPs,
   getContextDocuments,
   createContextDocument,
   deleteContextDocument
 } from '../services/database'
-import { sendMessageToGrok, previewPrompt, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
-import type { Product, ChatSession, Message, ScriptGenerationSettings, ICP, ContextDocument } from '../types'
+import { sendMessageToGrok, previewPrompt, editScript, DEFAULT_SCRIPT_SETTINGS, buildApiBusinessContext, buildApiProductContext } from '../services/grokApi'
+import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument } from '../types'
+import { getSuccessCases } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
@@ -40,7 +39,6 @@ import {
   Download,
   Sparkles,
   Info,
-  Users,
   Link2,
   FileText,
   Trash2,
@@ -49,7 +47,8 @@ import {
   Eye,
   EyeOff,
   Mic,
-  Square
+  Square,
+  Building2
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -72,8 +71,6 @@ export default function ProductWorkspace() {
   const [savingScript, setSavingScript] = useState(false)
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(DEFAULT_SCRIPT_SETTINGS)
   const [showMobileConfig, setShowMobileConfig] = useState(false)
-  const [icps, setICPs] = useState<ICP[]>([])
-  const [selectedICP, setSelectedICP] = useState<ICP | null>(null)
   const [contextDocs, setContextDocs] = useState<ContextDocument[]>([])
   const [showAddLink, setShowAddLink] = useState(false)
   const [newLinkUrl, setNewLinkUrl] = useState('')
@@ -89,6 +86,7 @@ export default function ProductWorkspace() {
   const [failedLinks, setFailedLinks] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [consciousnessLevel, setConsciousnessLevel] = useState<'cold' | 'warm' | 'hot'>('warm')
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const usageLimits = useUsageLimits()
@@ -120,12 +118,6 @@ export default function ProductWorkspace() {
 
         const sessionsData = await getChatSessions(productId)
         setSessions(sessionsData)
-
-        // Load ICPs: client-scoped for team products, user-scoped for single accounts
-        const icpsData = productData.client_id 
-          ? await getClientICPs(productData.client_id)
-          : await getICPs(user.id)
-        setICPs(icpsData)
 
         if (sessionId) {
           const sessionData = await getChatSession(sessionId)
@@ -217,14 +209,14 @@ export default function ProductWorkspace() {
       const savedUserMessage = await addMessage(session.id, 'user', userMessage)
       setMessages(prev => [...prev, savedUserMessage])
 
-      // Build context for AI - use message with settings for API call
       const productContext = buildProductContext(product, context)
       const messageForApi = { ...savedUserMessage, content: messageWithSettings }
       const allMessages = [...messages, messageForApi]
       
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
+      const { bizCtx, prodCtx } = await getStructuredContexts(product)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
-      
+
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
       setMessages(prev => [...prev, savedAiMessage])
 
@@ -247,7 +239,6 @@ export default function ProductWorkspace() {
     const baseContext = {
       product_name: product.name,
       product_type: product.type,
-      // New form fields
       product_description: product.product_description,
       main_problem: product.main_problem,
       best_customers: product.best_customers,
@@ -260,7 +251,6 @@ export default function ProductWorkspace() {
       key_objection: product.key_objection,
       shipping_info: product.shipping_info,
       awareness_level: product.awareness_level,
-      // Legacy fields for backward compatibility
       offer: product.offer,
       market_alternatives: product.market_alternatives,
       customer_values: product.customer_values,
@@ -272,36 +262,33 @@ export default function ProductWorkspace() {
       context_links_content: product.context_links_content || ''
     }
 
-    // Add restaurant-specific fields if applicable
     if (product.type === 'restaurant') {
-      return {
-        ...baseContext,
-        menu_text: product.menu_text,
-        location: product.location,
-        schedule: product.schedule,
-        is_new_restaurant: product.is_new_restaurant
-      }
+      return { ...baseContext, menu_text: product.menu_text, location: product.location, schedule: product.schedule, is_new_restaurant: product.is_new_restaurant }
     }
-
-    // Add real estate-specific fields if applicable
     if (product.type === 'real_estate') {
-      return {
-        ...baseContext,
-        re_business_type: product.re_business_type,
-        re_price: product.re_price,
-        re_location: product.re_location,
-        re_construction_size: product.re_construction_size,
-        re_bedrooms: product.re_bedrooms,
-        re_capacity: product.re_capacity,
-        re_bathrooms: product.re_bathrooms,
-        re_parking: product.re_parking,
-        re_highlights: product.re_highlights,
-        re_location_reference: product.re_location_reference,
-        re_cta: product.re_cta
-      }
+      return { ...baseContext, re_business_type: product.re_business_type, re_price: product.re_price, re_location: product.re_location, re_construction_size: product.re_construction_size, re_bedrooms: product.re_bedrooms, re_capacity: product.re_capacity, re_bathrooms: product.re_bathrooms, re_parking: product.re_parking, re_highlights: product.re_highlights, re_location_reference: product.re_location_reference, re_cta: product.re_cta }
     }
 
     return baseContext
+  }
+
+  const getStructuredContexts = async (product: Product) => {
+    const bizCtx = buildApiBusinessContext(product.business)
+    const prodCtx = buildApiProductContext(product)
+    if (product.type === 'service' && product.svc_has_success_cases) {
+      const cases = await getSuccessCases(product.id)
+      if (cases.length > 0) {
+        (prodCtx as Record<string, unknown>).success_cases = cases.map(c => ({
+          client_name: c.client_name,
+          before_state: c.before_state,
+          what_they_did: c.what_they_did,
+          result: c.result,
+          timeline: c.timeline,
+          life_change: c.life_change,
+        }))
+      }
+    }
+    return { bizCtx, prodCtx }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -645,9 +632,10 @@ export default function ProductWorkspace() {
       const productContext = buildProductContext(product, context)
       const allMessages = [...messages, userMessage]
       
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, selectedICP, contextDocs)
+      const { bizCtx, prodCtx } = await getStructuredContexts(product)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
-      
+
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
       setMessages(prev => [...prev, savedAiMessage])
 
@@ -671,14 +659,16 @@ export default function ProductWorkspace() {
     setLoadingPreview(true)
     try {
       const productContext = buildProductContext(product, context)
+      const { bizCtx, prodCtx } = await getStructuredContexts(product)
       const prompt = await previewPrompt(
         messages,
         productContext,
         language,
         scriptSettings,
         undefined,
-        selectedICP,
-        contextDocs
+        contextDocs,
+        bizCtx,
+        prodCtx
       )
       setPreviewSystemPrompt(prompt)
     } catch (error) {
@@ -711,6 +701,16 @@ export default function ProductWorkspace() {
     return handleSaveScript(content, title)
   }
 
+  const handleEditScript = async (originalContent: string, instruction: string): Promise<string> => {
+    let bizCtx: Record<string, unknown> | undefined
+    let prodCtx: Record<string, unknown> | undefined
+    if (product) {
+      const ctxs = await getStructuredContexts(product)
+      bizCtx = ctxs.bizCtx as Record<string, unknown> | undefined
+      prodCtx = ctxs.prodCtx as Record<string, unknown> | undefined
+    }
+    return editScript(originalContent, instruction, language, bizCtx, prodCtx)
+  }
 
   const exportAsText = () => {
     const text = messages
@@ -747,7 +747,63 @@ export default function ProductWorkspace() {
       regenerate: 'Regenerar',
       saveScript: 'Guardar Script',
       scriptSaved: '¡Script guardado!',
-      productDescription: 'Descripción del producto/servicio',
+      businessInfo: 'Información del Negocio',
+      bizName: 'Nombre',
+      bizSalesChannels: 'Canales de venta',
+      bizLocation: 'Ubicación',
+      bizShipping: 'Envíos',
+      bizShippingMethod: 'Método de envío',
+      bizTargetAudience: 'Audiencia objetivo',
+      bizAge: 'Edad',
+      bizSex: 'Sexo',
+      bizGeo: 'Alcance geográfico',
+      bizProfession: 'Profesión',
+      channelPhysical: 'Local físico',
+      channelMessages: 'Mensajes',
+      channelWebsite: 'Sitio web',
+      sexMale: 'Masculino',
+      sexFemale: 'Femenino',
+      sexBoth: 'Ambos',
+      geoLocal: 'Local',
+      geoCountry: 'Nacional',
+      geoWorld: 'Internacional',
+      productDescription: 'Beneficios / Descripción',
+      currentAlternatives: 'Alternativas actuales',
+      alternativesDisadvantages: 'Desventajas de alternativas',
+      productCategory: 'Categoría',
+      productVariations: 'Variaciones',
+      technicalSpecs: 'Especificaciones técnicas',
+      utility: 'Utilidad',
+      result: 'Resultado',
+      hasGuarantee: 'Garantía',
+      priceRange: 'Rango de precio',
+      stockLimited: 'Stock limitado',
+      // Service labels
+      svcServiceType: 'Tipo de servicio',
+      svcProblem: 'Problema que resuelve',
+      svcCurrentPain: 'Dolor actual',
+      svcAlternativesTried: 'Alternativas intentadas',
+      svcAlternativesFailures: 'Por qué fallan',
+      svcConcreteResult: 'Resultado concreto',
+      svcResultTimeline: 'Tiempo para resultados',
+      svcLifeChange: 'Cambio de vida',
+      svcProcessSteps: 'Proceso',
+      svcServiceFormat: 'Formato',
+      svcServiceDuration: 'Duración',
+      svcDifferentiation: 'Diferenciación',
+      svcMethodName: 'Método propio',
+      svcMainObjection: 'Objeción principal',
+      svcGuarantee: 'Garantía del servicio',
+      // Indumentaria labels
+      indArticleType: 'Tipo de artículo',
+      indModelCount: 'Cantidad de modelos',
+      indVariations: 'Variaciones',
+      indSizes: 'Tallas',
+      indMaterial: 'Material principal',
+      indQuality: 'Calidad',
+      indChanges: 'Acepta cambios',
+      indCustomizable: 'Personalizable',
+      // Legacy labels (for old products)
       mainProblem: 'Problema principal',
       bestCustomers: 'Mejores clientes',
       failedAttempts: 'Intentos fallidos',
@@ -759,7 +815,7 @@ export default function ProductWorkspace() {
       keyObjection: 'Objeción principal',
       shippingInfo: 'Información de envío',
       awarenessLevel: 'Nivel de conciencia',
-      // Restaurant-specific labels
+      // Restaurant labels
       menuText: 'Menú',
       location: 'Ubicación',
       schedule: 'Horario',
@@ -777,7 +833,9 @@ export default function ProductWorkspace() {
       reLocationReference: 'Referencia ubicación',
       reCta: 'Llamado a acción',
       scriptSettings: 'Configuración del Script',
-      rateScript: 'Calificar'
+      rateScript: 'Calificar',
+      yes: 'Sí',
+      no: 'No'
     },
     en: {
       back: 'Back',
@@ -799,7 +857,63 @@ export default function ProductWorkspace() {
       regenerate: 'Regenerate',
       saveScript: 'Save Script',
       scriptSaved: 'Script saved!',
-      productDescription: 'Product/Service Description',
+      businessInfo: 'Business Info',
+      bizName: 'Name',
+      bizSalesChannels: 'Sales Channels',
+      bizLocation: 'Location',
+      bizShipping: 'Shipping',
+      bizShippingMethod: 'Shipping Method',
+      bizTargetAudience: 'Target Audience',
+      bizAge: 'Age',
+      bizSex: 'Sex',
+      bizGeo: 'Geographic Scope',
+      bizProfession: 'Profession',
+      channelPhysical: 'Physical store',
+      channelMessages: 'Messages',
+      channelWebsite: 'Website',
+      sexMale: 'Male',
+      sexFemale: 'Female',
+      sexBoth: 'Both',
+      geoLocal: 'Local',
+      geoCountry: 'Country',
+      geoWorld: 'International',
+      productDescription: 'Benefits / Description',
+      currentAlternatives: 'Current Alternatives',
+      alternativesDisadvantages: 'Alternatives Disadvantages',
+      productCategory: 'Category',
+      productVariations: 'Variations',
+      technicalSpecs: 'Technical Specs',
+      utility: 'Utility',
+      result: 'Result',
+      hasGuarantee: 'Guarantee',
+      priceRange: 'Price Range',
+      stockLimited: 'Limited Stock',
+      // Service labels
+      svcServiceType: 'Service Type',
+      svcProblem: 'Problem It Solves',
+      svcCurrentPain: 'Current Pain',
+      svcAlternativesTried: 'Alternatives Tried',
+      svcAlternativesFailures: 'Why They Fail',
+      svcConcreteResult: 'Concrete Result',
+      svcResultTimeline: 'Time to Results',
+      svcLifeChange: 'Life Change',
+      svcProcessSteps: 'Process',
+      svcServiceFormat: 'Format',
+      svcServiceDuration: 'Duration',
+      svcDifferentiation: 'Differentiation',
+      svcMethodName: 'Own Method',
+      svcMainObjection: 'Main Objection',
+      svcGuarantee: 'Service Guarantee',
+      // Indumentaria labels
+      indArticleType: 'Article Type',
+      indModelCount: 'Number of Models',
+      indVariations: 'Variations',
+      indSizes: 'Sizes',
+      indMaterial: 'Main Material',
+      indQuality: 'Quality',
+      indChanges: 'Accepts Returns',
+      indCustomizable: 'Customizable',
+      // Legacy labels (for old products)
       mainProblem: 'Main Problem',
       bestCustomers: 'Best Customers',
       failedAttempts: 'Failed Attempts',
@@ -811,7 +925,7 @@ export default function ProductWorkspace() {
       keyObjection: 'Key Objection',
       shippingInfo: 'Shipping Info',
       awarenessLevel: 'Awareness Level',
-      // Restaurant-specific labels
+      // Restaurant labels
       menuText: 'Menu',
       location: 'Location',
       schedule: 'Schedule',
@@ -829,7 +943,9 @@ export default function ProductWorkspace() {
       reLocationReference: 'Location Reference',
       reCta: 'Call to Action',
       scriptSettings: 'Script Settings',
-      rateScript: 'Rate'
+      rateScript: 'Rate',
+      yes: 'Yes',
+      no: 'No'
     }
   }
 
@@ -857,6 +973,14 @@ export default function ProductWorkspace() {
 
   return (
     <Layout>
+      {/* Maintenance Disclaimer */}
+      <div className="bg-amber-900/30 border-b border-amber-700/30 px-4 py-2 text-center">
+        <p className="text-xs text-amber-200">
+          {language === 'es'
+            ? '⚠️ Estamos realizando mejoras. Podrías experimentar cambios temporales. ¡Gracias por tu paciencia!'
+            : '⚠️ We\'re making improvements. You may experience temporary changes. Thanks for your patience!'}
+        </p>
+      </div>
       <div className="flex h-[calc(100vh-64px)] lg:h-screen" style={{ height: 'calc(100dvh - 64px)' }}>
         {/* Left Panel — Script Config & Sessions */}
         <div className="hidden lg:flex w-[420px] bg-dark-100 border-r border-dark-100 flex-col min-h-0 overflow-hidden max-h-[100dvh]">
@@ -874,44 +998,120 @@ export default function ProductWorkspace() {
           </div>
 
           {/* Scrollable Content */}
-          <div className="flex-1 overflow-auto px-5 py-4 space-y-5">
-            {/* Script Settings — always visible */}
+          <div className="flex-1 overflow-auto px-5 py-4 space-y-4">
+            {/* Script Settings — no generate button here */}
             <ScriptSettingsPanel
               settings={scriptSettings}
               onChange={setScriptSettings}
               language={language}
-              onGenerate={handleGenerateScript}
               loading={loading}
             />
 
-            {/* ICP Selector */}
-            {icps.length > 0 && (
-              <div>
-                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
-                  <Users className="w-3.5 h-3.5 text-blue-500" />
-                  {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
-                </label>
-                <select
-                  value={selectedICP?.id || ''}
-                  onChange={(e) => {
-                    const icp = icps.find(i => i.id === e.target.value) || null
-                    setSelectedICP(icp)
-                  }}
-                  className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
-                  {icps.map(icp => (
-                    <option key={icp.id} value={icp.id}>{icp.name}</option>
-                  ))}
-                </select>
-                {selectedICP && (
-                  <p className="text-xs text-dark-500 mt-1.5 line-clamp-2">{selectedICP.description}</p>
-                )}
+            {/* Consciousness Level */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                {language === 'es' ? 'Nivel de Conciencia' : 'Consciousness Level'}
+              </label>
+              <div className="grid grid-cols-3 gap-1.5 bg-dark-200/50 p-1 rounded-xl">
+                {([
+                  { value: 'cold' as const, label: language === 'es' ? 'Frío' : 'Cold', emoji: '🧊' },
+                  { value: 'warm' as const, label: language === 'es' ? 'Tibio' : 'Warm', emoji: '🌡️' },
+                  { value: 'hot' as const, label: language === 'es' ? 'Caliente' : 'Hot', emoji: '🔥' },
+                ]).map(level => (
+                  <button
+                    key={level.value}
+                    onClick={() => setConsciousnessLevel(level.value)}
+                    className={`py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200 ${
+                      consciousnessLevel === level.value
+                        ? 'bg-dark-100 text-dark-900 shadow-sm border border-dark-200'
+                        : 'text-dark-500 hover:text-dark-700 border border-transparent'
+                    }`}
+                  >
+                    <span className="block text-sm mb-0.5">{level.emoji}</span>
+                    {level.label}
+                  </button>
+                ))}
               </div>
-            )}
+              <p className="text-[11px] text-dark-400 mt-1.5 text-center">
+                {consciousnessLevel === 'cold'
+                  ? (language === 'es' ? 'No sabe que tiene el problema' : "Doesn't know they have the problem")
+                  : consciousnessLevel === 'warm'
+                    ? (language === 'es' ? 'Sabe del problema, busca solución' : 'Knows the problem, seeks solution')
+                    : (language === 'es' ? 'Listo para comprar' : 'Ready to buy')}
+              </p>
+            </div>
+
+            {/* Chat Input — Apple-like pill */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
+                <Send className="w-3.5 h-3.5 text-primary-500" />
+                {language === 'es' ? 'Instrucciones' : 'Instructions'}
+              </label>
+              <div className="bg-dark-50 border border-dark-200 rounded-2xl p-1.5 focus-within:border-dark-300 focus-within:ring-1 focus-within:ring-dark-300 transition-all">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={isRecording
+                    ? (language === 'es' ? 'Grabando...' : 'Recording...')
+                    : isTranscribing
+                      ? (language === 'es' ? 'Transcribiendo...' : 'Transcribing...')
+                      : (language === 'es' ? 'Describe lo que necesitas...' : 'Describe what you need...')}
+                  className="w-full px-3 py-2 text-sm bg-transparent resize-none min-h-[60px] max-h-28 focus:outline-none text-dark-800 placeholder:text-dark-400"
+                  rows={2}
+                  disabled={loading || isTranscribing}
+                />
+                <div className="flex items-center justify-between px-1.5 pb-0.5">
+                  <button
+                    onClick={handleVoiceToggle}
+                    disabled={loading || isTranscribing}
+                    className={`h-8 w-8 flex items-center justify-center rounded-full transition-all duration-200 ${
+                      isRecording
+                        ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse'
+                        : isTranscribing
+                          ? 'bg-dark-200 text-dark-400'
+                          : 'text-dark-400 hover:text-dark-600 hover:bg-dark-200'
+                    }`}
+                    title={isRecording
+                      ? (language === 'es' ? 'Detener' : 'Stop')
+                      : (language === 'es' ? 'Grabar audio' : 'Record audio')}
+                  >
+                    {isTranscribing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : isRecording ? (
+                      <Square className="w-3 h-3 fill-current" />
+                    ) : (
+                      <Mic className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!input.trim() || loading}
+                    className="h-8 w-8 flex items-center justify-center rounded-full bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Generate Scripts Button */}
+            <button
+              onClick={handleGenerateScript}
+              disabled={loading || (scriptSettings.generationMode === 'by_type' && Object.values(scriptSettings.scriptTypeConfig).reduce((s, n) => s + n, 0) === 0)}
+              className="w-full py-3.5 flex items-center justify-center gap-2 text-base font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow-md"
+            >
+              <Sparkles className={`w-5 h-5 ${loading ? 'animate-pulse' : ''}`} />
+              {language === 'es' ? 'Generar Guiones' : 'Generate Scripts'}
+            </button>
 
             {/* Sessions */}
-            <div>
+            <div className="pt-2 border-t border-dark-200/60">
               <div className="flex items-center justify-between mb-2">
                 <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase">
                   <MessageSquare className="w-3.5 h-3.5 text-dark-400" />
@@ -955,13 +1155,15 @@ export default function ProductWorkspace() {
                           />
                         </div>
                       ) : (
-                        <button
+                        <div
                           onClick={() => navigate(`/product/${productId}/session/${session.id}`)}
                           onDoubleClick={() => {
                             setRenamingSessionId(session.id)
                             setRenameValue(session.title)
                           }}
-                          className="w-full text-left px-3 py-2 rounded-lg"
+                          className="w-full text-left px-3 py-2 rounded-lg cursor-pointer"
+                          role="button"
+                          tabIndex={0}
                         >
                           <div className="flex items-center gap-2">
                             <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${
@@ -984,7 +1186,7 @@ export default function ProductWorkspace() {
                           <p className="text-[11px] text-dark-400 mt-0.5 pl-5.5">
                             {new Date(session.updated_at).toLocaleDateString()}
                           </p>
-                        </button>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -1051,27 +1253,6 @@ export default function ProductWorkspace() {
                 onGenerate={() => { setShowMobileConfig(false); handleGenerateScript() }}
                 loading={loading}
               />
-              {icps.length > 0 && (
-                <div>
-                  <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
-                    <Users className="w-3.5 h-3.5 text-blue-500" />
-                    {language === 'es' ? 'Perfil de Cliente' : 'Client Profile'}
-                  </label>
-                  <select
-                    value={selectedICP?.id || ''}
-                    onChange={(e) => {
-                      const icp = icps.find(i => i.id === e.target.value) || null
-                      setSelectedICP(icp)
-                    }}
-                    className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm"
-                  >
-                    <option value="">{language === 'es' ? 'Sin ICP (general)' : 'No ICP (general)'}</option>
-                    {icps.map(icp => (
-                      <option key={icp.id} value={icp.id}>{icp.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
             </div>
           )}
 
@@ -1142,7 +1323,9 @@ export default function ProductWorkspace() {
                             script={script}
                             language={language}
                             onSave={handleSaveIndividualScript}
+                            onEdit={handleEditScript}
                             savingScript={savingScript}
+                            productType={product?.type}
                           />
                         ))}
                         {/* Prompt toggle for script messages */}
@@ -1238,67 +1421,74 @@ export default function ProductWorkspace() {
 
           {/* Usage Banner */}
           <UsageBanner usage={usageLimits} resource="script" />
-
-          {/* Input */}
-          <div className="bg-dark-100 border-t border-dark-100 px-6 py-3">
-            <div className="max-w-4xl mx-auto">
-              <div className="flex items-end gap-2">
-                <div className="flex-1 relative">
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={isRecording
-                      ? (language === 'es' ? 'Grabando... presiona ■ para detener' : 'Recording... press ■ to stop')
-                      : isTranscribing
-                        ? (language === 'es' ? 'Transcribiendo audio...' : 'Transcribing audio...')
-                        : t.placeholder}
-                    className="w-full px-4 py-3 text-sm bg-dark-200 border border-dark-300 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-400 focus:bg-dark-200 transition-colors"
-                    rows={1}
-                    disabled={loading || isTranscribing}
-                  />
-                </div>
-                <button
-                  onClick={handleVoiceToggle}
-                  disabled={loading || isTranscribing}
-                  className={`h-[48px] w-[48px] flex items-center justify-center rounded-xl transition-colors ${
-                    isRecording
-                      ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse'
-                      : isTranscribing
-                        ? 'bg-dark-200 text-dark-400'
-                        : 'bg-dark-200 text-dark-500 hover:bg-dark-300 hover:text-dark-700'
-                  }`}
-                  title={isRecording
-                    ? (language === 'es' ? 'Detener grabación' : 'Stop recording')
-                    : (language === 'es' ? 'Grabar audio' : 'Record audio')}
-                >
-                  {isTranscribing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : isRecording ? (
-                    <Square className="w-3.5 h-3.5 fill-current" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                </button>
-                <button
-                  onClick={() => handleSend()}
-                  disabled={!input.trim() || loading}
-                  className="h-[48px] w-[48px] flex items-center justify-center rounded-xl bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Right Sidebar - Product Info & Context */}
+        {/* Right Sidebar - Business Info, Product Info & Context */}
         {showProductInfo && (
           <div className="w-80 bg-dark-100 border-l border-dark-100 flex flex-col overflow-y-auto">
+            {/* Business Info */}
+            {product?.business && (
+              <div className="p-4 border-b border-dark-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <Building2 className="w-4 h-4 text-primary-500" />
+                  <h3 className="font-semibold text-dark-900">{t.businessInfo}</h3>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <p className="text-xs text-dark-400">{t.bizName}</p>
+                    <p className="text-dark-700">{product.business.name}</p>
+                  </div>
+                  {product.business.sales_channels?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-dark-400">{t.bizSalesChannels}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {product.business.sales_channels.map((ch: string) => (
+                          <span key={ch} className="px-2 py-0.5 bg-dark-200 rounded text-xs text-dark-600">
+                            {ch === 'physical' ? t.channelPhysical : ch === 'messages' ? t.channelMessages : t.channelWebsite}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {product.business.location && (
+                    <div>
+                      <p className="text-xs text-dark-400">{t.bizLocation}</p>
+                      <p className="text-dark-700">{product.business.location}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs text-dark-400">{t.bizShipping}</p>
+                    <p className="text-dark-700">{product.business.does_shipping ? (product.business.shipping_method || (language === 'es' ? 'Sí' : 'Yes')) : (language === 'es' ? 'No' : 'No')}</p>
+                  </div>
+                  {product.business.target_audiences && product.business.target_audiences.length > 0 && (
+                    <div>
+                      <p className="text-xs text-dark-400 mb-1">{t.bizTargetAudience}</p>
+                      {product.business.target_audiences.map((ta: { id: string; sex: string; age_min: number; age_max: number; geographic_scope: string; geographic_scope_custom?: string; has_specific_profession: boolean; profession_description?: string }, idx: number) => (
+                        <div key={ta.id} className="pl-2 border-l-2 border-primary-300 mb-2 space-y-1">
+                          {product.business!.target_audiences!.length > 1 && (
+                            <p className="text-xs font-medium text-dark-500">#{idx + 1}</p>
+                          )}
+                          <p className="text-xs text-dark-600">
+                            <span className="text-dark-400">{t.bizSex}:</span> {ta.sex === 'male' ? t.sexMale : ta.sex === 'female' ? t.sexFemale : t.sexBoth}
+                          </p>
+                          <p className="text-xs text-dark-600">
+                            <span className="text-dark-400">{t.bizAge}:</span> {ta.age_min} - {ta.age_max}
+                          </p>
+                          <p className="text-xs text-dark-600">
+                            <span className="text-dark-400">{t.bizGeo}:</span> {ta.geographic_scope === 'local' ? t.geoLocal : ta.geographic_scope === 'country' ? t.geoCountry : ta.geographic_scope === 'world' ? t.geoWorld : ta.geographic_scope_custom || ta.geographic_scope}
+                          </p>
+                          {ta.has_specific_profession && ta.profession_description && (
+                            <p className="text-xs text-dark-600">
+                              <span className="text-dark-400">{t.bizProfession}:</span> {ta.profession_description}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {/* Product Info */}
             <div className="p-4 border-b border-dark-100">
               <div className="flex items-center justify-between mb-3">
@@ -1335,118 +1525,94 @@ export default function ProductWorkspace() {
               <div className="space-y-3 text-sm">
                 {editingProduct ? (
                   <>
-                    {/* Product & Service common fields - Edit Mode */}
-                    {(product.type === 'product' || product.type === 'service') && (
-                      <>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.productDescription}</label>
-                          <textarea
-                            value={editedProduct.product_description || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, product_description: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.mainProblem}</label>
-                          <textarea
-                            value={editedProduct.main_problem || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, main_problem: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.bestCustomers}</label>
-                          <textarea
-                            value={editedProduct.best_customers || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, best_customers: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.failedAttempts}</label>
-                          <textarea
-                            value={editedProduct.failed_attempts || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, failed_attempts: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.attentionGrabber}</label>
-                          <textarea
-                            value={editedProduct.attention_grabber || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, attention_grabber: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.expectedResult}</label>
-                          <textarea
-                            value={editedProduct.expected_result || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, expected_result: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.differentiation}</label>
-                          <textarea
-                            value={editedProduct.differentiation || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, differentiation: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.awarenessLevel}</label>
-                          <textarea
-                            value={editedProduct.awareness_level || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, awareness_level: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
-                        </div>
-                      </>
-                    )}
-                    {/* Product-specific fields */}
+                    {/* Product edit fields */}
                     {product.type === 'product' && (
                       <>
                         <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.keyObjection}</label>
-                          <textarea
-                            value={editedProduct.key_objection || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, key_objection: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
+                          <label className="text-xs text-dark-400 block mb-1">{t.productDescription}</label>
+                          <textarea value={editedProduct.product_description || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, product_description: e.target.value }))} className="input-field text-sm min-h-[60px]" />
                         </div>
                         <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.shippingInfo}</label>
-                          <textarea
-                            value={editedProduct.shipping_info || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, shipping_info: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
+                          <label className="text-xs text-dark-400 block mb-1">{t.currentAlternatives}</label>
+                          <textarea value={editedProduct.current_alternatives || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, current_alternatives: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.alternativesDisadvantages}</label>
+                          <textarea value={editedProduct.alternatives_disadvantages || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, alternatives_disadvantages: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.technicalSpecs}</label>
+                          <textarea value={editedProduct.technical_specs || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, technical_specs: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.utility}</label>
+                          <textarea value={editedProduct.utility || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, utility: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.result}</label>
+                          <textarea value={editedProduct.result || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, result: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.hasGuarantee}</label>
+                          <textarea value={editedProduct.guarantee_details || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, guarantee_details: e.target.value }))} className="input-field text-sm min-h-[40px]" placeholder={language === 'es' ? 'Detalles de garantía (dejar vacío si no hay)' : 'Guarantee details (leave empty if none)'} />
                         </div>
                       </>
                     )}
-                    {/* Service-specific fields */}
+                    {/* Service edit fields */}
                     {product.type === 'service' && (
                       <>
                         <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.realPain}</label>
-                          <textarea
-                            value={editedProduct.real_pain || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, real_pain: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcProblem}</label>
+                          <textarea value={editedProduct.svc_problem || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_problem: e.target.value }))} className="input-field text-sm min-h-[60px]" />
                         </div>
                         <div>
-                          <label className="text-xs text-dark-400 block mb-1">{t.painConsequences}</label>
-                          <textarea
-                            value={editedProduct.pain_consequences || ''}
-                            onChange={(e) => setEditedProduct(prev => ({ ...prev, pain_consequences: e.target.value }))}
-                            className="input-field text-sm min-h-[60px]"
-                          />
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcCurrentPain}</label>
+                          <textarea value={editedProduct.svc_current_pain || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_current_pain: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcConcreteResult}</label>
+                          <textarea value={editedProduct.svc_concrete_result || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_concrete_result: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcProcessSteps}</label>
+                          <textarea value={editedProduct.svc_process_steps || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_process_steps: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcDifferentiation}</label>
+                          <textarea value={editedProduct.svc_differentiation || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_differentiation: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcMainObjection}</label>
+                          <textarea value={editedProduct.svc_main_objection || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_main_objection: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.svcGuarantee}</label>
+                          <textarea value={editedProduct.svc_guarantee_details || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, svc_guarantee_details: e.target.value }))} className="input-field text-sm min-h-[40px]" placeholder={language === 'es' ? 'Detalles de garantía (dejar vacío si no hay)' : 'Guarantee details (leave empty if none)'} />
                         </div>
                       </>
                     )}
-                    {/* Restaurant-specific fields */}
+                    {/* Indumentaria edit fields */}
+                    {product.type === 'indumentaria' && (
+                      <>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.productDescription}</label>
+                          <textarea value={editedProduct.product_description || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, product_description: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.indVariations}</label>
+                          <textarea value={editedProduct.ind_variations_description || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, ind_variations_description: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.indMaterial}</label>
+                          <input type="text" value={editedProduct.ind_main_material || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, ind_main_material: e.target.value }))} className="input-field text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-dark-400 block mb-1">{t.indQuality}</label>
+                          <textarea value={editedProduct.ind_quality_description || ''} onChange={(e) => setEditedProduct(prev => ({ ...prev, ind_quality_description: e.target.value }))} className="input-field text-sm min-h-[60px]" />
+                        </div>
+                      </>
+                    )}
+                    {/* Restaurant edit fields */}
                     {product.type === 'restaurant' && (
                       <>
                         <div>
@@ -1532,67 +1698,66 @@ export default function ProductWorkspace() {
                   </>
                 ) : (
                   <>
-                    {/* Product & Service common fields */}
-                    {(product.type === 'product' || product.type === 'service') && (
-                      <>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.productDescription}</p>
-                          <p className="text-dark-700">{product.product_description || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.mainProblem}</p>
-                          <p className="text-dark-700">{product.main_problem || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.bestCustomers}</p>
-                          <p className="text-dark-700">{product.best_customers || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.failedAttempts}</p>
-                          <p className="text-dark-700">{product.failed_attempts || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.attentionGrabber}</p>
-                          <p className="text-dark-700">{product.attention_grabber || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.expectedResult}</p>
-                          <p className="text-dark-700">{product.expected_result || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.differentiation}</p>
-                          <p className="text-dark-700">{product.differentiation || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.awarenessLevel}</p>
-                          <p className="text-dark-700">{product.awareness_level || '-'}</p>
-                        </div>
-                      </>
-                    )}
-                    {/* Product-specific fields */}
+                    {/* New product fields */}
                     {product.type === 'product' && (
                       <>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.keyObjection}</p>
-                          <p className="text-dark-700">{product.key_objection || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.shippingInfo}</p>
-                          <p className="text-dark-700">{product.shipping_info || '-'}</p>
-                        </div>
+                        {product.product_category && <div><p className="text-xs text-dark-400">{t.productCategory}</p><p className="text-dark-700">{product.product_category}</p></div>}
+                        {product.product_description && <div><p className="text-xs text-dark-400">{t.productDescription}</p><p className="text-dark-700">{product.product_description}</p></div>}
+                        {product.current_alternatives && <div><p className="text-xs text-dark-400">{t.currentAlternatives}</p><p className="text-dark-700">{product.current_alternatives}</p></div>}
+                        {product.alternatives_disadvantages && <div><p className="text-xs text-dark-400">{t.alternativesDisadvantages}</p><p className="text-dark-700">{product.alternatives_disadvantages}</p></div>}
+                        {product.product_variations && product.product_variations.length > 0 && <div><p className="text-xs text-dark-400">{t.productVariations}</p><p className="text-dark-700">{product.product_variations.join(', ')}</p></div>}
+                        {product.technical_specs && <div><p className="text-xs text-dark-400">{t.technicalSpecs}</p><p className="text-dark-700">{product.technical_specs}</p></div>}
+                        {product.utility && <div><p className="text-xs text-dark-400">{t.utility}</p><p className="text-dark-700">{product.utility}</p></div>}
+                        {product.result && <div><p className="text-xs text-dark-400">{t.result}</p><p className="text-dark-700">{product.result}</p></div>}
+                        {(product.has_guarantee !== undefined && product.has_guarantee !== null) && <div><p className="text-xs text-dark-400">{t.hasGuarantee}</p><p className="text-dark-700">{product.has_guarantee ? `${t.yes}${product.guarantee_details ? ` — ${product.guarantee_details}` : ''}` : t.no}</p></div>}
+                        {product.price_range && <div><p className="text-xs text-dark-400">{t.priceRange}</p><p className="text-dark-700">{product.price_range}</p></div>}
+                        {product.stock_limited && <div><p className="text-xs text-dark-400">{t.stockLimited}</p><p className="text-dark-700">{t.yes}</p></div>}
+                        {/* Legacy fields for old products */}
+                        {product.main_problem && <div><p className="text-xs text-dark-400">{t.mainProblem}</p><p className="text-dark-700">{product.main_problem}</p></div>}
+                        {product.best_customers && <div><p className="text-xs text-dark-400">{t.bestCustomers}</p><p className="text-dark-700">{product.best_customers}</p></div>}
+                        {product.differentiation && <div><p className="text-xs text-dark-400">{t.differentiation}</p><p className="text-dark-700">{product.differentiation}</p></div>}
+                        {product.key_objection && <div><p className="text-xs text-dark-400">{t.keyObjection}</p><p className="text-dark-700">{product.key_objection}</p></div>}
+                        {product.shipping_info && <div><p className="text-xs text-dark-400">{t.shippingInfo}</p><p className="text-dark-700">{product.shipping_info}</p></div>}
                       </>
                     )}
-                    {/* Service-specific fields */}
+                    {/* Service fields */}
                     {product.type === 'service' && (
                       <>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.realPain}</p>
-                          <p className="text-dark-700">{product.real_pain || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-dark-400">{t.painConsequences}</p>
-                          <p className="text-dark-700">{product.pain_consequences || '-'}</p>
-                        </div>
+                        {product.svc_service_type && <div><p className="text-xs text-dark-400">{t.svcServiceType}</p><p className="text-dark-700">{product.svc_service_type}</p></div>}
+                        {product.product_description && <div><p className="text-xs text-dark-400">{t.productDescription}</p><p className="text-dark-700">{product.product_description}</p></div>}
+                        {product.svc_problem && <div><p className="text-xs text-dark-400">{t.svcProblem}</p><p className="text-dark-700">{product.svc_problem}</p></div>}
+                        {product.svc_current_pain && <div><p className="text-xs text-dark-400">{t.svcCurrentPain}</p><p className="text-dark-700">{product.svc_current_pain}</p></div>}
+                        {product.svc_alternatives_tried && <div><p className="text-xs text-dark-400">{t.svcAlternativesTried}</p><p className="text-dark-700">{product.svc_alternatives_tried}</p></div>}
+                        {product.svc_alternatives_failures && <div><p className="text-xs text-dark-400">{t.svcAlternativesFailures}</p><p className="text-dark-700">{product.svc_alternatives_failures}</p></div>}
+                        {product.svc_concrete_result && <div><p className="text-xs text-dark-400">{t.svcConcreteResult}</p><p className="text-dark-700">{product.svc_concrete_result}</p></div>}
+                        {product.svc_result_timeline && <div><p className="text-xs text-dark-400">{t.svcResultTimeline}</p><p className="text-dark-700">{product.svc_result_timeline}</p></div>}
+                        {product.svc_life_change && <div><p className="text-xs text-dark-400">{t.svcLifeChange}</p><p className="text-dark-700">{product.svc_life_change}</p></div>}
+                        {product.svc_process_steps && <div><p className="text-xs text-dark-400">{t.svcProcessSteps}</p><p className="text-dark-700 whitespace-pre-wrap">{product.svc_process_steps}</p></div>}
+                        {product.svc_service_format && <div><p className="text-xs text-dark-400">{t.svcServiceFormat}</p><p className="text-dark-700">{product.svc_service_format}</p></div>}
+                        {product.svc_service_duration && <div><p className="text-xs text-dark-400">{t.svcServiceDuration}</p><p className="text-dark-700">{product.svc_service_duration}</p></div>}
+                        {product.svc_differentiation && <div><p className="text-xs text-dark-400">{t.svcDifferentiation}</p><p className="text-dark-700">{product.svc_differentiation}</p></div>}
+                        {product.svc_has_own_method && product.svc_method_name && <div><p className="text-xs text-dark-400">{t.svcMethodName}</p><p className="text-dark-700">{product.svc_method_name}</p></div>}
+                        {product.svc_main_objection && <div><p className="text-xs text-dark-400">{t.svcMainObjection}</p><p className="text-dark-700">{product.svc_main_objection}</p></div>}
+                        {(product.svc_has_guarantee) && <div><p className="text-xs text-dark-400">{t.svcGuarantee}</p><p className="text-dark-700">{product.svc_guarantee_details || t.yes}</p></div>}
+                        {/* Legacy fields for old services */}
+                        {product.main_problem && <div><p className="text-xs text-dark-400">{t.mainProblem}</p><p className="text-dark-700">{product.main_problem}</p></div>}
+                        {product.real_pain && <div><p className="text-xs text-dark-400">{t.realPain}</p><p className="text-dark-700">{product.real_pain}</p></div>}
+                        {product.differentiation && <div><p className="text-xs text-dark-400">{t.differentiation}</p><p className="text-dark-700">{product.differentiation}</p></div>}
+                      </>
+                    )}
+                    {/* Indumentaria fields */}
+                    {product.type === 'indumentaria' && (
+                      <>
+                        {product.ind_article_type && <div><p className="text-xs text-dark-400">{t.indArticleType}</p><p className="text-dark-700">{product.ind_article_type}</p></div>}
+                        {product.product_description && <div><p className="text-xs text-dark-400">{t.productDescription}</p><p className="text-dark-700">{product.product_description}</p></div>}
+                        {product.ind_model_count && <div><p className="text-xs text-dark-400">{t.indModelCount}</p><p className="text-dark-700">{product.ind_model_count}</p></div>}
+                        {product.ind_variations_description && <div><p className="text-xs text-dark-400">{t.indVariations}</p><p className="text-dark-700">{product.ind_variations_description}</p></div>}
+                        {product.ind_sizes && <div><p className="text-xs text-dark-400">{t.indSizes}</p><p className="text-dark-700">{product.ind_sizes}</p></div>}
+                        {product.ind_main_material && <div><p className="text-xs text-dark-400">{t.indMaterial}</p><p className="text-dark-700">{product.ind_main_material}</p></div>}
+                        {product.ind_quality_description && <div><p className="text-xs text-dark-400">{t.indQuality}</p><p className="text-dark-700">{product.ind_quality_description}</p></div>}
+                        {(product.ind_accepts_changes !== undefined && product.ind_accepts_changes !== null) && <div><p className="text-xs text-dark-400">{t.indChanges}</p><p className="text-dark-700">{product.ind_accepts_changes ? `${t.yes}${product.ind_change_policy ? ` — ${product.ind_change_policy}` : ''}` : t.no}</p></div>}
+                        {(product.has_guarantee !== undefined && product.has_guarantee !== null) && <div><p className="text-xs text-dark-400">{t.hasGuarantee}</p><p className="text-dark-700">{product.has_guarantee ? `${t.yes}${product.guarantee_details ? ` — ${product.guarantee_details}` : ''}` : t.no}</p></div>}
+                        {(product.ind_customizable !== undefined && product.ind_customizable !== null) && <div><p className="text-xs text-dark-400">{t.indCustomizable}</p><p className="text-dark-700">{product.ind_customizable ? `${t.yes}${product.ind_customization_description ? ` — ${product.ind_customization_description}` : ''}` : t.no}</p></div>}
                       </>
                     )}
                     {/* Restaurant-specific fields */}
@@ -1665,7 +1830,6 @@ export default function ProductWorkspace() {
             </div>
 
             {/* Context Documents */}
-            {currentSession && (
               <div className="p-4 border-t border-dark-100 bg-green-900/10">
                 <h3 className="font-semibold text-dark-900 mb-3 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-green-600" />
@@ -1811,7 +1975,6 @@ export default function ProductWorkspace() {
                   </div>
                 )}
               </div>
-            )}
           </div>
         )}
       </div>

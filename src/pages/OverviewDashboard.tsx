@@ -12,7 +12,6 @@ import {
   Package,
   TrendingUp,
   ArrowRight,
-  Sparkles,
   Crown
 } from 'lucide-react'
 
@@ -117,7 +116,6 @@ export default function OverviewDashboard() {
       quickActions: 'Acciones Rápidas',
       newScript: 'Nuevo Guión',
       newPost: 'Nuevo Post',
-      viewICPs: 'Perfiles ICP',
     },
     en: {
       welcome: 'Welcome back',
@@ -146,7 +144,6 @@ export default function OverviewDashboard() {
       quickActions: 'Quick Actions',
       newScript: 'New Script',
       newPost: 'New Post',
-      viewICPs: 'ICP Profiles',
     },
   }[language]
 
@@ -375,21 +372,6 @@ export default function OverviewDashboard() {
                 <div>
                   <p className="font-medium text-dark-900">{t.newPost}</p>
                   <p className="text-xs text-dark-400">Posts</p>
-                </div>
-                <ArrowRight className="w-4 h-4 text-dark-300 ml-auto group-hover:text-primary-500 transition-colors" />
-              </div>
-            </Link>
-            <Link
-              to="/icps"
-              className="card hover:border-primary-200 hover:shadow-md transition-all group"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-purple-900/20 rounded-xl flex items-center justify-center group-hover:bg-purple-200 transition-colors">
-                  <Sparkles className="w-5 h-5 text-purple-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-dark-900">{t.viewICPs}</p>
-                  <p className="text-xs text-dark-400">ICP</p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-dark-300 ml-auto group-hover:text-primary-500 transition-colors" />
               </div>

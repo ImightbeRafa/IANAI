@@ -11,7 +11,6 @@ import {
   ImageIcon,
   Film,
   BarChart3,
-  Users,
   AlignLeft,
   LayoutDashboard
 } from 'lucide-react'
@@ -39,7 +38,6 @@ export default function Layout({ children }: LayoutProps) {
       descriptions: 'Descripciones',
       posts: 'Posts',
       broll: 'Ad Videos',
-      icps: 'Perfiles ICP',
       settings: 'Configuración',
       signOut: 'Cerrar Sesión',
       admin: 'Admin'
@@ -50,7 +48,6 @@ export default function Layout({ children }: LayoutProps) {
       descriptions: 'Descriptions',
       posts: 'Posts',
       broll: 'Ad Videos',
-      icps: 'ICP Profiles',
       settings: 'Settings',
       signOut: 'Sign Out',
       admin: 'Admin'
@@ -65,7 +62,6 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/descriptions', label: t.descriptions, icon: AlignLeft, beta: true, adminOnly: false },
     { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: false },
     { path: '/broll', label: t.broll, icon: Film, beta: true, adminOnly: true },
-    { path: '/icps', label: t.icps, icon: Users, beta: true, adminOnly: false },
     { path: '/settings', label: t.settings, icon: Settings, beta: false, adminOnly: false },
     ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false, adminOnly: false }] : []),
   ]

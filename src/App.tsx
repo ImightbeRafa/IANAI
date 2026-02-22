@@ -17,8 +17,6 @@ const PostsDashboard = lazy(() => import('./pages/PostsDashboard'))
 const PostWorkspace = lazy(() => import('./pages/PostWorkspace'))
 const BRollDashboard = lazy(() => import('./pages/BRollDashboard'))
 const BRollWorkspace = lazy(() => import('./pages/BRollWorkspace'))
-const ICPDashboard = lazy(() => import('./pages/ICPDashboard'))
-const ICPForm = lazy(() => import('./pages/ICPForm'))
 const Settings = lazy(() => import('./pages/Settings'))
 const TeamManagement = lazy(() => import('./pages/TeamManagement'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
@@ -116,46 +114,6 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <BRollWorkspace />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/icps"
-              element={
-                <ProtectedRoute>
-                  <ICPDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/icps/new"
-              element={
-                <ProtectedRoute>
-                  <ICPForm />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/icps/:icpId/edit"
-              element={
-                <ProtectedRoute>
-                  <ICPForm />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/icps/client/:clientId/new"
-              element={
-                <ProtectedRoute>
-                  <ICPForm />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/icps/client/:clientId/:icpId/edit"
-              element={
-                <ProtectedRoute>
-                  <ICPForm />
                 </ProtectedRoute>
               }
             />

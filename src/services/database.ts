@@ -11,10 +11,12 @@ import type {
   ProductFormData,
   DashboardStats,
   TeamDashboardStats,
-  ICP,
-  ICPFormData,
   ContextDocument,
-  ContextDocumentFormData
+  ContextDocumentFormData,
+  Business,
+  BusinessFormData,
+  SuccessCase,
+  SuccessCaseFormData
 } from '../types'
 
 // =============================================
@@ -175,84 +177,193 @@ export async function deleteClient(clientId: string): Promise<void> {
 }
 
 // =============================================
+// BUSINESS FUNCTIONS
+// =============================================
+export async function createBusiness(
+  ownerId: string,
+  data: BusinessFormData,
+  clientId?: string
+): Promise<Business> {
+  const { data: business, error } = await supabase
+    .from('businesses')
+    .insert({
+      owner_id: ownerId,
+      client_id: clientId || null,
+      name: data.name,
+      sales_channels: data.sales_channels,
+      location: data.location || null,
+      does_shipping: data.does_shipping,
+      shipping_method: data.shipping_method || null,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  // Create target audiences
+  if (data.target_audiences && data.target_audiences.length > 0) {
+    const audienceInserts = data.target_audiences.map(a => ({
+      business_id: business.id,
+      sex: a.sex,
+      age_min: a.age_min,
+      age_max: a.age_max,
+      geographic_scope: a.geographic_scope,
+      geographic_scope_custom: a.geographic_scope_custom || null,
+      has_specific_profession: a.has_specific_profession,
+      profession_description: a.profession_description || null,
+    }))
+
+    const { error: audError } = await supabase
+      .from('business_target_audiences')
+      .insert(audienceInserts)
+
+    if (audError) console.error('Failed to create target audiences:', audError)
+  }
+
+  return business
+}
+
+export async function getBusinesses(userId: string): Promise<Business[]> {
+  const { data, error } = await supabase
+    .from('businesses')
+    .select('*, target_audiences:business_target_audiences(*)')
+    .eq('owner_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getClientBusinesses(clientId: string): Promise<Business[]> {
+  const { data, error } = await supabase
+    .from('businesses')
+    .select('*, target_audiences:business_target_audiences(*)')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getBusiness(businessId: string): Promise<Business | null> {
+  const { data, error } = await supabase
+    .from('businesses')
+    .select('*, target_audiences:business_target_audiences(*)')
+    .eq('id', businessId)
+    .single()
+
+  if (error) return null
+  return data
+}
+
+export async function updateBusiness(
+  businessId: string,
+  data: Partial<BusinessFormData>
+): Promise<void> {
+  const { target_audiences, ...businessFields } = data
+  
+  const { error } = await supabase
+    .from('businesses')
+    .update({ ...businessFields, updated_at: new Date().toISOString() })
+    .eq('id', businessId)
+
+  if (error) throw error
+
+  if (target_audiences) {
+    await supabase.from('business_target_audiences').delete().eq('business_id', businessId)
+    if (target_audiences.length > 0) {
+      const inserts = target_audiences.map(a => ({
+        business_id: businessId,
+        sex: a.sex,
+        age_min: a.age_min,
+        age_max: a.age_max,
+        geographic_scope: a.geographic_scope,
+        geographic_scope_custom: a.geographic_scope_custom || null,
+        has_specific_profession: a.has_specific_profession,
+        profession_description: a.profession_description || null,
+      }))
+      await supabase.from('business_target_audiences').insert(inserts)
+    }
+  }
+}
+
+export async function deleteBusiness(businessId: string): Promise<void> {
+  const { error } = await supabase
+    .from('businesses')
+    .delete()
+    .eq('id', businessId)
+
+  if (error) throw error
+}
+
+// =============================================
+// SUCCESS CASE FUNCTIONS
+// =============================================
+export async function getSuccessCases(productId: string): Promise<SuccessCase[]> {
+  const { data, error } = await supabase
+    .from('service_success_cases')
+    .select('*')
+    .eq('product_id', productId)
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createSuccessCase(
+  productId: string,
+  caseData: SuccessCaseFormData
+): Promise<SuccessCase> {
+  const { data, error } = await supabase
+    .from('service_success_cases')
+    .insert({
+      product_id: productId,
+      ...caseData,
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteSuccessCase(caseId: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_success_cases')
+    .delete()
+    .eq('id', caseId)
+
+  if (error) throw error
+}
+
+export async function replaceSuccessCases(
+  productId: string,
+  cases: SuccessCaseFormData[]
+): Promise<void> {
+  await supabase.from('service_success_cases').delete().eq('product_id', productId)
+  if (cases.length > 0) {
+    const inserts = cases.map(c => ({ product_id: productId, ...c }))
+    const { error } = await supabase.from('service_success_cases').insert(inserts)
+    if (error) throw error
+  }
+}
+
+// =============================================
 // PRODUCT FUNCTIONS
 // =============================================
 export async function createProduct(
-  data: ProductFormData & {
-    menu_text?: string
-    menu_pdf_url?: string
-    location?: string
-    schedule?: string
-    is_new_restaurant?: boolean
-    // Real estate fields
-    re_business_type?: string
-    re_price?: string
-    re_location?: string
-    re_construction_size?: string
-    re_bedrooms?: string
-    re_capacity?: string
-    re_bathrooms?: string
-    re_parking?: string
-    re_highlights?: string
-    re_location_reference?: string
-    re_cta?: string
-  },
+  data: Record<string, unknown> & { name: string; type: string; business_id?: string },
   ownerId: string,
   clientId?: string
 ): Promise<Product> {
+  const { success_cases, ...insertFields } = data as Record<string, unknown>
+  
   const insertData: Record<string, unknown> = {
     owner_id: ownerId,
     client_id: clientId || null,
-    name: data.name,
-    type: data.type,
-    // New form fields
-    product_description: data.product_description,
-    main_problem: data.main_problem,
-    best_customers: data.best_customers,
-    failed_attempts: data.failed_attempts,
-    attention_grabber: data.attention_grabber,
-    real_pain: data.real_pain,
-    pain_consequences: data.pain_consequences,
-    expected_result: data.expected_result,
-    differentiation: data.differentiation,
-    key_objection: data.key_objection,
-    shipping_info: data.shipping_info,
-    awareness_level: data.awareness_level,
-    // Context links
-    context_links: data.context_links || [],
-    context_links_content: data.context_links_content || '',
-    // Legacy fields for backward compatibility
-    description: data.description,
-    offer: data.offer,
-    market_alternatives: data.market_alternatives,
-    customer_values: data.customer_values,
-    purchase_reason: data.purchase_reason,
-    target_audience: data.target_audience,
-    call_to_action: data.call_to_action
-  }
-
-  // Add restaurant-specific fields if present
-  if (data.type === 'restaurant') {
-    insertData.menu_text = data.menu_text
-    insertData.menu_pdf_url = data.menu_pdf_url
-    insertData.location = data.location
-    insertData.schedule = data.schedule
-    insertData.is_new_restaurant = data.is_new_restaurant
-  }
-
-  // Add real estate-specific fields if present
-  if (data.type === 'real_estate') {
-    insertData.re_business_type = data.re_business_type
-    insertData.re_price = data.re_price
-    insertData.re_location = data.re_location
-    insertData.re_construction_size = data.re_construction_size
-    insertData.re_bedrooms = data.re_bedrooms
-    insertData.re_capacity = data.re_capacity
-    insertData.re_bathrooms = data.re_bathrooms
-    insertData.re_parking = data.re_parking
-    insertData.re_highlights = data.re_highlights
-    insertData.re_location_reference = data.re_location_reference
-    insertData.re_cta = data.re_cta
+    ...insertFields,
+    context_links: (data.context_links as string[]) || [],
+    context_links_content: (data.context_links_content as string) || '',
   }
 
   const { data: product, error } = await supabase
@@ -262,6 +373,16 @@ export async function createProduct(
     .single()
 
   if (error) throw error
+
+  // Create success cases for services
+  if (data.type === 'service' && success_cases && Array.isArray(success_cases) && success_cases.length > 0) {
+    const caseInserts = (success_cases as SuccessCaseFormData[]).map(c => ({
+      product_id: product.id,
+      ...c,
+    }))
+    await supabase.from('service_success_cases').insert(caseInserts)
+  }
+
   return product
 }
 
@@ -270,7 +391,29 @@ export async function getProducts(userId: string): Promise<Product[]> {
     .from('products')
     .select('*')
     .eq('owner_id', userId)
-    .is('client_id', null)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getUnassignedProducts(userId: string): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('owner_id', userId)
+    .is('business_id', null)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getBusinessProducts(businessId: string): Promise<Product[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('business_id', businessId)
     .order('created_at', { ascending: false })
 
   if (error) throw error
@@ -291,7 +434,7 @@ export async function getClientProducts(clientId: string): Promise<Product[]> {
 export async function getProduct(productId: string): Promise<Product | null> {
   const { data, error } = await supabase
     .from('products')
-    .select('*, client:clients(*)')
+    .select('*, client:clients(*), business:businesses(*, target_audiences:business_target_audiences(*))')
     .eq('id', productId)
     .single()
 
@@ -684,102 +827,6 @@ export async function deletePost(postId: string): Promise<void> {
     .from('posts')
     .delete()
     .eq('id', postId)
-
-  if (error) throw error
-}
-
-// =============================================
-// ICP (Ideal Client Profile) FUNCTIONS
-// =============================================
-export async function getICPs(userId: string): Promise<ICP[]> {
-  const { data, error } = await supabase
-    .from('icps')
-    .select('*')
-    .eq('owner_id', userId)
-    .is('client_id', null)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
-export async function getClientICPs(clientId: string): Promise<ICP[]> {
-  const { data, error } = await supabase
-    .from('icps')
-    .select('*')
-    .eq('client_id', clientId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
-export async function getOrphanedICPs(userId: string): Promise<ICP[]> {
-  const { data, error } = await supabase
-    .from('icps')
-    .select('*')
-    .eq('owner_id', userId)
-    .is('client_id', null)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
-export async function assignICPToClient(icpId: string, clientId: string): Promise<ICP> {
-  const { data, error } = await supabase
-    .from('icps')
-    .update({ client_id: clientId, updated_at: new Date().toISOString() })
-    .eq('id', icpId)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-export async function getICP(icpId: string): Promise<ICP | null> {
-  const { data, error } = await supabase
-    .from('icps')
-    .select('*')
-    .eq('id', icpId)
-    .single()
-
-  if (error) return null
-  return data
-}
-
-export async function createICP(userId: string, icpData: ICPFormData): Promise<ICP> {
-  const { data, error } = await supabase
-    .from('icps')
-    .insert({
-      owner_id: userId,
-      ...icpData
-    })
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-export async function updateICP(icpId: string, updates: Partial<ICPFormData>): Promise<ICP> {
-  const { data, error } = await supabase
-    .from('icps')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', icpId)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-export async function deleteICP(icpId: string): Promise<void> {
-  const { error } = await supabase
-    .from('icps')
-    .delete()
-    .eq('id', icpId)
 
   if (error) throw error
 }

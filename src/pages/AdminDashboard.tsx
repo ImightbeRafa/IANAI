@@ -26,7 +26,9 @@ import {
   CheckCircle,
   XCircle,
   Copy,
-  Mic
+  Mic,
+  Search,
+  ChevronDown
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -58,6 +60,20 @@ interface RecentLog {
   estimated_cost_usd: number
   success: boolean
   created_at: string
+}
+
+interface UserUsageStats {
+  user_id: string
+  user_email: string
+  total_calls: number
+  total_cost_usd: number
+  script_calls: number
+  description_calls: number
+  image_calls: number
+  video_calls: number
+  voice_calls: number
+  other_calls: number
+  last_active: string
 }
 
 interface ReferralCampaign {
@@ -140,6 +156,12 @@ export default function AdminDashboard() {
   const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([])
   const [referralSignups, setReferralSignups] = useState<ReferralSignup[]>([])
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
+  const [userStats, setUserStats] = useState<UserUsageStats[]>([])
+  const [logSearch, setLogSearch] = useState('')
+  const [logPage, setLogPage] = useState(0)
+  const [hasMoreLogs, setHasMoreLogs] = useState(true)
+  const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
+  const [userStatsSearch, setUserStatsSearch] = useState('')
 
   const labels = {
     es: {
@@ -261,15 +283,29 @@ export default function AdminDashboard() {
       if (dailyError) throw dailyError
       setDailyUsage(dailyData || [])
 
-      // Fetch recent logs
+      // Fetch per-user stats
+      const { data: userStatsData, error: userStatsError } = await supabase
+        .rpc('get_user_usage_stats', {
+          start_date: startDate.toISOString(),
+          end_date: new Date().toISOString()
+        })
+
+      if (userStatsError) console.warn('User stats not available yet:', userStatsError.message)
+      else setUserStats(userStatsData || [])
+
+      // Fetch first page of logs
+      setLogPage(0)
+      setLogSearch('')
+      const PAGE_SIZE = 20
       const { data: logsData, error: logsError } = await supabase
         .from('api_usage_logs')
         .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
         .order('created_at', { ascending: false })
-        .limit(50)
+        .range(0, PAGE_SIZE - 1)
 
       if (logsError) throw logsError
       setRecentLogs(logsData || [])
+      setHasMoreLogs((logsData || []).length >= PAGE_SIZE)
 
       // Fetch referral campaigns
       const { data: campaignsData } = await supabase
@@ -345,6 +381,68 @@ export default function AdminDashboard() {
       setLoading(false)
     }
   }, [isAdmin, dateRange])
+
+  const LOG_PAGE_SIZE = 20
+
+  const fetchLogs = async (search: string) => {
+    setLogSearch(search)
+    setLogPage(0)
+    setLoadingMoreLogs(true)
+    try {
+      let query = supabase
+        .from('api_usage_logs')
+        .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
+        .order('created_at', { ascending: false })
+        .range(0, LOG_PAGE_SIZE - 1)
+
+      if (search.trim()) {
+        query = query.ilike('user_email', `%${search.trim()}%`)
+      }
+
+      const { data, error: err } = await query
+      if (err) throw err
+      setRecentLogs(data || [])
+      setHasMoreLogs((data || []).length >= LOG_PAGE_SIZE)
+    } catch (err) {
+      console.error('Failed to search logs:', err)
+    } finally {
+      setLoadingMoreLogs(false)
+    }
+  }
+
+  const loadMoreLogs = async () => {
+    const nextPage = logPage + 1
+    setLoadingMoreLogs(true)
+    try {
+      const from = nextPage * LOG_PAGE_SIZE
+      const to = from + LOG_PAGE_SIZE - 1
+
+      let query = supabase
+        .from('api_usage_logs')
+        .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
+        .order('created_at', { ascending: false })
+        .range(from, to)
+
+      if (logSearch.trim()) {
+        query = query.ilike('user_email', `%${logSearch.trim()}%`)
+      }
+
+      const { data, error: err } = await query
+      if (err) throw err
+      setRecentLogs(prev => [...prev, ...(data || [])])
+      setHasMoreLogs((data || []).length >= LOG_PAGE_SIZE)
+      setLogPage(nextPage)
+    } catch (err) {
+      console.error('Failed to load more logs:', err)
+    } finally {
+      setLoadingMoreLogs(false)
+    }
+  }
+
+  // Filter user stats by search (client-side, already loaded)
+  const filteredUserStats = userStatsSearch.trim()
+    ? userStats.filter(u => u.user_email?.toLowerCase().includes(userStatsSearch.toLowerCase()))
+    : userStats
 
   // Calculate totals
   const totalCost = usageSummary.reduce((sum, u) => sum + Number(u.total_cost_usd), 0)
@@ -736,10 +834,90 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Recent Activity */}
+            {/* User Activity */}
+            {userStats.length > 0 && (
+              <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 mb-8">
+                <div className="p-6 border-b border-dark-100">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
+                      <Users className="w-5 h-5 text-primary-500" />
+                      {language === 'es' ? 'Actividad por Usuario' : 'User Activity'}
+                    </h2>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-dark-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={userStatsSearch}
+                        onChange={(e) => setUserStatsSearch(e.target.value)}
+                        placeholder={language === 'es' ? 'Buscar usuario...' : 'Search user...'}
+                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-56"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-dark-400 mt-1">
+                    {language === 'es' ? `${filteredUserStats.length} usuarios activos` : `${filteredUserStats.length} active users`}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-dark-50">
+                      <tr>
+                        <th className="px-5 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.user}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Guiones' : 'Scripts'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Desc.' : 'Desc.'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Imágenes' : 'Images'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Videos' : 'Videos'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Voz' : 'Voice'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Otro' : 'Other'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.calls}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Última Act.' : 'Last Active'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-dark-100">
+                      {filteredUserStats.map((u) => (
+                        <tr key={u.user_id || u.user_email} className="hover:bg-dark-50">
+                          <td className="px-5 py-3">
+                            <span className="text-sm text-dark-700 font-medium">{u.user_email || '-'}</span>
+                          </td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.script_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.description_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.image_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.video_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.voice_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.other_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">{u.total_calls}</td>
+                          <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">${Number(u.total_cost_usd).toFixed(4)}</td>
+                          <td className="px-4 py-3 text-xs text-right text-dark-500">{new Date(u.last_active).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Recent Activity — searchable + paginated */}
             <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100">
               <div className="p-6 border-b border-dark-100">
-                <h2 className="text-lg font-semibold text-dark-900">{t.recentActivity}</h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-dark-900">{t.recentActivity}</h2>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-dark-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={logSearch}
+                      onChange={(e) => setLogSearch(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(logSearch) }}
+                      placeholder={language === 'es' ? 'Buscar por email...' : 'Search by email...'}
+                      className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-64"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-dark-400 mt-1">
+                  {language === 'es' ? `Mostrando ${recentLogs.length} registros` : `Showing ${recentLogs.length} logs`}
+                  {logSearch && (language === 'es' ? ` — filtrado por "${logSearch}"` : ` — filtered by "${logSearch}"`)}
+                </p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -783,6 +961,23 @@ export default function AdminDashboard() {
                   </tbody>
                 </table>
               </div>
+              {/* Load More */}
+              {hasMoreLogs && (
+                <div className="p-4 border-t border-dark-100 flex justify-center">
+                  <button
+                    onClick={loadMoreLogs}
+                    disabled={loadingMoreLogs}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-dark-600 hover:text-dark-900 bg-dark-50 hover:bg-dark-200 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {loadingMoreLogs ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
+                    )}
+                    {language === 'es' ? 'Cargar más' : 'Load more'}
+                  </button>
+                </div>
+              )}
             </div>
           </>
         )}
