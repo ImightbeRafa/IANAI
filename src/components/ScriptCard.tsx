@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, ChevronDown, ChevronUp } from 'lucide-react'
+import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
 
-type EditSource = 'manual' | 'enhance' | 'hook' | null
+type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
 
 interface ScriptCardProps {
   script: ParsedScript
@@ -33,6 +33,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
   const [showHookPicker, setShowHookPicker] = useState(false)
   const hookPickerRef = useRef<HTMLDivElement>(null)
 
+  const [showConsciousnessPicker, setShowConsciousnessPicker] = useState(false)
+  const consciousnessPickerRef = useRef<HTMLDivElement>(null)
+
   const [editSource, setEditSource] = useState<EditSource>(null)
   const [editSourceLabel, setEditSourceLabel] = useState('')
   const [showOriginalFull, setShowOriginalFull] = useState(false)
@@ -47,6 +50,17 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showHookPicker])
+
+  useEffect(() => {
+    if (!showConsciousnessPicker) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (consciousnessPickerRef.current && !consciousnessPickerRef.current.contains(e.target as Node)) {
+        setShowConsciousnessPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showConsciousnessPicker])
 
   const handleCopy = (content: string, which: 'original' | 'edited') => {
     navigator.clipboard.writeText(content)
@@ -170,6 +184,49 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     ]
   }
 
+  const getConsciousnessTemplates = (): { label: string; emoji: string; prompt: string }[] => [
+    {
+      label: language === 'es' ? 'Frío' : 'Cold',
+      emoji: '🧊',
+      prompt: language === 'es'
+        ? 'Reescribe este guión para un espectador FRÍO que NO sabe que tiene el problema. Debes: Primero REVELAR un problema que no sabía que tenía. Usar ganchos de curiosidad que le hagan darse cuenta de una carencia o riesgo. EDUCAR antes de vender — el desarrollo debe construir la conciencia del problema de forma progresiva. Mostrar las CONSECUENCIAS de no actuar. Solo al final presentar el producto/servicio como la solución natural. El tono debe generar curiosidad y "momento ajá", NO presión de compra directa. Los ganchos deben usar formatos como: "Lo que nadie te dice sobre...", "¿Sabías que...?", "El error que comete el 90% de la gente con...". Mantén el mismo formato y estructura general del guión (ganchos A/B, desarrollo, CTA).'
+        : 'Rewrite this script for a COLD viewer who does NOT know they have the problem. You must: First REVEAL a problem they didn\'t know they had. Use curiosity-driven hooks. EDUCATE before selling — build problem awareness progressively. Show CONSEQUENCES of not acting. Only at the end present the product/service as the natural solution. Tone should generate curiosity and "aha moments", NOT direct buying pressure. Hooks should use formats like: "What nobody tells you about...", "Did you know...?". Keep the same format and structure (hooks A/B, development, CTA).'
+    },
+    {
+      label: language === 'es' ? 'Tibio' : 'Warm',
+      emoji: '🌡️',
+      prompt: language === 'es'
+        ? 'Reescribe este guión para un espectador TIBIO que YA SABE que tiene el problema y está explorando soluciones. Debes: RECONOCER su dolor directamente en el gancho — hablarle de lo que ya está sintiendo. Posicionarte como la MEJOR solución comparada con lo que ya intentó. VALIDAR sus intentos fallidos anteriores y explicar por qué no funcionaron. El desarrollo debe enfocarse en por qué ESTA solución es diferente y mejor. Incluir propuestas de valor concretas, resultados tangibles y diferenciadores claros. El CTA debe guiar al siguiente paso lógico. Mantén el mismo formato y estructura general del guión (ganchos A/B, desarrollo, CTA).'
+        : 'Rewrite this script for a WARM viewer who already KNOWS they have the problem and is exploring solutions. You must: ACKNOWLEDGE their pain directly in the hook. Position as the BEST solution compared to what they\'ve tried. VALIDATE previous failed attempts and explain why they didn\'t work. Development should focus on why THIS solution is different and better. Include concrete value propositions, tangible results, clear differentiators. CTA should guide to the next logical step. Keep the same format and structure (hooks A/B, development, CTA).'
+    },
+    {
+      label: language === 'es' ? 'Caliente' : 'Hot',
+      emoji: '🔥',
+      prompt: language === 'es'
+        ? 'Reescribe este guión para un espectador CALIENTE que está LISTO PARA COMPRAR — busca activamente este producto/servicio. Debes: Ser DIRECTO y específico desde el primer segundo. No educar, no contar historias largas. Liderar con la OFERTA concreta: qué es exactamente, especificaciones, precio/valor. Usar ganchos de definición directa: "Este es un [producto] que [beneficio principal]". El desarrollo debe ser una lista de propuestas de valor tangibles, sin relleno. Incluir pruebas sociales, garantías, y elementos que eliminen la última duda. Crear URGENCIA real solo si es verdad. El CTA debe ser muy claro y directo: exactamente qué hacer y cómo comprar AHORA. Formato dinámico tipo bulletpoints — cada frase debe vender. Mantén el mismo formato y estructura general del guión (ganchos A/B, desarrollo, CTA).'
+        : 'Rewrite this script for a HOT viewer who is READY TO BUY — actively looking for this product/service. You must: Be DIRECT and specific from the first second. No educating, no long stories. Lead with the CONCRETE OFFER: what it is, specs, price/value. Use direct definition hooks: "This is a [product] that [main benefit]". Development should be a list of tangible value propositions, no filler. Include social proof, guarantees, elements that eliminate last doubt. Create REAL urgency only if true. CTA must be very clear: exactly what to do and how to buy NOW. Dynamic bullet-point format — every sentence should sell. Keep the same format and structure (hooks A/B, development, CTA).'
+    },
+  ]
+
+  const handleConsciousnessChange = async (prompt: string, label: string) => {
+    if (!onEdit || editing || enhancing) return
+    setShowConsciousnessPicker(false)
+    setEditing(true)
+    setEditError(null)
+    try {
+      const source = editedContent || script.content
+      const result = await onEdit(source, prompt)
+      setEditedContent(result)
+      setEditSource('consciousness')
+      setEditSourceLabel(label)
+      setSavedEdited(false)
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Consciousness change failed')
+    } finally {
+      setEditing(false)
+    }
+  }
+
   const handleHookChange = async (hookPrompt: string, hookLabel: string) => {
     if (!onEdit || editing || enhancing) return
     setShowHookPicker(false)
@@ -215,6 +272,8 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
         return { label: t.enhanced, color: 'text-amber-500', icon: <Wand2 className="w-3 h-3" /> }
       case 'hook':
         return { label: `Hook: ${editSourceLabel}`, color: 'text-blue-500', icon: <Anchor className="w-3 h-3" /> }
+      case 'consciousness':
+        return { label: `${language === 'es' ? 'Conciencia' : 'Consciousness'}: ${editSourceLabel}`, color: 'text-violet-500', icon: <Sparkles className="w-3 h-3" /> }
       case 'manual':
       default:
         return { label: t.edited, color: 'text-primary-500', icon: <Pencil className="w-3 h-3" /> }
@@ -287,6 +346,33 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
                   className="w-full text-left px-3 py-2 text-xs text-dark-600 hover:bg-primary-900/10 hover:text-primary-400 transition-colors border-b border-dark-200/50 last:border-0"
                 >
                   {hook.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="relative" ref={consciousnessPickerRef}>
+          <button
+            onClick={() => setShowConsciousnessPicker(!showConsciousnessPicker)}
+            disabled={editing || enhancing}
+            className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-violet-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
+          >
+            <Sparkles className="w-3 h-3" />
+            {language === 'es' ? 'Conciencia' : 'Consciousness'}
+          </button>
+          {showConsciousnessPicker && (
+            <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
+              <div className="px-3 py-2 border-b border-dark-200">
+                <p className="text-[11px] font-semibold text-dark-500">{language === 'es' ? 'Nivel de conciencia' : 'Consciousness level'}</p>
+              </div>
+              {getConsciousnessTemplates().map((level, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleConsciousnessChange(level.prompt, level.label)}
+                  className="w-full text-left px-3 py-2 text-xs text-dark-600 hover:bg-violet-900/10 hover:text-violet-400 transition-colors border-b border-dark-200/50 last:border-0"
+                >
+                  <span className="mr-1.5">{level.emoji}</span>
+                  {level.label}
                 </button>
               ))}
             </div>

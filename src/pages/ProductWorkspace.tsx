@@ -88,7 +88,6 @@ export default function ProductWorkspace() {
   const [failedLinks, setFailedLinks] = useState<string[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
-  const [consciousnessLevel, setConsciousnessLevel] = useState<'cold' | 'warm' | 'hot'>('warm')
   const [activeSalesChannel, setActiveSalesChannel] = useState<SalesChannel | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -220,7 +219,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel, activeSalesChannel ?? undefined)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -639,7 +638,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel, activeSalesChannel ?? undefined)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -1012,41 +1011,6 @@ export default function ProductWorkspace() {
               language={language}
               loading={loading}
             />
-
-            {/* Consciousness Level */}
-            <div>
-              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                {language === 'es' ? 'Nivel de Conciencia' : 'Consciousness Level'}
-              </label>
-              <div className="grid grid-cols-3 gap-1.5 bg-dark-200/50 p-1 rounded-xl">
-                {([
-                  { value: 'cold' as const, label: language === 'es' ? 'Frío' : 'Cold', emoji: '🧊' },
-                  { value: 'warm' as const, label: language === 'es' ? 'Tibio' : 'Warm', emoji: '🌡️' },
-                  { value: 'hot' as const, label: language === 'es' ? 'Caliente' : 'Hot', emoji: '🔥' },
-                ]).map(level => (
-                  <button
-                    key={level.value}
-                    onClick={() => setConsciousnessLevel(level.value)}
-                    className={`py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200 ${
-                      consciousnessLevel === level.value
-                        ? 'bg-dark-100 text-dark-900 shadow-sm border border-dark-200'
-                        : 'text-dark-500 hover:text-dark-700 border border-transparent'
-                    }`}
-                  >
-                    <span className="block text-sm mb-0.5">{level.emoji}</span>
-                    {level.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-dark-400 mt-1.5 text-center">
-                {consciousnessLevel === 'cold'
-                  ? (language === 'es' ? 'No sabe que tiene el problema' : "Doesn't know they have the problem")
-                  : consciousnessLevel === 'warm'
-                    ? (language === 'es' ? 'Sabe del problema, busca solución' : 'Knows the problem, seeks solution')
-                    : (language === 'es' ? 'Listo para comprar' : 'Ready to buy')}
-              </p>
-            </div>
 
             {/* Active Sales Channel */}
             {product?.business?.sales_channels && product.business.sales_channels.length > 0 && (

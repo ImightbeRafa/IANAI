@@ -287,7 +287,6 @@ interface RequestBody {
   productType?: 'product' | 'service' | 'restaurant' | 'real_estate' | 'indumentaria'
   contextDocuments?: ContextDocumentData[]
   previewOnly?: boolean
-  consciousnessLevel?: 'cold' | 'warm' | 'hot'
   activeSalesChannel?: 'physical' | 'messages' | 'website'
 }
 
@@ -1423,7 +1422,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Request body is required' })
     }
 
-    const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments, consciousnessLevel, activeSalesChannel } = req.body as RequestBody
+    const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments, activeSalesChannel } = req.body as RequestBody
     const selectedModel: AIModel = 'grok'
 
     if (!messages || !Array.isArray(messages)) {
@@ -1481,8 +1480,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const businessRulesPrompt = buildBusinessRulesPrompt(businessContext, language, activeSalesChannel)
     const productRulesPrompt = buildProductRulesPrompt(productContext, language)
     const structuredContextPrompt = buildStructuredContext(businessContext, productContext, language)
-    const consciousnessPrompt = buildConsciousnessPrompt(consciousnessLevel, language)
-    
     // Legacy fallback: if no structured context, use old businessDetails JSON dump
     let legacyContextPrompt = ''
     if (!businessContext && !productContext) {
@@ -1498,7 +1495,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + consciousnessPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {
