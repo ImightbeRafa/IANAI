@@ -617,19 +617,29 @@ export default function ProductWorkspace() {
           reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' }
         }
         const config = scriptSettings.scriptTypeConfig
-        const parts: string[] = []
-        for (const [key, count] of Object.entries(config)) {
-          if (count > 0) {
-            const label = typeLabels[key]?.[language] || key
-            parts.push(language === 'es' 
-              ? `${count} guión(es) de tipo "${label}"`
-              : `${count} "${label}" script(s)`)
+        const reconocimientoCount = config.reconocimiento ?? 0
+        const otherCount = Object.entries(config).filter(([k]) => k !== 'reconocimiento').reduce((s, [, n]) => s + n, 0)
+        const isOnlyReconocimiento = reconocimientoCount > 0 && otherCount === 0
+
+        if (isOnlyReconocimiento) {
+          generatePrompt = language === 'es'
+            ? `Genera exactamente ${reconocimientoCount} guión(es) de contenido TOF / Reconocimiento de marca.\nCADA guión DEBE usar un TIPO DE VIDEO DIFERENTE de la lista maestra (Verdad Incómoda, Checklist de Errores, Antes/Después, Micro-Guía, Desmitificación, POV, Storytime, Behind the Scenes, Estándares, Comparativa, Hot Take, Preguntas, Mini Demo, Trend Hijack).\nNO repitas el mismo tipo de video. Varía obligatoriamente.`
+            : `Generate exactly ${reconocimientoCount} TOF / Brand Awareness content script(s).\nEach script MUST use a DIFFERENT VIDEO TYPE from the master list (Uncomfortable Truth, Error Checklist, Before/After, Micro-Guide, Myth Busting, POV, Storytime, Behind the Scenes, Quality Standards, Comparison, Hot Take, Questions, Mini Demo, Trend Hijack).\nDo NOT repeat the same video type. Vary obligatorily.`
+        } else {
+          const parts: string[] = []
+          for (const [key, count] of Object.entries(config)) {
+            if (count > 0) {
+              const label = typeLabels[key]?.[language] || key
+              parts.push(language === 'es' 
+                ? `${count} guión(es) de tipo "${label}"`
+                : `${count} "${label}" script(s)`)
+            }
           }
+          const total = Object.values(config).reduce((s, n) => s + n, 0)
+          generatePrompt = language === 'es'
+            ? `Genera exactamente ${total} guión(es) de venta: ${parts.join(', ')}.`
+            : `Generate exactly ${total} sales script(s): ${parts.join(', ')}.`
         }
-        const total = parts.reduce((sum, _) => sum, Object.values(config).reduce((s, n) => s + n, 0))
-        generatePrompt = language === 'es'
-          ? `Genera exactamente ${total} guión(es) de venta: ${parts.join(', ')}.`
-          : `Generate exactly ${total} sales script(s): ${parts.join(', ')}.`
       } else {
         generatePrompt = language === 'es' 
           ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta.`

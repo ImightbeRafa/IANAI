@@ -1572,6 +1572,29 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
 
     const config = settings.scriptTypeConfig
     const total = Object.values(config).reduce((s, n) => s + n, 0)
+    const reconocimientoCount = config.reconocimiento ?? 0
+    const otherCount = Object.entries(config).filter(([k]) => k !== 'reconocimiento').reduce((s, [, n]) => s + n, 0)
+    const isOnlyReconocimiento = reconocimientoCount > 0 && otherCount === 0
+
+    // Special handling for reconocimiento-only: reinforce video type variation
+    if (isOnlyReconocimiento) {
+      if (language === 'es') {
+        return `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:
+- CANTIDAD TOTAL: Genera EXACTAMENTE ${reconocimientoCount} guión(es) de contenido TOF / Reconocimiento. NI MÁS NI MENOS.
+- VARIACIÓN DE TIPOS DE VIDEO: Cada guión DEBE usar un tipo de video DIFERENTE de la lista maestra (A-N): Verdad Incómoda, Checklist de Errores, Antes/Después, Micro-Guía, Desmitificación, POV, Storytime, Behind the Scenes, Estándares, Comparativa, Hot Take, Preguntas, Mini Demo, Trend Hijack.
+- NO repitas el mismo tipo de video en esta generación.
+- Elige los tipos que mejor se adapten al negocio y producto del contexto.
+- Cada guión debe estar etiquetado: "OPCIÓN #[N] - [Tipo de Video]" (ej: "OPCIÓN #1 - Checklist de Errores").`
+      } else {
+        return `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:
+- TOTAL QUANTITY: Generate EXACTLY ${reconocimientoCount} TOF / Brand Awareness script(s). NO MORE, NO LESS.
+- VIDEO TYPE VARIATION: Each script MUST use a DIFFERENT video type from the master list (A-N): Uncomfortable Truth, Error Checklist, Before/After, Micro-Guide, Myth Busting, POV, Storytime, Behind the Scenes, Quality Standards, Comparison, Hot Take, Questions, Mini Demo, Trend Hijack.
+- Do NOT repeat the same video type in this generation.
+- Choose the types that best fit the business and product context.
+- Each script must be labeled: "OPTION #[N] - [Video Type]" (e.g., "OPTION #1 - Error Checklist").`
+      }
+    }
+
     const parts: string[] = []
 
     for (const [key, count] of Object.entries(config)) {
