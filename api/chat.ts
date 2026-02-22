@@ -288,6 +288,7 @@ interface RequestBody {
   contextDocuments?: ContextDocumentData[]
   previewOnly?: boolean
   consciousnessLevel?: 'cold' | 'warm' | 'hot'
+  activeSalesChannel?: 'physical' | 'messages' | 'website'
 }
 
 
@@ -734,31 +735,65 @@ interface ProductContext {
   [key: string]: unknown
 }
 
-function buildBusinessRulesPrompt(biz: BusinessContext | undefined, language: 'en' | 'es'): string {
+function buildBusinessRulesPrompt(biz: BusinessContext | undefined, language: 'en' | 'es', activeSalesChannel?: 'physical' | 'messages' | 'website'): string {
   if (!biz || !biz.name) return ''
   const rules: string[] = []
   const isEs = language === 'es'
 
-  // Sales channel CTA rules
-  if (biz.sales_channels && biz.sales_channels.length > 0) {
-    const channels = biz.sales_channels
-    if (channels.includes('messages') && !channels.includes('website')) {
+  const audienceIsLocal = biz.target_audiences?.some(a =>
+    a.geographic_scope === 'local' || a.geographic_scope === 'custom'
+  ) ?? false
+  const audienceIsWide = biz.target_audiences?.some(a =>
+    a.geographic_scope === 'country' || a.geographic_scope === 'world'
+  ) ?? false
+
+  if (activeSalesChannel === 'physical') {
+    if (biz.location && audienceIsLocal && !audienceIsWide) {
       rules.push(isEs
-        ? 'REGLA CTA: El negocio vende por mensajes. El CTA debe dirigir a enviar mensaje/DM. Nunca menciones una página web.'
-        : 'CTA RULE: The business sells via messages. The CTA must direct to send a message/DM. Never mention a website.')
-    } else if (channels.includes('website') && !channels.includes('messages')) {
+        ? `REGLA GANCHO + UBICACIÓN: La intención es vender en local físico y el público es de zona cercana. El gancho DEBE mencionar la zona general del negocio (${biz.location}), pero sin dar la dirección exacta — solo la zona general para segmentar geográficamente.`
+        : `HOOK + LOCATION RULE: The intent is physical store sales and the audience is local. The hook MUST mention the general area of the business (${biz.location}), but not the exact address — just the general zone for geographic segmentation.`)
+    } else if (biz.location) {
       rules.push(isEs
-        ? 'REGLA CTA: El negocio vende por página web. El CTA debe dirigir a la web/link en bio. Evita pedir mensajes directos.'
-        : 'CTA RULE: The business sells via website. The CTA must direct to the web/link in bio. Avoid asking for direct messages.')
-    } else if (channels.includes('website') && channels.includes('messages')) {
-      rules.push(isEs
-        ? 'REGLA CTA: El negocio vende por web y mensajes. Puedes alternar CTAs entre "link en bio" y "envíanos un mensaje".'
-        : 'CTA RULE: The business sells via web and messages. You can alternate CTAs between "link in bio" and "send us a message".')
+        ? `REGLA UBICACIÓN: El negocio está en ${biz.location}, pero el público abarca zonas amplias. NO menciones la ubicación en el gancho. Puedes mencionarla de forma sutil en el desarrollo cuando sea relevante.`
+        : `LOCATION RULE: The business is in ${biz.location}, but the audience spans wide areas. Do NOT mention the location in the hook. You may mention it subtly in the development when relevant.`)
     }
-    if (channels.includes('physical')) {
-      rules.push(isEs
-        ? 'REGLA LOCAL: El negocio tiene local físico. Puedes incluir invitaciones a visitar el local en el desarrollo o CTA.'
-        : 'LOCATION RULE: The business has a physical store. You can include invitations to visit the store in the development or CTA.')
+    rules.push(isEs
+      ? 'REGLA DESARROLLO: Antes del CTA, menciona cómo llegar al local o la referencia de ubicación para facilitar la visita.'
+      : 'DEVELOPMENT RULE: Before the CTA, mention how to get to the store or a location reference to facilitate the visit.')
+    rules.push(isEs
+      ? 'REGLA CTA OBLIGATORIO: El CTA debe ser: "Los esperamos." No uses CTA de mensajes ni de página web.'
+      : 'MANDATORY CTA RULE: The CTA must be: "We\'ll be waiting for you." Do not use message or website CTAs.')
+  } else if (activeSalesChannel === 'messages') {
+    rules.push(isEs
+      ? 'REGLA GANCHO: NO menciones la ubicación del negocio en el gancho. Nunca. El objetivo es venta por mensajes, no visita física.'
+      : 'HOOK RULE: Do NOT mention the business location in the hook. Never. The goal is sales via messages, not physical visits.')
+    rules.push(isEs
+      ? 'REGLA CTA OBLIGATORIO: El CTA debe ser: "Envíanos un mensaje para…" No uses CTA de visita física ni de página web.'
+      : 'MANDATORY CTA RULE: The CTA must be: "Send us a message to..." Do not use physical visit or website CTAs.')
+  } else if (activeSalesChannel === 'website') {
+    rules.push(isEs
+      ? 'REGLA GANCHO: NO menciones la ubicación del negocio en el gancho. Nunca. El objetivo es venta por web, no visita física.'
+      : 'HOOK RULE: Do NOT mention the business location in the hook. Never. The goal is web sales, not physical visits.')
+    rules.push(isEs
+      ? 'REGLA CTA OBLIGATORIO: El CTA debe ser: "Dale click a este anuncio para hacer tu pedido." No uses CTA de visita física ni de mensaje como principal.'
+      : 'MANDATORY CTA RULE: The CTA must be: "Click this ad to place your order." Do not use physical visit or message CTAs as the primary CTA.')
+  } else {
+    // Fallback: no active channel selected — use safe defaults without forcing location in hooks
+    if (biz.sales_channels && biz.sales_channels.length > 0) {
+      const channels = biz.sales_channels
+      if (channels.includes('messages') && !channels.includes('website')) {
+        rules.push(isEs
+          ? 'REGLA CTA: El negocio vende por mensajes. El CTA debe dirigir a enviar mensaje/DM.'
+          : 'CTA RULE: The business sells via messages. The CTA must direct to send a message/DM.')
+      } else if (channels.includes('website') && !channels.includes('messages')) {
+        rules.push(isEs
+          ? 'REGLA CTA: El negocio vende por página web. El CTA debe dirigir a la web/link en bio.'
+          : 'CTA RULE: The business sells via website. The CTA must direct to the web/link in bio.')
+      } else if (channels.includes('website') && channels.includes('messages')) {
+        rules.push(isEs
+          ? 'REGLA CTA: El negocio vende por web y mensajes. Puedes alternar CTAs entre "link en bio" y "envíanos un mensaje".'
+          : 'CTA RULE: The business sells via web and messages. You can alternate CTAs between "link in bio" and "send us a message".')
+      }
     }
   }
 
@@ -773,13 +808,6 @@ function buildBusinessRulesPrompt(biz: BusinessContext | undefined, language: 'e
         ? 'REGLA ENVÍOS: El negocio realiza envíos. Menciona disponibilidad de envíos en el desarrollo.'
         : 'SHIPPING RULE: The business offers shipping. Mention shipping availability in the development.')
     }
-  }
-
-  // Location rules
-  if (biz.location) {
-    rules.push(isEs
-      ? `REGLA UBICACIÓN: El negocio está en ${biz.location}. Usa esta ubicación para contextualizar y segmentar geográficamente en los ganchos.`
-      : `LOCATION RULE: The business is in ${biz.location}. Use this location to contextualize and geographically segment in hooks.`)
   }
 
   // Audience rules
@@ -1395,7 +1423,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Request body is required' })
     }
 
-    const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments, consciousnessLevel } = req.body as RequestBody
+    const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments, consciousnessLevel, activeSalesChannel } = req.body as RequestBody
     const selectedModel: AIModel = 'grok'
 
     if (!messages || !Array.isArray(messages)) {
@@ -1450,7 +1478,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Build structured prompt sections from new businessContext/productContext
-    const businessRulesPrompt = buildBusinessRulesPrompt(businessContext, language)
+    const businessRulesPrompt = buildBusinessRulesPrompt(businessContext, language, activeSalesChannel)
     const productRulesPrompt = buildProductRulesPrompt(productContext, language)
     const structuredContextPrompt = buildStructuredContext(businessContext, productContext, language)
     const consciousnessPrompt = buildConsciousnessPrompt(consciousnessLevel, language)

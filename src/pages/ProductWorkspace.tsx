@@ -17,7 +17,7 @@ import {
   deleteContextDocument
 } from '../services/database'
 import { sendMessageToGrok, previewPrompt, editScript, DEFAULT_SCRIPT_SETTINGS, buildApiBusinessContext, buildApiProductContext } from '../services/grokApi'
-import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument } from '../types'
+import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel } from '../types'
 import { getSuccessCases } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
@@ -48,7 +48,9 @@ import {
   EyeOff,
   Mic,
   Square,
-  Building2
+  Building2,
+  MapPin,
+  Globe
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -87,6 +89,7 @@ export default function ProductWorkspace() {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [consciousnessLevel, setConsciousnessLevel] = useState<'cold' | 'warm' | 'hot'>('warm')
+  const [activeSalesChannel, setActiveSalesChannel] = useState<SalesChannel | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const usageLimits = useUsageLimits()
@@ -115,6 +118,9 @@ export default function ProductWorkspace() {
         }
         setProduct(productData)
         setEditedProduct(productData)
+        if (productData.business?.sales_channels?.length) {
+          setActiveSalesChannel(productData.business.sales_channels[0])
+        }
 
         const sessionsData = await getChatSessions(productId)
         setSessions(sessionsData)
@@ -214,7 +220,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel, activeSalesChannel ?? undefined)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -633,7 +639,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, consciousnessLevel, activeSalesChannel ?? undefined)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -1041,6 +1047,53 @@ export default function ProductWorkspace() {
                     : (language === 'es' ? 'Listo para comprar' : 'Ready to buy')}
               </p>
             </div>
+
+            {/* Active Sales Channel */}
+            {product?.business?.sales_channels && product.business.sales_channels.length > 0 && (
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                  {language === 'es' ? 'Canal de Venta' : 'Sales Channel'}
+                </label>
+                <div className={`grid gap-1.5 bg-dark-200/50 p-1 rounded-xl ${
+                  product.business.sales_channels.length === 1 ? 'grid-cols-1' :
+                  product.business.sales_channels.length === 2 ? 'grid-cols-2' : 'grid-cols-3'
+                }`}>
+                  {product.business.sales_channels.map(channel => {
+                    const channelConfig = {
+                      physical: { label: language === 'es' ? 'Local Físico' : 'Physical Store', icon: <MapPin className="w-3.5 h-3.5" /> },
+                      messages: { label: language === 'es' ? 'Mensajes' : 'Messages', icon: <MessageSquare className="w-3.5 h-3.5" /> },
+                      website: { label: language === 'es' ? 'Página Web' : 'Website', icon: <Globe className="w-3.5 h-3.5" /> },
+                    }
+                    const cfg = channelConfig[channel]
+                    if (!cfg) return null
+                    return (
+                      <button
+                        key={channel}
+                        onClick={() => setActiveSalesChannel(channel)}
+                        className={`py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200 flex flex-col items-center gap-1 ${
+                          activeSalesChannel === channel
+                            ? 'bg-dark-100 text-dark-900 shadow-sm border border-dark-200'
+                            : 'text-dark-500 hover:text-dark-700 border border-transparent'
+                        }`}
+                      >
+                        {cfg.icon}
+                        <span className="text-[10px] leading-tight text-center">{cfg.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-dark-400 mt-1.5 text-center">
+                  {activeSalesChannel === 'physical'
+                    ? (language === 'es' ? 'CTA: Visita al local' : 'CTA: Visit store')
+                    : activeSalesChannel === 'messages'
+                      ? (language === 'es' ? 'CTA: Enviar mensaje' : 'CTA: Send message')
+                      : activeSalesChannel === 'website'
+                        ? (language === 'es' ? 'CTA: Click en anuncio' : 'CTA: Click ad')
+                        : (language === 'es' ? 'Selecciona un canal' : 'Select a channel')}
+                </p>
+              </div>
+            )}
 
             {/* Chat Input — Apple-like pill */}
             <div>

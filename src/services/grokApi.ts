@@ -139,7 +139,8 @@ export async function sendMessageToGrok(
   feature?: 'script' | 'description',
   businessCtx?: ApiBusinessContext,
   productCtx?: Record<string, unknown>,
-  consciousnessLevel?: 'cold' | 'warm' | 'hot'
+  consciousnessLevel?: 'cold' | 'warm' | 'hot',
+  activeSalesChannel?: 'physical' | 'messages' | 'website'
 ): Promise<{ content: string; _debug?: { systemPrompt: string } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -174,7 +175,8 @@ export async function sendMessageToGrok(
       productType: productType || productContext.product_type,
       contextDocuments,
       ...(feature ? { feature } : {}),
-      ...(consciousnessLevel ? { consciousnessLevel } : {})
+      ...(consciousnessLevel ? { consciousnessLevel } : {}),
+      ...(activeSalesChannel ? { activeSalesChannel } : {})
     })
   })
 
