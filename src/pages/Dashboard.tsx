@@ -407,9 +407,6 @@ export default function Dashboard() {
             <p className="font-medium text-dark-900 group-hover:text-primary-600 truncate">
               {business.name}
             </p>
-            <p className="text-sm text-dark-400">
-              {new Date(business.created_at).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US')}
-            </p>
           </div>
           <ChevronRight className="w-5 h-5 text-dark-400 group-hover:text-primary-600" />
         </div>

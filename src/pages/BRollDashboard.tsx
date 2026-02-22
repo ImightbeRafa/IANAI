@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProfile, getProducts, getBusinessProducts, getBusinesses, getSharedProducts, acceptPendingInvites } from '../services/database'
+import { getProfile, getUnassignedProducts, getBusinessProducts, getBusinesses, getSharedProducts, acceptPendingInvites } from '../services/database'
 import type { Product, Business } from '../types'
 import Layout from '../components/Layout'
 import { 
@@ -87,7 +87,7 @@ export default function BRollDashboard() {
 
         const [bizData, productsData] = await Promise.all([
           getBusinesses(user.id),
-          getProducts(user.id)
+          getUnassignedProducts(user.id)
         ])
         setBusinesses(bizData)
         setProducts(productsData)
@@ -239,45 +239,6 @@ export default function BRollDashboard() {
                 )
               })}
             </div>
-
-            {/* Unassigned products when viewing a business */}
-            {!selectedBusiness && products.length > 0 && businesses.length > 0 && (
-              <div className="mt-6">
-                <h3 className="text-sm font-semibold text-dark-500 uppercase tracking-wider mb-3">
-                  {t.unassignedProducts}
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {products.map((product) => {
-                    const ProductIcon = getProductIcon(product.type)
-                    return (
-                      <Link
-                        key={product.id}
-                        to={`/broll/product/${product.id}`}
-                        className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 p-6 hover:shadow-md hover:border-primary-200 transition-all group"
-                      >
-                        <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 bg-primary-900/30 rounded-lg flex items-center justify-center group-hover:bg-primary-200 transition-colors">
-                            <ProductIcon className="w-6 h-6 text-primary-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-dark-800 truncate group-hover:text-primary-600 transition-colors">
-                              {product.name}
-                            </h3>
-                            <p className="text-sm text-dark-500 mt-1 line-clamp-2">
-                              {product.description || product.product_description || (language === 'es' ? 'Sin descripción' : 'No description')}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mt-4 flex items-center gap-2 text-primary-600 text-sm font-medium">
-                          <Video className="w-4 h-4" />
-                          {t.generateBRoll}
-                        </div>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Shared products */}
             {sharedProducts.length > 0 && (

@@ -91,6 +91,7 @@ export default function ProductWorkspace() {
   const [activeSalesChannel, setActiveSalesChannel] = useState<SalesChannel | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const handleSendRef = useRef<(directMessage?: string) => Promise<void>>(null as any)
   const usageLimits = useUsageLimits()
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -240,6 +241,9 @@ export default function ProductWorkspace() {
     }
   }
 
+  // Keep ref in sync so voice callback always calls latest handleSend
+  handleSendRef.current = handleSend
+
   const buildProductContext = (product: Product, additionalContext: string) => {
     const baseContext = {
       product_name: product.name,
@@ -366,7 +370,7 @@ export default function ProductWorkspace() {
 
           const result = await response.json()
           if (response.ok && result.text) {
-            handleSend(result.text)
+            handleSendRef.current(result.text)
           } else {
             console.error('Transcription failed:', result.error)
           }
@@ -630,6 +634,14 @@ export default function ProductWorkspace() {
         generatePrompt = language === 'es' 
           ? `Genera exactamente ${scriptSettings.variations} guión(es) de venta.`
           : `Generate exactly ${scriptSettings.variations} sales script(s).`
+      }
+
+      // Append user instructions if provided
+      if (input.trim()) {
+        generatePrompt += language === 'es'
+          ? `\n\nInstrucciones adicionales del usuario: ${input.trim()}`
+          : `\n\nAdditional user instructions: ${input.trim()}`
+        setInput('')
       }
       
       const userMessage = await addMessage(session.id, 'user', generatePrompt)

@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
   getProfile, 
-  getProducts,
+  getUnassignedProducts,
   createProduct,
   getSharedProducts,
   acceptPendingInvites,
@@ -117,7 +117,7 @@ export default function PostsDashboard() {
 
         const [bizData, productsData] = await Promise.all([
           getBusinesses(user.id),
-          getProducts(user.id)
+          getUnassignedProducts(user.id)
         ])
         setBusinesses(bizData)
         setProducts(productsData)

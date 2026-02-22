@@ -40,9 +40,11 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
 
   const [hookPickerVersion, setHookPickerVersion] = useState<number | null>(null)
   const hookPickerRef = useRef<HTMLDivElement>(null)
+  const [hookDropUp, setHookDropUp] = useState(false)
 
   const [consciousnessPickerVersion, setConsciousnessPickerVersion] = useState<number | null>(null)
   const consciousnessPickerRef = useRef<HTMLDivElement>(null)
+  const [consciousnessDropUp, setConsciousnessDropUp] = useState(false)
 
   useEffect(() => {
     if (hookPickerVersion === null) return
@@ -345,7 +347,12 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
         </button>
         <div className="relative" ref={hookPickerVersion === versionIndex ? hookPickerRef : undefined}>
           <button
-            onClick={() => setHookPickerVersion(hookPickerVersion === versionIndex ? null : versionIndex)}
+            onClick={(e) => {
+              if (hookPickerVersion === versionIndex) { setHookPickerVersion(null); return }
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setHookDropUp(window.innerHeight - rect.bottom < 300)
+              setHookPickerVersion(versionIndex)
+            }}
             disabled={editing || enhancing}
             className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-blue-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
           >
@@ -353,7 +360,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
             {t.changeHooks}
           </button>
           {hookPickerVersion === versionIndex && (
-            <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
+            <div className={`absolute right-0 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto ${hookDropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
               <div className="px-3 py-2 border-b border-dark-200">
                 <p className="text-[11px] font-semibold text-dark-500">{t.pickHook}</p>
               </div>
@@ -371,7 +378,12 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
         </div>
         <div className="relative" ref={consciousnessPickerVersion === versionIndex ? consciousnessPickerRef : undefined}>
           <button
-            onClick={() => setConsciousnessPickerVersion(consciousnessPickerVersion === versionIndex ? null : versionIndex)}
+            onClick={(e) => {
+              if (consciousnessPickerVersion === versionIndex) { setConsciousnessPickerVersion(null); return }
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              setConsciousnessDropUp(window.innerHeight - rect.bottom < 300)
+              setConsciousnessPickerVersion(versionIndex)
+            }}
             disabled={editing || enhancing}
             className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-violet-400 px-2 py-0.5 rounded-md transition-colors disabled:opacity-40"
           >
@@ -379,7 +391,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
             {language === 'es' ? 'Conciencia' : 'Consciousness'}
           </button>
           {consciousnessPickerVersion === versionIndex && (
-            <div className="absolute right-0 top-full mt-1 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto">
+            <div className={`absolute right-0 w-64 bg-dark-100 border border-dark-200 rounded-lg shadow-xl z-50 max-h-72 overflow-y-auto ${consciousnessDropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
               <div className="px-3 py-2 border-b border-dark-200">
                 <p className="text-[11px] font-semibold text-dark-500">{language === 'es' ? 'Nivel de conciencia' : 'Consciousness level'}</p>
               </div>

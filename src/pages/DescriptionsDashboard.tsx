@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
   getProfile, 
-  getProducts,
+  getUnassignedProducts,
   getBusinesses,
   getBusinessProducts,
   getSharedProducts,
@@ -87,7 +87,7 @@ export default function DescriptionsDashboard() {
 
         const [bizData, productsData] = await Promise.all([
           getBusinesses(user.id),
-          getProducts(user.id)
+          getUnassignedProducts(user.id)
         ])
         setBusinesses(bizData)
         setProducts(productsData)
@@ -235,11 +235,13 @@ export default function DescriptionsDashboard() {
         {/* Products */}
         {displayProducts.length > 0 || (selectedBusiness && businessProducts.length === 0) ? (
           <>
-            {selectedBusiness && (
+            {selectedBusiness ? (
               <h2 className="text-lg font-semibold text-dark-900 mb-4">
                 {t.productsIn} {selectedBusiness.name}
               </h2>
-            )}
+            ) : businesses.length > 0 && products.length > 0 ? (
+              <h2 className="text-lg font-semibold text-dark-900 mb-4">{t.unassignedProducts}</h2>
+            ) : null}
 
             {displayProducts.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -260,23 +262,6 @@ export default function DescriptionsDashboard() {
             <p className="text-dark-500">{t.createFirst}</p>
           </div>
         ) : null}
-
-        {/* Unassigned products when on the main view and there are also businesses */}
-        {!selectedBusiness && products.length > 0 && businesses.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-lg font-semibold text-dark-900 mb-4">{t.unassignedProducts}</h2>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {products.map(p => renderProductCard(p))}
-            </div>
-          </div>
-        )}
-
-        {/* Only unassigned products, no businesses */}
-        {!selectedBusiness && products.length > 0 && businesses.length === 0 && (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {products.map(p => renderProductCard(p))}
-          </div>
-        )}
 
         {/* Shared With Me section */}
         {sharedProducts.length > 0 && !selectedBusiness && (
