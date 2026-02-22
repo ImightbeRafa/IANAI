@@ -636,11 +636,11 @@ export default function ProductWorkspace() {
           : `Generate exactly ${scriptSettings.variations} sales script(s).`
       }
 
-      // Append user instructions if provided
+      // Append user style/tone preferences while preserving master format
       if (input.trim()) {
         generatePrompt += language === 'es'
-          ? `\n\nInstrucciones adicionales del usuario: ${input.trim()}`
-          : `\n\nAdditional user instructions: ${input.trim()}`
+          ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${input.trim()}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura obligatoria de guiones (GANCHO/DESARROLLO/CTA). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
+          : `\n\nUSER STYLE PREFERENCE: "${input.trim()}"\nIMPORTANT: Apply this tone/focus preference WITHIN the mandatory script structure (HOOK/DEVELOPMENT/CTA). Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
         setInput('')
       }
       
