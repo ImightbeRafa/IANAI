@@ -3,13 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
-  getProfile, 
-  getUnassignedProducts,
   getDashboardStats,
   createProduct,
   deleteProduct,
-  getSharedProducts,
-  acceptPendingInvites,
   getSubscription,
   getBusinessProducts,
   deleteBusiness
@@ -24,7 +20,8 @@ import IndumentariaForm from '../components/IndumentariaForm'
 import BusinessForm from '../components/BusinessForm'
 import ProductTypeSelector from '../components/ProductTypeSelector'
 import ShareProductModal from '../components/ShareProductModal'
-import { getBusinesses, createBusiness } from '../services/database'
+import { createBusiness } from '../services/database'
+import { useDashboardData } from '../hooks/useDashboardData'
 import { 
   Package, 
   FileText, 
@@ -47,7 +44,7 @@ export default function Dashboard() {
   const { user } = useAuth()
   const { language } = useLanguage()
   const navigate = useNavigate()
-  const [products, setProducts] = useState<Product[]>([])
+  const dashData = useDashboardData()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [showProductForm, setShowProductForm] = useState(false)
@@ -57,16 +54,18 @@ export default function Dashboard() {
   const [showServiceForm, setShowServiceForm] = useState(false)
   const [showIndumentariaForm, setShowIndumentariaForm] = useState(false)
   const [showRealEstateForm, setShowRealEstateForm] = useState(false)
-  const [businesses, setBusinesses] = useState<Business[]>([])
   const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null)
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
   const [businessProducts, setBusinessProducts] = useState<Product[]>([])
   const [searchBusinesses, setSearchBusinesses] = useState('')
   const [searchProducts, setSearchProducts] = useState('')
-  const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
   const [sharingProduct, setSharingProduct] = useState<Product | null>(null)
   const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null)
   const [trialPlan, setTrialPlan] = useState<string | null>(null)
+
+  const businesses = dashData.businesses
+  const products = dashData.products
+  const sharedProducts = dashData.sharedProducts
 
   const filteredBusinesses = businesses.filter(b =>
     b.name.toLowerCase().includes(searchBusinesses.toLowerCase())
@@ -81,36 +80,20 @@ export default function Dashboard() {
   )
 
   useEffect(() => {
-    async function loadData() {
+    async function loadExtra() {
       if (!user) return
       try {
-        const profileData = await getProfile(user.id)
+        const [sub, statsData] = await Promise.all([
+          getSubscription(user.id),
+          getDashboardStats(user.id)
+        ])
 
-        // Auto-accept any pending sharing invites for this user
-        if (profileData?.email) {
-          await acceptPendingInvites(user.id, profileData.email)
-        }
-
-        // Load shared products (products others shared with me)
-        const shared = await getSharedProducts(user.id)
-        setSharedProducts(shared)
-
-        // Load subscription for trial banner
-        const sub = await getSubscription(user.id)
         if (sub?.status === 'trialing' && sub.trial_ends_at) {
           const daysLeft = Math.max(0, Math.ceil((new Date(sub.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
           setTrialDaysLeft(daysLeft)
           setTrialPlan(sub.plan)
         }
 
-        // Load businesses and products for all users
-        const [bizData, productsData, statsData] = await Promise.all([
-          getBusinesses(user.id),
-          getUnassignedProducts(user.id),
-          getDashboardStats(user.id)
-        ])
-        setBusinesses(bizData)
-        setProducts(productsData)
         setStats(statsData)
       } catch (error) {
         console.error('Failed to load dashboard data:', error)
@@ -118,7 +101,7 @@ export default function Dashboard() {
         setLoading(false)
       }
     }
-    loadData()
+    loadExtra()
   }, [user])
 
   useEffect(() => {
@@ -141,9 +124,8 @@ export default function Dashboard() {
       
       if (selectedBusiness) {
         setBusinessProducts(prev => [newProduct, ...prev])
-      } else {
-        setProducts(prev => [newProduct, ...prev])
       }
+      dashData.refresh()
       setShowProductForm(false)
       setShowServiceForm(false)
       setShowIndumentariaForm(false)
@@ -171,9 +153,8 @@ export default function Dashboard() {
       
       if (selectedBusiness) {
         setBusinessProducts(prev => [newProduct, ...prev])
-      } else {
-        setProducts(prev => [newProduct, ...prev])
       }
+      dashData.refresh()
       setShowRestaurantForm(false)
       navigate(`/product/${newProduct.id}`)
     } catch (error) {
@@ -185,7 +166,7 @@ export default function Dashboard() {
     if (!user) return
     try {
       const newBiz = await createBusiness(user.id, data)
-      setBusinesses(prev => [newBiz, ...prev])
+      dashData.refresh()
       setSelectedBusinessId(newBiz.id)
       setShowBusinessForm(false)
     } catch (error) {
@@ -200,7 +181,7 @@ export default function Dashboard() {
     if (!confirm(confirmMsg)) return
     try {
       await deleteBusiness(business.id)
-      setBusinesses(prev => prev.filter(b => b.id !== business.id))
+      dashData.refresh()
       if (selectedBusiness?.id === business.id) {
         setSelectedBusiness(null)
         setBusinessProducts([])
@@ -230,9 +211,8 @@ export default function Dashboard() {
       await deleteProduct(product.id)
       if (selectedBusiness) {
         setBusinessProducts(prev => prev.filter(p => p.id !== product.id))
-      } else {
-        setProducts(prev => prev.filter(p => p.id !== product.id))
       }
+      dashData.refresh()
     } catch (error) {
       console.error('Failed to delete product:', error)
     }

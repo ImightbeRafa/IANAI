@@ -242,7 +242,8 @@ export async function editScript(
   editInstruction: string,
   language: Language = 'es',
   businessCtx?: Record<string, unknown>,
-  productCtx?: Record<string, unknown>
+  productCtx?: Record<string, unknown>,
+  editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
 ): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -261,6 +262,8 @@ export async function editScript(
 
 REGLAS ESTRICTAS:
 - Devuelve SOLO el guión editado, nada más.
+- Devuelve exactamente UN (1) solo guión. NUNCA generes múltiples opciones, versiones o alternativas.
+- NO incluyas "OPCIÓN #1", "OPCIÓN #2", "Versión A", etc. Solo UN guión.
 - NO incluyas explicaciones, comentarios, notas ni introducciones.
 - NO digas "Aquí está el guión editado" ni nada similar.
 - Mantén exactamente el mismo formato, estructura y estilo del guión original.
@@ -271,6 +274,8 @@ REGLAS ESTRICTAS:
 
 STRICT RULES:
 - Return ONLY the edited script, nothing else.
+- Return exactly ONE (1) single script. NEVER generate multiple options, versions or alternatives.
+- Do NOT include "OPTION #1", "OPTION #2", "Version A", etc. Just ONE script.
 - Do NOT include explanations, comments, notes or introductions.
 - Do NOT say "Here is the edited script" or anything similar.
 - Keep exactly the same format, structure and style as the original script.
@@ -295,7 +300,7 @@ STRICT RULES:
       ],
       businessDetails: {},
       language,
-      feature: 'script'
+      feature: editType || 'script'
     })
   })
 

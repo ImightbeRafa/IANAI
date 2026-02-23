@@ -204,6 +204,56 @@ export async function uploadProductImage(
 }
 
 /**
+ * Convert an image URL to a base64 data URL.
+ * If the input is already a data URL, returns it as-is.
+ */
+export async function urlToBase64(url: string): Promise<string> {
+  if (url.startsWith('data:')) return url
+  const res = await fetch(url)
+  const blob = await res.blob()
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result as string)
+    reader.readAsDataURL(blob)
+  })
+}
+
+/**
+ * Compress a base64 data URL if it exceeds maxBytes (base64 string length).
+ * Resizes to fit within maxDim on the longest side and re-encodes as JPEG.
+ * Default threshold: ~1.5 MB base64 string (~1.1 MB binary).
+ */
+export async function compressBase64ForApi(
+  base64: string,
+  maxBytes: number = 1_500_000,
+  maxDim: number = 1536,
+  quality: number = 0.82
+): Promise<string> {
+  if (base64.length <= maxBytes) return base64
+
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas context failed')); return }
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = () => reject(new Error('Failed to load image for compression'))
+    img.src = base64
+  })
+}
+
+/**
  * Delete a post image from storage
  */
 export async function deletePostImage(imagePath: string): Promise<void> {

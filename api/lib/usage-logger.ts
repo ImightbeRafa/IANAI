@@ -15,9 +15,11 @@ export const MODEL_COSTS = {
   'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
   'gemini': { input: 0.15, output: 0.60 },
   
-  // Image generation models (per image)
-  'nano-banana': { perImage: 0.02 },
-  'nano-banana-pro': { perImage: 0.05 },
+  // Image generation models
+  // Gemini: $0.134/image (1K/2K tier) + input tokens ($2.00/1M) + thinking tokens ($12.00/1M)
+  'nano-banana': { perImage: 0.134, inputPer1M: 2.00, thinkingPer1M: 12.00 },
+  'nano-banana-pro': { perImage: 0.134, inputPer1M: 2.00, thinkingPer1M: 12.00 },
+  // Grok Imagine: $0.07/image (flat)
   'grok-imagine': { perImage: 0.07 },
   
   // Voice transcription (per minute of audio)
@@ -57,6 +59,7 @@ interface UsageLogParams {
   model: string
   inputTokens?: number
   outputTokens?: number
+  thinkingTokens?: number
   success?: boolean
   errorMessage?: string
   metadata?: Record<string, unknown>
@@ -76,6 +79,7 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       model,
       inputTokens = 0,
       outputTokens = 0,
+      thinkingTokens = 0,
       success = true,
       errorMessage,
       metadata = {}
@@ -91,8 +95,15 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
         const durationSec = (metadata?.estimatedDurationSec as number) || 10
         estimatedCostUsd = (modelCosts.perMinute as number) * (durationSec / 60)
       } else if ('perImage' in modelCosts) {
-        // Image model - fixed cost per image
+        // Image model - base per-image cost
         estimatedCostUsd = modelCosts.perImage as number
+        // Add Gemini token costs if available (input + thinking)
+        if ('inputPer1M' in modelCosts && inputTokens > 0) {
+          estimatedCostUsd += (inputTokens / 1_000_000) * (modelCosts.inputPer1M as number)
+        }
+        if ('thinkingPer1M' in modelCosts && thinkingTokens > 0) {
+          estimatedCostUsd += (thinkingTokens / 1_000_000) * (modelCosts.thinkingPer1M as number)
+        }
       } else if ('perSecond' in modelCosts) {
         // Video model - cost per second (duration passed in metadata)
         const duration = (metadata?.duration as number) || 5
@@ -110,6 +121,11 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       }
     }
 
+    // Store thinking tokens in metadata for visibility
+    const enrichedMetadata = thinkingTokens > 0
+      ? { ...metadata, thinkingTokens }
+      : metadata
+
     const { error } = await supabase.from('api_usage_logs').insert({
       user_id: userId,
       user_email: userEmail,
@@ -117,11 +133,11 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       model,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
+      total_tokens: inputTokens + outputTokens + thinkingTokens,
       estimated_cost_usd: estimatedCostUsd,
       success,
       error_message: errorMessage,
-      metadata
+      metadata: enrichedMetadata
     })
 
     if (error) {

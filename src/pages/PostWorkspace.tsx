@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPosts, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage } from '../services/database'
+import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage } from '../services/database'
 import type { ProductImage } from '../services/database'
 import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
-import { uploadPostImageOriginal, uploadProductImage } from '../utils/imageCompression'
+import { uploadPostImageOriginal, uploadProductImage, urlToBase64, compressBase64ForApi } from '../utils/imageCompression'
 import { 
   ArrowLeft,
   ImageIcon,
@@ -50,6 +50,7 @@ const API_URL = import.meta.env.PROD ? '/api/generate-image' : 'http://localhost
 
 export default function PostWorkspace() {
   const { productId } = useParams<{ productId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const { language } = useLanguage()
 
@@ -84,6 +85,9 @@ export default function PostWorkspace() {
   const [selectedProductImageIds, setSelectedProductImageIds] = useState<Set<string>>(new Set())
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
   const productImageInputRef = useRef<HTMLInputElement>(null)
+  const POSTS_PAGE_SIZE = 20
+  const [totalPostCount, setTotalPostCount] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const labels = {
     es: {
@@ -178,14 +182,27 @@ export default function PostWorkspace() {
 
   const t = labels[language]
 
+  // Handle script content passed from ScriptCard via sessionStorage
+  useEffect(() => {
+    const scriptKey = searchParams.get('scriptKey')
+    if (scriptKey) {
+      const content = sessionStorage.getItem(scriptKey)
+      if (content) {
+        setScriptText(content)
+        sessionStorage.removeItem(scriptKey)
+      }
+      setSearchParams({}, { replace: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     async function loadData() {
       if (!productId || !user) return
       try {
-        const [productData, scriptsData, savedPosts, userPalettes, prodImages] = await Promise.all([
+        const [productData, scriptsData, postsResult, userPalettes, prodImages] = await Promise.all([
           getProduct(productId),
           getScripts(productId),
-          getProductPosts(productId),
+          getProductPostsPaginated(productId, POSTS_PAGE_SIZE, 0),
           getCustomPalettes(user.id),
           getProductImages(productId)
         ])
@@ -193,8 +210,9 @@ export default function PostWorkspace() {
         setScripts(scriptsData)
         setCustomPalettes(userPalettes)
         setProductImages(prodImages)
+        setTotalPostCount(postsResult.total)
 
-        const loadedPosts: GeneratedPost[] = savedPosts
+        const loadedPosts: GeneratedPost[] = postsResult.posts
           .filter(post => post.status === 'completed' && post.generated_image_url)
           .map(post => ({
             id: post.id,
@@ -310,17 +328,6 @@ export default function PostWorkspace() {
       .map(img => img.image_url)
   }
 
-  const urlToBase64 = async (url: string): Promise<string> => {
-    if (url.startsWith('data:')) return url
-    const res = await fetch(url)
-    const blob = await res.blob()
-    return new Promise<string>((resolve) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result as string)
-      reader.readAsDataURL(blob)
-    })
-  }
-
   const handleGenerate = async () => {
     const script = getScriptPrompt()
     if (!script) return
@@ -349,7 +356,7 @@ export default function PostWorkspace() {
 
       const selectedUrls = getSelectedProductImageUrls()
       if (selectedUrls.length > 0) {
-        const base64Images = await Promise.all(selectedUrls.map(urlToBase64))
+        const base64Images = await Promise.all(selectedUrls.map(async u => compressBase64ForApi(await urlToBase64(u))))
         base64Images.forEach((img, i) => {
           requestBody[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img
         })
@@ -364,6 +371,7 @@ export default function PostWorkspace() {
         body: JSON.stringify(requestBody)
       })
 
+      if (response.status === 413) throw new Error(language === 'es' ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.' : 'Image is too large. Try a smaller or lower-resolution image.')
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || t.error)
 
@@ -433,17 +441,10 @@ export default function PostWorkspace() {
       const token = session?.access_token
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
-      // Convert image URL to base64 data URL if it isn't already
-      let base64Image = imageUrl
-      if (!imageUrl.startsWith('data:')) {
-        const imgRes = await fetch(imageUrl)
-        const blob = await imgRes.blob()
-        base64Image = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onloadend = () => resolve(reader.result as string)
-          reader.readAsDataURL(blob)
-        })
-      }
+      const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
+      const compressedRefImages = editRefImages.length > 0
+        ? await Promise.all(editRefImages.map(img => compressBase64ForApi(img)))
+        : undefined
 
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -456,10 +457,11 @@ export default function PostWorkspace() {
           editPrompt: editPrompt.trim(),
           editImage: base64Image,
           aspectRatio,
-          ...(editRefImages.length > 0 ? { editReferenceImages: editRefImages } : {})
+          ...(compressedRefImages ? { editReferenceImages: compressedRefImages } : {})
         })
       })
 
+      if (response.status === 413) throw new Error(language === 'es' ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.' : 'Image is too large. Try a smaller or lower-resolution image.')
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || t.editError)
 
@@ -550,16 +552,7 @@ export default function PostWorkspace() {
       const token = session?.access_token
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
-      let base64Image = imageUrl
-      if (!imageUrl.startsWith('data:')) {
-        const imgRes = await fetch(imageUrl)
-        const blob = await imgRes.blob()
-        base64Image = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onloadend = () => resolve(reader.result as string)
-          reader.readAsDataURL(blob)
-        })
-      }
+      const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
 
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -573,11 +566,12 @@ export default function PostWorkspace() {
           aspectRatio,
           language,
           productReferenceImages: selectedProductImageIds.size > 0
-            ? await Promise.all(getSelectedProductImageUrls().map(urlToBase64))
+            ? await Promise.all(getSelectedProductImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
             : undefined
         })
       })
 
+      if (response.status === 413) throw new Error(language === 'es' ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.' : 'Image is too large. Try a smaller or lower-resolution image.')
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || t.enhanceError)
 
@@ -700,6 +694,30 @@ export default function PostWorkspace() {
     }
     img.src = url
     if (paletteImageInputRef.current) paletteImageInputRef.current.value = ''
+  }
+
+  const handleLoadMore = async () => {
+    if (!productId || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const offset = generatedPosts.filter(p => p.saved).length
+      const result = await getProductPostsPaginated(productId, POSTS_PAGE_SIZE, offset)
+      const morePosts: GeneratedPost[] = result.posts
+        .filter(post => post.status === 'completed' && post.generated_image_url)
+        .map(post => ({
+          id: post.id,
+          imageUrl: post.generated_image_url!,
+          prompt: post.prompt,
+          createdAt: new Date(post.created_at),
+          model: post.model,
+          saved: true
+        }))
+      setGeneratedPosts(prev => [...prev, ...morePosts])
+    } catch (err) {
+      console.error('Failed to load more posts:', err)
+    } finally {
+      setLoadingMore(false)
+    }
   }
 
   const handleBuyBoost = async () => {
@@ -1217,6 +1235,7 @@ export default function PostWorkspace() {
             <h2 className="text-sm font-semibold text-dark-700 tracking-wide uppercase mb-4">{t.generatedImages}</h2>
 
             {generatedPosts.length > 0 || generating ? (
+              <>
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {generating && (
                   <GeneratingPlaceholder
@@ -1358,6 +1377,32 @@ export default function PostWorkspace() {
                   </div>
                 ))}
               </div>
+
+              {/* Load More button */}
+              {generatedPosts.filter(p => p.saved).length < totalPostCount && (
+                <div className="flex justify-center mt-6">
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-dark-200 text-dark-600 text-sm font-medium hover:bg-dark-100 transition-colors disabled:opacity-50"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {language === 'es' ? 'Cargando...' : 'Loading...'}
+                      </>
+                    ) : (
+                      <>
+                        {language === 'es' ? 'Cargar más' : 'Load More'}
+                        <span className="text-xs text-dark-400">
+                          ({generatedPosts.filter(p => p.saved).length}/{totalPostCount})
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center h-80 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-dark-100 flex items-center justify-center mb-4">

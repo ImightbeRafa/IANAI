@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
@@ -21,6 +21,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
+  const authResolved = useRef(false)
 
   // Fetch admin status from profiles table
   const fetchAdminStatus = async (userId: string) => {
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
         setIsAdmin(false)
       } else {
+        authResolved.current = true
         setSession(session)
         setUser(session?.user ?? null)
         if (session?.user) fetchAdminStatus(session.user.id)
@@ -92,6 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // For normal page loads, use getSession to restore existing session
     if (!hasOAuthCallback) {
       supabase.auth.getSession().then(({ data: { session }, error }) => {
+        // Skip if onAuthStateChange already resolved (avoids double render + double fetchAdminStatus)
+        if (authResolved.current) return
         if (error) {
           console.warn('Session recovery failed, signing out:', error.message)
           supabase.auth.signOut()

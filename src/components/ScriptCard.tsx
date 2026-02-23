@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
+import { getScriptsByMessage, getScriptVersions } from '../services/database'
 
 type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
 
@@ -14,18 +16,25 @@ interface EditHistoryEntry {
 interface ScriptCardProps {
   script: ParsedScript
   language: 'en' | 'es'
-  onSave?: (content: string, title: string) => Promise<string | null>
-  onEdit?: (originalContent: string, instruction: string) => Promise<string>
+  onSave?: (content: string, title: string, opts?: { edit_source?: string; message_id?: string; script_index?: number }) => Promise<string | null>
+  onEdit?: (originalContent: string, instruction: string, editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness') => Promise<string>
+  onSaveVersion?: (parentId: string, content: string, editSource: string, editLabel?: string) => Promise<string | null>
   isSaved?: boolean
   savingScript?: boolean
   productType?: ProductType
+  productId?: string
+  sessionId?: string
+  messageId?: string
+  scriptIndex?: number
 }
 
-export default function ScriptCard({ script, language, onSave, onEdit, isSaved, savingScript, productType }: ScriptCardProps) {
+export default function ScriptCard({ script, language, onSave, onEdit, onSaveVersion, isSaved, savingScript, productType, productId, messageId, scriptIndex }: ScriptCardProps) {
+  const navigate = useNavigate()
   const [copiedVersion, setCopiedVersion] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [savedOriginal, setSavedOriginal] = useState(isSaved || false)
   const [savedVersions, setSavedVersions] = useState<Set<number>>(new Set())
+  const [savedScriptId, setSavedScriptId] = useState<string | null>(null)
 
   const [showEditInput, setShowEditInput] = useState(false)
   const [editInstruction, setEditInstruction] = useState('')
@@ -37,12 +46,41 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
   const [enhancing, setEnhancing] = useState(false)
 
   const [editHistory, setEditHistory] = useState<EditHistoryEntry[]>([])
+  const initLoadedRef = useRef(false)
 
   const [hookPickerVersion, setHookPickerVersion] = useState<number | null>(null)
   const hookPickerRef = useRef<HTMLDivElement>(null)
 
   const [consciousnessPickerVersion, setConsciousnessPickerVersion] = useState<number | null>(null)
   const consciousnessPickerRef = useRef<HTMLDivElement>(null)
+
+  // Restore saved edit history on mount
+  useEffect(() => {
+    if (initLoadedRef.current || !messageId) return
+    initLoadedRef.current = true
+    ;(async () => {
+      try {
+        const saved = await getScriptsByMessage(messageId)
+        const match = saved.find(s => s.script_index === (scriptIndex ?? 0))
+        if (match) {
+          setSavedScriptId(match.id)
+          setSavedOriginal(true)
+          const versions = await getScriptVersions(match.id)
+          if (versions.length > 0) {
+            const sorted = [...versions].sort((a, b) => a.version - b.version)
+            setEditHistory(sorted.map(v => ({
+              content: v.content,
+              source: (v.edit_source as EditSource) || 'manual',
+              label: v.edit_label || ''
+            })))
+            setSavedVersions(new Set(sorted.map((_, i) => i)))
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load script versions:', err)
+      }
+    })()
+  }, [messageId, scriptIndex])
 
   useEffect(() => {
     if (hookPickerVersion === null) return
@@ -87,13 +125,42 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
       const title = versionIndex === -1
         ? script.title
         : `${script.title} (${entry?.source || 'edited'})`
-      const id = await onSave(content, title)
+      const opts = versionIndex === -1
+        ? { edit_source: 'original', message_id: messageId, script_index: scriptIndex }
+        : undefined
+      const id = await onSave(content, title, opts)
       if (id) {
-        if (versionIndex === -1) setSavedOriginal(true)
-        else setSavedVersions(prev => new Set(prev).add(versionIndex))
+        if (versionIndex === -1) {
+          setSavedOriginal(true)
+          setSavedScriptId(id)
+        } else {
+          setSavedVersions(prev => new Set(prev).add(versionIndex))
+        }
       }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const ensureOriginalSaved = async (): Promise<string | null> => {
+    if (savedScriptId) return savedScriptId
+    if (!onSave) return null
+    const id = await onSave(script.content, script.title, {
+      edit_source: 'original',
+      message_id: messageId,
+      script_index: scriptIndex
+    })
+    if (id) {
+      setSavedScriptId(id)
+      setSavedOriginal(true)
+    }
+    return id
+  }
+
+  const autoSaveVersion = async (content: string, editSource: string, editLabel?: string) => {
+    const parentId = await ensureOriginalSaved()
+    if (parentId && onSaveVersion) {
+      await onSaveVersion(parentId, content, editSource, editLabel)
     }
   }
 
@@ -109,10 +176,11 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     setEditError(null)
     try {
       const source = getVersionContent(editingFromVersion)
-      const result = await onEdit(source, editInstruction.trim())
+      const result = await onEdit(source, editInstruction.trim(), 'script_edit')
       setEditHistory(prev => [...prev, { content: result, source: 'manual', label: '' }])
       setShowEditInput(false)
       setEditInstruction('')
+      autoSaveVersion(result, 'manual')
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Edit failed')
     } finally {
@@ -140,8 +208,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     setEditError(null)
     try {
       const source = getVersionContent(fromVersion)
-      const result = await onEdit(source, ENHANCE_PROMPT)
+      const result = await onEdit(source, ENHANCE_PROMPT, 'script_enhance')
       setEditHistory(prev => [...prev, { content: result, source: 'enhance', label: '' }])
+      autoSaveVersion(result, 'enhance')
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Enhance failed')
     } finally {
@@ -232,8 +301,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     setEditError(null)
     try {
       const source = getVersionContent(fromVersion)
-      const result = await onEdit(source, prompt)
+      const result = await onEdit(source, prompt, 'script_consciousness')
       setEditHistory(prev => [...prev, { content: result, source: 'consciousness', label }])
+      autoSaveVersion(result, 'consciousness', label)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Consciousness change failed')
     } finally {
@@ -248,8 +318,10 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     setEditError(null)
     try {
       const source = getVersionContent(fromVersion)
-      const result = await onEdit(source, hookPrompt)
+      const fullPrompt = hookPrompt + ' Devuelve UN solo guión completo. NO generes múltiples opciones ni versiones.'
+      const result = await onEdit(source, fullPrompt, 'script_hook')
       setEditHistory(prev => [...prev, { content: result, source: 'hook', label: hookLabel }])
+      autoSaveVersion(result, 'hook', hookLabel)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Hook change failed')
     } finally {
@@ -261,6 +333,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
     copy: language === 'es' ? 'Copiar' : 'Copy',
     copied: language === 'es' ? 'Copiado' : 'Copied',
     save: language === 'es' ? 'Guardar' : 'Save',
+    generatePost: language === 'es' ? 'Post' : 'Post',
     saved: language === 'es' ? 'Guardado' : 'Saved',
     edit: language === 'es' ? 'Editar' : 'Edit',
     cancel: language === 'es' ? 'Cancelar' : 'Cancel',
@@ -318,6 +391,25 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
       >
         {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <BookmarkPlus className="w-3 h-3" />}
         {isSavedState ? t.saved : t.save}
+      </button>
+    )
+  }
+
+  const PostBtn = ({ versionIndex }: { versionIndex: number }) => {
+    if (!productId) return null
+    return (
+      <button
+        onClick={() => {
+          const content = getVersionContent(versionIndex)
+          const key = `scriptToPost_${Date.now()}`
+          sessionStorage.setItem(key, content)
+          navigate(`/posts/product/${productId}?scriptKey=${key}`)
+        }}
+        className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:bg-sky-900/20 hover:text-sky-400 px-2 py-0.5 rounded-md transition-colors"
+        title={language === 'es' ? 'Generar Post con este guión' : 'Generate Post from this script'}
+      >
+        <ImageIcon className="w-3 h-3" />
+        {t.generatePost}
       </button>
     )
   }
@@ -470,6 +562,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
       <div className="flex items-center flex-wrap gap-1.5 px-4 py-2 border-t border-dark-200">
         <CopyBtn versionIndex={-1} />
         <SaveBtn versionIndex={-1} />
+        <PostBtn versionIndex={-1} />
         <VersionActions versionIndex={-1} />
       </div>
 
@@ -499,6 +592,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, isSaved, 
             <div className="flex items-center flex-wrap gap-1.5 px-4 py-2 border-t border-dark-200">
               <CopyBtn versionIndex={index} />
               <SaveBtn versionIndex={index} />
+              <PostBtn versionIndex={index} />
               <VersionActions versionIndex={index} />
             </div>
           </div>

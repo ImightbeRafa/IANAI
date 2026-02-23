@@ -46,110 +46,6 @@ Solicitud del usuario: `
 // =============================================
 type PostAspectRatio = '9:16' | '3:4'
 
-// =============================================
-// ORGANIC POST PROMPT — Minimalistic, educational, non-sales
-// Product in action + one phrase. Clean, editorial, quiet.
-// =============================================
-function buildOrganicPostPrompt(aspectRatio: PostAspectRatio): string {
-  const isVertical = aspectRatio === '9:16'
-  const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
-  const layoutTip = isVertical
-    ? 'La composición es alta y estrecha. La imagen ocupa prácticamente todo el canvas. La frase se ubica con suficiente aire, sin competir con la imagen.'
-    : 'La composición es casi cuadrada. La imagen es protagonista absoluta. La frase puede ir superpuesta con overlay sutil o en un bloque limpio arriba o abajo.'
-
-  return `ACTÚA COMO: Director de Arte Senior + Fotógrafo Editorial. Tu meta es crear un post de contenido orgánico para redes sociales — NO es un post de venta.
-
-CONTEXTO FIJO (NO PREGUNTAR NADA):
-Recibiste un guión o descripción de producto/servicio. NO debés usarlo para vender. Debés extraer UN concepto, beneficio o dato interesante y transformarlo en una pieza visual minimalista y educativa.
-
-OBJETIVO:
-Crear UN (1) post orgánico de contenido, formato ${formatLabel}, con:
-1) Imagen del producto/servicio EN ACCIÓN (protagonista absoluta, 85–95% del canvas)
-2) UNA frase corta — educativa, informativa o aspiracional — NO de venta
-Eso es todo. Nada más. Minimalismo extremo.
-${layoutTip}
-
-REGLAS DE LA FRASE (ESTRICTO):
-- UNA sola frase. Máximo 8–12 palabras.
-- Tono: educativo, informativo, aspiracional o que genere curiosidad.
-- PROHIBIDO: llamados a la acción (comprar, escribir, pedir, agendar, cotizar).
-- PROHIBIDO: precios, descuentos, ofertas, urgencia de venta.
-- PROHIBIDO: múltiples frases, bullets, listas, subtítulos.
-- La frase debe apuntar a UN concepto específico extraído del guión:
-  - Un dato interesante del producto
-  - Un beneficio tangible (sin vender)
-  - Un hecho educativo sobre el problema que resuelve
-  - Una afirmación aspiracional que conecte emocionalmente
-- Ejemplos de buen tono:
-  - "El café recién tostado pierde 60% de aroma en 2 semanas"
-  - "Tu piel se regenera mientras dormís"
-  - "Cultivado a 1,800 metros sobre el nivel del mar"
-  - "Menos químicos. Más tierra."
-
-EXTRACCIÓN INTELIGENTE DESDE EL GUIÓN:
-Lee el guión y elegí UNO de estos ángulos para la frase:
-1) Un dato verificable o curioso sobre el producto/proceso
-2) Un beneficio real expresado sin lenguaje de venta
-3) Un contraste sutil (sin nombrar competidores directamente)
-4) Una referencia al origen, proceso o calidad intrínseca
-5) Una observación educativa sobre el problema que resuelve
-
-REGLAS DE DISEÑO (CALIDAD VISUAL PRO — ESTILO EDITORIAL DE MARCA PREMIUM):
-
-COMPOSICIÓN — FOTO-FIRST, EDGE-TO-EDGE:
-- La imagen del producto/servicio en acción es la PROTAGONISTA ABSOLUTA.
-- La fotografía cubre el 100% del canvas, de borde a borde, SIN marcos, SIN bordes blancos, SIN padding externo.
-- La frase va directamente sobre la imagen, integrada con la composición fotográfica.
-- El resultado debe verse como un post de una marca de lujo: limpio, seguro, editorial.
-PROHIBIDO: bordes blancos, marcos, padding blanco alrededor de la imagen, fondos sólidos detrás de la foto.
-PROHIBIDO: cajas de texto rectangulares blancas o de color sólido.
-
-MÁRGENES INTERNOS:
-- Márgenes internos del texto: aprox 8–10% desde los bordes del canvas.
-- La frase debe quedar dentro de la zona segura, pero la IMAGEN llega hasta los bordes.
-PROHIBIDO: texto pegado a bordes.
-PROHIBIDO: número de slide.
-PROHIBIDO: dimensiones, píxeles o anotaciones técnicas.
-
-TIPOGRAFÍA — BOLD, LIMPIA, CON PRESENCIA:
-- UNA sola familia tipográfica, sans-serif moderna (estilo Helvetica Neue, Inter, Montserrat, o similar).
-- Peso: BOLD o SEMIBOLD — la frase debe tener presencia visual fuerte y ser fácil de leer.
-- Tamaño: grande y confiado. Debe verse bien en un teléfono móvil.
-- Color: BLANCO puro (#FFFFFF) sobre zonas oscuras de la imagen, o NEGRO puro sobre zonas claras.
-- Tracking (espaciado entre letras): ligeramente expandido para un look premium.
-- Para garantizar legibilidad, usar UN degradado oscuro sutil (de negro transparente a transparente) detrás del texto — NO un rectángulo sólido, solo un gradient natural que se funde con la foto.
-- Mayúsculas o title case — lo que se vea más limpio según la frase.
-PROHIBIDO: tipografías decorativas, script, serif, sombras de texto gruesas, glow, outline de texto.
-PROHIBIDO: cajas o rectángulos de color detrás del texto.
-
-COLOR Y ATMÓSFERA:
-- Los colores vienen de la fotografía misma. Tonos naturales, cálidos o moody según el producto.
-- La imagen debe tener un tratamiento de color editorial: ligeramente desaturada, con contraste elevado, o con tonos cálidos — como una foto de revista.
-- Si se necesita legibilidad para el texto, usar degradado oscuro transparente (nunca blanco sólido).
-- Cero badges, cero botones, cero elementos gráficos extra, cero bordes.
-
-IMAGEN — PRODUCTO EN ACCIÓN (OBLIGATORIO):
-- El producto/servicio debe mostrarse EN USO, no en exhibición estática.
-- Escena realista: manos interactuando, producto siendo usado, servicio siendo entregado.
-- Iluminación: natural, cálida, o de estudio con carácter. Con mood y personalidad.
-- Fondo contextual con profundidad (bokeh, ambiente, textura) — no plano ni distractivo.
-- Calidad editorial: como la portada de Kinfolk, Cereal Magazine, o el feed de una marca como Aesop.
-PROHIBIDO: fondos blancos vacíos, fondos sólidos planos, mockups, collages, filtros agresivos.
-
-ENTREGABLE:
-Generá UNA imagen del post orgánico cumpliendo TODO:
-- Fotografía edge-to-edge, SIN bordes blancos ni marcos de ningún tipo
-- Producto en acción como protagonista absoluta
-- UNA frase corta, BOLD, legible, educativa, NO de venta
-- Texto directamente sobre la foto con degradado sutil para legibilidad
-- Estética editorial premium — como si fuera de una marca de lujo minimalista
-- Sin CTA, sin bullets, sin badges, sin botones, sin marcos
-- NUNCA incluir anotaciones técnicas, dimensiones o medidas visibles
-
-GUIÓN DEL USUARIO:
-`
-}
-
 function buildPostPrompt(aspectRatio: PostAspectRatio): string {
   const isVertical = aspectRatio === '9:16'
   const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
@@ -326,7 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { action, taskId, model = 'nano-banana', ...imageParams } = req.body
 
-    const VALID_ACTIONS = ['generate', 'edit', 'enhance', 'poll', 'post', 'organic']
+    const VALID_ACTIONS = ['generate', 'edit', 'enhance', 'poll', 'post']
     if (action && !VALID_ACTIONS.includes(action)) {
       return res.status(400).json({ error: `Invalid action. Must be one of: ${VALID_ACTIONS.join(', ')}` })
     }
@@ -456,11 +352,20 @@ Edit instruction: ${editPrompt}`
         await incrementUsage(user.id, 'image')
         await deductBonusImage(user.id)
 
+        // Extract token usage from Gemini response
+        const editUsage = response.usageMetadata
+        const editInputTokens = editUsage?.promptTokenCount || 0
+        const editOutputTokens = editUsage?.candidatesTokenCount || 0
+        const editThinkingTokens = editUsage?.thoughtsTokenCount || 0
+
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'edit',
           model: 'nano-banana-pro',
+          inputTokens: editInputTokens,
+          outputTokens: editOutputTokens,
+          thinkingTokens: editThinkingTokens,
           success: true,
           metadata: { action: 'edit', editPrompt: editPrompt.substring(0, 100) }
         })
@@ -749,11 +654,20 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         await incrementUsage(user.id, 'enhance')
 
+        // Extract token usage from Gemini response
+        const enhanceUsage = response.usageMetadata
+        const enhanceInputTokens = enhanceUsage?.promptTokenCount || 0
+        const enhanceOutputTokens = enhanceUsage?.candidatesTokenCount || 0
+        const enhanceThinkingTokens = enhanceUsage?.thoughtsTokenCount || 0
+
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'enhance',
           model: 'nano-banana-pro',
+          inputTokens: enhanceInputTokens,
+          outputTokens: enhanceOutputTokens,
+          thinkingTokens: enhanceThinkingTokens,
           success: true,
           metadata: { action: 'enhance' }
         })
@@ -925,12 +839,21 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         await incrementUsage(user.id, 'image')
         await deductBonusImage(user.id)
 
-        // Log Gemini image usage
+        // Extract token usage from Gemini response
+        const genUsage = response.usageMetadata
+        const genInputTokens = genUsage?.promptTokenCount || 0
+        const genOutputTokens = genUsage?.candidatesTokenCount || 0
+        const genThinkingTokens = genUsage?.thoughtsTokenCount || 0
+
+        // Log Gemini image usage with accurate token-based cost
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'image',
           model: selectedModel,
+          inputTokens: genInputTokens,
+          outputTokens: genOutputTokens,
+          thinkingTokens: genThinkingTokens,
           success: true,
           metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image }
         })

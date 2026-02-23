@@ -42,6 +42,23 @@ export async function updateProfile(userId: string, updates: Partial<Profile>): 
   if (error) throw error
 }
 
+export async function getOnboardingStatus(userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('profiles')
+    .select('has_completed_onboarding')
+    .eq('id', userId)
+    .maybeSingle()
+  return data?.has_completed_onboarding === true
+}
+
+export async function markOnboardingComplete(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ has_completed_onboarding: true })
+    .eq('id', userId)
+  if (error) throw error
+}
+
 // =============================================
 // TEAM FUNCTIONS
 // =============================================
@@ -579,11 +596,21 @@ export async function saveScript(
   productId: string,
   title: string,
   content: string,
-  angle?: string
+  angle?: string,
+  opts?: { edit_source?: string; message_id?: string; script_index?: number }
 ): Promise<Script> {
   const { data, error } = await supabase
     .from('scripts')
-    .insert({ session_id: sessionId, product_id: productId, title, content, angle })
+    .insert({
+      session_id: sessionId,
+      product_id: productId,
+      title,
+      content,
+      angle,
+      ...(opts?.edit_source ? { edit_source: opts.edit_source } : {}),
+      ...(opts?.message_id ? { message_id: opts.message_id } : {}),
+      ...(opts?.script_index != null ? { script_index: opts.script_index } : {})
+    })
     .select()
     .single()
 
@@ -656,7 +683,9 @@ export async function createScriptVersion(
   sessionId: string,
   productId: string,
   title: string,
-  content: string
+  content: string,
+  editSource?: string,
+  editLabel?: string
 ): Promise<Script> {
   // Get the latest version number
   const { data: existing } = await supabase
@@ -677,13 +706,27 @@ export async function createScriptVersion(
       title: `${title} (v${newVersion})`, 
       content,
       parent_script_id: originalScriptId,
-      version: newVersion
+      version: newVersion,
+      ...(editSource ? { edit_source: editSource } : {}),
+      ...(editLabel ? { edit_label: editLabel } : {})
     })
     .select()
     .single()
 
   if (error) throw error
   return data
+}
+
+export async function getScriptsByMessage(messageId: string): Promise<Script[]> {
+  const { data, error } = await supabase
+    .from('scripts')
+    .select('*')
+    .eq('message_id', messageId)
+    .is('parent_script_id', null)
+    .order('script_index', { ascending: true })
+
+  if (error) throw error
+  return data || []
 }
 
 // =============================================
@@ -820,6 +863,22 @@ export async function getProductPosts(productId: string): Promise<Post[]> {
 
   if (error) throw error
   return data || []
+}
+
+export async function getProductPostsPaginated(
+  productId: string,
+  limit: number,
+  offset: number
+): Promise<{ posts: Post[]; total: number }> {
+  const { data, error, count } = await supabase
+    .from('posts')
+    .select('*', { count: 'exact' })
+    .eq('product_id', productId)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) throw error
+  return { posts: data || [], total: count || 0 }
 }
 
 export async function deletePost(postId: string): Promise<void> {
@@ -996,8 +1055,14 @@ export interface FeedbackTicket {
   browser_info: string | null
   screen_size: string | null
   console_errors: unknown[]
+  network_errors: { url: string; status: number; statusText: string; timestamp: string }[]
+  breadcrumbs: { type: string; target: string; timestamp: string }[]
   screenshot_url: string | null
+  product_id: string | null
+  product_name: string | null
+  user_plan: string | null
   admin_notes: string | null
+  notes_history: { text: string; status: string; timestamp: string }[]
   resolved_at: string | null
   created_at: string
   updated_at: string
@@ -1015,6 +1080,11 @@ export async function createFeedbackTicket(ticket: {
   screen_size?: string
   console_errors?: unknown[]
   screenshot_url?: string
+  network_errors?: unknown[]
+  breadcrumbs?: unknown[]
+  product_id?: string
+  product_name?: string
+  user_plan?: string
 }): Promise<FeedbackTicket> {
   const { data, error } = await supabase
     .from('feedback_tickets')
@@ -1050,11 +1120,21 @@ export async function getAllTickets(): Promise<FeedbackTicket[]> {
 export async function updateTicketStatus(
   ticketId: string,
   status: 'open' | 'in_progress' | 'resolved' | 'closed',
-  adminNotes?: string
+  adminNotes?: string,
+  existingHistory?: { text: string; status: string; timestamp: string }[]
 ): Promise<void> {
   const update: Record<string, unknown> = { status }
   if (adminNotes !== undefined) update.admin_notes = adminNotes
   if (status === 'resolved') update.resolved_at = new Date().toISOString()
+
+  // Append to notes_history
+  const history = [...(existingHistory || [])]
+  history.push({
+    text: adminNotes || '',
+    status,
+    timestamp: new Date().toISOString(),
+  })
+  update.notes_history = history
 
   const { error } = await supabase
     .from('feedback_tickets')
@@ -1062,6 +1142,29 @@ export async function updateTicketStatus(
     .eq('id', ticketId)
 
   if (error) throw error
+}
+
+export async function getRecentFailedLogs(
+  userId: string,
+  aroundTimestamp: string,
+  windowMinutes: number = 30
+): Promise<{ id: string; feature: string; model: string; error_message: string | null; created_at: string }[]> {
+  const date = new Date(aroundTimestamp)
+  const from = new Date(date.getTime() - windowMinutes * 60 * 1000).toISOString()
+  const to = new Date(date.getTime() + windowMinutes * 60 * 1000).toISOString()
+
+  const { data, error } = await supabase
+    .from('api_usage_logs')
+    .select('id, feature, model, error_message, created_at')
+    .eq('user_id', userId)
+    .eq('success', false)
+    .gte('created_at', from)
+    .lte('created_at', to)
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  if (error) throw error
+  return data || []
 }
 
 export async function uploadFeedbackScreenshot(

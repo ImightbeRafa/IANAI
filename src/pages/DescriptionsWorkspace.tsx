@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getScripts } from '../services/database'
+import { getProduct, getScripts, getChatSessions, createChatSession, getMessages, addMessage } from '../services/database'
 import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
-import type { Product, Script, Message, ScriptGenerationSettings } from '../types'
+import type { Product, Script, Message, ScriptGenerationSettings, ChatSession } from '../types'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
 import { 
@@ -19,12 +19,6 @@ import {
   ChevronUp
 } from 'lucide-react'
 
-interface LocalMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-}
-
 export default function DescriptionsWorkspace() {
   const { productId } = useParams<{ productId: string }>()
   const { user } = useAuth()
@@ -33,7 +27,8 @@ export default function DescriptionsWorkspace() {
   const [product, setProduct] = useState<Product | null>(null)
   const [scripts, setScripts] = useState<Script[]>([])
   const [selectedScript, setSelectedScript] = useState<Script | null>(null)
-  const [messages, setMessages] = useState<LocalMessage[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
+  const [descSession, setDescSession] = useState<ChatSession | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
@@ -89,12 +84,24 @@ export default function DescriptionsWorkspace() {
     async function loadData() {
       if (!productId || !user) return
       try {
-        const [productData, scriptsData] = await Promise.all([
+        const [productData, scriptsData, sessionsData] = await Promise.all([
           getProduct(productId),
-          getScripts(productId)
+          getScripts(productId),
+          getChatSessions(productId)
         ])
         setProduct(productData)
         setScripts(scriptsData)
+
+        // Find or create a description session (prefixed with __desc__)
+        let session = sessionsData.find(s => s.title?.startsWith('__desc__'))
+        if (!session) {
+          session = await createChatSession(productId, user.id, '__desc__')
+        }
+        setDescSession(session)
+
+        // Load existing messages
+        const msgs = await getMessages(session.id)
+        setMessages(msgs)
       } catch (error) {
         console.error('Failed to load data:', error)
       } finally {
@@ -105,26 +112,25 @@ export default function DescriptionsWorkspace() {
   }, [productId, user])
 
   const handleGenerateDescriptions = async () => {
-    if (loading || !product) return
+    if (loading || !product || !descSession) return
     
     const scriptContent = selectedScript?.content || input.trim()
     if (!scriptContent) return
 
     setLoading(true)
     
-    const userMsg: LocalMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: selectedScript 
-        ? (language === 'es' 
-          ? `Genera descripciones de video para redes sociales basándote en este guión:\n\n${scriptContent}`
-          : `Generate social media video descriptions based on this script:\n\n${scriptContent}`)
-        : scriptContent
-    }
-    setMessages(prev => [...prev, userMsg])
-    if (!selectedScript) setInput('')
+    const userContent = selectedScript 
+      ? (language === 'es' 
+        ? `Genera descripciones de video para redes sociales basándote en este guión:\n\n${scriptContent}`
+        : `Generate social media video descriptions based on this script:\n\n${scriptContent}`)
+      : scriptContent
 
     try {
+      // Save user message to DB
+      const savedUserMsg = await addMessage(descSession.id, 'user', userContent)
+      setMessages(prev => [...prev, savedUserMsg])
+      if (!selectedScript) setInput('')
+
       const descriptionContext = {
         product_name: product.name,
         product_type: product.type,
@@ -134,20 +140,7 @@ export default function DescriptionsWorkspace() {
           : 'Generate short, engaging descriptions for social media videos (Instagram, TikTok, YouTube Shorts). Include relevant hashtags. Format: 3-5 description variations, each with a different approach (informative, emotional, urgent, social proof).'
       }
 
-      const apiMessages: Message[] = messages.map(m => ({
-        id: m.id,
-        session_id: '',
-        role: m.role,
-        content: m.content,
-        created_at: new Date().toISOString()
-      }))
-      apiMessages.push({
-        id: userMsg.id,
-        session_id: '',
-        role: 'user',
-        content: userMsg.content,
-        created_at: new Date().toISOString()
-      })
+      const allMessages = [...messages, savedUserMsg]
 
       const settings: ScriptGenerationSettings = {
         ...DEFAULT_SCRIPT_SETTINGS,
@@ -155,7 +148,7 @@ export default function DescriptionsWorkspace() {
       }
 
       const aiResponse = await sendMessageToGrok(
-        apiMessages,
+        allMessages,
         descriptionContext,
         language,
         settings,
@@ -164,18 +157,17 @@ export default function DescriptionsWorkspace() {
         'description'
       )
 
-      const aiMsg: LocalMessage = {
-        id: `ai-${Date.now()}`,
-        role: 'assistant',
-        content: aiResponse.content
-      }
-      setMessages(prev => [...prev, aiMsg])
+      // Save assistant message to DB
+      const savedAiMsg = await addMessage(descSession.id, 'assistant', aiResponse.content)
+      setMessages(prev => [...prev, savedAiMsg])
     } catch (error) {
       console.error('Failed to generate descriptions:', error)
-      const errorMsg: LocalMessage = {
+      const errorMsg: Message = {
         id: `error-${Date.now()}`,
+        session_id: descSession.id,
         role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to generate descriptions'}`
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to generate descriptions'}`,
+        created_at: new Date().toISOString()
       }
       setMessages(prev => [...prev, errorMsg])
     } finally {
@@ -258,6 +250,9 @@ export default function DescriptionsWorkspace() {
                       <button
                         key={script.id}
                         onClick={() => {
+                          if (selectedScript?.id !== script.id) {
+                            setMessages([])
+                          }
                           setSelectedScript(script)
                           setShowScriptPicker(false)
                         }}

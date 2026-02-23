@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getAllTickets, updateTicketStatus } from '../services/database'
+import { getAllTickets, updateTicketStatus, getRecentFailedLogs } from '../services/database'
 import type { FeedbackTicket } from '../services/database'
 import Layout from '../components/Layout'
 import { Link } from 'react-router-dom'
@@ -22,7 +22,13 @@ import {
   Image as ImageIcon,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  Wifi,
+  MousePointerClick,
+  Package,
+  CreditCard,
+  History,
+  Zap
 } from 'lucide-react'
 
 export default function AdminTickets() {
@@ -34,6 +40,8 @@ export default function AdminTickets() {
   const [filter, setFilter] = useState<'all' | 'open' | 'in_progress' | 'resolved' | 'closed'>('all')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [adminNotes, setAdminNotes] = useState<Record<string, string>>({})
+  const [failedLogs, setFailedLogs] = useState<Record<string, { id: string; feature: string; model: string; error_message: string | null; created_at: string }[]>>({})
+  const [loadingLogs, setLoadingLogs] = useState<string | null>(null)
 
   const t = language === 'es' ? {
     title: 'Tickets de Feedback',
@@ -129,14 +137,36 @@ export default function AdminTickets() {
   const handleStatusChange = async (ticketId: string, status: FeedbackTicket['status']) => {
     setUpdatingId(ticketId)
     try {
-      await updateTicketStatus(ticketId, status, adminNotes[ticketId])
-      setTickets(prev => prev.map(t =>
-        t.id === ticketId ? { ...t, status, admin_notes: adminNotes[ticketId] || t.admin_notes } : t
+      const ticket = tickets.find(tk => tk.id === ticketId)
+      const existingHistory = Array.isArray(ticket?.notes_history) ? ticket.notes_history : []
+      await updateTicketStatus(ticketId, status, adminNotes[ticketId], existingHistory)
+      const newEntry = { text: adminNotes[ticketId] || '', status, timestamp: new Date().toISOString() }
+      setTickets(prev => prev.map(tk =>
+        tk.id === ticketId ? {
+          ...tk,
+          status,
+          admin_notes: adminNotes[ticketId] || tk.admin_notes,
+          notes_history: [...existingHistory, newEntry],
+        } : tk
       ))
     } catch (err) {
       console.error('Failed to update ticket:', err)
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  const loadFailedLogs = async (ticketId: string, userId: string, createdAt: string) => {
+    if (failedLogs[ticketId]) return
+    setLoadingLogs(ticketId)
+    try {
+      const logs = await getRecentFailedLogs(userId, createdAt)
+      setFailedLogs(prev => ({ ...prev, [ticketId]: logs }))
+    } catch (err) {
+      console.error('Failed to load correlated logs:', err)
+      setFailedLogs(prev => ({ ...prev, [ticketId]: [] }))
+    } finally {
+      setLoadingLogs(null)
     }
   }
 
@@ -275,9 +305,19 @@ export default function AdminTickets() {
                           {priorityLabel(ticket.priority)}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3 mt-1">
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
                         <span className="text-[11px] text-dark-400">{ticket.user_email}</span>
                         <span className="text-[11px] text-dark-300">{new Date(ticket.created_at).toLocaleString()}</span>
+                        {ticket.user_plan && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-900/20 text-purple-400">
+                            <CreditCard className="w-2.5 h-2.5" /> {ticket.user_plan}
+                          </span>
+                        )}
+                        {ticket.product_name && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-900/20 text-blue-400">
+                            <Package className="w-2.5 h-2.5" /> {ticket.product_name}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded-full ${statusColor(ticket.status)}`}>
@@ -340,6 +380,131 @@ export default function AdminTickets() {
                           <div className="bg-dark-50 rounded-lg p-3 max-h-40 overflow-y-auto space-y-1">
                             {ticket.console_errors.map((err, i) => (
                               <p key={i} className="text-[10px] font-mono text-red-400 break-all">{String(err)}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Network errors */}
+                      {Array.isArray(ticket.network_errors) && ticket.network_errors.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                            <Wifi className="w-3.5 h-3.5 text-orange-400" /> {language === 'es' ? 'Errores de Red' : 'Network Errors'}
+                            <span className="text-dark-300 font-normal">({ticket.network_errors.length})</span>
+                          </p>
+                          <div className="bg-dark-50 rounded-lg overflow-hidden">
+                            <table className="w-full">
+                              <thead>
+                                <tr className="border-b border-dark-200">
+                                  <th className="px-3 py-1.5 text-left text-[9px] font-semibold text-dark-400 uppercase">URL</th>
+                                  <th className="px-3 py-1.5 text-center text-[9px] font-semibold text-dark-400 uppercase">{language === 'es' ? 'Estado' : 'Status'}</th>
+                                  <th className="px-3 py-1.5 text-right text-[9px] font-semibold text-dark-400 uppercase">{language === 'es' ? 'Hora' : 'Time'}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-dark-200">
+                                {ticket.network_errors.map((ne, i) => (
+                                  <tr key={i}>
+                                    <td className="px-3 py-1.5 text-[10px] font-mono text-dark-600 truncate max-w-[200px]">{ne.url}</td>
+                                    <td className="px-3 py-1.5 text-center">
+                                      <span className={`text-[10px] font-bold ${ne.status >= 500 ? 'text-red-400' : 'text-amber-400'}`}>
+                                        {ne.status} {ne.statusText}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-1.5 text-[10px] text-dark-400 text-right whitespace-nowrap">
+                                      {new Date(ne.timestamp).toLocaleTimeString()}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* User action breadcrumbs */}
+                      {Array.isArray(ticket.breadcrumbs) && ticket.breadcrumbs.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                            <MousePointerClick className="w-3.5 h-3.5 text-blue-400" /> {language === 'es' ? 'Acciones del Usuario' : 'User Actions'}
+                            <span className="text-dark-300 font-normal">({ticket.breadcrumbs.length})</span>
+                          </p>
+                          <div className="bg-dark-50 rounded-lg p-3 max-h-48 overflow-y-auto space-y-1.5">
+                            {ticket.breadcrumbs.map((bc, i) => (
+                              <div key={i} className="flex items-start gap-2">
+                                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                                  bc.type === 'click' ? 'bg-blue-900/20 text-blue-400' :
+                                  bc.type === 'navigation' ? 'bg-green-900/20 text-green-400' :
+                                  'bg-purple-900/20 text-purple-400'
+                                }`}>
+                                  {bc.type === 'click' ? 'CLICK' : bc.type === 'navigation' ? 'NAV' : 'INPUT'}
+                                </span>
+                                <span className="text-[10px] font-mono text-dark-600 break-all flex-1">{bc.target}</span>
+                                <span className="text-[9px] text-dark-400 whitespace-nowrap">{new Date(bc.timestamp).toLocaleTimeString()}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Correlated API failures */}
+                      <div>
+                        <button
+                          onClick={() => loadFailedLogs(ticket.id, ticket.user_id, ticket.created_at)}
+                          className="text-[10px] font-semibold text-dark-400 uppercase tracking-wide mb-2 flex items-center gap-1 hover:text-primary-400 transition-colors"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-amber-400" />
+                          {language === 'es' ? 'Fallos de API Relacionados (±30 min)' : 'Related API Failures (±30 min)'}
+                          {loadingLogs === ticket.id && <Loader2 className="w-3 h-3 animate-spin ml-1" />}
+                          {!failedLogs[ticket.id] && !loadingLogs && <span className="text-dark-300 font-normal ml-1">— {language === 'es' ? 'click para cargar' : 'click to load'}</span>}
+                        </button>
+                        {failedLogs[ticket.id] && (
+                          failedLogs[ticket.id].length === 0 ? (
+                            <p className="text-[10px] text-dark-400 italic">{language === 'es' ? 'Sin fallos de API en esa ventana de tiempo' : 'No API failures in that time window'}</p>
+                          ) : (
+                            <div className="bg-dark-50 rounded-lg overflow-hidden">
+                              <table className="w-full">
+                                <thead>
+                                  <tr className="border-b border-dark-200">
+                                    <th className="px-3 py-1.5 text-left text-[9px] font-semibold text-dark-400 uppercase">{language === 'es' ? 'Función' : 'Feature'}</th>
+                                    <th className="px-3 py-1.5 text-left text-[9px] font-semibold text-dark-400 uppercase">{language === 'es' ? 'Modelo' : 'Model'}</th>
+                                    <th className="px-3 py-1.5 text-left text-[9px] font-semibold text-dark-400 uppercase">{language === 'es' ? 'Error' : 'Error'}</th>
+                                    <th className="px-3 py-1.5 text-right text-[9px] font-semibold text-dark-400 uppercase">{language === 'es' ? 'Hora' : 'Time'}</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-dark-200">
+                                  {failedLogs[ticket.id].map((log) => (
+                                    <tr key={log.id}>
+                                      <td className="px-3 py-1.5 text-[10px] font-medium text-dark-700">{log.feature}</td>
+                                      <td className="px-3 py-1.5 text-[10px] font-mono text-dark-600">{log.model}</td>
+                                      <td className="px-3 py-1.5 text-[10px] font-mono text-red-400 truncate max-w-[200px]">{log.error_message || '-'}</td>
+                                      <td className="px-3 py-1.5 text-[10px] text-dark-400 text-right whitespace-nowrap">
+                                        {new Date(log.created_at).toLocaleTimeString()}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )
+                        )}
+                      </div>
+
+                      {/* Notes history timeline */}
+                      {Array.isArray(ticket.notes_history) && ticket.notes_history.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+                            <History className="w-3.5 h-3.5 text-purple-400" /> {language === 'es' ? 'Historial de Notas' : 'Notes History'}
+                          </p>
+                          <div className="bg-dark-50 rounded-lg p-3 max-h-40 overflow-y-auto space-y-2">
+                            {ticket.notes_history.map((entry, i) => (
+                              <div key={i} className="flex items-start gap-2 text-[10px]">
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-medium whitespace-nowrap ${statusColor(entry.status)}`}>
+                                  {statusIcon(entry.status)}
+                                  {entry.status}
+                                </span>
+                                <span className="text-dark-600 flex-1">{entry.text || <span className="italic text-dark-400">{language === 'es' ? '(sin nota)' : '(no note)'}</span>}</span>
+                                <span className="text-dark-400 whitespace-nowrap">{new Date(entry.timestamp).toLocaleString()}</span>
+                              </div>
                             ))}
                           </div>
                         </div>

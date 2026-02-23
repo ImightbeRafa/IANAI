@@ -3,11 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
-  getProfile, 
-  getUnassignedProducts,
   createProduct,
-  getSharedProducts,
-  acceptPendingInvites,
   getBusinessProducts
 } from '../services/database'
 import type { Product, RestaurantFormData, Business, ProductType, NewProductFormData, NewServiceFormData, IndumentariaFormData, RealEstateFormData } from '../types'
@@ -19,7 +15,8 @@ import ServiceForm from '../components/ServiceForm'
 import IndumentariaForm from '../components/IndumentariaForm'
 import BusinessForm from '../components/BusinessForm'
 import ProductTypeSelector from '../components/ProductTypeSelector'
-import { getBusinesses, createBusiness } from '../services/database'
+import { createBusiness } from '../services/database'
+import { useDashboardData } from '../hooks/useDashboardData'
 import { 
   Package, 
   ImageIcon, 
@@ -36,8 +33,7 @@ import {
 export default function PostsDashboard() {
   const { user } = useAuth()
   const { language } = useLanguage()
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(true)
+  const dashData = useDashboardData()
   const [showProductForm, setShowProductForm] = useState(false)
   const [showRestaurantForm, setShowRestaurantForm] = useState(false)
   const [showTypeSelector, setShowTypeSelector] = useState(false)
@@ -45,11 +41,14 @@ export default function PostsDashboard() {
   const [showServiceForm, setShowServiceForm] = useState(false)
   const [showIndumentariaForm, setShowIndumentariaForm] = useState(false)
   const [showRealEstateForm, setShowRealEstateForm] = useState(false)
-  const [businesses, setBusinesses] = useState<Business[]>([])
   const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null)
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
   const [businessProducts, setBusinessProducts] = useState<Product[]>([])
-  const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
+
+  const businesses = dashData.businesses
+  const products = dashData.products
+  const sharedProducts = dashData.sharedProducts
+  const loading = dashData.loading
 
   const labels = {
     es: {
@@ -103,34 +102,6 @@ export default function PostsDashboard() {
   const t = labels[language]
 
   useEffect(() => {
-    async function loadData() {
-      if (!user) return
-      try {
-        const profileData = await getProfile(user.id)
-
-        if (profileData?.email) {
-          await acceptPendingInvites(user.id, profileData.email)
-        }
-
-        const shared = await getSharedProducts(user.id)
-        setSharedProducts(shared)
-
-        const [bizData, productsData] = await Promise.all([
-          getBusinesses(user.id),
-          getUnassignedProducts(user.id)
-        ])
-        setBusinesses(bizData)
-        setProducts(productsData)
-      } catch (error) {
-        console.error('Failed to load data:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadData()
-  }, [user])
-
-  useEffect(() => {
     async function loadBusinessProducts() {
       if (!selectedBusiness) return
       try {
@@ -149,9 +120,8 @@ export default function PostsDashboard() {
       const newProduct = await createProduct({ ...formData } as Record<string, unknown> & { name: string; type: string }, user.id)
       if (selectedBusiness) {
         setBusinessProducts(prev => [newProduct, ...prev])
-      } else {
-        setProducts(prev => [newProduct, ...prev])
       }
+      dashData.refresh()
       setShowProductForm(false)
       setShowServiceForm(false)
       setShowIndumentariaForm(false)
@@ -177,9 +147,8 @@ export default function PostsDashboard() {
       const newProduct = await createProduct(restaurantData, user.id)
       if (selectedBusiness) {
         setBusinessProducts(prev => [newProduct, ...prev])
-      } else {
-        setProducts(prev => [newProduct, ...prev])
       }
+      dashData.refresh()
       setShowRestaurantForm(false)
     } catch (error) {
       console.error('Failed to create restaurant:', error)
@@ -190,7 +159,7 @@ export default function PostsDashboard() {
     if (!user) return
     try {
       const newBiz = await createBusiness(user.id, data)
-      setBusinesses(prev => [newBiz, ...prev])
+      dashData.refresh()
       setSelectedBusinessId(newBiz.id)
       setShowBusinessForm(false)
     } catch (error) {

@@ -294,6 +294,11 @@ export interface Script {
   duration?: string
   platform?: string
   variation_number: number
+  // Edit tracking
+  edit_source?: string
+  edit_label?: string
+  message_id?: string
+  script_index?: number
   created_at: string
   updated_at: string
   // Joined data

@@ -1,25 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage, Language } from '../contexts/LanguageContext'
-import { getProfile } from '../services/database'
+import { getProfile, markOnboardingComplete } from '../services/database'
 import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight } from 'lucide-react'
+import OnboardingWizard from '../components/OnboardingWizard'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, HelpCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useUsageLimits } from '../hooks/useUsageLimits'
+import type { OnboardingStep } from '../hooks/useOnboarding'
 
-interface Subscription {
-  plan: 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
-  status: string
-  current_period_end?: string
-  trial_ends_at?: string
-}
-
-interface Usage {
-  scripts_generated: number
-  images_generated: number
-  descriptions_generated: number
-}
+type PlanKey = 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
 
 const PLAN_DETAILS = {
   free: { name: 'Free', price: 0, scripts: 10, descriptions: 10, images: 1, color: 'gray', paymentLink: null },
@@ -60,47 +52,46 @@ export default function Settings() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [subscription, setSubscription] = useState<Subscription | null>(null)
-  const [usage, setUsage] = useState<Usage | null>(null)
-  const [bonusImages, setBonusImages] = useState(0)
+  const usageLimits = useUsageLimits()
+  const currentPlan = (usageLimits.plan || 'free') as PlanKey
+
+  // Replay wizard state
+  const WIZARD_STEPS: OnboardingStep[] = ['welcome', 'dashboard', 'scripts', 'posts', 'descriptions', 'settings', 'feedback', 'complete']
+  const [showWizard, setShowWizard] = useState(false)
+  const [wizardStepIndex, setWizardStepIndex] = useState(0)
+
+  const handleReplayWizard = async () => {
+    if (user) {
+      // Reset the flag in DB so it can re-trigger naturally too
+      try {
+        await supabase.from('profiles').update({ has_completed_onboarding: false }).eq('id', user.id)
+      } catch {}
+    }
+    setWizardStepIndex(0)
+    setShowWizard(true)
+  }
+
+  const wizardNextStep = () => {
+    if (wizardStepIndex >= WIZARD_STEPS.length - 1) {
+      setShowWizard(false)
+      setWizardStepIndex(0)
+      if (user) markOnboardingComplete(user.id).catch(() => {})
+    } else {
+      setWizardStepIndex(prev => prev + 1)
+    }
+  }
+  const wizardPrevStep = () => { if (wizardStepIndex > 0) setWizardStepIndex(prev => prev - 1) }
+  const wizardSkipAll = () => {
+    setShowWizard(false)
+    setWizardStepIndex(0)
+    if (user) markOnboardingComplete(user.id).catch(() => {})
+  }
 
   useEffect(() => {
     async function loadData() {
       if (!user) return
-      
-      // Load profile
       const profileData = await getProfile(user.id)
       setProfile(profileData)
-      setBonusImages((profileData as any)?.bonus_images || 0)
-      
-      // Load subscription
-      const { data: subData } = await supabase
-        .from('subscriptions')
-        .select('plan, status, current_period_end, trial_ends_at')
-        .eq('user_id', user.id)
-        .in('status', ['active', 'trialing'])
-        .single()
-      
-      if (subData) {
-        setSubscription(subData as Subscription)
-      } else {
-        setSubscription({ plan: 'free', status: 'active' })
-      }
-      
-      // Load current month usage
-      const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
-      const { data: usageData } = await supabase
-        .from('usage')
-        .select('scripts_generated, images_generated, descriptions_generated')
-        .eq('user_id', user.id)
-        .eq('period_start', currentMonth)
-        .single()
-      
-      if (usageData) {
-        setUsage(usageData as Usage)
-      } else {
-        setUsage({ scripts_generated: 0, images_generated: 0, descriptions_generated: 0 })
-      }
     }
     loadData()
   }, [user])
@@ -268,20 +259,20 @@ export default function Settings() {
               <CreditCard className="w-5 h-5 text-primary-500" />
               {language === 'es' ? 'Plan y Facturación' : 'Plan & Billing'}
             </h2>
-            {subscription && (
+            {!usageLimits.loading && (
               <span className={`px-3 py-1 text-sm font-medium rounded-full ${
-                subscription.plan === 'free' ? 'bg-dark-300 text-gray-700' :
-                subscription.plan === 'starter' ? 'bg-blue-900/20 text-blue-700' :
-                subscription.plan === 'pro' ? 'bg-purple-900/20 text-purple-700' :
+                currentPlan === 'free' ? 'bg-dark-300 text-gray-700' :
+                currentPlan === 'starter' ? 'bg-blue-900/20 text-blue-700' :
+                currentPlan === 'pro' ? 'bg-purple-900/20 text-purple-700' :
                 'bg-amber-900/20 text-amber-400'
               }`}>
-                {PLAN_DETAILS[subscription.plan].name}
+                {PLAN_DETAILS[currentPlan].name}
               </span>
             )}
           </div>
 
           {/* Current Usage */}
-          {usage && subscription && (
+          {!usageLimits.loading && (
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="p-4 bg-dark-50 rounded-xl">
                 <div className="flex items-center gap-2 mb-2">
@@ -291,9 +282,9 @@ export default function Settings() {
                   </span>
                 </div>
                 <div className="text-xl font-bold text-dark-900">
-                  {usage.scripts_generated}
+                  {usageLimits.scriptsUsed}
                   <span className="text-sm font-normal text-dark-400">
-                    / {PLAN_DETAILS[subscription.plan].scripts === -1 ? '∞' : PLAN_DETAILS[subscription.plan].scripts}
+                    / {usageLimits.scriptsLimit === -1 ? '∞' : usageLimits.scriptsLimit}
                   </span>
                 </div>
               </div>
@@ -305,9 +296,9 @@ export default function Settings() {
                   </span>
                 </div>
                 <div className="text-xl font-bold text-dark-900">
-                  {usage.descriptions_generated}
+                  {usageLimits.descriptionsUsed}
                   <span className="text-sm font-normal text-dark-400">
-                    / {PLAN_DETAILS[subscription.plan].descriptions === -1 ? '∞' : PLAN_DETAILS[subscription.plan].descriptions}
+                    / {usageLimits.descriptionsLimit === -1 ? '∞' : usageLimits.descriptionsLimit}
                   </span>
                 </div>
               </div>
@@ -319,9 +310,9 @@ export default function Settings() {
                   </span>
                 </div>
                 <div className="text-xl font-bold text-dark-900">
-                  {usage.images_generated}
+                  {usageLimits.imagesUsed}
                   <span className="text-sm font-normal text-dark-400">
-                    / {PLAN_DETAILS[subscription.plan].images === -1 ? '∞' : PLAN_DETAILS[subscription.plan].images}
+                    / {usageLimits.imagesLimit === -1 ? '∞' : usageLimits.imagesLimit}
                   </span>
                 </div>
               </div>
@@ -334,7 +325,7 @@ export default function Settings() {
               <div 
                 key={plan}
                 className={`p-4 rounded-xl border-2 transition-all ${
-                  subscription?.plan === plan 
+                  currentPlan === plan 
                     ? 'border-primary-500 bg-primary-900/20' 
                     : 'border-dark-200 hover:border-dark-300'
                 }`}
@@ -343,7 +334,7 @@ export default function Settings() {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-dark-900">{PLAN_DETAILS[plan].name}</span>
-                      {subscription?.plan === plan && (
+                      {currentPlan === plan && (
                         <span className="px-2 py-0.5 text-xs bg-primary-500 text-white rounded-full">
                           {language === 'es' ? 'Actual' : 'Current'}
                         </span>
@@ -360,9 +351,9 @@ export default function Settings() {
                     <p className="text-xs text-dark-400">/ {language === 'es' ? 'mes' : 'month'}</p>
                   </div>
                 </div>
-                {subscription?.plan !== plan && PLAN_DETAILS[plan].paymentLink && (() => {
+                {currentPlan !== plan && PLAN_DETAILS[plan].paymentLink && (() => {
                   const rank: Record<string, number> = { free: 0, starter: 1, pro: 2, meta_advanze: 2, enterprise: 3 }
-                  return (rank[subscription?.plan || 'free'] || 0) < (rank[plan] || 0)
+                  return (rank[currentPlan] || 0) < (rank[plan] || 0)
                 })() && (
                   <button 
                     className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
@@ -419,7 +410,7 @@ export default function Settings() {
           </p>
 
           {/* Image Boost — only for pro plan users */}
-          {(subscription?.plan === 'pro' || subscription?.plan === 'meta_advanze') && (
+          {(currentPlan === 'pro' || currentPlan === 'meta_advanze') && (
             <div className="mt-4 p-4 rounded-xl border-2 border-dashed border-primary-300 bg-primary-900/20">
               <div className="flex items-center justify-between">
                 <div>
@@ -434,11 +425,11 @@ export default function Settings() {
                       ? '+100 diseños extra (pago único, no se reinician)' 
                       : '+100 extra designs (one-time, no reset)'}
                   </p>
-                  {bonusImages > 0 && (
+                  {usageLimits.bonusImages > 0 && (
                     <p className="text-xs text-primary-600 mt-1 font-medium">
                       {language === 'es' 
-                        ? `${bonusImages} diseños bonus disponibles` 
-                        : `${bonusImages} bonus designs available`}
+                        ? `${usageLimits.bonusImages} diseños bonus disponibles` 
+                        : `${usageLimits.bonusImages} bonus designs available`}
                     </p>
                   )}
                 </div>
@@ -559,7 +550,40 @@ export default function Settings() {
             )}
           </div>
         </div>
+
+        {/* Replay Setup Wizard */}
+        <div className="card mt-6">
+          <button
+            onClick={handleReplayWizard}
+            className="flex items-center justify-between w-full py-3 hover:bg-dark-50 -mx-4 px-4 rounded-lg transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary-900/20">
+                <HelpCircle className="w-5 h-5 text-primary-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-dark-900">
+                  {language === 'es' ? 'Tutorial de la Plataforma' : 'Platform Tutorial'}
+                </p>
+                <p className="text-sm text-dark-500">
+                  {language === 'es' ? 'Revisa el tour guiado de todas las funciones' : 'Replay the guided tour of all features'}
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-dark-400" />
+          </button>
+        </div>
       </div>
+      {showWizard && (
+        <OnboardingWizard
+          currentStep={WIZARD_STEPS[wizardStepIndex]}
+          stepIndex={wizardStepIndex}
+          totalSteps={WIZARD_STEPS.length}
+          nextStep={wizardNextStep}
+          prevStep={wizardPrevStep}
+          skipAll={wizardSkipAll}
+        />
+      )}
     </Layout>
   )
 }

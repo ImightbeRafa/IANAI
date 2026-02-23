@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useUsageLimits } from '../hooks/useUsageLimits'
+import { useOnboarding } from '../hooks/useOnboarding'
 import { getDashboardStats } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
+import OnboardingWizard from '../components/OnboardingWizard'
 import {
   FileText,
   ImageIcon,
@@ -33,6 +35,7 @@ export default function OverviewDashboard() {
   const { user } = useAuth()
   const { language } = useLanguage()
   const usage = useUsageLimits()
+  const onboarding = useOnboarding()
 
   const [stats, setStats] = useState<ActivityStat>({
     totalProducts: 0,
@@ -86,7 +89,7 @@ export default function OverviewDashboard() {
     }
 
     loadOverview()
-  }, [user, language])
+  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const t = {
     es: {
@@ -379,6 +382,16 @@ export default function OverviewDashboard() {
           </div>
         </div>
       </div>
+      {onboarding.showWizard && (
+        <OnboardingWizard
+          currentStep={onboarding.currentStep}
+          stepIndex={onboarding.stepIndex}
+          totalSteps={onboarding.totalSteps}
+          nextStep={onboarding.nextStep}
+          prevStep={onboarding.prevStep}
+          skipAll={onboarding.skipAll}
+        />
+      )}
     </Layout>
   )
 }

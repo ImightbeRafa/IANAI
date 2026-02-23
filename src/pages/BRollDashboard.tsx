@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProfile, getUnassignedProducts, getBusinessProducts, getBusinesses, getSharedProducts, acceptPendingInvites } from '../services/database'
+import { getBusinessProducts } from '../services/database'
+import { useDashboardData } from '../hooks/useDashboardData'
 import type { Product, Business } from '../types'
 import Layout from '../components/Layout'
 import { 
@@ -20,14 +21,16 @@ import {
 } from 'lucide-react'
 
 export default function BRollDashboard() {
-  const { user } = useAuth()
+  const { } = useAuth()
   const { language } = useLanguage()
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(true)
-  const [businesses, setBusinesses] = useState<Business[]>([])
+  const dashData = useDashboardData()
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
   const [businessProducts, setBusinessProducts] = useState<Product[]>([])
-  const [sharedProducts, setSharedProducts] = useState<(Product & { shared_role: string; shared_by_email: string })[]>([])
+
+  const businesses = dashData.businesses
+  const products = dashData.products
+  const sharedProducts = dashData.sharedProducts
+  const loading = dashData.loading
 
   const labels = {
     es: {
@@ -71,34 +74,6 @@ export default function BRollDashboard() {
   }
 
   const t = labels[language]
-
-  useEffect(() => {
-    async function loadData() {
-      if (!user) return
-      try {
-        const profileData = await getProfile(user.id)
-
-        if (profileData?.email) {
-          await acceptPendingInvites(user.id, profileData.email)
-        }
-
-        const shared = await getSharedProducts(user.id)
-        setSharedProducts(shared)
-
-        const [bizData, productsData] = await Promise.all([
-          getBusinesses(user.id),
-          getUnassignedProducts(user.id)
-        ])
-        setBusinesses(bizData)
-        setProducts(productsData)
-      } catch (error) {
-        console.error('Failed to load data:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadData()
-  }, [user])
 
   useEffect(() => {
     async function loadBusinessProducts() {

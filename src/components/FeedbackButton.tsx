@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useLocation } from 'react-router-dom'
 import { createFeedbackTicket, uploadFeedbackScreenshot } from '../services/database'
+import { supabase } from '../lib/supabase'
 import {
   MessageSquarePlus,
   X,
@@ -23,6 +24,8 @@ type Category = 'bug' | 'feature' | 'question' | 'other'
 type Priority = 'low' | 'medium' | 'high' | 'urgent'
 
 const consoleErrors: string[] = []
+const networkErrors: { url: string; status: number; statusText: string; timestamp: string }[] = []
+const breadcrumbs: { type: 'click' | 'navigation' | 'input'; target: string; timestamp: string }[] = []
 
 // Capture console errors for context
 const originalConsoleError = console.error
@@ -36,6 +39,53 @@ window.addEventListener('error', (e) => {
   consoleErrors.push(`${e.message} at ${e.filename}:${e.lineno}`)
   if (consoleErrors.length > 20) consoleErrors.shift()
 })
+
+// Capture unhandled promise rejections
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason instanceof Error ? `${e.reason.message}\n${e.reason.stack}` : String(e.reason)
+  consoleErrors.push(`[UnhandledRejection] ${reason}`.slice(0, 500))
+  if (consoleErrors.length > 20) consoleErrors.shift()
+})
+
+// Capture failed network requests (4xx/5xx)
+const originalFetch = window.fetch
+window.fetch = async (...args: Parameters<typeof fetch>) => {
+  const response = await originalFetch(...args)
+  if (!response.ok) {
+    const url = typeof args[0] === 'string' ? args[0] : args[0] instanceof Request ? args[0].url : String(args[0])
+    networkErrors.push({
+      url: url.slice(0, 200),
+      status: response.status,
+      statusText: response.statusText,
+      timestamp: new Date().toISOString(),
+    })
+    if (networkErrors.length > 15) networkErrors.shift()
+  }
+  return response
+}
+
+// Capture user action breadcrumbs
+const pushBreadcrumb = (type: 'click' | 'navigation' | 'input', target: string) => {
+  breadcrumbs.push({ type, target: target.slice(0, 120), timestamp: new Date().toISOString() })
+  if (breadcrumbs.length > 20) breadcrumbs.shift()
+}
+
+document.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement
+  const tag = el.tagName?.toLowerCase() || ''
+  const text = el.textContent?.trim().slice(0, 50) || ''
+  const id = el.id ? `#${el.id}` : ''
+  const cls = el.className && typeof el.className === 'string' ? `.${el.className.split(' ')[0]}` : ''
+  pushBreadcrumb('click', `${tag}${id}${cls}${text ? ` "${text}"` : ''}`)
+}, { capture: true })
+
+let _lastPath = window.location.pathname
+void setInterval(() => {
+  if (window.location.pathname !== _lastPath) {
+    pushBreadcrumb('navigation', window.location.pathname)
+    _lastPath = window.location.pathname
+  }
+}, 500)
 
 export default function FeedbackButton() {
   const { user } = useAuth()
@@ -168,6 +218,35 @@ export default function FeedbackButton() {
         screenshotUrl = await uploadFeedbackScreenshot(user.id, screenshotBlob)
       }
 
+      // Fetch plan & product context at submit time
+      let userPlan = 'free'
+      let productId: string | undefined
+      let productName: string | undefined
+
+      try {
+        const { data: subData } = await supabase
+          .from('subscriptions')
+          .select('plan')
+          .eq('user_id', user.id)
+          .in('status', ['active', 'trialing'])
+          .maybeSingle()
+        if (subData?.plan) userPlan = subData.plan
+      } catch { /* ignore */ }
+
+      // Extract product ID from URL if on a product page
+      const pathMatch = location.pathname.match(/\/products\/([^/]+)/)
+      if (pathMatch) {
+        productId = pathMatch[1]
+        try {
+          const { data: prodData } = await supabase
+            .from('products')
+            .select('name')
+            .eq('id', productId)
+            .maybeSingle()
+          if (prodData?.name) productName = prodData.name
+        } catch { /* ignore */ }
+      }
+
       await createFeedbackTicket({
         user_id: user.id,
         user_email: user.email || undefined,
@@ -180,6 +259,11 @@ export default function FeedbackButton() {
         screen_size: `${window.innerWidth}x${window.innerHeight}`,
         console_errors: consoleErrors.slice(-10),
         screenshot_url: screenshotUrl,
+        network_errors: networkErrors.slice(-10),
+        breadcrumbs: breadcrumbs.slice(-15),
+        product_id: productId,
+        product_name: productName,
+        user_plan: userPlan,
       })
 
       setSubmitted(true)
@@ -208,6 +292,7 @@ export default function FeedbackButton() {
       {/* Floating button */}
       <button
         onClick={() => setOpen(true)}
+        data-onboarding="feedback"
         className="fixed bottom-6 right-6 z-40 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group"
         title={t.title}
       >

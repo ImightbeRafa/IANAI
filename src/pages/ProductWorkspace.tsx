@@ -12,6 +12,7 @@ import {
   updateChatSession,
   updateProduct,
   saveScript,
+  createScriptVersion,
   getContextDocuments,
   createContextDocument,
   deleteContextDocument
@@ -122,7 +123,8 @@ export default function ProductWorkspace() {
           setActiveSalesChannel(productData.business.sales_channels[0])
         }
 
-        const sessionsData = await getChatSessions(productId)
+        const allSessions = await getChatSessions(productId)
+        const sessionsData = allSessions.filter(s => !s.title?.startsWith('__desc__'))
         setSessions(sessionsData)
 
         if (sessionId) {
@@ -706,7 +708,11 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleSaveScript = async (content: string, title?: string): Promise<string | null> => {
+  const handleSaveScript = async (
+    content: string,
+    title?: string,
+    opts?: { edit_source?: string; message_id?: string; script_index?: number }
+  ): Promise<string | null> => {
     if (!currentSession || !product || savingScript) return null
     setSavingScript(true)
     try {
@@ -714,7 +720,9 @@ export default function ProductWorkspace() {
         currentSession.id,
         product.id,
         title || `Script - ${new Date().toLocaleDateString()}`,
-        content
+        content,
+        undefined,
+        opts
       )
       return script.id
     } catch (error) {
@@ -725,11 +733,43 @@ export default function ProductWorkspace() {
     }
   }
 
-  const handleSaveIndividualScript = async (content: string, title: string): Promise<string | null> => {
-    return handleSaveScript(content, title)
+  const handleSaveIndividualScript = async (
+    content: string,
+    title: string,
+    opts?: { edit_source?: string; message_id?: string; script_index?: number }
+  ): Promise<string | null> => {
+    return handleSaveScript(content, title, opts)
   }
 
-  const handleEditScript = async (originalContent: string, instruction: string): Promise<string> => {
+  const handleSaveVersion = async (
+    parentId: string,
+    content: string,
+    editSource: string,
+    editLabel?: string
+  ): Promise<string | null> => {
+    if (!currentSession || !product) return null
+    try {
+      const version = await createScriptVersion(
+        parentId,
+        currentSession.id,
+        product.id,
+        `Script`,
+        content,
+        editSource,
+        editLabel
+      )
+      return version.id
+    } catch (error) {
+      console.error('Failed to save script version:', error)
+      return null
+    }
+  }
+
+  const handleEditScript = async (
+    originalContent: string,
+    instruction: string,
+    editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
+  ): Promise<string> => {
     let bizCtx: Record<string, unknown> | undefined
     let prodCtx: Record<string, unknown> | undefined
     if (product) {
@@ -737,7 +777,7 @@ export default function ProductWorkspace() {
       bizCtx = ctxs.bizCtx as Record<string, unknown> | undefined
       prodCtx = ctxs.prodCtx as Record<string, unknown> | undefined
     }
-    return editScript(originalContent, instruction, language, bizCtx, prodCtx)
+    return editScript(originalContent, instruction, language, bizCtx, prodCtx, editType)
   }
 
   const exportAsText = () => {
@@ -1364,8 +1404,13 @@ export default function ProductWorkspace() {
                             language={language}
                             onSave={handleSaveIndividualScript}
                             onEdit={handleEditScript}
+                            onSaveVersion={handleSaveVersion}
                             savingScript={savingScript}
                             productType={product?.type}
+                            productId={productId}
+                            sessionId={currentSession?.id}
+                            messageId={message.id}
+                            scriptIndex={script.index}
                           />
                         ))}
                         {/* Prompt toggle for script messages */}

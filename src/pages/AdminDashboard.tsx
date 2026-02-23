@@ -162,6 +162,7 @@ export default function AdminDashboard() {
   const [hasMoreLogs, setHasMoreLogs] = useState(true)
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
   const [userStatsSearch, setUserStatsSearch] = useState('')
+  const [ticketStats, setTicketStats] = useState<{ open: number; urgent: number; in_progress: number; total: number }>({ open: 0, urgent: 0, in_progress: 0, total: 0 })
 
   const labels = {
     es: {
@@ -199,6 +200,10 @@ export default function AdminDashboard() {
       pdf_extract: 'Extracción PDF',
       url_fetch: 'Lectura de URLs',
       voice_transcription: 'Transcripción de Voz',
+      script_edit: 'Edición de Guión',
+      script_enhance: 'Mejora de Guión',
+      script_hook: 'Cambio de Gancho',
+      script_consciousness: 'Nivel de Conciencia',
       noData: 'No hay datos de uso aún',
       user: 'Usuario',
       time: 'Hora',
@@ -241,6 +246,10 @@ export default function AdminDashboard() {
       pdf_extract: 'PDF Extraction',
       url_fetch: 'URL Fetching',
       voice_transcription: 'Voice Transcription',
+      script_edit: 'Script Edit',
+      script_enhance: 'Script Enhance',
+      script_hook: 'Hook Change',
+      script_consciousness: 'Consciousness Level',
       noData: 'No usage data yet',
       user: 'User',
       time: 'Time',
@@ -364,6 +373,21 @@ export default function AdminDashboard() {
         }
       })
       setReferralSignups(enrichedSignups)
+
+      // Fetch ticket summary stats
+      try {
+        const { data: ticketData } = await supabase
+          .from('feedback_tickets')
+          .select('status, priority')
+        if (ticketData) {
+          setTicketStats({
+            total: ticketData.length,
+            open: ticketData.filter(t => t.status === 'open').length,
+            urgent: ticketData.filter(t => t.priority === 'urgent' && t.status !== 'closed' && t.status !== 'resolved').length,
+            in_progress: ticketData.filter(t => t.status === 'in_progress').length,
+          })
+        }
+      } catch { /* ticket stats are non-critical */ }
 
     } catch (err) {
       console.error('Failed to fetch admin data:', err)
@@ -571,6 +595,51 @@ export default function AdminDashboard() {
                 <p className="text-3xl font-bold text-dark-900">{successRate}%</p>
               </div>
             </div>
+
+            {/* Ticket Summary */}
+            {ticketStats.total > 0 && (
+              <div className="mb-8">
+                <Link
+                  to="/admin/tickets"
+                  className="bg-dark-100 rounded-xl p-5 border border-dark-100 flex items-center justify-between hover:border-primary-500/30 transition-colors block"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary-900/20 rounded-lg">
+                      <MessageSquarePlus className="w-5 h-5 text-primary-500" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-dark-900">
+                        {language === 'es' ? 'Tickets de Feedback' : 'Feedback Tickets'}
+                      </p>
+                      <p className="text-xs text-dark-500">{ticketStats.total} total</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    {ticketStats.urgent > 0 && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-900/20">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                        <span className="text-xs font-bold text-red-400">{ticketStats.urgent}</span>
+                        <span className="text-[10px] text-red-400/70">{language === 'es' ? 'urgentes' : 'urgent'}</span>
+                      </div>
+                    )}
+                    {ticketStats.open > 0 && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-900/20">
+                        <Clock className="w-3.5 h-3.5 text-green-400" />
+                        <span className="text-xs font-bold text-green-400">{ticketStats.open}</span>
+                        <span className="text-[10px] text-green-400/70">{language === 'es' ? 'abiertos' : 'open'}</span>
+                      </div>
+                    )}
+                    {ticketStats.in_progress > 0 && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-900/20">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-xs font-bold text-amber-400">{ticketStats.in_progress}</span>
+                        <span className="text-[10px] text-amber-400/70">{language === 'es' ? 'en progreso' : 'in progress'}</span>
+                      </div>
+                    )}
+                  </div>
+                </Link>
+              </div>
+            )}
 
             {/* Referral Tracking Section */}
             {campaigns.length > 0 && (
@@ -794,6 +863,10 @@ export default function AdminDashboard() {
                         {feature === 'pdf_extract' && <FileUp className="w-5 h-5 text-orange-500" />}
                         {feature === 'url_fetch' && <Link2 className="w-5 h-5 text-teal-500" />}
                         {feature === 'voice_transcription' && <Mic className="w-5 h-5 text-rose-500" />}
+                        {feature === 'script_edit' && <Pencil className="w-5 h-5 text-sky-500" />}
+                        {feature === 'script_enhance' && <Wand2 className="w-5 h-5 text-amber-600" />}
+                        {feature === 'script_hook' && <FileText className="w-5 h-5 text-blue-400" />}
+                        {feature === 'script_consciousness' && <Sparkles className="w-5 h-5 text-violet-400" />}
                         <span className="font-medium text-dark-900">
                           {t[feature as keyof typeof t] || feature}
                         </span>
