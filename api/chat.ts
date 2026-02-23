@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
+import { getMemoryInjection } from './lib/memory-helpers.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -1908,32 +1909,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Build style memory prompt from AI memory tables (gated by experimental toggle)
+    // Build style memory prompt from hybrid AI memory system
     const productId = req.body.productId as string | undefined
     const aiMemoryEnabled = req.body.aiMemoryEnabled !== false
     let styleMemoryPrompt = ''
-    if (memorySupabase && productId && aiMemoryEnabled) {
+    if (aiMemoryEnabled) {
       try {
-        const [globalRes, productRes] = await Promise.all([
-          memorySupabase.from('user_ai_memory').select('style_summary').eq('user_id', user.id).single(),
-          memorySupabase.from('product_ai_memory').select('style_summary').eq('product_id', productId).eq('user_id', user.id).single()
-        ])
-        const globalSummary = globalRes.data?.style_summary
-        const productSummary = productRes.data?.style_summary
-        if (globalSummary || productSummary) {
-          const isEs = language === 'es'
-          const header = isEs
-            ? '\n\n===================================================================\nMEMORIA DE ESTILO — PREFERENCIAS DEL USUARIO (APRENDIDO)\n===================================================================\nEl siguiente perfil de estilo fue extraído del comportamiento real del usuario. APLICA estas preferencias manteniendo las reglas estructurales del sistema.'
-            : '\n\n===================================================================\nSTYLE MEMORY — USER PREFERENCES (LEARNED)\n===================================================================\nThe following style profile was extracted from the user\'s actual behavior. APPLY these preferences while maintaining the system\'s structural rules.'
-          const parts = [header]
-          if (globalSummary) {
-            parts.push(`\n${isEs ? 'ESTILO GLOBAL' : 'GLOBAL STYLE'}:\n${globalSummary}`)
-          }
-          if (productSummary) {
-            parts.push(`\n${isEs ? 'ESTILO PARA ESTE PRODUCTO' : 'STYLE FOR THIS PRODUCT'}:\n${productSummary}`)
-          }
-          parts.push('\n===================================================================')
-          styleMemoryPrompt = parts.join('')
+        styleMemoryPrompt = await getMemoryInjection(
+          user.id,
+          productId || null,
+          language as 'es' | 'en'
+        )
+        if (styleMemoryPrompt) {
+          styleMemoryPrompt = '\n\n' + styleMemoryPrompt
         }
       } catch (e) {
         console.warn('Failed to load style memory:', e)

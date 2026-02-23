@@ -5,6 +5,9 @@
     },
     "api/analyze-style.ts": {
       "maxDuration": 60
+    },
+    "api/reflect-memory.ts": {
+      "maxDuration": 30
     }
   },
   "rewrites": [

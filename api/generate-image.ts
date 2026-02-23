@@ -6,6 +6,7 @@ import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
+import { getMemoryInjection } from './lib/memory-helpers.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -819,26 +820,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         ? 'REGLA DE PRODUCTO (NO NEGOCIABLE): Se adjuntan fotos del PRODUCTO REAL del usuario. El producto DEBE verse EXACTAMENTE como en las fotos de referencia. NO inventes ni reimagines el producto. Usa las referencias como fuente de verdad.\n\n'
         : ''
 
-      // Load visual style memory when no explicit palette is chosen
+      // Load structured visual style memory from hybrid AI memory system
       let visualMemoryPrefix = ''
-      if (imgMemSupabase && !imageParams.colorPaletteId && !(imageParams.customColors && (imageParams.customColors as string[]).length > 0)) {
-        try {
-          const { data: globalMem } = await imgMemSupabase
-            .from('user_ai_memory')
-            .select('style_summary, signals')
-            .eq('user_id', user.id)
-            .single()
-          if (globalMem?.style_summary) {
-            const visualLines = globalMem.style_summary
-              .split('\n')
-              .filter((l: string) => /visual|color|palette|style|layout|design/i.test(l))
-              .join(' ')
-            if (visualLines.trim()) {
-              visualMemoryPrefix = `PREFERENCIAS VISUALES DEL USUARIO (aprendidas): ${visualLines.trim()}\n\n`
-            }
-          }
-        } catch { /* ignore */ }
-      }
+      try {
+        const visualMemory = await getMemoryInjection(
+          user.id,
+          imageParams.productId as string || null,
+          (postLanguage as 'es' | 'en') || 'es',
+          { types: ['visual_style', 'preference', 'anti_pattern'], limit: 10 }
+        )
+        if (visualMemory) {
+          visualMemoryPrefix = visualMemory + '\n\n'
+        }
+      } catch { /* ignore */ }
 
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
       if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {

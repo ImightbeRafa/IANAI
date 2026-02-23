@@ -121,6 +121,7 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
   'gemini-2.5-flash': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
+  'grok-4-1-fast-reasoning': { name: 'Grok 4.1 Fast (Memory)', color: 'bg-violet-500' },
 }
 
 // Cost per 1M tokens or per image/video (for reference display)
@@ -142,6 +143,7 @@ const MODEL_PRICING: Record<string, string> = {
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
   'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
+  'grok-4-1-fast-reasoning': '$2/1M in, $10/1M out',
 }
 
 export default function AdminDashboard() {
@@ -207,6 +209,7 @@ export default function AdminDashboard() {
       script_hook: 'Cambio de Gancho',
       script_consciousness: 'Nivel de Conciencia',
       style_analysis: 'Análisis de Estilo (Custom Post)',
+      memory_reflection: 'Reflexión de Memoria',
       noData: 'No hay datos de uso aún',
       user: 'Usuario',
       time: 'Hora',
@@ -254,6 +257,7 @@ export default function AdminDashboard() {
       script_hook: 'Hook Change',
       script_consciousness: 'Consciousness Level',
       style_analysis: 'Style Analysis (Custom Post)',
+      memory_reflection: 'Memory Reflection',
       noData: 'No usage data yet',
       user: 'User',
       time: 'Time',

@@ -591,3 +591,30 @@ export interface ProductAiMemory {
   updated_at: string
 }
 
+// =============================================
+// Hybrid AI Memory (typed, categorized)
+// =============================================
+export interface AiMemory {
+  id: string
+  user_id: string
+  product_id: string | null
+  memory_type: 'preference' | 'anti_pattern' | 'rule' | 'example' | 'visual_style' | 'fact'
+  category: string | null
+  content: string
+  metadata: Record<string, unknown>
+  confidence: number
+  source: string | null
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AiMemoryStats {
+  id: string
+  user_id: string
+  product_id: string | null
+  total_lifetime_signals: number
+  signals_since_last_reflection: number
+  last_reflection_at: string | null
+}
+

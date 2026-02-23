@@ -354,6 +354,7 @@ export default function PostWorkspace() {
         postStyle: postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
         presetId: postStyle === 'venta-directa' || isCustomType ? undefined : postStyle,
         customPostTypeId: isCustomType ? postStyle.replace('custom-', '') : undefined,
+        productId,
         aspectRatio,
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,

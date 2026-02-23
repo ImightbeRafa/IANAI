@@ -53,6 +53,7 @@ export type FeatureType =
   | 'prompt_condense'  // Prompt condensing for video APIs
   | 'voice_transcription' // Voice-to-text transcription
   | 'style_analysis'      // Custom post type style analysis
+  | 'memory_reflection'   // AI memory synthesis/reflection
 
 interface UsageLogParams {
   userId?: string

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
+import { getMemoryInjection } from './lib/memory-helpers.js'
 
 const XAI_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -180,7 +181,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       script,
       productContext,
       productPhotosDescription,
-      duration = 15
+      duration = 15,
+      productId
     } = req.body
 
     if (!script || typeof script !== 'string' || script.trim().length === 0) {
@@ -199,12 +201,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `Contexto del producto:\n${productContext}`
         : ''
 
+    // Load style memory for video generation context
+    let memoryContext = ''
+    try {
+      memoryContext = await getMemoryInjection(
+        user.id,
+        productId || null,
+        'es',
+        { types: ['preference', 'anti_pattern', 'visual_style', 'rule'], limit: 8 }
+      )
+    } catch { /* ignore */ }
+
     const moduleBInput = `Guión ganador FINAL (NO modificar el texto, solo traducir a tomas cinematográficas):
 
 "${script.trim()}"
 
 Duración total del video: ${duration} segundos.
-Divide el guión en segmentos que cubran los ${duration} segundos completos.`
+Divide el guión en segmentos que cubran los ${duration} segundos completos.${memoryContext ? `\n\n${memoryContext}` : ''}`
 
     console.log('Modules A+B: Running in parallel...')
 

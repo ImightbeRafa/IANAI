@@ -21,10 +21,11 @@ import {
   getProductAiMemory,
   updateUserAiMemorySummary,
   updateProductAiMemorySummary,
-  resetProductAiMemory
+  resetProductAiMemory,
+  getAiMemories
 } from '../services/database'
 import { sendMessageToGrok, previewPrompt, editScript, DEFAULT_SCRIPT_SETTINGS, buildApiBusinessContext, buildApiProductContext } from '../services/grokApi'
-import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel, UserAiMemory, ProductAiMemory } from '../types'
+import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel, UserAiMemory, ProductAiMemory, AiMemory } from '../types'
 import { getSuccessCases } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
@@ -117,8 +118,12 @@ export default function ProductWorkspace() {
   const [showSynthesisPreview, setShowSynthesisPreview] = useState(false)
   const [aiMemoryEnabled, setAiMemoryEnabled] = useState(() => {
     const stored = localStorage.getItem('ai_memory_enabled')
-    return stored !== null ? stored === 'true' : false
+    return stored !== null ? stored === 'true' : true
   })
+  const [recentMemories, setRecentMemories] = useState<AiMemory[]>([])
+  const [showTeachModal, setShowTeachModal] = useState(false)
+  const [teachInput, setTeachInput] = useState('')
+  const [teachingSaving, setTeachingSaving] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const handleSendRef = useRef<(directMessage?: string) => Promise<void>>(null as any)
@@ -184,12 +189,14 @@ export default function ProductWorkspace() {
   const refreshMemory = async () => {
     if (!productId || !user) return
     try {
-      const [gMem, pMem] = await Promise.all([
+      const [gMem, pMem, typedMems] = await Promise.all([
         getUserAiMemory(user.id),
-        getProductAiMemory(productId, user.id)
+        getProductAiMemory(productId, user.id),
+        getAiMemories(user.id, productId, { limit: 5 })
       ])
       setGlobalMemory(gMem)
       setProductMemory(pMem)
+      setRecentMemories(typedMems)
     } catch (e) {
       console.warn('Failed to load AI memory:', e)
     }
@@ -205,6 +212,33 @@ export default function ProductWorkspace() {
     window.addEventListener('ai-signal-recorded', handler)
     return () => window.removeEventListener('ai-signal-recorded', handler)
   }, [productId, user])
+
+  // Listen for reflection completion — refresh memories + show toast
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.productId === productId) {
+        refreshMemory()
+      }
+    }
+    window.addEventListener('ai-memory-reflected', handler)
+    return () => window.removeEventListener('ai-memory-reflected', handler)
+  }, [productId, user])
+
+  // Teach Me handler
+  const handleTeachMe = async () => {
+    if (!teachInput.trim() || !product || teachingSaving) return
+    setTeachingSaving(true)
+    try {
+      await recordAiSignal(product.id, 'user_explicit', { instruction: teachInput.trim() })
+      setTeachInput('')
+      setShowTeachModal(false)
+    } catch (e) {
+      console.warn('Teach me failed:', e)
+    } finally {
+      setTeachingSaving(false)
+    }
+  }
 
   const handleSaveGlobalMemory = async () => {
     if (!user) return
@@ -1730,8 +1764,43 @@ export default function ProductWorkspace() {
                     </div>
                   )}
 
+                  {/* Typed Memories (from hybrid system) */}
+                  {recentMemories.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1 mb-1">
+                        <Sparkles className="w-3 h-3 text-violet-400" />
+                        <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                          {language === 'es' ? 'Memorias Aprendidas' : 'Learned Memories'} ({recentMemories.length})
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        {recentMemories.map((mem) => {
+                          const typeIcon = mem.memory_type === 'anti_pattern' ? '🚫'
+                            : mem.memory_type === 'rule' ? '📏'
+                            : mem.memory_type === 'example' ? '✨'
+                            : mem.memory_type === 'visual_style' ? '🎨'
+                            : mem.memory_type === 'fact' ? '📌'
+                            : '💡'
+                          const bgClass = mem.memory_type === 'anti_pattern' ? 'bg-red-900/10 text-red-400/70' : 'bg-dark-200/40 text-dark-400'
+                          return (
+                            <p key={mem.id} className={`text-[10px] ${bgClass} rounded px-2 py-1 truncate`} title={mem.content}>
+                              {typeIcon} {mem.content.substring(0, 100)}{mem.content.length > 100 ? '…' : ''}
+                            </p>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Actions */}
                   <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowTeachModal(true)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-violet-600 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
+                    >
+                      <Brain className="w-3 h-3" />
+                      {language === 'es' ? 'Enseñar' : 'Teach Me'}
+                    </button>
                     <button
                       onClick={handleRelearn}
                       disabled={synthesisingMemory}
@@ -2546,6 +2615,60 @@ export default function ProductWorkspace() {
           </div>
         )}
       </div>
+      {/* Teach Me Modal */}
+      {showTeachModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-dark-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Brain className="w-5 h-5 text-violet-500" />
+                <h3 className="text-sm font-semibold text-dark-800">
+                  {language === 'es' ? 'Enseñar a la IA' : 'Teach the AI'}
+                </h3>
+              </div>
+              <button onClick={() => setShowTeachModal(false)} className="p-1 rounded-lg hover:bg-dark-50 text-dark-400 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-dark-500">
+                {language === 'es'
+                  ? 'Escribe una instrucción directa para la IA. Ejemplo: "Nunca uses preguntas retóricas como gancho" o "Mi tono es agresivo y directo, sin rodeos".'
+                  : 'Write a direct instruction for the AI. Example: "Never use rhetorical questions as hooks" or "My tone is aggressive and direct, no fluff".'}
+              </p>
+              <textarea
+                value={teachInput}
+                onChange={(e) => setTeachInput(e.target.value)}
+                className="w-full px-3 py-2.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-700 resize-none focus:outline-none focus:ring-2 focus:ring-violet-500 min-h-[100px] placeholder-dark-400"
+                placeholder={language === 'es' ? 'Escribe tu instrucción aquí...' : 'Write your instruction here...'}
+                autoFocus
+              />
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowTeachModal(false)}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-dark-500 bg-dark-50 hover:bg-dark-100 rounded-lg transition-colors"
+                >
+                  {language === 'es' ? 'Cancelar' : 'Cancel'}
+                </button>
+                <button
+                  onClick={handleTeachMe}
+                  disabled={!teachInput.trim() || teachingSaving}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 hover:bg-violet-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {teachingSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Brain className="w-4 h-4" />
+                  )}
+                  {teachingSaving
+                    ? (language === 'es' ? 'Guardando...' : 'Saving...')
+                    : (language === 'es' ? 'Enseñar' : 'Teach')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }

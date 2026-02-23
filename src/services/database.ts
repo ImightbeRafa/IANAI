@@ -19,6 +19,8 @@ import type {
   SuccessCaseFormData,
   UserAiMemory,
   ProductAiMemory,
+  AiMemory,
+  AiMemoryStats,
   CustomPostType,
   CustomPostTypeFormData
 } from '../types'
@@ -1367,10 +1369,69 @@ export async function recordAiSignal(
     } else {
       // Notify listeners (e.g. AI Memory panel) to refresh immediately
       window.dispatchEvent(new CustomEvent('ai-signal-recorded', { detail: { productId, signalType } }))
+
+      // Increment ai_memory_stats + check if reflection should trigger
+      try {
+        await supabase.rpc('increment_ai_memory_stats', {
+          p_user_id: user.id,
+          p_product_id: productId
+        })
+
+        // High-value signals always trigger reflection
+        const HIGH_VALUE_SIGNALS = ['script_rated', 'edit_manual', 'user_explicit']
+        const isHighValue = HIGH_VALUE_SIGNALS.includes(signalType) &&
+          (signalType !== 'script_rated' || signalData.rating === 'bad')
+
+        if (isHighValue) {
+          triggerReflection(productId, true)
+        } else {
+          // Progressive threshold check
+          const { data: stats } = await supabase
+            .from('ai_memory_stats')
+            .select('total_lifetime_signals, signals_since_last_reflection')
+            .eq('user_id', user.id)
+            .eq('product_id', productId)
+            .maybeSingle()
+
+          if (stats) {
+            const threshold = stats.total_lifetime_signals <= 20 ? 4 : 8
+            if (stats.signals_since_last_reflection >= threshold) {
+              triggerReflection(productId, false)
+            }
+          }
+        }
+      } catch (statsErr) {
+        console.warn('AI memory stats update failed:', statsErr)
+      }
     }
   } catch (err) {
     console.warn('AI signal recording error:', err)
   }
+}
+
+function triggerReflection(productId: string, force: boolean): void {
+  const apiUrl = import.meta.env.PROD ? '/api/reflect-memory' : 'http://localhost:3000/api/reflect-memory'
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!session?.access_token) return
+    // Fire-and-forget — don't await, don't block
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ productId, force, source: 'frontend' })
+    }).then(async (res) => {
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.skipped) {
+          window.dispatchEvent(new CustomEvent('ai-memory-reflected', {
+            detail: { productId, upserted: data.upserted, deleted: data.deleted, styleDirective: data.style_directive }
+          }))
+        }
+      }
+    }).catch(() => { /* fire-and-forget */ })
+  })
 }
 
 export async function getUserAiMemory(userId: string): Promise<UserAiMemory | null> {
@@ -1442,6 +1503,80 @@ export async function resetUserAiMemory(userId: string): Promise<void> {
     .eq('user_id', userId)
 
   if (error) throw error
+}
+
+// =============================================
+// HYBRID AI MEMORIES (typed, categorized)
+// =============================================
+export async function getAiMemories(
+  userId: string,
+  productId?: string | null,
+  options?: { types?: string[]; categories?: string[]; limit?: number }
+): Promise<AiMemory[]> {
+  let query = supabase
+    .from('ai_memories')
+    .select('*')
+    .or(`and(user_id.eq.${userId},product_id.is.null),and(user_id.eq.${userId}${productId ? `,product_id.eq.${productId}` : ''})`)
+
+  if (options?.types && options.types.length > 0) {
+    query = query.in('memory_type', options.types)
+  }
+  if (options?.categories && options.categories.length > 0) {
+    query = query.in('category', options.categories)
+  }
+
+  const { data, error } = await query
+    .order('confidence', { ascending: false })
+    .order('updated_at', { ascending: false })
+    .limit(options?.limit || 15)
+
+  if (error) throw error
+  return data || []
+}
+
+export async function deleteAiMemory(memoryId: string): Promise<void> {
+  const { error } = await supabase
+    .from('ai_memories')
+    .delete()
+    .eq('id', memoryId)
+
+  if (error) throw error
+}
+
+export async function getAiMemoryStats(
+  userId: string,
+  productId: string
+): Promise<AiMemoryStats | null> {
+  const { data, error } = await supabase
+    .from('ai_memory_stats')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('product_id', productId)
+    .maybeSingle()
+
+  if (error) return null
+  return data
+}
+
+export async function upsertAiMemoryStats(
+  userId: string,
+  productId: string
+): Promise<void> {
+  const { error } = await supabase.rpc('increment_ai_memory_stats', {
+    p_user_id: userId,
+    p_product_id: productId
+  })
+  if (error) {
+    // Fallback: direct upsert if RPC doesn't exist yet
+    await supabase
+      .from('ai_memory_stats')
+      .upsert({
+        user_id: userId,
+        product_id: productId,
+        total_lifetime_signals: 1,
+        signals_since_last_reflection: 1
+      }, { onConflict: 'user_id,product_id' })
+  }
 }
 
 // =============================================
