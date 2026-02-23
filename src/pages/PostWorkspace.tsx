@@ -771,9 +771,9 @@ export default function PostWorkspace() {
       </div>
       <div className="h-full flex flex-col lg:flex-row lg:overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-dark-100 border-b lg:border-b-0 lg:border-r border-dark-100 flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">
+        <div className="w-full lg:w-[420px] bg-dark-100/90 backdrop-blur-lg border-b lg:border-b-0 lg:border-r border-white/[0.04] flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">
           {/* Header */}
-          <div className="px-5 py-4 border-b border-dark-100">
+          <div className="px-5 py-4 border-b border-white/[0.06]">
             <Link
               to="/posts"
               className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-3"
@@ -1073,7 +1073,7 @@ export default function PostWorkspace() {
                     onChange={(e) => setScriptText(e.target.value)}
                     placeholder={t.scriptPlaceholder}
                     rows={6}
-                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
                   />
                 </>
               )}
@@ -1207,7 +1207,7 @@ export default function PostWorkspace() {
             <button
               onClick={handleGenerate}
               disabled={generating || !hasScript}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary-600 text-white font-medium text-sm hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl btn-glow font-medium text-sm"
             >
               {generating ? (
                 <>
@@ -1244,12 +1244,12 @@ export default function PostWorkspace() {
                   const isEditing = editing && editingPostId === post.id
                   const isProcessing = isEnhancing || isEditing
                   return (
-                  <div key={post.id} className={`bg-dark-100 rounded-xl shadow-sm overflow-hidden group transition-all duration-700 ${isProcessing ? 'proc-border border-2' : 'border border-dark-100'}`}>
+                  <div key={post.id} className={`bg-dark-100 rounded-xl shadow-sm overflow-hidden group transition-all duration-700 animate-entrance stagger-${Math.min((index % 6) + 1, 6)} ${isProcessing ? 'proc-border border-2' : 'border border-dark-100 card-hover'}`}>
                     <div className="relative overflow-hidden">
                       <img
                         src={post.imageUrl}
                         alt={`Post ${index + 1}`}
-                        className={`w-full h-auto transition-all duration-700 ${isProcessing ? 'blur-[6px] scale-[1.03] brightness-[0.6]' : ''}`}
+                        className={`w-full h-auto transition-all duration-700 ${isProcessing ? 'blur-[8px] scale-[1.04] brightness-[0.5]' : ''}`}
                       />
                       {/* Magic Wand — enhance button */}
                       <button
@@ -1409,10 +1409,15 @@ export default function PostWorkspace() {
               </>
             ) : (
               <div className="flex flex-col items-center justify-center h-80 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-dark-100 flex items-center justify-center mb-4">
-                  <ImageIcon className="w-8 h-8 text-dark-300" />
+                <div className="empty-ambient-bg rounded-3xl px-10 py-12 animate-entrance">
+                  <div className="relative w-16 h-16 mx-auto mb-5">
+                    <div className="w-16 h-16 rounded-2xl bg-primary-900/30 flex items-center justify-center border border-primary-800/30">
+                      <ImageIcon className="w-8 h-8 text-primary-400 gen-placeholder-icon" />
+                    </div>
+                    <div className="absolute -inset-2 rounded-3xl border border-primary-700/20 gen-placeholder-ring" />
+                  </div>
+                  <p className="text-sm text-dark-300 font-medium">{t.noImages}</p>
                 </div>
-                <p className="text-sm text-dark-400">{t.noImages}</p>
               </div>
             )}
           </div>

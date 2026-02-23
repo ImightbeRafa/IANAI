@@ -196,8 +196,21 @@ export default function DescriptionsWorkspace() {
   if (pageLoading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center h-full">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <div className="flex flex-col h-[calc(100vh-64px)]">
+          <div className="glass-panel px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="skeleton w-6 h-6 rounded-md" />
+              <div><div className="skeleton w-32 h-4 mb-1" /><div className="skeleton w-20 h-3" /></div>
+            </div>
+            <div className="skeleton w-24 h-7 rounded-lg" />
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="space-y-4 w-full max-w-md px-6">
+              <div className="skeleton w-full h-20 rounded-xl" />
+              <div className="skeleton w-3/4 h-16 rounded-xl" />
+              <div className="skeleton w-full h-24 rounded-xl" />
+            </div>
+          </div>
         </div>
       </Layout>
     )
@@ -217,7 +230,7 @@ export default function DescriptionsWorkspace() {
     <Layout>
       <div className="flex flex-col h-[calc(100vh-64px)]" style={{ height: 'calc(100dvh - 64px)' }}>
         {/* Header */}
-        <div className="bg-dark-100 border-b border-dark-100 px-6 py-3 flex items-center justify-between">
+        <div className="glass-panel px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
               to="/descriptions"
@@ -299,17 +312,20 @@ export default function DescriptionsWorkspace() {
         <div className="flex-1 overflow-y-auto px-6 py-8 space-y-5">
           {messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-center max-w-sm">
-                <div className="w-14 h-14 rounded-2xl bg-primary-900/20 flex items-center justify-center mx-auto mb-5">
-                  <Sparkles className="w-7 h-7 text-primary-500" />
+              <div className="text-center max-w-sm empty-ambient-bg rounded-3xl px-10 py-12 animate-entrance">
+                <div className="relative w-16 h-16 mx-auto mb-5">
+                  <div className="w-16 h-16 rounded-2xl bg-primary-900/30 flex items-center justify-center border border-primary-800/30">
+                    <Sparkles className="w-8 h-8 text-primary-400 gen-placeholder-icon" />
+                  </div>
+                  <div className="absolute -inset-2 rounded-3xl border border-primary-700/20 gen-placeholder-ring" />
                 </div>
-                <p className="text-dark-400 text-sm mb-4">{t.startPrompt}</p>
-                <p className="text-dark-300 text-xs mb-8">{t.pasteScript}</p>
+                <p className="text-dark-300 text-sm font-medium mb-3">{t.startPrompt}</p>
+                <p className="text-dark-500 text-xs mb-8 leading-relaxed">{t.pasteScript}</p>
                 {selectedScript && (
                   <button
                     onClick={handleGenerateDescriptions}
                     disabled={loading}
-                    className="inline-flex items-center gap-2.5 text-base font-medium px-8 py-3 rounded-xl bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
+                    className="inline-flex items-center gap-2.5 text-base font-medium px-8 py-3 rounded-xl btn-glow"
                   >
                     {loading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -322,16 +338,16 @@ export default function DescriptionsWorkspace() {
               </div>
             </div>
           ) : (
-            messages.map((message) => (
+            messages.map((message, msgIdx) => (
               <div
                 key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex animate-entrance ${message.role === 'user' ? 'justify-end' : 'justify-start'} stagger-${Math.min(msgIdx % 6 + 1, 6)}`}
               >
                 <div
                   className={`max-w-3xl px-5 py-4 ${
                     message.role === 'user'
-                      ? 'bg-primary-600 text-white rounded-2xl rounded-br-md'
-                      : 'bg-dark-100 border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm'
+                      ? 'bg-gradient-to-br from-primary-600 to-primary-500 text-white rounded-2xl rounded-br-md shadow-lg shadow-primary-900/20'
+                      : 'bg-dark-100 border border-dark-200/60 text-dark-800 rounded-2xl rounded-bl-md shadow-sm chat-ai-border'
                   }`}
                 >
                   <div className="whitespace-pre-wrap text-sm leading-relaxed">
@@ -370,7 +386,7 @@ export default function DescriptionsWorkspace() {
         </div>
 
         {/* Input */}
-        <div className="bg-dark-100 border-t border-dark-100 px-6 py-3">
+        <div className="glass-panel border-t border-white/[0.04] px-6 py-3">
           <div className="max-w-4xl mx-auto">
             <div className="flex items-end gap-2">
               <div className="flex-1 relative">
@@ -379,7 +395,7 @@ export default function DescriptionsWorkspace() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={t.placeholder}
-                  className="w-full px-4 py-3 text-sm bg-dark-200 border border-dark-300 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-400 focus:bg-dark-200 transition-colors"
+                  className="w-full px-4 py-3 text-sm bg-dark-200 border border-dark-300 rounded-xl resize-none min-h-[48px] max-h-32 focus:outline-none focus:ring-1 focus:ring-dark-400 focus:bg-dark-200 input-glow transition-colors"
                   rows={1}
                   disabled={loading}
                 />

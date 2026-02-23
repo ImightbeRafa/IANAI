@@ -494,16 +494,52 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
 
   const isProcessing = editing || enhancing
 
+  const accentForSource = (source: EditSource): string => {
+    switch (source) {
+      case 'enhance': return 'border-l-amber-500'
+      case 'hook': return 'border-l-blue-500'
+      case 'consciousness': return 'border-l-violet-500'
+      case 'manual': return 'border-l-primary-500'
+      default: return 'border-l-primary-500'
+    }
+  }
+
+  const formatContent = (text: string) => {
+    return text.replace(/\[(GANCHO[S]?|HOOK[S]?|DESARROLLO|DEVELOPMENT|CTA|CIERRE|CLOSE)(?:\s*[AB])?\]/gi, (match) => `{{CHIP:${match}}}`)
+  }
+
+  const renderContent = (text: string) => {
+    const parts = formatContent(text).split(/(\{\{CHIP:[^}]+\}\})/g)
+    return parts.map((part, i) => {
+      const chipMatch = part.match(/\{\{CHIP:(.+)\}\}/)
+      if (chipMatch) {
+        return <span key={i} className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-dark-200/80 text-primary-400 mr-1">{chipMatch[1]}</span>
+      }
+      return <span key={i}>{part}</span>
+    })
+  }
+
   return (
-    <div className="bg-dark-100 border border-dark-200 rounded-xl transition-shadow hover:shadow-sm">
+    <div className="bg-dark-100 border border-dark-200 rounded-xl card-hover animate-entrance group/card">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-200 bg-dark-200/40 rounded-t-xl">
         <span className="text-xs font-semibold text-dark-600 tracking-wide">
           {script.title}
         </span>
-        <span className="text-[10px] text-dark-300 font-mono">
-          #{script.index}
-        </span>
+        <div className="flex items-center gap-2">
+          {editHistory.length > 0 && (
+            <div className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-dark-400" title={t.original} />
+              {editHistory.map((entry, i) => {
+                const colors: Record<string, string> = { enhance: 'bg-amber-500', hook: 'bg-blue-500', consciousness: 'bg-violet-500', manual: 'bg-primary-500' }
+                return <span key={i} className={`w-2 h-2 rounded-full ${colors[entry.source || 'manual'] || 'bg-primary-500'}`} title={entry.label || t.edited} />
+              })}
+            </div>
+          )}
+          <span className="text-[10px] text-dark-300 font-mono">
+            #{script.index}
+          </span>
+        </div>
       </div>
 
       {/* Edit instruction input */}
@@ -516,7 +552,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
               onChange={(e) => setEditInstruction(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEdit() } }}
               placeholder={t.editPlaceholder}
-              className="flex-1 px-3 py-2 text-sm bg-dark-50 border border-dark-200 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-primary-500 min-h-[40px] max-h-20"
+              className="flex-1 px-3 py-2 text-sm bg-dark-50 border border-dark-200 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-primary-500 min-h-[40px] max-h-20 input-glow"
               rows={1}
               disabled={editing}
             />
@@ -551,49 +587,53 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
       )}
 
       {/* Original version — always visible and editable */}
-      <div className="px-4 py-3">
-        <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-dark-400 mb-2">
-          {t.original}
+      <div className="border-l-[3px] border-l-dark-300 mx-2 my-1 rounded-sm">
+        <div className="px-3 py-3">
+          <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-dark-400 mb-2">
+            {t.original}
+          </div>
+          <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
+            {renderContent(script.content)}
+          </div>
         </div>
-        <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
-          {script.content}
+        <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 border-t border-dark-200/50 opacity-60 group-hover/card:opacity-100 transition-opacity duration-200">
+          <CopyBtn versionIndex={-1} />
+          <SaveBtn versionIndex={-1} />
+          <PostBtn versionIndex={-1} />
+          <VersionActions versionIndex={-1} />
         </div>
-      </div>
-      <div className="flex items-center flex-wrap gap-1.5 px-4 py-2 border-t border-dark-200">
-        <CopyBtn versionIndex={-1} />
-        <SaveBtn versionIndex={-1} />
-        <PostBtn versionIndex={-1} />
-        <VersionActions versionIndex={-1} />
       </div>
 
       {/* Edit history entries */}
       {editHistory.map((entry, index) => {
         const badge = getBadgeForSource(entry.source, entry.label)
         return (
-          <div key={index} className="border-t-2 border-dark-200">
-            <div className="px-4 pt-3 pb-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${badge.color}`}>
-                  {badge.icon}
-                  {badge.label}
+          <div key={index} className="border-t border-dark-200/60 animate-entrance">
+            <div className={`border-l-[3px] ${accentForSource(entry.source)} mx-2 my-1 rounded-sm`}>
+              <div className="px-3 pt-3 pb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider ${badge.color}`}>
+                    {badge.icon}
+                    {badge.label}
+                  </div>
+                  <button
+                    onClick={() => handleDiscardVersion(index)}
+                    className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors opacity-0 group-hover/card:opacity-100"
+                    title={t.discard}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleDiscardVersion(index)}
-                  className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
-                  title={t.discard}
-                >
-                  <X className="w-3 h-3" />
-                </button>
+                <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
+                  {renderContent(entry.content)}
+                </div>
               </div>
-              <div className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">
-                {entry.content}
+              <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 border-t border-dark-200/50 opacity-60 group-hover/card:opacity-100 transition-opacity duration-200">
+                <CopyBtn versionIndex={index} />
+                <SaveBtn versionIndex={index} />
+                <PostBtn versionIndex={index} />
+                <VersionActions versionIndex={index} />
               </div>
-            </div>
-            <div className="flex items-center flex-wrap gap-1.5 px-4 py-2 border-t border-dark-200">
-              <CopyBtn versionIndex={index} />
-              <SaveBtn versionIndex={index} />
-              <PostBtn versionIndex={index} />
-              <VersionActions versionIndex={index} />
             </div>
           </div>
         )

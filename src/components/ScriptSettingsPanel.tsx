@@ -246,7 +246,7 @@ export default function ScriptSettingsPanel({
         <button
           onClick={onGenerate}
           disabled={loading || (settings.generationMode === 'by_type' && totalByType === 0)}
-          className="w-full btn-primary py-3.5 flex items-center justify-center gap-2 mt-2 text-base font-medium"
+          className="w-full btn-glow py-3.5 rounded-xl flex items-center justify-center gap-2 mt-2 text-base font-medium"
         >
           <Sparkles className={`w-5 h-5 ${loading ? 'animate-pulse' : ''}`} />
           {t.generate}

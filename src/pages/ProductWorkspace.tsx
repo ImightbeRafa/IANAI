@@ -1128,7 +1128,7 @@ export default function ProductWorkspace() {
                 <Send className="w-3.5 h-3.5 text-primary-500" />
                 {language === 'es' ? 'Instrucciones' : 'Instructions'}
               </label>
-              <div className="bg-dark-50 border border-dark-200 rounded-2xl p-1.5 focus-within:border-dark-300 focus-within:ring-1 focus-within:ring-dark-300 transition-all">
+              <div className="bg-dark-50 border border-dark-200 rounded-2xl p-1.5 input-glow transition-all">
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -1184,7 +1184,7 @@ export default function ProductWorkspace() {
             <button
               onClick={handleGenerateScript}
               disabled={loading || (scriptSettings.generationMode === 'by_type' && Object.values(scriptSettings.scriptTypeConfig).reduce((s, n) => s + n, 0) === 0)}
-              className="w-full py-3.5 flex items-center justify-center gap-2 text-base font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow-md"
+              className="w-full py-3.5 flex items-center justify-center gap-2 text-base font-medium btn-glow rounded-xl"
             >
               <Sparkles className={`w-5 h-5 ${loading ? 'animate-pulse' : ''}`} />
               {language === 'es' ? 'Generar Guiones' : 'Generate Scripts'}
@@ -1279,7 +1279,7 @@ export default function ProductWorkspace() {
         {/* Main Chat Area */}
         <div className="flex-1 flex flex-col bg-dark-50/50">
           {/* Header */}
-          <div className="bg-dark-100 border-b border-dark-100 px-6 py-3 flex items-center justify-between">
+          <div className="glass-panel px-6 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
               <button
                 onClick={() => setShowMobileConfig(!showMobileConfig)}
@@ -1368,12 +1368,15 @@ export default function ProductWorkspace() {
           <div className="flex-1 overflow-y-auto px-6 py-8 space-y-5">
             {messages.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-center max-w-xs">
-                  <div className="w-14 h-14 rounded-2xl bg-primary-900/20 flex items-center justify-center mx-auto mb-4">
-                    <Sparkles className="w-7 h-7 text-primary-500" />
+                <div className="text-center max-w-sm empty-ambient-bg rounded-3xl px-10 py-12 animate-entrance">
+                  <div className="relative w-16 h-16 mx-auto mb-5">
+                    <div className="w-16 h-16 rounded-2xl bg-primary-900/30 flex items-center justify-center border border-primary-800/30">
+                      <Sparkles className="w-8 h-8 text-primary-400 gen-placeholder-icon" />
+                    </div>
+                    <div className="absolute -inset-2 rounded-3xl border border-primary-700/20 gen-placeholder-ring" />
                   </div>
-                  <p className="text-dark-500 text-sm mb-1">{t.startConversation}</p>
-                  <p className="text-dark-400 text-xs">
+                  <p className="text-dark-300 text-sm font-medium mb-2">{t.startConversation}</p>
+                  <p className="text-dark-500 text-xs leading-relaxed">
                     {language === 'es' ? 'Configura las opciones a la izquierda y presiona "Generar Guiones"' : 'Configure options on the left and press "Generate Scripts"'}
                   </p>
                 </div>
@@ -1388,7 +1391,7 @@ export default function ProductWorkspace() {
                   <div key={message.id}>
                     {message.role === 'user' ? (
                       <div className="flex justify-end">
-                        <div className="max-w-3xl px-5 py-4 bg-primary-600 text-white rounded-2xl rounded-br-md">
+                        <div className="max-w-3xl px-5 py-4 bg-gradient-to-br from-primary-600 to-primary-500 text-white rounded-2xl rounded-br-md shadow-lg shadow-primary-900/20">
                           <div className="whitespace-pre-wrap text-sm leading-relaxed">
                             {message.content}
                           </div>
@@ -1452,7 +1455,7 @@ export default function ProductWorkspace() {
                     ) : (
                       /* Non-script assistant message (conversational) */
                       <div className="flex justify-start">
-                        <div className="max-w-3xl px-5 py-4 bg-dark-100 border border-dark-100 text-dark-800 rounded-2xl rounded-bl-md shadow-sm">
+                        <div className="max-w-3xl px-5 py-4 bg-dark-100 border border-dark-200/60 text-dark-800 rounded-2xl rounded-bl-md shadow-sm chat-ai-border">
                           <div className="whitespace-pre-wrap text-sm leading-relaxed">
                             {message.content}
                           </div>
@@ -1510,7 +1513,7 @@ export default function ProductWorkspace() {
 
         {/* Right Sidebar - Business Info, Product Info & Context */}
         {showProductInfo && (
-          <div className="w-80 bg-dark-100 border-l border-dark-100 flex flex-col overflow-y-auto">
+          <div className="w-80 bg-dark-100/90 backdrop-blur-lg border-l border-white/[0.04] flex flex-col overflow-y-auto">
             {/* Business Info */}
             {product?.business && (
               <div className="p-4 border-b border-dark-100">

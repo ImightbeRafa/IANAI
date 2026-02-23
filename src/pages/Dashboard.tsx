@@ -307,7 +307,7 @@ export default function Dashboard() {
     return (
       <div
         key={product.id}
-        className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group relative"
+        className="block p-5 bg-dark-50 rounded-xl group relative card-hover"
       >
         <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100">
           <button
@@ -363,7 +363,7 @@ export default function Dashboard() {
   const renderBusinessCard = (business: Business) => (
     <div
       key={business.id}
-      className="relative p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group"
+      className="relative p-5 bg-dark-50 rounded-xl group card-hover"
     >
       <button
         onClick={(e) => {
@@ -458,15 +458,18 @@ export default function Dashboard() {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="card animate-pulse">
-                <div className="h-16 bg-dark-100 rounded"></div>
+              <div key={i} className="card">
+                <div className="flex items-center gap-4">
+                  <div className="skeleton w-12 h-12 rounded-xl" />
+                  <div><div className="skeleton w-16 h-6 mb-1.5" /><div className="skeleton w-20 h-4" /></div>
+                </div>
               </div>
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {statCards.map(({ label, value, icon: Icon, color }) => (
-              <div key={label} className="card">
+            {statCards.map(({ label, value, icon: Icon, color }, statIdx) => (
+              <div key={label} className={`card animate-entrance stagger-${statIdx + 1}`}>
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 ${color} rounded-xl flex items-center justify-center`}>
                     <Icon className="w-6 h-6 text-white" />
@@ -585,7 +588,7 @@ export default function Dashboard() {
               {loading ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {[...Array(3)].map((_, i) => (
-                    <div key={i} className="h-24 bg-dark-50 rounded-lg animate-pulse"></div>
+                    <div key={i} className="skeleton h-24 rounded-lg" />
                   ))}
                 </div>
               ) : businesses.length === 0 ? (
@@ -622,7 +625,7 @@ export default function Dashboard() {
             {sharedProducts.map(product => (
               <div
                 key={product.id}
-                className="block p-5 bg-dark-50 hover:bg-dark-100 rounded-xl transition-colors group relative"
+                className="block p-5 bg-dark-50 rounded-xl group relative card-hover"
               >
                 <div className="absolute top-3 right-3">
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
