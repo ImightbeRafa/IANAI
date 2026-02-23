@@ -46,14 +46,44 @@ Solicitud del usuario: `
 // =============================================
 type PostAspectRatio = '9:16' | '3:4'
 
-function buildPostPrompt(aspectRatio: PostAspectRatio): string {
+function buildPostPrompt(aspectRatio: PostAspectRatio, language: string = 'es', hasProductImages: boolean = false): string {
   const isVertical = aspectRatio === '9:16'
   const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
   const layoutTip = isVertical
     ? 'La composición es alta y estrecha: headline arriba, bullets en el medio, CTA abajo. La imagen de fondo ocupa todo el canvas.'
     : 'La composición es casi cuadrada: headline arriba, bullets compactos, CTA abajo. Aprovechá el ancho para un layout más editorial con la imagen de producto al lado o como fondo.'
 
-  return `ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
+  const langLabel = language === 'es' ? 'ESPAÑOL' : 'ENGLISH'
+
+  const langRule = `═══════════════════════════════════════════════
+REGLA #0 — IDIOMA Y TEXTO (NO NEGOCIABLE)
+═══════════════════════════════════════════════
+- El idioma de TODOS los textos visibles en la imagen (headline, bullets, CTA, badges, sellos) DEBE ser: ${langLabel}.
+- COPIA el texto del guión TAL CUAL está escrito — NO traduzcas, NO parafrasees, NO cambies el idioma.
+- Si el guión está en español, TODO el texto del post DEBE estar en español.
+- Si el guión está en inglés, TODO el texto del post DEBE estar en inglés.
+- PROHIBIDO mezclar idiomas. PROHIBIDO usar texto placeholder o lorem ipsum.
+- VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
+═══════════════════════════════════════════════
+
+`
+
+  const productRefRule = hasProductImages
+    ? `═══════════════════════════════════════════════
+REGLA #1 — IMÁGENES DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
+═══════════════════════════════════════════════
+Se adjuntan fotos del PRODUCTO REAL del usuario.
+- El producto en el post DEBE verse EXACTAMENTE como en las fotos de referencia.
+- USA las fotos de referencia como fuente de verdad para la forma, silueta, color, textura, ángulo y detalles reales del producto.
+- NO inventes, NO rediseñes, NO reimagines el producto. Usa la referencia fielmente.
+- Si necesitas mostrar el producto en acción, mantené su apariencia idéntica a la referencia.
+- La forma del producto NO se modifica bajo ninguna circunstancia: no stylize, no cartoon, no 3D fake.
+═══════════════════════════════════════════════
+
+`
+    : ''
+
+  return `${langRule}${productRefRule}ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
 
 CONTEXTO FIJO (NO PREGUNTAR NADA):
 En tu contexto ya recibiste un guión escrito con esta estructura:
@@ -149,13 +179,21 @@ TRATAMIENTO DE IMAGEN (70–80% del post) — PRODUCT-LED:
 - Overlay para texto: degradado suave, elegante, casi imperceptible (para legibilidad sin tapar el producto).
 PROHIBIDO: filtros fuertes, HDR exagerado, texturas baratas, collages.
 
-VISUAL (OBLIGATORIO: PRODUCTO/SERVICIO EN ACCIÓN, NO EN EXHIBICIÓN):
+${hasProductImages
+    ? `VISUAL (OBLIGATORIO: USAR LAS FOTOS DE PRODUCTO PROPORCIONADAS):
+Se te adjuntan fotos reales del producto. USÁLAS como base visual principal del post.
+- El producto DEBE aparecer en el post con su apariencia REAL (forma, color, textura, ángulo de las fotos de referencia).
+- Podés ubicar el producto en un contexto de uso o lifestyle, pero su forma DEBE ser fiel a la referencia.
+- NO generes un producto inventado. NO cambies su silueta, proporciones ni detalles.
+- Elegí el mejor ángulo/foto de las referencias para la composición.
+- El producto debe ocupar un lugar prominente en la composición (60–80% del área visual).`
+    : `VISUAL (OBLIGATORIO: PRODUCTO/SERVICIO EN ACCIÓN, NO EN EXHIBICIÓN):
 Como el guión no trae visuales, vos debés inferir la mejor escena que demuestre la función principal del guión.
 Elegí UNA escena y construí la imagen alrededor:
 - Si el guión habla de entrega/rutas/puerta: mostrar acción de entrega (mano recibiendo, caja/bolsa en puerta, timbre, etc.).
 - Si el guión habla de frescura/punto perfecto: mostrar acción de uso (cortar/abrir/preparar/servir/comer).
 - Si el guión habla de garantía/reposición: incluir un sello visual de garantía y una escena que refuerce "cero riesgo" (sin saturar).
-- Si el guión compara contra alternativa (supermercado): que la escena muestre claramente el beneficio opuesto (producto intacto, bien seleccionado, listo para usar).
+- Si el guión compara contra alternativa (supermercado): que la escena muestre claramente el beneficio opuesto (producto intacto, bien seleccionado, listo para usar).`}
 
 BULLETS CON MUCHA INFO — PERO QUE SE LEA "CARO" (NO REDUCIR PALABRAS):
 - Los bullets deben ser escaneables:
@@ -186,7 +224,7 @@ COMPOSICIÓN FINAL (RECOMENDADA):
 ENTREGABLE:
 Generá el arte final (UNA imagen) del post, cumpliendo TODO:
 - Headline + 3–5 bullets + CTA en un solo slide
-- Visual en acción inferida inteligentemente del guión
+- ${hasProductImages ? 'Visual basada en las fotos de producto proporcionadas (producto REAL, fiel a la referencia)' : 'Visual en acción inferida inteligentemente del guión'}
 - Márgenes generosos respetados estrictamente
 - Dirección de arte premium (Apple/IG/Spotify) con mucho aire y coherencia visual
 - Sin número de slide
@@ -707,6 +745,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     
     let enhancedPrompt: string
 
+    // Detect whether product reference images are provided
+    const hasProductImages = !!(imageParams.input_image)
+    const postLanguage: string = imageParams.language || 'es'
+
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
       // Determine aspect ratio from request (default 9:16 for backward compat)
@@ -738,17 +780,24 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
       }
 
+      // Language enforcement prefix for preset mode (presets lack built-in language rules)
+      const langLabel = postLanguage === 'es' ? 'ESPAÑOL' : 'ENGLISH'
+      const presetLangPrefix = `REGLA DE IDIOMA (NO NEGOCIABLE): TODOS los textos visibles en la imagen DEBEN estar en ${langLabel}. COPIA el texto del guión TAL CUAL — NO traduzcas, NO cambies el idioma. PROHIBIDO mezclar idiomas.\n\n`
+      const presetProductPrefix = hasProductImages
+        ? 'REGLA DE PRODUCTO (NO NEGOCIABLE): Se adjuntan fotos del PRODUCTO REAL del usuario. El producto DEBE verse EXACTAMENTE como en las fotos de referencia. NO inventes ni reimagines el producto. Usa las referencias como fuente de verdad.\n\n'
+        : ''
+
       if (postStyle === 'preset' && imageParams.presetId) {
-        // PRESET MODE: aspect ratio + color prefix + preset master prompt + user script
+        // PRESET MODE: lang + product ref + aspect ratio + color prefix + preset master prompt + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = aspectRatioPrefix + colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
@@ -769,7 +818,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       console.log('Submitting to Gemini Image API:', { 
         model: geminiModelId,
         prompt: enhancedPrompt.substring(0, 100) + '...',
-        hasInputImage: !!imageParams.input_image
+        hasInputImage: !!imageParams.input_image,
+        language: postLanguage,
+        hasProductImages
       })
 
       try {
@@ -780,19 +831,27 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
         const promptParts: PromptPart[] = [{ text: enhancedPrompt }]
 
-        // Add input image if provided (for image-to-image generation)
-        if (imageParams.input_image) {
-          // Extract base64 data from data URL if present
-          const base64Match = imageParams.input_image.match(/^data:([^;]+);base64,(.+)$/)
-          if (base64Match) {
-            promptParts.push({
-              inlineData: {
-                mimeType: base64Match[1],
-                data: base64Match[2]
-              }
-            })
+        // Add ALL product reference images (input_image, input_image_2, input_image_3, input_image_4)
+        const inputImageKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
+        const productImageParts: PromptPart[] = []
+        for (const key of inputImageKeys) {
+          const img = imageParams[key]
+          if (img && typeof img === 'string') {
+            const base64Match = img.match(/^data:([^;]+);base64,(.+)$/)
+            if (base64Match) {
+              productImageParts.push({
+                inlineData: {
+                  mimeType: base64Match[1],
+                  data: base64Match[2]
+                }
+              })
+            }
           }
         }
+        if (productImageParts.length > 0 && isPostMode) {
+          promptParts.push({ text: 'IMÁGENES DE REFERENCIA DEL PRODUCTO REAL (usa estas como fuente de verdad para la apariencia del producto):' })
+        }
+        promptParts.push(...productImageParts)
 
         // Determine aspect ratio from dimensions
         const geminiAspectRatio = getAspectRatio(

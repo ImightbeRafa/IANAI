@@ -350,6 +350,7 @@ export default function PostWorkspace() {
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,
         model: imageModel,
+        language,
         colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
         customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined
       }
