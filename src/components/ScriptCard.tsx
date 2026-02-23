@@ -54,7 +54,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
   const [consciousnessPickerVersion, setConsciousnessPickerVersion] = useState<number | null>(null)
   const consciousnessPickerRef = useRef<HTMLDivElement>(null)
 
-  const [rated, setRated] = useState<'good' | 'bad' | null>(null)
+  const [ratings, setRatings] = useState<Record<number, 'good' | 'bad'>>({})
 
   // Restore saved edit history on mount
   useEffect(() => {
@@ -438,30 +438,47 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
     )
   }
 
+  const fireRatingSignal = (vi: number, rating: 'good' | 'bad') => {
+    if (!productId) return
+    const content = getVersionContent(vi)
+    const lines = content.split('\n').filter(l => l.trim())
+    recordAiSignal(productId, 'script_rated', {
+      signal_key: `rated_${rating}`,
+      rating,
+      hook: lines[0] || '',
+      cta: lines[lines.length - 1] || '',
+      script: content.substring(0, 2000)
+    })
+  }
+
   const RateBtn = ({ versionIndex }: { versionIndex: number }) => {
     if (!productId) return null
+    const current = ratings[versionIndex] || null
+
     const handleRate = (rating: 'good' | 'bad') => {
-      if (rated) return
-      setRated(rating)
-      const content = getVersionContent(versionIndex)
-      const lines = content.split('\n').filter(l => l.trim())
-      recordAiSignal(productId!, 'script_rated', {
-        signal_key: `rated_${rating}`,
-        rating,
-        hook: lines[0] || '',
-        cta: lines[lines.length - 1] || '',
-        script: content.substring(0, 2000)
-      })
+      if (current === rating) {
+        // Un-rate: clicking same rating again removes it
+        setRatings(prev => {
+          const next = { ...prev }
+          delete next[versionIndex]
+          return next
+        })
+        return
+      }
+
+      // Set or change rating for this specific version only
+      fireRatingSignal(versionIndex, rating)
+      setRatings(prev => ({ ...prev, [versionIndex]: rating }))
     }
+
     return (
       <div className="inline-flex items-center gap-0.5">
         <button
           onClick={() => handleRate('good')}
-          disabled={rated !== null}
           className={`inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded-md transition-colors ${
-            rated === 'good'
+            current === 'good'
               ? 'bg-green-900/20 text-green-400'
-              : rated ? 'opacity-30 text-dark-400' : 'text-dark-400 hover:bg-green-900/20 hover:text-green-400'
+              : 'text-dark-400 hover:bg-green-900/20 hover:text-green-400'
           }`}
           title={language === 'es' ? 'Buen guión' : 'Good script'}
         >
@@ -469,11 +486,10 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
         </button>
         <button
           onClick={() => handleRate('bad')}
-          disabled={rated !== null}
           className={`inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded-md transition-colors ${
-            rated === 'bad'
+            current === 'bad'
               ? 'bg-red-900/20 text-red-400'
-              : rated ? 'opacity-30 text-dark-400' : 'text-dark-400 hover:bg-red-900/20 hover:text-red-400'
+              : 'text-dark-400 hover:bg-red-900/20 hover:text-red-400'
           }`}
           title={language === 'es' ? 'Mal guión' : 'Bad script'}
         >
