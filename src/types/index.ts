@@ -539,6 +539,7 @@ export interface UserAiMemory {
   sample_hooks: string[]
   sample_ctas: string[]
   edit_patterns: string[]
+  avoid_patterns: string[]
   signals_since_last_synthesis: number
   last_synthesized_at: string | null
   created_at: string
@@ -582,6 +583,8 @@ export interface ProductAiMemory {
   sample_ctas: string[]
   sample_scripts: string[]
   edit_instructions: string[]
+  avoid_patterns: string[]
+  edit_transformations: string[]
   signals_since_last_synthesis: number
   last_synthesized_at: string | null
   created_at: string

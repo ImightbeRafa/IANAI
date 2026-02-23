@@ -115,6 +115,10 @@ export default function ProductWorkspace() {
   const [savingMemory, setSavingMemory] = useState(false)
   const [synthesisingMemory, setSynthesisingMemory] = useState(false)
   const [showSynthesisPreview, setShowSynthesisPreview] = useState(false)
+  const [aiMemoryEnabled, setAiMemoryEnabled] = useState(() => {
+    const stored = localStorage.getItem('ai_memory_enabled')
+    return stored !== null ? stored === 'true' : false
+  })
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const handleSendRef = useRef<(directMessage?: string) => Promise<void>>(null as any)
@@ -207,7 +211,7 @@ export default function ProductWorkspace() {
     setSavingMemory(true)
     try {
       await updateUserAiMemorySummary(user.id, globalMemoryDraft)
-      setGlobalMemory(prev => prev ? { ...prev, style_summary: globalMemoryDraft } : { id: '', user_id: user.id, style_summary: globalMemoryDraft, signals: {}, sample_hooks: [], sample_ctas: [], edit_patterns: [], signals_since_last_synthesis: 0, last_synthesized_at: null, created_at: '', updated_at: '' })
+      setGlobalMemory(prev => prev ? { ...prev, style_summary: globalMemoryDraft } : { id: '', user_id: user.id, style_summary: globalMemoryDraft, signals: {}, sample_hooks: [], sample_ctas: [], edit_patterns: [], avoid_patterns: [], signals_since_last_synthesis: 0, last_synthesized_at: null, created_at: '', updated_at: '' })
       setEditingGlobalMemory(false)
     } catch (e) {
       console.error('Failed to save global memory:', e)
@@ -221,7 +225,7 @@ export default function ProductWorkspace() {
     setSavingMemory(true)
     try {
       await updateProductAiMemorySummary(productId, user.id, productMemoryDraft)
-      setProductMemory(prev => prev ? { ...prev, style_summary: productMemoryDraft } : { id: '', product_id: productId, user_id: user.id, style_summary: productMemoryDraft, signals: {}, sample_hooks: [], sample_ctas: [], sample_scripts: [], edit_instructions: [], signals_since_last_synthesis: 0, last_synthesized_at: null, created_at: '', updated_at: '' })
+      setProductMemory(prev => prev ? { ...prev, style_summary: productMemoryDraft } : { id: '', product_id: productId, user_id: user.id, style_summary: productMemoryDraft, signals: {}, sample_hooks: [], sample_ctas: [], sample_scripts: [], edit_instructions: [], avoid_patterns: [], edit_transformations: [], signals_since_last_synthesis: 0, last_synthesized_at: null, created_at: '', updated_at: '' })
       setEditingProductMemory(false)
     } catch (e) {
       console.error('Failed to save product memory:', e)
@@ -341,7 +345,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -787,7 +791,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -1400,16 +1404,34 @@ export default function ProductWorkspace() {
 
             {/* AI Memory Panel */}
             <div className="pt-2 border-t border-dark-200/60">
-              <button
-                onClick={() => setShowMemoryPanel(!showMemoryPanel)}
-                className="flex items-center justify-between w-full mb-2"
-              >
-                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase cursor-pointer">
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  onClick={() => setShowMemoryPanel(!showMemoryPanel)}
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
                   <Brain className="w-3.5 h-3.5 text-purple-500" />
-                  {language === 'es' ? 'Memoria IA' : 'AI Memory'}
-                </label>
-                <ChevronDown className={`w-3.5 h-3.5 text-dark-400 transition-transform ${showMemoryPanel ? '' : '-rotate-90'}`} />
-              </button>
+                  <span className="text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                    {language === 'es' ? 'Memoria IA' : 'AI Memory'}
+                  </span>
+                  <span className="text-[9px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                    Experimental
+                  </span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-dark-400 transition-transform ${showMemoryPanel ? '' : '-rotate-90'}`} />
+                </button>
+                <button
+                  onClick={() => {
+                    const next = !aiMemoryEnabled
+                    setAiMemoryEnabled(next)
+                    localStorage.setItem('ai_memory_enabled', String(next))
+                  }}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${aiMemoryEnabled ? 'bg-purple-600' : 'bg-dark-300'}`}
+                  title={aiMemoryEnabled
+                    ? (language === 'es' ? 'Memoria activa — click para desactivar' : 'Memory active — click to disable')
+                    : (language === 'es' ? 'Memoria inactiva — click para activar' : 'Memory inactive — click to enable')}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${aiMemoryEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+                </button>
+              </div>
 
               {showMemoryPanel && (
                 <div className="space-y-3">
@@ -1632,6 +1654,51 @@ export default function ProductWorkspace() {
                                 {inst}
                               </p>
                             ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Anti-patterns (things user rejects) */}
+                      {(productMemory?.avoid_patterns?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1">
+                            <X className="w-3 h-3 text-red-400" />
+                            <span className="text-[10px] font-semibold text-red-400/80 uppercase tracking-wide">
+                              {language === 'es' ? 'Anti-patrones' : 'Anti-patterns'} ({productMemory!.avoid_patterns.length})
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {productMemory!.avoid_patterns.map((ap, i) => (
+                              <p key={i} className="text-[10px] text-red-400/70 bg-red-900/10 rounded px-2 py-1 truncate" title={ap}>
+                                ❌ {ap.substring(0, 100)}{ap.length > 100 ? '…' : ''}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Edit transformations (before → after) */}
+                      {(productMemory?.edit_transformations?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1">
+                            <RefreshCw className="w-3 h-3 text-cyan-400" />
+                            <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                              {language === 'es' ? 'Correcciones' : 'Corrections'} ({productMemory!.edit_transformations.length})
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {productMemory!.edit_transformations.map((t, i) => {
+                              try {
+                                const parsed = JSON.parse(t)
+                                return (
+                                  <div key={i} className="text-[10px] bg-dark-200/40 rounded px-2 py-1">
+                                    <span className="text-red-400/70 line-through">{parsed.before?.substring(0, 60)}</span>
+                                    <span className="text-dark-400 mx-1">→</span>
+                                    <span className="text-green-400/70">{parsed.after?.substring(0, 60)}</span>
+                                  </div>
+                                )
+                              } catch { return null }
+                            })}
                           </div>
                         </div>
                       )}

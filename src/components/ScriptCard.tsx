@@ -186,10 +186,18 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
     setEditError(null)
     try {
       const source = getVersionContent(editingFromVersion)
+      const sourceLines = source.split('\n').filter(l => l.trim())
+      const beforeHook = sourceLines[0] || ''
       const result = await onEdit(source, editInstruction.trim(), 'script_edit')
+      const resultLines = result.split('\n').filter(l => l.trim())
+      const afterHook = resultLines[0] || ''
       setEditHistory(prev => [...prev, { content: result, source: 'manual', label: '' }])
       if (productId) {
-        recordAiSignal(productId, 'edit_manual', { instruction: editInstruction.trim() })
+        recordAiSignal(productId, 'edit_manual', {
+          instruction: editInstruction.trim(),
+          before_hook: beforeHook,
+          after_hook: afterHook !== beforeHook ? afterHook : undefined
+        })
       }
       setShowEditInput(false)
       setEditInstruction('')

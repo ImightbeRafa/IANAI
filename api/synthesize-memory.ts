@@ -9,35 +9,44 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
-const GLOBAL_SYNTHESIS_SYSTEM = `You are a copywriting style analyst. You will receive a user's saved scripts, editing patterns, and behavioral signals across all their products.
+const GLOBAL_SYNTHESIS_SYSTEM = `You are a copywriting style analyst. You will receive a user's saved scripts, editing patterns, behavioral signals, and ANTI-PATTERNS (things the user explicitly rejects) across all their products.
 
 Extract their GLOBAL WRITING STYLE as actionable instructions (~200 words max).
 
 Cover these areas:
 1. VOICE & TONE: How do they write? Aggressive/educational/casual/direct?
-2. HOOK RHYTHM: Short punchy hooks or context-rich openers?
+2. HOOK STYLE: What hook structures do they keep? Start hooks with declarations, NOT questions (unless proven otherwise).
 3. CTA PATTERNS: What call-to-action style do they prefer?
 4. VOCABULARY: Recurring power words, phrases, or patterns?
-5. EDIT TENDENCIES: What do they consistently change? What to avoid?
+5. WHAT TO AVOID: Based on anti-patterns and edit history, what should NEVER appear? Be explicit.
 6. VISUAL PREFERENCES: If post data is available, preferred styles/colors?
+
+CRITICAL: The ANTI-PATTERNS section shows things the user has explicitly removed or rejected. These are HARD RULES — the AI must NEVER reproduce these patterns.
+EDIT TRANSFORMATIONS show before→after changes — learn what the user corrects.
 
 Write as INSTRUCTIONS for another AI copywriter to follow.
 Do NOT list observations. Write directives.
 Keep it dense and actionable. No filler.`
 
-const PRODUCT_SYNTHESIS_SYSTEM = `You are a copywriting style analyst. You will receive saved scripts and behavioral signals for ONE SPECIFIC PRODUCT.
+const PRODUCT_SYNTHESIS_SYSTEM = `You are a copywriting style analyst. You will receive saved scripts, behavioral signals, ANTI-PATTERNS, and EDIT TRANSFORMATIONS for ONE SPECIFIC PRODUCT.
 
-Extract product-specific style instructions (~150 words max) that COMPLEMENT (not repeat) the user's global style.
+Extract product-specific style instructions (~200 words max) that COMPLEMENT (not repeat) the user's global style.
 
 Cover:
-1. WINNING HOOKS: Which hook types/structures work best for this product?
-2. STRUCTURE: Which script archetype gets saved/favorited?
+1. WINNING HOOKS: Which hook structures get saved? Provide 2-3 example hooks from their BEST (post-edit) versions.
+2. STRUCTURE: Which script archetype gets saved/favorited? (e.g. [GANCHO]-[DESARROLLO]-[CTA] with bullets)
 3. KEY PHRASES: Product-specific vocabulary or selling points the user keeps?
-4. WHAT DOESN'T WORK: Patterns edited out or never saved?
+4. HARD RULES — NEVER DO: Based on anti-patterns and rejected content, list explicit prohibitions.
+5. EDIT PATTERNS: Based on before→after transformations, what does the user consistently correct?
 
-Include 2-3 example hooks from their best scripts if available.
+CRITICAL: 
+- ANTI-PATTERNS are things the user EXPLICITLY removed or rated badly. These are absolute prohibitions.
+- EDIT TRANSFORMATIONS show the user's corrections (before→after). Learn the direction of improvement.
+- POSITIVE EXAMPLES are hooks/CTAs the user kept or rated well.
+- Always prefer the AFTER version from transformations over raw samples.
+
 Write as INSTRUCTIONS. Be specific to this product.
-Do NOT repeat generic writing advice. Focus on what's unique to this product.`
+Do NOT repeat generic writing advice. Focus on what's unique.`
 
 interface SynthesisRequest {
   userId?: string
@@ -111,13 +120,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const globalHooks = globalMem?.sample_hooks || []
     const globalCtas = globalMem?.sample_ctas || []
     const globalPatterns = globalMem?.edit_patterns || []
+    const globalAvoid = globalMem?.avoid_patterns || []
 
     const globalUserContent = [
-      globalHooks.length > 0 ? `SAMPLE HOOKS FROM SAVED SCRIPTS:\n${globalHooks.map((h: string, i: number) => `${i + 1}. ${h}`).join('\n')}` : '',
-      globalCtas.length > 0 ? `SAMPLE CTAs FROM SAVED SCRIPTS:\n${globalCtas.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}` : '',
-      globalPatterns.length > 0 ? `USER'S RECURRING INSTRUCTIONS/EDIT REQUESTS:\n${globalPatterns.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n')}` : '',
-      Object.keys(globalSignals).length > 0 ? `BEHAVIORAL SIGNALS:\n${JSON.stringify(globalSignals, null, 2)}` : '',
-      savedScripts.length > 0 ? `RECENT SAVED SCRIPTS (${savedScripts.length}):\n${savedScripts.slice(0, 5).map((s, i) => `--- Script ${i + 1} ${s.is_favorite ? '(FAVORITE)' : ''} ---\n${s.content.substring(0, 800)}`).join('\n\n')}` : ''
+      '=== POSITIVE EXAMPLES (what user keeps/likes) ===',
+      globalHooks.length > 0 ? `HOOKS THAT WORK:\n${globalHooks.map((h: string, i: number) => `${i + 1}. ${h}`).join('\n')}` : '',
+      globalCtas.length > 0 ? `CTAs THAT WORK:\n${globalCtas.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}` : '',
+      savedScripts.length > 0 ? `RECENT SAVED SCRIPTS (${savedScripts.length}):\n${savedScripts.slice(0, 5).map((s, i) => `--- Script ${i + 1} ${s.is_favorite ? '(FAVORITE)' : ''} ---\n${s.content.substring(0, 800)}`).join('\n\n')}` : '',
+      '\n=== ANTI-PATTERNS (what user REJECTS — NEVER reproduce) ===',
+      globalAvoid.length > 0 ? `REJECTED PATTERNS:\n${globalAvoid.map((a: string, i: number) => `${i + 1}. ❌ ${a}`).join('\n')}` : 'No explicit rejections yet.',
+      '\n=== USER INSTRUCTIONS ===',
+      globalPatterns.length > 0 ? `EXPLICIT EDIT INSTRUCTIONS:\n${globalPatterns.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n')}` : '',
+      Object.keys(globalSignals).length > 0 ? `BEHAVIORAL SIGNALS:\n${JSON.stringify(globalSignals, null, 2)}` : ''
     ].filter(Boolean).join('\n\n')
 
     if (globalUserContent.trim().length > 50) {
@@ -177,14 +191,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const productCtas = productMem?.sample_ctas || []
       const productScripts = productMem?.sample_scripts || []
       const productInstructions = productMem?.edit_instructions || []
+      const productAvoid = productMem?.avoid_patterns || []
+      const productTransforms = productMem?.edit_transformations || []
+
+      // Parse edit transformations into readable format
+      const transformsFormatted = productTransforms.map((t: string) => {
+        try {
+          const parsed = JSON.parse(t)
+          return `"${parsed.before}" → "${parsed.after}"`
+        } catch { return null }
+      }).filter(Boolean)
 
       const productUserContent = [
-        productHooks.length > 0 ? `SAMPLE HOOKS FOR THIS PRODUCT:\n${productHooks.map((h: string, i: number) => `${i + 1}. ${h}`).join('\n')}` : '',
-        productCtas.length > 0 ? `SAMPLE CTAs FOR THIS PRODUCT:\n${productCtas.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n')}` : '',
-        productInstructions.length > 0 ? `USER'S INSTRUCTIONS/REFINEMENTS FOR THIS PRODUCT:\n${productInstructions.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n')}` : '',
-        Object.keys(productSignals).length > 0 ? `BEHAVIORAL SIGNALS:\n${JSON.stringify(productSignals, null, 2)}` : '',
-        productScripts.length > 0 ? `SAVED SCRIPTS FOR THIS PRODUCT:\n${productScripts.map((s: string, i: number) => `--- Script ${i + 1} ---\n${s.substring(0, 800)}`).join('\n\n')}` : '',
-        savedScripts.length > 0 ? `ADDITIONAL SAVED SCRIPTS:\n${savedScripts.slice(0, 3).map((s, i) => `--- Script ${i + 1} ${s.is_favorite ? '(FAVORITE)' : ''} ---\n${s.content.substring(0, 600)}`).join('\n\n')}` : ''
+        '=== POSITIVE EXAMPLES (hooks/CTAs user keeps or rates well) ===',
+        productHooks.length > 0 ? `HOOKS THAT WORK FOR THIS PRODUCT:\n${productHooks.map((h: string, i: number) => `${i + 1}. ✅ ${h}`).join('\n')}` : '',
+        productCtas.length > 0 ? `CTAs THAT WORK FOR THIS PRODUCT:\n${productCtas.map((c: string, i: number) => `${i + 1}. ✅ ${c}`).join('\n')}` : '',
+        productScripts.length > 0 ? `SAVED SCRIPTS:\n${productScripts.map((s: string, i: number) => `--- Script ${i + 1} ---\n${s.substring(0, 800)}`).join('\n\n')}` : '',
+        savedScripts.length > 0 ? `ADDITIONAL SAVED SCRIPTS:\n${savedScripts.slice(0, 3).map((s, i) => `--- Script ${i + 1} ${s.is_favorite ? '(FAVORITE)' : ''} ---\n${s.content.substring(0, 600)}`).join('\n\n')}` : '',
+        '\n=== ANTI-PATTERNS (NEVER reproduce these) ===',
+        productAvoid.length > 0 ? `REJECTED/REMOVED CONTENT:\n${productAvoid.map((a: string, i: number) => `${i + 1}. ❌ ${a}`).join('\n')}` : 'No explicit rejections yet.',
+        '\n=== EDIT TRANSFORMATIONS (before → after corrections) ===',
+        transformsFormatted.length > 0 ? `USER CORRECTIONS:\n${transformsFormatted.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n')}` : 'No edit transformations tracked yet.',
+        '\n=== USER INSTRUCTIONS ===',
+        productInstructions.length > 0 ? `EXPLICIT INSTRUCTIONS:\n${productInstructions.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n')}` : '',
+        Object.keys(productSignals).length > 0 ? `BEHAVIORAL SIGNALS:\n${JSON.stringify(productSignals, null, 2)}` : ''
       ].filter(Boolean).join('\n\n')
 
       if (productUserContent.trim().length > 50) {

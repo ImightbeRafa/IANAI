@@ -1908,10 +1908,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Build style memory prompt from AI memory tables
+    // Build style memory prompt from AI memory tables (gated by experimental toggle)
     const productId = req.body.productId as string | undefined
+    const aiMemoryEnabled = req.body.aiMemoryEnabled !== false
     let styleMemoryPrompt = ''
-    if (memorySupabase && productId) {
+    if (memorySupabase && productId && aiMemoryEnabled) {
       try {
         const [globalRes, productRes] = await Promise.all([
           memorySupabase.from('user_ai_memory').select('style_summary').eq('user_id', user.id).single(),
