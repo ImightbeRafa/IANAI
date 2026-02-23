@@ -114,6 +114,7 @@ export default function ProductWorkspace() {
   const [productMemoryDraft, setProductMemoryDraft] = useState('')
   const [savingMemory, setSavingMemory] = useState(false)
   const [synthesisingMemory, setSynthesisingMemory] = useState(false)
+  const [showSynthesisPreview, setShowSynthesisPreview] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const handleSendRef = useRef<(directMessage?: string) => Promise<void>>(null as any)
@@ -1507,6 +1508,54 @@ export default function ProductWorkspace() {
                       </p>
                     )}
                   </div>
+
+                  {/* AI Synthesis → Prompt Injection Preview */}
+                  {(globalMemory?.style_summary || productMemory?.style_summary) && (
+                    <div className="border border-purple-500/20 rounded-lg overflow-hidden">
+                      <button
+                        onClick={() => setShowSynthesisPreview(!showSynthesisPreview)}
+                        className="flex items-center justify-between w-full px-2.5 py-1.5 bg-purple-900/10 hover:bg-purple-900/20 transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-400 uppercase tracking-wide">
+                          <Sparkles className="w-3 h-3" />
+                          {language === 'es' ? 'Síntesis → Inyección al Prompt' : 'Synthesis → Prompt Injection'}
+                        </span>
+                        <ChevronDown className={`w-3 h-3 text-purple-400 transition-transform ${showSynthesisPreview ? '' : '-rotate-90'}`} />
+                      </button>
+                      {showSynthesisPreview && (
+                        <div className="px-2.5 py-2 space-y-2">
+                          <p className="text-[10px] text-dark-400 italic">
+                            {language === 'es'
+                              ? 'Este es el texto exacto que se inyecta en cada generación de guión:'
+                              : 'This is the exact text injected into every script generation:'}
+                          </p>
+                          <div className="bg-dark-50 border border-dark-200/60 rounded-lg p-2 font-mono text-[10px] text-dark-500 leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+                            {(() => {
+                              const isEs = language === 'es'
+                              const header = isEs
+                                ? '═══════════════════════════════════\nMEMORIA DE ESTILO — PREFERENCIAS DEL USUARIO (APRENDIDO)\n═══════════════════════════════════\nEl siguiente perfil de estilo fue extraído del comportamiento real del usuario. APLICA estas preferencias manteniendo las reglas estructurales del sistema.'
+                                : '═══════════════════════════════════\nSTYLE MEMORY — USER PREFERENCES (LEARNED)\n═══════════════════════════════════\nThe following style profile was extracted from the user\'s actual behavior. APPLY these preferences while maintaining the system\'s structural rules.'
+                              const parts = [header]
+                              if (globalMemory?.style_summary) {
+                                parts.push(`\n${isEs ? 'ESTILO GLOBAL' : 'GLOBAL STYLE'}:\n${globalMemory.style_summary}`)
+                              }
+                              if (productMemory?.style_summary) {
+                                parts.push(`\n${isEs ? 'ESTILO PARA ESTE PRODUCTO' : 'STYLE FOR THIS PRODUCT'}:\n${productMemory.style_summary}`)
+                              }
+                              parts.push('\n═══════════════════════════════════')
+                              return parts.join('')
+                            })()}
+                          </div>
+                          {productMemory?.last_synthesized_at && (
+                            <p className="text-[9px] text-dark-400">
+                              {language === 'es' ? 'Última síntesis:' : 'Last synthesis:'}{' '}
+                              {new Date(productMemory.last_synthesized_at).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Collected Memory Data */}
                   {(productMemory || globalMemory) && (
