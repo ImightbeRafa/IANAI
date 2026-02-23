@@ -528,3 +528,63 @@ export interface TeamDashboardStats extends DashboardStats {
   totalMembers: number
 }
 
+// =============================================
+// AI Memory Types
+// =============================================
+export interface UserAiMemory {
+  id: string
+  user_id: string
+  style_summary: string | null
+  signals: Record<string, number>
+  sample_hooks: string[]
+  sample_ctas: string[]
+  edit_patterns: string[]
+  signals_since_last_synthesis: number
+  last_synthesized_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+// =============================================
+// Custom Post Types
+// =============================================
+export interface CustomPostType {
+  id: string
+  user_id: string
+  name: string
+  description?: string
+  reference_images: string[]
+  master_prompt_es: string
+  master_prompt_en: string
+  style_preferences: Record<string, unknown>
+  thumbnail_url?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CustomPostTypeFormData {
+  name: string
+  description?: string
+  reference_images: string[]
+  master_prompt_es: string
+  master_prompt_en: string
+  style_preferences: Record<string, unknown>
+  thumbnail_url?: string
+}
+
+export interface ProductAiMemory {
+  id: string
+  product_id: string
+  user_id: string
+  style_summary: string | null
+  signals: Record<string, number>
+  sample_hooks: string[]
+  sample_ctas: string[]
+  sample_scripts: string[]
+  edit_instructions: string[]
+  signals_since_last_synthesis: number
+  last_synthesized_at: string | null
+  created_at: string
+  updated_at: string
+}
+

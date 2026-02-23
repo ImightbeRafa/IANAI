@@ -16,7 +16,11 @@ import type {
   Business,
   BusinessFormData,
   SuccessCase,
-  SuccessCaseFormData
+  SuccessCaseFormData,
+  UserAiMemory,
+  ProductAiMemory,
+  CustomPostType,
+  CustomPostTypeFormData
 } from '../types'
 
 // =============================================
@@ -1333,4 +1337,150 @@ export async function acceptPendingInvites(userId: string, email: string): Promi
     .eq('status', 'pending')
 
   if (error) console.error('Error accepting pending invites:', error)
+}
+
+// =============================================
+// AI MEMORY FUNCTIONS
+// =============================================
+
+export async function recordAiSignal(
+  productId: string,
+  signalType: string,
+  signalData: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { error } = await supabase.rpc('record_ai_signal', {
+      p_user_id: user.id,
+      p_product_id: productId,
+      p_signal_type: signalType,
+      p_signal_data: {
+        signal_key: signalType,
+        ...signalData
+      }
+    })
+
+    if (error) console.warn('AI signal recording failed:', error.message)
+  } catch (err) {
+    console.warn('AI signal recording error:', err)
+  }
+}
+
+export async function getUserAiMemory(userId: string): Promise<UserAiMemory | null> {
+  const { data, error } = await supabase
+    .from('user_ai_memory')
+    .select('*')
+    .eq('user_id', userId)
+    .single()
+
+  if (error || !data) return null
+  return data
+}
+
+export async function getProductAiMemory(productId: string, userId: string): Promise<ProductAiMemory | null> {
+  const { data, error } = await supabase
+    .from('product_ai_memory')
+    .select('*')
+    .eq('product_id', productId)
+    .eq('user_id', userId)
+    .single()
+
+  if (error || !data) return null
+  return data
+}
+
+export async function updateUserAiMemorySummary(userId: string, styleSummary: string): Promise<void> {
+  const { error } = await supabase
+    .from('user_ai_memory')
+    .upsert({
+      user_id: userId,
+      style_summary: styleSummary,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+
+  if (error) throw error
+}
+
+export async function updateProductAiMemorySummary(
+  productId: string,
+  userId: string,
+  styleSummary: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('product_ai_memory')
+    .upsert({
+      product_id: productId,
+      user_id: userId,
+      style_summary: styleSummary,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'product_id,user_id' })
+
+  if (error) throw error
+}
+
+export async function resetProductAiMemory(productId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('product_ai_memory')
+    .delete()
+    .eq('product_id', productId)
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+export async function resetUserAiMemory(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('user_ai_memory')
+    .delete()
+    .eq('user_id', userId)
+
+  if (error) throw error
+}
+
+// =============================================
+// CUSTOM POST TYPES
+// =============================================
+export async function getCustomPostTypes(userId: string): Promise<CustomPostType[]> {
+  const { data, error } = await supabase
+    .from('custom_post_types')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createCustomPostType(
+  userId: string,
+  formData: CustomPostTypeFormData
+): Promise<CustomPostType> {
+  const { data, error } = await supabase
+    .from('custom_post_types')
+    .insert({
+      user_id: userId,
+      name: formData.name,
+      description: formData.description || null,
+      reference_images: formData.reference_images,
+      master_prompt_es: formData.master_prompt_es,
+      master_prompt_en: formData.master_prompt_en,
+      style_preferences: formData.style_preferences,
+      thumbnail_url: formData.thumbnail_url || null
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteCustomPostType(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('custom_post_types')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
 }

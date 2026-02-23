@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
-import { getScriptsByMessage, getScriptVersions } from '../services/database'
+import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../services/database'
 
 type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
 
@@ -136,6 +136,14 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
         } else {
           setSavedVersions(prev => new Set(prev).add(versionIndex))
         }
+        if (productId) {
+          const lines = content.split('\n').filter(l => l.trim())
+          recordAiSignal(productId, 'script_saved', {
+            hook: lines[0] || '',
+            cta: lines[lines.length - 1] || '',
+            script: content.substring(0, 2000)
+          })
+        }
       }
     } finally {
       setSaving(false)
@@ -178,6 +186,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
       const source = getVersionContent(editingFromVersion)
       const result = await onEdit(source, editInstruction.trim(), 'script_edit')
       setEditHistory(prev => [...prev, { content: result, source: 'manual', label: '' }])
+      if (productId) {
+        recordAiSignal(productId, 'edit_manual', { instruction: editInstruction.trim() })
+      }
       setShowEditInput(false)
       setEditInstruction('')
       autoSaveVersion(result, 'manual')
@@ -210,6 +221,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
       const source = getVersionContent(fromVersion)
       const result = await onEdit(source, ENHANCE_PROMPT, 'script_enhance')
       setEditHistory(prev => [...prev, { content: result, source: 'enhance', label: '' }])
+      if (productId) recordAiSignal(productId, 'edit_enhance', {})
       autoSaveVersion(result, 'enhance')
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Enhance failed')
@@ -303,6 +315,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
       const source = getVersionContent(fromVersion)
       const result = await onEdit(source, prompt, 'script_consciousness')
       setEditHistory(prev => [...prev, { content: result, source: 'consciousness', label }])
+      if (productId) recordAiSignal(productId, 'consciousness_applied', { signal_key: `consciousness_${label.toLowerCase()}` })
       autoSaveVersion(result, 'consciousness', label)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Consciousness change failed')
@@ -321,6 +334,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
       const fullPrompt = hookPrompt + ' Devuelve UN solo guión completo. NO generes múltiples opciones ni versiones.'
       const result = await onEdit(source, fullPrompt, 'script_hook')
       setEditHistory(prev => [...prev, { content: result, source: 'hook', label: hookLabel }])
+      if (productId) recordAiSignal(productId, 'hook_chosen', { signal_key: `hook_${hookLabel}` })
       autoSaveVersion(result, 'hook', hookLabel)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Hook change failed')

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { createClient } from '@supabase/supabase-js'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
@@ -7,6 +8,10 @@ import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
+
+const imgMemSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+const imgMemSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const imgMemSupabase = imgMemSupabaseUrl && imgMemSupabaseKey ? createClient(imgMemSupabaseUrl, imgMemSupabaseKey) : null
 
 // Gemini Image Generation Models (from official SDK documentation)
 const GEMINI_IMAGE_MODELS: Record<string, string> = {
@@ -787,17 +792,59 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         ? 'REGLA DE PRODUCTO (NO NEGOCIABLE): Se adjuntan fotos del PRODUCTO REAL del usuario. El producto DEBE verse EXACTAMENTE como en las fotos de referencia. NO inventes ni reimagines el producto. Usa las referencias como fuente de verdad.\n\n'
         : ''
 
-      if (postStyle === 'preset' && imageParams.presetId) {
-        // PRESET MODE: lang + product ref + aspect ratio + color prefix + preset master prompt + user script
+      // Load visual style memory when no explicit palette is chosen
+      let visualMemoryPrefix = ''
+      if (imgMemSupabase && !imageParams.colorPaletteId && !(imageParams.customColors && (imageParams.customColors as string[]).length > 0)) {
+        try {
+          const { data: globalMem } = await imgMemSupabase
+            .from('user_ai_memory')
+            .select('style_summary, signals')
+            .eq('user_id', user.id)
+            .single()
+          if (globalMem?.style_summary) {
+            const visualLines = globalMem.style_summary
+              .split('\n')
+              .filter((l: string) => /visual|color|palette|style|layout|design/i.test(l))
+              .join(' ')
+            if (visualLines.trim()) {
+              visualMemoryPrefix = `PREFERENCIAS VISUALES DEL USUARIO (aprendidas): ${visualLines.trim()}\n\n`
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
+        // CUSTOM POST TYPE MODE: load master prompt from DB
+        try {
+          const { data: customType } = await imgMemSupabase
+            .from('custom_post_types')
+            .select('master_prompt_es, master_prompt_en')
+            .eq('id', imageParams.customPostTypeId)
+            .eq('user_id', user.id)
+            .single()
+
+          if (customType) {
+            const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          } else {
+            // Fallback to venta directa if custom type not found
+            enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          }
+        } catch {
+          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        }
+      } else if (postStyle === 'preset' && imageParams.presetId) {
+        // PRESET MODE: lang + product ref + aspect ratio + visual memory + color prefix + preset master prompt + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)

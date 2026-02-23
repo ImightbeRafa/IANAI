@@ -120,6 +120,7 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'fal-ai/kling-video/v2.6/pro/image-to-video': { name: 'Kling 2.6 Image', color: 'bg-cyan-400' },
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
+  'gemini-2.5-flash-preview-05-20': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
 }
 
 // Cost per 1M tokens or per image/video (for reference display)
@@ -140,6 +141,7 @@ const MODEL_PRICING: Record<string, string> = {
   'fal-ai/kling-video/v2.6/pro/image-to-video': '$0.07/sec',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
+  'gemini-2.5-flash-preview-05-20': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
 }
 
 export default function AdminDashboard() {
@@ -204,6 +206,7 @@ export default function AdminDashboard() {
       script_enhance: 'Mejora de Guión',
       script_hook: 'Cambio de Gancho',
       script_consciousness: 'Nivel de Conciencia',
+      style_analysis: 'Análisis de Estilo (Custom Post)',
       noData: 'No hay datos de uso aún',
       user: 'Usuario',
       time: 'Hora',
@@ -250,6 +253,7 @@ export default function AdminDashboard() {
       script_enhance: 'Script Enhance',
       script_hook: 'Hook Change',
       script_consciousness: 'Consciousness Level',
+      style_analysis: 'Style Analysis (Custom Post)',
       noData: 'No usage data yet',
       user: 'User',
       time: 'Time',
@@ -867,6 +871,7 @@ export default function AdminDashboard() {
                         {feature === 'script_enhance' && <Wand2 className="w-5 h-5 text-amber-600" />}
                         {feature === 'script_hook' && <FileText className="w-5 h-5 text-blue-400" />}
                         {feature === 'script_consciousness' && <Sparkles className="w-5 h-5 text-violet-400" />}
+                        {feature === 'style_analysis' && <ImageIcon className="w-5 h-5 text-fuchsia-500" />}
                         <span className="font-medium text-dark-900">
                           {t[feature as keyof typeof t] || feature}
                         </span>

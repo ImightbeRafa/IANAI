@@ -15,10 +15,16 @@ import {
   createScriptVersion,
   getContextDocuments,
   createContextDocument,
-  deleteContextDocument
+  deleteContextDocument,
+  recordAiSignal,
+  getUserAiMemory,
+  getProductAiMemory,
+  updateUserAiMemorySummary,
+  updateProductAiMemorySummary,
+  resetProductAiMemory
 } from '../services/database'
 import { sendMessageToGrok, previewPrompt, editScript, DEFAULT_SCRIPT_SETTINGS, buildApiBusinessContext, buildApiProductContext } from '../services/grokApi'
-import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel } from '../types'
+import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel, UserAiMemory, ProductAiMemory } from '../types'
 import { getSuccessCases } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
@@ -51,7 +57,11 @@ import {
   Square,
   Building2,
   MapPin,
-  Globe
+  Globe,
+  Brain,
+  ChevronDown,
+  RefreshCw,
+  Check
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -90,6 +100,16 @@ export default function ProductWorkspace() {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [activeSalesChannel, setActiveSalesChannel] = useState<SalesChannel | null>(null)
+  // AI Memory panel state
+  const [globalMemory, setGlobalMemory] = useState<UserAiMemory | null>(null)
+  const [productMemory, setProductMemory] = useState<ProductAiMemory | null>(null)
+  const [showMemoryPanel, setShowMemoryPanel] = useState(true)
+  const [editingGlobalMemory, setEditingGlobalMemory] = useState(false)
+  const [editingProductMemory, setEditingProductMemory] = useState(false)
+  const [globalMemoryDraft, setGlobalMemoryDraft] = useState('')
+  const [productMemoryDraft, setProductMemoryDraft] = useState('')
+  const [savingMemory, setSavingMemory] = useState(false)
+  const [synthesisingMemory, setSynthesisingMemory] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const handleSendRef = useRef<(directMessage?: string) => Promise<void>>(null as any)
@@ -150,6 +170,92 @@ export default function ProductWorkspace() {
 
     loadData()
   }, [productId, sessionId, user, navigate])
+
+  // Load AI Memory data
+  useEffect(() => {
+    async function loadMemory() {
+      if (!productId || !user) return
+      try {
+        const [gMem, pMem] = await Promise.all([
+          getUserAiMemory(user.id),
+          getProductAiMemory(productId, user.id)
+        ])
+        setGlobalMemory(gMem)
+        setProductMemory(pMem)
+      } catch (e) {
+        console.warn('Failed to load AI memory:', e)
+      }
+    }
+    loadMemory()
+  }, [productId, user])
+
+  const handleSaveGlobalMemory = async () => {
+    if (!user) return
+    setSavingMemory(true)
+    try {
+      await updateUserAiMemorySummary(user.id, globalMemoryDraft)
+      setGlobalMemory(prev => prev ? { ...prev, style_summary: globalMemoryDraft } : { id: '', user_id: user.id, style_summary: globalMemoryDraft, signals: {}, sample_hooks: [], sample_ctas: [], edit_patterns: [], signals_since_last_synthesis: 0, last_synthesized_at: null, created_at: '', updated_at: '' })
+      setEditingGlobalMemory(false)
+    } catch (e) {
+      console.error('Failed to save global memory:', e)
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
+  const handleSaveProductMemory = async () => {
+    if (!user || !productId) return
+    setSavingMemory(true)
+    try {
+      await updateProductAiMemorySummary(productId, user.id, productMemoryDraft)
+      setProductMemory(prev => prev ? { ...prev, style_summary: productMemoryDraft } : { id: '', product_id: productId, user_id: user.id, style_summary: productMemoryDraft, signals: {}, sample_hooks: [], sample_ctas: [], sample_scripts: [], edit_instructions: [], signals_since_last_synthesis: 0, last_synthesized_at: null, created_at: '', updated_at: '' })
+      setEditingProductMemory(false)
+    } catch (e) {
+      console.error('Failed to save product memory:', e)
+    } finally {
+      setSavingMemory(false)
+    }
+  }
+
+  const handleRelearn = async () => {
+    if (!user || !productId) return
+    setSynthesisingMemory(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+      const res = await fetch('/api/synthesize-memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ productId })
+      })
+      if (res.ok) {
+        const result = await res.json()
+        if (result.globalSummary) {
+          setGlobalMemory(prev => prev ? { ...prev, style_summary: result.globalSummary } : null)
+        }
+        if (result.productSummary) {
+          setProductMemory(prev => prev ? { ...prev, style_summary: result.productSummary } : null)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to re-learn:', e)
+    } finally {
+      setSynthesisingMemory(false)
+    }
+  }
+
+  const handleResetMemory = async () => {
+    if (!user || !productId) return
+    const confirmed = window.confirm(language === 'es' ? 'Esto eliminará toda la memoria de este producto. ¿Continuar?' : 'This will delete all memory for this product. Continue?')
+    if (!confirmed) return
+    try {
+      await resetProductAiMemory(productId, user.id)
+      setProductMemory(null)
+    } catch (e) {
+      console.error('Failed to reset memory:', e)
+    }
+  }
 
   const handleRenameSession = async (sessionId: string) => {
     if (!renameValue.trim()) {
@@ -222,7 +328,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -650,9 +756,14 @@ export default function ProductWorkspace() {
 
       // Append user style/tone preferences while preserving master format
       if (input.trim()) {
+        const userInstruction = input.trim()
         generatePrompt += language === 'es'
-          ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${input.trim()}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura obligatoria de guiones (GANCHO/DESARROLLO/CTA). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
-          : `\n\nUSER STYLE PREFERENCE: "${input.trim()}"\nIMPORTANT: Apply this tone/focus preference WITHIN the mandatory script structure (HOOK/DEVELOPMENT/CTA). Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
+          ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura obligatoria de guiones (GANCHO/DESARROLLO/CTA). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
+          : `\n\nUSER STYLE PREFERENCE: "${userInstruction}"\nIMPORTANT: Apply this tone/focus preference WITHIN the mandatory script structure (HOOK/DEVELOPMENT/CTA). Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
+        // Record instruction as AI memory signal
+        if (product) {
+          recordAiSignal(product.id, 'user_instruction', { instruction: userInstruction })
+        }
         setInput('')
       }
       
@@ -663,7 +774,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -1270,6 +1381,152 @@ export default function ProductWorkspace() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* AI Memory Panel */}
+            <div className="pt-2 border-t border-dark-200/60">
+              <button
+                onClick={() => setShowMemoryPanel(!showMemoryPanel)}
+                className="flex items-center justify-between w-full mb-2"
+              >
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase cursor-pointer">
+                  <Brain className="w-3.5 h-3.5 text-purple-500" />
+                  {language === 'es' ? 'Memoria IA' : 'AI Memory'}
+                </label>
+                <ChevronDown className={`w-3.5 h-3.5 text-dark-400 transition-transform ${showMemoryPanel ? '' : '-rotate-90'}`} />
+              </button>
+
+              {showMemoryPanel && (
+                <div className="space-y-3">
+                  {/* Global Style */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-medium text-dark-500 uppercase tracking-wide">
+                        {language === 'es' ? 'Estilo Global' : 'Global Style'}
+                      </span>
+                      {!editingGlobalMemory ? (
+                        <button
+                          onClick={() => {
+                            setGlobalMemoryDraft(globalMemory?.style_summary || '')
+                            setEditingGlobalMemory(true)
+                          }}
+                          className="p-0.5 rounded text-dark-400 hover:text-dark-600 transition-colors"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      ) : (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={handleSaveGlobalMemory}
+                            disabled={savingMemory}
+                            className="p-0.5 rounded text-green-500 hover:text-green-600 transition-colors"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => setEditingGlobalMemory(false)}
+                            className="p-0.5 rounded text-dark-400 hover:text-dark-600 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {editingGlobalMemory ? (
+                      <textarea
+                        value={globalMemoryDraft}
+                        onChange={(e) => setGlobalMemoryDraft(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs bg-dark-50 border border-dark-200 rounded-lg text-dark-700 resize-none focus:outline-none focus:ring-1 focus:ring-purple-500 min-h-[80px]"
+                        placeholder={language === 'es' ? 'Escribe instrucciones de estilo para la IA...' : 'Write style instructions for the AI...'}
+                      />
+                    ) : (
+                      <p className="text-xs text-dark-500 bg-dark-50/50 rounded-lg px-2.5 py-2 min-h-[32px]">
+                        {globalMemory?.style_summary || (language === 'es' ? 'Guarda guiones para que la IA aprenda tu estilo' : 'Save scripts so the AI learns your style')}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Product Style */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-medium text-dark-500 uppercase tracking-wide">
+                        {language === 'es' ? 'Este Producto' : 'This Product'}
+                      </span>
+                      {!editingProductMemory ? (
+                        <button
+                          onClick={() => {
+                            setProductMemoryDraft(productMemory?.style_summary || '')
+                            setEditingProductMemory(true)
+                          }}
+                          className="p-0.5 rounded text-dark-400 hover:text-dark-600 transition-colors"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      ) : (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={handleSaveProductMemory}
+                            disabled={savingMemory}
+                            className="p-0.5 rounded text-green-500 hover:text-green-600 transition-colors"
+                          >
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => setEditingProductMemory(false)}
+                            className="p-0.5 rounded text-dark-400 hover:text-dark-600 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {editingProductMemory ? (
+                      <textarea
+                        value={productMemoryDraft}
+                        onChange={(e) => setProductMemoryDraft(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs bg-dark-50 border border-dark-200 rounded-lg text-dark-700 resize-none focus:outline-none focus:ring-1 focus:ring-purple-500 min-h-[80px]"
+                        placeholder={language === 'es' ? 'Instrucciones específicas para este producto...' : 'Product-specific instructions...'}
+                      />
+                    ) : (
+                      <p className="text-xs text-dark-500 bg-dark-50/50 rounded-lg px-2.5 py-2 min-h-[32px]">
+                        {productMemory?.style_summary || (language === 'es' ? 'La IA aprenderá las preferencias de este producto' : 'AI will learn preferences for this product')}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Signal Stats */}
+                  {(productMemory || globalMemory) && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {productMemory?.signals && Object.entries(productMemory.signals).slice(0, 6).map(([key, val]) => (
+                        <span key={key} className="text-[10px] bg-dark-200/60 text-dark-500 px-1.5 py-0.5 rounded-full">
+                          {key.replace(/_/g, ' ')}: {val as number}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleRelearn}
+                      disabled={synthesisingMemory}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${synthesisingMemory ? 'animate-spin' : ''}`} />
+                      {synthesisingMemory
+                        ? (language === 'es' ? 'Aprendiendo...' : 'Learning...')
+                        : (language === 'es' ? 'Re-aprender' : 'Re-learn')}
+                    </button>
+                    <button
+                      onClick={handleResetMemory}
+                      className="flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium text-dark-400 hover:text-red-500 bg-dark-50 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      {language === 'es' ? 'Reset' : 'Reset'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

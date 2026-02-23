@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage } from '../services/database'
+import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal } from '../services/database'
 import type { ProductImage } from '../services/database'
 import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
@@ -32,8 +32,10 @@ import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import { IMAGE_PRESETS } from '../data/image-presets'
 import { COLOR_PALETTES } from '../data/color-palettes'
-import { getCustomPalettes, createCustomPalette, deleteCustomPalette } from '../services/database'
+import { getCustomPalettes, createCustomPalette, deleteCustomPalette, getCustomPostTypes, createCustomPostType, deleteCustomPostType } from '../services/database'
 import type { CustomColorPalette } from '../services/database'
+import type { CustomPostType } from '../types'
+import CreateCustomPostType from '../components/CreateCustomPostType'
 
 type PostAspectRatio = '9:16' | '3:4'
 
@@ -81,6 +83,8 @@ export default function PostWorkspace() {
   const [newPaletteColors, setNewPaletteColors] = useState<[string, string, string]>(['#000000', '#FFFFFF', '#0284c7'])
   const [customColors, setCustomColors] = useState<string[] | null>(null)
   const paletteImageInputRef = useRef<HTMLInputElement>(null)
+  const [customPostTypes, setCustomPostTypes] = useState<CustomPostType[]>([])
+  const [showCreatePostType, setShowCreatePostType] = useState(false)
   const [productImages, setProductImages] = useState<ProductImage[]>([])
   const [selectedProductImageIds, setSelectedProductImageIds] = useState<Set<string>>(new Set())
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
@@ -199,17 +203,19 @@ export default function PostWorkspace() {
     async function loadData() {
       if (!productId || !user) return
       try {
-        const [productData, scriptsData, postsResult, userPalettes, prodImages] = await Promise.all([
+        const [productData, scriptsData, postsResult, userPalettes, prodImages, userPostTypes] = await Promise.all([
           getProduct(productId),
           getScripts(productId),
           getProductPostsPaginated(productId, POSTS_PAGE_SIZE, 0),
           getCustomPalettes(user.id),
-          getProductImages(productId)
+          getProductImages(productId),
+          getCustomPostTypes(user.id)
         ])
         setProduct(productData)
         setScripts(scriptsData)
         setCustomPalettes(userPalettes)
         setProductImages(prodImages)
+        setCustomPostTypes(userPostTypes)
         setTotalPostCount(postsResult.total)
 
         const loadedPosts: GeneratedPost[] = postsResult.posts
@@ -341,11 +347,13 @@ export default function PostWorkspace() {
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
       const isVertical = aspectRatio === '9:16'
+      const isCustomType = postStyle.startsWith('custom-')
       const requestBody: Record<string, unknown> = {
         prompt: script,
         mode: 'post',
-        postStyle: postStyle === 'venta-directa' ? 'venta-directa' : 'preset',
-        presetId: postStyle === 'venta-directa' ? undefined : postStyle,
+        postStyle: postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
+        presetId: postStyle === 'venta-directa' || isCustomType ? undefined : postStyle,
+        customPostTypeId: isCustomType ? postStyle.replace('custom-', '') : undefined,
         aspectRatio,
         width: isVertical ? 1080 : 1080,
         height: isVertical ? 1920 : 1440,
@@ -379,6 +387,18 @@ export default function PostWorkspace() {
       if (result.status === 'Ready' && result.result?.sample) {
         const imageUrl = result.result.sample
         const tempId = `post-${Date.now()}`
+
+        // Record AI memory signal for post generation
+        if (productId) {
+          recordAiSignal(productId, 'post_generated', {
+            signal_key: `post_style_${postStyle}`,
+          })
+          if (colorPaletteId !== 'auto') {
+            recordAiSignal(productId, 'color_palette_used', {
+              signal_key: `palette_${colorPaletteId}`,
+            })
+          }
+        }
 
         // Show immediately with base64
         setGeneratedPosts(prev => [{
@@ -801,7 +821,9 @@ export default function PostWorkspace() {
                   <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />
                   {postStyle === 'venta-directa'
                     ? t.styleDirectSale
-                    : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
+                    : postStyle.startsWith('custom-')
+                      ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
+                      : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
                   }
                 </span>
                 {showStyleDropdown ? <ChevronUp className="w-4 h-4 text-dark-400" /> : <ChevronDown className="w-4 h-4 text-dark-400" />}
@@ -833,7 +855,7 @@ export default function PostWorkspace() {
                     <button
                       key={preset.id}
                       onClick={() => { setPostStyle(preset.id); setShowStyleDropdown(false) }}
-                      className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 last:border-b-0 ${
+                      className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
                         postStyle === preset.id ? 'bg-primary-900/20' : ''
                       }`}
                     >
@@ -855,6 +877,77 @@ export default function PostWorkspace() {
                       )}
                     </button>
                   ))}
+
+                  {/* Custom post types */}
+                  {customPostTypes.length > 0 && (
+                    <div className="border-t border-dark-200 pt-1">
+                      <div className="px-3 py-1.5">
+                        <span className="text-[10px] font-bold text-dark-400 uppercase tracking-wider">
+                          {language === 'es' ? 'Mis Estilos' : 'My Styles'}
+                        </span>
+                      </div>
+                      {customPostTypes.map(ct => (
+                        <button
+                          key={ct.id}
+                          onClick={() => { setPostStyle(`custom-${ct.id}`); setShowStyleDropdown(false) }}
+                          className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
+                            postStyle === `custom-${ct.id}` ? 'bg-primary-900/20' : ''
+                          }`}
+                        >
+                          {ct.reference_images?.[0] ? (
+                            <img src={ct.reference_images[0]} alt={ct.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-violet-400 to-fuchsia-500 flex items-center justify-center flex-shrink-0">
+                              <Sparkles className="w-5 h-5 text-white" />
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold text-dark-800">{ct.name}</div>
+                            {ct.description && (
+                              <div className="text-[11px] text-dark-400 mt-0.5 line-clamp-2">{ct.description}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+                            {postStyle === `custom-${ct.id}` && (
+                              <div className="w-2 h-2 rounded-full bg-primary-500" />
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (confirm(language === 'es' ? '¿Eliminar este estilo?' : 'Delete this style?')) {
+                                  deleteCustomPostType(ct.id).then(() => {
+                                    setCustomPostTypes(prev => prev.filter(c => c.id !== ct.id))
+                                    if (postStyle === `custom-${ct.id}`) setPostStyle('venta-directa')
+                                  })
+                                }
+                              }}
+                              className="p-0.5 rounded hover:bg-red-100 text-dark-300 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Create custom post type button */}
+                  <button
+                    onClick={() => { setShowCreatePostType(true); setShowStyleDropdown(false) }}
+                    className="w-full flex items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-t border-dark-200"
+                  >
+                    <div className="w-10 h-10 rounded-lg border-2 border-dashed border-dark-300 flex items-center justify-center flex-shrink-0">
+                      <Plus className="w-5 h-5 text-dark-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-primary-600">
+                        {language === 'es' ? 'Crear Estilo Personalizado' : 'Create Custom Style'}
+                      </div>
+                      <div className="text-[11px] text-dark-400 mt-0.5">
+                        {language === 'es' ? 'Sube imágenes de referencia y la IA creará tu estilo' : 'Upload reference images and AI will create your style'}
+                      </div>
+                    </div>
+                  </button>
                 </div>
               )}
             </div>
@@ -1423,6 +1516,26 @@ export default function PostWorkspace() {
           </div>
         </div>
       </div>
+      {/* Create Custom Post Type Modal */}
+      {showCreatePostType && (
+        <CreateCustomPostType
+          onClose={() => setShowCreatePostType(false)}
+          onSave={async (data) => {
+            if (!user) return
+            const saved = await createCustomPostType(user.id, {
+              name: data.name,
+              description: data.description,
+              reference_images: data.referenceImages,
+              master_prompt_es: data.masterPromptEs,
+              master_prompt_en: data.masterPromptEn,
+              style_preferences: data.stylePreferences,
+              thumbnail_url: data.thumbnailUrl
+            })
+            setCustomPostTypes(prev => [saved, ...prev])
+            setPostStyle(`custom-${saved.id}`)
+          }}
+        />
+      )}
     </Layout>
   )
 }

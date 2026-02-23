@@ -1,9 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { createClient } from '@supabase/supabase-js'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
+
+const memorySupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+const memorySupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const memorySupabase = memorySupabaseUrl && memorySupabaseKey ? createClient(memorySupabaseUrl, memorySupabaseKey) : null
 
 type AIModel = 'grok'
 
@@ -1903,7 +1908,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    // Build style memory prompt from AI memory tables
+    const productId = req.body.productId as string | undefined
+    let styleMemoryPrompt = ''
+    if (memorySupabase && productId) {
+      try {
+        const [globalRes, productRes] = await Promise.all([
+          memorySupabase.from('user_ai_memory').select('style_summary').eq('user_id', user.id).single(),
+          memorySupabase.from('product_ai_memory').select('style_summary').eq('product_id', productId).eq('user_id', user.id).single()
+        ])
+        const globalSummary = globalRes.data?.style_summary
+        const productSummary = productRes.data?.style_summary
+        if (globalSummary || productSummary) {
+          const isEs = language === 'es'
+          const header = isEs
+            ? '\n\n===================================================================\nMEMORIA DE ESTILO — PREFERENCIAS DEL USUARIO (APRENDIDO)\n===================================================================\nEl siguiente perfil de estilo fue extraído del comportamiento real del usuario. APLICA estas preferencias manteniendo las reglas estructurales del sistema.'
+            : '\n\n===================================================================\nSTYLE MEMORY — USER PREFERENCES (LEARNED)\n===================================================================\nThe following style profile was extracted from the user\'s actual behavior. APPLY these preferences while maintaining the system\'s structural rules.'
+          const parts = [header]
+          if (globalSummary) {
+            parts.push(`\n${isEs ? 'ESTILO GLOBAL' : 'GLOBAL STYLE'}:\n${globalSummary}`)
+          }
+          if (productSummary) {
+            parts.push(`\n${isEs ? 'ESTILO PARA ESTE PRODUCTO' : 'STYLE FOR THIS PRODUCT'}:\n${productSummary}`)
+          }
+          parts.push('\n===================================================================')
+          styleMemoryPrompt = parts.join('')
+        }
+      } catch (e) {
+        console.warn('Failed to load style memory:', e)
+      }
+    }
+
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {

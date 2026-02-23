@@ -14,6 +14,7 @@ export const MODEL_COSTS = {
   'grok-3-mini': { input: 0.30, output: 0.50 },
   'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
   'gemini': { input: 0.15, output: 0.60 },
+  'gemini-2.5-flash-preview-05-20': { input: 0.15, output: 0.60, thinking: 3.50 },
   
   // Image generation models
   // Gemini: $0.134/image (1K/2K tier) + input tokens ($2.00/1M) + thinking tokens ($12.00/1M)
@@ -51,6 +52,7 @@ export type FeatureType =
   | 'kling_video'      // Kling AI video generation (fal.ai)
   | 'prompt_condense'  // Prompt condensing for video APIs
   | 'voice_transcription' // Voice-to-text transcription
+  | 'style_analysis'      // Custom post type style analysis
 
 interface UsageLogParams {
   userId?: string
@@ -118,6 +120,10 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
         const inputCost = (inputTokens / 1_000_000) * (modelCosts.input as number)
         const outputCost = (outputTokens / 1_000_000) * (modelCosts.output as number)
         estimatedCostUsd = inputCost + outputCost
+        // Add thinking token cost if model supports it (e.g. Gemini Flash)
+        if ('thinking' in modelCosts && thinkingTokens > 0) {
+          estimatedCostUsd += (thinkingTokens / 1_000_000) * (modelCosts.thinking as number)
+        }
       }
     }
 
