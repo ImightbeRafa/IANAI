@@ -219,15 +219,48 @@ export async function urlToBase64(url: string): Promise<string> {
 }
 
 /**
+ * Aggressively compress an image for style analysis.
+ * Gemini only needs to understand layout, colors, typography and composition —
+ * not pixel-perfect detail. This keeps API input token costs very low.
+ * Target: 768px max dimension, JPEG quality 0.6, always re-encodes.
+ */
+export async function compressForStyleAnalysis(
+  dataUrl: string,
+  maxDim: number = 768,
+  quality: number = 0.6
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { reject(new Error('Canvas context failed')); return }
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
+/**
  * Compress a base64 data URL if it exceeds maxBytes (base64 string length).
  * Resizes to fit within maxDim on the longest side and re-encodes as JPEG.
- * Default threshold: ~1.5 MB base64 string (~1.1 MB binary).
+ * Default threshold: ~800 KB base64 string (~600 KB binary).
  */
 export async function compressBase64ForApi(
   base64: string,
-  maxBytes: number = 1_500_000,
-  maxDim: number = 1536,
-  quality: number = 0.82
+  maxBytes: number = 800_000,
+  maxDim: number = 1280,
+  quality: number = 0.78
 ): Promise<string> {
   if (base64.length <= maxBytes) return base64
 

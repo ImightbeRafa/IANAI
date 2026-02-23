@@ -2,6 +2,9 @@
   "functions": {
     "api/transcribe-audio.ts": {
       "maxDuration": 30
+    },
+    "api/analyze-style.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

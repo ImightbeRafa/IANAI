@@ -789,9 +789,9 @@ export default function PostWorkspace() {
             : '⚠️ We\'re making improvements. You may experience temporary changes. Thanks for your patience!'}
         </p>
       </div>
-      <div className="h-full flex flex-col lg:flex-row lg:overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-dark-100/90 backdrop-blur-lg border-b lg:border-b-0 lg:border-r border-white/[0.04] flex flex-col min-h-0 overflow-hidden max-h-[100dvh]">
+        <div className="w-full lg:w-[420px] bg-dark-100/90 backdrop-blur-lg border-b lg:border-b-0 lg:border-r border-white/[0.04] flex flex-col min-h-0 overflow-hidden">
           {/* Header */}
           <div className="px-5 py-4 border-b border-white/[0.06]">
             <Link

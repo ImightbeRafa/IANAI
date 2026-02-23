@@ -42,7 +42,7 @@ CRITICAL RULES:
 - Mention specific font style recommendations based on what you see
 - The prompt must work as a standalone instruction for an image generation AI
 - Output TWO versions: one in Spanish (master_prompt_es) and one in English (master_prompt_en)
-- Each prompt should be 300-500 words
+- Each prompt should be 150-300 words (be dense and specific, not verbose)
 - Do NOT include generic filler — every sentence must add specific visual instruction
 - If the user mentions brand safety constraints, typography preferences, or language rules, incorporate them as NON-NEGOTIABLE rules at the top of the prompt
 
@@ -171,9 +171,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       contents: promptParts,
       config: {
         temperature: 0.4,
-        maxOutputTokens: 4096
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 }
       }
     })
+
+    // Check if response was truncated
+    const finishReason = response.candidates?.[0]?.finishReason
+    console.log('Gemini style analysis finishReason:', finishReason)
+    if (finishReason === 'MAX_TOKENS') {
+      console.error('Gemini style analysis response was truncated:', finishReason)
+      return res.status(500).json({ error: 'AI response was too long and got cut off. Please try again with fewer images or a shorter description.' })
+    }
 
     const parts = response.candidates?.[0]?.content?.parts || []
     const rawText = parts
@@ -200,6 +209,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       parsed = JSON.parse(cleanJson)
     } catch {
       console.error('Failed to parse Gemini style analysis response:', cleanJson.substring(0, 500))
+      console.error('finishReason was:', finishReason, '| response length:', cleanJson.length)
+      // Detect truncation: incomplete JSON that ends mid-value
+      const looksTrauncated = !cleanJson.endsWith('}') || cleanJson.split('{').length > cleanJson.split('}').length
+      if (looksTrauncated) {
+        return res.status(500).json({ error: 'AI response was truncated and could not be parsed. Please try again — the analysis will retry with less detail.' })
+      }
       return res.status(500).json({ error: 'AI returned invalid format. Please try again.' })
     }
 

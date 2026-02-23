@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { X, Upload, Loader2, ChevronRight, ChevronLeft, Sparkles, Check, Image as ImageIcon, Type, Shield, Eye } from 'lucide-react'
 import { useLanguage } from '../contexts/LanguageContext'
+import { compressForStyleAnalysis } from '../utils/imageCompression'
 
 interface StylePreferences {
   brandColors: string
@@ -167,30 +168,6 @@ export default function CreateCustomPostType({ onClose, onSave }: Props) {
   }
 
   const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB per file
-  const MAX_DIMENSION = 1200 // Compress to max 1200px on longest side
-
-  const compressImage = (dataUrl: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        let w = img.width
-        let h = img.height
-        if (w > MAX_DIMENSION || h > MAX_DIMENSION) {
-          const ratio = Math.min(MAX_DIMENSION / w, MAX_DIMENSION / h)
-          w = Math.round(w * ratio)
-          h = Math.round(h * ratio)
-        }
-        canvas.width = w
-        canvas.height = h
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(img, 0, 0, w, h)
-        resolve(canvas.toDataURL('image/jpeg', 0.8))
-      }
-      img.onerror = () => resolve(dataUrl) // fallback to original
-      img.src = dataUrl
-    })
-  }
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -210,7 +187,7 @@ export default function CreateCustomPostType({ onClose, onSave }: Props) {
         reader.onloadend = () => resolve(reader.result as string)
         reader.readAsDataURL(file)
       })
-      const compressed = await compressImage(dataUrl)
+      const compressed = await compressForStyleAnalysis(dataUrl)
       setReferenceImages(prev => [...prev, compressed])
     }
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -234,6 +211,10 @@ export default function CreateCustomPostType({ onClose, onSave }: Props) {
       const token = session?.access_token
       if (!token) throw new Error('Not authenticated')
 
+      const compressedForApi = await Promise.all(
+        referenceImages.map(img => compressForStyleAnalysis(img))
+      )
+
       const response = await fetch(ANALYZE_API_URL, {
         method: 'POST',
         headers: {
@@ -241,7 +222,7 @@ export default function CreateCustomPostType({ onClose, onSave }: Props) {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          referenceImages,
+          referenceImages: compressedForApi,
           description: description.trim(),
           stylePreferences: stylePrefs
         })

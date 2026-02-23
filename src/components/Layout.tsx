@@ -69,7 +69,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = allNavItems.filter(item => !item.adminOnly || isAdmin)
 
   return (
-    <div className="min-h-screen min-h-dvh-safe bg-dark-50 flex">
+    <div className="h-screen bg-dark-50 flex overflow-hidden">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div 
@@ -162,7 +162,7 @@ export default function Layout({ children }: LayoutProps) {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 flex flex-col min-h-0 overflow-auto">
           {children}
         </main>
       </div>

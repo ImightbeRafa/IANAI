@@ -669,14 +669,31 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
         const enhanceAR = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
 
-        const response = await ai.models.generateContent({
-          model: enhanceModelId,
-          contents: promptParts,
-          config: {
-            responseModalities: ['TEXT', 'IMAGE'],
-            imageConfig: { imageSize: '2K', aspectRatio: enhanceAR }
-          }
-        })
+        // Retry once on transient 503 errors
+        let response: Awaited<ReturnType<typeof ai.models.generateContent>>
+        try {
+          response = await ai.models.generateContent({
+            model: enhanceModelId,
+            contents: promptParts,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: { imageSize: '2K', aspectRatio: enhanceAR }
+            }
+          })
+        } catch (firstTry) {
+          const is503 = firstTry instanceof Error && (firstTry.message.includes('503') || firstTry.message.includes('UNAVAILABLE'))
+          if (!is503) throw firstTry
+          console.warn('Gemini enhance 503 — retrying once after 2s...')
+          await new Promise(r => setTimeout(r, 2000))
+          response = await ai.models.generateContent({
+            model: enhanceModelId,
+            contents: promptParts,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: { imageSize: '2K', aspectRatio: enhanceAR }
+            }
+          })
+        }
 
         const candidates = response.candidates || []
         const parts = candidates[0]?.content?.parts || []
@@ -726,19 +743,29 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       } catch (enhanceError) {
         console.error('Gemini enhance error:', enhanceError)
 
+        const errMsg = enhanceError instanceof Error ? enhanceError.message : 'Unknown error'
+        const isTransient = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')
+
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'enhance',
           model: 'nano-banana-pro',
           success: false,
-          errorMessage: enhanceError instanceof Error ? enhanceError.message : 'Unknown error',
-          metadata: { action: 'enhance' }
+          errorMessage: errMsg,
+          metadata: { action: 'enhance', transient: isTransient }
         })
+
+        if (isTransient) {
+          return res.status(503).json({
+            error: 'El servicio de IA está temporalmente saturado. Intenta de nuevo en unos segundos.',
+            retryable: true
+          })
+        }
 
         return res.status(500).json({
           error: 'Image enhance failed',
-          details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error'
+          details: errMsg
         })
       }
     }
