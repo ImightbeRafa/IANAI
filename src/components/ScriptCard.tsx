@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon } from 'lucide-react'
+import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon, ThumbsUp, ThumbsDown } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../services/database'
@@ -53,6 +53,8 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
 
   const [consciousnessPickerVersion, setConsciousnessPickerVersion] = useState<number | null>(null)
   const consciousnessPickerRef = useRef<HTMLDivElement>(null)
+
+  const [rated, setRated] = useState<'good' | 'bad' | null>(null)
 
   // Restore saved edit history on mount
   useEffect(() => {
@@ -428,6 +430,51 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
     )
   }
 
+  const RateBtn = ({ versionIndex }: { versionIndex: number }) => {
+    if (!productId) return null
+    const handleRate = (rating: 'good' | 'bad') => {
+      if (rated) return
+      setRated(rating)
+      const content = getVersionContent(versionIndex)
+      const lines = content.split('\n').filter(l => l.trim())
+      recordAiSignal(productId!, 'script_rated', {
+        signal_key: `rated_${rating}`,
+        rating,
+        hook: lines[0] || '',
+        cta: lines[lines.length - 1] || '',
+        script: content.substring(0, 2000)
+      })
+    }
+    return (
+      <div className="inline-flex items-center gap-0.5">
+        <button
+          onClick={() => handleRate('good')}
+          disabled={rated !== null}
+          className={`inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded-md transition-colors ${
+            rated === 'good'
+              ? 'bg-green-900/20 text-green-400'
+              : rated ? 'opacity-30 text-dark-400' : 'text-dark-400 hover:bg-green-900/20 hover:text-green-400'
+          }`}
+          title={language === 'es' ? 'Buen guión' : 'Good script'}
+        >
+          <ThumbsUp className="w-3 h-3" />
+        </button>
+        <button
+          onClick={() => handleRate('bad')}
+          disabled={rated !== null}
+          className={`inline-flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded-md transition-colors ${
+            rated === 'bad'
+              ? 'bg-red-900/20 text-red-400'
+              : rated ? 'opacity-30 text-dark-400' : 'text-dark-400 hover:bg-red-900/20 hover:text-red-400'
+          }`}
+          title={language === 'es' ? 'Mal guión' : 'Bad script'}
+        >
+          <ThumbsDown className="w-3 h-3" />
+        </button>
+      </div>
+    )
+  }
+
   const VersionActions = ({ versionIndex }: { versionIndex: number }) => {
     if (!onEdit) return null
     return (
@@ -613,6 +660,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
         <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 border-t border-dark-200/50 opacity-60 group-hover/card:opacity-100 transition-opacity duration-200">
           <CopyBtn versionIndex={-1} />
           <SaveBtn versionIndex={-1} />
+          <RateBtn versionIndex={-1} />
           <PostBtn versionIndex={-1} />
           <VersionActions versionIndex={-1} />
         </div>
@@ -645,6 +693,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
               <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 border-t border-dark-200/50 opacity-60 group-hover/card:opacity-100 transition-opacity duration-200">
                 <CopyBtn versionIndex={index} />
                 <SaveBtn versionIndex={index} />
+                <RateBtn versionIndex={index} />
                 <PostBtn versionIndex={index} />
                 <VersionActions versionIndex={index} />
               </div>

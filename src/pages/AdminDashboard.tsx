@@ -120,7 +120,7 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'fal-ai/kling-video/v2.6/pro/image-to-video': { name: 'Kling 2.6 Image', color: 'bg-cyan-400' },
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
-  'gemini-2.5-flash-preview-05-20': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
+  'gemini-2.5-flash': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
 }
 
 // Cost per 1M tokens or per image/video (for reference display)
@@ -141,7 +141,7 @@ const MODEL_PRICING: Record<string, string> = {
   'fal-ai/kling-video/v2.6/pro/image-to-video': '$0.07/sec',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
-  'gemini-2.5-flash-preview-05-20': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
+  'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
 }
 
 export default function AdminDashboard() {

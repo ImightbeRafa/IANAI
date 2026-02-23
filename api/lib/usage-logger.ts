@@ -14,7 +14,7 @@ export const MODEL_COSTS = {
   'grok-3-mini': { input: 0.30, output: 0.50 },
   'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
   'gemini': { input: 0.15, output: 0.60 },
-  'gemini-2.5-flash-preview-05-20': { input: 0.15, output: 0.60, thinking: 3.50 },
+  'gemini-2.5-flash': { input: 0.15, output: 0.60, thinking: 3.50 },
   
   // Image generation models
   // Gemini: $0.134/image (1K/2K tier) + input tokens ($2.00/1M) + thinking tokens ($12.00/1M)

@@ -61,7 +61,11 @@ import {
   Brain,
   ChevronDown,
   RefreshCw,
-  Check
+  Check,
+  Anchor,
+  Target,
+  ScrollText,
+  MessageCircle
 } from 'lucide-react'
 
 export default function ProductWorkspace() {
@@ -172,21 +176,29 @@ export default function ProductWorkspace() {
   }, [productId, sessionId, user, navigate])
 
   // Load AI Memory data
-  useEffect(() => {
-    async function loadMemory() {
-      if (!productId || !user) return
-      try {
-        const [gMem, pMem] = await Promise.all([
-          getUserAiMemory(user.id),
-          getProductAiMemory(productId, user.id)
-        ])
-        setGlobalMemory(gMem)
-        setProductMemory(pMem)
-      } catch (e) {
-        console.warn('Failed to load AI memory:', e)
-      }
+  const refreshMemory = async () => {
+    if (!productId || !user) return
+    try {
+      const [gMem, pMem] = await Promise.all([
+        getUserAiMemory(user.id),
+        getProductAiMemory(productId, user.id)
+      ])
+      setGlobalMemory(gMem)
+      setProductMemory(pMem)
+    } catch (e) {
+      console.warn('Failed to load AI memory:', e)
     }
-    loadMemory()
+  }
+
+  useEffect(() => {
+    refreshMemory()
+  }, [productId, user])
+
+  // Real-time refresh when signals are recorded
+  useEffect(() => {
+    const handler = () => { refreshMemory() }
+    window.addEventListener('ai-signal-recorded', handler)
+    return () => window.removeEventListener('ai-signal-recorded', handler)
   }, [productId, user])
 
   const handleSaveGlobalMemory = async () => {
@@ -1496,14 +1508,109 @@ export default function ProductWorkspace() {
                     )}
                   </div>
 
-                  {/* Signal Stats */}
+                  {/* Collected Memory Data */}
                   {(productMemory || globalMemory) && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {productMemory?.signals && Object.entries(productMemory.signals).slice(0, 6).map(([key, val]) => (
-                        <span key={key} className="text-[10px] bg-dark-200/60 text-dark-500 px-1.5 py-0.5 rounded-full">
-                          {key.replace(/_/g, ' ')}: {val as number}
-                        </span>
-                      ))}
+                    <div className="space-y-2">
+                      {/* Hooks collected */}
+                      {(productMemory?.sample_hooks?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1">
+                            <Anchor className="w-3 h-3 text-blue-400" />
+                            <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                              {language === 'es' ? 'Ganchos guardados' : 'Saved Hooks'} ({productMemory!.sample_hooks.length})
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {productMemory!.sample_hooks.map((hook, i) => (
+                              <p key={i} className="text-[10px] text-dark-400 bg-dark-200/40 rounded px-2 py-1 truncate" title={hook}>
+                                {hook}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CTAs collected */}
+                      {(productMemory?.sample_ctas?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1">
+                            <Target className="w-3 h-3 text-green-400" />
+                            <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                              CTAs ({productMemory!.sample_ctas.length})
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {productMemory!.sample_ctas.map((cta, i) => (
+                              <p key={i} className="text-[10px] text-dark-400 bg-dark-200/40 rounded px-2 py-1 truncate" title={cta}>
+                                {cta}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Scripts collected */}
+                      {(productMemory?.sample_scripts?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1">
+                            <ScrollText className="w-3 h-3 text-amber-400" />
+                            <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                              {language === 'es' ? 'Guiones' : 'Scripts'} ({productMemory!.sample_scripts.length})
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {productMemory!.sample_scripts.map((s, i) => (
+                              <p key={i} className="text-[10px] text-dark-400 bg-dark-200/40 rounded px-2 py-1 line-clamp-2" title={s.substring(0, 300)}>
+                                {s.substring(0, 120)}{s.length > 120 ? '…' : ''}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Edit instructions */}
+                      {(productMemory?.edit_instructions?.length ?? 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1 mb-1">
+                            <MessageCircle className="w-3 h-3 text-purple-400" />
+                            <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                              {language === 'es' ? 'Instrucciones' : 'Instructions'} ({productMemory!.edit_instructions.length})
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {productMemory!.edit_instructions.map((inst, i) => (
+                              <p key={i} className="text-[10px] text-dark-400 bg-dark-200/40 rounded px-2 py-1 truncate" title={inst}>
+                                {inst}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Signal counters summary */}
+                      {productMemory?.signals && Object.keys(productMemory.signals).length > 0 && (
+                        <div>
+                          <span className="text-[10px] font-semibold text-dark-500 uppercase tracking-wide">
+                            {language === 'es' ? 'Señales' : 'Signals'}
+                          </span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {Object.entries(productMemory.signals).map(([key, val]) => (
+                              <span key={key} className="text-[10px] bg-dark-200/60 text-dark-500 px-1.5 py-0.5 rounded-full">
+                                {key.replace(/_/g, ' ')}: {val as number}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Synthesis status */}
+                      {productMemory?.signals_since_last_synthesis != null && productMemory.signals_since_last_synthesis > 0 && (
+                        <p className="text-[10px] text-dark-400 italic">
+                          {language === 'es'
+                            ? `${productMemory.signals_since_last_synthesis} señales nuevas desde última síntesis`
+                            : `${productMemory.signals_since_last_synthesis} new signals since last synthesis`}
+                        </p>
+                      )}
                     </div>
                   )}
 

@@ -1362,7 +1362,12 @@ export async function recordAiSignal(
       }
     })
 
-    if (error) console.warn('AI signal recording failed:', error.message)
+    if (error) {
+      console.warn('AI signal recording failed:', error.message)
+    } else {
+      // Notify listeners (e.g. AI Memory panel) to refresh immediately
+      window.dispatchEvent(new CustomEvent('ai-signal-recorded', { detail: { productId, signalType } }))
+    }
   } catch (err) {
     console.warn('AI signal recording error:', err)
   }

@@ -9,7 +9,7 @@ const MAX_IMAGE_BASE64_LENGTH = 10_000_000 // ~7.5 MB decoded
 const MAX_DESCRIPTION_LENGTH = 2000
 const MAX_PREF_FIELD_LENGTH = 500
 
-const ANALYSIS_MODEL = 'gemini-2.5-flash-preview-05-20'
+const ANALYSIS_MODEL = 'gemini-2.5-flash'
 
 const STYLE_ANALYSIS_SYSTEM_PROMPT = `You are a world-class Art Director and Visual Design Analyst specializing in social media advertising.
 
