@@ -1244,12 +1244,12 @@ export default function PostWorkspace() {
                   const isEditing = editing && editingPostId === post.id
                   const isProcessing = isEnhancing || isEditing
                   return (
-                  <div key={post.id} className={`bg-dark-100 rounded-xl shadow-sm overflow-hidden group transition-all duration-500 ${isProcessing ? 'animate-breathe-border border-2 border-sky-500/30' : 'border border-dark-100'}`}>
+                  <div key={post.id} className={`bg-dark-100 rounded-xl shadow-sm overflow-hidden group transition-all duration-700 ${isProcessing ? 'proc-border border-2' : 'border border-dark-100'}`}>
                     <div className="relative overflow-hidden">
                       <img
                         src={post.imageUrl}
                         alt={`Post ${index + 1}`}
-                        className={`w-full h-auto transition-all duration-500 ${isProcessing ? 'animate-breathe' : ''}`}
+                        className={`w-full h-auto transition-all duration-700 ${isProcessing ? 'blur-[6px] scale-[1.03] brightness-[0.6]' : ''}`}
                       />
                       {/* Magic Wand — enhance button */}
                       <button
@@ -1261,14 +1261,25 @@ export default function PostWorkspace() {
                         <Wand2 className="w-5 h-5" />
                       </button>
                       {isProcessing && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-black/50 backdrop-blur-md">
-                            <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-                            <span className="text-white text-sm font-medium">
-                              {isEnhancing ? t.enhancing : t.editing}
-                            </span>
+                        <>
+                          {/* Organic cell/scale pattern layer 1 */}
+                          <div className="absolute inset-0 proc-cells-layer" />
+                          {/* Counter-drift layer for depth */}
+                          <div className="absolute inset-0 proc-cells-layer-alt" />
+                          {/* Sweeping light pass */}
+                          <div className="absolute inset-0 proc-sweep" />
+                          {/* Dark overlay pulse */}
+                          <div className="absolute inset-0 bg-dark-900/30 proc-pulse" />
+                          {/* Center status pill */}
+                          <div className="absolute inset-0 flex items-center justify-center z-10">
+                            <div className="flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10">
+                              <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                              <span className="text-white/90 text-sm font-medium tracking-wide">
+                                {isEnhancing ? t.enhancing : t.editing}
+                              </span>
+                            </div>
                           </div>
-                        </div>
+                        </>
                       )}
                     </div>
                     <div className="p-3 space-y-2">
