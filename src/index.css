@@ -101,6 +101,33 @@ select option {
   min-height: 100dvh;
 }
 
+/* ===== Post Card Breathing Animation (enhance/edit loading) ===== */
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    filter: brightness(1);
+    box-shadow: 0 0 0 0 rgba(14, 165, 233, 0);
+  }
+  50% {
+    transform: scale(1.015);
+    filter: brightness(0.7);
+    box-shadow: 0 0 30px 8px rgba(14, 165, 233, 0.25);
+  }
+}
+
+@keyframes breathe-border {
+  0%, 100% { border-color: rgba(14, 165, 233, 0.15); }
+  50%      { border-color: rgba(14, 165, 233, 0.5); }
+}
+
+.animate-breathe {
+  animation: breathe 2.8s ease-in-out infinite;
+}
+
+.animate-breathe-border {
+  animation: breathe-border 2.8s ease-in-out infinite;
+}
+
 /* ===== Generating Placeholder Animations ===== */
 @keyframes gen-bg-shift {
   0%   { background-position: 0% 50%; }

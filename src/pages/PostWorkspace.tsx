@@ -378,34 +378,39 @@ export default function PostWorkspace() {
 
       if (result.status === 'Ready' && result.result?.sample) {
         const imageUrl = result.result.sample
-        let savedUrl = imageUrl
-        let postId = `post-${Date.now()}`
+        const tempId = `post-${Date.now()}`
 
-        try {
-          if (user && productId) {
-            savedUrl = await uploadPostImageOriginal(user.id, productId, imageUrl)
-            const post = await createPost(productId, user.id, {
-              prompt: script,
-              width: aspectRatio === '9:16' ? 1080 : 1080,
-              height: aspectRatio === '9:16' ? 1920 : 1440,
-              output_format: 'png',
-              model: imageModel
-            })
-            postId = post.id
-            await updatePostStatus(postId, 'completed', savedUrl)
-          }
-        } catch (saveErr) {
-          console.error('Failed to save image:', saveErr)
-        }
-
+        // Show immediately with base64
         setGeneratedPosts(prev => [{
-          id: postId,
-          imageUrl: savedUrl,
+          id: tempId,
+          imageUrl,
           prompt: script,
           createdAt: new Date(),
           model: imageModel,
-          saved: !!user && !!productId
+          saved: false
         }, ...prev])
+
+        // Upload to Supabase in background, then swap URL + save to DB
+        if (user && productId) {
+          (async () => {
+            try {
+              const savedUrl = await uploadPostImageOriginal(user.id, productId, imageUrl)
+              const post = await createPost(productId, user.id, {
+                prompt: script,
+                width: aspectRatio === '9:16' ? 1080 : 1080,
+                height: aspectRatio === '9:16' ? 1920 : 1440,
+                output_format: 'png',
+                model: imageModel
+              })
+              await updatePostStatus(post.id, 'completed', savedUrl)
+              setGeneratedPosts(prev => prev.map(p =>
+                p.id === tempId ? { ...p, id: post.id, imageUrl: savedUrl, saved: true } : p
+              ))
+            } catch (saveErr) {
+              console.error('Failed to save image:', saveErr)
+            }
+          })()
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t.error)
@@ -468,56 +473,48 @@ export default function PostWorkspace() {
 
       if (result.status === 'Ready' && result.result?.sample) {
         const editedUrl = result.result.sample
+        const tempId = `edit-${Date.now()}`
+        const editText = editPrompt.trim()
 
-        // Try to upload the edited image to storage
-        let savedUrl = editedUrl
-        try {
-          if (user && productId) {
-            savedUrl = await uploadPostImageOriginal(user.id, productId, editedUrl)
-          }
-        } catch (saveErr) {
-          console.error('Failed to save edited image:', saveErr)
-        }
-
-        // Add the edited image as a NEW post card right after the original (before + after)
-        const editedPost: GeneratedPost = {
-          id: `edit-${Date.now()}`,
-          imageUrl: savedUrl,
-          prompt: `✏️ ${editPrompt.trim()}`,
-          createdAt: new Date(),
-          model: 'nano-banana-pro',
-          saved: true
-        }
-
-        // Save to DB as a new post if possible
-        try {
-          if (user && productId) {
-            const dbPost = await createPost(productId, user.id, {
-              prompt: `Edit: ${editPrompt.trim()}`,
-              width: 0,
-              height: 0,
-              output_format: 'png',
-              model: 'nano-banana-pro'
-            })
-            editedPost.id = dbPost.id
-            await updatePostStatus(dbPost.id, 'completed', savedUrl)
-          }
-        } catch (dbErr) {
-          console.error('Failed to save edited post to DB:', dbErr)
-        }
-
-        // Insert right after the original post
+        // Show immediately with base64 + clear edit state
         setGeneratedPosts(prev => {
           const idx = prev.findIndex(p => p.id === postId)
           const next = [...prev]
-          next.splice(idx + 1, 0, editedPost)
+          next.splice(idx + 1, 0, {
+            id: tempId,
+            imageUrl: editedUrl,
+            prompt: `✏️ ${editText}`,
+            createdAt: new Date(),
+            model: 'nano-banana-pro',
+            saved: false
+          })
           return next
         })
-
-        // Clear edit state
         setEditPrompt('')
         setEditRefImages([])
         setEditingPostId(null)
+
+        // Upload to Supabase in background
+        if (user && productId) {
+          (async () => {
+            try {
+              const savedUrl = await uploadPostImageOriginal(user.id, productId, editedUrl)
+              const dbPost = await createPost(productId, user.id, {
+                prompt: `Edit: ${editText}`,
+                width: 0,
+                height: 0,
+                output_format: 'png',
+                model: 'nano-banana-pro'
+              })
+              await updatePostStatus(dbPost.id, 'completed', savedUrl)
+              setGeneratedPosts(prev => prev.map(p =>
+                p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
+              ))
+            } catch (saveErr) {
+              console.error('Failed to save edited image:', saveErr)
+            }
+          })()
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t.editError)
@@ -578,47 +575,44 @@ export default function PostWorkspace() {
 
       if (result.status === 'Ready' && result.result?.sample) {
         const enhancedUrl = result.result.sample
+        const tempId = `enhance-${Date.now()}`
 
-        let savedUrl = enhancedUrl
-        try {
-          if (user && productId) {
-            savedUrl = await uploadPostImageOriginal(user.id, productId, enhancedUrl)
-          }
-        } catch (saveErr) {
-          console.error('Failed to save enhanced image:', saveErr)
-        }
-
-        const enhancedPost: GeneratedPost = {
-          id: `enhance-${Date.now()}`,
-          imageUrl: savedUrl,
-          prompt: `✨ Enhanced`,
-          createdAt: new Date(),
-          model: 'nano-banana-pro',
-          saved: true
-        }
-
-        try {
-          if (user && productId) {
-            const dbPost = await createPost(productId, user.id, {
-              prompt: 'Enhanced version',
-              width: 0,
-              height: 0,
-              output_format: 'png',
-              model: 'nano-banana-pro'
-            })
-            enhancedPost.id = dbPost.id
-            await updatePostStatus(dbPost.id, 'completed', savedUrl)
-          }
-        } catch (dbErr) {
-          console.error('Failed to save enhanced post to DB:', dbErr)
-        }
-
+        // Show immediately with base64
         setGeneratedPosts(prev => {
           const idx = prev.findIndex(p => p.id === postId)
           const next = [...prev]
-          next.splice(idx + 1, 0, enhancedPost)
+          next.splice(idx + 1, 0, {
+            id: tempId,
+            imageUrl: enhancedUrl,
+            prompt: `✨ Enhanced`,
+            createdAt: new Date(),
+            model: 'nano-banana-pro',
+            saved: false
+          })
           return next
         })
+
+        // Upload to Supabase in background
+        if (user && productId) {
+          (async () => {
+            try {
+              const savedUrl = await uploadPostImageOriginal(user.id, productId, enhancedUrl)
+              const dbPost = await createPost(productId, user.id, {
+                prompt: 'Enhanced version',
+                width: 0,
+                height: 0,
+                output_format: 'png',
+                model: 'nano-banana-pro'
+              })
+              await updatePostStatus(dbPost.id, 'completed', savedUrl)
+              setGeneratedPosts(prev => prev.map(p =>
+                p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
+              ))
+            } catch (saveErr) {
+              console.error('Failed to save enhanced image:', saveErr)
+            }
+          })()
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t.enhanceError)
@@ -1245,14 +1239,17 @@ export default function PostWorkspace() {
                     sublabel={imageModel}
                   />
                 )}
-                {generatedPosts.map((post, index) => (
-                  <div key={post.id} className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 overflow-hidden group">
-                    <div className="relative">
+                {generatedPosts.map((post, index) => {
+                  const isEnhancing = enhancingPostId === post.id
+                  const isEditing = editing && editingPostId === post.id
+                  const isProcessing = isEnhancing || isEditing
+                  return (
+                  <div key={post.id} className={`bg-dark-100 rounded-xl shadow-sm overflow-hidden group transition-all duration-500 ${isProcessing ? 'animate-breathe-border border-2 border-sky-500/30' : 'border border-dark-100'}`}>
+                    <div className="relative overflow-hidden">
                       <img
                         src={post.imageUrl}
                         alt={`Post ${index + 1}`}
-                        className="w-full h-auto"
-                        loading="lazy"
+                        className={`w-full h-auto transition-all duration-500 ${isProcessing ? 'animate-breathe' : ''}`}
                       />
                       {/* Magic Wand — enhance button */}
                       <button
@@ -1263,19 +1260,13 @@ export default function PostWorkspace() {
                       >
                         <Wand2 className="w-5 h-5" />
                       </button>
-                      {enhancingPostId === post.id && (
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
-                          <div className="flex items-center gap-2 text-white text-sm font-medium">
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            {t.enhancing}
-                          </div>
-                        </div>
-                      )}
-                      {editing && editingPostId === post.id && (
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
-                          <div className="flex items-center gap-2 text-white text-sm font-medium">
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            {t.editing}
+                      {isProcessing && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="flex items-center gap-2.5 px-4 py-2 rounded-full bg-black/50 backdrop-blur-md">
+                            <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+                            <span className="text-white text-sm font-medium">
+                              {isEnhancing ? t.enhancing : t.editing}
+                            </span>
                           </div>
                         </div>
                       )}
@@ -1376,7 +1367,8 @@ export default function PostWorkspace() {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
 
               {/* Load More button */}
