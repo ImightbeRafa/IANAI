@@ -11,6 +11,8 @@ export interface UsageLimits {
   bonusImages: number
   descriptionsUsed: number
   descriptionsLimit: number
+  repliesUsed: number
+  repliesLimit: number
   loading: boolean
   refresh: () => void
 }
@@ -28,6 +30,8 @@ const DEFAULT_DATA: Omit<UsageLimits, 'loading' | 'refresh'> = {
   bonusImages: 0,
   descriptionsUsed: 0,
   descriptionsLimit: 10,
+  repliesUsed: 0,
+  repliesLimit: 10,
 }
 
 async function fetchUsageData(userId: string): Promise<Omit<UsageLimits, 'loading' | 'refresh'>> {
@@ -44,6 +48,8 @@ async function fetchUsageData(userId: string): Promise<Omit<UsageLimits, 'loadin
         bonusImages: data.bonusImages || 0,
         descriptionsUsed: data.descriptionsUsed || 0,
         descriptionsLimit: data.descriptionsLimit ?? 10,
+        repliesUsed: data.repliesUsed || 0,
+        repliesLimit: data.repliesLimit ?? 10,
       }
     }
   } catch {
@@ -62,7 +68,7 @@ async function fetchUsageData(userId: string): Promise<Omit<UsageLimits, 'loadin
       .maybeSingle(),
     supabase
       .from('usage')
-      .select('scripts_generated, images_generated, descriptions_generated, enhances_generated')
+      .select('scripts_generated, images_generated, descriptions_generated, enhances_generated, replies_generated')
       .eq('user_id', userId)
       .eq('period_start', currentMonth)
       .maybeSingle(),
@@ -77,7 +83,7 @@ async function fetchUsageData(userId: string): Promise<Omit<UsageLimits, 'loadin
 
   const { data: limits } = await supabase
     .from('plan_limits')
-    .select('scripts_per_month, images_per_month, descriptions_per_month')
+    .select('scripts_per_month, images_per_month, descriptions_per_month, replies_per_month')
     .eq('plan', plan)
     .maybeSingle()
 
@@ -94,6 +100,8 @@ async function fetchUsageData(userId: string): Promise<Omit<UsageLimits, 'loadin
     bonusImages: bonus,
     descriptionsUsed: usage?.descriptions_generated || 0,
     descriptionsLimit: limits?.descriptions_per_month ?? 10,
+    repliesUsed: usage?.replies_generated || 0,
+    repliesLimit: limits?.replies_per_month ?? 10,
   }
 }
 

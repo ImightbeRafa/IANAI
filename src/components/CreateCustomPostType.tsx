@@ -33,6 +33,8 @@ interface Props {
     stylePreferences: Record<string, unknown>
     thumbnailUrl?: string
   }) => Promise<void>
+  initialReferenceImages?: string[]
+  initialDescription?: string
 }
 
 const ANALYZE_API_URL = import.meta.env.PROD ? '/api/analyze-style' : 'http://localhost:3000/api/analyze-style'
@@ -66,11 +68,11 @@ const LAYOUT_OPTIONS = [
   { id: 'any', es: 'Que la IA decida', en: 'Let AI decide' },
 ]
 
-export default function CreateCustomPostType({ onClose, onSave }: Props) {
+export default function CreateCustomPostType({ onClose, onSave, initialReferenceImages, initialDescription }: Props) {
   const { language } = useLanguage()
-  const [step, setStep] = useState(1)
-  const [referenceImages, setReferenceImages] = useState<string[]>([])
-  const [description, setDescription] = useState('')
+  const [step, setStep] = useState(initialReferenceImages && initialReferenceImages.length > 0 ? 2 : 1)
+  const [referenceImages, setReferenceImages] = useState<string[]>(initialReferenceImages || [])
+  const [description, setDescription] = useState(initialDescription || '')
   const [stylePrefs, setStylePrefs] = useState<StylePreferences>({
     brandColors: '',
     typography: 'any',

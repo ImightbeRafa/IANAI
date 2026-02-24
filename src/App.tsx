@@ -24,6 +24,8 @@ const DescriptionsDashboard = lazy(() => import('./pages/DescriptionsDashboard')
 const DescriptionsWorkspace = lazy(() => import('./pages/DescriptionsWorkspace'))
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const AdminTickets = lazy(() => import('./pages/AdminTickets'))
+const RespuestasDashboard = lazy(() => import('./pages/RespuestasDashboard'))
+const RespuestasWorkspace = lazy(() => import('./pages/RespuestasWorkspace'))
 
 function LazyFallback() {
   return (
@@ -130,6 +132,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <DescriptionsWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/respuestas"
+              element={
+                <ProtectedRoute>
+                  <RespuestasDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/respuestas/product/:productId"
+              element={
+                <ProtectedRoute>
+                  <RespuestasWorkspace />
                 </ProtectedRoute>
               }
             />

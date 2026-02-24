@@ -782,8 +782,8 @@ export default function ProductWorkspace() {
 
         if (isOnlyReconocimiento) {
           generatePrompt = language === 'es'
-            ? `Genera exactamente ${reconocimientoCount} guión(es) de contenido TOF / Reconocimiento de marca.\nCADA guión DEBE usar un TIPO DE VIDEO DIFERENTE de la lista maestra (Verdad Incómoda, Checklist de Errores, Antes/Después, Micro-Guía, Desmitificación, POV, Storytime, Behind the Scenes, Estándares, Comparativa, Hot Take, Preguntas, Mini Demo, Trend Hijack).\nNO repitas el mismo tipo de video. Varía obligatoriamente.`
-            : `Generate exactly ${reconocimientoCount} TOF / Brand Awareness content script(s).\nEach script MUST use a DIFFERENT VIDEO TYPE from the master list (Uncomfortable Truth, Error Checklist, Before/After, Micro-Guide, Myth Busting, POV, Storytime, Behind the Scenes, Quality Standards, Comparison, Hot Take, Questions, Mini Demo, Trend Hijack).\nDo NOT repeat the same video type. Vary obligatorily.`
+            ? `Genera exactamente ${reconocimientoCount} guión(es) de reconocimiento de marca (micro-historias).\nCada guión DEBE tener un MOTOR EMOCIONAL DIFERENTE.\nLa marca debe aparecer como consecuencia natural de la historia, NO como protagonista.\nNO repitas la misma emoción o enfoque. Varía obligatoriamente.`
+            : `Generate exactly ${reconocimientoCount} brand awareness script(s) (micro-stories).\nEach script MUST have a DIFFERENT EMOTIONAL MOTOR.\nThe brand must appear as a natural consequence of the story, NOT as the protagonist.\nDo NOT repeat the same emotion or approach. Vary obligatorily.`
         } else {
           const parts: string[] = []
           for (const [key, count] of Object.entries(config)) {
@@ -806,11 +806,20 @@ export default function ProductWorkspace() {
       }
 
       // Append user style/tone preferences while preserving master format
+      const isReconocimientoOnly = scriptSettings.generationMode === 'by_type' 
+        && (scriptSettings.scriptTypeConfig.reconocimiento ?? 0) > 0
+        && Object.entries(scriptSettings.scriptTypeConfig).every(([k, n]) => k === 'reconocimiento' || n === 0)
       if (input.trim()) {
         const userInstruction = input.trim()
-        generatePrompt += language === 'es'
-          ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura obligatoria de guiones (GANCHO/DESARROLLO/CTA). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
-          : `\n\nUSER STYLE PREFERENCE: "${userInstruction}"\nIMPORTANT: Apply this tone/focus preference WITHIN the mandatory script structure (HOOK/DEVELOPMENT/CTA). Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
+        if (isReconocimientoOnly) {
+          generatePrompt += language === 'es'
+            ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque en las micro-historias. NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
+            : `\n\nUSER STYLE PREFERENCE: "${userInstruction}"\nIMPORTANT: Apply this tone/focus preference within the micro-stories. Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
+        } else {
+          generatePrompt += language === 'es'
+            ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura obligatoria de guiones (GANCHO/DESARROLLO/CTA). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
+            : `\n\nUSER STYLE PREFERENCE: "${userInstruction}"\nIMPORTANT: Apply this tone/focus preference WITHIN the mandatory script structure (HOOK/DEVELOPMENT/CTA). Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
+        }
         // Record instruction as AI memory signal
         if (product) {
           recordAiSignal(product.id, 'user_instruction', { instruction: userInstruction })

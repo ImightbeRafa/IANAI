@@ -54,6 +54,8 @@ export type FeatureType =
   | 'voice_transcription' // Voice-to-text transcription
   | 'style_analysis'      // Custom post type style analysis
   | 'memory_reflection'   // AI memory synthesis/reflection
+  | 'reply'              // Client reply generation (Respuestas)
+  | 'ocr'                // Image OCR text extraction
 
 interface UsageLogParams {
   userId?: string

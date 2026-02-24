@@ -24,7 +24,8 @@ import {
   Plus,
   Trash2,
   Pipette,
-  Check
+  Check,
+  Palette
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
@@ -85,6 +86,8 @@ export default function PostWorkspace() {
   const paletteImageInputRef = useRef<HTMLInputElement>(null)
   const [customPostTypes, setCustomPostTypes] = useState<CustomPostType[]>([])
   const [showCreatePostType, setShowCreatePostType] = useState(false)
+  const [createTypeFromImage, setCreateTypeFromImage] = useState<string | null>(null)
+  const [showEnhanceTip, setShowEnhanceTip] = useState(false)
   const [productImages, setProductImages] = useState<ProductImage[]>([])
   const [selectedProductImageIds, setSelectedProductImageIds] = useState<Set<string>>(new Set())
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
@@ -130,6 +133,8 @@ export default function PostWorkspace() {
       enhance: 'Mejorar',
       enhancing: 'Mejorando...',
       enhanceError: 'Error al mejorar imagen',
+      saveAsStyle: 'Guardar como estilo',
+      enhanceTip: '¡Prueba mejorarla!',
       createPalette: 'Crear paleta',
       paletteName: 'Nombre',
       paletteColors: 'Colores',
@@ -174,6 +179,8 @@ export default function PostWorkspace() {
       enhance: 'Enhance',
       enhancing: 'Enhancing...',
       enhanceError: 'Error enhancing image',
+      saveAsStyle: 'Save as style',
+      enhanceTip: 'Try enhancing it!',
       createPalette: 'Create palette',
       paletteName: 'Name',
       paletteColors: 'Colors',
@@ -411,6 +418,19 @@ export default function PostWorkspace() {
           saved: false
         }, ...prev])
 
+        // Show enhance tip once (guard against redundant timeouts)
+        if (!localStorage.getItem('enhance_tip_dismissed') && !showEnhanceTip) {
+          const tipTimer = setTimeout(() => setShowEnhanceTip(true), 2000)
+          // Auto-dismiss after 12 seconds
+          setTimeout(() => {
+            clearTimeout(tipTimer)
+            setShowEnhanceTip(prev => {
+              if (prev) localStorage.setItem('enhance_tip_dismissed', '1')
+              return false
+            })
+          }, 14000)
+        }
+
         // Upload to Supabase in background, then swap URL + save to DB
         if (user && productId) {
           (async () => {
@@ -640,6 +660,22 @@ export default function PostWorkspace() {
     } finally {
       setEnhancingPostId(null)
     }
+  }
+
+  const handleCreateStyleFromPost = async (imageUrl: string) => {
+    try {
+      const base64 = await urlToBase64(imageUrl)
+      setCreateTypeFromImage(base64)
+      setShowCreatePostType(true)
+    } catch (err) {
+      console.error('Failed to load post image for style creation:', err)
+      setError(language === 'es' ? 'No se pudo cargar la imagen para crear el estilo.' : 'Failed to load image for style creation.')
+    }
+  }
+
+  const dismissEnhanceTip = () => {
+    setShowEnhanceTip(false)
+    localStorage.setItem('enhance_tip_dismissed', '1')
   }
 
   const handleSavePalette = async () => {
@@ -1345,15 +1381,36 @@ export default function PostWorkspace() {
                         alt={`Post ${index + 1}`}
                         className={`w-full h-auto transition-all duration-700 ${isProcessing ? 'blur-[8px] scale-[1.04] brightness-[0.5]' : ''}`}
                       />
-                      {/* Magic Wand — enhance button */}
-                      <button
-                        onClick={() => handleEnhance(post.id, post.imageUrl)}
-                        disabled={!!enhancingPostId || editing}
-                        className="absolute top-2 right-2 w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={t.enhance}
-                      >
-                        <Wand2 className="w-5 h-5" />
-                      </button>
+                      {/* Top-right action buttons */}
+                      <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+                        {/* Magic Wand — enhance button */}
+                        <button
+                          onClick={() => { handleEnhance(post.id, post.imageUrl); dismissEnhanceTip() }}
+                          disabled={!!enhancingPostId || editing}
+                          className="w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={t.enhance}
+                        >
+                          <Wand2 className="w-5 h-5" />
+                        </button>
+                        {/* Save as style button */}
+                        <button
+                          onClick={() => handleCreateStyleFromPost(post.imageUrl)}
+                          className="w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all"
+                          title={t.saveAsStyle}
+                        >
+                          <Palette className="w-5 h-5" />
+                        </button>
+                      </div>
+                      {/* Enhance tip tooltip — shows once on first post */}
+                      {showEnhanceTip && index === 0 && (
+                        <button
+                          onClick={dismissEnhanceTip}
+                          className="absolute top-2 right-13 bg-primary-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg shadow-lg animate-bounce-subtle whitespace-nowrap z-20"
+                        >
+                          <span className="mr-1">✨</span>{t.enhanceTip}
+                          <div className="absolute top-1/2 -right-1.5 -translate-y-1/2 w-0 h-0 border-t-[5px] border-t-transparent border-b-[5px] border-b-transparent border-l-[6px] border-l-primary-600" />
+                        </button>
+                      )}
                       {isProcessing && (
                         <>
                           {/* Organic cell/scale pattern layer 1 */}
@@ -1520,7 +1577,8 @@ export default function PostWorkspace() {
       {/* Create Custom Post Type Modal */}
       {showCreatePostType && (
         <CreateCustomPostType
-          onClose={() => setShowCreatePostType(false)}
+          onClose={() => { setShowCreatePostType(false); setCreateTypeFromImage(null) }}
+          initialReferenceImages={createTypeFromImage ? [createTypeFromImage] : undefined}
           onSave={async (data) => {
             if (!user) return
             const saved = await createCustomPostType(user.id, {

@@ -363,6 +363,20 @@ select option {
 .gen-dot-2 { animation: gen-dot-bounce 1.4s ease-in-out infinite 0.2s; }
 .gen-dot-3 { animation: gen-dot-bounce 1.4s ease-in-out infinite 0.4s; }
 
+/* ===== Enhance Tip Subtle Bounce ===== */
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+.animate-bounce-subtle { animation: bounce-subtle 2s ease-in-out infinite; }
+
+/* ===== Feedback Toast Slide-in ===== */
+@keyframes slide-in-up {
+  0%   { transform: translateY(24px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-in-up { animation: slide-in-up 0.4s ease-out forwards; }
+
 @layer components {
   .btn-primary {
     @apply bg-primary-600 text-white px-4 py-2 rounded-lg font-medium 

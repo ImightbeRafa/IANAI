@@ -20,6 +20,7 @@ import IndumentariaForm from '../components/IndumentariaForm'
 import BusinessForm from '../components/BusinessForm'
 import ProductTypeSelector from '../components/ProductTypeSelector'
 import ShareProductModal from '../components/ShareProductModal'
+import FeedbackToast from '../components/FeedbackToast'
 import { createBusiness } from '../services/database'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { 
@@ -726,6 +727,9 @@ export default function Dashboard() {
           businessId={selectedBusinessId}
         />
       )}
+
+      {/* Periodic feedback toast */}
+      <FeedbackToast />
     </Layout>
   )
 }

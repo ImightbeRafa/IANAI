@@ -618,3 +618,36 @@ export interface AiMemoryStats {
   last_reflection_at: string | null
 }
 
+// =============================================
+// Respuestas (Client Reply Generator)
+// =============================================
+export interface ReplySession {
+  id: string
+  product_id: string
+  user_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ReplyMessage {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  attachments: Record<string, unknown>[]
+  created_at: string
+}
+
+export interface ReplyContextSource {
+  id: string
+  product_id: string
+  user_id: string
+  source_type: 'url' | 'text' | 'image'
+  title: string
+  content: string | null
+  url: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+

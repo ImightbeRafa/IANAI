@@ -91,7 +91,7 @@ export async function requireAuth(
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image' | 'video' | 'description' | 'enhance'
+  action: 'script' | 'image' | 'video' | 'description' | 'enhance' | 'reply'
 ): Promise<{ allowed: boolean; remaining: number; limit: number }> {
   if (!supabaseAdmin) {
     console.error('Usage limit check: Supabase not configured — denying request')
@@ -143,7 +143,9 @@ export async function checkUsageLimit(
         ? limits.images_per_month 
         : effectiveAction === 'description'
           ? (limits.descriptions_per_month ?? -1)
-          : limits.videos_per_month || 10
+          : effectiveAction === 'reply'
+            ? (limits.replies_per_month ?? 10)
+            : limits.videos_per_month || 10
 
     // -1 means unlimited
     if (limit === -1) {
@@ -180,7 +182,9 @@ export async function checkUsageLimit(
         ? (usage?.images_generated || 0) + Math.floor((usage?.enhances_generated || 0) / 2)
         : effectiveAction === 'description'
           ? (usage?.descriptions_generated || 0)
-          : (usage?.videos_generated || 0)
+          : effectiveAction === 'reply'
+            ? (usage?.replies_generated || 0)
+            : (usage?.videos_generated || 0)
 
     const remaining = limit - currentUsage
     const allowed = remaining > 0
@@ -218,7 +222,7 @@ export async function deductBonusImage(userId: string): Promise<void> {
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image' | 'video' | 'description' | 'enhance'
+  action: 'script' | 'image' | 'video' | 'description' | 'enhance' | 'reply'
 ): Promise<void> {
   if (!supabaseAdmin) return
 

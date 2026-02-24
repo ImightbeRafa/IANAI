@@ -22,7 +22,10 @@ import type {
   AiMemory,
   AiMemoryStats,
   CustomPostType,
-  CustomPostTypeFormData
+  CustomPostTypeFormData,
+  ReplySession,
+  ReplyMessage,
+  ReplyContextSource
 } from '../types'
 
 // =============================================
@@ -1619,6 +1622,123 @@ export async function createCustomPostType(
 export async function deleteCustomPostType(id: string): Promise<void> {
   const { error } = await supabase
     .from('custom_post_types')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
+
+// =============================================
+// RESPUESTAS (Client Reply Generator)
+// =============================================
+
+export async function getReplySessions(productId: string): Promise<ReplySession[]> {
+  const { data, error } = await supabase
+    .from('reply_sessions')
+    .select('*')
+    .eq('product_id', productId)
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createReplySession(
+  productId: string,
+  userId: string,
+  title: string = 'New conversation'
+): Promise<ReplySession> {
+  const { data, error } = await supabase
+    .from('reply_sessions')
+    .insert({ product_id: productId, user_id: userId, title })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteReplySession(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('reply_sessions')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
+
+export async function getReplyMessages(sessionId: string): Promise<ReplyMessage[]> {
+  const { data, error } = await supabase
+    .from('reply_messages')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function addReplyMessage(
+  sessionId: string,
+  role: 'user' | 'assistant',
+  content: string,
+  attachments: Record<string, unknown>[] = []
+): Promise<ReplyMessage> {
+  const { data, error } = await supabase
+    .from('reply_messages')
+    .insert({ session_id: sessionId, role, content, attachments })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function getReplyContextSources(
+  productId: string,
+  userId: string
+): Promise<ReplyContextSource[]> {
+  const { data, error } = await supabase
+    .from('reply_context_sources')
+    .select('*')
+    .eq('product_id', productId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function createReplyContextSource(
+  productId: string,
+  userId: string,
+  sourceType: 'url' | 'text' | 'image',
+  title: string,
+  content: string | null,
+  url: string | null = null,
+  metadata: Record<string, unknown> = {}
+): Promise<ReplyContextSource> {
+  const { data, error } = await supabase
+    .from('reply_context_sources')
+    .insert({
+      product_id: productId,
+      user_id: userId,
+      source_type: sourceType,
+      title,
+      content,
+      url,
+      metadata
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteReplyContextSource(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('reply_context_sources')
     .delete()
     .eq('id', id)
 
