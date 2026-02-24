@@ -24,7 +24,6 @@ import {
   Plus,
   Trash2,
   Pipette,
-  Check,
   Palette
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -89,7 +88,6 @@ export default function PostWorkspace() {
   const [createTypeFromImage, setCreateTypeFromImage] = useState<string | null>(null)
   const [showEnhanceTip, setShowEnhanceTip] = useState(false)
   const [productImages, setProductImages] = useState<ProductImage[]>([])
-  const [selectedProductImageIds, setSelectedProductImageIds] = useState<Set<string>>(new Set())
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
   const productImageInputRef = useRef<HTMLInputElement>(null)
   const POSTS_PAGE_SIZE = 20
@@ -313,32 +311,13 @@ export default function PostWorkspace() {
     try {
       await deleteProductImage(imgId)
       setProductImages(prev => prev.filter(i => i.id !== imgId))
-      setSelectedProductImageIds(prev => {
-        const next = new Set(prev)
-        next.delete(imgId)
-        return next
-      })
     } catch (err) {
       console.error('Delete product image failed:', err)
     }
   }
 
-  const toggleProductImageSelection = (imgId: string) => {
-    setSelectedProductImageIds(prev => {
-      const next = new Set(prev)
-      if (next.has(imgId)) {
-        next.delete(imgId)
-      } else {
-        next.add(imgId)
-      }
-      return next
-    })
-  }
-
-  const getSelectedProductImageUrls = (): string[] => {
-    return productImages
-      .filter(img => selectedProductImageIds.has(img.id))
-      .map(img => img.image_url)
+  const getProductImageUrls = (): string[] => {
+    return productImages.map(img => img.image_url)
   }
 
   const handleGenerate = async () => {
@@ -371,7 +350,7 @@ export default function PostWorkspace() {
         customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined
       }
 
-      const selectedUrls = getSelectedProductImageUrls()
+      const selectedUrls = getProductImageUrls()
       if (selectedUrls.length > 0) {
         const base64Images = await Promise.all(selectedUrls.map(async u => compressBase64ForApi(await urlToBase64(u))))
         base64Images.forEach((img, i) => {
@@ -604,8 +583,8 @@ export default function PostWorkspace() {
           enhanceImage: base64Image,
           aspectRatio,
           language,
-          productReferenceImages: selectedProductImageIds.size > 0
-            ? await Promise.all(getSelectedProductImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
+          productReferenceImages: productImages.length > 0
+            ? await Promise.all(getProductImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
             : undefined
         })
       })
@@ -1209,40 +1188,24 @@ export default function PostWorkspace() {
               )}
             </div>
 
-            {/* Product images — persistent, selectable */}
+            {/* Product images — persistent, all used as reference */}
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 {t.refImages}
               </label>
               <p className="text-[10px] text-dark-400 mb-2">
                 {language === 'es'
-                  ? 'Sube fotos de tu producto. Selecciona las que quieras usar como referencia en generación y mejora.'
-                  : 'Upload product photos. Select the ones you want to use as reference for generation and enhancement.'}
+                  ? 'Sube fotos de tu producto. Todas se usarán como referencia en generación y mejora.'
+                  : 'Upload product photos. All will be used as reference for generation and enhancement.'}
               </p>
 
               {/* Image grid */}
               <div className="flex gap-2 flex-wrap">
-                {productImages.map((img) => {
-                  const isSelected = selectedProductImageIds.has(img.id)
-                  return (
+                {productImages.map((img) => (
                     <div key={img.id} className="relative group">
-                      <button
-                        onClick={() => toggleProductImageSelection(img.id)}
-                        className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
-                          isSelected
-                            ? 'border-primary-500 ring-2 ring-primary-500/30'
-                            : 'border-dark-200 hover:border-dark-300'
-                        }`}
-                      >
+                      <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-primary-500 ring-2 ring-primary-500/30">
                         <img src={img.image_url} alt="Product" className="w-full h-full object-cover" />
-                        {isSelected && (
-                          <div className="absolute inset-0 bg-primary-500/20 flex items-center justify-center">
-                            <div className="w-5 h-5 bg-primary-500 rounded-full flex items-center justify-center">
-                              <Check className="w-3 h-3 text-white" />
-                            </div>
-                          </div>
-                        )}
-                      </button>
+                      </div>
                       <button
                         onClick={() => handleDeleteProductImage(img.id)}
                         className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
@@ -1250,8 +1213,7 @@ export default function PostWorkspace() {
                         <X className="w-2.5 h-2.5" />
                       </button>
                     </div>
-                  )
-                })}
+                  ))}
 
                 {/* Upload button */}
                 {productImages.length < 4 && (
@@ -1282,11 +1244,11 @@ export default function PostWorkspace() {
                 />
               </div>
 
-              {selectedProductImageIds.size > 0 && (
+              {productImages.length > 0 && (
                 <p className="text-[10px] text-primary-500 mt-1.5 font-medium">
                   {language === 'es'
-                    ? `${selectedProductImageIds.size} imagen(es) seleccionada(s) como referencia`
-                    : `${selectedProductImageIds.size} image(s) selected as reference`}
+                    ? `${productImages.length} imagen(es) se usarán como referencia`
+                    : `${productImages.length} image(s) will be used as reference`}
                 </p>
               )}
             </div>
