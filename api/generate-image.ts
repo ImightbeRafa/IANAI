@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -950,6 +950,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           promptParts.push({ text: 'IMÁGENES DE REFERENCIA DEL PRODUCTO REAL (usa estas como fuente de verdad para la apariencia del producto):' })
         }
         promptParts.push(...productImageParts)
+
+        // Brand Kit: inject logo as inline image so Gemini can reproduce it in the post
+        if (brandKit && brandKit.logo_url && isPostMode) {
+          try {
+            const logoData = await fetchBrandLogoAsBase64(brandKit)
+            if (logoData) {
+              promptParts.push({ text: `LOGO OFICIAL DE LA MARCA "${brandKit.name}" (DEBES incluirlo en el diseño, reproduciéndolo fielmente):` })
+              promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
+            }
+          } catch (logoErr) {
+            console.warn('Failed to inject brand logo inline:', logoErr)
+          }
+        }
 
         // Determine aspect ratio from dimensions
         const geminiAspectRatio = getAspectRatio(

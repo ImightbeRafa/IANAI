@@ -200,5 +200,27 @@ export function buildBrandVisualPrompt(kit: BrandKitRow): string | null {
  */
 export function buildBrandLogoPrompt(kit: BrandKitRow): string | null {
   if (!kit.logo_url) return null
-  return `LOGO DE MARCA: La marca tiene un logotipo oficial. Incluye el logotipo de la marca "${kit.name}" de forma prominente en el diseño. Posiciónalo de manera profesional (esquina superior o inferior, o integrado en la composición). El logo debe ser claramente visible y legible. URL del logo: ${kit.logo_url}`
+  return `LOGO DE MARCA (NO NEGOCIABLE): Se adjunta el logotipo oficial de la marca "${kit.name}". DEBES incluir este logo EXACTAMENTE como aparece en la imagen de referencia del logo. Posiciónalo de forma prominente y profesional (esquina superior izquierda, superior derecha, o centrado arriba). El logo DEBE ser claramente visible, legible, y mantener sus proporciones originales. NO modifiques, rediseñes ni reimagines el logo — reprodúcelo fielmente.`
+}
+
+/**
+ * Fetch the brand kit logo from its URL and return as base64 data for inline Gemini usage.
+ * Returns null if fetch fails or no logo is set.
+ */
+export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeType: string; data: string } | null> {
+  if (!kit.logo_url) return null
+  try {
+    const resp = await fetch(kit.logo_url)
+    if (!resp.ok) {
+      console.warn('Failed to fetch brand logo:', resp.status, kit.logo_url)
+      return null
+    }
+    const contentType = resp.headers.get('content-type') || 'image/webp'
+    const buffer = await resp.arrayBuffer()
+    const base64 = Buffer.from(buffer).toString('base64')
+    return { mimeType: contentType, data: base64 }
+  } catch (err) {
+    console.warn('Error fetching brand logo for inline injection:', err)
+    return null
+  }
 }

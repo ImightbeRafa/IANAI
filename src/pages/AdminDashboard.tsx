@@ -439,61 +439,23 @@ export default function AdminDashboard() {
       })
       setReferralSignups(enrichedSignups)
 
-      // Fetch ALL subscriptions for billing dashboard
+      // Fetch ALL billing data via admin API (uses service role — bypasses RLS)
       try {
-        const { data: subsData } = await supabase
-          .from('subscriptions')
-          .select('*')
-          .order('updated_at', { ascending: false })
-
-        const rawSubs = subsData || []
-        const subUserIds = [...new Set(rawSubs.map((s: Record<string, unknown>) => s.user_id as string))]
-
-        let subProfilesMap: Record<string, { email: string; full_name: string }> = {}
-        if (subUserIds.length > 0) {
-          const { data: pData } = await supabase
-            .from('profiles')
-            .select('id, email, full_name')
-            .in('id', subUserIds)
-          for (const p of (pData || []) as { id: string; email: string; full_name: string }[]) {
-            subProfilesMap[p.id] = { email: p.email, full_name: p.full_name }
+        const { data: { session: adminSession } } = await supabase.auth.getSession()
+        if (adminSession) {
+          const billingApiUrl = import.meta.env.PROD ? '/api/admin-billing' : 'http://localhost:3000/api/admin-billing'
+          const billingResp = await fetch(billingApiUrl, {
+            headers: { 'Authorization': `Bearer ${adminSession.access_token}` }
+          })
+          if (billingResp.ok) {
+            const billingData = await billingResp.json()
+            setAllSubscriptions((billingData.subscriptions || []) as AdminSubscription[])
+            setAllPayments((billingData.payments || []) as AdminPayment[])
+          } else {
+            console.warn('Admin billing API failed:', billingResp.status)
           }
         }
-
-        setAllSubscriptions(rawSubs.map((s: Record<string, unknown>) => ({
-          ...s,
-          user_email: subProfilesMap[s.user_id as string]?.email || 'Unknown',
-          user_name: subProfilesMap[s.user_id as string]?.full_name || '',
-        })) as AdminSubscription[])
-      } catch { /* billing subs non-critical */ }
-
-      // Fetch ALL payments for billing dashboard
-      try {
-        const { data: payData } = await supabase
-          .from('payments')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(200)
-
-        const rawPays = payData || []
-        const payUserIds = [...new Set(rawPays.map((p: Record<string, unknown>) => p.user_id as string))]
-
-        let payProfilesMap: Record<string, { email: string }> = {}
-        if (payUserIds.length > 0) {
-          const { data: pData } = await supabase
-            .from('profiles')
-            .select('id, email')
-            .in('id', payUserIds)
-          for (const p of (pData || []) as { id: string; email: string }[]) {
-            payProfilesMap[p.id] = { email: p.email }
-          }
-        }
-
-        setAllPayments(rawPays.map((p: Record<string, unknown>) => ({
-          ...p,
-          user_email: payProfilesMap[p.user_id as string]?.email || 'Unknown',
-        })) as AdminPayment[])
-      } catch { /* billing payments non-critical */ }
+      } catch { /* billing non-critical */ }
 
       // Fetch ticket summary stats
       try {

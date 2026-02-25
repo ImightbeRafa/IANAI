@@ -98,8 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Failed to credit images. Please try again.' })
     }
 
-    // 4. Record payment
-    await supabase.from('payments').insert({
+    // 4. Record payment (resilient: retry without 'plan' if column doesn't exist)
+    const payRow = {
       user_id: user.id,
       amount: BOOST_PRICE,
       currency: 'USD',
@@ -107,7 +107,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       plan: 'image_boost',
       description: `+${BOOST_AMOUNT} bonus designs`,
       paid_at: new Date().toISOString()
-    })
+    }
+    const { error: payError } = await supabase.from('payments').insert(payRow)
+    if (payError) {
+      console.warn('[confirm-boost] payments insert failed, retrying without plan:', payError.message)
+      const { plan: _drop, ...coreRow } = payRow
+      await supabase.from('payments').insert(coreRow)
+    }
 
     // 5. Record in audit trail (if payment_transactions table exists)
     try {

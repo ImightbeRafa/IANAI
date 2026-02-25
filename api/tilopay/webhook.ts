@@ -91,6 +91,46 @@ function parseWebhookData(req: VercelRequest): TiloPayWebhookData {
 }
 
 // =============================================
+// SAFE PAYMENT INSERT — handles missing 'plan' column
+// =============================================
+async function safeInsertPayment(row: {
+  user_id: string
+  amount: number | null
+  currency: string
+  status: string
+  plan?: string | null
+  description?: string | null
+  paid_at?: string
+}): Promise<void> {
+  if (!supabase || !row.amount || row.amount <= 0) return
+  try {
+    const { error } = await supabase.from('payments').insert({
+      user_id: row.user_id,
+      amount: row.amount,
+      currency: row.currency,
+      status: row.status,
+      plan: row.plan || null,
+      description: row.description || null,
+      paid_at: row.paid_at || new Date().toISOString()
+    })
+    if (error) {
+      // Retry without plan column (migration 053 may not be applied)
+      console.warn('payments insert failed, retrying without plan column:', error.message)
+      await supabase.from('payments').insert({
+        user_id: row.user_id,
+        amount: row.amount,
+        currency: row.currency,
+        status: row.status,
+        description: row.description || null,
+        paid_at: row.paid_at || new Date().toISOString()
+      })
+    }
+  } catch (err) {
+    console.error('Failed to insert payment:', err)
+  }
+}
+
+// =============================================
 // AUDIT TRAIL — record every webhook event
 // =============================================
 async function recordTransaction(params: {
@@ -380,17 +420,10 @@ async function handleSubscribe(
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('user_id', userId)
 
-  if (amount && amount > 0) {
-    await supabase!.from('payments').insert({
-      user_id: userId,
-      amount,
-      currency,
-      status: 'succeeded',
-      plan,
-      description: `New subscription: ${plan}`,
-      paid_at: new Date().toISOString()
-    })
-  }
+  await safeInsertPayment({
+    user_id: userId, amount, currency, status: 'succeeded',
+    plan, description: `New subscription: ${plan}`
+  })
 
   console.log(`Subscription activated for ${email}`)
 }
@@ -426,14 +459,9 @@ async function handlePayment(
     .eq('user_id', userId)
     .eq('status', 'pending')
 
-  await supabase!.from('payments').insert({
-    user_id: userId,
-    amount: amount || 0,
-    currency,
-    status: 'succeeded',
-    plan,
-    description: `Recurring payment: ${plan}`,
-    paid_at: new Date().toISOString()
+  await safeInsertPayment({
+    user_id: userId, amount: amount || 0, currency, status: 'succeeded',
+    plan, description: `Recurring payment: ${plan}`
   })
 
   console.log(`Payment recorded, subscription extended, plan: ${plan}`)
@@ -452,14 +480,9 @@ async function handleRejected(
     .update({ status: 'past_due', updated_at: new Date().toISOString() })
     .eq('user_id', userId)
 
-  await supabase!.from('payments').insert({
-    user_id: userId,
-    amount: amount || 0,
-    currency,
-    status: 'failed',
-    plan,
-    description: `Failed payment: ${plan}`,
-    paid_at: new Date().toISOString()
+  await safeInsertPayment({
+    user_id: userId, amount: amount || 0, currency, status: 'failed',
+    plan, description: `Failed payment: ${plan}`
   })
 
   console.log(`Subscription marked as past_due`)
@@ -524,17 +547,10 @@ async function handleImageBoost(
     .eq('user_id', userId)
     .eq('plan', 'image_boost')
 
-  if (amount && amount > 0) {
-    await supabase!.from('payments').insert({
-      user_id: userId,
-      amount,
-      currency,
-      status: 'succeeded',
-      plan: 'image_boost',
-      description: '+100 bonus images',
-      paid_at: new Date().toISOString()
-    })
-  }
+  await safeInsertPayment({
+    user_id: userId, amount, currency, status: 'succeeded',
+    plan: 'image_boost', description: '+100 bonus images'
+  })
 
   console.log(`+100 bonus images credited to ${email}`)
 }

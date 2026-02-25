@@ -50,6 +50,7 @@ interface GeneratedPost {
 }
 
 const API_URL = import.meta.env.PROD ? '/api/generate-image' : 'http://localhost:3000/api/generate-image'
+const STREAMLINE_API_URL = import.meta.env.PROD ? '/api/streamline-script' : 'http://localhost:3000/api/streamline-script'
 
 // Preload an image into the browser cache so URL swaps don't cause a blank flash
 const preloadImage = (url: string): Promise<void> =>
@@ -101,6 +102,8 @@ export default function PostWorkspace() {
   const [productImages, setProductImages] = useState<ProductImage[]>([])
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
   const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
+  const [streamlinedScript, setStreamlinedScript] = useState<string | null>(null)
+  const [streamlining, setStreamlining] = useState(false)
   const productImageInputRef = useRef<HTMLInputElement>(null)
   const POSTS_PAGE_SIZE = 20
   const [totalPostCount, setTotalPostCount] = useState(0)
@@ -153,7 +156,11 @@ export default function PostWorkspace() {
       savePalette: 'Guardar',
       orUploadImage: 'O sube una imagen para extraer colores',
       customPalette: 'Personalizada',
-      deletePalette: 'Eliminar'
+      deletePalette: 'Eliminar',
+      streamline: 'Optimizar para post',
+      streamlining: 'Optimizando...',
+      streamlined: 'Guión optimizado',
+      revertStreamline: 'Usar original'
     },
     en: {
       back: 'Back',
@@ -201,7 +208,11 @@ export default function PostWorkspace() {
       savePalette: 'Save',
       orUploadImage: 'Or upload an image to extract colors',
       customPalette: 'Custom',
-      deletePalette: 'Delete'
+      deletePalette: 'Delete',
+      streamline: 'Optimize for post',
+      streamlining: 'Optimizing...',
+      streamlined: 'Optimized script',
+      revertStreamline: 'Use original'
     }
   }
 
@@ -261,12 +272,64 @@ export default function PostWorkspace() {
 
   const getScriptPrompt = (): string => {
     let base = ''
-    if (selectedScript) base = selectedScript.content
+    if (streamlinedScript) base = streamlinedScript
+    else if (selectedScript) base = selectedScript.content
     else if (scriptText.trim()) base = scriptText.trim()
     if (!base) return ''
     const extra = additionalInstructions.trim()
     if (extra) return `${base}\n\n[INSTRUCCIONES ADICIONALES / ADDITIONAL INSTRUCTIONS]:\n${extra}`
     return base
+  }
+
+  const handleStreamline = async () => {
+    const rawScript = selectedScript?.content || scriptText.trim()
+    if (!rawScript || streamlining) return
+
+    setStreamlining(true)
+    setError('')
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+
+      // Resolve the actual post style name for the API
+      let resolvedStyle = postStyle
+      if (postStyle.startsWith('custom-')) {
+        resolvedStyle = 'custom-type'
+      } else if (postStyle !== 'venta-directa' && postStyle !== 'organico') {
+        // It's a preset ID — use it directly
+        resolvedStyle = postStyle
+      }
+
+      const resp = await fetch(STREAMLINE_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          script: rawScript,
+          postStyle: resolvedStyle,
+          language
+        })
+      })
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to streamline')
+      }
+
+      const data = await resp.json()
+      if (data.streamlined) {
+        setStreamlinedScript(data.streamlined)
+      }
+    } catch (err) {
+      console.error('Streamline error:', err)
+      setError(language === 'es' ? 'Error al optimizar guión' : 'Error streamlining script')
+    } finally {
+      setStreamlining(false)
+    }
   }
 
   const normalizeImageToJpeg = (file: File): Promise<string> => {
@@ -879,7 +942,7 @@ export default function PostWorkspace() {
                 <div className="absolute z-30 mt-1 w-full bg-dark-100 rounded-xl shadow-xl border border-dark-200 max-h-[400px] overflow-y-auto">
                   {/* Venta Directa — always first */}
                   <button
-                    onClick={() => { setPostStyle('venta-directa'); setShowStyleDropdown(false) }}
+                    onClick={() => { setPostStyle('venta-directa'); setStreamlinedScript(null); setShowStyleDropdown(false) }}
                     className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
                       postStyle === 'venta-directa' ? 'bg-primary-900/20' : ''
                     }`}
@@ -900,7 +963,7 @@ export default function PostWorkspace() {
                   {IMAGE_PRESETS.map(preset => (
                     <button
                       key={preset.id}
-                      onClick={() => { setPostStyle(preset.id); setShowStyleDropdown(false) }}
+                      onClick={() => { setPostStyle(preset.id); setStreamlinedScript(null); setShowStyleDropdown(false) }}
                       className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
                         postStyle === preset.id ? 'bg-primary-900/20' : ''
                       }`}
@@ -935,7 +998,7 @@ export default function PostWorkspace() {
                       {customPostTypes.map(ct => (
                         <button
                           key={ct.id}
-                          onClick={() => { setPostStyle(`custom-${ct.id}`); setShowStyleDropdown(false) }}
+                          onClick={() => { setPostStyle(`custom-${ct.id}`); setStreamlinedScript(null); setShowStyleDropdown(false) }}
                           className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
                             postStyle === `custom-${ct.id}` ? 'bg-primary-900/20' : ''
                           }`}
@@ -1177,6 +1240,7 @@ export default function PostWorkspace() {
                             onClick={() => {
                               setSelectedScript(script)
                               setScriptText('')
+                              setStreamlinedScript(null)
                               setShowScriptPicker(false)
                             }}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
@@ -1204,14 +1268,47 @@ export default function PostWorkspace() {
                 <div className="mt-2 bg-primary-900/20 border border-primary-100 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[10px] font-semibold text-primary-700 uppercase tracking-wide">{t.selectedScript}</p>
-                    <button
-                      onClick={() => setSelectedScript(null)}
-                      className="text-[10px] text-primary-500 hover:text-primary-700 font-medium"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {!streamlinedScript && (
+                        <button
+                          onClick={handleStreamline}
+                          disabled={streamlining}
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                          title={t.streamline}
+                        >
+                          {streamlining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                          {streamlining ? t.streamlining : t.streamline}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { setSelectedScript(null); setStreamlinedScript(null) }}
+                        className="text-[10px] text-primary-500 hover:text-primary-700 font-medium"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                   <p className="text-xs text-dark-600 leading-relaxed line-clamp-3 whitespace-pre-wrap">{selectedScript.content}</p>
+                </div>
+              )}
+
+              {/* Streamlined script card */}
+              {streamlinedScript && (
+                <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide flex items-center gap-1">
+                      <Wand2 className="w-3 h-3" />
+                      {t.streamlined}
+                    </p>
+                    <button
+                      onClick={() => setStreamlinedScript(null)}
+                      className="flex items-center gap-1 text-[10px] text-emerald-600 hover:text-emerald-800 font-medium"
+                    >
+                      <X className="w-3 h-3" />
+                      {t.revertStreamline}
+                    </button>
+                  </div>
+                  <p className="text-xs text-dark-700 leading-relaxed whitespace-pre-wrap">{streamlinedScript}</p>
                 </div>
               )}
 
@@ -1221,11 +1318,21 @@ export default function PostWorkspace() {
                   <p className="text-[10px] text-dark-400 text-center my-2">{t.pasteScript}</p>
                   <textarea
                     value={scriptText}
-                    onChange={(e) => setScriptText(e.target.value)}
+                    onChange={(e) => { setScriptText(e.target.value); setStreamlinedScript(null) }}
                     placeholder={t.scriptPlaceholder}
                     rows={4}
                     className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
                   />
+                  {scriptText.trim() && !streamlinedScript && (
+                    <button
+                      onClick={handleStreamline}
+                      disabled={streamlining}
+                      className="mt-1.5 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-medium bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                    >
+                      {streamlining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
+                      {streamlining ? t.streamlining : t.streamline}
+                    </button>
+                  )}
                 </>
               )}
 
