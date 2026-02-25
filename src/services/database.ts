@@ -1752,7 +1752,16 @@ export async function getBrandKits(userId: string): Promise<BrandKit[]> {
     .order('is_default', { ascending: false })
     .order('created_at', { ascending: true })
 
-  if (error) throw error
+  if (error) {
+    // Fallback: is_default column may not exist yet (migration 052)
+    const { data: fallback, error: fallbackError } = await supabase
+      .from('brand_kits')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+    if (fallbackError) throw fallbackError
+    return fallback || []
+  }
   return data || []
 }
 

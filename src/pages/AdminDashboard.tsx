@@ -28,7 +28,10 @@ import {
   Copy,
   Mic,
   Search,
-  ChevronDown
+  ChevronDown,
+  CreditCard,
+  TrendingDown,
+  Zap
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -102,6 +105,51 @@ interface ReferralSignup {
   current_status?: string
 }
 
+interface AdminSubscription {
+  id: string
+  user_id: string
+  plan: string
+  status: string
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  tilopay_subscription_id: string | null
+  created_at: string
+  updated_at: string
+  user_email?: string
+  user_name?: string
+}
+
+interface AdminPayment {
+  id: string
+  user_id: string
+  amount: number
+  currency: string
+  status: string
+  plan: string | null
+  description: string | null
+  paid_at: string | null
+  created_at: string
+  user_email?: string
+}
+
+// Plan monthly prices in USD for MRR calculation
+const PLAN_PRICES_USD: Record<string, number> = {
+  free: 0,
+  starter: 29,
+  pro: 49,
+  meta_advanze: 49,
+  enterprise: 199,
+}
+
+const PLAN_COLORS: Record<string, string> = {
+  free: 'bg-gray-400',
+  starter: 'bg-blue-500',
+  pro: 'bg-purple-500',
+  meta_advanze: 'bg-indigo-500',
+  enterprise: 'bg-amber-500',
+  image_boost: 'bg-green-500',
+}
+
 // Model display names and colors
 const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'grok': { name: 'Grok (xAI)', color: 'bg-purple-500' },
@@ -167,6 +215,11 @@ export default function AdminDashboard() {
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
   const [userStatsSearch, setUserStatsSearch] = useState('')
   const [ticketStats, setTicketStats] = useState<{ open: number; urgent: number; in_progress: number; total: number }>({ open: 0, urgent: 0, in_progress: 0, total: 0 })
+  const [allSubscriptions, setAllSubscriptions] = useState<AdminSubscription[]>([])
+  const [allPayments, setAllPayments] = useState<AdminPayment[]>([])
+  const [paymentSearch, setPaymentSearch] = useState('')
+  const [subsSearch, setSubsSearch] = useState('')
+  const [billingTab, setBillingTab] = useState<'overview' | 'payments' | 'subscriptions'>('overview')
 
   const labels = {
     es: {
@@ -386,6 +439,62 @@ export default function AdminDashboard() {
       })
       setReferralSignups(enrichedSignups)
 
+      // Fetch ALL subscriptions for billing dashboard
+      try {
+        const { data: subsData } = await supabase
+          .from('subscriptions')
+          .select('*')
+          .order('updated_at', { ascending: false })
+
+        const rawSubs = subsData || []
+        const subUserIds = [...new Set(rawSubs.map((s: Record<string, unknown>) => s.user_id as string))]
+
+        let subProfilesMap: Record<string, { email: string; full_name: string }> = {}
+        if (subUserIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('profiles')
+            .select('id, email, full_name')
+            .in('id', subUserIds)
+          for (const p of (pData || []) as { id: string; email: string; full_name: string }[]) {
+            subProfilesMap[p.id] = { email: p.email, full_name: p.full_name }
+          }
+        }
+
+        setAllSubscriptions(rawSubs.map((s: Record<string, unknown>) => ({
+          ...s,
+          user_email: subProfilesMap[s.user_id as string]?.email || 'Unknown',
+          user_name: subProfilesMap[s.user_id as string]?.full_name || '',
+        })) as AdminSubscription[])
+      } catch { /* billing subs non-critical */ }
+
+      // Fetch ALL payments for billing dashboard
+      try {
+        const { data: payData } = await supabase
+          .from('payments')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(200)
+
+        const rawPays = payData || []
+        const payUserIds = [...new Set(rawPays.map((p: Record<string, unknown>) => p.user_id as string))]
+
+        let payProfilesMap: Record<string, { email: string }> = {}
+        if (payUserIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('profiles')
+            .select('id, email')
+            .in('id', payUserIds)
+          for (const p of (pData || []) as { id: string; email: string }[]) {
+            payProfilesMap[p.id] = { email: p.email }
+          }
+        }
+
+        setAllPayments(rawPays.map((p: Record<string, unknown>) => ({
+          ...p,
+          user_email: payProfilesMap[p.user_id as string]?.email || 'Unknown',
+        })) as AdminPayment[])
+      } catch { /* billing payments non-critical */ }
+
       // Fetch ticket summary stats
       try {
         const { data: ticketData } = await supabase
@@ -506,6 +615,32 @@ export default function AdminDashboard() {
     acc[u.feature].cost += Number(u.total_cost_usd)
     return acc
   }, {} as Record<string, { calls: number; cost: number }>)
+
+  // Billing calculations
+  const activePaidSubs = allSubscriptions.filter(s => (s.status === 'active' || s.status === 'trialing') && s.plan !== 'free')
+  const cancelledSubs = allSubscriptions.filter(s => s.status === 'cancelled')
+  const totalPaidEver = allSubscriptions.filter(s => s.plan !== 'free')
+  const churnRate = totalPaidEver.length > 0 ? (cancelledSubs.length / totalPaidEver.length * 100).toFixed(1) : '0'
+  const mrr = activePaidSubs.reduce((sum, s) => sum + (PLAN_PRICES_USD[s.plan] || 0), 0)
+  const totalRevenue = allPayments.filter(p => p.status === 'succeeded').reduce((sum, p) => sum + Number(p.amount), 0)
+  const boostPayments = allPayments.filter(p => p.plan === 'image_boost' && p.status === 'succeeded')
+  const boostRevenue = boostPayments.reduce((sum, p) => sum + Number(p.amount), 0)
+
+  // Plan distribution
+  const planDistribution = allSubscriptions.reduce((acc, s) => {
+    const plan = s.plan || 'free'
+    acc[plan] = (acc[plan] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+  const totalSubsCount = allSubscriptions.length || 1
+
+  // Filter payments/subs by search
+  const filteredPayments = paymentSearch.trim()
+    ? allPayments.filter(p => p.user_email?.toLowerCase().includes(paymentSearch.toLowerCase()) || p.plan?.toLowerCase().includes(paymentSearch.toLowerCase()))
+    : allPayments
+  const filteredSubs = subsSearch.trim()
+    ? allSubscriptions.filter(s => s.user_email?.toLowerCase().includes(subsSearch.toLowerCase()) || s.plan?.toLowerCase().includes(subsSearch.toLowerCase()))
+    : allSubscriptions
 
   if (!isAdmin) {
     return (
@@ -652,6 +787,342 @@ export default function AdminDashboard() {
                 </Link>
               </div>
             )}
+
+            {/* Revenue & Billing Section */}
+            <div className="mb-8">
+              <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2 mb-4">
+                <CreditCard className="w-5 h-5 text-green-500" />
+                {language === 'es' ? 'Ingresos y Facturación' : 'Revenue & Billing'}
+              </h2>
+
+              {/* Revenue KPI Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                  <div className="flex items-center gap-2 mb-1">
+                    <DollarSign className="w-4 h-4 text-green-500" />
+                    <span className="text-xs text-dark-500">{language === 'es' ? 'Ingresos Totales' : 'Total Revenue'}</span>
+                  </div>
+                  <p className="text-2xl font-bold text-dark-900">${totalRevenue.toFixed(2)}</p>
+                  {boostRevenue > 0 && (
+                    <p className="text-[10px] text-dark-400 mt-0.5">
+                      ${boostRevenue.toFixed(2)} {language === 'es' ? 'de boosts' : 'from boosts'}
+                    </p>
+                  )}
+                </div>
+                <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                  <div className="flex items-center gap-2 mb-1">
+                    <TrendingUp className="w-4 h-4 text-blue-500" />
+                    <span className="text-xs text-dark-500">MRR</span>
+                  </div>
+                  <p className="text-2xl font-bold text-dark-900">${mrr.toFixed(0)}</p>
+                  <p className="text-[10px] text-dark-400 mt-0.5">
+                    {activePaidSubs.length} {language === 'es' ? 'suscriptores activos' : 'active subscribers'}
+                  </p>
+                </div>
+                <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Users className="w-4 h-4 text-purple-500" />
+                    <span className="text-xs text-dark-500">{language === 'es' ? 'Suscriptores de Pago' : 'Paid Subscribers'}</span>
+                  </div>
+                  <p className="text-2xl font-bold text-dark-900">{activePaidSubs.length}</p>
+                  <p className="text-[10px] text-dark-400 mt-0.5">
+                    {allSubscriptions.length} total
+                  </p>
+                </div>
+                <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
+                  <div className="flex items-center gap-2 mb-1">
+                    <TrendingDown className="w-4 h-4 text-red-500" />
+                    <span className="text-xs text-dark-500">{language === 'es' ? 'Tasa de Abandono' : 'Churn Rate'}</span>
+                  </div>
+                  <p className="text-2xl font-bold text-dark-900">{churnRate}%</p>
+                  <p className="text-[10px] text-dark-400 mt-0.5">
+                    {cancelledSubs.length} {language === 'es' ? 'cancelados' : 'cancelled'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Plan Distribution */}
+              {Object.keys(planDistribution).length > 0 && (
+                <div className="bg-dark-100 rounded-xl p-5 border border-dark-100 mb-6">
+                  <h3 className="text-sm font-semibold text-dark-700 mb-3">
+                    {language === 'es' ? 'Distribución por Plan' : 'Plan Distribution'}
+                  </h3>
+                  <div className="space-y-2">
+                    {Object.entries(planDistribution)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([plan, count]) => (
+                        <div key={plan} className="flex items-center gap-3">
+                          <div className="w-24 text-xs font-medium text-dark-700 capitalize">{plan.replace('_', ' ')}</div>
+                          <div className="flex-1 h-5 bg-dark-50 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${PLAN_COLORS[plan] || 'bg-gray-400'} transition-all`}
+                              style={{ width: `${Math.max(2, (count / totalSubsCount) * 100)}%` }}
+                            />
+                          </div>
+                          <div className="w-20 text-right">
+                            <span className="text-sm font-bold text-dark-900">{count}</span>
+                            <span className="text-xs text-dark-400 ml-1">({((count / totalSubsCount) * 100).toFixed(0)}%)</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Billing Tabs */}
+              <div className="flex gap-2 mb-4">
+                {(['overview', 'payments', 'subscriptions'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setBillingTab(tab)}
+                    className={`px-4 py-2 text-sm rounded-lg font-medium transition-colors ${
+                      billingTab === tab
+                        ? 'bg-primary-600 text-white'
+                        : 'bg-dark-50 text-dark-600 hover:bg-dark-100'
+                    }`}
+                  >
+                    {tab === 'overview' ? (language === 'es' ? 'Resumen' : 'Overview')
+                      : tab === 'payments' ? (language === 'es' ? 'Pagos' : 'Payments')
+                      : (language === 'es' ? 'Suscripciones' : 'Subscriptions')}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab Content */}
+              {billingTab === 'overview' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Recent Payments Mini */}
+                  <div className="bg-dark-100 rounded-xl border border-dark-100">
+                    <div className="p-4 border-b border-dark-50 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-dark-700 flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-green-500" />
+                        {language === 'es' ? 'Últimos Pagos' : 'Recent Payments'}
+                      </h3>
+                      <button onClick={() => setBillingTab('payments')} className="text-xs text-primary-500 hover:text-primary-600">
+                        {language === 'es' ? 'Ver todos' : 'View all'}
+                      </button>
+                    </div>
+                    <div className="divide-y divide-dark-50 max-h-64 overflow-y-auto">
+                      {allPayments.slice(0, 8).map(p => (
+                        <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-medium text-dark-900">{p.user_email}</p>
+                            <p className="text-[10px] text-dark-400">{p.plan || '-'} &middot; {p.paid_at ? new Date(p.paid_at).toLocaleDateString() : '-'}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-sm font-bold ${p.status === 'succeeded' ? 'text-green-500' : p.status === 'failed' ? 'text-red-400' : 'text-amber-400'}`}>
+                              ${Number(p.amount).toFixed(2)}
+                            </p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              p.status === 'succeeded' ? 'bg-green-900/20 text-green-400'
+                                : p.status === 'failed' ? 'bg-red-900/20 text-red-400'
+                                : 'bg-amber-900/20 text-amber-400'
+                            }`}>{p.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {allPayments.length === 0 && (
+                        <div className="px-4 py-6 text-center text-xs text-dark-400">
+                          {language === 'es' ? 'No hay pagos registrados' : 'No payments recorded'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Boost Sales Mini */}
+                  <div className="bg-dark-100 rounded-xl border border-dark-100">
+                    <div className="p-4 border-b border-dark-50">
+                      <h3 className="text-sm font-semibold text-dark-700 flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-amber-500" />
+                        {language === 'es' ? 'Ventas de Image Boost' : 'Image Boost Sales'}
+                      </h3>
+                    </div>
+                    <div className="p-4">
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <p className="text-xs text-dark-400">{language === 'es' ? 'Compras' : 'Purchases'}</p>
+                          <p className="text-2xl font-bold text-dark-900">{boostPayments.length}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-dark-400">{language === 'es' ? 'Ingresos' : 'Revenue'}</p>
+                          <p className="text-2xl font-bold text-green-500">${boostRevenue.toFixed(2)}</p>
+                        </div>
+                      </div>
+                      {boostPayments.length > 0 && (
+                        <div className="divide-y divide-dark-50 max-h-36 overflow-y-auto">
+                          {boostPayments.slice(0, 5).map(p => (
+                            <div key={p.id} className="py-2 flex items-center justify-between">
+                              <span className="text-xs text-dark-600">{p.user_email}</span>
+                              <span className="text-xs text-dark-400">{p.paid_at ? new Date(p.paid_at).toLocaleDateString() : '-'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {billingTab === 'payments' && (
+                <div className="bg-dark-100 rounded-xl border border-dark-100">
+                  <div className="p-4 border-b border-dark-50 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-dark-700">
+                      {language === 'es' ? `Todos los Pagos (${allPayments.length})` : `All Payments (${allPayments.length})`}
+                    </h3>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-dark-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={paymentSearch}
+                        onChange={(e) => setPaymentSearch(e.target.value)}
+                        placeholder={language === 'es' ? 'Buscar por email o plan...' : 'Search by email or plan...'}
+                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-900 w-60"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className="bg-dark-50 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Fecha' : 'Date'}</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Usuario' : 'User'}</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">Plan</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Monto' : 'Amount'}</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Estado' : 'Status'}</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Descripción' : 'Description'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-dark-50">
+                        {filteredPayments.map(p => (
+                          <tr key={p.id} className="hover:bg-dark-50">
+                            <td className="px-4 py-2.5 text-sm text-dark-600 whitespace-nowrap">
+                              {p.paid_at ? new Date(p.paid_at).toLocaleDateString() : new Date(p.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-2.5 text-sm text-dark-900 font-medium">{p.user_email}</td>
+                            <td className="px-4 py-2.5">
+                              <span className={`text-xs px-2 py-0.5 rounded ${PLAN_COLORS[p.plan || ''] ? PLAN_COLORS[p.plan || ''] + ' text-white' : 'bg-dark-50 text-dark-600'}`}>
+                                {p.plan || '-'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-sm font-bold text-dark-900">
+                              ${Number(p.amount).toFixed(2)} <span className="text-xs text-dark-400 font-normal">{p.currency}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              <span className={`text-xs px-2 py-0.5 rounded ${
+                                p.status === 'succeeded' ? 'bg-green-900/20 text-green-400'
+                                  : p.status === 'failed' ? 'bg-red-900/20 text-red-400'
+                                  : p.status === 'refunded' ? 'bg-purple-900/20 text-purple-400'
+                                  : 'bg-amber-900/20 text-amber-400'
+                              }`}>{p.status}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-sm text-dark-500 max-w-40 truncate">{p.description || '-'}</td>
+                          </tr>
+                        ))}
+                        {filteredPayments.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-4 py-8 text-center text-sm text-dark-400">
+                              {language === 'es' ? 'No hay pagos' : 'No payments found'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {billingTab === 'subscriptions' && (
+                <div className="bg-dark-100 rounded-xl border border-dark-100">
+                  <div className="p-4 border-b border-dark-50 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-dark-700">
+                      {language === 'es' ? `Todas las Suscripciones (${allSubscriptions.length})` : `All Subscriptions (${allSubscriptions.length})`}
+                    </h3>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-dark-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={subsSearch}
+                        onChange={(e) => setSubsSearch(e.target.value)}
+                        placeholder={language === 'es' ? 'Buscar por email o plan...' : 'Search by email or plan...'}
+                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-900 w-60"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className="bg-dark-50 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Usuario' : 'User'}</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">Plan</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Estado' : 'Status'}</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Vence' : 'Period End'}</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Cancela' : 'Cancels'}</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">TiloPay ID</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Actualizado' : 'Updated'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-dark-50">
+                        {filteredSubs.map(s => {
+                          const isNearExpiry = s.current_period_end && new Date(s.current_period_end).getTime() - Date.now() < 7 * 24 * 60 * 60 * 1000
+                          return (
+                            <tr key={s.id} className="hover:bg-dark-50">
+                              <td className="px-4 py-2.5">
+                                <div>
+                                  <p className="text-sm font-medium text-dark-900">{s.user_name || '-'}</p>
+                                  <p className="text-xs text-dark-500">{s.user_email}</p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className={`text-xs px-2 py-0.5 rounded ${PLAN_COLORS[s.plan] ? PLAN_COLORS[s.plan] + ' text-white' : 'bg-dark-50 text-dark-600'}`}>
+                                  {s.plan}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded ${
+                                  s.status === 'active' ? 'bg-green-900/20 text-green-400'
+                                    : s.status === 'trialing' ? 'bg-blue-900/20 text-blue-400'
+                                    : s.status === 'cancelled' ? 'bg-red-900/20 text-red-400'
+                                    : s.status === 'past_due' ? 'bg-amber-900/20 text-amber-400'
+                                    : 'bg-dark-50 text-dark-500'
+                                }`}>
+                                  {s.status === 'active' && <CheckCircle className="w-3 h-3" />}
+                                  {s.status === 'cancelled' && <XCircle className="w-3 h-3" />}
+                                  {s.status === 'trialing' && <Clock className="w-3 h-3" />}
+                                  {s.status}
+                                </span>
+                              </td>
+                              <td className={`px-4 py-2.5 text-sm ${isNearExpiry ? 'text-amber-400 font-semibold' : 'text-dark-600'}`}>
+                                {s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : '-'}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {s.cancel_at_period_end ? (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-red-900/20 text-red-400">{language === 'es' ? 'Sí' : 'Yes'}</span>
+                                ) : (
+                                  <span className="text-xs text-dark-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-dark-500 font-mono max-w-32 truncate">
+                                {s.tilopay_subscription_id || '-'}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-dark-500">
+                                {new Date(s.updated_at).toLocaleDateString()}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {filteredSubs.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-8 text-center text-sm text-dark-400">
+                              {language === 'es' ? 'No hay suscripciones' : 'No subscriptions found'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Referral Tracking Section */}
             {campaigns.length > 0 && (

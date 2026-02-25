@@ -230,7 +230,8 @@ ${bodyText}`
       config: {
         systemInstruction: systemPrompt,
         temperature: 0.3,
-        maxOutputTokens: 1024
+        maxOutputTokens: 2048,
+        responseMimeType: 'application/json'
       }
     })
 
@@ -243,11 +244,27 @@ ${bodyText}`
       const cleaned = aiText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
       brandData = JSON.parse(cleaned)
     } catch {
-      console.warn('Failed to parse AI brand extraction:', aiText)
-      return res.status(200).json({
-        success: false,
-        error: 'AI could not extract brand data from this URL'
-      })
+      // Attempt JSON repair: close truncated strings/objects
+      try {
+        let repaired = aiText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+        // Close any unclosed string
+        const quoteCount = (repaired.match(/"/g) || []).length
+        if (quoteCount % 2 !== 0) repaired += '"'
+        // Close unclosed arrays/objects
+        const opens = (repaired.match(/[{[]/g) || []).length
+        const closes = (repaired.match(/[}\]]/g) || []).length
+        for (let i = 0; i < opens - closes; i++) {
+          repaired += repaired.includes('[') && !repaired.endsWith('}') ? ']' : '}'
+        }
+        brandData = JSON.parse(repaired)
+        console.log('Repaired truncated AI brand JSON successfully')
+      } catch {
+        console.warn('Failed to parse AI brand extraction:', aiText.substring(0, 500))
+        return res.status(200).json({
+          success: false,
+          error: 'AI could not extract brand data from this URL'
+        })
+      }
     }
 
     // Token usage
