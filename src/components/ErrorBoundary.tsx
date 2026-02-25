@@ -8,24 +8,41 @@ interface Props {
 interface State {
   hasError: boolean
   error: Error | null
+  retryCount: number
+}
+
+// DOM errors injected by browser extensions (Google Translate, Grammarly, etc.)
+const isDOMExtensionError = (error: Error): boolean => {
+  const msg = error.message || ''
+  return (
+    msg.includes('insertBefore') ||
+    msg.includes('removeChild') ||
+    (msg.includes('Failed to execute') && msg.includes('on \'Node\''))
+  )
 }
 
 export default class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
-    this.state = { hasError: false, error: null }
+    this.state = { hasError: false, error: null, retryCount: 0 }
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error }
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Auto-recover from DOM errors caused by browser extensions (e.g. Google Translate)
+    if (isDOMExtensionError(error) && this.state.retryCount < 3) {
+      console.warn('ErrorBoundary: DOM extension error detected, auto-recovering…', error.message)
+      this.setState(prev => ({ hasError: false, error: null, retryCount: prev.retryCount + 1 }))
+      return
+    }
     console.error('ErrorBoundary caught:', error, errorInfo)
   }
 
   handleReset = () => {
-    this.setState({ hasError: false, error: null })
+    this.setState({ hasError: false, error: null, retryCount: 0 })
     window.location.href = '/dashboard'
   }
 

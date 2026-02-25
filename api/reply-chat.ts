@@ -4,6 +4,7 @@ import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
+import { loadBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -171,7 +172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // First verify the user owns this product (or is a collaborator)
     const { data: ownershipCheck } = await supabase
       .from('products')
-      .select('id, user_id')
+      .select('id, owner_id')
       .eq('id', productId)
       .single()
 
@@ -180,7 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Check direct ownership or collaborator access
-    let hasAccess = ownershipCheck.user_id === user.id
+    let hasAccess = ownershipCheck.owner_id === user.id
     if (!hasAccess) {
       const { data: collab } = await supabase
         .from('product_collaborators')
@@ -290,10 +291,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // =============================================
+    // 3b. BRAND KIT INJECTION
+    // =============================================
+    let brandVoicePrompt = ''
+    try {
+      const brandKit = await loadBrandKit(user.id)
+      if (brandKit) {
+        const bv = buildBrandVoicePrompt(brandKit, language as 'es' | 'en')
+        if (bv) brandVoicePrompt = '\n\n' + bv
+      }
+    } catch { /* ignore */ }
+
+    // =============================================
     // 4. BUILD SYSTEM PROMPT
     // =============================================
     const lang = ['en', 'es'].includes(language) ? language : 'es'
-    const systemPrompt = REPLY_SYSTEM_PROMPTS[lang] + businessContextPrompt + productContextPrompt + contextSourcesPrompt + memoryPrompt
+    const systemPrompt = REPLY_SYSTEM_PROMPTS[lang] + businessContextPrompt + productContextPrompt + contextSourcesPrompt + memoryPrompt + brandVoicePrompt
 
     // =============================================
     // 5. GROK API CALL (with search_mode: "auto")

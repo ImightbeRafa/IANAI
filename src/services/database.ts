@@ -25,7 +25,9 @@ import type {
   CustomPostTypeFormData,
   ReplySession,
   ReplyMessage,
-  ReplyContextSource
+  ReplyContextSource,
+  BrandKit,
+  BrandKitFormData
 } from '../types'
 
 // =============================================
@@ -667,7 +669,7 @@ export async function toggleScriptFavorite(scriptId: string, isFavorite: boolean
   if (error) throw error
 }
 
-export async function rateScript(scriptId: string, rating: number): Promise<void> {
+export async function rateScript(scriptId: string, rating: number | null): Promise<void> {
   const { error } = await supabase
     .from('scripts')
     .update({ rating })
@@ -1383,7 +1385,7 @@ export async function recordAiSignal(
         // High-value signals always trigger reflection
         const HIGH_VALUE_SIGNALS = ['script_rated', 'edit_manual', 'user_explicit']
         const isHighValue = HIGH_VALUE_SIGNALS.includes(signalType) &&
-          (signalType !== 'script_rated' || signalData.rating === 'bad')
+          (signalType !== 'script_rated' || signalData.rating === 'bad' || signalData.rating === 'good')
 
         if (isHighValue) {
           triggerReflection(productId, true)
@@ -1741,6 +1743,45 @@ export async function deleteReplyContextSource(id: string): Promise<void> {
     .from('reply_context_sources')
     .delete()
     .eq('id', id)
+
+  if (error) throw error
+}
+
+// =============================================
+// BRAND KIT
+// =============================================
+export async function getBrandKit(userId: string): Promise<BrandKit | null> {
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
+}
+
+export async function upsertBrandKit(userId: string, kit: BrandKitFormData): Promise<BrandKit> {
+  const { user_id: _drop, ...safeKit } = kit as BrandKitFormData & { user_id?: string }
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .upsert({
+      ...safeKit,
+      user_id: userId,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteBrandKit(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('brand_kits')
+    .delete()
+    .eq('user_id', userId)
 
   if (error) throw error
 }

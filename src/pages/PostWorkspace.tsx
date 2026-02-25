@@ -50,6 +50,15 @@ interface GeneratedPost {
 
 const API_URL = import.meta.env.PROD ? '/api/generate-image' : 'http://localhost:3000/api/generate-image'
 
+// Preload an image into the browser cache so URL swaps don't cause a blank flash
+const preloadImage = (url: string): Promise<void> =>
+  new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve()
+    img.onerror = () => resolve() // resolve anyway — the <img> tag will retry
+    img.src = url
+  })
+
 export default function PostWorkspace() {
   const { productId } = useParams<{ productId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -60,6 +69,7 @@ export default function PostWorkspace() {
   const [scripts, setScripts] = useState<Script[]>([])
   const [selectedScript, setSelectedScript] = useState<Script | null>(null)
   const [scriptText, setScriptText] = useState('')
+  const [additionalInstructions, setAdditionalInstructions] = useState('')
   const [showScriptPicker, setShowScriptPicker] = useState(false)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -108,6 +118,8 @@ export default function PostWorkspace() {
       selectScript: 'Seleccionar guión guardado',
       pasteScript: 'O pega un guión directamente',
       scriptPlaceholder: 'Pega aquí tu guión con estructura Gancho / Desarrollo / CTA...',
+      additionalInstructions: 'Instrucciones adicionales (opcional)',
+      additionalPlaceholder: 'Ej: "Usa fondo oscuro", "Resalta el precio", "Estilo minimalista"...',
       noScripts: 'No hay guiones guardados. Genera guiones primero en Scripts.',
       scriptsFor: 'Guiones de',
       selectedScript: 'Guión seleccionado',
@@ -154,6 +166,8 @@ export default function PostWorkspace() {
       selectScript: 'Select saved script',
       pasteScript: 'Or paste a script directly',
       scriptPlaceholder: 'Paste your script with Hook / Development / CTA structure...',
+      additionalInstructions: 'Additional instructions (optional)',
+      additionalPlaceholder: 'E.g.: "Use dark background", "Highlight the price", "Minimalist style"...',
       noScripts: 'No saved scripts. Generate scripts first in Scripts workspace.',
       scriptsFor: 'Scripts for',
       selectedScript: 'Selected script',
@@ -244,8 +258,13 @@ export default function PostWorkspace() {
   }, [productId, user])
 
   const getScriptPrompt = (): string => {
-    if (selectedScript) return selectedScript.content
-    return scriptText.trim()
+    let base = ''
+    if (selectedScript) base = selectedScript.content
+    else if (scriptText.trim()) base = scriptText.trim()
+    if (!base) return ''
+    const extra = additionalInstructions.trim()
+    if (extra) return `${base}\n\n[INSTRUCCIONES ADICIONALES / ADDITIONAL INSTRUCTIONS]:\n${extra}`
+    return base
   }
 
   const normalizeImageToJpeg = (file: File): Promise<string> => {
@@ -423,6 +442,8 @@ export default function PostWorkspace() {
                 model: imageModel
               })
               await updatePostStatus(post.id, 'completed', savedUrl)
+              // Preload into browser cache before swapping URL to avoid blank flash
+              await preloadImage(savedUrl)
               setGeneratedPosts(prev => prev.map(p =>
                 p.id === tempId ? { ...p, id: post.id, imageUrl: savedUrl, saved: true } : p
               ))
@@ -527,6 +548,8 @@ export default function PostWorkspace() {
                 model: 'nano-banana-pro'
               })
               await updatePostStatus(dbPost.id, 'completed', savedUrl)
+              // Preload into browser cache before swapping URL to avoid blank flash
+              await preloadImage(savedUrl)
               setGeneratedPosts(prev => prev.map(p =>
                 p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
               ))
@@ -625,6 +648,8 @@ export default function PostWorkspace() {
                 model: 'nano-banana-pro'
               })
               await updatePostStatus(dbPost.id, 'completed', savedUrl)
+              // Preload into browser cache before swapping URL to avoid blank flash
+              await preloadImage(savedUrl)
               setGeneratedPosts(prev => prev.map(p =>
                 p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
               ))
@@ -1169,7 +1194,7 @@ export default function PostWorkspace() {
                       <X className="w-3 h-3" />
                     </button>
                   </div>
-                  <p className="text-xs text-dark-600 leading-relaxed line-clamp-6 whitespace-pre-wrap">{selectedScript.content}</p>
+                  <p className="text-xs text-dark-600 leading-relaxed line-clamp-3 whitespace-pre-wrap">{selectedScript.content}</p>
                 </div>
               )}
 
@@ -1181,10 +1206,26 @@ export default function PostWorkspace() {
                     value={scriptText}
                     onChange={(e) => setScriptText(e.target.value)}
                     placeholder={t.scriptPlaceholder}
-                    rows={6}
+                    rows={4}
                     className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
                   />
                 </>
+              )}
+
+              {/* Additional instructions — always visible */}
+              {(selectedScript || scriptText.trim()) && (
+                <div className="mt-3">
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {t.additionalInstructions}
+                  </label>
+                  <textarea
+                    value={additionalInstructions}
+                    onChange={(e) => setAdditionalInstructions(e.target.value)}
+                    placeholder={t.additionalPlaceholder}
+                    rows={3}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
               )}
             </div>
 

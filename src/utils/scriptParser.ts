@@ -40,7 +40,9 @@ export function parseScripts(text: string): ParsedScript[] {
       const fullBlock = trimmed.slice(start, end).trim()
       // Remove the header line itself from content
       const firstNewline = fullBlock.indexOf('\n')
-      const content = firstNewline > -1 ? fullBlock.slice(firstNewline + 1).trim() : fullBlock
+      let content = firstNewline > -1 ? fullBlock.slice(firstNewline + 1).trim() : fullBlock
+      // Strip trailing --- or === separators left over from between scripts
+      content = content.replace(/\n\s*(?:---+|===+)\s*$/, '').trim()
 
       return {
         index: header.index,
@@ -109,6 +111,12 @@ function extractTitleFromBlock(block: string): string {
  */
 export function isScriptContent(text: string): boolean {
   if (text.length < 150) return false
+
+  // If there are 2+ distinct script headers (GUIÓN #1, GUIÓN #2, etc.),
+  // it's definitely script content — covers recognition/awareness scripts
+  // that lack Gancho/Desarrollo/CTA structure.
+  const headerMatches = text.match(/(?:GUI[OÓ]N|SCRIPT|OPCI[OÓ]N|Gui[oó]n|Script|Opci[oó]n)\s*#?\s*\d/gi)
+  if (headerMatches && headerMatches.length >= 2) return true
 
   const scriptIndicators = [
     /GUI[OÓ]N\s*#?\s*\d/i,

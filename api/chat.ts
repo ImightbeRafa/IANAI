@@ -4,6 +4,7 @@ import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
+import { loadBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -1710,7 +1711,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    // Brand Kit: inject brand voice if active
+    let brandVoicePrompt = ''
+    try {
+      const brandKit = await loadBrandKit(user.id)
+      if (brandKit) {
+        const bv = buildBrandVoicePrompt(brandKit, language as 'es' | 'en')
+        if (bv) brandVoicePrompt = '\n\n' + bv
+      }
+    } catch { /* ignore */ }
+
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + brandVoicePrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {

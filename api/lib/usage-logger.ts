@@ -13,6 +13,7 @@ export const MODEL_COSTS = {
   'grok': { input: 3.00, output: 15.00 },
   'grok-3-mini': { input: 0.30, output: 0.50 },
   'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
+  'grok-4-1-fast-reasoning': { input: 2.00, output: 10.00 },
   'gemini': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60, thinking: 3.50 },
   

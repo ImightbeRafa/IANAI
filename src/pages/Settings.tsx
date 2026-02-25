@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage, Language } from '../contexts/LanguageContext'
-import { getProfile, markOnboardingComplete } from '../services/database'
+import { getProfile } from '../services/database'
 import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import OnboardingWizard from '../components/OnboardingWizard'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, HelpCircle } from 'lucide-react'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, MessageCircle, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUsageLimits } from '../hooks/useUsageLimits'
-import type { OnboardingStep } from '../hooks/useOnboarding'
+import { getBrandKit, upsertBrandKit, deleteBrandKit } from '../services/database'
+import type { BrandKit, BrandKitFormData } from '../types'
+import { CHANGELOG, ROADMAP, STATUS_ALERT, type ChangeCategory, type RoadmapStatus } from '../data/changelog'
 
 type PlanKey = 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
 
@@ -55,43 +56,47 @@ export default function Settings() {
   const usageLimits = useUsageLimits()
   const currentPlan = (usageLimits.plan || 'free') as PlanKey
 
-  // Replay wizard state
-  const WIZARD_STEPS: OnboardingStep[] = ['welcome', 'dashboard', 'scripts', 'posts', 'descriptions', 'settings', 'feedback', 'complete']
-  const [showWizard, setShowWizard] = useState(false)
-  const [wizardStepIndex, setWizardStepIndex] = useState(0)
-
-  const handleReplayWizard = async () => {
-    if (user) {
-      // Reset the flag in DB so it can re-trigger naturally too
-      try {
-        await supabase.from('profiles').update({ has_completed_onboarding: false }).eq('id', user.id)
-      } catch {}
-    }
-    setWizardStepIndex(0)
-    setShowWizard(true)
-  }
-
-  const wizardNextStep = () => {
-    if (wizardStepIndex >= WIZARD_STEPS.length - 1) {
-      setShowWizard(false)
-      setWizardStepIndex(0)
-      if (user) markOnboardingComplete(user.id).catch(() => {})
-    } else {
-      setWizardStepIndex(prev => prev + 1)
-    }
-  }
-  const wizardPrevStep = () => { if (wizardStepIndex > 0) setWizardStepIndex(prev => prev - 1) }
-  const wizardSkipAll = () => {
-    setShowWizard(false)
-    setWizardStepIndex(0)
-    if (user) markOnboardingComplete(user.id).catch(() => {})
-  }
+  // Brand Kit state
+  const [brandKit, setBrandKit] = useState<BrandKit | null>(null)
+  const [bkName, setBkName] = useState('My Brand')
+  const [bkPrimary, setBkPrimary] = useState('#000000')
+  const [bkSecondary, setBkSecondary] = useState('#ffffff')
+  const [bkAccent, setBkAccent] = useState('#6366f1')
+  const [bkVoice, setBkVoice] = useState('')
+  const [bkToneKeywords, setBkToneKeywords] = useState<string[]>([])
+  const [bkToneInput, setBkToneInput] = useState('')
+  const [bkMustUse, setBkMustUse] = useState<string[]>([])
+  const [bkMustUseInput, setBkMustUseInput] = useState('')
+  const [bkForbidden, setBkForbidden] = useState<string[]>([])
+  const [bkForbiddenInput, setBkForbiddenInput] = useState('')
+  const [bkActive, setBkActive] = useState(true)
+  const [bkSaving, setBkSaving] = useState(false)
+  const [bkMessage, setBkMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [devTab, setDevTab] = useState<'changelog' | 'roadmap' | 'feedback'>('changelog')
 
   useEffect(() => {
     async function loadData() {
       if (!user) return
       const profileData = await getProfile(user.id)
       setProfile(profileData)
+      // Load brand kit
+      try {
+        const kit = await getBrandKit(user.id)
+        if (kit) {
+          setBrandKit(kit)
+          setBkName(kit.name)
+          setBkPrimary(kit.primary_color || '#000000')
+          setBkSecondary(kit.secondary_color || '#ffffff')
+          setBkAccent(kit.accent_color || '#6366f1')
+          setBkVoice(kit.brand_voice || '')
+          setBkToneKeywords(kit.tone_keywords || [])
+          setBkMustUse(kit.must_use_phrases || [])
+          setBkForbidden(kit.forbidden_phrases || [])
+          setBkActive(kit.is_active)
+        }
+      } catch (err) {
+        console.warn('Failed to load brand kit:', err)
+      }
     }
     loadData()
   }, [user])
@@ -140,6 +145,67 @@ export default function Settings() {
   }
 
   const t = labels[language]
+
+  const handleSaveBrandKit = async () => {
+    if (!user) return
+    setBkSaving(true)
+    setBkMessage(null)
+    try {
+      const data: BrandKitFormData = {
+        name: bkName || 'My Brand',
+        primary_color: bkPrimary,
+        secondary_color: bkSecondary,
+        accent_color: bkAccent,
+        brand_voice: bkVoice || null,
+        tone_keywords: bkToneKeywords,
+        must_use_phrases: bkMustUse,
+        forbidden_phrases: bkForbidden,
+        is_active: bkActive
+      }
+      const saved = await upsertBrandKit(user.id, data)
+      setBrandKit(saved)
+      setBkMessage({ type: 'success', text: language === 'es' ? 'Brand Kit guardado' : 'Brand Kit saved' })
+    } catch (err) {
+      setBkMessage({ type: 'error', text: language === 'es' ? 'Error al guardar' : 'Failed to save' })
+    } finally {
+      setBkSaving(false)
+    }
+  }
+
+  const handleDeleteBrandKit = async () => {
+    if (!user) return
+    setBkSaving(true)
+    try {
+      await deleteBrandKit(user.id)
+      setBrandKit(null)
+      setBkName('My Brand')
+      setBkPrimary('#000000')
+      setBkSecondary('#ffffff')
+      setBkAccent('#6366f1')
+      setBkVoice('')
+      setBkToneKeywords([])
+      setBkMustUse([])
+      setBkForbidden([])
+      setBkActive(true)
+      setBkMessage({ type: 'success', text: language === 'es' ? 'Brand Kit eliminado' : 'Brand Kit deleted' })
+    } catch {
+      setBkMessage({ type: 'error', text: language === 'es' ? 'Error al eliminar' : 'Failed to delete' })
+    } finally {
+      setBkSaving(false)
+    }
+  }
+
+  const addTag = (list: string[], setList: (v: string[]) => void, input: string, setInput: (v: string) => void) => {
+    const val = input.trim()
+    if (val && !list.includes(val)) {
+      setList([...list, val])
+    }
+    setInput('')
+  }
+
+  const removeTag = (list: string[], setList: (v: string[]) => void, index: number) => {
+    setList(list.filter((_, i) => i !== index))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -252,6 +318,212 @@ export default function Settings() {
           </div>
         </div>
 
+        {/* Brand Kit */}
+        <div className="card mt-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
+              <Palette className="w-5 h-5 text-primary-500" />
+              Brand Kit
+            </h2>
+            <div className="flex items-center gap-3">
+              {brandKit && (
+                <button
+                  onClick={handleDeleteBrandKit}
+                  className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                  disabled={bkSaving}
+                >
+                  <Trash2 className="w-3 h-3" />
+                  {language === 'es' ? 'Eliminar' : 'Delete'}
+                </button>
+              )}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs text-dark-500">{bkActive ? (language === 'es' ? 'Activo' : 'Active') : (language === 'es' ? 'Inactivo' : 'Inactive')}</span>
+                <div
+                  onClick={() => setBkActive(!bkActive)}
+                  className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                    bkActive ? 'bg-primary-500' : 'bg-dark-300'
+                  }`}
+                >
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                    bkActive ? 'translate-x-4' : ''
+                  }`} />
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {bkMessage && (
+            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm mb-4 ${
+              bkMessage.type === 'success'
+                ? 'bg-green-900/20 border border-green-700/30 text-green-400'
+                : 'bg-red-900/20 border border-red-700/30 text-red-400'
+            }`}>
+              {bkMessage.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+              {bkMessage.text}
+            </div>
+          )}
+
+          <p className="text-xs text-dark-400 mb-4">
+            {language === 'es'
+              ? 'Define la identidad visual y tonal de tu marca. Se aplica automáticamente a posts, guiones y respuestas.'
+              : 'Define your brand\'s visual and tonal identity. Auto-applied to posts, scripts, and replies.'}
+          </p>
+
+          <div className="space-y-5">
+            {/* Brand Name */}
+            <div>
+              <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                {language === 'es' ? 'Nombre de Marca' : 'Brand Name'}
+              </label>
+              <input
+                type="text"
+                value={bkName}
+                onChange={(e) => setBkName(e.target.value)}
+                className="input-field"
+                placeholder="My Brand"
+              />
+            </div>
+
+            {/* Brand Colors */}
+            <div>
+              <label className="block text-sm font-medium text-dark-700 mb-2">
+                {language === 'es' ? 'Colores de Marca' : 'Brand Colors'}
+              </label>
+              <div className="flex items-center gap-4">
+                <div className="flex flex-col items-center gap-1">
+                  <input type="color" value={bkPrimary} onChange={e => setBkPrimary(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
+                  <span className="text-[10px] text-dark-400">{language === 'es' ? 'Primario' : 'Primary'}</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <input type="color" value={bkSecondary} onChange={e => setBkSecondary(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
+                  <span className="text-[10px] text-dark-400">{language === 'es' ? 'Secundario' : 'Secondary'}</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <input type="color" value={bkAccent} onChange={e => setBkAccent(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
+                  <span className="text-[10px] text-dark-400">{language === 'es' ? 'Acento' : 'Accent'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Brand Voice */}
+            <div>
+              <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                {language === 'es' ? 'Voz de Marca' : 'Brand Voice'}
+              </label>
+              <textarea
+                value={bkVoice}
+                onChange={(e) => setBkVoice(e.target.value)}
+                className="input-field min-h-[80px] resize-y"
+                placeholder={language === 'es'
+                  ? 'Describe el tono y personalidad de tu marca... Ej: Profesional pero cercano, usa humor sutil'
+                  : 'Describe your brand\'s tone & personality... E.g.: Professional yet approachable, uses subtle humor'}
+                rows={3}
+              />
+            </div>
+
+            {/* Tone Keywords */}
+            <div>
+              <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                {language === 'es' ? 'Palabras Clave de Tono' : 'Tone Keywords'}
+              </label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {bkToneKeywords.map((kw, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-primary-900/20 text-primary-400 rounded-full text-xs">
+                    {kw}
+                    <button onClick={() => removeTag(bkToneKeywords, setBkToneKeywords, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={bkToneInput}
+                  onChange={e => setBkToneInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkToneKeywords, setBkToneKeywords, bkToneInput, setBkToneInput))}
+                  className="input-field flex-1"
+                  placeholder={language === 'es' ? 'Ej: profesional, cercano...' : 'E.g.: bold, friendly...'}
+                />
+                <button
+                  type="button"
+                  onClick={() => addTag(bkToneKeywords, setBkToneKeywords, bkToneInput, setBkToneInput)}
+                  className="btn-secondary px-3"
+                ><Plus className="w-4 h-4" /></button>
+              </div>
+            </div>
+
+            {/* Must-use Phrases */}
+            <div>
+              <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                {language === 'es' ? 'Frases Obligatorias' : 'Must-Use Phrases'}
+              </label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {bkMustUse.map((p, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-green-900/20 text-green-400 rounded-full text-xs">
+                    {p}
+                    <button onClick={() => removeTag(bkMustUse, setBkMustUse, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={bkMustUseInput}
+                  onChange={e => setBkMustUseInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkMustUse, setBkMustUse, bkMustUseInput, setBkMustUseInput))}
+                  className="input-field flex-1"
+                  placeholder={language === 'es' ? 'Ej: ¡Descúbrelo hoy!' : 'E.g.: Discover today!'}
+                />
+                <button
+                  type="button"
+                  onClick={() => addTag(bkMustUse, setBkMustUse, bkMustUseInput, setBkMustUseInput)}
+                  className="btn-secondary px-3"
+                ><Plus className="w-4 h-4" /></button>
+              </div>
+            </div>
+
+            {/* Forbidden Phrases */}
+            <div>
+              <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                {language === 'es' ? 'Frases Prohibidas' : 'Forbidden Phrases'}
+              </label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {bkForbidden.map((p, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-red-900/20 text-red-400 rounded-full text-xs">
+                    {p}
+                    <button onClick={() => removeTag(bkForbidden, setBkForbidden, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={bkForbiddenInput}
+                  onChange={e => setBkForbiddenInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkForbidden, setBkForbidden, bkForbiddenInput, setBkForbiddenInput))}
+                  className="input-field flex-1"
+                  placeholder={language === 'es' ? 'Ej: barato, gratis...' : 'E.g.: cheap, free...'}
+                />
+                <button
+                  type="button"
+                  onClick={() => addTag(bkForbidden, setBkForbidden, bkForbiddenInput, setBkForbiddenInput)}
+                  className="btn-secondary px-3"
+                ><Plus className="w-4 h-4" /></button>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={handleSaveBrandKit}
+            disabled={bkSaving}
+            className="btn-primary flex items-center gap-2 mt-6"
+          >
+            <Save className="w-4 h-4" />
+            {bkSaving
+              ? (language === 'es' ? 'Guardando...' : 'Saving...')
+              : (language === 'es' ? 'Guardar Brand Kit' : 'Save Brand Kit')}
+          </button>
+        </div>
+
         {/* Billing & Subscription */}
         <div className="card mt-6">
           <div className="flex items-center justify-between mb-6">
@@ -273,7 +545,7 @@ export default function Settings() {
 
           {/* Current Usage */}
           {!usageLimits.loading && (
-            <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
               <div className="p-4 bg-dark-50 rounded-xl">
                 <div className="flex items-center gap-2 mb-2">
                   <Zap className="w-4 h-4 text-amber-500" />
@@ -313,6 +585,20 @@ export default function Settings() {
                   {usageLimits.imagesUsed}
                   <span className="text-sm font-normal text-dark-400">
                     / {usageLimits.imagesLimit === -1 ? '∞' : usageLimits.imagesLimit}
+                  </span>
+                </div>
+              </div>
+              <div className="p-4 bg-dark-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <MessageCircle className="w-4 h-4 text-green-500" />
+                  <span className="text-xs font-medium text-dark-700">
+                    {language === 'es' ? 'Respuestas' : 'Replies'}
+                  </span>
+                </div>
+                <div className="text-xl font-bold text-dark-900">
+                  {usageLimits.repliesUsed}
+                  <span className="text-sm font-normal text-dark-400">
+                    / {usageLimits.repliesLimit === -1 ? '∞' : usageLimits.repliesLimit}
                   </span>
                 </div>
               </div>
@@ -551,39 +837,145 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Replay Setup Wizard */}
+        {/* From the Developer */}
         <div className="card mt-6">
-          <button
-            onClick={handleReplayWizard}
-            className="flex items-center justify-between w-full py-3 hover:bg-dark-50 -mx-4 px-4 rounded-lg transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary-900/20">
-                <HelpCircle className="w-5 h-5 text-primary-600" />
-              </div>
-              <div className="text-left">
-                <p className="font-medium text-dark-900">
-                  {language === 'es' ? 'Tutorial de la Plataforma' : 'Platform Tutorial'}
-                </p>
-                <p className="text-sm text-dark-500">
-                  {language === 'es' ? 'Revisa el tour guiado de todas las funciones' : 'Replay the guided tour of all features'}
-                </p>
-              </div>
+          <div className="flex items-center gap-2 mb-4">
+            <Code2 className="w-5 h-5 text-primary-500" />
+            <h2 className="text-lg font-semibold text-dark-900">
+              {language === 'es' ? 'Desde el Desarrollador' : 'From the Developer'}
+            </h2>
+          </div>
+
+          {/* Status Alert */}
+          {STATUS_ALERT.active && (
+            <div className={`flex items-start gap-2 p-3 rounded-lg text-sm mb-4 ${
+              STATUS_ALERT.severity === 'error' ? 'bg-red-900/20 border border-red-700/30 text-red-400' :
+              STATUS_ALERT.severity === 'warning' ? 'bg-amber-900/20 border border-amber-700/30 text-amber-400' :
+              'bg-blue-900/20 border border-blue-700/30 text-blue-400'
+            }`}>
+              {STATUS_ALERT.severity === 'error' ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> :
+               STATUS_ALERT.severity === 'warning' ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> :
+               <Info className="w-4 h-4 mt-0.5 shrink-0" />}
+              <span>{STATUS_ALERT.text[language]}</span>
             </div>
-            <ChevronRight className="w-5 h-5 text-dark-400" />
-          </button>
+          )}
+
+          {/* Tabs */}
+          <div className="flex gap-1 p-1 bg-dark-50 rounded-lg mb-4">
+            {([
+              { key: 'changelog' as const, label: language === 'es' ? 'Cambios' : 'Changelog', icon: Clock },
+              { key: 'roadmap' as const, label: language === 'es' ? 'Próximamente' : 'Coming Soon', icon: Rocket },
+              { key: 'feedback' as const, label: 'Feedback', icon: MessageSquarePlus },
+            ]).map(tab => {
+              const Icon = tab.icon
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setDevTab(tab.key)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                    devTab === tab.key
+                      ? 'bg-dark-100 text-dark-900 shadow-sm'
+                      : 'text-dark-500 hover:text-dark-700'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Changelog Tab */}
+          {devTab === 'changelog' && (
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
+              {CHANGELOG.map((release, ri) => (
+                <div key={ri}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-bold text-primary-400 bg-primary-900/20 px-2 py-0.5 rounded-full">
+                      v{release.version}
+                    </span>
+                    <span className="text-[10px] text-dark-400">
+                      {new Date(release.date).toLocaleDateString(language === 'es' ? 'es-ES' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 ml-1">
+                    {release.items.map((item, ii) => {
+                      const catConfig: Record<ChangeCategory, { icon: typeof Sparkles; color: string; label: string }> = {
+                        feature: { icon: Sparkles, color: 'text-green-400', label: language === 'es' ? 'Nuevo' : 'New' },
+                        fix: { icon: Bug, color: 'text-red-400', label: 'Fix' },
+                        improvement: { icon: ArrowUpCircle, color: 'text-blue-400', label: language === 'es' ? 'Mejora' : 'Improved' },
+                        rework: { icon: Wrench, color: 'text-amber-400', label: 'Rework' },
+                      }
+                      const cfg = catConfig[item.category]
+                      const CatIcon = cfg.icon
+                      return (
+                        <div key={ii} className="flex items-start gap-2 text-sm">
+                          <CatIcon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${cfg.color}`} />
+                          <span className="text-dark-700">{item.text[language]}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {ri < CHANGELOG.length - 1 && <div className="border-b border-dark-200/50 mt-3" />}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Roadmap Tab */}
+          {devTab === 'roadmap' && (
+            <div className="space-y-3">
+              {ROADMAP.map((item, i) => {
+                const statusConfig: Record<RoadmapStatus, { color: string; bg: string; label: string }> = {
+                  planned: { color: 'text-dark-500', bg: 'bg-dark-200', label: language === 'es' ? 'Planeado' : 'Planned' },
+                  in_progress: { color: 'text-blue-400', bg: 'bg-blue-900/20', label: language === 'es' ? 'En progreso' : 'In Progress' },
+                  beta: { color: 'text-amber-400', bg: 'bg-amber-900/20', label: 'Beta' },
+                  done: { color: 'text-green-400', bg: 'bg-green-900/20', label: language === 'es' ? 'Listo' : 'Done' },
+                }
+                const sc = statusConfig[item.status]
+                return (
+                  <div key={i} className="flex items-start gap-3 p-3 bg-dark-50 rounded-lg">
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${sc.color} ${sc.bg}`}>
+                      {sc.label}
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-sm text-dark-700">{item.text[language]}</p>
+                      {item.eta && <p className="text-[10px] text-dark-400 mt-0.5">ETA: {item.eta}</p>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Feedback Tab */}
+          {devTab === 'feedback' && (
+            <div className="text-center py-6">
+              <MessageSquarePlus className="w-10 h-10 text-primary-500 mx-auto mb-3" />
+              <p className="text-sm text-dark-700 mb-1">
+                {language === 'es'
+                  ? 'Tu feedback nos ayuda a mejorar la plataforma.'
+                  : 'Your feedback helps us improve the platform.'}
+              </p>
+              <p className="text-xs text-dark-400 mb-4">
+                {language === 'es'
+                  ? 'Reporta bugs, sugiere funciones o haz preguntas.'
+                  : 'Report bugs, suggest features, or ask questions.'}
+              </p>
+              <button
+                onClick={() => {
+                  const feedbackBtn = document.querySelector('[data-onboarding="feedback"]') as HTMLButtonElement
+                  if (feedbackBtn) feedbackBtn.click()
+                }}
+                className="btn-primary inline-flex items-center gap-2"
+              >
+                <MessageSquarePlus className="w-4 h-4" />
+                {language === 'es' ? 'Enviar Feedback' : 'Send Feedback'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
-      {showWizard && (
-        <OnboardingWizard
-          currentStep={WIZARD_STEPS[wizardStepIndex]}
-          stepIndex={wizardStepIndex}
-          totalSteps={WIZARD_STEPS.length}
-          nextStep={wizardNextStep}
-          prevStep={wizardPrevStep}
-          skipAll={wizardSkipAll}
-        />
-      )}
     </Layout>
   )
 }

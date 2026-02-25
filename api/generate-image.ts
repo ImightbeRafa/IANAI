@@ -7,6 +7,7 @@ import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
+import { loadBrandKit, buildBrandColorOverride } from './lib/brand-kit.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -800,7 +801,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
 
       // Resolve color palette override (if any)
-      // Supports both predefined palette IDs and custom hex colors
+      // Priority: custom colors > predefined palette > brand kit colors > none
       let colorPrefix = ''
       if (imageParams.customColors && Array.isArray(imageParams.customColors) && imageParams.customColors.length > 0) {
         // Custom user-defined palette: array of hex strings
@@ -810,6 +811,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const colorPalette = findColorPaletteById(imageParams.colorPaletteId as string)
         if (colorPalette && colorPalette.promptEs) {
           colorPrefix = 'IMPORTANTE: ' + colorPalette.promptEs + ' Ignora cualquier otro color mencionado en las instrucciones siguientes.\n\n'
+        }
+      }
+
+      // Brand Kit: auto-inject brand colors when no explicit palette is selected
+      let brandKit: Awaited<ReturnType<typeof loadBrandKit>> = null
+      try {
+        brandKit = await loadBrandKit(user.id)
+      } catch { /* ignore */ }
+
+      if (!colorPrefix && brandKit) {
+        const bkColorOverride = buildBrandColorOverride(brandKit)
+        if (bkColorOverride) {
+          colorPrefix = 'IMPORTANTE: ' + bkColorOverride + '\n\n'
         }
       }
 

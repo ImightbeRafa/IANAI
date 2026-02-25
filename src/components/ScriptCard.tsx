@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon, ThumbsUp, ThumbsDown } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
-import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../services/database'
+import { getScriptsByMessage, getScriptVersions, recordAiSignal, rateScript } from '../services/database'
 
 type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
 
@@ -67,6 +67,9 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
         if (match) {
           setSavedScriptId(match.id)
           setSavedOriginal(true)
+          // Restore persisted rating (DB stores 5=good, 1=bad)
+          if (match.rating === 5) setRatings(prev => ({ ...prev, [0]: 'good' }))
+          else if (match.rating === 1) setRatings(prev => ({ ...prev, [0]: 'bad' }))
           const versions = await getScriptVersions(match.id)
           if (versions.length > 0) {
             const sorted = [...versions].sort((a, b) => a.version - b.version)
@@ -463,12 +466,20 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
           delete next[versionIndex]
           return next
         })
+        // Persist un-rate to DB if script is saved (version 0 = original)
+        if (versionIndex === 0 && savedScriptId) {
+          rateScript(savedScriptId, null).catch(() => {})
+        }
         return
       }
 
       // Set or change rating for this specific version only
       fireRatingSignal(versionIndex, rating)
       setRatings(prev => ({ ...prev, [versionIndex]: rating }))
+      // Persist to DB if script is saved (version 0 = original, good=5, bad=1)
+      if (versionIndex === 0 && savedScriptId) {
+        rateScript(savedScriptId, rating === 'good' ? 5 : 1).catch(() => {})
+      }
     }
 
     return (

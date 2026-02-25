@@ -651,3 +651,36 @@ export interface ReplyContextSource {
   created_at: string
 }
 
+// =============================================
+// Brand Kit
+// =============================================
+export interface BrandKit {
+  id: string
+  user_id: string
+  name: string
+  logo_url: string | null
+  primary_color: string | null
+  secondary_color: string | null
+  accent_color: string | null
+  brand_voice: string | null
+  tone_keywords: string[]
+  must_use_phrases: string[]
+  forbidden_phrases: string[]
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface BrandKitFormData {
+  name: string
+  logo_url?: string | null
+  primary_color?: string | null
+  secondary_color?: string | null
+  accent_color?: string | null
+  brand_voice?: string | null
+  tone_keywords?: string[]
+  must_use_phrases?: string[]
+  forbidden_phrases?: string[]
+  is_active?: boolean
+}
+
