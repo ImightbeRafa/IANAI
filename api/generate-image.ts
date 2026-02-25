@@ -661,19 +661,21 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
         const promptParts: PromptPart[] = [
-          { text: ENHANCE_SYSTEM_PROMPT },
-          { inlineData: { mimeType: base64Match[1], data: base64Match[2] } }
+          { text: ENHANCE_SYSTEM_PROMPT }
         ]
 
-        // Add product reference images if provided (up to 4)
+        // PRODUCT REFERENCE IMAGES FIRST — Gemini must see product truth BEFORE the design
+        let productRefCount = 0
         if (hasProductRef) {
-          promptParts.push({ text: 'IMÁGENES DE REFERENCIA DEL PRODUCTO REAL (usa estas como fuente de verdad para la apariencia del producto):' })
+          promptParts.push({ text: '══ IMÁGENES DE REFERENCIA DEL PRODUCTO REAL ══\nEstas son fotos REALES del producto del usuario. El producto en el diseño mejorado DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:' })
           for (const refImg of imageParams.productReferenceImages!.slice(0, 4)) {
             const refMatch = refImg.match(/^data:([^;]+);base64,(.+)$/)
             if (refMatch) {
               promptParts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } })
+              productRefCount++
             }
           }
+          console.log(`Enhance: ${productRefCount} product reference images injected BEFORE enhance image`)
         }
 
         // Brand Kit: inject logo so it is preserved/reinforced during enhancement
@@ -688,6 +690,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           } catch (logoErr) {
             console.warn('Failed to inject brand logo in enhance:', logoErr)
           }
+        }
+
+        // NOW add the image to enhance (AFTER product refs + logo so model has truth established)
+        promptParts.push({ text: '══ IMAGEN A MEJORAR ══\nEsta es la imagen de diseño que debes reinterpretar y mejorar. Aplica las reglas anteriores:' })
+        promptParts.push({ inlineData: { mimeType: base64Match[1], data: base64Match[2] } })
+
+        // Closing reinforcement if product refs were provided
+        if (productRefCount > 0) {
+          promptParts.push({ text: 'RECORDATORIO FINAL: El producto en la imagen mejorada DEBE ser IDÉNTICO a las fotos de referencia del producto proporcionadas arriba. NO inventes otro producto. NO cambies forma, color, silueta ni textura. Copia el producto EXACTAMENTE de las referencias.' })
         }
 
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
@@ -978,9 +989,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
         }
         if (productImageParts.length > 0 && isPostMode) {
-          promptParts.push({ text: 'IMÁGENES DE REFERENCIA DEL PRODUCTO REAL (usa estas como fuente de verdad para la apariencia del producto):' })
+          promptParts.push({ text: '══ IMÁGENES DE REFERENCIA DEL PRODUCTO REAL ══\nEstas son fotos REALES del producto del usuario. El producto en el diseño DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:' })
         }
         promptParts.push(...productImageParts)
+
+        // Closing reinforcement if product images were provided
+        if (productImageParts.length > 0 && isPostMode) {
+          promptParts.push({ text: 'RECORDATORIO: El producto en el diseño DEBE ser IDÉNTICO a las fotos de referencia proporcionadas arriba. NO inventes otro producto. Copia forma, color, silueta y textura EXACTAMENTE de las referencias.' })
+        }
 
         // Determine aspect ratio from dimensions
         const geminiAspectRatio = getAspectRatio(
