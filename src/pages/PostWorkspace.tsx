@@ -89,6 +89,7 @@ export default function PostWorkspace() {
   const editFileInputRef = useRef<HTMLInputElement>(null)
   const usageLimits = useUsageLimits()
   const [enhancingPostId, setEnhancingPostId] = useState<string | null>(null)
+  const enhancingPostIdRef = useRef<string | null>(null)
   const [customPalettes, setCustomPalettes] = useState<CustomColorPalette[]>([])
   const [showColorCreator, setShowColorCreator] = useState(false)
   const [newPaletteName, setNewPaletteName] = useState('')
@@ -513,6 +514,12 @@ export default function PostWorkspace() {
               setGeneratedPosts(prev => prev.map(p =>
                 p.id === tempId ? { ...p, id: post.id, imageUrl: savedUrl, saved: true } : p
               ))
+              // Sync enhancing/editing refs if they were tracking this tempId
+              if (enhancingPostIdRef.current === tempId) {
+                enhancingPostIdRef.current = post.id
+                setEnhancingPostId(post.id)
+              }
+              setEditingPostId(prev => prev === tempId ? post.id : prev)
             } catch (saveErr) {
               console.error('Failed to save image:', saveErr)
             }
@@ -620,6 +627,11 @@ export default function PostWorkspace() {
               setGeneratedPosts(prev => prev.map(p =>
                 p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
               ))
+              // Sync enhancing ref if it was tracking this tempId
+              if (enhancingPostIdRef.current === tempId) {
+                enhancingPostIdRef.current = dbPost.id
+                setEnhancingPostId(dbPost.id)
+              }
             } catch (saveErr) {
               console.error('Failed to save edited image:', saveErr)
             }
@@ -653,6 +665,7 @@ export default function PostWorkspace() {
     if (enhancingPostId) return
 
     setEnhancingPostId(postId)
+    enhancingPostIdRef.current = postId
     setError('')
 
     try {
@@ -688,9 +701,12 @@ export default function PostWorkspace() {
         const enhancedUrl = result.result.sample
         const tempId = `enhance-${Date.now()}`
 
+        // Use ref to get the CURRENT post id (may have changed via background save)
+        const currentPostId = enhancingPostIdRef.current || postId
+
         // Show immediately with base64
         setGeneratedPosts(prev => {
-          const idx = prev.findIndex(p => p.id === postId)
+          const idx = prev.findIndex(p => p.id === currentPostId)
           const next = [...prev]
           next.splice(idx + 1, 0, {
             id: tempId,
@@ -721,6 +737,11 @@ export default function PostWorkspace() {
               setGeneratedPosts(prev => prev.map(p =>
                 p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
               ))
+              // Sync enhancing ref if user started enhancing this post before save finished
+              if (enhancingPostIdRef.current === tempId) {
+                enhancingPostIdRef.current = dbPost.id
+                setEnhancingPostId(dbPost.id)
+              }
             } catch (saveErr) {
               console.error('Failed to save enhanced image:', saveErr)
             }
@@ -731,6 +752,7 @@ export default function PostWorkspace() {
       setError(err instanceof Error ? err.message : t.enhanceError)
     } finally {
       setEnhancingPostId(null)
+      enhancingPostIdRef.current = null
     }
   }
 
