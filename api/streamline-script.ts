@@ -8,99 +8,118 @@ const XAI_API_URL = 'https://api.x.ai/v1/chat/completions'
 function getSystemPrompt(postStyle: string, language: string): string {
   const lang = language === 'en' ? 'English' : 'Spanish'
 
-  const baseRules = `You are an expert at condensing advertising scripts into ultra-short copy for social media image posts.
-The user will give you a full script (Hook / Development / CTA). Your job is to extract ONLY the essential text that should appear ON the image.
+  const baseRules = `You are a senior copywriter specializing in condensing advertising scripts for social media image posts.
+The user will give you a full script that follows a persuasion structure (Hook → Development → CTA).
+
+YOUR JOB: Distill it into short, punchy image copy — BUT you MUST preserve the script's core persuasion arc:
+1. THE HOOK — the attention-grabbing opening idea. Keep its essence; don't genericize it.
+2. THE KEY ARGUMENT — the unique selling point, differentiator, or proof from the development section. This is the "why buy" — never lose it.
+3. THE CTA — the closing push to action. Keep the urgency/incentive if present.
 
 CRITICAL RULES:
-- Output ONLY the condensed text. No explanations, no labels, no markdown.
-- Keep the SAME language as the input script (${lang}). Do NOT translate.
-- Be extremely concise — images get cluttered with too much text.
-- Preserve the core selling message and key differentiator.
+- Output ONLY the condensed text. No explanations, no labels, no markdown, no commentary.
+- Keep the SAME language as the input (${lang}). Do NOT translate.
+- Condense ≠ rewrite from scratch. The output must feel like a distilled version of THIS specific script, not a generic ad.
+- Remove filler, transitions, repetition, and verbose phrasing — but KEEP specific claims, numbers, product names, and unique angles.
+- If the script mentions a specific benefit, stat, or differentiator, it MUST appear in the output.
+- The result should read as a coherent mini-pitch, not disconnected fragments.
 - Output must be ready to paste directly into an image generation prompt.`
 
   const styleRules: Record<string, string> = {
     'venta-directa': `
-OUTPUT FORMAT (strictly):
-- 1 punchy headline (max 8 words)
-- 3 ultra-short bullets (max 5 words each) — tangible facts only
-- 1 CTA (max 4 words)
+
+OUTPUT FORMAT:
+Line 1: Hook headline — the script's opening idea condensed into one punchy line (max 10 words)
+Lines 2-4: 3 key selling points from the script's development — each a short, specific claim (max 6 words each). Use the script's own arguments, not generic benefits.
+Line 5: CTA — the script's call to action, condensed (max 5 words). Keep any urgency/offer.
 
 Separate each element with a line break. Nothing else.`,
 
     'features-benefits': `
-OUTPUT FORMAT (strictly):
-- 1 product name/headline (max 6 words)
-- 3-4 feature labels (2-3 words each) — these go on callout labels pointing to the product
+
+OUTPUT FORMAT:
+Line 1: Product name or hook headline from the script (max 8 words)
+Lines 2-5: 3-4 feature→benefit labels extracted from the script's development (3-4 words each). Each should be a SPECIFIC feature or benefit mentioned in the script, not invented.
 
 Separate each element with a line break. Nothing else.`,
 
     'product-showcase': `
-OUTPUT FORMAT (strictly):
-- 1 bold headline (max 8 words)
-- 3 short callout labels (max 4 words each)
-- 1 CTA button text (max 3 words)
+
+OUTPUT FORMAT:
+Line 1: The script's hook idea as a bold headline (max 10 words)
+Lines 2-4: 3 product highlights from the script's key arguments (max 5 words each)
+Line 5: CTA from the script (max 4 words)
 
 Separate each element with a line break. Nothing else.`,
 
     'social-proof': `
-OUTPUT FORMAT (strictly):
-- 1 short customer quote (max 15 words)
-- 1 customer name (can be invented if not in script)
-- 1 product benefit headline (max 6 words)
-- Star rating (e.g. ★★★★★)
+
+OUTPUT FORMAT:
+Line 1: A testimonial-style quote that captures the script's main promise (max 18 words) — paraphrase the script's hook/development as if a customer said it
+Line 2: Customer name (can be invented if not in script)
+Line 3: The script's key benefit as a headline (max 8 words)
+Line 4: Star rating (e.g. ★★★★★)
 
 Separate each element with a line break. Nothing else.`,
 
     'comparison': `
-OUTPUT FORMAT (strictly):
-- Option A name (max 3 words)
-- Option B name (max 3 words)
-- 3 comparison points for each (max 4 words each), marked with ✓ or ✗
+
+OUTPUT FORMAT:
+Line 1: Option A name — the "without" or competitor (max 4 words)
+Line 2: Option B name — the product/solution from the script (max 4 words)
+Lines 3-8: 3 comparison points extracted from the script's arguments, each with ✓ or ✗ (max 5 words each)
 
 Separate each element with a line break. Nothing else.`,
 
     'before-after': `
-OUTPUT FORMAT (strictly):
-- "Before" state description (max 6 words)
-- "After" state description (max 6 words)
-- 1 key metric or result (e.g. percentage, time saved)
-- 1 short headline (max 8 words)
+
+OUTPUT FORMAT:
+Line 1: "Before" — the problem/pain from the script's hook (max 8 words)
+Line 2: "After" — the transformation/result from the script's development (max 8 words)
+Line 3: Key metric or proof from the script (e.g. percentage, time saved, specific result)
+Line 4: Headline that captures the script's core promise (max 10 words)
 
 Separate each element with a line break. Nothing else.`,
 
     'collage': `
-OUTPUT FORMAT (strictly):
-- 1 main headline (max 8 words)
-- 3-4 short captions for panels (max 5 words each)
-- 1 CTA (max 3 words)
+
+OUTPUT FORMAT:
+Line 1: Main headline from the script's hook (max 10 words)
+Lines 2-5: 3-4 panel captions — each one a key point from the script's development (max 6 words each)
+Line 6: CTA from the script (max 4 words)
 
 Separate each element with a line break. Nothing else.`,
 
     'deals-discounts': `
-OUTPUT FORMAT (strictly):
-- Discount amount (e.g. "30% OFF" or "$10 OFF")
-- Product/offer name (max 5 words)
-- 1 urgency phrase (max 5 words)
-- 1 CTA button text (max 3 words)
+
+OUTPUT FORMAT:
+Line 1: Discount/offer amount from the script (e.g. "30% OFF", "$10 OFF", "2x1")
+Line 2: Product/offer name (max 6 words)
+Line 3: Urgency phrase from the script's CTA (max 6 words)
+Line 4: CTA button text (max 4 words)
 
 Separate each element with a line break. Nothing else.`,
 
     'testimonial': `
-OUTPUT FORMAT (strictly):
-- 1 short testimonial quote (max 20 words)
-- Customer name
-- 1 product benefit (max 5 words)
-- Star rating (e.g. ★★★★★)
+
+OUTPUT FORMAT:
+Line 1: Testimonial quote — distill the script's main argument as if a real customer said it (max 22 words)
+Line 2: Customer name (use from script or invent a realistic one)
+Line 3: The script's key benefit as a short tagline (max 6 words)
+Line 4: Star rating (e.g. ★★★★★)
 
 Separate each element with a line break. Nothing else.`,
   }
 
   // Default generic condensation for custom types, organic, etc.
   const defaultStyleRules = `
+
 OUTPUT FORMAT:
-Condense the entire script into max 50 words total.
-Keep: the main headline, 2-3 key points, and the CTA.
-Remove: all filler, transitions, repetition, and verbose explanations.
+Distill the script into max 60 words total, preserving its persuasion arc:
+- Start with the hook idea (condensed)
+- Include the 2-3 strongest arguments or proof points from the development
+- End with the CTA
+Remove filler and repetition, but keep specific claims, numbers, and the script's unique angle.
 Output as short lines separated by line breaks. Nothing else.`
 
   return baseRules + (styleRules[postStyle] || defaultStyleRules)
