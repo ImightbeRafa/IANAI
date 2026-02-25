@@ -1273,7 +1273,7 @@ export default function PostWorkspace() {
                         <button
                           onClick={handleStreamline}
                           disabled={streamlining}
-                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-dark-100 border border-dark-200 text-amber-400 hover:bg-dark-200 transition-colors disabled:opacity-50"
                           title={t.streamline}
                         >
                           {streamlining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
@@ -1294,21 +1294,21 @@ export default function PostWorkspace() {
 
               {/* Streamlined script card */}
               {streamlinedScript && (
-                <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                <div className="mt-2 bg-dark-100 border border-emerald-500/30 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wide flex items-center gap-1">
+                    <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide flex items-center gap-1">
                       <Wand2 className="w-3 h-3" />
                       {t.streamlined}
                     </p>
                     <button
                       onClick={() => setStreamlinedScript(null)}
-                      className="flex items-center gap-1 text-[10px] text-emerald-600 hover:text-emerald-800 font-medium"
+                      className="flex items-center gap-1 text-[10px] text-dark-400 hover:text-dark-600 font-medium"
                     >
                       <X className="w-3 h-3" />
                       {t.revertStreamline}
                     </button>
                   </div>
-                  <p className="text-xs text-dark-700 leading-relaxed whitespace-pre-wrap">{streamlinedScript}</p>
+                  <p className="text-xs text-dark-500 leading-relaxed whitespace-pre-wrap">{streamlinedScript}</p>
                 </div>
               )}
 
@@ -1327,7 +1327,7 @@ export default function PostWorkspace() {
                     <button
                       onClick={handleStreamline}
                       disabled={streamlining}
-                      className="mt-1.5 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-medium bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-50"
+                      className="mt-1.5 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-medium bg-dark-100 border border-dark-200 text-amber-400 hover:bg-dark-200 transition-colors disabled:opacity-50"
                     >
                       {streamlining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
                       {streamlining ? t.streamlining : t.streamline}

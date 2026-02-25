@@ -200,7 +200,17 @@ export function buildBrandVisualPrompt(kit: BrandKitRow): string | null {
  */
 export function buildBrandLogoPrompt(kit: BrandKitRow): string | null {
   if (!kit.logo_url) return null
-  return `LOGO DE MARCA (NO NEGOCIABLE): Se adjunta el logotipo oficial de la marca "${kit.name}". DEBES incluir este logo EXACTAMENTE como aparece en la imagen de referencia del logo. Posiciónalo de forma prominente y profesional (esquina superior izquierda, superior derecha, o centrado arriba). El logo DEBE ser claramente visible, legible, y mantener sus proporciones originales. NO modifiques, rediseñes ni reimagines el logo — reprodúcelo fielmente.`
+  return `═══════════════════════════════════════════════
+REGLA — LOGO DE MARCA (NO NEGOCIABLE / MÁXIMA PRIORIDAD)
+═══════════════════════════════════════════════
+Se adjunta el logotipo oficial de la marca "${kit.name}" como imagen inline.
+- DEBES incluir este logo en el diseño final, reproduciéndolo FIELMENTE.
+- Posiciónalo de forma prominente: esquina superior izquierda, superior derecha, o centrado arriba.
+- El logo DEBE ser claramente visible, legible, y mantener sus proporciones originales.
+- NO modifiques, NO rediseñes, NO reimagines el logo — cópialo tal cual de la referencia adjunta.
+- Si hay conflicto entre el logo y otros elementos, el logo GANA. Ajusta los demás elementos.
+- VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
+═══════════════════════════════════════════════`
 }
 
 /**

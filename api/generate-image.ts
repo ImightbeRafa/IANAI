@@ -443,6 +443,14 @@ Edit instruction: ${editPrompt}`
       }
     }
 
+    // Brand Kit: resolve by explicit ID or fallback to user default
+    // Hoisted before enhance + generation so logo is available in both paths
+    const brandKitIdParam = imageParams.brandKitId as string | undefined
+    let brandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
+    try {
+      brandKit = await resolveBrandKit(user.id, brandKitIdParam)
+    } catch { /* ignore */ }
+
     // =============================================
     // MAGIC WAND ENHANCE MODE (Gemini only)
     // Sends existing image + creative-director mega-prompt → upgraded design
@@ -668,6 +676,20 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
         }
 
+        // Brand Kit: inject logo so it is preserved/reinforced during enhancement
+        if (brandKit && brandKit.logo_url) {
+          try {
+            const logoData = await fetchBrandLogoAsBase64(brandKit)
+            if (logoData) {
+              promptParts.push({ text: `══ LOGO DE MARCA "${brandKit.name}" ══\nSi el logo aparece en la imagen original, MANTENLO exactamente igual. Si NO aparece, AGRÉGALO en una posición prominente (esquina superior). Reprodúcelo fielmente de la referencia adjunta:` })
+              promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
+              console.log(`Brand logo injected in enhance for "${brandKit.name}"`)
+            }
+          } catch (logoErr) {
+            console.warn('Failed to inject brand logo in enhance:', logoErr)
+          }
+        }
+
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
         const enhanceAR = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
 
@@ -783,13 +805,6 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const hasProductImages = !!(imageParams.input_image)
     const postLanguage: string = imageParams.language || 'es'
 
-    // Brand Kit: resolve by explicit ID or fallback to user default (hoisted for logging)
-    const brandKitIdParam = imageParams.brandKitId as string | undefined
-    let brandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
-    try {
-      brandKit = await resolveBrandKit(user.id, brandKitIdParam)
-    } catch { /* ignore */ }
-
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
       // Determine aspect ratio from request (default 9:16 for backward compat)
@@ -880,10 +895,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
-            enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+            enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
           }
         } catch {
-          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: lang + product ref + aspect ratio + visual memory + color prefix + preset master prompt + user script
@@ -891,7 +906,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         if (preset) {
           enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
@@ -929,6 +944,22 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
         const promptParts: PromptPart[] = [{ text: enhancedPrompt }]
 
+        // Brand Kit: inject logo as FIRST inline image (highest visual priority for Gemini)
+        if (brandKit && brandKit.logo_url && isPostMode) {
+          try {
+            const logoData = await fetchBrandLogoAsBase64(brandKit)
+            if (logoData) {
+              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit.name}" ══\nEsta es la imagen del logo que DEBES incluir en el diseño. Reprodúcelo FIELMENTE, sin modificar, en una posición prominente (esquina superior o centrado arriba).` })
+              promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
+              console.log(`Brand logo injected inline for "${brandKit.name}" (${logoData.mimeType}, ${Math.round(logoData.data.length / 1024)}KB)`)
+            } else {
+              console.warn(`Brand logo fetch returned null for kit "${brandKit.name}" (url: ${brandKit.logo_url})`)
+            }
+          } catch (logoErr) {
+            console.warn('Failed to inject brand logo inline:', logoErr)
+          }
+        }
+
         // Add ALL product reference images (input_image, input_image_2, input_image_3, input_image_4)
         const inputImageKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
         const productImageParts: PromptPart[] = []
@@ -950,19 +981,6 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           promptParts.push({ text: 'IMÁGENES DE REFERENCIA DEL PRODUCTO REAL (usa estas como fuente de verdad para la apariencia del producto):' })
         }
         promptParts.push(...productImageParts)
-
-        // Brand Kit: inject logo as inline image so Gemini can reproduce it in the post
-        if (brandKit && brandKit.logo_url && isPostMode) {
-          try {
-            const logoData = await fetchBrandLogoAsBase64(brandKit)
-            if (logoData) {
-              promptParts.push({ text: `LOGO OFICIAL DE LA MARCA "${brandKit.name}" (DEBES incluirlo en el diseño, reproduciéndolo fielmente):` })
-              promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
-            }
-          } catch (logoErr) {
-            console.warn('Failed to inject brand logo inline:', logoErr)
-          }
-        }
 
         // Determine aspect ratio from dimensions
         const geminiAspectRatio = getAspectRatio(
