@@ -1749,20 +1749,15 @@ export async function getBrandKits(userId: string): Promise<BrandKit[]> {
     .from('brand_kits')
     .select('*')
     .eq('user_id', userId)
-    .order('is_default', { ascending: false })
     .order('created_at', { ascending: true })
 
-  if (error) {
-    // Fallback: is_default column may not exist yet (migration 052)
-    const { data: fallback, error: fallbackError } = await supabase
-      .from('brand_kits')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true })
-    if (fallbackError) throw fallbackError
-    return fallback || []
-  }
-  return data || []
+  if (error) throw error
+  // Sort defaults first client-side (is_default column may not exist yet)
+  return (data || []).sort((a, b) => {
+    if (a.is_default && !b.is_default) return -1
+    if (!a.is_default && b.is_default) return 1
+    return 0
+  })
 }
 
 export async function getBrandKitById(kitId: string): Promise<BrandKit | null> {

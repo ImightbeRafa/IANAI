@@ -230,7 +230,7 @@ ${bodyText}`
       config: {
         systemInstruction: systemPrompt,
         temperature: 0.3,
-        maxOutputTokens: 2048,
+        maxOutputTokens: 4096,
         responseMimeType: 'application/json'
       }
     })
@@ -244,18 +244,23 @@ ${bodyText}`
       const cleaned = aiText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
       brandData = JSON.parse(cleaned)
     } catch {
-      // Attempt JSON repair: close truncated strings/objects
+      // Attempt JSON repair: close truncated strings/objects/arrays
       try {
         let repaired = aiText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
+        // Remove trailing comma if present
+        repaired = repaired.replace(/,\s*$/, '')
         // Close any unclosed string
         const quoteCount = (repaired.match(/"/g) || []).length
         if (quoteCount % 2 !== 0) repaired += '"'
-        // Close unclosed arrays/objects
-        const opens = (repaired.match(/[{[]/g) || []).length
-        const closes = (repaired.match(/[}\]]/g) || []).length
-        for (let i = 0; i < opens - closes; i++) {
-          repaired += repaired.includes('[') && !repaired.endsWith('}') ? ']' : '}'
+        // Track bracket/brace nesting in order to close properly
+        const stack: string[] = []
+        for (const ch of repaired) {
+          if (ch === '{') stack.push('}')
+          else if (ch === '[') stack.push(']')
+          else if (ch === '}' || ch === ']') stack.pop()
         }
+        // Close in reverse order
+        while (stack.length > 0) repaired += stack.pop()
         brandData = JSON.parse(repaired)
         console.log('Repaired truncated AI brand JSON successfully')
       } catch {
