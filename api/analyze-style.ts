@@ -89,22 +89,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Maximum 3 reference images allowed' })
     }
 
-    // Validate each image: type check, MIME whitelist, size cap
+    // Validate and normalize each image: accept both base64 data URLs and regular URLs
+    // Regular URLs (e.g. Supabase Storage) are fetched and converted to base64
+    const normalizedImages: string[] = []
     for (let i = 0; i < referenceImages.length; i++) {
-      const img = referenceImages[i]
+      let img = referenceImages[i]
       if (typeof img !== 'string') {
         return res.status(400).json({ error: `Reference image ${i + 1} is not a valid string` })
       }
+
+      // If it's a regular URL (not base64), fetch and convert
+      if (img.startsWith('http://') || img.startsWith('https://')) {
+        try {
+          const imgResp = await fetch(img)
+          if (!imgResp.ok) {
+            return res.status(400).json({ error: `Failed to fetch reference image ${i + 1} from URL` })
+          }
+          const contentType = imgResp.headers.get('content-type') || 'image/webp'
+          const buffer = await imgResp.arrayBuffer()
+          const base64 = Buffer.from(buffer).toString('base64')
+          img = `data:${contentType};base64,${base64}`
+        } catch (fetchErr) {
+          console.error(`Failed to fetch reference image ${i + 1}:`, fetchErr)
+          return res.status(400).json({ error: `Could not load reference image ${i + 1}. Please try re-uploading.` })
+        }
+      }
+
       if (img.length > MAX_IMAGE_BASE64_LENGTH) {
         return res.status(413).json({ error: `Reference image ${i + 1} is too large. Max ~7.5 MB per image.` })
       }
       const mimeMatch = img.match(/^data:([^;]+);base64,/)
       if (!mimeMatch) {
-        return res.status(400).json({ error: `Reference image ${i + 1} is not valid base64 data` })
+        return res.status(400).json({ error: `Reference image ${i + 1} is not valid image data` })
       }
       if (!ALLOWED_MIME_TYPES.includes(mimeMatch[1])) {
         return res.status(400).json({ error: `Reference image ${i + 1} has unsupported format. Use JPEG, PNG, or WebP.` })
       }
+      normalizedImages.push(img)
     }
 
     // Validate description length
@@ -154,15 +175,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { text: userMessage }
     ]
 
-    // Add reference images
-    for (const img of referenceImages) {
-      if (typeof img === 'string') {
-        const base64Match = img.match(/^data:([^;]+);base64,(.+)$/)
-        if (base64Match) {
-          promptParts.push({
-            inlineData: { mimeType: base64Match[1], data: base64Match[2] }
-          })
-        }
+    // Add reference images (already normalized to base64 data URLs)
+    for (const img of normalizedImages) {
+      const base64Match = img.match(/^data:([^;]+);base64,(.+)$/)
+      if (base64Match) {
+        promptParts.push({
+          inlineData: { mimeType: base64Match[1], data: base64Match[2] }
+        })
       }
     }
 
@@ -233,7 +252,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       outputTokens: usage?.candidatesTokenCount || 0,
       thinkingTokens: usage?.thoughtsTokenCount || 0,
       success: true,
-      metadata: { imageCount: referenceImages.length }
+      metadata: { imageCount: normalizedImages.length }
     })
 
     return res.status(200).json({
