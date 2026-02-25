@@ -204,6 +204,55 @@ export async function uploadProductImage(
 }
 
 /**
+ * Compress and resize an image File for brand kit uploads (logos, reference images).
+ * - Logos: max 512px, WebP 0.85 quality (~30-80KB output)
+ * - Reference images: max 1024px, WebP 0.80 quality (~80-200KB output)
+ * Returns a Blob ready for Supabase Storage upload.
+ */
+export async function compressBrandImage(
+  file: File,
+  maxDim: number = 512,
+  quality: number = 0.85
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        let { width, height } = img
+
+        // Only downscale, never upscale
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height)
+          width = Math.round(width * scale)
+          height = Math.round(height * scale)
+        }
+
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('Canvas context failed')); return }
+
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else reject(new Error('Failed to compress brand image'))
+          },
+          'image/webp',
+          quality
+        )
+      }
+      img.onerror = () => reject(new Error('Failed to load image for compression'))
+      img.src = reader.result as string
+    }
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+/**
  * Convert an image URL to a base64 data URL.
  * If the input is already a data URL, returns it as-is.
  */

@@ -1806,7 +1806,30 @@ export async function createBrandKit(userId: string, kit: BrandKitFormData): Pro
     .select()
     .single()
 
-  if (error) throw error
+  if (error) {
+    // Fallback: migrations 051/052 may not be applied yet — insert core columns only
+    console.warn('brand_kits insert failed, trying core columns only:', error.message)
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from('brand_kits')
+      .insert({
+        user_id: userId,
+        name: safeKit.name,
+        logo_url: safeKit.logo_url || null,
+        primary_color: safeKit.primary_color || null,
+        secondary_color: safeKit.secondary_color || null,
+        accent_color: safeKit.accent_color || null,
+        brand_voice: safeKit.brand_voice || null,
+        tone_keywords: safeKit.tone_keywords || [],
+        must_use_phrases: safeKit.must_use_phrases || [],
+        forbidden_phrases: safeKit.forbidden_phrases || [],
+        is_active: true
+      })
+      .select()
+      .single()
+
+    if (fallbackError) throw fallbackError
+    return fallbackData
+  }
   return data
 }
 

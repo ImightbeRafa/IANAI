@@ -178,7 +178,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ) as string | undefined
 
     if (!email) {
-      console.error('No email found in webhook payload. Keys received:', Object.keys(data))
+      console.warn('No email found in webhook payload. Keys received:', Object.keys(data))
+
+      // Fallback: for one-time payments (image_boost), TiloPay sends empty body.
+      // Check for recent pending image_boost subscriptions and auto-credit them.
+      if (eventType === 'payment') {
+        const cutoff = new Date()
+        cutoff.setHours(cutoff.getHours() - 24)
+
+        const { data: pendingBoosts } = await supabase
+          .from('pending_subscriptions')
+          .select('user_id, email, plan')
+          .eq('plan', 'image_boost')
+          .eq('status', 'pending')
+          .gte('created_at', cutoff.toISOString())
+          .order('created_at', { ascending: false })
+
+        if (pendingBoosts && pendingBoosts.length > 0) {
+          console.log(`[webhook-fallback] Found ${pendingBoosts.length} pending image_boost(s), processing...`)
+          for (const pb of pendingBoosts) {
+            try {
+              await handleImageBoost(
+                pb.user_id,
+                pb.email || 'unknown',
+                'image_boost',
+                14.99,
+                'USD',
+                { ...data, _fallback: true }
+              )
+              await recordTransaction({
+                userId: pb.user_id, email: pb.email, eventType,
+                plan: 'image_boost', amount: 14.99, currency: 'USD',
+                status: 'succeeded_fallback', tilopaySubscriptionId: null,
+                rawData: { ...data, _fallback: true, pending_user: pb.user_id }
+              })
+              console.log(`[webhook-fallback] Credited image_boost to ${pb.email} (${pb.user_id})`)
+            } catch (err) {
+              console.error(`[webhook-fallback] Failed to credit ${pb.email}:`, err)
+              await recordTransaction({
+                userId: pb.user_id, email: pb.email, eventType,
+                plan: 'image_boost', amount: 14.99, currency: 'USD',
+                status: 'error_fallback', tilopaySubscriptionId: null,
+                rawData: data, errorMessage: err instanceof Error ? err.message : 'Fallback credit failed'
+              })
+            }
+          }
+          return res.status(200).json({ received: true, action: 'image_boost_fallback', count: pendingBoosts.length })
+        }
+      }
+
       await recordTransaction({
         userId: null, email: null, eventType, plan: null,
         amount: null, currency: 'USD', status: 'error_no_email',

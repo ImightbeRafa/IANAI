@@ -11,6 +11,7 @@ import { useUsageLimits } from '../hooks/useUsageLimits'
 import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments } from '../services/database'
 import type { BrandKit, BrandKitFormData, Subscription, Payment } from '../types'
 import { CHANGELOG, ROADMAP, STATUS_ALERT, type ChangeCategory, type RoadmapStatus } from '../data/changelog'
+import { compressBrandImage } from '../utils/imageCompression'
 
 type PlanKey = 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
 
@@ -692,16 +693,17 @@ export default function Settings() {
                           onChange={async (e) => {
                             const file = e.target.files?.[0]
                             if (!file) return
-                            if (file.size > 5 * 1024 * 1024) {
-                              setBkMessage({ type: 'error', text: language === 'es' ? 'Logo muy grande (máx 5MB)' : 'Logo too large (max 5MB)' })
+                            if (file.size > 10 * 1024 * 1024) {
+                              setBkMessage({ type: 'error', text: language === 'es' ? 'Logo muy grande (máx 10MB)' : 'Logo too large (max 10MB)' })
                               return
                             }
                             try {
                               const { data: { session } } = await supabase.auth.getSession()
                               if (!session) return
-                              const ext = file.name.split('.').pop() || 'png'
-                              const path = `${session.user.id}/logo-${Date.now()}.${ext}`
-                              const { error: uploadError } = await supabase.storage.from('brand-assets').upload(path, file)
+                              // Compress: max 512px, WebP 0.85 quality (~30-80KB)
+                              const compressed = await compressBrandImage(file, 512, 0.85)
+                              const path = `${session.user.id}/logo-${Date.now()}.webp`
+                              const { error: uploadError } = await supabase.storage.from('brand-assets').upload(path, compressed, { contentType: 'image/webp', upsert: true })
                               if (uploadError) throw uploadError
                               const { data: urlData } = supabase.storage.from('brand-assets').getPublicUrl(path)
                               setBkLogoUrl(urlData.publicUrl)
@@ -894,10 +896,20 @@ export default function Settings() {
                         <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
                           const file = e.target.files?.[0]
                           if (!file) return
-                          if (file.size > 5 * 1024 * 1024) { setBkMessage({ type: 'error', text: language === 'es' ? 'Imagen muy grande (máx 5MB)' : 'Image too large (max 5MB)' }); return }
-                          const reader = new FileReader()
-                          reader.onload = () => setBkReferenceImages(prev => [...prev, reader.result as string])
-                          reader.readAsDataURL(file)
+                          if (file.size > 10 * 1024 * 1024) { setBkMessage({ type: 'error', text: language === 'es' ? 'Imagen muy grande (máx 10MB)' : 'Image too large (max 10MB)' }); return }
+                          try {
+                            const { data: { session } } = await supabase.auth.getSession()
+                            if (!session) return
+                            // Compress: max 1024px, WebP 0.80 quality (~80-200KB)
+                            const compressed = await compressBrandImage(file, 1024, 0.80)
+                            const path = `${session.user.id}/ref-${Date.now()}-${bkReferenceImages.length}.webp`
+                            const { error: uploadError } = await supabase.storage.from('brand-assets').upload(path, compressed, { contentType: 'image/webp', upsert: true })
+                            if (uploadError) throw uploadError
+                            const { data: urlData } = supabase.storage.from('brand-assets').getPublicUrl(path)
+                            setBkReferenceImages(prev => [...prev, urlData.publicUrl])
+                          } catch (err) {
+                            setBkMessage({ type: 'error', text: language === 'es' ? 'Error al subir imagen' : 'Failed to upload image' })
+                          }
                           e.target.value = ''
                         }} />
                       </label>
