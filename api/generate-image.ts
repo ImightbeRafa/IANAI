@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { loadBrandKit, buildBrandColorOverride } from './lib/brand-kit.js'
+import { loadBrandKit, buildBrandColorOverride, buildBrandVisualPrompt } from './lib/brand-kit.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -827,6 +827,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
       }
 
+      // Brand Kit: inject visual style (fonts, AI-extracted style notes)
+      let brandVisualPrefix = ''
+      if (brandKit) {
+        const bvp = buildBrandVisualPrompt(brandKit)
+        if (bvp) brandVisualPrefix = bvp + '\n\n'
+      }
+
       // Language enforcement prefix for preset mode (presets lack built-in language rules)
       const langLabel = postLanguage === 'es' ? 'ESPAÑOL' : 'ENGLISH'
       const presetLangPrefix = `REGLA DE IDIOMA (NO NEGOCIABLE): TODOS los textos visibles en la imagen DEBEN estar en ${langLabel}. COPIA el texto del guión TAL CUAL — NO traduzcas, NO cambies el idioma. PROHIBIDO mezclar idiomas.\n\n`
@@ -861,7 +868,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
             enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
@@ -873,13 +880,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // PRESET MODE: lang + product ref + aspect ratio + visual memory + color prefix + preset master prompt + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
           enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)

@@ -15,10 +15,17 @@ export interface BrandKitRow {
   primary_color: string | null
   secondary_color: string | null
   accent_color: string | null
+  font_primary: string | null
+  font_secondary: string | null
+  tagline: string | null
+  industry: string | null
+  target_audience: string | null
   brand_voice: string | null
   tone_keywords: string[]
   must_use_phrases: string[]
   forbidden_phrases: string[]
+  visual_style_notes: string | null
+  reference_images: string[]
   is_active: boolean
 }
 
@@ -51,6 +58,30 @@ export function buildBrandVoicePrompt(kit: BrandKitRow, language: 'en' | 'es'): 
     parts.push('=== IDENTIDAD DE MARCA (Brand Kit) ===')
   } else {
     parts.push('=== BRAND IDENTITY (Brand Kit) ===')
+  }
+
+  if (kit.name && kit.name !== 'My Brand') {
+    parts.push(language === 'es'
+      ? `MARCA: ${kit.name}`
+      : `BRAND: ${kit.name}`)
+  }
+
+  if (kit.tagline) {
+    parts.push(language === 'es'
+      ? `TAGLINE: ${kit.tagline}`
+      : `TAGLINE: ${kit.tagline}`)
+  }
+
+  if (kit.industry) {
+    parts.push(language === 'es'
+      ? `INDUSTRIA: ${kit.industry}`
+      : `INDUSTRY: ${kit.industry}`)
+  }
+
+  if (kit.target_audience) {
+    parts.push(language === 'es'
+      ? `AUDIENCIA OBJETIVO: ${kit.target_audience}`
+      : `TARGET AUDIENCE: ${kit.target_audience}`)
   }
 
   if (kit.brand_voice) {
@@ -90,4 +121,28 @@ export function buildBrandColorOverride(kit: BrandKitRow): string | null {
   const colors = [kit.primary_color, kit.secondary_color, kit.accent_color].filter(Boolean)
   if (colors.length === 0) return null
   return `USA SOLO ESTOS COLORES DE MARCA: ${colors.join(', ')}. Estos son los colores oficiales de la marca, úsalos como colores dominantes en el diseño.`
+}
+
+/**
+ * Build a visual style prompt block for image generation.
+ * Includes fonts, AI-extracted visual notes, and brand context.
+ * Returns null if no visual data is available.
+ */
+export function buildBrandVisualPrompt(kit: BrandKitRow): string | null {
+  const parts: string[] = []
+
+  if (kit.font_primary) {
+    parts.push(`TIPOGRAFÍA PRINCIPAL: ${kit.font_primary}${kit.font_secondary ? ` | SECUNDARIA: ${kit.font_secondary}` : ''}`)
+  }
+
+  if (kit.tagline) {
+    parts.push(`TAGLINE DE MARCA (incluir cuando sea relevante): ${kit.tagline}`)
+  }
+
+  if (kit.visual_style_notes) {
+    parts.push(`GUÍA DE ESTILO VISUAL (extraída de referencias de la marca):\n${kit.visual_style_notes}`)
+  }
+
+  if (parts.length === 0) return null
+  return parts.join('\n')
 }

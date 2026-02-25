@@ -62,6 +62,11 @@ export default function Settings() {
   const [bkPrimary, setBkPrimary] = useState('#000000')
   const [bkSecondary, setBkSecondary] = useState('#ffffff')
   const [bkAccent, setBkAccent] = useState('#6366f1')
+  const [bkFontPrimary, setBkFontPrimary] = useState('')
+  const [bkFontSecondary, setBkFontSecondary] = useState('')
+  const [bkTagline, setBkTagline] = useState('')
+  const [bkIndustry, setBkIndustry] = useState('')
+  const [bkTargetAudience, setBkTargetAudience] = useState('')
   const [bkVoice, setBkVoice] = useState('')
   const [bkToneKeywords, setBkToneKeywords] = useState<string[]>([])
   const [bkToneInput, setBkToneInput] = useState('')
@@ -69,9 +74,13 @@ export default function Settings() {
   const [bkMustUseInput, setBkMustUseInput] = useState('')
   const [bkForbidden, setBkForbidden] = useState<string[]>([])
   const [bkForbiddenInput, setBkForbiddenInput] = useState('')
-  const [bkActive, setBkActive] = useState(true)
+  const [bkVisualStyleNotes, setBkVisualStyleNotes] = useState('')
+  const [bkReferenceImages, setBkReferenceImages] = useState<string[]>([])
+  const [bkActive, setBkActive] = useState(false)
   const [bkSaving, setBkSaving] = useState(false)
+  const [bkAnalyzing, setBkAnalyzing] = useState(false)
   const [bkMessage, setBkMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [bkSection, setBkSection] = useState<'identity' | 'visual' | 'voice' | 'style'>('identity')
   const [devTab, setDevTab] = useState<'changelog' | 'roadmap' | 'feedback'>('changelog')
 
   useEffect(() => {
@@ -88,10 +97,17 @@ export default function Settings() {
           setBkPrimary(kit.primary_color || '#000000')
           setBkSecondary(kit.secondary_color || '#ffffff')
           setBkAccent(kit.accent_color || '#6366f1')
+          setBkFontPrimary(kit.font_primary || '')
+          setBkFontSecondary(kit.font_secondary || '')
+          setBkTagline(kit.tagline || '')
+          setBkIndustry(kit.industry || '')
+          setBkTargetAudience(kit.target_audience || '')
           setBkVoice(kit.brand_voice || '')
           setBkToneKeywords(kit.tone_keywords || [])
           setBkMustUse(kit.must_use_phrases || [])
           setBkForbidden(kit.forbidden_phrases || [])
+          setBkVisualStyleNotes(kit.visual_style_notes || '')
+          setBkReferenceImages(kit.reference_images || [])
           setBkActive(kit.is_active)
         }
       } catch (err) {
@@ -156,10 +172,17 @@ export default function Settings() {
         primary_color: bkPrimary,
         secondary_color: bkSecondary,
         accent_color: bkAccent,
+        font_primary: bkFontPrimary || null,
+        font_secondary: bkFontSecondary || null,
+        tagline: bkTagline || null,
+        industry: bkIndustry || null,
+        target_audience: bkTargetAudience || null,
         brand_voice: bkVoice || null,
         tone_keywords: bkToneKeywords,
         must_use_phrases: bkMustUse,
         forbidden_phrases: bkForbidden,
+        visual_style_notes: bkVisualStyleNotes || null,
+        reference_images: bkReferenceImages,
         is_active: bkActive
       }
       const saved = await upsertBrandKit(user.id, data)
@@ -182,11 +205,18 @@ export default function Settings() {
       setBkPrimary('#000000')
       setBkSecondary('#ffffff')
       setBkAccent('#6366f1')
+      setBkFontPrimary('')
+      setBkFontSecondary('')
+      setBkTagline('')
+      setBkIndustry('')
+      setBkTargetAudience('')
       setBkVoice('')
       setBkToneKeywords([])
       setBkMustUse([])
       setBkForbidden([])
-      setBkActive(true)
+      setBkVisualStyleNotes('')
+      setBkReferenceImages([])
+      setBkActive(false)
       setBkMessage({ type: 'success', text: language === 'es' ? 'Brand Kit eliminado' : 'Brand Kit deleted' })
     } catch {
       setBkMessage({ type: 'error', text: language === 'es' ? 'Error al eliminar' : 'Failed to delete' })
@@ -320,7 +350,7 @@ export default function Settings() {
 
         {/* Brand Kit */}
         <div className="card mt-6">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
               <Palette className="w-5 h-5 text-primary-500" />
               Brand Kit
@@ -363,159 +393,406 @@ export default function Settings() {
             </div>
           )}
 
+          {!bkActive && (
+            <div className="flex items-center gap-2 p-3 rounded-lg text-sm mb-4 bg-amber-900/10 border border-amber-700/20 text-amber-500">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              {language === 'es'
+                ? 'El Brand Kit está inactivo. Configúralo y actívalo para que se aplique automáticamente.'
+                : 'Brand Kit is inactive. Set it up and activate it to auto-apply to your content.'}
+            </div>
+          )}
+
           <p className="text-xs text-dark-400 mb-4">
             {language === 'es'
-              ? 'Define la identidad visual y tonal de tu marca. Se aplica automáticamente a posts, guiones y respuestas.'
-              : 'Define your brand\'s visual and tonal identity. Auto-applied to posts, scripts, and replies.'}
+              ? 'Define la identidad completa de tu marca. Se aplica automáticamente a posts, guiones y respuestas.'
+              : 'Define your complete brand identity. Auto-applied to posts, scripts, and replies.'}
           </p>
 
-          <div className="space-y-5">
-            {/* Brand Name */}
-            <div>
-              <label className="block text-sm font-medium text-dark-700 mb-1.5">
-                {language === 'es' ? 'Nombre de Marca' : 'Brand Name'}
-              </label>
-              <input
-                type="text"
-                value={bkName}
-                onChange={(e) => setBkName(e.target.value)}
-                className="input-field"
-                placeholder="My Brand"
-              />
-            </div>
-
-            {/* Brand Colors */}
-            <div>
-              <label className="block text-sm font-medium text-dark-700 mb-2">
-                {language === 'es' ? 'Colores de Marca' : 'Brand Colors'}
-              </label>
-              <div className="flex items-center gap-4">
-                <div className="flex flex-col items-center gap-1">
-                  <input type="color" value={bkPrimary} onChange={e => setBkPrimary(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
-                  <span className="text-[10px] text-dark-400">{language === 'es' ? 'Primario' : 'Primary'}</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <input type="color" value={bkSecondary} onChange={e => setBkSecondary(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
-                  <span className="text-[10px] text-dark-400">{language === 'es' ? 'Secundario' : 'Secondary'}</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <input type="color" value={bkAccent} onChange={e => setBkAccent(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
-                  <span className="text-[10px] text-dark-400">{language === 'es' ? 'Acento' : 'Accent'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Brand Voice */}
-            <div>
-              <label className="block text-sm font-medium text-dark-700 mb-1.5">
-                {language === 'es' ? 'Voz de Marca' : 'Brand Voice'}
-              </label>
-              <textarea
-                value={bkVoice}
-                onChange={(e) => setBkVoice(e.target.value)}
-                className="input-field min-h-[80px] resize-y"
-                placeholder={language === 'es'
-                  ? 'Describe el tono y personalidad de tu marca... Ej: Profesional pero cercano, usa humor sutil'
-                  : 'Describe your brand\'s tone & personality... E.g.: Professional yet approachable, uses subtle humor'}
-                rows={3}
-              />
-            </div>
-
-            {/* Tone Keywords */}
-            <div>
-              <label className="block text-sm font-medium text-dark-700 mb-1.5">
-                {language === 'es' ? 'Palabras Clave de Tono' : 'Tone Keywords'}
-              </label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {bkToneKeywords.map((kw, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-primary-900/20 text-primary-400 rounded-full text-xs">
-                    {kw}
-                    <button onClick={() => removeTag(bkToneKeywords, setBkToneKeywords, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={bkToneInput}
-                  onChange={e => setBkToneInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkToneKeywords, setBkToneKeywords, bkToneInput, setBkToneInput))}
-                  className="input-field flex-1"
-                  placeholder={language === 'es' ? 'Ej: profesional, cercano...' : 'E.g.: bold, friendly...'}
-                />
-                <button
-                  type="button"
-                  onClick={() => addTag(bkToneKeywords, setBkToneKeywords, bkToneInput, setBkToneInput)}
-                  className="btn-secondary px-3"
-                ><Plus className="w-4 h-4" /></button>
-              </div>
-            </div>
-
-            {/* Must-use Phrases */}
-            <div>
-              <label className="block text-sm font-medium text-dark-700 mb-1.5">
-                {language === 'es' ? 'Frases Obligatorias' : 'Must-Use Phrases'}
-              </label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {bkMustUse.map((p, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-green-900/20 text-green-400 rounded-full text-xs">
-                    {p}
-                    <button onClick={() => removeTag(bkMustUse, setBkMustUse, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={bkMustUseInput}
-                  onChange={e => setBkMustUseInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkMustUse, setBkMustUse, bkMustUseInput, setBkMustUseInput))}
-                  className="input-field flex-1"
-                  placeholder={language === 'es' ? 'Ej: ¡Descúbrelo hoy!' : 'E.g.: Discover today!'}
-                />
-                <button
-                  type="button"
-                  onClick={() => addTag(bkMustUse, setBkMustUse, bkMustUseInput, setBkMustUseInput)}
-                  className="btn-secondary px-3"
-                ><Plus className="w-4 h-4" /></button>
-              </div>
-            </div>
-
-            {/* Forbidden Phrases */}
-            <div>
-              <label className="block text-sm font-medium text-dark-700 mb-1.5">
-                {language === 'es' ? 'Frases Prohibidas' : 'Forbidden Phrases'}
-              </label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {bkForbidden.map((p, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-red-900/20 text-red-400 rounded-full text-xs">
-                    {p}
-                    <button onClick={() => removeTag(bkForbidden, setBkForbidden, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={bkForbiddenInput}
-                  onChange={e => setBkForbiddenInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkForbidden, setBkForbidden, bkForbiddenInput, setBkForbiddenInput))}
-                  className="input-field flex-1"
-                  placeholder={language === 'es' ? 'Ej: barato, gratis...' : 'E.g.: cheap, free...'}
-                />
-                <button
-                  type="button"
-                  onClick={() => addTag(bkForbidden, setBkForbidden, bkForbiddenInput, setBkForbiddenInput)}
-                  className="btn-secondary px-3"
-                ><Plus className="w-4 h-4" /></button>
-              </div>
-            </div>
+          {/* Section Tabs */}
+          <div className="flex gap-1 mb-5 bg-dark-50 rounded-lg p-1">
+            {([
+              { key: 'identity' as const, es: 'Identidad', en: 'Identity' },
+              { key: 'visual' as const, es: 'Visual', en: 'Visual' },
+              { key: 'voice' as const, es: 'Voz y Tono', en: 'Voice & Tone' },
+              { key: 'style' as const, es: 'Estilo IA', en: 'AI Style' }
+            ] as const).map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setBkSection(tab.key)}
+                className={`flex-1 text-xs font-medium py-2 px-3 rounded-md transition-all ${
+                  bkSection === tab.key
+                    ? 'bg-white text-dark-900 shadow-sm'
+                    : 'text-dark-400 hover:text-dark-600'
+                }`}
+              >
+                {language === 'es' ? tab.es : tab.en}
+              </button>
+            ))}
           </div>
+
+          {/* === IDENTITY SECTION === */}
+          {bkSection === 'identity' && (
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                  {language === 'es' ? 'Nombre de Marca' : 'Brand Name'}
+                </label>
+                <input
+                  type="text"
+                  value={bkName}
+                  onChange={(e) => setBkName(e.target.value)}
+                  className="input-field"
+                  placeholder="My Brand"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                  {language === 'es' ? 'Tagline / Eslogan' : 'Tagline / Slogan'}
+                </label>
+                <input
+                  type="text"
+                  value={bkTagline}
+                  onChange={(e) => setBkTagline(e.target.value)}
+                  className="input-field"
+                  placeholder={language === 'es' ? 'Ej: "Tu aliado en bienestar"' : 'E.g.: "Your wellness ally"'}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                    {language === 'es' ? 'Industria / Categoría' : 'Industry / Category'}
+                  </label>
+                  <input
+                    type="text"
+                    value={bkIndustry}
+                    onChange={(e) => setBkIndustry(e.target.value)}
+                    className="input-field"
+                    placeholder={language === 'es' ? 'Ej: Salud y bienestar' : 'E.g.: Health & wellness'}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                    {language === 'es' ? 'Audiencia Objetivo' : 'Target Audience'}
+                  </label>
+                  <input
+                    type="text"
+                    value={bkTargetAudience}
+                    onChange={(e) => setBkTargetAudience(e.target.value)}
+                    className="input-field"
+                    placeholder={language === 'es' ? 'Ej: Mujeres 25-45, profesionales' : 'E.g.: Women 25-45, professionals'}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* === VISUAL SECTION === */}
+          {bkSection === 'visual' && (
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {language === 'es' ? 'Colores de Marca' : 'Brand Colors'}
+                </label>
+                <div className="flex items-center gap-4">
+                  <div className="flex flex-col items-center gap-1">
+                    <input type="color" value={bkPrimary} onChange={e => setBkPrimary(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
+                    <span className="text-[10px] text-dark-400">{language === 'es' ? 'Primario' : 'Primary'}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1">
+                    <input type="color" value={bkSecondary} onChange={e => setBkSecondary(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
+                    <span className="text-[10px] text-dark-400">{language === 'es' ? 'Secundario' : 'Secondary'}</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1">
+                    <input type="color" value={bkAccent} onChange={e => setBkAccent(e.target.value)} className="w-10 h-10 rounded-lg cursor-pointer border border-dark-200" />
+                    <span className="text-[10px] text-dark-400">{language === 'es' ? 'Acento' : 'Accent'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                    {language === 'es' ? 'Tipografía Principal' : 'Primary Font'}
+                  </label>
+                  <input
+                    type="text"
+                    value={bkFontPrimary}
+                    onChange={(e) => setBkFontPrimary(e.target.value)}
+                    className="input-field"
+                    placeholder={language === 'es' ? 'Ej: Montserrat, Open Sans...' : 'E.g.: Montserrat, Open Sans...'}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                    {language === 'es' ? 'Tipografía Secundaria' : 'Secondary Font'}
+                  </label>
+                  <input
+                    type="text"
+                    value={bkFontSecondary}
+                    onChange={(e) => setBkFontSecondary(e.target.value)}
+                    className="input-field"
+                    placeholder={language === 'es' ? 'Ej: Playfair Display, Lato...' : 'E.g.: Playfair Display, Lato...'}
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-dark-400">
+                {language === 'es'
+                  ? 'Las tipografías se usan como guía para la IA al generar posts. Para mejores resultados, usa fuentes de Google Fonts.'
+                  : 'Fonts are used as guidance for AI when generating posts. For best results, use Google Fonts names.'}
+              </p>
+            </div>
+          )}
+
+          {/* === VOICE & TONE SECTION === */}
+          {bkSection === 'voice' && (
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                  {language === 'es' ? 'Voz de Marca' : 'Brand Voice'}
+                </label>
+                <textarea
+                  value={bkVoice}
+                  onChange={(e) => setBkVoice(e.target.value)}
+                  className="input-field min-h-[80px] resize-y"
+                  placeholder={language === 'es'
+                    ? 'Describe el tono y personalidad de tu marca... Ej: Profesional pero cercano, usa humor sutil'
+                    : 'Describe your brand\'s tone & personality... E.g.: Professional yet approachable, uses subtle humor'}
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                  {language === 'es' ? 'Palabras Clave de Tono' : 'Tone Keywords'}
+                </label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {bkToneKeywords.map((kw, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-primary-900/20 text-primary-400 rounded-full text-xs">
+                      {kw}
+                      <button onClick={() => removeTag(bkToneKeywords, setBkToneKeywords, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={bkToneInput}
+                    onChange={e => setBkToneInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkToneKeywords, setBkToneKeywords, bkToneInput, setBkToneInput))}
+                    className="input-field flex-1"
+                    placeholder={language === 'es' ? 'Ej: profesional, cercano...' : 'E.g.: bold, friendly...'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addTag(bkToneKeywords, setBkToneKeywords, bkToneInput, setBkToneInput)}
+                    className="btn-secondary px-3"
+                  ><Plus className="w-4 h-4" /></button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                  {language === 'es' ? 'Frases Obligatorias' : 'Must-Use Phrases'}
+                </label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {bkMustUse.map((p, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-green-900/20 text-green-400 rounded-full text-xs">
+                      {p}
+                      <button onClick={() => removeTag(bkMustUse, setBkMustUse, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={bkMustUseInput}
+                    onChange={e => setBkMustUseInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkMustUse, setBkMustUse, bkMustUseInput, setBkMustUseInput))}
+                    className="input-field flex-1"
+                    placeholder={language === 'es' ? 'Ej: ¡Descúbrelo hoy!' : 'E.g.: Discover today!'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addTag(bkMustUse, setBkMustUse, bkMustUseInput, setBkMustUseInput)}
+                    className="btn-secondary px-3"
+                  ><Plus className="w-4 h-4" /></button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                  {language === 'es' ? 'Frases Prohibidas' : 'Forbidden Phrases'}
+                </label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {bkForbidden.map((p, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-red-900/20 text-red-400 rounded-full text-xs">
+                      {p}
+                      <button onClick={() => removeTag(bkForbidden, setBkForbidden, i)} className="hover:text-red-400"><X className="w-3 h-3" /></button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={bkForbiddenInput}
+                    onChange={e => setBkForbiddenInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag(bkForbidden, setBkForbidden, bkForbiddenInput, setBkForbiddenInput))}
+                    className="input-field flex-1"
+                    placeholder={language === 'es' ? 'Ej: barato, gratis...' : 'E.g.: cheap, free...'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addTag(bkForbidden, setBkForbidden, bkForbiddenInput, setBkForbiddenInput)}
+                    className="btn-secondary px-3"
+                  ><Plus className="w-4 h-4" /></button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* === AI STYLE ANALYSIS SECTION === */}
+          {bkSection === 'style' && (
+            <div className="space-y-5">
+              <p className="text-xs text-dark-400">
+                {language === 'es'
+                  ? 'Sube ejemplos de tus posts o diseños existentes. Nuestra IA analizará el estilo visual para generar contenido más consistente con tu marca desde el primer intento.'
+                  : 'Upload examples of your existing posts or designs. Our AI will analyze the visual style to generate content more consistent with your brand from the first try.'}
+              </p>
+
+              {/* Reference Image Upload */}
+              <div>
+                <label className="block text-sm font-medium text-dark-700 mb-2">
+                  {language === 'es' ? 'Imágenes de Referencia' : 'Reference Images'}
+                  <span className="text-dark-400 font-normal ml-1">({language === 'es' ? 'máx. 3' : 'max 3'})</span>
+                </label>
+
+                {/* Image Preview Grid */}
+                {bkReferenceImages.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {bkReferenceImages.map((img, i) => (
+                      <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-dark-200 group">
+                        <img src={img} alt={`Ref ${i + 1}`} className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => setBkReferenceImages(prev => prev.filter((_, idx) => idx !== i))}
+                          className="absolute top-1 right-1 w-5 h-5 bg-dark-900/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3 text-white" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {bkReferenceImages.length < 3 && (
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-dark-200 rounded-lg cursor-pointer hover:border-primary-400 hover:bg-primary-900/5 transition-all">
+                    <Plus className="w-5 h-5 text-dark-400 mb-1" />
+                    <span className="text-xs text-dark-400">
+                      {language === 'es' ? 'Subir imagen' : 'Upload image'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        if (file.size > 5 * 1024 * 1024) {
+                          setBkMessage({ type: 'error', text: language === 'es' ? 'Imagen muy grande (máx 5MB)' : 'Image too large (max 5MB)' })
+                          return
+                        }
+                        const reader = new FileReader()
+                        reader.onload = () => {
+                          const base64 = reader.result as string
+                          setBkReferenceImages(prev => [...prev, base64])
+                        }
+                        reader.readAsDataURL(file)
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Analyze Button */}
+              {bkReferenceImages.length > 0 && (
+                <button
+                  onClick={async () => {
+                    if (!user || bkAnalyzing) return
+                    setBkAnalyzing(true)
+                    setBkMessage(null)
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession()
+                      if (!session) return
+                      const apiUrl = import.meta.env.PROD ? '/api/analyze-style' : 'http://localhost:3000/api/analyze-style'
+                      const resp = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                        body: JSON.stringify({
+                          referenceImages: bkReferenceImages,
+                          description: `Brand: ${bkName}. ${bkIndustry ? `Industry: ${bkIndustry}.` : ''} ${bkTargetAudience ? `Audience: ${bkTargetAudience}.` : ''}`,
+                          stylePreferences: {
+                            brandColors: [bkPrimary, bkSecondary, bkAccent].filter(c => c !== '#000000' && c !== '#ffffff').join(', '),
+                            typography: [bkFontPrimary, bkFontSecondary].filter(Boolean).join(', '),
+                            mood: bkVoice || undefined
+                          }
+                        })
+                      })
+                      const data = await resp.json()
+                      if (!resp.ok) throw new Error(data.error || 'Analysis failed')
+                      const notes = language === 'es' ? data.masterPromptEs : data.masterPromptEn
+                      setBkVisualStyleNotes(notes || '')
+                      if (data.extractedColors?.length > 0) {
+                        const [c1, c2, c3] = data.extractedColors
+                        if (c1) setBkPrimary(c1)
+                        if (c2) setBkSecondary(c2)
+                        if (c3) setBkAccent(c3)
+                      }
+                      setBkMessage({ type: 'success', text: language === 'es' ? 'Estilo analizado con éxito' : 'Style analyzed successfully' })
+                    } catch (err) {
+                      setBkMessage({ type: 'error', text: err instanceof Error ? err.message : (language === 'es' ? 'Error al analizar' : 'Analysis failed') })
+                    } finally {
+                      setBkAnalyzing(false)
+                    }
+                  }}
+                  disabled={bkAnalyzing}
+                  className="btn-secondary flex items-center gap-2 w-full justify-center"
+                >
+                  <Sparkles className={`w-4 h-4 ${bkAnalyzing ? 'animate-spin' : ''}`} />
+                  {bkAnalyzing
+                    ? (language === 'es' ? 'Analizando estilo...' : 'Analyzing style...')
+                    : (language === 'es' ? 'Analizar Estilo con IA' : 'Analyze Style with AI')}
+                </button>
+              )}
+
+              {/* AI-Extracted Style Notes */}
+              {bkVisualStyleNotes && (
+                <div>
+                  <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                    {language === 'es' ? 'Guía de Estilo (generada por IA)' : 'Style Guide (AI-generated)'}
+                  </label>
+                  <textarea
+                    value={bkVisualStyleNotes}
+                    onChange={(e) => setBkVisualStyleNotes(e.target.value)}
+                    className="input-field min-h-[120px] resize-y text-xs"
+                    rows={6}
+                  />
+                  <p className="text-[10px] text-dark-400 mt-1">
+                    {language === 'es'
+                      ? 'Puedes editar esta guía. Se inyecta automáticamente al generar posts.'
+                      : 'You can edit this guide. It is automatically injected when generating posts.'}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           <button
             onClick={handleSaveBrandKit}
             disabled={bkSaving}
-            className="btn-primary flex items-center gap-2 mt-6"
+            className="btn-primary flex items-center gap-2 mt-6 w-full justify-center"
           >
             <Save className="w-4 h-4" />
             {bkSaving

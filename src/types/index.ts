@@ -662,10 +662,17 @@ export interface BrandKit {
   primary_color: string | null
   secondary_color: string | null
   accent_color: string | null
+  font_primary: string | null
+  font_secondary: string | null
+  tagline: string | null
+  industry: string | null
+  target_audience: string | null
   brand_voice: string | null
   tone_keywords: string[]
   must_use_phrases: string[]
   forbidden_phrases: string[]
+  visual_style_notes: string | null
+  reference_images: string[]
   is_active: boolean
   created_at: string
   updated_at: string
@@ -677,10 +684,17 @@ export interface BrandKitFormData {
   primary_color?: string | null
   secondary_color?: string | null
   accent_color?: string | null
+  font_primary?: string | null
+  font_secondary?: string | null
+  tagline?: string | null
+  industry?: string | null
+  target_audience?: string | null
   brand_voice?: string | null
   tone_keywords?: string[]
   must_use_phrases?: string[]
   forbidden_phrases?: string[]
+  visual_style_notes?: string | null
+  reference_images?: string[]
   is_active?: boolean
 }
 

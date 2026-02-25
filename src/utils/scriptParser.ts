@@ -83,10 +83,19 @@ export function parseScripts(text: string): ParsedScript[] {
   }
 
   // No multi-script pattern found — return as single script
+  // If there's exactly one header, strip it from content (same as multi-script path)
+  let singleContent = trimmed
+  if (headers.length === 1) {
+    const block = trimmed.slice(headers[0].pos).trim()
+    const firstNewline = block.indexOf('\n')
+    if (firstNewline > -1) {
+      singleContent = block.slice(firstNewline + 1).trim()
+    }
+  }
   return [{
     index: 1,
     title: extractTitleFromBlock(trimmed) || 'Script 1',
-    content: trimmed
+    content: singleContent
   }]
 }
 
@@ -117,6 +126,11 @@ export function isScriptContent(text: string): boolean {
   // that lack Gancho/Desarrollo/CTA structure.
   const headerMatches = text.match(/(?:GUI[OÓ]N|SCRIPT|OPCI[OÓ]N|Gui[oó]n|Script|Opci[oó]n)\s*#?\s*\d/gi)
   if (headerMatches && headerMatches.length >= 2) return true
+
+  // A single script header with substantial content is still a script
+  // (covers single reconocimiento / awareness scripts without Gancho/CTA)
+  const singleHeader = text.match(/(?:GUI[OÓ]N|SCRIPT|OPCI[OÓ]N|Gui[oó]n|Script|Opci[oó]n)\s*#?\s*\d/i)
+  if (singleHeader && text.length >= 200) return true
 
   const scriptIndicators = [
     /GUI[OÓ]N\s*#?\s*\d/i,
