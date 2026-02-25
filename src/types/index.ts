@@ -674,6 +674,8 @@ export interface BrandKit {
   visual_style_notes: string | null
   reference_images: string[]
   is_active: boolean
+  is_default: boolean
+  client_id: string | null
   created_at: string
   updated_at: string
 }
@@ -696,5 +698,50 @@ export interface BrandKitFormData {
   visual_style_notes?: string | null
   reference_images?: string[]
   is_active?: boolean
+  is_default?: boolean
+  client_id?: string | null
+}
+
+// =============================================
+// Subscription & Payment Types
+// =============================================
+export interface Subscription {
+  id: string
+  user_id: string
+  plan: string
+  status: 'active' | 'cancelled' | 'past_due' | 'trialing' | 'paused'
+  current_period_start: string | null
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  trial_ends_at: string | null
+  tilopay_subscription_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Payment {
+  id: string
+  user_id: string
+  amount: number
+  currency: string
+  status: 'pending' | 'succeeded' | 'failed' | 'refunded'
+  plan: string | null
+  description: string | null
+  paid_at: string | null
+  created_at: string
+}
+
+export interface PaymentTransaction {
+  id: string
+  user_id: string | null
+  email: string | null
+  event_type: string
+  plan: string | null
+  amount: number | null
+  currency: string
+  status: string
+  tilopay_subscription_id: string | null
+  error_message: string | null
+  created_at: string
 }
 

@@ -4,7 +4,7 @@ import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { loadBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -1712,11 +1712,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Brand Kit: inject brand voice if active
+    const brandKitId = req.body.brandKitId as string | undefined
     let brandVoicePrompt = ''
+    let resolvedBrandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
     try {
-      const brandKit = await loadBrandKit(user.id)
-      if (brandKit) {
-        const bv = buildBrandVoicePrompt(brandKit, language as 'es' | 'en')
+      resolvedBrandKit = await resolveBrandKit(user.id, brandKitId)
+      if (resolvedBrandKit) {
+        const bv = buildBrandVoicePrompt(resolvedBrandKit, language as 'es' | 'en')
         if (bv) brandVoicePrompt = '\n\n' + bv
       }
     } catch { /* ignore */ }
@@ -1774,7 +1776,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
-      metadata: { productType, variations: scriptSettings?.variations }
+      metadata: { productType, variations: scriptSettings?.variations, brandKitId: resolvedBrandKit?.id, brandKitName: resolvedBrandKit?.name }
     })
 
     // Increment usage counter after successful generation

@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai'
 import { findPresetById } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { loadBrandKit, buildBrandColorOverride, buildBrandVisualPrompt } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt } from './lib/brand-kit.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 
@@ -783,6 +783,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const hasProductImages = !!(imageParams.input_image)
     const postLanguage: string = imageParams.language || 'es'
 
+    // Brand Kit: resolve by explicit ID or fallback to user default (hoisted for logging)
+    const brandKitIdParam = imageParams.brandKitId as string | undefined
+    let brandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
+    try {
+      brandKit = await resolveBrandKit(user.id, brandKitIdParam)
+    } catch { /* ignore */ }
+
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
       // Determine aspect ratio from request (default 9:16 for backward compat)
@@ -815,11 +822,6 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       }
 
       // Brand Kit: auto-inject brand colors when no explicit palette is selected
-      let brandKit: Awaited<ReturnType<typeof loadBrandKit>> = null
-      try {
-        brandKit = await loadBrandKit(user.id)
-      } catch { /* ignore */ }
-
       if (!colorPrefix && brandKit) {
         const bkColorOverride = buildBrandColorOverride(brandKit)
         if (bkColorOverride) {
@@ -832,6 +834,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       if (brandKit) {
         const bvp = buildBrandVisualPrompt(brandKit)
         if (bvp) brandVisualPrefix = bvp + '\n\n'
+      }
+
+      // Brand Kit: inject logo prompt for image generation
+      let brandLogoPrefix = ''
+      if (brandKit) {
+        const blp = buildBrandLogoPrompt(brandKit)
+        if (blp) brandLogoPrefix = blp + '\n\n'
       }
 
       // Language enforcement prefix for preset mode (presets lack built-in language rules)
@@ -868,7 +877,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
             enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
@@ -880,13 +889,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // PRESET MODE: lang + product ref + aspect ratio + visual memory + color prefix + preset master prompt + user script
         const preset = findPresetById(imageParams.presetId as string)
         if (preset) {
-          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
         } else {
           enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
@@ -1003,7 +1012,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           outputTokens: genOutputTokens,
           thinkingTokens: genThinkingTokens,
           success: true,
-          metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image }
+          metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image, brandKitId: brandKit?.id, brandKitName: brandKit?.name }
         })
 
         // Return immediately (no polling needed for Gemini)
@@ -1133,7 +1142,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           feature: 'image',
           model: 'grok-imagine',
           success: true,
-          metadata: { width: imageParams.width, height: imageParams.height }
+          metadata: { width: imageParams.width, height: imageParams.height, brandKitId: brandKit?.id, brandKitName: brandKit?.name }
         })
 
         // Return immediately (Grok Imagine is synchronous)

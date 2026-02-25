@@ -143,7 +143,8 @@ export async function sendMessageToGrok(
   _consciousnessLevel?: 'cold' | 'warm' | 'hot',
   activeSalesChannel?: 'physical' | 'messages' | 'website',
   productId?: string,
-  aiMemoryEnabled?: boolean
+  aiMemoryEnabled?: boolean,
+  brandKitId?: string
 ): Promise<{ content: string; _debug?: { systemPrompt: string } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -180,7 +181,8 @@ export async function sendMessageToGrok(
       ...(feature ? { feature } : {}),
       ...(activeSalesChannel ? { activeSalesChannel } : {}),
       ...(productId ? { productId } : {}),
-      ...(aiMemoryEnabled !== undefined ? { aiMemoryEnabled } : {})
+      ...(aiMemoryEnabled !== undefined ? { aiMemoryEnabled } : {}),
+      ...(brandKitId ? { brandKitId } : {})
     })
   })
 

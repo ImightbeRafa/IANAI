@@ -18,6 +18,7 @@ import { supabase } from '../lib/supabase'
 import type { Product, ReplySession, ReplyMessage, ReplyContextSource } from '../types'
 import Layout from '../components/Layout'
 import UsageBanner from '../components/UsageBanner'
+import BrandKitSelector from '../components/BrandKitSelector'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import {
   Send,
@@ -70,6 +71,7 @@ export default function RespuestasWorkspace() {
   const [textValue, setTextValue] = useState('')
   const [addingSource, setAddingSource] = useState(false)
   const [ocrLoading, setOcrLoading] = useState(false)
+  const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -263,7 +265,8 @@ export default function RespuestasWorkspace() {
           messages: apiMessages,
           productId,
           language,
-          sessionId: currentSession.id
+          sessionId: currentSession.id,
+          brandKitId: selectedBrandKitId || undefined
         })
       })
 
@@ -496,6 +499,12 @@ export default function RespuestasWorkspace() {
               {t.title} — {product?.name || ''}
             </h1>
           </div>
+          <BrandKitSelector
+            selectedKitId={selectedBrandKitId}
+            onSelect={setSelectedBrandKitId}
+            productId={productId}
+            compact
+          />
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="p-1.5 hover:bg-dark-200 rounded-lg transition-colors text-dark-500"

@@ -27,18 +27,53 @@ export interface BrandKitRow {
   visual_style_notes: string | null
   reference_images: string[]
   is_active: boolean
+  is_default: boolean
+  client_id: string | null
 }
 
 /**
- * Load the active brand kit for a user (server-side, uses service role).
+ * Load a specific brand kit by ID (server-side, uses service role).
+ * Enforces ownership: kit must belong to the given userId.
+ */
+export async function loadBrandKitById(userId: string, kitId: string): Promise<BrandKitRow | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .select('*')
+    .eq('id', kitId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    console.warn('Failed to load brand kit by id:', error.message)
+    return null
+  }
+  return data
+}
+
+/**
+ * Load the default active brand kit for a user (fallback when no kitId provided).
  */
 export async function loadBrandKit(userId: string): Promise<BrandKitRow | null> {
   if (!supabase) return null
+  // Try default kit first
+  const { data: defaultKit, error: e1 } = await supabase
+    .from('brand_kits')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_default', true)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!e1 && defaultKit) return defaultKit
+
+  // Fallback: any active kit
   const { data, error } = await supabase
     .from('brand_kits')
     .select('*')
     .eq('user_id', userId)
     .eq('is_active', true)
+    .limit(1)
     .maybeSingle()
 
   if (error) {
@@ -46,6 +81,17 @@ export async function loadBrandKit(userId: string): Promise<BrandKitRow | null> 
     return null
   }
   return data
+}
+
+/**
+ * Resolve brand kit: use specific kitId if provided, else fall back to user default.
+ */
+export async function resolveBrandKit(userId: string, brandKitId?: string): Promise<BrandKitRow | null> {
+  if (brandKitId) {
+    const kit = await loadBrandKitById(userId, brandKitId)
+    if (kit) return kit
+  }
+  return loadBrandKit(userId)
 }
 
 /**
@@ -145,4 +191,14 @@ export function buildBrandVisualPrompt(kit: BrandKitRow): string | null {
 
   if (parts.length === 0) return null
   return parts.join('\n')
+}
+
+/**
+ * Build a logo injection prompt for image generation.
+ * Instructs the AI to incorporate the brand logo in the design.
+ * Returns null if no logo is set.
+ */
+export function buildBrandLogoPrompt(kit: BrandKitRow): string | null {
+  if (!kit.logo_url) return null
+  return `LOGO DE MARCA: La marca tiene un logotipo oficial. Incluye el logotipo de la marca "${kit.name}" de forma prominente en el diseño. Posiciónalo de manera profesional (esquina superior o inferior, o integrado en la composición). El logo debe ser claramente visible y legible. URL del logo: ${kit.logo_url}`
 }

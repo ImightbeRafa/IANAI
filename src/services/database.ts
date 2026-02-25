@@ -1309,18 +1309,12 @@ export async function getSharedProducts(userId: string): Promise<(Product & { sh
 // SUBSCRIPTION & REFERRAL
 // =============================================
 
-export async function getSubscription(userId: string): Promise<{
-  plan: string
-  status: string
-  trial_ends_at: string | null
-  referral_campaign_id: string | null
-} | null> {
+export async function getSubscription(userId: string): Promise<import('../types').Subscription | null> {
   const { data, error } = await supabase
     .from('subscriptions')
-    .select('plan, status, trial_ends_at, referral_campaign_id')
+    .select('*')
     .eq('user_id', userId)
-    .in('status', ['active', 'trialing'])
-    .single()
+    .maybeSingle()
 
   if (error || !data) return null
   return data
@@ -1748,28 +1742,58 @@ export async function deleteReplyContextSource(id: string): Promise<void> {
 }
 
 // =============================================
-// BRAND KIT
+// BRAND KIT (Multi-Kit V3)
 // =============================================
-export async function getBrandKit(userId: string): Promise<BrandKit | null> {
+export async function getBrandKits(userId: string): Promise<BrandKit[]> {
   const { data, error } = await supabase
     .from('brand_kits')
     .select('*')
     .eq('user_id', userId)
+    .order('is_default', { ascending: false })
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getBrandKitById(kitId: string): Promise<BrandKit | null> {
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .select('*')
+    .eq('id', kitId)
     .maybeSingle()
 
   if (error) throw error
   return data
 }
 
-export async function upsertBrandKit(userId: string, kit: BrandKitFormData): Promise<BrandKit> {
-  const { user_id: _drop, ...safeKit } = kit as BrandKitFormData & { user_id?: string }
+export async function getBrandKitForClient(clientId: string): Promise<BrandKit | null> {
   const { data, error } = await supabase
     .from('brand_kits')
-    .upsert({
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
+}
+
+export async function createBrandKit(userId: string, kit: BrandKitFormData): Promise<BrandKit> {
+  const { user_id: _drop, ...safeKit } = kit as BrandKitFormData & { user_id?: string }
+
+  // Check if user has any kits — if not, make this one default
+  const existing = await getBrandKits(userId)
+  const isFirst = existing.length === 0
+
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .insert({
       ...safeKit,
       user_id: userId,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id' })
+      is_default: isFirst ? true : (safeKit.is_default || false),
+      is_active: safeKit.is_active ?? true
+    })
     .select()
     .single()
 
@@ -1777,11 +1801,63 @@ export async function upsertBrandKit(userId: string, kit: BrandKitFormData): Pro
   return data
 }
 
-export async function deleteBrandKit(userId: string): Promise<void> {
+export async function updateBrandKit(kitId: string, kit: BrandKitFormData): Promise<BrandKit> {
+  const { user_id: _drop, ...safeKit } = kit as BrandKitFormData & { user_id?: string }
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .update({
+      ...safeKit,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', kitId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteBrandKit(kitId: string): Promise<void> {
   const { error } = await supabase
     .from('brand_kits')
     .delete()
-    .eq('user_id', userId)
+    .eq('id', kitId)
 
   if (error) throw error
+}
+
+export async function setDefaultBrandKit(userId: string, kitId: string): Promise<void> {
+  const { error } = await supabase.rpc('set_default_brand_kit', {
+    p_user_id: userId,
+    p_kit_id: kitId
+  })
+
+  if (error) throw error
+}
+
+// =============================================
+// SUBSCRIPTION & PAYMENTS
+// =============================================
+export async function getPayments(userId: string, limit = 20): Promise<import('../types').Payment[]> {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('user_id', userId)
+    .order('paid_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  return data || []
+}
+
+export async function getPaymentTransactions(userId: string, limit = 50): Promise<import('../types').PaymentTransaction[]> {
+  const { data, error } = await supabase
+    .from('payment_transactions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  return data || []
 }

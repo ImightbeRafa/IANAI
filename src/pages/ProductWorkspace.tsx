@@ -34,6 +34,7 @@ import ScriptSettingsPanel from '../components/ScriptSettingsPanel'
 import ScriptCard from '../components/ScriptCard'
 import { parseScripts, isScriptContent } from '../utils/scriptParser'
 import UsageBanner from '../components/UsageBanner'
+import BrandKitSelector from '../components/BrandKitSelector'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import { 
   Send, 
@@ -122,6 +123,7 @@ export default function ProductWorkspace() {
   })
   const [recentMemories, setRecentMemories] = useState<AiMemory[]>([])
   const [showTeachModal, setShowTeachModal] = useState(false)
+  const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
   const [teachInput, setTeachInput] = useState('')
   const [teachingSaving, setTeachingSaving] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -379,7 +381,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -834,7 +836,7 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -1245,6 +1247,18 @@ export default function ProductWorkspace() {
               language={language}
               loading={loading}
             />
+
+            {/* Brand Kit Selector */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
+                Brand Kit
+              </label>
+              <BrandKitSelector
+                selectedKitId={selectedBrandKitId}
+                onSelect={setSelectedBrandKitId}
+                productId={productId}
+              />
+            </div>
 
             {/* Active Sales Channel */}
             {product?.business?.sales_channels && product.business.sales_channels.length > 0 && (

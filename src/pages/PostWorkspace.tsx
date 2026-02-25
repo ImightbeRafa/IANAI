@@ -36,6 +36,7 @@ import { getCustomPalettes, createCustomPalette, deleteCustomPalette, getCustomP
 import type { CustomColorPalette } from '../services/database'
 import type { CustomPostType } from '../types'
 import CreateCustomPostType from '../components/CreateCustomPostType'
+import BrandKitSelector from '../components/BrandKitSelector'
 
 type PostAspectRatio = '9:16' | '3:4'
 
@@ -99,6 +100,7 @@ export default function PostWorkspace() {
   const [showEnhanceTip, setShowEnhanceTip] = useState(false)
   const [productImages, setProductImages] = useState<ProductImage[]>([])
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
+  const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
   const productImageInputRef = useRef<HTMLInputElement>(null)
   const POSTS_PAGE_SIZE = 20
   const [totalPostCount, setTotalPostCount] = useState(0)
@@ -366,7 +368,8 @@ export default function PostWorkspace() {
         model: imageModel,
         language,
         colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
-        customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined
+        customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
+        brandKitId: selectedBrandKitId || undefined
       }
 
       const selectedUrls = getProductImageUrls()
@@ -504,6 +507,7 @@ export default function PostWorkspace() {
           editPrompt: editPrompt.trim(),
           editImage: base64Image,
           aspectRatio,
+          brandKitId: selectedBrandKitId || undefined,
           ...(compressedRefImages ? { editReferenceImages: compressedRefImages } : {})
         })
       })
@@ -606,6 +610,7 @@ export default function PostWorkspace() {
           enhanceImage: base64Image,
           aspectRatio,
           language,
+          brandKitId: selectedBrandKitId || undefined,
           productReferenceImages: productImages.length > 0
             ? await Promise.all(getProductImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
             : undefined
@@ -991,6 +996,18 @@ export default function PostWorkspace() {
                   </button>
                 </div>
               )}
+            </div>
+
+            {/* Brand Kit Selector */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                Brand Kit
+              </label>
+              <BrandKitSelector
+                selectedKitId={selectedBrandKitId}
+                onSelect={setSelectedBrandKitId}
+                productId={productId}
+              />
             </div>
 
             {/* Color Palette selector */}

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
+import { resolveBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
 
 const XAI_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -23,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return
 
   try {
-    const { prompt, type = 'image', productContext } = req.body
+    const { prompt, type = 'image', productContext, brandKitId } = req.body
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
       return res.status(400).json({ error: 'Prompt is required' })
@@ -60,10 +61,24 @@ Reglas:
 - Máximo 100 palabras
 - NO incluyas texto en la imagen a menos que el usuario lo pida explícitamente`
 
+    // Brand Kit: resolve and inject brand context
+    let brandContext = ''
+    let resolvedBrandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
+    try {
+      resolvedBrandKit = await resolveBrandKit(user.id, brandKitId)
+      if (resolvedBrandKit) {
+        const bv = buildBrandVoicePrompt(resolvedBrandKit, 'es')
+        if (bv) brandContext = `\n\nContexto de marca:\n${bv}`
+      }
+    } catch { /* ignore */ }
+
     // Add product context if provided
     let userMessage = `Prompt original del usuario: "${prompt.trim()}"`
     if (productContext) {
       userMessage += `\n\nContexto del producto/servicio: ${productContext}`
+    }
+    if (brandContext) {
+      userMessage += brandContext
     }
 
     const response = await fetch(XAI_API_URL, {
@@ -123,7 +138,7 @@ Reglas:
       inputTokens,
       outputTokens,
       success: true,
-      metadata: { type }
+      metadata: { type, brandKitId: resolvedBrandKit?.id, brandKitName: resolvedBrandKit?.name }
     })
 
     return res.status(200).json({

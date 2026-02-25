@@ -8,6 +8,9 @@
     },
     "api/reflect-memory.ts": {
       "maxDuration": 30
+    },
+    "api/extract-brand.ts": {
+      "maxDuration": 30
     }
   },
   "rewrites": [

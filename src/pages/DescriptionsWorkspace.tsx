@@ -7,6 +7,7 @@ import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
 import type { Product, Script, Message, ScriptGenerationSettings, ChatSession } from '../types'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
+import BrandKitSelector from '../components/BrandKitSelector'
 import { 
   Send, 
   Loader2, 
@@ -34,6 +35,7 @@ export default function DescriptionsWorkspace() {
   const [pageLoading, setPageLoading] = useState(true)
   const [showScriptPicker, setShowScriptPicker] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -154,7 +156,14 @@ export default function DescriptionsWorkspace() {
         settings,
         undefined,
         undefined,
-        'description'
+        'description',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        selectedBrandKitId ?? undefined
       )
 
       // Save assistant message to DB
@@ -243,7 +252,14 @@ export default function DescriptionsWorkspace() {
               <p className="text-xs text-dark-400">{product.name}</p>
             </div>
           </div>
-          <div className="relative">
+          <div className="flex items-center gap-2">
+            <BrandKitSelector
+              selectedKitId={selectedBrandKitId}
+              onSelect={setSelectedBrandKitId}
+              productId={productId}
+              compact
+            />
+            <div className="relative">
             <button
               onClick={() => setShowScriptPicker(!showScriptPicker)}
               className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-primary-900/20 text-primary-700 hover:bg-primary-900/30 rounded-lg transition-colors"
@@ -287,6 +303,7 @@ export default function DescriptionsWorkspace() {
                 )}
               </div>
             )}
+          </div>
           </div>
         </div>
 

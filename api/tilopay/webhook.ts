@@ -29,37 +29,128 @@ const supabase = supabaseUrl && supabaseServiceKey
 
 // TiloPay webhook payload structure (based on their API docs)
 interface TiloPayWebhookData {
-  // Common fields TiloPay likely sends
+  // Common fields TiloPay may send (various naming conventions)
   email?: string
   subscriber_email?: string
   customer_email?: string
+  correo?: string
   subscriber_id?: string
   subscription_id?: string
   plan_id?: string
   plan_title?: string
-  amount?: number
+  amount?: number | string
+  monto?: number | string
   currency?: string
   status?: string
   modality?: string
+  description?: string
+  nombre?: string
+  name?: string
   // Allow any other fields
   [key: string]: unknown
 }
 
+// =============================================
+// BODY PARSING — handle undefined, form-encoded, JSON, query params
+// =============================================
+function parseWebhookData(req: VercelRequest): TiloPayWebhookData {
+  // 1. Try req.body (Vercel auto-parses JSON and form-urlencoded)
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+    return req.body as TiloPayWebhookData
+  }
+
+  // 2. Try parsing body as string (some providers send raw string)
+  if (req.body && typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body) as TiloPayWebhookData
+    } catch {
+      // Try URL-encoded string
+      const params = new URLSearchParams(req.body)
+      if (params.has('email') || params.has('subscriber_email') || params.has('amount')) {
+        const obj: TiloPayWebhookData = {}
+        params.forEach((value, key) => { obj[key] = value })
+        return obj
+      }
+    }
+  }
+
+  // 3. Fallback: extract from query params (TiloPay might send everything in URL)
+  const q = req.query
+  if (q && (q.email || q.subscriber_email || q.amount)) {
+    const obj: TiloPayWebhookData = {}
+    for (const [key, val] of Object.entries(q)) {
+      if (key !== 'event' && key !== 'secret') {
+        obj[key] = typeof val === 'string' ? val : Array.isArray(val) ? val[0] : val
+      }
+    }
+    return obj
+  }
+
+  // 4. Nothing found
+  return {}
+}
+
+// =============================================
+// AUDIT TRAIL — record every webhook event
+// =============================================
+async function recordTransaction(params: {
+  userId: string | null
+  email: string | null
+  eventType: string
+  plan: string | null
+  amount: number | null
+  currency: string
+  status: string
+  tilopaySubscriptionId: string | null
+  rawData: TiloPayWebhookData
+  errorMessage?: string
+}): Promise<void> {
+  if (!supabase) return
+  try {
+    await supabase.from('payment_transactions').insert({
+      user_id: params.userId,
+      email: params.email,
+      event_type: params.eventType,
+      plan: params.plan,
+      amount: params.amount,
+      currency: params.currency,
+      status: params.status,
+      tilopay_subscription_id: params.tilopaySubscriptionId,
+      tilopay_data: params.rawData,
+      error_message: params.errorMessage || null
+    })
+  } catch (err) {
+    console.error('Failed to record transaction:', err)
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Only allow POST (no GET info leak)
+  // Allow GET for health check
+  if (req.method === 'GET') {
+    return res.status(200).json({ status: 'ok', handler: 'tilopay-webhook' })
+  }
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // Log the FULL raw request for debugging
+  console.log('=== TiloPay Webhook Raw Request ===')
+  console.log('Headers:', JSON.stringify({
+    'content-type': req.headers['content-type'],
+    'user-agent': req.headers['user-agent'],
+    'x-forwarded-for': req.headers['x-forwarded-for']
+  }))
+  console.log('Query:', JSON.stringify(req.query))
+  console.log('Body type:', typeof req.body)
+  console.log('Body:', JSON.stringify(req.body))
+
   try {
-    // Verify webhook secret (must match TILOPAY_WEBHOOK_SECRET env var)
-    // TiloPay dashboard URLs should include: ?event=subscribe&secret=YOUR_SECRET
+    // Verify webhook secret
     const secret = req.query.secret as string
     if (!WEBHOOK_SECRET || secret !== WEBHOOK_SECRET) {
-      console.error('Webhook secret mismatch or not configured', {
+      console.error('Webhook secret mismatch', {
         hasSecret: !!WEBHOOK_SECRET,
-        receivedSecret: secret ? `${secret.slice(0, 4)}...` : 'none',
-        ip: req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || 'unknown'
+        received: secret ? `${secret.slice(0, 4)}...` : 'none'
       })
       return res.status(403).json({ error: 'Forbidden' })
     }
@@ -69,21 +160,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Server not configured' })
     }
 
-    // Get event type from query parameter (configured in TiloPay dashboard)
-    const eventType = req.query.event as string || 'unknown'
-    const data: TiloPayWebhookData = req.body
+    // Parse the event type and data defensively
+    const eventType = (req.query.event as string) || 'unknown'
+    const data = parseWebhookData(req)
+    const hasData = Object.keys(data).length > 0
 
-    console.log(`TiloPay webhook received: ${eventType}`, JSON.stringify(data, null, 2))
+    console.log(`TiloPay event: ${eventType}, parsed data:`, JSON.stringify(data, null, 2))
 
     // Extract email from various possible fields
-    const email = data.email || data.subscriber_email || data.customer_email
-    
+    const email = (
+      data.email ||
+      data.subscriber_email ||
+      data.customer_email ||
+      data.correo ||
+      (typeof data.nombre === 'string' && data.nombre.includes('@') ? data.nombre : null) ||
+      (typeof data.name === 'string' && data.name.includes('@') ? data.name : null)
+    ) as string | undefined
+
     if (!email) {
-      console.error('No email in webhook payload')
-      return res.status(200).json({ received: true, warning: 'No email found' })
+      console.error('No email found in webhook payload. Keys received:', Object.keys(data))
+      await recordTransaction({
+        userId: null, email: null, eventType, plan: null,
+        amount: null, currency: 'USD', status: 'error_no_email',
+        tilopaySubscriptionId: null, rawData: data,
+        errorMessage: `No email in payload. HasData: ${hasData}. Keys: ${Object.keys(data).join(',')}`
+      })
+      return res.status(200).json({ received: true, warning: 'No email found in payload' })
     }
 
-    // Find user by email in pending_subscriptions or profiles
+    // Find user by email
     let userId: string | null = null
     let pendingPlan: string | null = null
 
@@ -95,7 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     if (pending) {
       userId = pending.user_id
@@ -106,8 +211,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('profiles')
         .select('id')
         .eq('email', email)
-        .single()
-      
+        .maybeSingle()
+
       if (profile) {
         userId = profile.id
       }
@@ -115,90 +220,126 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!userId) {
       console.error(`No user found for email: ${email}`)
+      await recordTransaction({
+        userId: null, email, eventType, plan: pendingPlan,
+        amount: parseAmount(data), currency: String(data.currency || 'USD'),
+        status: 'error_no_user', tilopaySubscriptionId: getSubId(data),
+        rawData: data, errorMessage: `No user found for email ${email}`
+      })
       return res.status(200).json({ received: true, warning: 'User not found' })
     }
 
-    // Determine plan from webhook data or pending subscription
+    // Determine plan
     const plan = pendingPlan || determinePlanFromData(data)
+    const amount = parseAmount(data)
+    const currency = String(data.currency || 'USD')
+    const subId = getSubId(data)
 
-    // Handle one-time image boost purchase (not a subscription change)
+    console.log(`Processing: user=${userId}, email=${email}, event=${eventType}, plan=${plan}, amount=${amount}`)
+
+    // Handle one-time image boost purchase
     if (plan === 'image_boost') {
-      await handleImageBoost(userId, email, data)
+      await handleImageBoost(userId, email, plan, amount, currency, data)
+      await recordTransaction({
+        userId, email, eventType, plan: 'image_boost',
+        amount, currency, status: 'succeeded',
+        tilopaySubscriptionId: subId, rawData: data
+      })
       return res.status(200).json({ received: true, event: eventType, action: 'image_boost' })
     }
 
     // Process based on event type
-    switch (eventType) {
-      case 'subscribe':
-        await handleSubscribe(userId, email, plan, data)
-        break
+    let txStatus = 'processed'
+    let txError: string | undefined
 
-      case 'payment':
-        await handlePayment(userId, plan, data)
-        break
-
-      case 'rejected':
-        await handleRejected(userId, data)
-        break
-
-      case 'unsubscribe':
-        await handleUnsubscribe(userId, data)
-        break
-
-      case 'reactive':
-        await handleReactive(userId, plan, data)
-        break
-
-      default:
-        console.log(`Unknown event type: ${eventType}`)
+    try {
+      switch (eventType) {
+        case 'subscribe':
+          await handleSubscribe(userId, email, plan, amount, currency, data)
+          break
+        case 'payment':
+          await handlePayment(userId, plan, amount, currency, data)
+          break
+        case 'rejected':
+          await handleRejected(userId, plan, amount, currency, data)
+          txStatus = 'rejected'
+          break
+        case 'unsubscribe':
+          await handleUnsubscribe(userId, data)
+          txStatus = 'cancelled'
+          break
+        case 'reactive':
+          await handleReactive(userId, plan, data)
+          break
+        default:
+          console.log(`Unknown event type: ${eventType}`)
+          txStatus = 'unknown_event'
+      }
+    } catch (handlerErr) {
+      txStatus = 'error'
+      txError = handlerErr instanceof Error ? handlerErr.message : 'Handler failed'
+      console.error(`Handler error for ${eventType}:`, handlerErr)
     }
+
+    // Record audit trail
+    await recordTransaction({
+      userId, email, eventType, plan, amount, currency,
+      status: txStatus, tilopaySubscriptionId: subId,
+      rawData: data, errorMessage: txError
+    })
 
     return res.status(200).json({ received: true, event: eventType })
 
   } catch (error) {
-    console.error('Webhook error:', error)
+    console.error('Webhook top-level error:', error)
+    // Try to record even on crash
+    try {
+      await recordTransaction({
+        userId: null, email: null, eventType: (req.query.event as string) || 'unknown',
+        plan: null, amount: null, currency: 'USD', status: 'crash',
+        tilopaySubscriptionId: null, rawData: parseWebhookData(req),
+        errorMessage: error instanceof Error ? error.message : 'Unknown crash'
+      })
+    } catch { /* ignore */ }
     return res.status(200).json({ received: true, error: 'Processing failed' })
   }
 }
 
 // =============================================
-// EVENT HANDLERS (TiloPay Repeat API format)
+// EVENT HANDLERS
 // =============================================
 
-/**
- * Handle new subscription (webhook_subscribe)
- * Called when user completes initial subscription
- */
 async function handleSubscribe(
-  userId: string, 
-  email: string, 
-  plan: string, 
+  userId: string,
+  email: string,
+  plan: string,
+  amount: number | null,
+  currency: string,
   data: TiloPayWebhookData
 ) {
   console.log(`New subscription for user ${userId}: ${plan}`)
 
-  // Create/update subscription record
   await supabase!.from('subscriptions').upsert({
     user_id: userId,
     plan: plan,
     status: 'active',
-    tilopay_subscription_id: data.subscriber_id || data.subscription_id,
+    tilopay_subscription_id: getSubId(data),
     current_period_start: new Date().toISOString(),
     current_period_end: getNextBillingDate().toISOString()
   }, { onConflict: 'user_id' })
 
-  // Mark pending subscription as completed
   await supabase!.from('pending_subscriptions')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('user_id', userId)
 
-  // Record payment if amount provided
-  if (data.amount) {
+  if (amount && amount > 0) {
     await supabase!.from('payments').insert({
       user_id: userId,
-      amount: data.amount,
-      currency: data.currency || 'USD',
+      amount,
+      currency,
       status: 'succeeded',
+      plan,
+      description: `New subscription: ${plan}`,
       paid_at: new Date().toISOString()
     })
   }
@@ -206,74 +347,77 @@ async function handleSubscribe(
   console.log(`Subscription activated for ${email}`)
 }
 
-/**
- * Handle successful recurring payment (webhook_payment)
- * Called for each successful recurring charge
- * Also updates plan in case this is first payment or plan changed
- */
-async function handlePayment(userId: string, plan: string, data: TiloPayWebhookData) {
+async function handlePayment(
+  userId: string,
+  plan: string,
+  amount: number | null,
+  currency: string,
+  data: TiloPayWebhookData
+) {
   console.log(`Recurring payment for user ${userId}, plan: ${plan}`)
 
-  // Update subscription with plan AND extend period
-  // This ensures plan is set correctly even if subscribe event was missed
-  const { error } = await supabase!.from('subscriptions')
-    .update({
-      plan: plan, // Always update plan based on payment
+  // Update/create subscription — ensures plan is correct even if subscribe was missed
+  const { error: subError } = await supabase!.from('subscriptions')
+    .upsert({
+      user_id: userId,
+      plan: plan,
       status: 'active',
+      tilopay_subscription_id: getSubId(data),
       current_period_start: new Date().toISOString(),
       current_period_end: getNextBillingDate().toISOString(),
       updated_at: new Date().toISOString()
-    })
-    .eq('user_id', userId)
+    }, { onConflict: 'user_id' })
 
-  if (error) {
-    console.error('Failed to update subscription:', error)
+  if (subError) {
+    console.error('Failed to upsert subscription:', subError)
   }
 
-  // Record payment
+  // Mark any pending subscription as completed
+  await supabase!.from('pending_subscriptions')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+
   await supabase!.from('payments').insert({
     user_id: userId,
-    amount: data.amount || 0,
-    currency: data.currency || 'USD',
+    amount: amount || 0,
+    currency,
     status: 'succeeded',
+    plan,
+    description: `Recurring payment: ${plan}`,
     paid_at: new Date().toISOString()
   })
 
-  console.log(`Payment recorded, subscription extended, plan set to: ${plan}`)
+  console.log(`Payment recorded, subscription extended, plan: ${plan}`)
 }
 
-/**
- * Handle failed payment (webhook_rejected)
- * Called when recurring charge fails
- */
-async function handleRejected(userId: string, data: TiloPayWebhookData) {
+async function handleRejected(
+  userId: string,
+  plan: string,
+  amount: number | null,
+  currency: string,
+  data: TiloPayWebhookData
+) {
   console.log(`Payment rejected for user ${userId}`)
 
-  // Update subscription status
   await supabase!.from('subscriptions')
-    .update({
-      status: 'past_due',
-      updated_at: new Date().toISOString()
-    })
+    .update({ status: 'past_due', updated_at: new Date().toISOString() })
     .eq('user_id', userId)
 
-  // Record failed payment
   await supabase!.from('payments').insert({
     user_id: userId,
-    amount: data.amount || 0,
-    currency: data.currency || 'USD',
+    amount: amount || 0,
+    currency,
     status: 'failed',
+    plan,
+    description: `Failed payment: ${plan}`,
     paid_at: new Date().toISOString()
   })
 
   console.log(`Subscription marked as past_due`)
 }
 
-/**
- * Handle cancellation (webhook_unsubscribe)
- * Called when user cancels subscription
- */
-async function handleUnsubscribe(userId: string, data: TiloPayWebhookData) {
+async function handleUnsubscribe(userId: string, _data: TiloPayWebhookData) {
   console.log(`Subscription cancelled for user ${userId}`)
 
   await supabase!.from('subscriptions')
@@ -287,13 +431,9 @@ async function handleUnsubscribe(userId: string, data: TiloPayWebhookData) {
   console.log(`Subscription cancelled`)
 }
 
-/**
- * Handle reactivation (webhook_reactive)
- * Called when cancelled subscription is reactivated
- */
 async function handleReactive(
-  userId: string, 
-  plan: string, 
+  userId: string,
+  plan: string,
   data: TiloPayWebhookData
 ) {
   console.log(`Subscription reactivated for user ${userId}`)
@@ -303,6 +443,7 @@ async function handleReactive(
       status: 'active',
       plan: plan,
       cancel_at_period_end: false,
+      tilopay_subscription_id: getSubId(data),
       current_period_end: getNextBillingDate().toISOString(),
       updated_at: new Date().toISOString()
     })
@@ -311,18 +452,16 @@ async function handleReactive(
   console.log(`Subscription reactivated`)
 }
 
-/**
- * Handle one-time image boost purchase ($14.99 → +100 bonus images)
- * Does NOT modify the user's subscription — only credits bonus_images.
- */
 async function handleImageBoost(
   userId: string,
   email: string,
+  plan: string,
+  amount: number | null,
+  currency: string,
   data: TiloPayWebhookData
 ) {
   console.log(`Image boost purchase for user ${userId} (${email})`)
 
-  // Credit 100 bonus images via atomic RPC
   const { error } = await supabase!.rpc('credit_bonus_images', {
     p_user_id: userId,
     p_amount: 100
@@ -332,19 +471,19 @@ async function handleImageBoost(
     console.error('Failed to credit bonus images:', error)
   }
 
-  // Mark pending as completed
   await supabase!.from('pending_subscriptions')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('plan', 'image_boost')
 
-  // Record payment
-  if (data.amount) {
+  if (amount && amount > 0) {
     await supabase!.from('payments').insert({
       user_id: userId,
-      amount: data.amount,
-      currency: data.currency || 'USD',
+      amount,
+      currency,
       status: 'succeeded',
+      plan: 'image_boost',
+      description: '+100 bonus images',
       paid_at: new Date().toISOString()
     })
   }
@@ -356,53 +495,36 @@ async function handleImageBoost(
 // HELPER FUNCTIONS
 // =============================================
 
-/**
- * Determine plan from TiloPay webhook data
- * Uses amount, plan_title, or modality to detect plan
- */
+function parseAmount(data: TiloPayWebhookData): number | null {
+  const raw = data.amount ?? data.monto
+  if (raw === undefined || raw === null) return null
+  const num = typeof raw === 'number' ? raw : parseFloat(String(raw))
+  return isNaN(num) ? null : num
+}
+
+function getSubId(data: TiloPayWebhookData): string | null {
+  return (data.subscriber_id || data.subscription_id || null) as string | null
+}
+
 function determinePlanFromData(data: TiloPayWebhookData): string {
-  // First try to determine from amount (most reliable)
-  const amount = parseFloat(String(data.amount || '0'))
+  const amount = parseAmount(data) || 0
 
-  // Check for image boost one-time purchase first
-  if (amount >= 14 && amount <= 16) {
-    return 'image_boost' // 100 extra images $14.99 one-time
-  }
-  
-  if (amount >= 200) {
-    return 'enterprise' // Enterprise plan at $299/month
-  }
-  if (amount >= 40) {
-    return 'pro' // Premium plan at $49/month
-  }
-  if (amount >= 20) {
-    return 'starter' // Starter plan at $33/month
-  }
-  
-  // Fallback: try to determine plan from modality or plan_title
-  const title = (data.modality || data.plan_title || '').toLowerCase()
+  if (amount >= 14 && amount <= 16) return 'image_boost'
+  if (amount >= 200) return 'enterprise'
+  if (amount >= 40) return 'pro'
+  if (amount >= 20) return 'starter'
 
-  if (title.includes('boost') || title.includes('extra') || title.includes('100')) {
-    return 'image_boost'
-  }
-  if (title.includes('enterprise') || title.includes('empresa')) {
-    return 'enterprise'
-  }
-  if (title.includes('premium') || title.includes('pro')) {
-    return 'pro'
-  }
-  if (title.includes('starter') || title.includes('individual') || title.includes('básico')) {
-    return 'starter'
-  }
-  
-  // Default to starter if we can't determine
-  console.log('Could not determine plan from data, defaulting to starter:', data)
+  const title = String(data.modality || data.plan_title || data.description || '').toLowerCase()
+
+  if (title.includes('boost') || title.includes('extra') || title.includes('100')) return 'image_boost'
+  if (title.includes('enterprise') || title.includes('empresa')) return 'enterprise'
+  if (title.includes('premium') || title.includes('pro')) return 'pro'
+  if (title.includes('starter') || title.includes('individual') || title.includes('básico')) return 'starter'
+
+  console.log('Could not determine plan from data, defaulting to starter:', JSON.stringify(data))
   return 'starter'
 }
 
-/**
- * Calculate next billing date (1 month from now)
- */
 function getNextBillingDate(): Date {
   const date = new Date()
   date.setMonth(date.getMonth() + 1)
