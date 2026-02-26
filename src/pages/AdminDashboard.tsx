@@ -153,8 +153,12 @@ const PLAN_COLORS: Record<string, string> = {
 // Model display names and colors
 const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'grok': { name: 'Grok (xAI)', color: 'bg-purple-500' },
+  'grok-3-fast': { name: 'Grok 3 Fast', color: 'bg-purple-500' },
   'grok-3-mini': { name: 'Grok 3 Mini', color: 'bg-purple-400' },
+  'grok-3-mini-fast': { name: 'Grok 3 Mini Fast', color: 'bg-purple-300' },
   'grok-4-fast-non-reasoning': { name: 'Grok 4 Fast', color: 'bg-purple-600' },
+  'grok-2-vision-latest': { name: 'Grok 2 Vision', color: 'bg-purple-700' },
+  'whisper-1': { name: 'Whisper (OpenAI)', color: 'bg-green-500' },
   'gemini': { name: 'Gemini 3 Pro', color: 'bg-blue-500' },
   'nano-banana': { name: 'Nano Banana', color: 'bg-yellow-500' },
   'nano-banana-pro': { name: 'Nano Banana Pro', color: 'bg-orange-500' },
@@ -175,8 +179,12 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
 // Cost per 1M tokens or per image/video (for reference display)
 const MODEL_PRICING: Record<string, string> = {
   'grok': '$3/1M in, $15/1M out',
+  'grok-3-fast': '$3/1M in, $15/1M out',
   'grok-3-mini': '$0.30/1M in, $0.50/1M out',
+  'grok-3-mini-fast': '$0.30/1M in, $0.50/1M out',
   'grok-4-fast-non-reasoning': '$0.20/1M in, $0.50/1M out',
+  'grok-2-vision-latest': '$2/1M in, $10/1M out',
+  'whisper-1': '~$0.006/min',
   'gemini': '$0.15/1M in, $0.60/1M out',
   'nano-banana': '~$0.02/image',
   'nano-banana-pro': '~$0.05/image',
@@ -263,6 +271,8 @@ export default function AdminDashboard() {
       script_consciousness: 'Nivel de Conciencia',
       style_analysis: 'Análisis de Estilo (Custom Post)',
       memory_reflection: 'Reflexión de Memoria',
+      memory_synthesis: 'Síntesis de Memoria',
+      brand_extraction: 'Extracción de Marca',
       reply: 'Respuestas a Clientes',
       ocr: 'OCR de Imágenes',
       noData: 'No hay datos de uso aún',
@@ -313,6 +323,8 @@ export default function AdminDashboard() {
       script_consciousness: 'Consciousness Level',
       style_analysis: 'Style Analysis (Custom Post)',
       memory_reflection: 'Memory Reflection',
+      memory_synthesis: 'Memory Synthesis',
+      brand_extraction: 'Brand Extraction',
       reply: 'Client Replies',
       ocr: 'Image OCR',
       noData: 'No usage data yet',

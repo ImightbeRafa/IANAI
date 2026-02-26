@@ -11,9 +11,12 @@ const supabase = supabaseUrl && supabaseServiceKey
 export const MODEL_COSTS = {
   // Script generation models (per 1M tokens)
   'grok': { input: 3.00, output: 15.00 },
+  'grok-3-fast': { input: 3.00, output: 15.00 },
   'grok-3-mini': { input: 0.30, output: 0.50 },
+  'grok-3-mini-fast': { input: 0.30, output: 0.50 },
   'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
   'grok-4-1-fast-reasoning': { input: 2.00, output: 10.00 },
+  'grok-2-vision-latest': { input: 2.00, output: 10.00 },
   'gemini': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60, thinking: 3.50 },
   
@@ -54,7 +57,9 @@ export type FeatureType =
   | 'prompt_condense'  // Prompt condensing for video APIs
   | 'voice_transcription' // Voice-to-text transcription
   | 'style_analysis'      // Custom post type style analysis
-  | 'memory_reflection'   // AI memory synthesis/reflection
+  | 'memory_reflection'   // AI memory reflection (typed memories)
+  | 'memory_synthesis'   // AI memory style synthesis (global/product)
+  | 'brand_extraction'   // Brand identity extraction from URL
   | 'reply'              // Client reply generation (Respuestas)
   | 'ocr'                // Image OCR text extraction
 

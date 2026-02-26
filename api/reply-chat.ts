@@ -353,7 +353,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'reply',
-      model: 'grok',
+      model: 'grok-3-fast',
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
@@ -375,7 +375,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'reply',
-      model: 'grok',
+      model: 'grok-3-fast',
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

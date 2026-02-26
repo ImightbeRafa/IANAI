@@ -198,6 +198,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error) {
     console.error('Streamline script error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: 'prompt_condense',
+      model: 'grok-3-fast',
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({
       error: error instanceof Error ? error.message : 'Internal server error'
     })

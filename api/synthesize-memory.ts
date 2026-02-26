@@ -171,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await logApiUsage({
             userId,
             userEmail: user.email,
-            feature: 'prompt_enhance',
+            feature: 'memory_synthesis',
             model: 'grok-3-mini-fast',
             inputTokens: usage.prompt_tokens || estimateTokens(GLOBAL_SYNTHESIS_SYSTEM + globalUserContent),
             outputTokens: usage.completion_tokens || estimateTokens(summary),
@@ -179,6 +179,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             metadata: { action: 'ai_memory_global_synthesis' }
           })
         }
+      } else {
+        await logApiUsage({
+          userId,
+          userEmail: user.email,
+          feature: 'memory_synthesis',
+          model: 'grok-3-mini-fast',
+          inputTokens: estimateTokens(GLOBAL_SYNTHESIS_SYSTEM + globalUserContent),
+          success: false,
+          errorMessage: `API error: ${globalResponse.status}`,
+          metadata: { action: 'ai_memory_global_synthesis' }
+        })
       }
     }
 
@@ -255,7 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             await logApiUsage({
               userId,
               userEmail: user.email,
-              feature: 'prompt_enhance',
+              feature: 'memory_synthesis',
               model: 'grok-3-mini-fast',
               inputTokens: usage.prompt_tokens || estimateTokens(PRODUCT_SYNTHESIS_SYSTEM + productUserContent),
               outputTokens: usage.completion_tokens || estimateTokens(summary),
@@ -263,6 +274,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               metadata: { action: 'ai_memory_product_synthesis', productId }
             })
           }
+        } else {
+          await logApiUsage({
+            userId,
+            userEmail: user.email,
+            feature: 'memory_synthesis',
+            model: 'grok-3-mini-fast',
+            inputTokens: estimateTokens(PRODUCT_SYNTHESIS_SYSTEM + productUserContent),
+            success: false,
+            errorMessage: `API error: ${productResponse.status}`,
+            metadata: { action: 'ai_memory_product_synthesis', productId }
+          })
         }
       }
     }
@@ -274,6 +296,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error) {
     console.error('Memory synthesis error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: 'memory_synthesis',
+      model: 'grok-3-mini-fast',
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({
       error: error instanceof Error ? error.message : 'Internal server error'
     })

@@ -280,7 +280,7 @@ ${bodyText}`
     await logApiUsage({
       userId: user.id,
       userEmail: user.email || undefined,
-      feature: 'url_fetch',
+      feature: 'brand_extraction',
       model: 'gemini-2.5-flash',
       inputTokens,
       outputTokens,
@@ -303,7 +303,7 @@ ${bodyText}`
     await logApiUsage({
       userId: user.id,
       userEmail: user.email || undefined,
-      feature: 'url_fetch',
+      feature: 'brand_extraction',
       model: 'gemini-2.5-flash',
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error',

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import { logApiUsage } from './lib/usage-logger.js'
 
 export const config = {
   api: {
@@ -88,65 +89,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'No PDF file found in request' })
     }
 
-    // Use pdf-parse or call external API to extract text
-    // For now, we'll use the Grok API to process the PDF content
-    const base64Pdf = pdfBuffer.toString('base64')
-    
-    // Call Grok API to extract text from PDF
-    const apiKey = process.env.GROK_API_KEY
-    if (!apiKey) {
-      return res.status(500).json({ error: 'API key not configured' })
+    // Extract text using pdf-parse (same approach as extract-pdf.ts)
+    let textContent = ''
+
+    try {
+      const pdfParse = await import('pdf-parse')
+      const pdfData = await pdfParse.default(pdfBuffer)
+      textContent = pdfData.text
+    } catch {
+      // Fallback: Basic text extraction for PDFs with embedded text
+      const pdfString = pdfBuffer.toString('utf8')
+      const textMatches = pdfString.match(/\(([^)]+)\)/g) || []
+      textContent = textMatches
+        .map(m => m.slice(1, -1))
+        .filter(t => t.length > 1 && !/^[\\\/\d\s]+$/.test(t))
+        .join(' ')
     }
 
-    const response = await fetch('https://api.x.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'grok-2-vision-latest',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Extract ALL text from this PDF menu. Include every dish name, description, and price. Format it clearly with dish names, descriptions, and prices. Do not summarize - include everything verbatim.'
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:application/pdf;base64,${base64Pdf}`
-                }
-              }
-            ]
-          }
-        ],
-        max_tokens: 4000
-      })
-    })
+    // Clean up whitespace
+    textContent = textContent.replace(/\s+/g, ' ').trim()
 
-    if (!response.ok) {
-      // Fallback: Return a message asking user to paste text manually
-      console.error('Grok API error:', await response.text())
-      return res.status(200).json({ 
+    // If extraction returned very little text, it's likely a scanned/image PDF
+    if (textContent.length < 50) {
+      await logApiUsage({
+        userId: user.id,
+        userEmail: user.email || undefined,
+        feature: 'pdf_extract',
+        model: 'pdf-parse',
+        success: false,
+        errorMessage: 'Insufficient text extracted (likely scanned PDF)',
+        metadata: { pdfSizeBytes: pdfBuffer.length, textLength: textContent.length }
+      })
+
+      return res.status(200).json({
         text: '',
-        error: 'Could not process PDF automatically. Please paste the menu text manually.',
+        error: 'Could not extract text from this PDF. It may be a scanned document. Please paste the menu text manually.',
         needsManualInput: true
       })
     }
 
-    const data = await response.json()
-    const extractedText = data.choices?.[0]?.message?.content || ''
+    // Limit content length
+    const maxLength = 8000
+    if (textContent.length > maxLength) {
+      textContent = textContent.substring(0, maxLength) + '...[truncated]'
+    }
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email || undefined,
+      feature: 'pdf_extract',
+      model: 'pdf-parse',
+      success: true,
+      metadata: { pdfSizeBytes: pdfBuffer.length, textLength: textContent.length }
+    })
 
     return res.status(200).json({
-      text: extractedText,
-      url: '' // Could store in Supabase Storage if needed
+      text: textContent,
+      url: ''
     })
 
   } catch (error) {
     console.error('PDF parsing error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email || undefined,
+      feature: 'pdf_extract',
+      model: 'pdf-parse',
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({ 
       error: 'Failed to process PDF',
       text: '',

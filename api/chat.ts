@@ -1772,7 +1772,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: usageAction,
-      model: 'grok',
+      model: 'grok-3-fast',
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
@@ -1785,6 +1785,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ content, remaining: remaining - 1, model: selectedModel, _debug: { systemPrompt } })
   } catch (error) {
     console.error('Chat API error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: usageAction,
+      model: 'grok-3-fast',
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Internal server error' 
     })

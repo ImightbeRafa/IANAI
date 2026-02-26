@@ -312,6 +312,16 @@ User request: ${prompt}`
 
   } catch (error) {
     console.error('Video generation error:', error)
+
+    await logApiUsage({
+      userId: user.id,
+      userEmail: user.email,
+      feature: 'video',
+      model: 'grok-imagine-video-720p',
+      success: false,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+    })
+
     return res.status(500).json({ 
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error'
