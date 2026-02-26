@@ -878,6 +878,7 @@ interface BusinessContext {
     has_specific_profession?: boolean
     profession_description?: string
   }>
+  icp_description?: string
 }
 
 interface ProductContext {
@@ -1048,6 +1049,13 @@ function buildBusinessRulesPrompt(biz: BusinessContext | undefined, language: 'e
       : `AUDIENCE RULE: Adapt language, tone and examples for these target audiences:\n${audienceDescriptions.join('\n')}`)
   }
 
+  // ICP free-text description
+  if (biz.icp_description && biz.icp_description.trim()) {
+    rules.push(isEs
+      ? `REGLA PERFIL DE CLIENTE IDEAL: El usuario proporcionó esta descripción detallada de su cliente ideal. Úsala para adaptar el tono, lenguaje, ejemplos, puntos de dolor y deseos en todo el contenido generado:\n${biz.icp_description.trim()}`
+      : `IDEAL CUSTOMER PROFILE RULE: The user provided this detailed description of their ideal customer. Use it to adapt tone, language, examples, pain points and desires across all generated content:\n${biz.icp_description.trim()}`)
+  }
+
   if (rules.length === 0) return ''
 
   const header = isEs
@@ -1164,6 +1172,12 @@ function buildStructuredContext(biz: BusinessContext | undefined, product: Produ
         bizLines.push(`  ${i + 1}. ${parts.join(' | ')}`)
       })
     }
+
+    if (biz.icp_description && biz.icp_description.trim()) {
+      bizLines.push(`\n${isEs ? 'DESCRIPCIÓN DEL CLIENTE IDEAL:' : 'IDEAL CUSTOMER DESCRIPTION:'}`)
+      bizLines.push(biz.icp_description.trim())
+    }
+
     sections.push(bizLines.join('\n'))
   }
 

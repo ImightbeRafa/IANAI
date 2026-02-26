@@ -242,6 +242,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (biz.location) bizFields.push(`${isEs ? 'Ubicación' : 'Location'}: ${biz.location}`)
         if (biz.sales_channels?.length) bizFields.push(`${isEs ? 'Canales de venta' : 'Sales channels'}: ${biz.sales_channels.join(', ')}`)
         if (biz.does_shipping) bizFields.push(`${isEs ? 'Hace envíos' : 'Does shipping'}: ${isEs ? 'Sí' : 'Yes'}${biz.shipping_method ? ` (${biz.shipping_method})` : ''}`)
+        if (biz.icp_description?.trim()) bizFields.push(`${isEs ? 'Cliente ideal' : 'Ideal customer'}: ${biz.icp_description.trim()}`)
 
         if (bizFields.length > 0) {
           businessContextPrompt = `\n\n${isEs ? '=== INFORMACIÓN DEL NEGOCIO ===' : '=== BUSINESS INFORMATION ==='}\n${bizFields.join('\n')}`

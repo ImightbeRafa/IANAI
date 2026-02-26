@@ -77,9 +77,16 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '2.5.0',
-    date: '2026-02-24',
+    version: '0.1.2',
+    date: '2026-02-26',
     items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'Descripción de cliente ideal — pega un texto detallado de tu ICP en tu negocio para que la IA lo use en todo el contenido',
+          en: 'Ideal customer description — paste a detailed ICP text in your business so the AI uses it across all content'
+        }
+      },
       {
         category: 'feature',
         text: {
@@ -132,7 +139,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     ]
   },
   {
-    version: '2.4.0',
+    version: '0.1.1',
     date: '2026-02-23',
     items: [
       {
@@ -159,7 +166,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     ]
   },
   {
-    version: '2.3.0',
+    version: '0.1.0',
     date: '2026-02-16',
     items: [
       {

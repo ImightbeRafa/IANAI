@@ -32,6 +32,7 @@ export default function BusinessForm({ onSubmit, onCancel, initialData, isEditin
     target_audiences: initialData?.target_audiences?.length
       ? initialData.target_audiences
       : [{ ...EMPTY_AUDIENCE }],
+    icp_description: initialData?.icp_description || '',
   })
 
   const labels = {
@@ -84,6 +85,9 @@ export default function BusinessForm({ onSubmit, onCancel, initialData, isEditin
       professionNo: 'Nada en particular',
       professionYes: 'Sí',
       professionPlaceholder: 'Ej: Médicos, Abogados, Dueños de negocio',
+      icpLabel: 'Descripción detallada de tu cliente ideal',
+      icpOptional: 'Opcional',
+      icpPlaceholder: 'Pega aquí una descripción completa de tu cliente ideal. Por ejemplo: "Mi cliente ideal es una mujer de 30-45 años, emprendedora, que tiene un negocio de e-commerce y busca escalar sus ventas..."',
     },
     en: {
       title: isEditing ? 'Edit Business' : 'New Business',
@@ -130,6 +134,9 @@ export default function BusinessForm({ onSubmit, onCancel, initialData, isEditin
       professionNo: 'Nothing specific',
       professionYes: 'Yes',
       professionPlaceholder: 'E.g.: Doctors, Lawyers, Business owners',
+      icpLabel: 'Detailed description of your ideal customer',
+      icpOptional: 'Optional',
+      icpPlaceholder: 'Paste a full description of your ideal customer here. For example: "My ideal customer is a 30-45 year old female entrepreneur who runs an e-commerce business and wants to scale their sales..."',
     },
   }
 
@@ -271,6 +278,7 @@ export default function BusinessForm({ onSubmit, onCancel, initialData, isEditin
                       has_specific_profession: !!(data.audience_profession as string)?.trim(),
                       profession_description: (data.audience_profession as string) || '',
                     }],
+                    icp_description: typeof data.icp_description === 'string' ? data.icp_description : prev.icp_description,
                   }))
                   setStep(2)
                 }}
@@ -489,6 +497,20 @@ export default function BusinessForm({ onSubmit, onCancel, initialData, isEditin
               >
                 <Plus className="w-4 h-4" /> {t.addAudience}
               </button>
+
+              {/* ICP Free-text Description */}
+              <div className="border-t border-dark-200 pt-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="block text-sm font-medium text-dark-700">{t.icpLabel}</label>
+                  <span className="text-xs text-dark-400 bg-dark-50 px-1.5 py-0.5 rounded">{t.icpOptional}</span>
+                </div>
+                <textarea
+                  value={formData.icp_description || ''}
+                  onChange={e => setFormData(prev => ({ ...prev, icp_description: e.target.value }))}
+                  placeholder={t.icpPlaceholder}
+                  className="input-field min-h-[120px]"
+                />
+              </div>
             </div>
           )}
         </div>

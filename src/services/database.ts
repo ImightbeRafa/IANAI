@@ -222,6 +222,7 @@ export async function createBusiness(
       location: data.location || null,
       does_shipping: data.does_shipping,
       shipping_method: data.shipping_method || null,
+      icp_description: data.icp_description || null,
     })
     .select()
     .single()
@@ -289,10 +290,11 @@ export async function updateBusiness(
   data: Partial<BusinessFormData>
 ): Promise<void> {
   const { target_audiences, ...businessFields } = data
+  const updatePayload = { ...businessFields, updated_at: new Date().toISOString() }
   
   const { error } = await supabase
     .from('businesses')
-    .update({ ...businessFields, updated_at: new Date().toISOString() })
+    .update(updatePayload)
     .eq('id', businessId)
 
   if (error) throw error

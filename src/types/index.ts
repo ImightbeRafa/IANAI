@@ -90,6 +90,7 @@ export interface Business {
   created_at: string
   updated_at: string
   target_audiences?: TargetAudience[]
+  icp_description?: string
 }
 
 export interface BusinessFormData {
@@ -99,6 +100,7 @@ export interface BusinessFormData {
   does_shipping: boolean
   shipping_method?: string
   target_audiences: TargetAudienceFormData[]
+  icp_description?: string
 }
 
 export interface TargetAudience {

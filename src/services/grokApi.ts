@@ -63,6 +63,7 @@ export interface ApiBusinessContext {
     has_specific_profession?: boolean
     profession_description?: string
   }>
+  icp_description?: string
 }
 
 export function buildApiBusinessContext(business: Business | undefined): ApiBusinessContext | undefined {
@@ -82,6 +83,7 @@ export function buildApiBusinessContext(business: Business | undefined): ApiBusi
       has_specific_profession: a.has_specific_profession,
       profession_description: a.profession_description || undefined,
     })),
+    icp_description: business.icp_description || undefined,
   }
 }
 
