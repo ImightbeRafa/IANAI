@@ -616,6 +616,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const userPrompt = imageParams.prompt || ''
     const isGeminiModel = selectedModel === 'nano-banana' || selectedModel === 'nano-banana-pro'
     const isPostMode = imageParams.mode === 'post'
+    const isProductMode = isPostMode && (imageParams.postStyle || '') === 'product'
     
     let enhancedPrompt: string
 
@@ -628,7 +629,6 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       // Determine aspect ratio from request (default 9:16 for backward compat)
       const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
       const postStyle: string = imageParams.postStyle || 'venta-directa'
-      const isProductMode = postStyle === 'product'
 
       if (imageParams.aspectRatio === '1:1' && isProductMode) {
         imageParams.width = 1080
