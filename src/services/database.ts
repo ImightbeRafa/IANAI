@@ -590,6 +590,15 @@ export async function addMessage(
   return data
 }
 
+export async function deleteSessionMessages(sessionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('messages')
+    .delete()
+    .eq('session_id', sessionId)
+
+  if (error) throw error
+}
+
 export async function getMessages(sessionId: string): Promise<Message[]> {
   const { data, error } = await supabase
     .from('messages')

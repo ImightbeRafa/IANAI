@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getScripts, getChatSessions, createChatSession, getMessages, addMessage } from '../services/database'
+import { getProduct, getScripts, getChatSessions, createChatSession, getMessages, addMessage, deleteSessionMessages } from '../services/database'
 import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
 import type { Product, Script, Message, ScriptGenerationSettings, ChatSession } from '../types'
 import Layout from '../components/Layout'
@@ -17,7 +17,8 @@ import {
   Copy,
   Check,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  RotateCcw
 } from 'lucide-react'
 
 export default function DescriptionsWorkspace() {
@@ -113,25 +114,41 @@ export default function DescriptionsWorkspace() {
     loadData()
   }, [productId, user])
 
+  const handleNewSession = async () => {
+    if (!descSession) return
+    try {
+      await deleteSessionMessages(descSession.id)
+      setMessages([])
+      setSelectedScript(null)
+      setInput('')
+    } catch (err) {
+      console.error('Failed to clear session:', err)
+    }
+  }
+
   const handleGenerateDescriptions = async () => {
     if (loading || !product || !descSession) return
     
-    const scriptContent = selectedScript?.content || input.trim()
+    // After initial generation (messages exist), use typed input as feedback
+    const isFollowUp = messages.length > 0 && input.trim()
+    const scriptContent = isFollowUp ? input.trim() : (selectedScript?.content || input.trim())
     if (!scriptContent) return
 
     setLoading(true)
     
-    const userContent = selectedScript 
-      ? (language === 'es' 
-        ? `Genera descripciones de video para redes sociales basándote en este guión:\n\n${scriptContent}`
-        : `Generate social media video descriptions based on this script:\n\n${scriptContent}`)
-      : scriptContent
+    const userContent = isFollowUp
+      ? scriptContent
+      : selectedScript 
+        ? (language === 'es' 
+          ? `Genera descripciones de video para redes sociales basándote en este guión:\n\n${scriptContent}`
+          : `Generate social media video descriptions based on this script:\n\n${scriptContent}`)
+        : scriptContent
 
     try {
       // Save user message to DB
       const savedUserMsg = await addMessage(descSession.id, 'user', userContent)
       setMessages(prev => [...prev, savedUserMsg])
-      if (!selectedScript) setInput('')
+      setInput('')
 
       const descriptionContext = {
         product_name: product.name,
@@ -253,6 +270,16 @@ export default function DescriptionsWorkspace() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {messages.length > 0 && (
+              <button
+                onClick={handleNewSession}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-dark-400 hover:text-dark-700 hover:bg-dark-50 rounded-lg transition-colors"
+                title={language === 'es' ? 'Nueva conversación' : 'New conversation'}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                {language === 'es' ? 'Nueva' : 'New'}
+              </button>
+            )}
             <BrandKitSelector
               selectedKitId={selectedBrandKitId}
               onSelect={setSelectedBrandKitId}
@@ -281,6 +308,7 @@ export default function DescriptionsWorkspace() {
                         onClick={() => {
                           if (selectedScript?.id !== script.id) {
                             setMessages([])
+                            if (descSession) deleteSessionMessages(descSession.id).catch(() => {})
                           }
                           setSelectedScript(script)
                           setShowScriptPicker(false)

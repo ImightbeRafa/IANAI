@@ -171,17 +171,35 @@ Edit instruction: ${editPrompt}`
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
         const editAR = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
 
-        const response = await ai.models.generateContent({
-          model: editModelId,
-          contents: promptParts,
-          config: {
-            responseModalities: ['TEXT', 'IMAGE'],
-            imageConfig: {
-              imageSize: '2K',
-              aspectRatio: editAR
+        // Retry once on transient errors (503, 500, etc.)
+        let response: Awaited<ReturnType<typeof ai.models.generateContent>>
+        try {
+          response = await ai.models.generateContent({
+            model: editModelId,
+            contents: promptParts,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: {
+                imageSize: '2K',
+                aspectRatio: editAR
+              }
             }
-          }
-        })
+          })
+        } catch (firstErr) {
+          console.warn('Gemini edit first attempt failed, retrying:', firstErr instanceof Error ? firstErr.message : firstErr)
+          await new Promise(r => setTimeout(r, 2000))
+          response = await ai.models.generateContent({
+            model: editModelId,
+            contents: promptParts,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig: {
+                imageSize: '2K',
+                aspectRatio: editAR
+              }
+            }
+          })
+        }
 
         const candidates = response.candidates || []
         const parts = candidates[0]?.content?.parts || []
@@ -689,13 +707,20 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         : ''
 
       // Load structured visual style memory from hybrid AI memory system
+      // When explicit colors are active (brand kit or palette), exclude color/visual memories
+      // to prevent learned color preferences from overriding the user's explicit choice
+      const hasExplicitColors = !!colorPrefix
       let visualMemoryPrefix = ''
       try {
         const visualMemory = await getMemoryInjection(
           user.id,
           imageParams.productId as string || null,
           (postLanguage as 'es' | 'en') || 'es',
-          { types: ['visual_style', 'preference', 'anti_pattern'], limit: 10 }
+          {
+            types: ['visual_style', 'preference', 'anti_pattern'],
+            excludeCategories: hasExplicitColors ? ['color', 'visual'] : undefined,
+            limit: 10
+          }
         )
         if (visualMemory) {
           visualMemoryPrefix = visualMemory + '\n\n'

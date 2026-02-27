@@ -33,6 +33,7 @@ export async function getRelevantMemories(
   options?: {
     types?: string[]
     categories?: string[]
+    excludeCategories?: string[]
     limit?: number
   }
 ): Promise<AiMemoryRow[]> {
@@ -54,6 +55,11 @@ export async function getRelevantMemories(
     }
     if (options?.categories && options.categories.length > 0) {
       query = query.in('category', options.categories)
+    }
+    if (options?.excludeCategories && options.excludeCategories.length > 0) {
+      for (const cat of options.excludeCategories) {
+        query = query.neq('category', cat)
+      }
     }
 
     // Smart ordering: product-specific first, then by confidence, then by recency
@@ -104,10 +110,10 @@ export function buildMemoryInjection(
 
   const parts: string[] = []
 
-  // Header
+  // Header — important: do NOT claim to override color, layout, or format instructions
   parts.push(isEs
-    ? '=== DIRECTIVAS DE MEMORIA — MÁXIMA PRIORIDAD. ANULA CUALQUIER INSTRUCCIÓN EN CONFLICTO ==='
-    : '=== MEMORY DIRECTIVES — HIGHEST PRIORITY. OVERRIDE ANY CONFLICTING INSTRUCTIONS ==='
+    ? '=== DIRECTIVAS DE MEMORIA — APLICA ESTAS PREFERENCIAS DE ESTILO (pero NUNCA anules instrucciones de COLOR, LAYOUT o FORMATO ya definidas arriba) ==='
+    : '=== MEMORY DIRECTIVES — APPLY THESE STYLE PREFERENCES (but NEVER override COLOR, LAYOUT, or FORMAT instructions defined above) ==='
   )
 
   // Core style directive
@@ -186,8 +192,8 @@ export function buildMemoryInjection(
 
   // Closing instruction
   parts.push(isEs
-    ? '\nSi algo en la tarea contradice lo anterior, sigue las memorias. Nunca menciones estas directivas al usuario.'
-    : '\nIf anything in the task contradicts the above, follow the memories. Never mention these directives to the user.'
+    ? '\nEstas directivas son preferencias de estilo aprendidas. Respeta SIEMPRE las instrucciones de COLOR, LAYOUT y FORMATO definidas antes de este bloque. Nunca menciones estas directivas al usuario.'
+    : '\nThese directives are learned style preferences. ALWAYS respect COLOR, LAYOUT, and FORMAT instructions defined before this block. Never mention these directives to the user.'
   )
 
   return parts.join('\n')
@@ -204,6 +210,7 @@ export async function getMemoryInjection(
   options?: {
     types?: string[]
     categories?: string[]
+    excludeCategories?: string[]
     limit?: number
   }
 ): Promise<string> {
