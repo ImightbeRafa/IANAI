@@ -127,4 +127,64 @@ export const IMAGE_PRESETS: ImagePreset[] = [
   },
 ];
 
+export interface ProductSubStyle {
+  id: string;
+  name: string;
+  nameEs: string;
+  description: string;
+  descriptionEs: string;
+  icon: string;
+}
+
+export const PRODUCT_SUB_STYLES: ProductSubStyle[] = [
+  {
+    id: 'studio-hero',
+    name: 'Studio Hero',
+    nameEs: 'Estudio Hero',
+    description: 'Clean background, pro lighting, floating shadow',
+    descriptionEs: 'Fondo limpio, iluminación profesional, sombra flotante',
+    icon: '✦',
+  },
+  {
+    id: 'lifestyle',
+    name: 'Lifestyle Context',
+    nameEs: 'Contexto Lifestyle',
+    description: 'Product in real-life scene',
+    descriptionEs: 'Producto en escena real de uso',
+    icon: '☀',
+  },
+  {
+    id: 'background-swap',
+    name: 'Background Swap',
+    nameEs: 'Cambiar Fondo',
+    description: 'Pick or describe a new background',
+    descriptionEs: 'Elige o describe un fondo nuevo',
+    icon: '⬡',
+  },
+  {
+    id: 'pure-enhance',
+    name: 'Pure Enhancement',
+    nameEs: 'Solo Mejorar',
+    description: 'Same composition, better quality',
+    descriptionEs: 'Misma composición, mejor calidad',
+    icon: '◈',
+  },
+  {
+    id: 'splash-action',
+    name: 'Splash / Action',
+    nameEs: 'Splash / Acción',
+    description: 'Dynamic elements: water, powder, light',
+    descriptionEs: 'Elementos dinámicos: agua, polvo, luz',
+    icon: '✧',
+  },
+  {
+    id: 'podium',
+    name: 'Podium Display',
+    nameEs: 'Podio / Display',
+    description: '3D pedestal with catalog lighting',
+    descriptionEs: 'Pedestal 3D con iluminación de catálogo',
+    icon: '▲',
+  },
+];
+
 export default IMAGE_PRESETS;

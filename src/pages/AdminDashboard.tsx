@@ -1325,6 +1325,11 @@ export default function AdminDashboard() {
                         {feature === 'script_hook' && <FileText className="w-5 h-5 text-blue-400" />}
                         {feature === 'script_consciousness' && <Sparkles className="w-5 h-5 text-violet-400" />}
                         {feature === 'style_analysis' && <ImageIcon className="w-5 h-5 text-fuchsia-500" />}
+                        {feature === 'memory_reflection' && <Zap className="w-5 h-5 text-yellow-500" />}
+                        {feature === 'memory_synthesis' && <Zap className="w-5 h-5 text-yellow-600" />}
+                        {feature === 'brand_extraction' && <Sparkles className="w-5 h-5 text-indigo-500" />}
+                        {feature === 'reply' && <MessageSquarePlus className="w-5 h-5 text-teal-500" />}
+                        {feature === 'ocr' && <FileText className="w-5 h-5 text-gray-500" />}
                         <span className="font-medium text-dark-900">
                           {t[feature as keyof typeof t] || feature}
                         </span>

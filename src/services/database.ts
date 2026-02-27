@@ -813,6 +813,7 @@ export interface Post {
   output_format: string
   model?: string
   error_message?: string
+  rating?: number | null
   created_at: string
   updated_at: string
 }
@@ -892,6 +893,15 @@ export async function getProductPostsPaginated(
 
   if (error) throw error
   return { posts: data || [], total: count || 0 }
+}
+
+export async function ratePost(postId: string, rating: number | null): Promise<void> {
+  const { error } = await supabase
+    .from('posts')
+    .update({ rating })
+    .eq('id', postId)
+
+  if (error) throw error
 }
 
 export async function deletePost(postId: string): Promise<void> {
@@ -1184,10 +1194,10 @@ export async function uploadFeedbackScreenshot(
   userId: string,
   file: Blob
 ): Promise<string> {
-  const fileName = `${userId}/${Date.now()}.png`
+  const fileName = `${userId}/${Date.now()}.jpg`
   const { error } = await supabase.storage
     .from('feedback-screenshots')
-    .upload(fileName, file, { contentType: 'image/png' })
+    .upload(fileName, file, { contentType: 'image/jpeg' })
 
   if (error) throw error
 
@@ -1379,9 +1389,9 @@ export async function recordAiSignal(
         })
 
         // High-value signals always trigger reflection
-        const HIGH_VALUE_SIGNALS = ['script_rated', 'edit_manual', 'user_explicit']
+        const HIGH_VALUE_SIGNALS = ['script_rated', 'post_rated', 'edit_manual', 'user_explicit']
         const isHighValue = HIGH_VALUE_SIGNALS.includes(signalType) &&
-          (signalType !== 'script_rated' || signalData.rating === 'bad' || signalData.rating === 'good')
+          (!['script_rated', 'post_rated'].includes(signalType) || signalData.rating === 'bad' || signalData.rating === 'good')
 
         if (isHighValue) {
           triggerReflection(productId, true)

@@ -17,7 +17,7 @@ const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 // =============================================
 const SYNTHESIS_SYSTEM = `You are the world's best brand-voice memory curator for a bilingual (English/Spanish) creator SaaS.
 
-You will receive NEW SIGNALS (user actions since last reflection), EXISTING MEMORIES (previously extracted), and POSITIVE EXAMPLES (scripts the user saved/liked).
+You will receive NEW SIGNALS (user actions since last reflection), EXISTING MEMORIES (previously extracted), POSITIVE EXAMPLES (scripts the user saved/liked), and optionally RATED POSTS (visual feedback from image generation).
 
 Your job: extract, update, or remove typed memories that will be injected into future AI generations to match this user's exact style.
 
@@ -31,6 +31,7 @@ Rules (follow strictly):
 - Each memory content should be a clear, concise directive (not an observation)
 - Valid memory types: "preference", "anti_pattern", "rule", "example", "visual_style", "fact"
 - Valid categories: "hooks", "cta", "tone", "vocabulary", "structure", "color", "core_style", "visual", "general"
+- When RATED POSTS are present, extract "visual_style" memories from patterns in liked/disliked posts (e.g. color preferences, layout style, typography choices, imagery themes). Use category "visual" or "color" as appropriate.
 
 Output ONLY valid JSON matching this schema:
 {
@@ -167,6 +168,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // =============================================
+    // 4b. FETCH RATED POSTS (visual style learning)
+    // =============================================
+    let ratedPosts: { prompt: string; rating: number; model: string | null }[] = []
+    if (productId) {
+      const { data } = await supabase
+        .from('posts')
+        .select('prompt, rating, model')
+        .eq('product_id', productId)
+        .not('rating', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(10)
+      ratedPosts = data || []
+    } else {
+      const { data: userProducts } = await supabase
+        .from('products')
+        .select('id')
+        .eq('owner_id', userId)
+      const productIds = (userProducts || []).map((p: { id: string }) => p.id)
+      if (productIds.length > 0) {
+        const { data } = await supabase
+          .from('posts')
+          .select('prompt, rating, model')
+          .in('product_id', productIds)
+          .not('rating', 'is', null)
+          .order('updated_at', { ascending: false })
+          .limit(10)
+        ratedPosts = data || []
+      }
+    }
+
+    // =============================================
     // 5. BUILD SIGNAL SNAPSHOT FOR LLM
     // =============================================
     const mem = productMem || globalMem
@@ -211,6 +243,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       product_id: m.product_id
     }))
 
+    const ratedPostsText = ratedPosts.length > 0
+      ? ratedPosts.map((p, i) => {
+          const label = p.rating === 5 ? 'LIKED' : p.rating === 1 ? 'DISLIKED' : `rating=${p.rating}`
+          return `--- Post ${i + 1} (${label}, model: ${p.model || 'unknown'}) ---\n${p.prompt.substring(0, 400)}`
+        }).join('\n\n')
+      : ''
+
     const userContent = `NEW SIGNALS since last reflection:
 ${JSON.stringify(newSignals, null, 2)}
 
@@ -218,7 +257,8 @@ EXISTING MEMORIES:
 ${JSON.stringify(existingMemoriesFormatted, null, 2)}
 
 POSITIVE EXAMPLES user loved and saved:
-${positiveScriptsText}`
+${positiveScriptsText}${ratedPostsText ? `\n\nRATED POSTS (visual feedback — extract visual_style memories from these):
+${ratedPostsText}` : ''}`
 
     // =============================================
     // 6. CALL GROK 4.1 FAST REASONING WITH JSON MODE

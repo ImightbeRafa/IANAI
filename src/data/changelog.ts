@@ -40,12 +40,26 @@ export const STATUS_ALERT: StatusAlert = {
 // =============================================
 export const ROADMAP: RoadmapItem[] = [
   {
-    status: 'in_progress',
+    status: 'done',
     text: {
       es: 'Brand Kit — identidad visual y tonal aplicada automáticamente',
       en: 'Brand Kit — auto-applied visual and tonal identity'
+    }
+  },
+  {
+    status: 'in_progress',
+    text: {
+      es: 'Fondos temáticos — mármol, madera, naturaleza, navidad y más como presets rápidos',
+      en: 'Background theme presets — marble, wood, nature, Christmas and more as quick picks'
     },
-    eta: 'Feb 2026'
+    eta: 'Mar 2026'
+  },
+  {
+    status: 'planned',
+    text: {
+      es: 'Catálogo de producto — genera sets consistentes de fotos para toda tu línea',
+      en: 'Product catalog — generate consistent photo sets for your entire product line'
+    }
   },
   {
     status: 'planned',
@@ -78,8 +92,29 @@ export const ROADMAP: RoadmapItem[] = [
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '0.1.2',
-    date: '2026-02-26',
+    date: '2026-02-27',
     items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'Foto de Producto — nuevo tipo de post para fotografía profesional de producto con IA',
+          en: 'Product Photo — new post type for AI-powered professional product photography'
+        }
+      },
+      {
+        category: 'feature',
+        text: {
+          es: '6 estilos de foto: Estudio Hero, Lifestyle, Cambiar Fondo, Solo Mejorar, Splash/Acción y Podio 3D',
+          en: '6 photo styles: Studio Hero, Lifestyle, Background Swap, Pure Enhancement, Splash/Action and 3D Podium'
+        }
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Formato cuadrado (1:1) disponible en modo Producto — ideal para e-commerce y catálogos',
+          en: 'Square format (1:1) available in Product mode — ideal for e-commerce and catalogs'
+        }
+      },
       {
         category: 'feature',
         text: {
@@ -127,6 +162,13 @@ export const CHANGELOG: ChangelogEntry[] = [
         text: {
           es: 'Ahora puedes ver el uso de respuestas en tu resumen del plan',
           en: 'Reply usage now visible in your plan summary'
+        }
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Corrección de formato cuadrado en prompts de fotografía de producto',
+          en: 'Fixed square format label in product photography prompts'
         }
       },
       {

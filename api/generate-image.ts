@@ -4,7 +4,8 @@ import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from '
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
-import { findPresetById } from './data/image-presets.js'
+import { buildPostPrompt, buildPresetPrompt, buildProductPrompt } from './data/image-presets.js'
+import type { PostAspectRatio } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
@@ -46,201 +47,7 @@ Puedes incluir texto legible si el usuario lo solicita.
 
 Solicitud del usuario: `
 
-// =============================================
-// MASTER POST PROMPT — Director de Arte + Diseñador Gráfico + Copywriter
-// Used when mode === 'post'. Built dynamically based on aspect ratio.
-// CRITICAL: No pixel values, no dimension annotations — the AI renders them.
-// =============================================
-type PostAspectRatio = '9:16' | '3:4'
-
-function buildPostPrompt(aspectRatio: PostAspectRatio, language: string = 'es', hasProductImages: boolean = false): string {
-  const isVertical = aspectRatio === '9:16'
-  const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
-  const layoutTip = isVertical
-    ? 'La composición es alta y estrecha: headline arriba, bullets en el medio, CTA abajo. La imagen de fondo ocupa todo el canvas.'
-    : 'La composición es casi cuadrada: headline arriba, bullets compactos, CTA abajo. Aprovechá el ancho para un layout más editorial con la imagen de producto al lado o como fondo.'
-
-  const langLabel = language === 'es' ? 'ESPAÑOL' : 'ENGLISH'
-
-  const langRule = `═══════════════════════════════════════════════
-REGLA #0 — IDIOMA Y TEXTO (NO NEGOCIABLE)
-═══════════════════════════════════════════════
-- El idioma de TODOS los textos visibles en la imagen (headline, bullets, CTA, badges, sellos) DEBE ser: ${langLabel}.
-- COPIA el texto del guión TAL CUAL está escrito — NO traduzcas, NO parafrasees, NO cambies el idioma.
-- Si el guión está en español, TODO el texto del post DEBE estar en español.
-- Si el guión está en inglés, TODO el texto del post DEBE estar en inglés.
-- PROHIBIDO mezclar idiomas. PROHIBIDO usar texto placeholder o lorem ipsum.
-- VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
-═══════════════════════════════════════════════
-
-`
-
-  const productRefRule = hasProductImages
-    ? `═══════════════════════════════════════════════
-REGLA #1 — IMÁGENES DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
-═══════════════════════════════════════════════
-Se adjuntan fotos del PRODUCTO REAL del usuario.
-- El producto en el post DEBE verse EXACTAMENTE como en las fotos de referencia.
-- USA las fotos de referencia como fuente de verdad para la forma, silueta, color, textura, ángulo y detalles reales del producto.
-- NO inventes, NO rediseñes, NO reimagines el producto. Usa la referencia fielmente.
-- Si necesitas mostrar el producto en acción, mantené su apariencia idéntica a la referencia.
-- La forma del producto NO se modifica bajo ninguna circunstancia: no stylize, no cartoon, no 3D fake.
-═══════════════════════════════════════════════
-
-`
-    : ''
-
-  return `${langRule}${productRefRule}ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
-
-CONTEXTO FIJO (NO PREGUNTAR NADA):
-En tu contexto ya recibiste un guión escrito con esta estructura:
-- [GANCHO]
-- [DESARROLLO]
-- [CTA]
-Ese guión NO incluye instrucciones visuales. Vos debés inferirlas de forma inteligente.
-
-OBJETIVO:
-Transformar ese guión en UN (1) post publicitario de venta directa en un solo slide, formato ${formatLabel}, con:
-1) Gancho (headline)
-2) Desarrollo (bullets ultra tangibles)
-3) CTA (acción única tipo botón)
-Todo en el MISMO slide, con diseño profesional, legible y ordenado.
-${layoutTip}
-
-REGLAS DE COPY (PERFORMANCE):
-- Cero saludos.
-- 2–3 segundos de gancho (headline corto).
-- No párrafos largos en el diseño.
-- Convertí el [DESARROLLO] del guión a 3–5 bullets máximos.
-- Cada bullet debe ser tangible: entrega, logística, garantía, tiempo, cobertura, pago, proceso, "qué recibís".
-- Eliminá adjetivos vacíos ("premium", "alta calidad") si no vienen con evidencia. Si el guión trae adjetivos, aterrizalos a hechos.
-- CTA debe ser UNO solo, directo, operativo. No mezclar acciones.
-
-EXTRACCIÓN AUTOMÁTICA DESDE EL GUION (OBLIGATORIO):
-1) Del [GANCHO] extraé:
-   - Qué se vende (producto/servicio literal)
-   - Público buyer (segmento implícito)
-   - Función/propuesta principal (1 sola)
-   - Ángulo/diferenciador (1) (garantía, entrega, rapidez, anti-alternativa, variedad, certeza)
-2) Del [DESARROLLO] extraé y priorizá:
-   - 3–5 hechos verificables (máximo) que eliminan dudas.
-   - Si el guión menciona una alternativa/competidor (ej "supermercados"), convertí eso en 1 bullet de contraste máximo (sin explicar de más).
-   - Si el guión menciona garantía, reposición, devolución o riesgo cero, eso va sí o sí como bullet.
-3) Del [CTA] extraé:
-   - Acción única (mensaje, WhatsApp, DM, pedir, agendar, cotizar)
-   - Resultado inmediato (qué pasa después de que escribe)
-
-REGLAS DE DISEÑO (CALIDAD VISUAL PRO):
-
-MÁRGENES OBLIGATORIOS (ESTRICTO):
-- Dejá un margen generoso arriba (aprox 12% del alto) libre de texto importante.
-- Dejá un margen generoso abajo (aprox 14% del alto) libre de texto importante.
-- Dejá márgenes laterales amplios (aprox 10% del ancho) sin texto importante.
-Todo lo crítico (headline, bullets, CTA) debe quedar dentro de estas zonas seguras.
-PROHIBIDO: texto pegado a bordes.
-PROHIBIDO: número de slide (1/1, 2/2, etc.).
-PROHIBIDO: mostrar dimensiones, medidas, píxeles, resolución o cualquier anotación técnica dentro de la imagen.
-
-DIRECCIÓN DE ARTE (LOOK & FEEL PREMIUM) — ESTILO APPLE/IG/SPOTIFY:
-El diseño debe verse como una marca grande: minimalista premium + editorial + quiet luxury.
-Objetivo visual: aunque haya texto (headline + 3–5 bullets + CTA), el post se siente limpio, caro, ordenado y ultra intencional.
-
-Reglas visuales (estrictas):
-- No saturación: máximo 1 imagen principal + 1 badge opcional + texto + CTA.
-- Mucho aire: espacios generosos entre bloques (headline / bullets / CTA).
-- Alineación perfecta: todo basado en grid, márgenes consistentes, baseline visual estable.
-- Consistencia: radios de esquina, sombras, grosor de líneas, estilos de badges e íconos coherentes.
-- Cero "plantilla barata": NO bursts, NO stickers, NO íconos caricaturescos, NO flechas exageradas, NO emojis, NO outlines pesados.
-
-GRID Y JERARQUÍA:
-- Alineación principal: izquierda.
-- Máximo 2 bloques de texto arriba/medio: (Headline + Bullets).
-- CTA en una barra tipo "botón" al final (pero dentro del margen inferior seguro).
-- Headline: 8–12 palabras ideal (máximo 14). Si el gancho es largo, reescribilo sin perder sentido.
-- Bullets: 3–5. 1 línea cada uno (máximo 2 si es inevitable).
-- Interlineado headline: compacto.
-- Interlineado bullets: que respire y se lea bien.
-- Espaciado vertical entre bullets: consistente, uniforme, "editorial".
-- El texto debe ser legible en pantalla de celular.
-
-TIPOGRAFÍA (SOLO 2 FAMILIAS) — APPLE-LIKE:
-- Mantener solo 2 familias.
-- Elegí tipografías sans de estética sistema / tech premium (estilo SF / Inter / Helvetica / Neue).
-- Tracking levemente cerrado o neutro (evitar letras "infladas").
-- Jerarquía fuerte: headline realmente domina; bullets limpios; CTA sólido.
-PROHIBIDO: tipografías decorativas, condensadas extremas o "futuristas baratas".
-
-COLOR SYSTEM (SOBRIO + 1 ACENTO) — ESTILO SPOTIFY/IG:
-- Mantener: 1 color primario + 1 acento + neutrales.
-- Paletas recomendadas:
-  - Apple-like: blanco/negro/grises + acento mínimo.
-  - Instagram-like: degradado MUY sutil y controlado (no arcoíris), solo como wash/overlay.
-  - Spotify-like: base oscura + 1 acento vibrante controlado (solo para CTA o 1 palabra clave).
-- El acento solo puede usarse para UNA de estas cosas: 1) Botón CTA o 2) Badge o 3) 1–3 palabras clave (NO usar el acento en todo a la vez si compite).
-PROHIBIDO: múltiples acentos, fondos chillones, combinaciones neón sin control.
-
-TRATAMIENTO DE IMAGEN (70–80% del post) — PRODUCT-LED:
-- Calidad premium: iluminación limpia, sombras suaves, contraste controlado, recorte perfecto.
-- Fondo limpio y moderno: sin ruido visual, sin elementos irrelevantes.
-- Profundidad sutil: blur leve o separación por luz/sombra; nada agresivo.
-- Overlay para texto: degradado suave, elegante, casi imperceptible (para legibilidad sin tapar el producto).
-PROHIBIDO: filtros fuertes, HDR exagerado, texturas baratas, collages.
-
-${hasProductImages
-    ? `VISUAL (OBLIGATORIO: USAR LAS FOTOS DE PRODUCTO PROPORCIONADAS):
-Se te adjuntan fotos reales del producto. USÁLAS como base visual principal del post.
-- El producto DEBE aparecer en el post con su apariencia REAL (forma, color, textura, ángulo de las fotos de referencia).
-- Podés ubicar el producto en un contexto de uso o lifestyle, pero su forma DEBE ser fiel a la referencia.
-- NO generes un producto inventado. NO cambies su silueta, proporciones ni detalles.
-- Elegí el mejor ángulo/foto de las referencias para la composición.
-- El producto debe ocupar un lugar prominente en la composición (60–80% del área visual).`
-    : `VISUAL (OBLIGATORIO: PRODUCTO/SERVICIO EN ACCIÓN, NO EN EXHIBICIÓN):
-Como el guión no trae visuales, vos debés inferir la mejor escena que demuestre la función principal del guión.
-Elegí UNA escena y construí la imagen alrededor:
-- Si el guión habla de entrega/rutas/puerta: mostrar acción de entrega (mano recibiendo, caja/bolsa en puerta, timbre, etc.).
-- Si el guión habla de frescura/punto perfecto: mostrar acción de uso (cortar/abrir/preparar/servir/comer).
-- Si el guión habla de garantía/reposición: incluir un sello visual de garantía y una escena que refuerce "cero riesgo" (sin saturar).
-- Si el guión compara contra alternativa (supermercado): que la escena muestre claramente el beneficio opuesto (producto intacto, bien seleccionado, listo para usar).`}
-
-BULLETS CON MUCHA INFO — PERO QUE SE LEA "CARO" (NO REDUCIR PALABRAS):
-- Los bullets deben ser escaneables:
-  - iniciar con palabra clave (Entrega / Garantía / Pago / Tiempo / Cobertura / Proceso) y luego el dato.
-  - usar separadores sutiles (•, —, |) solo si mejora lectura.
-  - máximo 1–2 líneas por bullet, con espacio vertical constante.
-- Checkmarks opcionales: si se usan, deben ser minimalistas, mismo grosor, mismo estilo, sin color fuerte (a menos que el acento sea exactamente para eso).
-
-BADGE / SELLOS — QUIET LUXURY:
-- Badge opcional solo si refuerza la promesa principal del guión.
-- Estilo: pill o escudo minimalista, borde fino o relleno sutil.
-- Texto en mayúsculas, corto, sin sombras duras.
-- Nunca compite con headline ni con CTA.
-
-CTA BOTÓN — SISTEMA / UI PREMIUM (OBLIGATORIO):
-- Botón con radio consistente, sombra suave o borde fino.
-- Alta legibilidad: texto grande, peso fuerte, sin efectos.
-- Ícono del canal solo si aplica, en estilo lineal minimalista.
-PROHIBIDO: brillos, biseles, contornos dobles, gradientes fuertes, estilos "baratos".
-
-COMPOSICIÓN FINAL (RECOMENDADA):
-- Área superior (dentro safe): Headline + badge (opcional).
-- Área media: bullets (3–5) con checkmarks minimalistas opcional.
-- Área inferior: botón CTA.
-- Imagen de acción ocupa 70–80% del post, con overlay elegante donde haya texto.
-- Nada debe quedar pegado al borde.
-
-ENTREGABLE:
-Generá el arte final (UNA imagen) del post, cumpliendo TODO:
-- Headline + 3–5 bullets + CTA en un solo slide
-- ${hasProductImages ? 'Visual basada en las fotos de producto proporcionadas (producto REAL, fiel a la referencia)' : 'Visual en acción inferida inteligentemente del guión'}
-- Márgenes generosos respetados estrictamente
-- Dirección de arte premium (Apple/IG/Spotify) con mucho aire y coherencia visual
-- Sin número de slide
-- Sin texto tapable por la UI de Instagram
-- NUNCA incluir anotaciones técnicas, dimensiones, píxeles o medidas visibles en la imagen
-
-GUIÓN DEL USUARIO:
-`
-}
+// PostAspectRatio type and buildPostPrompt (Venta Directa) imported from ./data/image-presets.js
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -821,7 +628,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       // Determine aspect ratio from request (default 9:16 for backward compat)
       const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
       const postStyle: string = imageParams.postStyle || 'venta-directa'
-      if (postAspectRatio === '9:16') {
+      const isProductMode = postStyle === 'product'
+
+      if (imageParams.aspectRatio === '1:1' && isProductMode) {
+        imageParams.width = 1080
+        imageParams.height = 1080
+      } else if (postAspectRatio === '9:16') {
         imageParams.width = 1080
         imageParams.height = 1920
       } else {
@@ -891,7 +703,30 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       } catch { /* ignore */ }
 
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-      if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
+      if (isProductMode) {
+        // PRODUCT PHOTOGRAPHY MODE: high-quality product images without text overlays
+        if (!hasProductImages) {
+          return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
+        }
+        const VALID_SUB_STYLES = ['studio-hero', 'lifestyle', 'background-swap', 'pure-enhance', 'splash-action', 'podium']
+        const rawSubStyle = (imageParams.productSubStyle as string) || 'studio-hero'
+        const productSubStyle = VALID_SUB_STYLES.includes(rawSubStyle) ? rawSubStyle : 'studio-hero'
+        const productAR = imageParams.aspectRatio === '1:1' ? '1:1' : postAspectRatio
+        const bgDesc = typeof imageParams.backgroundDescription === 'string'
+          ? imageParams.backgroundDescription.slice(0, 500)
+          : undefined
+        const productPrompt = buildProductPrompt(
+          productSubStyle,
+          productAR,
+          postLanguage,
+          bgDesc
+        )
+        if (productPrompt) {
+          enhancedPrompt = colorPrefix + brandVisualPrefix + productPrompt
+        } else {
+          enhancedPrompt = colorPrefix + brandVisualPrefix + buildProductPrompt('studio-hero', productAR, postLanguage)!
+        }
+      } else if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
         // CUSTOM POST TYPE MODE: load master prompt from DB
         try {
           const { data: customType } = await imgMemSupabase
@@ -912,10 +747,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'preset' && imageParams.presetId) {
-        // PRESET MODE: lang + product ref + aspect ratio + visual memory + color prefix + preset master prompt + user script
-        const preset = findPresetById(imageParams.presetId as string)
-        if (preset) {
-          enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + preset.masterPromptEs + '\n\nProducto/servicio del usuario:\n' + userPrompt
+        // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
+        const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
+        if (presetPrompt) {
+          enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
         } else {
           enhancedPrompt = aspectRatioPrefix + visualMemoryPrefix + colorPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }

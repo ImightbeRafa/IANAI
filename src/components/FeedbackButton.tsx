@@ -87,6 +87,36 @@ void setInterval(() => {
   }
 }, 500)
 
+function compressScreenshot(blob: Blob, maxWidth = 1280, quality = 0.7): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      let w = img.width
+      let h = img.height
+      if (w > maxWidth) {
+        h = Math.round(h * (maxWidth / w))
+        w = maxWidth
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return reject(new Error('Canvas context unavailable'))
+      ctx.drawImage(img, 0, 0, w, h)
+      canvas.toBlob(
+        (result) => {
+          if (result) resolve(result)
+          else reject(new Error('Compression produced empty blob'))
+        },
+        'image/jpeg',
+        quality,
+      )
+    }
+    img.onerror = () => reject(new Error('Failed to load image for compression'))
+    img.src = URL.createObjectURL(blob)
+  })
+}
+
 export default function FeedbackButton() {
   const { user } = useAuth()
   const { language } = useLanguage()
@@ -192,12 +222,14 @@ export default function FeedbackButton() {
         windowHeight: document.documentElement.scrollHeight,
       })
 
-      canvas.toBlob((blob: Blob | null) => {
-        if (blob) {
-          setScreenshotBlob(blob)
-          setScreenshot(URL.createObjectURL(blob))
-        }
-      }, 'image/png', 0.8)
+      const rawBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/png')
+      )
+      if (rawBlob) {
+        const compressed = await compressScreenshot(rawBlob)
+        setScreenshotBlob(compressed)
+        setScreenshot(URL.createObjectURL(compressed))
+      }
     } catch (err) {
       console.error('Screenshot capture failed:', err)
     } finally {

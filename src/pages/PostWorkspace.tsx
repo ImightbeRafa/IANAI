@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal } from '../services/database'
+import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost } from '../services/database'
 import type { ProductImage } from '../services/database'
 import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
@@ -24,13 +24,16 @@ import {
   Plus,
   Trash2,
   Pipette,
-  Palette
+  Palette,
+  ThumbsUp,
+  ThumbsDown,
+  Camera
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
 import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
-import { IMAGE_PRESETS } from '../data/image-presets'
+import { IMAGE_PRESETS, PRODUCT_SUB_STYLES } from '../data/image-presets'
 import { COLOR_PALETTES } from '../data/color-palettes'
 import { getCustomPalettes, createCustomPalette, deleteCustomPalette, getCustomPostTypes, createCustomPostType, deleteCustomPostType } from '../services/database'
 import type { CustomColorPalette } from '../services/database'
@@ -38,7 +41,7 @@ import type { CustomPostType } from '../types'
 import CreateCustomPostType from '../components/CreateCustomPostType'
 import BrandKitSelector from '../components/BrandKitSelector'
 
-type PostAspectRatio = '9:16' | '3:4'
+type PostAspectRatio = '9:16' | '3:4' | '1:1'
 
 interface GeneratedPost {
   id: string
@@ -109,6 +112,11 @@ export default function PostWorkspace() {
   const POSTS_PAGE_SIZE = 20
   const [totalPostCount, setTotalPostCount] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [postRatings, setPostRatings] = useState<Record<string, 'good' | 'bad'>>({})
+  const [productSubStyle, setProductSubStyle] = useState<string>('studio-hero')
+  const [backgroundDescription, setBackgroundDescription] = useState('')
+
+  const isProductMode = postStyle === 'product'
 
   const labels = {
     es: {
@@ -161,7 +169,18 @@ export default function PostWorkspace() {
       streamline: 'Optimizar para post',
       streamlining: 'Optimizando...',
       streamlined: 'Guión optimizado',
-      revertStreamline: 'Usar original'
+      revertStreamline: 'Usar original',
+      productType: 'Foto de Producto',
+      productTypeDesc: 'Imagen profesional del producto',
+      productSubStyleLabel: 'Estilo de foto',
+      backgroundDesc: 'Describe el fondo deseado (opcional)',
+      backgroundPlaceholder: 'Ej: "Mármol blanco", "Hojas tropicales", "Fondo navideño"...',
+      squareFormat: 'Cuadrado',
+      productRefRequired: 'Sube al menos una foto del producto',
+      generateProduct: 'Generar Foto',
+      generatingProduct: 'Generando foto...',
+      productInstructions: 'Instrucciones adicionales (opcional)',
+      productInstructionsPlaceholder: 'Ej: "Ángulo lateral", "Colores cálidos", "Fondo oscuro"...'
     },
     en: {
       back: 'Back',
@@ -213,7 +232,18 @@ export default function PostWorkspace() {
       streamline: 'Optimize for post',
       streamlining: 'Optimizing...',
       streamlined: 'Optimized script',
-      revertStreamline: 'Use original'
+      revertStreamline: 'Use original',
+      productType: 'Product Photo',
+      productTypeDesc: 'Professional product image',
+      productSubStyleLabel: 'Photo style',
+      backgroundDesc: 'Describe the desired background (optional)',
+      backgroundPlaceholder: 'E.g.: "White marble", "Tropical leaves", "Christmas background"...',
+      squareFormat: 'Square',
+      productRefRequired: 'Upload at least one product photo',
+      generateProduct: 'Generate Photo',
+      generatingProduct: 'Generating photo...',
+      productInstructions: 'Additional instructions (optional)',
+      productInstructionsPlaceholder: 'E.g.: "Side angle", "Warm colors", "Dark background"...'
     }
   }
 
@@ -251,8 +281,9 @@ export default function PostWorkspace() {
         setCustomPostTypes(userPostTypes)
         setTotalPostCount(postsResult.total)
 
-        const loadedPosts: GeneratedPost[] = postsResult.posts
+        const completedPosts = postsResult.posts
           .filter(post => post.status === 'completed' && post.generated_image_url)
+        const loadedPosts: GeneratedPost[] = completedPosts
           .map(post => ({
             id: post.id,
             imageUrl: post.generated_image_url!,
@@ -262,6 +293,13 @@ export default function PostWorkspace() {
             saved: true
           }))
         setGeneratedPosts(loadedPosts)
+
+        const restoredRatings: Record<string, 'good' | 'bad'> = {}
+        for (const post of completedPosts) {
+          if (post.rating === 5) restoredRatings[post.id] = 'good'
+          else if (post.rating === 1) restoredRatings[post.id] = 'bad'
+        }
+        if (Object.keys(restoredRatings).length > 0) setPostRatings(restoredRatings)
       } catch (err) {
         console.error('Failed to load data:', err)
       } finally {
@@ -406,8 +444,15 @@ export default function PostWorkspace() {
   }
 
   const handleGenerate = async () => {
-    const script = getScriptPrompt()
-    if (!script) return
+    if (isProductMode) {
+      if (productImages.length === 0) {
+        setError(t.productRefRequired)
+        return
+      }
+    } else {
+      const script = getScriptPrompt()
+      if (!script) return
+    }
 
     setGenerating(true)
     setError('')
@@ -418,22 +463,47 @@ export default function PostWorkspace() {
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
       const isVertical = aspectRatio === '9:16'
+      const isSquare = aspectRatio === '1:1'
       const isCustomType = postStyle.startsWith('custom-')
-      const requestBody: Record<string, unknown> = {
-        prompt: script,
-        mode: 'post',
-        postStyle: postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
-        presetId: postStyle === 'venta-directa' || isCustomType ? undefined : postStyle,
-        customPostTypeId: isCustomType ? postStyle.replace('custom-', '') : undefined,
-        productId,
-        aspectRatio,
-        width: isVertical ? 1080 : 1080,
-        height: isVertical ? 1920 : 1440,
-        model: imageModel,
-        language,
-        colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
-        customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
-        brandKitId: selectedBrandKitId || undefined
+
+      let requestBody: Record<string, unknown>
+
+      if (isProductMode) {
+        const extraInstructions = additionalInstructions.trim()
+        requestBody = {
+          prompt: extraInstructions || 'Professional product photograph',
+          mode: 'post',
+          postStyle: 'product',
+          productSubStyle: productSubStyle,
+          backgroundDescription: productSubStyle === 'background-swap' ? backgroundDescription.trim() || undefined : undefined,
+          productId,
+          aspectRatio,
+          width: 1080,
+          height: isSquare ? 1080 : isVertical ? 1920 : 1440,
+          model: imageModel,
+          language,
+          colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
+          customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
+          brandKitId: selectedBrandKitId || undefined
+        }
+      } else {
+        const script = getScriptPrompt()
+        requestBody = {
+          prompt: script,
+          mode: 'post',
+          postStyle: postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
+          presetId: postStyle === 'venta-directa' || isCustomType ? undefined : postStyle,
+          customPostTypeId: isCustomType ? postStyle.replace('custom-', '') : undefined,
+          productId,
+          aspectRatio,
+          width: isVertical ? 1080 : 1080,
+          height: isVertical ? 1920 : 1440,
+          model: imageModel,
+          language,
+          colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
+          customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
+          brandKitId: selectedBrandKitId || undefined
+        }
       }
 
       const selectedUrls = getProductImageUrls()
@@ -460,6 +530,7 @@ export default function PostWorkspace() {
       if (result.status === 'Ready' && result.result?.sample) {
         const imageUrl = result.result.sample
         const tempId = `post-${Date.now()}`
+        const usedPrompt = requestBody.prompt as string || ''
 
         // Record AI memory signal for post generation
         if (productId) {
@@ -477,7 +548,7 @@ export default function PostWorkspace() {
         setGeneratedPosts(prev => [{
           id: tempId,
           imageUrl,
-          prompt: script,
+          prompt: usedPrompt,
           createdAt: new Date(),
           model: imageModel,
           saved: false
@@ -502,9 +573,9 @@ export default function PostWorkspace() {
             try {
               const savedUrl = await uploadPostImageOriginal(user.id, productId, imageUrl)
               const post = await createPost(productId, user.id, {
-                prompt: script,
-                width: aspectRatio === '9:16' ? 1080 : 1080,
-                height: aspectRatio === '9:16' ? 1920 : 1440,
+                prompt: usedPrompt,
+                width: 1080,
+                height: aspectRatio === '1:1' ? 1080 : aspectRatio === '9:16' ? 1920 : 1440,
                 output_format: 'png',
                 model: imageModel
               })
@@ -949,12 +1020,14 @@ export default function PostWorkspace() {
                 className="w-full flex items-center justify-between px-3 py-2.5 bg-dark-50 rounded-lg text-sm text-dark-700 hover:bg-dark-100 transition-colors border border-dark-200"
               >
                 <span className="flex items-center gap-2 truncate">
-                  <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />
-                  {postStyle === 'venta-directa'
-                    ? t.styleDirectSale
-                    : postStyle.startsWith('custom-')
-                      ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
-                      : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
+                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
+                  {postStyle === 'product'
+                    ? t.productType
+                    : postStyle === 'venta-directa'
+                      ? t.styleDirectSale
+                      : postStyle.startsWith('custom-')
+                        ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
+                        : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
                   }
                 </span>
                 {showStyleDropdown ? <ChevronUp className="w-4 h-4 text-dark-400" /> : <ChevronDown className="w-4 h-4 text-dark-400" />}
@@ -977,6 +1050,25 @@ export default function PostWorkspace() {
                       <div className="text-[11px] text-dark-400 mt-0.5">{t.styleDirectSaleDesc}</div>
                     </div>
                     {postStyle === 'venta-directa' && (
+                      <div className="w-2 h-2 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
+                    )}
+                  </button>
+
+                  {/* Product Photo — second */}
+                  <button
+                    onClick={() => { setPostStyle('product'); setStreamlinedScript(null); setShowStyleDropdown(false) }}
+                    className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
+                      postStyle === 'product' ? 'bg-primary-900/20' : ''
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-sky-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                      <Camera className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-dark-800">{t.productType}</div>
+                      <div className="text-[11px] text-dark-400 mt-0.5">{t.productTypeDesc}</div>
+                    </div>
+                    {postStyle === 'product' && (
                       <div className="w-2 h-2 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
                     )}
                   </button>
@@ -1230,7 +1322,67 @@ export default function PostWorkspace() {
               )}
             </div>
 
-            {/* Script selector */}
+            {/* Product mode: sub-style picker + background input */}
+            {isProductMode && (
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                  <Camera className="w-3.5 h-3.5 text-primary-500" />
+                  {t.productSubStyleLabel}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {PRODUCT_SUB_STYLES.map(style => (
+                    <button
+                      key={style.id}
+                      onClick={() => setProductSubStyle(style.id)}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg text-left transition-all ${
+                        productSubStyle === style.id
+                          ? 'bg-primary-900/20 text-primary-700 border border-primary-300 shadow-sm'
+                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                      }`}
+                    >
+                      <span className="text-base leading-none mt-0.5">{style.icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-semibold">{language === 'es' ? style.nameEs : style.name}</div>
+                        <div className="text-[9px] text-dark-400 mt-0.5 leading-tight">{language === 'es' ? style.descriptionEs : style.description}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Background description for background-swap sub-style */}
+                {productSubStyle === 'background-swap' && (
+                  <div className="mt-3">
+                    <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                      {t.backgroundDesc}
+                    </label>
+                    <textarea
+                      value={backgroundDescription}
+                      onChange={(e) => setBackgroundDescription(e.target.value)}
+                      placeholder={t.backgroundPlaceholder}
+                      rows={2}
+                      className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
+                    />
+                  </div>
+                )}
+
+                {/* Additional instructions for product mode */}
+                <div className="mt-3">
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {t.productInstructions}
+                  </label>
+                  <textarea
+                    value={additionalInstructions}
+                    onChange={(e) => setAdditionalInstructions(e.target.value)}
+                    placeholder={t.productInstructionsPlaceholder}
+                    rows={2}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Script selector — hidden in product mode */}
+            {!isProductMode && (
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 {t.scriptLabel}
@@ -1374,16 +1526,23 @@ export default function PostWorkspace() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Product images — persistent, all used as reference */}
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
-                {t.refImages}
+                {isProductMode
+                  ? (language === 'es' ? 'Foto del producto (requerida)' : 'Product photo (required)')
+                  : t.refImages}
               </label>
               <p className="text-[10px] text-dark-400 mb-2">
-                {language === 'es'
-                  ? 'Sube fotos de tu producto. Todas se usarán como referencia en generación y mejora.'
-                  : 'Upload product photos. All will be used as reference for generation and enhancement.'}
+                {isProductMode
+                  ? (language === 'es'
+                    ? 'Sube la foto de tu producto. La IA generará una versión profesional.'
+                    : 'Upload your product photo. AI will generate a professional version.')
+                  : (language === 'es'
+                    ? 'Sube fotos de tu producto. Todas se usarán como referencia en generación y mejora.'
+                    : 'Upload product photos. All will be used as reference for generation and enhancement.')}
               </p>
 
               {/* Image grid */}
@@ -1447,11 +1606,12 @@ export default function PostWorkspace() {
                 <ImageIcon className="w-3.5 h-3.5 text-primary-500" />
                 {t.formatLabel}
               </label>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className={`grid gap-1.5 ${isProductMode ? 'grid-cols-3' : 'grid-cols-2'}`}>
                 {([
                   { id: '9:16' as PostAspectRatio, name: t.reelStory, sub: '9:16' },
                   { id: '3:4' as PostAspectRatio, name: t.squarePost, sub: '3:4' },
-                ] as const).map(f => (
+                  ...(isProductMode ? [{ id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1' }] : []),
+                ] as { id: PostAspectRatio; name: string; sub: string }[]).map(f => (
                   <button
                     key={f.id}
                     onClick={() => setAspectRatio(f.id)}
@@ -1485,18 +1645,18 @@ export default function PostWorkspace() {
           <div className="px-5 py-4 border-t border-dark-100">
             <button
               onClick={handleGenerate}
-              disabled={generating || !hasScript}
+              disabled={generating || (isProductMode ? productImages.length === 0 : !hasScript)}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl btn-glow font-medium text-sm"
             >
               {generating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {t.generating}
+                  {isProductMode ? t.generatingProduct : t.generating}
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4" />
-                  {t.generate}
+                  {isProductMode ? <Camera className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                  {isProductMode ? t.generateProduct : t.generate}
                 </>
               )}
             </button>
@@ -1513,8 +1673,8 @@ export default function PostWorkspace() {
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {generating && (
                   <GeneratingPlaceholder
-                    aspectRatio={aspectRatio === '9:16' ? '9/16' : '3/4'}
-                    label={t.generating}
+                    aspectRatio={aspectRatio === '9:16' ? '9/16' : aspectRatio === '1:1' ? '1/1' : '3/4'}
+                    label={isProductMode ? t.generatingProduct : t.generating}
                     sublabel={imageModel}
                   />
                 )}
@@ -1613,6 +1773,62 @@ export default function PostWorkspace() {
                           <Pencil className="w-3.5 h-3.5" />
                           {t.edit}
                         </button>
+                        {productId && (
+                          <div className="inline-flex items-center gap-0.5">
+                            <button
+                              onClick={() => {
+                                const current = postRatings[post.id]
+                                if (current === 'good') {
+                                  setPostRatings(prev => { const next = { ...prev }; delete next[post.id]; return next })
+                                  if (post.saved) ratePost(post.id, null).catch(() => {})
+                                  return
+                                }
+                                setPostRatings(prev => ({ ...prev, [post.id]: 'good' }))
+                                if (post.saved) ratePost(post.id, 5).catch(() => {})
+                                recordAiSignal(productId, 'post_rated', {
+                                  signal_key: 'rated_good',
+                                  rating: 'good',
+                                  prompt: post.prompt?.substring(0, 500) || '',
+                                  post_style: postStyle,
+                                  model: post.model || imageModel
+                                })
+                              }}
+                              className={`p-2 rounded-lg transition-colors ${
+                                postRatings[post.id] === 'good'
+                                  ? 'text-emerald-600 bg-emerald-50'
+                                  : 'text-dark-400 hover:text-emerald-600 hover:bg-emerald-50/50'
+                              }`}
+                            >
+                              <ThumbsUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                const current = postRatings[post.id]
+                                if (current === 'bad') {
+                                  setPostRatings(prev => { const next = { ...prev }; delete next[post.id]; return next })
+                                  if (post.saved) ratePost(post.id, null).catch(() => {})
+                                  return
+                                }
+                                setPostRatings(prev => ({ ...prev, [post.id]: 'bad' }))
+                                if (post.saved) ratePost(post.id, 1).catch(() => {})
+                                recordAiSignal(productId, 'post_rated', {
+                                  signal_key: 'rated_bad',
+                                  rating: 'bad',
+                                  prompt: post.prompt?.substring(0, 500) || '',
+                                  post_style: postStyle,
+                                  model: post.model || imageModel
+                                })
+                              }}
+                              className={`p-2 rounded-lg transition-colors ${
+                                postRatings[post.id] === 'bad'
+                                  ? 'text-red-500 bg-red-50'
+                                  : 'text-dark-400 hover:text-red-500 hover:bg-red-50/50'
+                              }`}
+                            >
+                              <ThumbsDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {editingPostId === post.id && (
