@@ -722,9 +722,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           bgDesc
         )
         if (productPrompt) {
-          enhancedPrompt = colorPrefix + brandVisualPrefix + productPrompt
+          enhancedPrompt = colorPrefix + productPrompt
         } else {
-          enhancedPrompt = colorPrefix + brandVisualPrefix + buildProductPrompt('studio-hero', productAR, postLanguage)!
+          enhancedPrompt = colorPrefix + buildProductPrompt('studio-hero', productAR, postLanguage)!
         }
       } else if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
         // CUSTOM POST TYPE MODE: load master prompt from DB
@@ -791,7 +791,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const promptParts: PromptPart[] = [{ text: enhancedPrompt }]
 
         // Brand Kit: inject logo as FIRST inline image (highest visual priority for Gemini)
-        if (brandKit && brandKit.logo_url && isPostMode) {
+        if (brandKit && brandKit.logo_url && isPostMode && !isProductMode) {
           try {
             const logoData = await fetchBrandLogoAsBase64(brandKit)
             if (logoData) {

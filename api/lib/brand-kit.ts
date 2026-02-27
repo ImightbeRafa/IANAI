@@ -84,14 +84,15 @@ export async function loadBrandKit(userId: string): Promise<BrandKitRow | null> 
 }
 
 /**
- * Resolve brand kit: use specific kitId if provided, else fall back to user default.
+ * Resolve brand kit: use specific kitId if provided, otherwise return null.
+ * The frontend handles default-kit UX (BrandKitSelector auto-selects).
+ * The backend trusts whatever the frontend sends — no auto-fallback.
  */
 export async function resolveBrandKit(userId: string, brandKitId?: string): Promise<BrandKitRow | null> {
   if (brandKitId) {
-    const kit = await loadBrandKitById(userId, brandKitId)
-    if (kit) return kit
+    return loadBrandKitById(userId, brandKitId)
   }
-  return loadBrandKit(userId)
+  return null
 }
 
 /**
