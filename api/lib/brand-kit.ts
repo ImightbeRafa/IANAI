@@ -167,7 +167,7 @@ export function buildBrandVoicePrompt(kit: BrandKitRow, language: 'en' | 'es'): 
 export function buildBrandColorOverride(kit: BrandKitRow): string | null {
   const colors = [kit.primary_color, kit.secondary_color, kit.accent_color].filter(Boolean)
   if (colors.length === 0) return null
-  return `USA SOLO ESTOS COLORES DE MARCA: ${colors.join(', ')}. Estos son los colores oficiales de la marca, úsalos como colores dominantes en el diseño.`
+  return `USA SOLO ESTOS COLORES DE MARCA: ${colors.join(', ')}. Estos son los colores oficiales de la marca — NO uses ningún otro color fuera de esta paleta. Ignora cualquier otro color mencionado en las instrucciones siguientes.`
 }
 
 /**
