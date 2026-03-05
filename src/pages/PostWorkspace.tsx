@@ -1482,7 +1482,12 @@ export default function PostWorkspace() {
                       {t.revertStreamline}
                     </button>
                   </div>
-                  <p className="text-xs text-dark-500 leading-relaxed whitespace-pre-wrap">{streamlinedScript}</p>
+                  <textarea
+                    value={streamlinedScript}
+                    onChange={(e) => setStreamlinedScript(e.target.value)}
+                    rows={6}
+                    className="w-full text-xs text-dark-500 leading-relaxed bg-dark-50 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-transparent"
+                  />
                 </div>
               )}
 
