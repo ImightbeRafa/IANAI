@@ -226,7 +226,7 @@ export default function AdminTickets() {
     <Layout>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <Link
               to="/admin"
@@ -235,8 +235,8 @@ export default function AdminTickets() {
               <ArrowLeft className="w-3.5 h-3.5" />
               {t.back}
             </Link>
-            <h1 className="text-2xl font-bold text-dark-900 flex items-center gap-3">
-              <MessageSquarePlus className="w-7 h-7 text-primary-500" />
+            <h1 className="text-xl sm:text-2xl font-bold text-dark-900 flex items-center gap-3">
+              <MessageSquarePlus className="w-6 sm:w-7 h-6 sm:h-7 text-primary-500" />
               {t.title}
             </h1>
             <p className="text-dark-500 text-sm mt-1">{t.subtitle}</p>
@@ -244,7 +244,7 @@ export default function AdminTickets() {
           <button
             onClick={loadTickets}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-200 rounded-lg text-sm text-dark-600 hover:bg-dark-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-dark-100 border border-dark-200 rounded-lg text-sm text-dark-600 hover:bg-dark-50 transition-colors self-start sm:self-auto"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             {t.refresh}
@@ -252,7 +252,7 @@ export default function AdminTickets() {
         </div>
 
         {/* Filter tabs */}
-        <div className="flex gap-1 mb-6 bg-dark-100 rounded-lg p-1 border border-dark-200">
+        <div className="flex gap-1 mb-6 bg-dark-100 rounded-lg p-1 border border-dark-200 overflow-x-auto">
           {(['all', 'open', 'in_progress', 'resolved', 'closed'] as const).map(f => (
             <button
               key={f}
@@ -520,7 +520,7 @@ export default function AdminTickets() {
                           rows={2}
                           className="w-full px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-xs resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 placeholder:text-dark-400"
                         />
-                        <div className="flex gap-2 mt-3">
+                        <div className="flex gap-2 mt-3 flex-wrap">
                           {(['open', 'in_progress', 'resolved', 'closed'] as const).map(s => (
                             <button
                               key={s}

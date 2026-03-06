@@ -22,6 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
   const authResolved = useRef(false)
+  const currentUserIdRef = useRef<string | null>(null)
 
   // Fetch admin status from profiles table
   const fetchAdminStatus = async (userId: string) => {
@@ -64,6 +65,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAdmin(false)
       } else {
         authResolved.current = true
+        const newUserId = session?.user?.id ?? null
+        const isSameUser = newUserId !== null && newUserId === currentUserIdRef.current
+
+        // For token refreshes where the user hasn't changed, skip state updates
+        // to avoid re-rendering the entire app (which causes data re-fetches)
+        if (isSameUser && (event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION')) {
+          // Silently update session ref without triggering React re-render
+          setLoading(false)
+          return
+        }
+
+        currentUserIdRef.current = newUserId
         setSession(session)
         setUser(session?.user ?? null)
         if (session?.user) fetchAdminStatus(session.user.id)
@@ -103,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null)
           setIsAdmin(false)
         } else {
+          currentUserIdRef.current = session?.user?.id ?? null
           setSession(session)
           setUser(session?.user ?? null)
           if (session?.user) fetchAdminStatus(session.user.id)
@@ -127,6 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.error('OAuth code exchange failed:', error.message)
             setLoading(false)
           } else if (data.session) {
+            currentUserIdRef.current = data.session.user.id
             setSession(data.session)
             setUser(data.session.user)
             fetchAdminStatus(data.session.user.id)

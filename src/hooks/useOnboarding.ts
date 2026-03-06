@@ -59,7 +59,7 @@ export function useOnboarding(): UseOnboardingReturn {
       }
     }
     check()
-  }, [user, checked])
+  }, [user?.id, checked])
 
   const finish = useCallback(async () => {
     setShowWizard(false)
@@ -71,7 +71,7 @@ export function useOnboarding(): UseOnboardingReturn {
         console.error('Failed to mark onboarding complete:', err)
       }
     }
-  }, [user])
+  }, [user?.id])
 
   const nextStep = useCallback(() => {
     if (stepIndex >= STEPS.length - 1) {

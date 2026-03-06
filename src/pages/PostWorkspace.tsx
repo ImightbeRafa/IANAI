@@ -115,6 +115,7 @@ export default function PostWorkspace() {
   const [postRatings, setPostRatings] = useState<Record<string, 'good' | 'bad'>>({})
   const [productSubStyle, setProductSubStyle] = useState<string>('studio-hero')
   const [backgroundDescription, setBackgroundDescription] = useState('')
+  const [mobileConfigOpen, setMobileConfigOpen] = useState(() => window.innerWidth >= 1024)
 
   const isProductMode = postStyle === 'product'
 
@@ -307,7 +308,7 @@ export default function PostWorkspace() {
       }
     }
     loadData()
-  }, [productId, user])
+  }, [productId, user?.id])
 
   const getScriptPrompt = (): string => {
     let base = ''
@@ -543,6 +544,9 @@ export default function PostWorkspace() {
             })
           }
         }
+
+        // Collapse config on mobile so user sees the result
+        if (window.innerWidth < 1024) setMobileConfigOpen(false)
 
         // Show immediately with base64
         setGeneratedPosts(prev => [{
@@ -993,16 +997,28 @@ export default function PostWorkspace() {
       </div>
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
-        <div className="w-full lg:w-[420px] bg-dark-100/90 backdrop-blur-lg border-b lg:border-b-0 lg:border-r border-white/[0.04] flex flex-col min-h-0 overflow-hidden">
+        {/* Mobile overlay backdrop */}
+        {mobileConfigOpen && (
+          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setMobileConfigOpen(false)} />
+        )}
+        <div className={`fixed inset-y-0 left-0 z-50 w-[90vw] max-w-[420px] lg:static lg:z-auto lg:w-[420px] bg-dark-100/90 backdrop-blur-lg border-r border-white/[0.04] flex flex-col min-h-0 overflow-hidden transition-transform duration-200 ${!mobileConfigOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'}`}>
           {/* Header */}
           <div className="px-5 py-4 border-b border-white/[0.06]">
-            <Link
-              to="/posts"
-              className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-3"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              {t.back}
-            </Link>
+            <div className="flex items-center justify-between mb-3">
+              <Link
+                to="/posts"
+                className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                {t.back}
+              </Link>
+              <button
+                onClick={() => setMobileConfigOpen(false)}
+                className="lg:hidden p-2 hover:bg-dark-200 rounded-lg text-dark-400 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
             <h1 className="text-lg font-semibold text-dark-900">{product.name}</h1>
             <p className="text-xs text-dark-400 mt-0.5">{t.subtitle}</p>
           </div>
@@ -1144,7 +1160,7 @@ export default function PostWorkspace() {
                                   })
                                 }
                               }}
-                              className="p-0.5 rounded hover:bg-red-100 text-dark-300 hover:text-red-500 transition-colors"
+                              className="p-1.5 rounded hover:bg-red-100 text-dark-300 hover:text-red-500 transition-colors"
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>
@@ -1244,7 +1260,7 @@ export default function PostWorkspace() {
                     {cp.name}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDeletePalette(cp.id) }}
-                      className="ml-0.5 opacity-0 group-hover/cp:opacity-100 transition-opacity"
+                      className="ml-0.5 opacity-100 lg:opacity-0 lg:group-hover/cp:opacity-100 transition-opacity p-0.5"
                     >
                       <Trash2 className="w-2.5 h-2.5 text-dark-400 hover:text-red-500" />
                     </button>
@@ -1559,7 +1575,7 @@ export default function PostWorkspace() {
                       </div>
                       <button
                         onClick={() => handleDeleteProductImage(img.id)}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
+                        className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:bg-red-700"
                       >
                         <X className="w-2.5 h-2.5" />
                       </button>
@@ -1670,6 +1686,30 @@ export default function PostWorkspace() {
 
         {/* Right Panel — Generated Posts */}
         <div className="flex-1 bg-dark-50/50 overflow-auto">
+          {/* Mobile toolbar — always visible on mobile */}
+          <div className="lg:hidden flex items-center gap-2 px-4 py-3 bg-dark-100 border-b border-dark-200">
+            <Link to="/posts" className="p-2 hover:bg-dark-200 rounded-lg transition-colors">
+              <ArrowLeft className="w-4 h-4 text-dark-500" />
+            </Link>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-dark-800 truncate">{product.name}</p>
+            </div>
+            <button
+              onClick={() => setMobileConfigOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-dark-200 hover:bg-dark-300 rounded-lg text-xs font-medium text-dark-600 transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-primary-500" />
+              {language === 'es' ? 'Configurar' : 'Configure'}
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={generating || (isProductMode ? productImages.length === 0 : !hasScript)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg btn-glow text-xs font-medium"
+            >
+              {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {language === 'es' ? 'Generar' : 'Generate'}
+            </button>
+          </div>
           <div className="p-6">
             <h2 className="text-sm font-semibold text-dark-700 tracking-wide uppercase mb-4">{t.generatedImages}</h2>
 
@@ -1696,7 +1736,7 @@ export default function PostWorkspace() {
                         className={`w-full h-auto transition-all duration-700 ${isProcessing ? 'blur-[8px] scale-[1.04] brightness-[0.5]' : ''}`}
                       />
                       {/* Top-right action buttons */}
-                      <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+                      <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
                         {/* Magic Wand — enhance button */}
                         <button
                           onClick={() => { handleEnhance(post.id, post.imageUrl); dismissEnhanceTip() }}

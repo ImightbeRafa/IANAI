@@ -412,7 +412,7 @@ export default function ServiceForm({ onSubmit, onCancel, businessId, initialDat
                     {(formData.context_links || []).map((link, i) => (
                       <div key={i} className="flex items-center gap-2 bg-blue-900/20 rounded-lg px-3 py-1.5 group">
                         <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /><span className="text-xs text-dark-700 truncate flex-1">{link}</span>
-                        <button type="button" onClick={() => handleRemoveLink(link)} className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
+                        <button type="button" onClick={() => handleRemoveLink(link)} className="p-1.5 text-dark-300 hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
                       </div>
                     ))}
                   </div>

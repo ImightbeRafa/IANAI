@@ -89,7 +89,7 @@ export default function OverviewDashboard() {
     }
 
     loadOverview()
-  }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const t = {
     es: {

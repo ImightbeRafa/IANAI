@@ -633,12 +633,12 @@ export default function AdminDashboard() {
     <Layout>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-dark-900">{t.title}</h1>
-            <p className="text-dark-500 mt-1">{t.subtitle}</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-dark-900">{t.title}</h1>
+            <p className="text-dark-500 mt-1 text-sm">{t.subtitle}</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
             {/* Date Range Selector */}
             <select
               value={dateRange}
@@ -693,7 +693,7 @@ export default function AdminDashboard() {
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCost}</span>
                 </div>
-                <p className="text-3xl font-bold text-dark-900">${totalCost.toFixed(4)}</p>
+<p className="text-2xl sm:text-3xl font-bold text-dark-900">${totalCost.toFixed(4)}</p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -703,7 +703,7 @@ export default function AdminDashboard() {
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCalls}</span>
                 </div>
-                <p className="text-3xl font-bold text-dark-900">{totalCalls.toLocaleString()}</p>
+<p className="text-2xl sm:text-3xl font-bold text-dark-900">{totalCalls.toLocaleString()}</p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -713,7 +713,7 @@ export default function AdminDashboard() {
                   </div>
                   <span className="text-dark-500 text-sm">{t.successRate}</span>
                 </div>
-                <p className="text-3xl font-bold text-dark-900">{successRate}%</p>
+<p className="text-2xl sm:text-3xl font-bold text-dark-900">{successRate}%</p>
               </div>
             </div>
 
@@ -735,7 +735,7 @@ export default function AdminDashboard() {
                       <p className="text-xs text-dark-500">{ticketStats.total} total</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                     {ticketStats.urgent > 0 && (
                       <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-900/20">
                         <AlertCircle className="w-3.5 h-3.5 text-red-400" />
@@ -939,7 +939,7 @@ export default function AdminDashboard() {
 
               {billingTab === 'payments' && (
                 <div className="bg-dark-100 rounded-xl border border-dark-100">
-                  <div className="p-4 border-b border-dark-50 flex items-center justify-between">
+                  <div className="p-4 border-b border-dark-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <h3 className="text-sm font-semibold text-dark-700">
                       {language === 'es' ? `Todos los Pagos (${allPayments.length})` : `All Payments (${allPayments.length})`}
                     </h3>
@@ -950,7 +950,7 @@ export default function AdminDashboard() {
                         value={paymentSearch}
                         onChange={(e) => setPaymentSearch(e.target.value)}
                         placeholder={language === 'es' ? 'Buscar por email o plan...' : 'Search by email or plan...'}
-                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-900 w-60"
+                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-900 w-full sm:w-60"
                       />
                     </div>
                   </div>
@@ -1007,7 +1007,7 @@ export default function AdminDashboard() {
 
               {billingTab === 'subscriptions' && (
                 <div className="bg-dark-100 rounded-xl border border-dark-100">
-                  <div className="p-4 border-b border-dark-50 flex items-center justify-between">
+                  <div className="p-4 border-b border-dark-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <h3 className="text-sm font-semibold text-dark-700">
                       {language === 'es' ? `Todas las Suscripciones (${allSubscriptions.length})` : `All Subscriptions (${allSubscriptions.length})`}
                     </h3>
@@ -1018,7 +1018,7 @@ export default function AdminDashboard() {
                         value={subsSearch}
                         onChange={(e) => setSubsSearch(e.target.value)}
                         placeholder={language === 'es' ? 'Buscar por email o plan...' : 'Search by email or plan...'}
-                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-900 w-60"
+                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg text-dark-900 w-full sm:w-60"
                       />
                     </div>
                   </div>
@@ -1148,9 +1148,9 @@ export default function AdminDashboard() {
                 {campaigns.map(campaign => (
                   <div key={campaign.id} className="bg-dark-100 rounded-xl border border-dark-100 mb-4">
                     <div className="p-5 border-b border-dark-50">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <div className={`w-2.5 h-2.5 rounded-full ${campaign.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
+                          <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${campaign.is_active ? 'bg-green-500' : 'bg-red-500'}`} />
                           <div>
                             <h3 className="font-semibold text-dark-900">{campaign.name}</h3>
                             <p className="text-xs text-dark-500">
@@ -1159,7 +1159,7 @@ export default function AdminDashboard() {
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 flex-shrink-0">
                           <span className="text-sm font-medium text-dark-700">
                             {campaign.current_signups}{campaign.max_signups ? `/${campaign.max_signups}` : ''} {language === 'es' ? 'registros' : 'signups'}
                           </span>
@@ -1254,7 +1254,7 @@ export default function AdminDashboard() {
 
             {/* Usage by Model */}
             <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 mb-8">
-              <div className="p-6 border-b border-dark-100">
+              <div className="p-4 sm:p-6 border-b border-dark-100">
                 <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
                   <Cpu className="w-5 h-5 text-primary-500" />
                   {t.byModel}
@@ -1264,28 +1264,28 @@ export default function AdminDashboard() {
                 <table className="w-full">
                   <thead className="bg-dark-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.calls}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.tokens}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.pricing}</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.calls}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.tokens}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.pricing}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-dark-100">
                     {Object.entries(byModel).map(([model, data]) => (
                       <tr key={model} className="hover:bg-dark-50">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-3 h-3 rounded-full ${MODEL_INFO[model]?.color || 'bg-gray-400'}`} />
-                            <span className="font-medium text-dark-900">
+                        <td className="px-3 sm:px-6 py-3 sm:py-4">
+                          <div className="flex items-center gap-2 sm:gap-3">
+                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${MODEL_INFO[model]?.color || 'bg-gray-400'}`} />
+                            <span className="font-medium text-dark-900 text-sm sm:text-base">
                               {MODEL_INFO[model]?.name || model}
                             </span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-right text-dark-700">{data.calls.toLocaleString()}</td>
-                        <td className="px-6 py-4 text-right text-dark-700">{data.tokens.toLocaleString()}</td>
-                        <td className="px-6 py-4 text-right font-medium text-dark-900">${data.cost.toFixed(4)}</td>
-                        <td className="px-6 py-4 text-right text-dark-500 text-sm">{MODEL_PRICING[model] || '-'}</td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.calls.toLocaleString()}</td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.tokens.toLocaleString()}</td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right font-medium text-dark-900 text-sm">${data.cost.toFixed(4)}</td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-500 text-xs sm:text-sm">{MODEL_PRICING[model] || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1373,8 +1373,8 @@ export default function AdminDashboard() {
             {/* User Activity */}
             {userStats.length > 0 && (
               <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 mb-8">
-                <div className="p-6 border-b border-dark-100">
-                  <div className="flex items-center justify-between">
+                <div className="p-4 sm:p-6 border-b border-dark-100">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
                       <Users className="w-5 h-5 text-primary-500" />
                       {language === 'es' ? 'Actividad por Usuario' : 'User Activity'}
@@ -1386,7 +1386,7 @@ export default function AdminDashboard() {
                         value={userStatsSearch}
                         onChange={(e) => setUserStatsSearch(e.target.value)}
                         placeholder={language === 'es' ? 'Buscar usuario...' : 'Search user...'}
-                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-56"
+                        className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-full sm:w-56"
                       />
                     </div>
                   </div>
@@ -1435,8 +1435,8 @@ export default function AdminDashboard() {
 
             {/* Recent Activity — searchable + paginated */}
             <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100">
-              <div className="p-6 border-b border-dark-100">
-                <div className="flex items-center justify-between">
+              <div className="p-4 sm:p-6 border-b border-dark-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold text-dark-900">{t.recentActivity}</h2>
                   <div className="relative">
                     <Search className="w-4 h-4 text-dark-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1446,7 +1446,7 @@ export default function AdminDashboard() {
                       onChange={(e) => setLogSearch(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(logSearch) }}
                       placeholder={language === 'es' ? 'Buscar por email...' : 'Search by email...'}
-                      className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-64"
+                      className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-full sm:w-64"
                     />
                   </div>
                 </div>
@@ -1459,35 +1459,35 @@ export default function AdminDashboard() {
                 <table className="w-full">
                   <thead className="bg-dark-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.time}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.user}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.feature}</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.tokens}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
-                      <th className="px-6 py-3 text-center text-xs font-medium text-dark-500 uppercase">{t.status}</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.time}</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.user}</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.feature}</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.tokens}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
+                      <th className="px-3 sm:px-6 py-3 text-center text-xs font-medium text-dark-500 uppercase">{t.status}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-dark-100">
                     {recentLogs.map((log) => (
                       <tr key={log.id} className="hover:bg-dark-50">
-                        <td className="px-6 py-3 text-sm text-dark-500">
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-500 whitespace-nowrap">
                           {new Date(log.created_at).toLocaleString()}
                         </td>
-                        <td className="px-6 py-3 text-sm text-dark-700">{log.user_email || '-'}</td>
-                        <td className="px-6 py-3 text-sm text-dark-700">
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">{log.user_email || '-'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">
                           {t[log.feature as keyof typeof t] || log.feature}
                         </td>
-                        <td className="px-6 py-3">
+                        <td className="px-3 sm:px-6 py-3">
                           <span className={`text-xs px-2 py-1 rounded ${MODEL_INFO[log.model]?.color || 'bg-gray-400'} text-white`}>
                             {MODEL_INFO[log.model]?.name || log.model}
                           </span>
                         </td>
-                        <td className="px-6 py-3 text-sm text-right text-dark-700">{log.total_tokens?.toLocaleString() || '-'}</td>
-                        <td className="px-6 py-3 text-sm text-right font-medium text-dark-900">
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right text-dark-700">{log.total_tokens?.toLocaleString() || '-'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right font-medium text-dark-900">
                           ${Number(log.estimated_cost_usd).toFixed(6)}
                         </td>
-                        <td className="px-6 py-3 text-center">
+                        <td className="px-3 sm:px-6 py-3 text-center">
                           <span className={`text-xs px-2 py-1 rounded ${log.success ? 'bg-green-900/20 text-green-700' : 'bg-red-900/20 text-red-700'}`}>
                             {log.success ? t.success : t.failed}
                           </span>

@@ -332,7 +332,7 @@ export default function IndumentariaForm({ onSubmit, onCancel, businessId, initi
                     {(formData.ind_product_images || []).map((url, i) => (
                       <div key={i} className="relative group aspect-square rounded-lg overflow-hidden bg-dark-50">
                         <img src={url} alt="" className="w-full h-full object-cover" />
-                        <button type="button" onClick={() => removeImage(url)} className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
+                        <button type="button" onClick={() => removeImage(url)} className="absolute top-1 right-1 p-1.5 bg-red-500 text-white rounded-full opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
                       </div>
                     ))}
                   </div>
@@ -355,7 +355,7 @@ export default function IndumentariaForm({ onSubmit, onCancel, businessId, initi
                     {(formData.context_links || []).map((link, i) => (
                       <div key={i} className="flex items-center gap-2 bg-blue-900/20 rounded-lg px-3 py-1.5 group">
                         <Link2 className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" /><span className="text-xs text-dark-700 truncate flex-1">{link}</span>
-                        <button type="button" onClick={() => handleRemoveLink(link)} className="p-0.5 text-dark-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
+                        <button type="button" onClick={() => handleRemoveLink(link)} className="p-1.5 text-dark-300 hover:text-red-500 opacity-100 lg:opacity-0 lg:group-hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
                       </div>
                     ))}
                   </div>

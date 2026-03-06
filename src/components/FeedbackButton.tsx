@@ -325,7 +325,7 @@ export default function FeedbackButton() {
       <button
         onClick={() => setOpen(true)}
         data-onboarding="feedback"
-        className="fixed bottom-6 right-6 z-40 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group"
+        className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group"
         title={t.title}
       >
         <MessageSquarePlus className="w-5 h-5 group-hover:scale-110 transition-transform" />
@@ -446,7 +446,7 @@ export default function FeedbackButton() {
                         />
                         <button
                           onClick={() => { setScreenshot(null); setScreenshotBlob(null) }}
-                          className="absolute top-2 right-2 p-1.5 bg-dark-100/90 rounded-lg text-dark-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                          className="absolute top-2 right-2 p-2 bg-dark-100/90 rounded-lg text-dark-400 hover:text-red-500 transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

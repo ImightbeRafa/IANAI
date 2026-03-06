@@ -83,7 +83,7 @@ export default function TeamManagement() {
 
   useEffect(() => {
     loadTeamData()
-  }, [user])
+  }, [user?.id])
 
   async function loadTeamData() {
     if (!user) return

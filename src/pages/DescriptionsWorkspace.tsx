@@ -112,7 +112,7 @@ export default function DescriptionsWorkspace() {
       }
     }
     loadData()
-  }, [productId, user])
+  }, [productId, user?.id])
 
   const handleNewSession = async () => {
     if (!descSession) return

@@ -33,7 +33,7 @@ export default function BrandKitSelector({ selectedKitId, onSelect, productId, c
       }
     }
     load()
-  }, [user])
+  }, [user?.id])
 
   // Restore last-used kit from localStorage
   useEffect(() => {

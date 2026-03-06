@@ -84,7 +84,7 @@ export default function ProductWorkspace() {
   const [context, setContext] = useState('')
   const [loading, setLoading] = useState(false)
   const [initializing, setInitializing] = useState(true)
-  const [showProductInfo, setShowProductInfo] = useState(true)
+  const [showProductInfo, setShowProductInfo] = useState(() => window.innerWidth >= 1024)
   const [editingProduct, setEditingProduct] = useState(false)
   const [editedProduct, setEditedProduct] = useState<Partial<Product>>({})
   const [savingScript, setSavingScript] = useState(false)
@@ -185,7 +185,7 @@ export default function ProductWorkspace() {
     }
 
     loadData()
-  }, [productId, sessionId, user, navigate])
+  }, [productId, sessionId, user?.id, navigate])
 
   // Load AI Memory data
   const refreshMemory = async () => {
@@ -206,14 +206,14 @@ export default function ProductWorkspace() {
 
   useEffect(() => {
     refreshMemory()
-  }, [productId, user])
+  }, [productId, user?.id])
 
   // Real-time refresh when signals are recorded
   useEffect(() => {
     const handler = () => { refreshMemory() }
     window.addEventListener('ai-signal-recorded', handler)
     return () => window.removeEventListener('ai-signal-recorded', handler)
-  }, [productId, user])
+  }, [productId, user?.id])
 
   // Listen for reflection completion — refresh memories + show toast
   useEffect(() => {
@@ -225,7 +225,7 @@ export default function ProductWorkspace() {
     }
     window.addEventListener('ai-memory-reflected', handler)
     return () => window.removeEventListener('ai-memory-reflected', handler)
-  }, [productId, user])
+  }, [productId, user?.id])
 
   // Teach Me handler
   const handleTeachMe = async () => {
@@ -1443,7 +1443,7 @@ export default function ProductWorkspace() {
                                 setRenamingSessionId(session.id)
                                 setRenameValue(session.title)
                               }}
-                              className="ml-auto opacity-0 group-hover:opacity-100 p-0.5 rounded text-dark-400 hover:text-dark-600 transition-opacity"
+                              className="ml-auto opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 rounded text-dark-400 hover:text-dark-600 transition-opacity"
                             >
                               <Pencil className="w-3 h-3" />
                             </button>
@@ -1851,16 +1851,14 @@ export default function ProductWorkspace() {
         {/* Main Chat Area */}
         <div className="flex-1 flex flex-col bg-dark-50/50">
           {/* Header */}
-          <div className="glass-panel px-6 py-3 flex items-center justify-between">
+          <div className="glass-panel px-4 lg:px-6 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
-              <button
-                onClick={() => setShowMobileConfig(!showMobileConfig)}
-                className={`lg:hidden p-2 rounded-md transition-colors ${
-                  showMobileConfig ? 'bg-primary-900/20 text-primary-500' : 'hover:bg-dark-50 text-dark-400'
-                }`}
+              <Link
+                to="/scripts"
+                className="lg:hidden p-1.5 hover:bg-dark-50 rounded-md transition-colors text-dark-400"
               >
-                <Sparkles className="w-4 h-4" />
-              </button>
+                <ChevronLeft className="w-4 h-4" />
+              </Link>
               <h1 className="text-sm font-semibold text-dark-800 truncate">
                 {currentSession?.title || product.name}
               </h1>
@@ -1869,7 +1867,7 @@ export default function ProductWorkspace() {
               {messages.length > 0 && (
                 <button onClick={exportAsText} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-dark-500 hover:text-dark-700 hover:bg-dark-50 rounded-md transition-colors">
                   <Download className="w-3.5 h-3.5" />
-                  {t.export}
+                  <span className="hidden sm:inline">{t.export}</span>
                 </button>
               )}
               {isAdmin && (
@@ -1895,9 +1893,43 @@ export default function ProductWorkspace() {
             </div>
           </div>
 
+          {/* Mobile Settings Summary Bar — always visible on mobile */}
+          <button
+            onClick={() => setShowMobileConfig(!showMobileConfig)}
+            className="lg:hidden flex items-center gap-3 w-full px-4 py-2.5 bg-dark-100 border-b border-dark-200 text-left active:bg-dark-200 transition-colors"
+          >
+            <Sparkles className="w-4 h-4 text-primary-500 flex-shrink-0" />
+            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-medium text-dark-700">
+                {scriptSettings.generationMode === 'mixed'
+                  ? `${scriptSettings.variations} ${language === 'es' ? 'guiones' : 'scripts'}`
+                  : `${Object.values(scriptSettings.scriptTypeConfig).reduce((s, n) => s + n, 0)} ${language === 'es' ? 'guiones' : 'scripts'}`
+                }
+              </span>
+              <span className="text-dark-300">·</span>
+              <span className="text-xs text-dark-500">
+                {scriptSettings.generationMode === 'mixed'
+                  ? (language === 'es' ? 'Mixto' : 'Mixed')
+                  : (language === 'es' ? 'Por tipo' : 'By type')
+                }
+              </span>
+              {activeSalesChannel && (
+                <>
+                  <span className="text-dark-300">·</span>
+                  <span className="text-xs text-dark-500">
+                    {activeSalesChannel === 'physical' ? (language === 'es' ? 'Físico' : 'Physical')
+                      : activeSalesChannel === 'messages' ? (language === 'es' ? 'Mensajes' : 'Messages')
+                      : (language === 'es' ? 'Web' : 'Website')}
+                  </span>
+                </>
+              )}
+            </div>
+            <ChevronDown className={`w-4 h-4 text-dark-400 flex-shrink-0 transition-transform ${showMobileConfig ? 'rotate-180' : ''}`} />
+          </button>
+
           {/* Mobile Config Panel */}
           {showMobileConfig && (
-            <div className="lg:hidden border-b border-dark-100 bg-dark-100 px-5 py-4 max-h-[60vh] overflow-y-auto space-y-4">
+            <div className="lg:hidden border-b border-dark-100 bg-dark-100 px-5 py-4 max-h-[70vh] overflow-y-auto space-y-4">
               <ScriptSettingsPanel
                 settings={scriptSettings}
                 onChange={setScriptSettings}
@@ -1905,6 +1937,97 @@ export default function ProductWorkspace() {
                 onGenerate={() => { setShowMobileConfig(false); handleGenerateScript() }}
                 loading={loading}
               />
+
+              {/* Brand Kit Selector */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
+                  Brand Kit
+                </label>
+                <BrandKitSelector
+                  selectedKitId={selectedBrandKitId}
+                  onSelect={setSelectedBrandKitId}
+                  productId={productId}
+                />
+              </div>
+
+              {/* Sales Channel */}
+              {product?.business?.sales_channels && product.business.sales_channels.length > 0 && (
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2.5">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                    {language === 'es' ? 'Canal de Venta' : 'Sales Channel'}
+                  </label>
+                  <div className={`grid gap-1.5 bg-dark-200/50 p-1 rounded-xl ${
+                    product.business.sales_channels.length === 1 ? 'grid-cols-1' :
+                    product.business.sales_channels.length === 2 ? 'grid-cols-2' : 'grid-cols-3'
+                  }`}>
+                    {product.business.sales_channels.map(channel => {
+                      const channelConfig: Record<string, { label: string; icon: JSX.Element }> = {
+                        physical: { label: language === 'es' ? 'Local Físico' : 'Physical Store', icon: <MapPin className="w-3.5 h-3.5" /> },
+                        messages: { label: language === 'es' ? 'Mensajes' : 'Messages', icon: <MessageSquare className="w-3.5 h-3.5" /> },
+                        website: { label: language === 'es' ? 'Página Web' : 'Website', icon: <Globe className="w-3.5 h-3.5" /> },
+                      }
+                      const cfg = channelConfig[channel]
+                      if (!cfg) return null
+                      return (
+                        <button
+                          key={channel}
+                          onClick={() => setActiveSalesChannel(channel)}
+                          className={`py-2.5 px-2 rounded-lg text-xs font-medium transition-all duration-200 flex flex-col items-center gap-1 ${
+                            activeSalesChannel === channel
+                              ? 'bg-dark-100 text-dark-900 shadow-sm border border-dark-200'
+                              : 'text-dark-500 hover:text-dark-700 border border-transparent'
+                          }`}
+                        >
+                          {cfg.icon}
+                          <span className="text-[11px] leading-tight text-center">{cfg.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Sessions */}
+              <div className="pt-2 border-t border-dark-200/60">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                    <MessageSquare className="w-3.5 h-3.5 text-dark-400" />
+                    {t.sessions}
+                  </label>
+                  <button 
+                    onClick={() => { handleNewSession(); setShowMobileConfig(false) }}
+                    className="flex items-center gap-1 text-xs font-medium text-primary-500 hover:text-primary-400 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {t.newSession}
+                  </button>
+                </div>
+                {sessions.length === 0 ? (
+                  <p className="text-sm text-dark-400 py-2">{t.noSessions}</p>
+                ) : (
+                  <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
+                    {sessions.map((session) => (
+                      <div
+                        key={session.id}
+                        onClick={() => { navigate(`/product/${productId}/session/${session.id}`); setShowMobileConfig(false) }}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg cursor-pointer flex items-center gap-2 ${
+                          currentSession?.id === session.id
+                            ? 'bg-dark-200/60 border border-dark-200'
+                            : 'hover:bg-dark-50 border border-transparent'
+                        }`}
+                      >
+                        <MessageSquare className={`w-3.5 h-3.5 flex-shrink-0 ${
+                          currentSession?.id === session.id ? 'text-dark-700' : 'text-dark-400'
+                        }`} />
+                        <span className={`truncate text-sm ${
+                          currentSession?.id === session.id ? 'font-medium text-dark-800' : 'text-dark-600'
+                        }`}>{session.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -2081,11 +2204,74 @@ export default function ProductWorkspace() {
 
           {/* Usage Banner */}
           <UsageBanner usage={usageLimits} resource="script" />
+
+          {/* Mobile Chat Input & Generate */}
+          <div className="lg:hidden border-t border-dark-200 bg-dark-100 px-3 py-2">
+            <div className="bg-dark-50 border border-dark-200 rounded-2xl p-1.5 input-glow transition-all">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={isRecording
+                  ? (language === 'es' ? 'Grabando...' : 'Recording...')
+                  : isTranscribing
+                    ? (language === 'es' ? 'Transcribiendo...' : 'Transcribing...')
+                    : (language === 'es' ? 'Describe lo que necesitas...' : 'Describe what you need...')}
+                className="w-full px-3 py-2 text-sm bg-transparent resize-none min-h-[44px] max-h-24 focus:outline-none text-dark-800 placeholder:text-dark-400"
+                rows={1}
+                disabled={loading || isTranscribing}
+              />
+              <div className="flex items-center justify-between px-1.5 pb-0.5">
+                <button
+                  onClick={handleVoiceToggle}
+                  disabled={loading || isTranscribing}
+                  className={`h-10 w-10 flex items-center justify-center rounded-full transition-all duration-200 ${
+                    isRecording
+                      ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse'
+                      : isTranscribing
+                        ? 'bg-dark-200 text-dark-400'
+                        : 'text-dark-400 hover:text-dark-600 hover:bg-dark-200'
+                  }`}
+                >
+                  {isTranscribing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : isRecording ? (
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  ) : (
+                    <Mic className="w-4 h-4" />
+                  )}
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleGenerateScript}
+                    disabled={loading}
+                    className="h-10 px-4 flex items-center justify-center gap-1.5 rounded-full btn-glow text-sm font-medium"
+                  >
+                    <Sparkles className={`w-4 h-4 ${loading ? 'animate-pulse' : ''}`} />
+                    {language === 'es' ? 'Generar' : 'Generate'}
+                  </button>
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={!input.trim() || loading}
+                    className="h-10 w-10 flex items-center justify-center rounded-full bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Right Sidebar - Business Info, Product Info & Context */}
         {showProductInfo && (
-          <div className="w-80 bg-dark-100/90 backdrop-blur-lg border-l border-white/[0.04] flex flex-col overflow-y-auto">
+          <>
+          <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setShowProductInfo(false)} />
+          <div className="fixed inset-y-0 right-0 z-50 w-[85vw] max-w-80 lg:static lg:z-auto lg:w-80 bg-dark-100/90 backdrop-blur-lg border-l border-white/[0.04] flex flex-col overflow-y-auto">
             {/* Business Info */}
             {product?.business && (
               <div className="p-4 border-b border-dark-100">
@@ -2636,6 +2822,7 @@ export default function ProductWorkspace() {
                 )}
               </div>
           </div>
+          </>
         )}
       </div>
       {/* Teach Me Modal */}

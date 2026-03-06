@@ -90,7 +90,7 @@ export function useDashboardData(): DashboardData {
     } finally {
       setLoading(false)
     }
-  }, [user])
+  }, [user?.id])
 
   useEffect(() => {
     doFetch()

@@ -199,7 +199,7 @@ export default function BRollWorkspace() {
       }
     }
     loadData()
-  }, [productId, user])
+  }, [productId, user?.id])
 
   // Timer for elapsed seconds display
   useEffect(() => {

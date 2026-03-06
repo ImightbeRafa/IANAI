@@ -61,7 +61,7 @@ export default function RespuestasWorkspace() {
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024)
 
   // Context source modals
   const [showUrlInput, setShowUrlInput] = useState(false)
@@ -171,7 +171,7 @@ export default function RespuestasWorkspace() {
       }
     }
     loadData()
-  }, [productId, user])
+  }, [productId, user?.id])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -520,7 +520,9 @@ export default function RespuestasWorkspace() {
         <div className="flex flex-1 min-h-0">
           {/* Left sidebar — Knowledge Base */}
           {sidebarOpen && (
-            <div className="w-72 border-r border-dark-200 bg-dark-50 flex flex-col overflow-hidden">
+            <>
+            <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+            <div className="fixed inset-y-0 left-0 z-50 w-72 lg:static lg:z-auto border-r border-dark-200 bg-dark-50 flex flex-col overflow-hidden">
               {/* Sessions section */}
               <div className="p-3 border-b border-dark-200">
                 <div className="flex items-center justify-between mb-2">
@@ -542,14 +544,14 @@ export default function RespuestasWorkspace() {
                           ? 'bg-primary-900/20 text-primary-400'
                           : 'text-dark-500 hover:bg-dark-200'
                       }`}
-                      onClick={() => handleSwitchSession(session)}
+                      onClick={() => { handleSwitchSession(session); if (window.innerWidth < 1024) setSidebarOpen(false) }}
                     >
                       <MessageCircle className="w-3 h-3 flex-shrink-0" />
                       <span className="flex-1 truncate">{session.title}</span>
                       {sessions.length > 1 && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id) }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 transition-opacity"
+                          className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 hover:text-red-400 transition-opacity"
                           title={t.deleteSession}
                         >
                           <Trash2 className="w-3 h-3" />
@@ -679,7 +681,7 @@ export default function RespuestasWorkspace() {
                         </div>
                         <button
                           onClick={() => handleDeleteSource(source.id)}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 text-dark-400 hover:text-red-400 transition-opacity"
+                          className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 text-dark-400 hover:text-red-400 transition-opacity"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -689,6 +691,7 @@ export default function RespuestasWorkspace() {
                 )}
               </div>
             </div>
+            </>
           )}
 
           {/* Main chat area */}

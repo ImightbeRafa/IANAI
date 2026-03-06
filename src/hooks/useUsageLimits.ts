@@ -139,7 +139,7 @@ export function useUsageLimits(): UsageLimits {
     } finally {
       setLoading(false)
     }
-  }, [user])
+  }, [user?.id])
 
   useEffect(() => {
     doFetch()

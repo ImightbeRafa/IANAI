@@ -103,7 +103,7 @@ export default function Dashboard() {
       }
     }
     loadExtra()
-  }, [user])
+  }, [user?.id])
 
   useEffect(() => {
     async function loadBusinessProducts() {
@@ -310,7 +310,7 @@ export default function Dashboard() {
         key={product.id}
         className="block p-5 bg-dark-50 rounded-xl group relative card-hover"
       >
-        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100">
+        <div className="absolute top-3 right-3 flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -371,7 +371,7 @@ export default function Dashboard() {
           e.stopPropagation()
           handleDeleteBusiness(business)
         }}
-        className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors opacity-0 group-hover:opacity-100 z-10"
+        className="absolute top-3 right-3 p-1.5 text-dark-300 hover:text-red-500 hover:bg-red-900/20 rounded-lg transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100 z-10"
         title={language === 'es' ? 'Eliminar negocio' : 'Delete business'}
       >
         <Trash2 className="w-4 h-4" />
