@@ -21,8 +21,9 @@ export const MODEL_COSTS = {
   'gemini-2.5-flash': { input: 0.15, output: 0.60, thinking: 3.50 },
   
   // Image generation models
-  // Gemini: $0.134/image (1K/2K tier) + input tokens ($2.00/1M) + thinking tokens ($12.00/1M)
-  'nano-banana': { perImage: 0.134, inputPer1M: 2.00, thinkingPer1M: 12.00 },
+  // Gemini 2.5 Flash (nano-banana): ~$0.0315/image (1K) + input tokens ($0.10/1M) + thinking ($1.25/1M)
+  'nano-banana': { perImage: 0.0315, inputPer1M: 0.10, thinkingPer1M: 1.25 },
+  // Gemini 3 Pro (nano-banana-pro): ~$0.134/image (2K) + input tokens ($2.00/1M) + thinking ($12.00/1M)
   'nano-banana-pro': { perImage: 0.134, inputPer1M: 2.00, thinkingPer1M: 12.00 },
   // Grok Imagine: $0.07/image (flat)
   'grok-imagine': { perImage: 0.07 },

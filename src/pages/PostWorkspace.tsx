@@ -80,7 +80,7 @@ export default function PostWorkspace() {
   const [generating, setGenerating] = useState(false)
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
-  const imageModel: ImageModel = 'nano-banana-pro'
+  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const [postStyle, setPostStyle] = useState<string>('venta-directa')
   const [showStyleDropdown, setShowStyleDropdown] = useState(false)
@@ -154,6 +154,9 @@ export default function PostWorkspace() {
       formatLabel: 'Formato',
       reelStory: 'Reel / Story',
       squarePost: 'Post Feed',
+      modelLabel: 'Modelo',
+      modelBanana: 'Banana',
+      modelBananaPro: 'Banana Pro',
       colorLabel: 'Paleta de Colores',
       enhance: 'Mejorar',
       enhancing: 'Mejorando...',
@@ -217,6 +220,9 @@ export default function PostWorkspace() {
       formatLabel: 'Format',
       reelStory: 'Reel / Story',
       squarePost: 'Feed Post',
+      modelLabel: 'Model',
+      modelBanana: 'Banana',
+      modelBananaPro: 'Banana Pro',
       colorLabel: 'Color Palette',
       enhance: 'Enhance',
       enhancing: 'Enhancing...',
@@ -1648,6 +1654,38 @@ export default function PostWorkspace() {
                     </div>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Model Selector */}
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                <Sparkles className="w-3.5 h-3.5 text-primary-500" />
+                {t.modelLabel}
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={() => setImageModel('nano-banana')}
+                  className={`p-2.5 rounded-lg text-xs transition-colors ${
+                    imageModel === 'nano-banana'
+                      ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                      : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                  }`}
+                >
+                  <div className="font-medium">{t.modelBanana}</div>
+                  <div className={`text-[10px] mt-0.5 ${imageModel === 'nano-banana' ? 'text-primary-500' : 'text-dark-400'}`}>Flash</div>
+                </button>
+                <button
+                  onClick={() => setImageModel('nano-banana-pro')}
+                  className={`p-2.5 rounded-lg text-xs transition-colors ${
+                    imageModel === 'nano-banana-pro'
+                      ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                      : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                  }`}
+                >
+                  <div className="font-medium">{t.modelBananaPro}</div>
+                  <div className={`text-[10px] mt-0.5 ${imageModel === 'nano-banana-pro' ? 'text-primary-500' : 'text-dark-400'}`}>Pro</div>
+                </button>
               </div>
             </div>
 
