@@ -16,6 +16,9 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
   const [pasteText, setPasteText] = useState('')
   const [processing, setProcessing] = useState(false)
   const [status, setStatus] = useState<'' | 'extracting' | 'analyzing' | 'success' | 'error'>('')
+  const [errorMessage, setErrorMessage] = useState('')
+
+  const MAX_PASTE_LENGTH = 15000
 
   const t = {
     urlButton: language === 'es' ? 'Auto-llenar con enlace' : 'Auto-fill from link',
@@ -36,18 +39,21 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
     if (!url.trim() || processing) return
     setProcessing(true)
     setStatus('extracting')
+    setErrorMessage('')
     try {
       setStatus('analyzing')
       const { data, error } = await autoFillFromUrl(url.trim(), formType, language)
       if (data && !error) {
         onResult(data)
         setStatus('success')
-        setTimeout(() => { setShowUrlModal(false); setUrl(''); setStatus('') }, 1200)
+        setTimeout(() => { setShowUrlModal(false); setUrl(''); setStatus(''); setErrorMessage('') }, 1200)
       } else {
         setStatus('error')
+        setErrorMessage(error || t.error)
       }
     } catch {
       setStatus('error')
+      setErrorMessage(t.error)
     } finally {
       setProcessing(false)
     }
@@ -57,17 +63,20 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
     if (!pasteText.trim() || processing) return
     setProcessing(true)
     setStatus('analyzing')
+    setErrorMessage('')
     try {
       const { data, error } = await autoFillFromText(pasteText.trim(), formType, language)
       if (data && !error) {
         onResult(data)
         setStatus('success')
-        setTimeout(() => { setShowPasteModal(false); setPasteText(''); setStatus('') }, 1200)
+        setTimeout(() => { setShowPasteModal(false); setPasteText(''); setStatus(''); setErrorMessage('') }, 1200)
       } else {
         setStatus('error')
+        setErrorMessage(error || t.error)
       }
     } catch {
       setStatus('error')
+      setErrorMessage(t.error)
     } finally {
       setProcessing(false)
     }
@@ -78,7 +87,7 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
     if (status === 'extracting') return <p className="text-sm text-blue-400 flex items-center gap-2 mt-3"><Loader2 className="w-4 h-4 animate-spin" />{t.extracting}</p>
     if (status === 'analyzing') return <p className="text-sm text-blue-400 flex items-center gap-2 mt-3"><Loader2 className="w-4 h-4 animate-spin" />{t.analyzing}</p>
     if (status === 'success') return <p className="text-sm text-green-400 flex items-center gap-2 mt-3"><Check className="w-4 h-4" />{t.success}</p>
-    if (status === 'error') return <p className="text-sm text-red-400 flex items-center gap-2 mt-3"><AlertCircle className="w-4 h-4" />{t.error}</p>
+    if (status === 'error') return <p className="text-sm text-red-400 flex items-center gap-2 mt-3"><AlertCircle className="w-4 h-4" />{errorMessage || t.error}</p>
     return null
   }
 
@@ -119,7 +128,7 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
           <div className="bg-dark-100 rounded-xl w-full max-w-md p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-dark-900">{t.urlTitle}</h3>
-              <button onClick={() => { setShowUrlModal(false); setUrl(''); setStatus('') }} className="p-1 hover:bg-dark-200 rounded"><X className="w-4 h-4 text-dark-400" /></button>
+              <button onClick={() => { setShowUrlModal(false); setUrl(''); setStatus(''); setErrorMessage('') }} className="p-1 hover:bg-dark-200 rounded"><X className="w-4 h-4 text-dark-400" /></button>
             </div>
             <input
               type="url"
@@ -132,7 +141,7 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
             />
             <StatusIndicator />
             <div className="flex justify-end gap-2">
-              <button onClick={() => { setShowUrlModal(false); setUrl(''); setStatus('') }} className="btn-secondary text-sm" disabled={processing}>{t.cancel}</button>
+              <button onClick={() => { setShowUrlModal(false); setUrl(''); setStatus(''); setErrorMessage('') }} className="btn-secondary text-sm" disabled={processing}>{t.cancel}</button>
               <button onClick={handleUrl} disabled={!url.trim() || processing} className="btn-primary text-sm flex items-center gap-2">
                 {processing && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t.process}
@@ -148,19 +157,31 @@ export default function AutoFillButtons({ formType, language, disabled, onResult
           <div className="bg-dark-100 rounded-xl w-full max-w-md p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-dark-900">{t.pasteTitle}</h3>
-              <button onClick={() => { setShowPasteModal(false); setPasteText(''); setStatus('') }} className="p-1 hover:bg-dark-200 rounded"><X className="w-4 h-4 text-dark-400" /></button>
+              <button onClick={() => { setShowPasteModal(false); setPasteText(''); setStatus(''); setErrorMessage('') }} className="p-1 hover:bg-dark-200 rounded"><X className="w-4 h-4 text-dark-400" /></button>
             </div>
-            <textarea
-              value={pasteText}
-              onChange={e => setPasteText(e.target.value)}
-              placeholder={t.pastePlaceholder}
-              className="input-field min-h-[150px]"
-              autoFocus
-              disabled={processing}
-            />
+            <div>
+              <textarea
+                value={pasteText}
+                onChange={e => setPasteText(e.target.value)}
+                placeholder={t.pastePlaceholder}
+                className="input-field min-h-[150px]"
+                autoFocus
+                disabled={processing}
+              />
+              <div className="flex justify-between mt-1">
+                <span className={`text-xs ${pasteText.length > MAX_PASTE_LENGTH ? 'text-amber-400' : 'text-dark-400'}`}>
+                  {pasteText.length > MAX_PASTE_LENGTH
+                    ? (language === 'es' ? `Se usarán los primeros ${MAX_PASTE_LENGTH.toLocaleString()} caracteres` : `First ${MAX_PASTE_LENGTH.toLocaleString()} characters will be used`)
+                    : ''}
+                </span>
+                <span className={`text-xs ${pasteText.length > MAX_PASTE_LENGTH ? 'text-amber-400' : 'text-dark-400'}`}>
+                  {pasteText.length.toLocaleString()}{pasteText.length > MAX_PASTE_LENGTH ? ` / ${MAX_PASTE_LENGTH.toLocaleString()}` : ''}
+                </span>
+              </div>
+            </div>
             <StatusIndicator />
             <div className="flex justify-end gap-2">
-              <button onClick={() => { setShowPasteModal(false); setPasteText(''); setStatus('') }} className="btn-secondary text-sm" disabled={processing}>{t.cancel}</button>
+              <button onClick={() => { setShowPasteModal(false); setPasteText(''); setStatus(''); setErrorMessage('') }} className="btn-secondary text-sm" disabled={processing}>{t.cancel}</button>
               <button onClick={handlePaste} disabled={!pasteText.trim() || processing} className="btn-primary text-sm flex items-center gap-2">
                 {processing && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t.process}
