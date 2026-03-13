@@ -1,16 +1,16 @@
 // =============================================
 // Account Types
 // =============================================
-export type AccountType = 'single' | 'team'
-export type TeamRole = 'owner' | 'admin' | 'member'
+type AccountType = 'single' | 'team'
+type TeamRole = 'owner' | 'admin' | 'member'
 export type ProductType = 'product' | 'service' | 'restaurant' | 'real_estate' | 'indumentaria'
-export type SessionStatus = 'active' | 'completed' | 'archived'
+type SessionStatus = 'active' | 'completed' | 'archived'
 
 // =============================================
 // Script Enhancement Types
 // =============================================
 export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso' | 'reconocimiento'
-export type GenerationMode = 'mixed' | 'by_type'
+type GenerationMode = 'mixed' | 'by_type'
 
 export interface ScriptTypeConfig {
   venta_directa: number
@@ -103,7 +103,7 @@ export interface BusinessFormData {
   icp_description?: string
 }
 
-export interface TargetAudience {
+interface TargetAudience {
   id: string
   business_id: string
   sex: 'male' | 'female' | 'both'
@@ -310,16 +310,10 @@ export interface Script {
 
 export interface ScriptTemplate {
   id: string
-  owner_id?: string
-  team_id?: string
+  user_id: string
   name: string
-  description?: string
   content: string
-  framework?: ScriptFramework
-  tone?: string
-  duration?: string
-  platform?: string
-  usage_count: number
+  is_active: boolean
   created_at: string
   updated_at: string
 }
@@ -493,7 +487,7 @@ export interface ScriptGenerationSettings {
 // =============================================
 // Context Documents Types
 // =============================================
-export type ContextDocumentType = 'pdf' | 'image' | 'link' | 'text'
+type ContextDocumentType = 'pdf' | 'image' | 'link' | 'text'
 
 export interface ContextDocument {
   id: string

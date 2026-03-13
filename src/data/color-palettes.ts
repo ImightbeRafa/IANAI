@@ -15,7 +15,3 @@ export const COLOR_PALETTES: ColorPalette[] = [
     promptEs: '',
   },
 ];
-
-export function findPaletteById(id: string): ColorPalette | undefined {
-  return COLOR_PALETTES.find(p => p.id === id);
-}

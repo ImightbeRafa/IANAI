@@ -52,38 +52,6 @@ export async function loadBrandKitById(userId: string, kitId: string): Promise<B
 }
 
 /**
- * Load the default active brand kit for a user (fallback when no kitId provided).
- */
-export async function loadBrandKit(userId: string): Promise<BrandKitRow | null> {
-  if (!supabase) return null
-  // Try default kit first
-  const { data: defaultKit, error: e1 } = await supabase
-    .from('brand_kits')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('is_default', true)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  if (!e1 && defaultKit) return defaultKit
-
-  // Fallback: any active kit
-  const { data, error } = await supabase
-    .from('brand_kits')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .limit(1)
-    .maybeSingle()
-
-  if (error) {
-    console.warn('Failed to load brand kit:', error.message)
-    return null
-  }
-  return data
-}
-
-/**
  * Resolve brand kit: use specific kitId if provided, otherwise return null.
  * The frontend handles default-kit UX (BrandKitSelector auto-selects).
  * The backend trusts whatever the frontend sends — no auto-fallback.

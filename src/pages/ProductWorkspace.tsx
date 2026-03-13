@@ -22,10 +22,14 @@ import {
   updateUserAiMemorySummary,
   updateProductAiMemorySummary,
   resetProductAiMemory,
-  getAiMemories
+  getAiMemories,
+  getScriptTemplates,
+  createScriptTemplate,
+  toggleScriptTemplateActive,
+  deleteScriptTemplate
 } from '../services/database'
 import { sendMessageToGrok, previewPrompt, editScript, DEFAULT_SCRIPT_SETTINGS, buildApiBusinessContext, buildApiProductContext } from '../services/grokApi'
-import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel, UserAiMemory, ProductAiMemory, AiMemory } from '../types'
+import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel, UserAiMemory, ProductAiMemory, AiMemory, ScriptTemplate } from '../types'
 import { getSuccessCases } from '../services/database'
 import { supabase } from '../lib/supabase'
 import Layout from '../components/Layout'
@@ -126,6 +130,14 @@ export default function ProductWorkspace() {
   const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
   const [teachInput, setTeachInput] = useState('')
   const [teachingSaving, setTeachingSaving] = useState(false)
+  // Script Templates state
+  const [scriptTemplates, setScriptTemplates] = useState<ScriptTemplate[]>([])
+  const [showTemplatePanel, setShowTemplatePanel] = useState(false)
+  const [showCreateTemplate, setShowCreateTemplate] = useState(false)
+  const [newTemplateName, setNewTemplateName] = useState('')
+  const [newTemplateContent, setNewTemplateContent] = useState('')
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [templatePlanMax, setTemplatePlanMax] = useState(3)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const handleSendRef = useRef<(directMessage?: string) => Promise<void>>(null as any)
@@ -177,6 +189,33 @@ export default function ProductWorkspace() {
         } else if (sessionsData.length > 0) {
           navigate(`/product/${productId}/session/${sessionsData[0].id}`, { replace: true })
         }
+        // Load script templates (user-level, not product-level)
+        try {
+          const templates = await getScriptTemplates(user.id)
+          setScriptTemplates(templates)
+        } catch (e) {
+          console.warn('Failed to load script templates:', e)
+        }
+
+        // Load plan limit for templates
+        try {
+          const { data: sub } = await supabase
+            .from('subscriptions')
+            .select('plan')
+            .eq('user_id', user.id)
+            .in('status', ['active', 'trialing'])
+            .single()
+          const plan = sub?.plan || 'free'
+          const { data: limits } = await supabase
+            .from('plan_limits')
+            .select('script_templates_max')
+            .eq('plan', plan)
+            .single()
+          if (limits?.script_templates_max != null) {
+            setTemplatePlanMax(limits.script_templates_max)
+          }
+        } catch { /* use default */ }
+
       } catch (error) {
         console.error('Failed to load product:', error)
       } finally {
@@ -381,7 +420,8 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, messageForApi]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined)
+      const activeTemplateIds = scriptTemplates.filter(t => t.is_active).map(t => t.id)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined, activeTemplateIds)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -836,7 +876,8 @@ export default function ProductWorkspace() {
       const allMessages = [...messages, userMessage]
       
       const { bizCtx, prodCtx } = await getStructuredContexts(product)
-      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined)
+      const activeGenTemplateIds = scriptTemplates.filter(t => t.is_active).map(t => t.id)
+      const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined, activeGenTemplateIds)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
@@ -1306,6 +1347,140 @@ export default function ProductWorkspace() {
                 </p>
               </div>
             )}
+
+            {/* Script Templates Panel */}
+            <div className="pt-2 border-t border-dark-200/60">
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  onClick={() => setShowTemplatePanel(!showTemplatePanel)}
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                    {language === 'es' ? 'Plantillas' : 'Templates'}
+                  </span>
+                  {scriptTemplates.filter(t => t.is_active).length > 0 && (
+                    <span className="text-[9px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                      {scriptTemplates.filter(t => t.is_active).length}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-3.5 h-3.5 text-dark-400 transition-transform ${showTemplatePanel ? '' : '-rotate-90'}`} />
+                </button>
+                <span className="text-[9px] text-dark-400">
+                  {scriptTemplates.length}/{templatePlanMax === 999 ? '∞' : templatePlanMax}
+                </span>
+              </div>
+
+              {showTemplatePanel && (
+                <div className="space-y-2">
+                  {scriptTemplates.length === 0 && !showCreateTemplate && (
+                    <p className="text-xs text-dark-400 py-1">
+                      {language === 'es'
+                        ? 'Guarda guiones ganadores para inspirar futuras generaciones.'
+                        : 'Save winning scripts to inspire future generations.'}
+                    </p>
+                  )}
+
+                  {scriptTemplates.map(tmpl => (
+                    <div key={tmpl.id} className="bg-dark-50 border border-dark-200/60 rounded-lg p-2 group">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-medium text-dark-700 truncate flex-1 mr-2">{tmpl.name}</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await toggleScriptTemplateActive(tmpl.id, !tmpl.is_active)
+                                setScriptTemplates(prev => prev.map(t => t.id === tmpl.id ? { ...t, is_active: !t.is_active } : t))
+                              } catch (e) { console.error(e) }
+                            }}
+                            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${tmpl.is_active ? 'bg-amber-500' : 'bg-dark-300'}`}
+                            title={tmpl.is_active
+                              ? (language === 'es' ? 'Activa — click para desactivar' : 'Active — click to disable')
+                              : (language === 'es' ? 'Inactiva — click para activar' : 'Inactive — click to enable')}
+                          >
+                            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${tmpl.is_active ? 'translate-x-[13px]' : 'translate-x-[2px]'}`} />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm(language === 'es' ? '¿Eliminar esta plantilla?' : 'Delete this template?')) return
+                              try {
+                                await deleteScriptTemplate(tmpl.id)
+                                setScriptTemplates(prev => prev.filter(t => t.id !== tmpl.id))
+                              } catch (e) { console.error(e) }
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-dark-400 hover:text-red-500 transition-all"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-dark-400 line-clamp-2">{tmpl.content.substring(0, 150)}{tmpl.content.length > 150 ? '…' : ''}</p>
+                    </div>
+                  ))}
+
+                  {showCreateTemplate ? (
+                    <div className="bg-dark-50 border border-dark-200/60 rounded-lg p-2 space-y-2">
+                      <input
+                        type="text"
+                        value={newTemplateName}
+                        onChange={(e) => setNewTemplateName(e.target.value)}
+                        placeholder={language === 'es' ? 'Nombre de la plantilla...' : 'Template name...'}
+                        className="w-full px-2 py-1.5 text-xs bg-dark-100 border border-dark-200 rounded-lg text-dark-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                      <textarea
+                        value={newTemplateContent}
+                        onChange={(e) => setNewTemplateContent(e.target.value)}
+                        placeholder={language === 'es' ? 'Pega tu guión ganador aquí...' : 'Paste your winning script here...'}
+                        className="w-full px-2 py-1.5 text-xs bg-dark-100 border border-dark-200 rounded-lg text-dark-700 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500 min-h-[100px]"
+                        maxLength={10000}
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={async () => {
+                            if (!newTemplateName.trim() || !newTemplateContent.trim() || !user) return
+                            setSavingTemplate(true)
+                            try {
+                              const created = await createScriptTemplate(user.id, newTemplateName.trim(), newTemplateContent.trim())
+                              setScriptTemplates(prev => [created, ...prev])
+                              setNewTemplateName('')
+                              setNewTemplateContent('')
+                              setShowCreateTemplate(false)
+                            } catch (e) { console.error(e) } finally { setSavingTemplate(false) }
+                          }}
+                          disabled={!newTemplateName.trim() || !newTemplateContent.trim() || savingTemplate}
+                          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {savingTemplate ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          {language === 'es' ? 'Guardar' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => { setShowCreateTemplate(false); setNewTemplateName(''); setNewTemplateContent('') }}
+                          className="px-2 py-1.5 text-[11px] font-medium text-dark-400 hover:text-dark-600 bg-dark-100 hover:bg-dark-200 rounded-lg transition-colors"
+                        >
+                          {language === 'es' ? 'Cancelar' : 'Cancel'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (scriptTemplates.length >= templatePlanMax) {
+                          alert(language === 'es'
+                            ? `Has alcanzado el límite de ${templatePlanMax} plantillas de tu plan.`
+                            : `You've reached the ${templatePlanMax} template limit for your plan.`)
+                          return
+                        }
+                        setShowCreateTemplate(true)
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      {language === 'es' ? 'Agregar Plantilla' : 'Add Template'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Chat Input — Apple-like pill */}
             <div>
@@ -1988,6 +2163,134 @@ export default function ProductWorkspace() {
                 </div>
               )}
 
+              {/* Script Templates (Mobile) */}
+              <div className="pt-2 border-t border-dark-200/60">
+                <div className="flex items-center justify-between mb-2">
+                  <button
+                    onClick={() => setShowTemplatePanel(!showTemplatePanel)}
+                    className="flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                      {language === 'es' ? 'Plantillas' : 'Templates'}
+                    </span>
+                    {scriptTemplates.filter(t => t.is_active).length > 0 && (
+                      <span className="text-[9px] font-bold text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                        {scriptTemplates.filter(t => t.is_active).length}
+                      </span>
+                    )}
+                    <ChevronDown className={`w-3.5 h-3.5 text-dark-400 transition-transform ${showTemplatePanel ? '' : '-rotate-90'}`} />
+                  </button>
+                  <span className="text-[9px] text-dark-400">
+                    {scriptTemplates.length}/{templatePlanMax === 999 ? '∞' : templatePlanMax}
+                  </span>
+                </div>
+                {showTemplatePanel && (
+                  <div className="space-y-2">
+                    {scriptTemplates.length === 0 && !showCreateTemplate && (
+                      <p className="text-xs text-dark-400 py-1">
+                        {language === 'es'
+                          ? 'Guarda guiones ganadores para inspirar futuras generaciones.'
+                          : 'Save winning scripts to inspire future generations.'}
+                      </p>
+                    )}
+                    {scriptTemplates.map(tmpl => (
+                      <div key={tmpl.id} className="bg-dark-50 border border-dark-200/60 rounded-lg p-2 group">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-medium text-dark-700 truncate flex-1 mr-2">{tmpl.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await toggleScriptTemplateActive(tmpl.id, !tmpl.is_active)
+                                  setScriptTemplates(prev => prev.map(t => t.id === tmpl.id ? { ...t, is_active: !t.is_active } : t))
+                                } catch (e) { console.error(e) }
+                              }}
+                              className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${tmpl.is_active ? 'bg-amber-500' : 'bg-dark-300'}`}
+                            >
+                              <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${tmpl.is_active ? 'translate-x-[13px]' : 'translate-x-[2px]'}`} />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(language === 'es' ? '¿Eliminar esta plantilla?' : 'Delete this template?')) return
+                                try {
+                                  await deleteScriptTemplate(tmpl.id)
+                                  setScriptTemplates(prev => prev.filter(t => t.id !== tmpl.id))
+                                } catch (e) { console.error(e) }
+                              }}
+                              className="p-0.5 rounded text-dark-400 hover:text-red-500 transition-all"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-dark-400 line-clamp-2">{tmpl.content.substring(0, 150)}{tmpl.content.length > 150 ? '…' : ''}</p>
+                      </div>
+                    ))}
+                    {showCreateTemplate ? (
+                      <div className="bg-dark-50 border border-dark-200/60 rounded-lg p-2 space-y-2">
+                        <input
+                          type="text"
+                          value={newTemplateName}
+                          onChange={(e) => setNewTemplateName(e.target.value)}
+                          placeholder={language === 'es' ? 'Nombre de la plantilla...' : 'Template name...'}
+                          className="w-full px-2 py-1.5 text-xs bg-dark-100 border border-dark-200 rounded-lg text-dark-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        />
+                        <textarea
+                          value={newTemplateContent}
+                          onChange={(e) => setNewTemplateContent(e.target.value)}
+                          placeholder={language === 'es' ? 'Pega tu guión ganador aquí...' : 'Paste your winning script here...'}
+                          className="w-full px-2 py-1.5 text-xs bg-dark-100 border border-dark-200 rounded-lg text-dark-700 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500 min-h-[100px]"
+                          maxLength={10000}
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={async () => {
+                              if (!newTemplateName.trim() || !newTemplateContent.trim() || !user) return
+                              setSavingTemplate(true)
+                              try {
+                                const created = await createScriptTemplate(user.id, newTemplateName.trim(), newTemplateContent.trim())
+                                setScriptTemplates(prev => [created, ...prev])
+                                setNewTemplateName('')
+                                setNewTemplateContent('')
+                                setShowCreateTemplate(false)
+                              } catch (e) { console.error(e) } finally { setSavingTemplate(false) }
+                            }}
+                            disabled={!newTemplateName.trim() || !newTemplateContent.trim() || savingTemplate}
+                            className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            {savingTemplate ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                            {language === 'es' ? 'Guardar' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => { setShowCreateTemplate(false); setNewTemplateName(''); setNewTemplateContent('') }}
+                            className="px-2 py-1.5 text-[11px] font-medium text-dark-400 hover:text-dark-600 bg-dark-100 hover:bg-dark-200 rounded-lg transition-colors"
+                          >
+                            {language === 'es' ? 'Cancelar' : 'Cancel'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (scriptTemplates.length >= templatePlanMax) {
+                            alert(language === 'es'
+                              ? `Has alcanzado el límite de ${templatePlanMax} plantillas de tu plan.`
+                              : `You've reached the ${templatePlanMax} template limit for your plan.`)
+                            return
+                          }
+                          setShowCreateTemplate(true)
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                        {language === 'es' ? 'Agregar Plantilla' : 'Add Template'}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Sessions */}
               <div className="pt-2 border-t border-dark-200/60">
                 <div className="flex items-center justify-between mb-2">
@@ -2109,6 +2412,25 @@ export default function ProductWorkspace() {
                             sessionId={currentSession?.id}
                             messageId={message.id}
                             scriptIndex={script.index}
+                            onSaveAsTemplate={async (content, suggestedName) => {
+                              if (!user) return
+                              if (scriptTemplates.length >= templatePlanMax) {
+                                alert(language === 'es'
+                                  ? `Has alcanzado el límite de ${templatePlanMax} plantillas de tu plan.`
+                                  : `You've reached the ${templatePlanMax} template limit for your plan.`)
+                                return
+                              }
+                              const name = prompt(
+                                language === 'es' ? 'Nombre para la plantilla:' : 'Template name:',
+                                suggestedName
+                              )
+                              if (!name?.trim()) return
+                              try {
+                                const created = await createScriptTemplate(user.id, name.trim(), content)
+                                setScriptTemplates(prev => [created, ...prev])
+                                setShowTemplatePanel(true)
+                              } catch (e) { console.error('Failed to save template:', e) }
+                            }}
                           />
                         ))}
                         {/* Prompt toggle for script messages */}

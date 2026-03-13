@@ -5,7 +5,7 @@ const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 // Create Supabase client with service role for server-side operations
-export const supabaseAdmin = supabaseUrl && supabaseServiceKey
+const supabaseAdmin = supabaseUrl && supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null
 
@@ -24,7 +24,7 @@ export interface AuthResult {
  * Verify the user's JWT token from the Authorization header
  * Returns the authenticated user or null if invalid
  */
-export async function verifyAuth(req: VercelRequest): Promise<AuthResult> {
+async function verifyAuth(req: VercelRequest): Promise<AuthResult> {
   const authHeader = req.headers.authorization
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

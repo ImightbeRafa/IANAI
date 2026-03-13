@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon, ThumbsUp, ThumbsDown, FileText } from 'lucide-react'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal, rateScript } from '../services/database'
@@ -26,9 +26,10 @@ interface ScriptCardProps {
   sessionId?: string
   messageId?: string
   scriptIndex?: number
+  onSaveAsTemplate?: (content: string, suggestedName: string) => void
 }
 
-export default function ScriptCard({ script, language, onSave, onEdit, onSaveVersion, isSaved, savingScript, productType, productId, messageId, scriptIndex }: ScriptCardProps) {
+export default function ScriptCard({ script, language, onSave, onEdit, onSaveVersion, isSaved, savingScript, productType, productId, messageId, scriptIndex, onSaveAsTemplate }: ScriptCardProps) {
   const navigate = useNavigate()
   const [copiedVersion, setCopiedVersion] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
@@ -441,6 +442,24 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
     )
   }
 
+  const TemplateBtn = ({ versionIndex }: { versionIndex: number }) => {
+    if (!onSaveAsTemplate) return null
+    return (
+      <button
+        onClick={() => {
+          const content = getVersionContent(versionIndex)
+          const suggestedName = script.title || (language === 'es' ? 'Plantilla' : 'Template')
+          onSaveAsTemplate(content, suggestedName)
+        }}
+        className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:bg-amber-900/20 hover:text-amber-400 px-2 py-0.5 rounded-md transition-colors"
+        title={language === 'es' ? 'Guardar como plantilla' : 'Save as template'}
+      >
+        <FileText className="w-3 h-3" />
+        {language === 'es' ? 'Plantilla' : 'Template'}
+      </button>
+    )
+  }
+
   const fireRatingSignal = (vi: number, rating: 'good' | 'bad') => {
     if (!productId) return
     const content = getVersionContent(vi)
@@ -697,6 +716,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
           <SaveBtn versionIndex={-1} />
           <RateBtn versionIndex={-1} />
           <PostBtn versionIndex={-1} />
+          <TemplateBtn versionIndex={-1} />
           <VersionActions versionIndex={-1} />
         </div>
       </div>
@@ -730,6 +750,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
                 <SaveBtn versionIndex={index} />
                 <RateBtn versionIndex={index} />
                 <PostBtn versionIndex={index} />
+                <TemplateBtn versionIndex={index} />
                 <VersionActions versionIndex={index} />
               </div>
             </div>

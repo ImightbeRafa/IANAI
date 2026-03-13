@@ -5,7 +5,7 @@ const CHAT_API_URL = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000
 
 type Language = 'en' | 'es'
 
-export interface ProductContext {
+interface ProductContext {
   product_name?: string
   product_type?: ProductType
   // New form fields
@@ -48,7 +48,7 @@ export interface ProductContext {
   re_cta?: string
 }
 
-export interface ApiBusinessContext {
+interface ApiBusinessContext {
   name?: string
   sales_channels?: string[]
   location?: string
@@ -146,7 +146,8 @@ export async function sendMessageToGrok(
   activeSalesChannel?: 'physical' | 'messages' | 'website',
   productId?: string,
   aiMemoryEnabled?: boolean,
-  brandKitId?: string
+  brandKitId?: string,
+  scriptTemplateIds?: string[]
 ): Promise<{ content: string; _debug?: { systemPrompt: string } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -184,7 +185,8 @@ export async function sendMessageToGrok(
       ...(activeSalesChannel ? { activeSalesChannel } : {}),
       ...(productId ? { productId } : {}),
       ...(aiMemoryEnabled !== undefined ? { aiMemoryEnabled } : {}),
-      ...(brandKitId ? { brandKitId } : {})
+      ...(brandKitId ? { brandKitId } : {}),
+      ...(scriptTemplateIds && scriptTemplateIds.length > 0 ? { scriptTemplateIds } : {})
     })
   })
 
@@ -315,15 +317,4 @@ STRICT RULES:
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || 'Edit failed')
   return data.content || ''
-}
-
-export function getInitialPrompt(language: Language = 'es'): string {
-  if (language === 'en') {
-    return `Let's create high-converting ad scripts for your business. I'll ask you a few quick questions to understand your product.
-
-What product or service do you sell and what's your irresistible offer?`
-  }
-  return `Vamos a crear guiones de venta de alta conversión para tu negocio. Te haré algunas preguntas rápidas para entender tu producto.
-
-¿Qué producto o servicio vendes y cuál es tu oferta irresistible?`
 }

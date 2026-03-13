@@ -8,7 +8,7 @@ const supabase = supabaseUrl && supabaseServiceKey
   : null
 
 // Cost per 1M tokens (in USD) - Update these based on actual pricing
-export const MODEL_COSTS = {
+const MODEL_COSTS = {
   // Script generation models (per 1M tokens)
   'grok': { input: 3.00, output: 15.00 },
   'grok-3-fast': { input: 3.00, output: 15.00 },

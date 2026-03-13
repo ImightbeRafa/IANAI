@@ -3,14 +3,12 @@ import type {
   Profile, 
   Team, 
   TeamMember, 
-  Client, 
   Product, 
   ChatSession, 
   Message, 
   Script,
   ProductFormData,
   DashboardStats,
-  TeamDashboardStats,
   ContextDocument,
   ContextDocumentFormData,
   Business,
@@ -20,14 +18,14 @@ import type {
   UserAiMemory,
   ProductAiMemory,
   AiMemory,
-  AiMemoryStats,
   CustomPostType,
   CustomPostTypeFormData,
   ReplySession,
   ReplyMessage,
   ReplyContextSource,
   BrandKit,
-  BrandKitFormData
+  BrandKitFormData,
+  ScriptTemplate
 } from '../types'
 
 // =============================================
@@ -42,15 +40,6 @@ export async function getProfile(userId: string): Promise<Profile | null> {
 
   if (error) return null
   return data
-}
-
-export async function updateProfile(userId: string, updates: Partial<Profile>): Promise<void> {
-  const { error } = await supabase
-    .from('profiles')
-    .update(updates)
-    .eq('id', userId)
-
-  if (error) throw error
 }
 
 export async function getOnboardingStatus(userId: string): Promise<boolean> {
@@ -73,17 +62,6 @@ export async function markOnboardingComplete(userId: string): Promise<void> {
 // =============================================
 // TEAM FUNCTIONS
 // =============================================
-export async function createTeam(ownerId: string, name: string): Promise<Team> {
-  const { data, error } = await supabase
-    .from('teams')
-    .insert({ owner_id: ownerId, name })
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
 export async function getTeam(userId: string): Promise<Team | null> {
   const { data, error } = await supabase
     .from('team_members')
@@ -151,60 +129,6 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
 }
 
 // =============================================
-// CLIENT FUNCTIONS (Teams only)
-// =============================================
-export async function createClient(teamId: string, userId: string, name: string): Promise<Client> {
-  const { data, error } = await supabase
-    .from('clients')
-    .insert({ team_id: teamId, created_by: userId, name })
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-export async function getClients(teamId: string): Promise<Client[]> {
-  const { data, error } = await supabase
-    .from('clients')
-    .select('*')
-    .eq('team_id', teamId)
-    .order('name')
-
-  if (error) throw error
-  return data || []
-}
-
-export async function getClient(clientId: string): Promise<Client | null> {
-  const { data, error } = await supabase
-    .from('clients')
-    .select('*')
-    .eq('id', clientId)
-    .single()
-
-  if (error) return null
-  return data
-}
-
-export async function updateClient(clientId: string, name: string): Promise<void> {
-  const { error } = await supabase
-    .from('clients')
-    .update({ name })
-    .eq('id', clientId)
-
-  if (error) throw error
-}
-
-export async function deleteClient(clientId: string): Promise<void> {
-  const { error } = await supabase
-    .from('clients')
-    .delete()
-    .eq('id', clientId)
-
-  if (error) throw error
-}
-
-// =============================================
 // BUSINESS FUNCTIONS
 // =============================================
 export async function createBusiness(
@@ -263,60 +187,6 @@ export async function getBusinesses(userId: string): Promise<Business[]> {
   return data || []
 }
 
-export async function getClientBusinesses(clientId: string): Promise<Business[]> {
-  const { data, error } = await supabase
-    .from('businesses')
-    .select('*, target_audiences:business_target_audiences(*)')
-    .eq('client_id', clientId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
-export async function getBusiness(businessId: string): Promise<Business | null> {
-  const { data, error } = await supabase
-    .from('businesses')
-    .select('*, target_audiences:business_target_audiences(*)')
-    .eq('id', businessId)
-    .single()
-
-  if (error) return null
-  return data
-}
-
-export async function updateBusiness(
-  businessId: string,
-  data: Partial<BusinessFormData>
-): Promise<void> {
-  const { target_audiences, ...businessFields } = data
-  const updatePayload = { ...businessFields, updated_at: new Date().toISOString() }
-  
-  const { error } = await supabase
-    .from('businesses')
-    .update(updatePayload)
-    .eq('id', businessId)
-
-  if (error) throw error
-
-  if (target_audiences) {
-    await supabase.from('business_target_audiences').delete().eq('business_id', businessId)
-    if (target_audiences.length > 0) {
-      const inserts = target_audiences.map(a => ({
-        business_id: businessId,
-        sex: a.sex,
-        age_min: a.age_min,
-        age_max: a.age_max,
-        geographic_scope: a.geographic_scope,
-        geographic_scope_custom: a.geographic_scope_custom || null,
-        has_specific_profession: a.has_specific_profession,
-        profession_description: a.profession_description || null,
-      }))
-      await supabase.from('business_target_audiences').insert(inserts)
-    }
-  }
-}
-
 export async function deleteBusiness(businessId: string): Promise<void> {
   const { error } = await supabase
     .from('businesses')
@@ -338,44 +208,6 @@ export async function getSuccessCases(productId: string): Promise<SuccessCase[]>
 
   if (error) throw error
   return data || []
-}
-
-export async function createSuccessCase(
-  productId: string,
-  caseData: SuccessCaseFormData
-): Promise<SuccessCase> {
-  const { data, error } = await supabase
-    .from('service_success_cases')
-    .insert({
-      product_id: productId,
-      ...caseData,
-    })
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-export async function deleteSuccessCase(caseId: string): Promise<void> {
-  const { error } = await supabase
-    .from('service_success_cases')
-    .delete()
-    .eq('id', caseId)
-
-  if (error) throw error
-}
-
-export async function replaceSuccessCases(
-  productId: string,
-  cases: SuccessCaseFormData[]
-): Promise<void> {
-  await supabase.from('service_success_cases').delete().eq('product_id', productId)
-  if (cases.length > 0) {
-    const inserts = cases.map(c => ({ product_id: productId, ...c }))
-    const { error } = await supabase.from('service_success_cases').insert(inserts)
-    if (error) throw error
-  }
 }
 
 // =============================================
@@ -416,17 +248,6 @@ export async function createProduct(
   return product
 }
 
-export async function getProducts(userId: string): Promise<Product[]> {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .eq('owner_id', userId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
 export async function getUnassignedProducts(userId: string): Promise<Product[]> {
   const { data, error } = await supabase
     .from('products')
@@ -444,17 +265,6 @@ export async function getBusinessProducts(businessId: string): Promise<Product[]
     .from('products')
     .select('*')
     .eq('business_id', businessId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
-export async function getClientProducts(clientId: string): Promise<Product[]> {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .eq('client_id', clientId)
     .order('created_at', { ascending: false })
 
   if (error) throw error
@@ -485,15 +295,6 @@ export async function deleteProduct(productId: string): Promise<void> {
   const { error } = await supabase
     .from('products')
     .delete()
-    .eq('id', productId)
-
-  if (error) throw error
-}
-
-export async function assignProductToClient(productId: string, clientId: string): Promise<void> {
-  const { error } = await supabase
-    .from('products')
-    .update({ client_id: clientId })
     .eq('id', productId)
 
   if (error) throw error
@@ -547,15 +348,6 @@ export async function updateChatSession(
   const { error } = await supabase
     .from('chat_sessions')
     .update(updates)
-    .eq('id', sessionId)
-
-  if (error) throw error
-}
-
-export async function deleteChatSession(sessionId: string): Promise<void> {
-  const { error } = await supabase
-    .from('chat_sessions')
-    .delete()
     .eq('id', sessionId)
 
   if (error) throw error
@@ -649,35 +441,6 @@ export async function getScripts(productId: string): Promise<Script[]> {
 
   if (error) throw error
   return data || []
-}
-
-export async function getAllUserScripts(userId: string): Promise<Script[]> {
-  const { data, error } = await supabase
-    .from('scripts')
-    .select('*, product:products!inner(*)')
-    .eq('product.owner_id', userId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
-export async function deleteScript(scriptId: string): Promise<void> {
-  const { error } = await supabase
-    .from('scripts')
-    .delete()
-    .eq('id', scriptId)
-
-  if (error) throw error
-}
-
-export async function toggleScriptFavorite(scriptId: string, isFavorite: boolean): Promise<void> {
-  const { error } = await supabase
-    .from('scripts')
-    .update({ is_favorite: isFavorite })
-    .eq('id', scriptId)
-
-  if (error) throw error
 }
 
 export async function rateScript(scriptId: string, rating: number | null): Promise<void> {
@@ -777,39 +540,11 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
   }
 }
 
-export async function getTeamDashboardStats(teamId: string): Promise<TeamDashboardStats> {
-  const now = new Date()
-  const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-
-  const [clientsResult, membersResult, productsResult, scriptsResult, sessionsResult, monthlyScriptsResult] = await Promise.all([
-    supabase.from('clients').select('id', { count: 'exact' }).eq('team_id', teamId),
-    supabase.from('team_members').select('id', { count: 'exact' }).eq('team_id', teamId),
-    supabase.from('products').select('id, client:clients!inner(team_id)', { count: 'exact' }).eq('client.team_id', teamId),
-    supabase.from('scripts').select('id, product:products!inner(client:clients!inner(team_id))', { count: 'exact' }).eq('product.client.team_id', teamId),
-    supabase.from('chat_sessions').select('id, product:products!inner(client:clients!inner(team_id))', { count: 'exact' }).eq('product.client.team_id', teamId),
-    supabase.from('scripts').select('id, product:products!inner(client:clients!inner(team_id))', { count: 'exact' }).eq('product.client.team_id', teamId).gte('created_at', firstDayOfMonth)
-  ])
-
-  const anyError = clientsResult.error || membersResult.error || productsResult.error || scriptsResult.error || sessionsResult.error || monthlyScriptsResult.error
-  if (anyError) {
-    console.error('Team dashboard stats error:', anyError)
-  }
-
-  return {
-    totalClients: clientsResult.count || 0,
-    totalMembers: membersResult.count || 0,
-    totalProducts: productsResult.count || 0,
-    totalScripts: scriptsResult.count || 0,
-    totalSessions: sessionsResult.count || 0,
-    scriptsThisMonth: monthlyScriptsResult.count || 0
-  }
-}
-
 // =============================================
 // POST FUNCTIONS (AI Image Generation)
 // =============================================
 
-export interface Post {
+interface Post {
   id: string
   product_id: string
   created_by: string
@@ -877,17 +612,6 @@ export async function updatePostStatus(
   if (error) throw error
 }
 
-export async function getProductPosts(productId: string): Promise<Post[]> {
-  const { data, error } = await supabase
-    .from('posts')
-    .select('*')
-    .eq('product_id', productId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
 export async function getProductPostsPaginated(
   productId: string,
   limit: number,
@@ -908,15 +632,6 @@ export async function ratePost(postId: string, rating: number | null): Promise<v
   const { error } = await supabase
     .from('posts')
     .update({ rating })
-    .eq('id', postId)
-
-  if (error) throw error
-}
-
-export async function deletePost(postId: string): Promise<void> {
-  const { error } = await supabase
-    .from('posts')
-    .delete()
     .eq('id', postId)
 
   if (error) throw error
@@ -1128,17 +843,6 @@ export async function createFeedbackTicket(ticket: {
   return data
 }
 
-export async function getUserTickets(userId: string): Promise<FeedbackTicket[]> {
-  const { data, error } = await supabase
-    .from('feedback_tickets')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data || []
-}
-
 export async function getAllTickets(): Promise<FeedbackTicket[]> {
   const { data, error } = await supabase
     .from('feedback_tickets')
@@ -1341,16 +1045,6 @@ export async function getSubscription(userId: string): Promise<import('../types'
   return data
 }
 
-export async function applyReferralCode(userId: string, code: string): Promise<{ success: boolean; error?: string; plan?: string; trial_ends_at?: string }> {
-  const { data, error } = await supabase.rpc('apply_referral_code', {
-    p_user_id: userId,
-    p_code: code
-  })
-
-  if (error) return { success: false, error: error.message }
-  return data as { success: boolean; error?: string; plan?: string; trial_ends_at?: string }
-}
-
 export async function acceptPendingInvites(userId: string, email: string): Promise<void> {
   const { error } = await supabase
     .from('product_collaborators')
@@ -1516,15 +1210,6 @@ export async function resetProductAiMemory(productId: string, userId: string): P
   if (error) throw error
 }
 
-export async function resetUserAiMemory(userId: string): Promise<void> {
-  const { error } = await supabase
-    .from('user_ai_memory')
-    .delete()
-    .eq('user_id', userId)
-
-  if (error) throw error
-}
-
 // =============================================
 // HYBRID AI MEMORIES (typed, categorized)
 // =============================================
@@ -1552,51 +1237,6 @@ export async function getAiMemories(
 
   if (error) throw error
   return data || []
-}
-
-export async function deleteAiMemory(memoryId: string): Promise<void> {
-  const { error } = await supabase
-    .from('ai_memories')
-    .delete()
-    .eq('id', memoryId)
-
-  if (error) throw error
-}
-
-export async function getAiMemoryStats(
-  userId: string,
-  productId: string
-): Promise<AiMemoryStats | null> {
-  const { data, error } = await supabase
-    .from('ai_memory_stats')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('product_id', productId)
-    .maybeSingle()
-
-  if (error) return null
-  return data
-}
-
-export async function upsertAiMemoryStats(
-  userId: string,
-  productId: string
-): Promise<void> {
-  const { error } = await supabase.rpc('increment_ai_memory_stats', {
-    p_user_id: userId,
-    p_product_id: productId
-  })
-  if (error) {
-    // Fallback: direct upsert if RPC doesn't exist yet
-    await supabase
-      .from('ai_memory_stats')
-      .upsert({
-        user_id: userId,
-        product_id: productId,
-        total_lifetime_signals: 1,
-        signals_since_last_reflection: 1
-      }, { onConflict: 'user_id,product_id' })
-  }
 }
 
 // =============================================
@@ -1781,29 +1421,6 @@ export async function getBrandKits(userId: string): Promise<BrandKit[]> {
   })
 }
 
-export async function getBrandKitById(kitId: string): Promise<BrandKit | null> {
-  const { data, error } = await supabase
-    .from('brand_kits')
-    .select('*')
-    .eq('id', kitId)
-    .maybeSingle()
-
-  if (error) throw error
-  return data
-}
-
-export async function getBrandKitForClient(clientId: string): Promise<BrandKit | null> {
-  const { data, error } = await supabase
-    .from('brand_kits')
-    .select('*')
-    .eq('client_id', clientId)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  if (error) throw error
-  return data
-}
-
 export async function createBrandKit(userId: string, kit: BrandKitFormData): Promise<BrandKit> {
   const { user_id: _drop, ...safeKit } = kit as BrandKitFormData & { user_id?: string }
 
@@ -1898,14 +1515,54 @@ export async function getPayments(userId: string, limit = 20): Promise<import('.
   return data || []
 }
 
-export async function getPaymentTransactions(userId: string, limit = 50): Promise<import('../types').PaymentTransaction[]> {
+// =============================================
+// SCRIPT TEMPLATES
+// =============================================
+export async function getScriptTemplates(userId: string): Promise<ScriptTemplate[]> {
   const { data, error } = await supabase
-    .from('payment_transactions')
+    .from('script_templates')
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
-    .limit(limit)
 
   if (error) throw error
   return data || []
 }
+
+export async function createScriptTemplate(
+  userId: string,
+  name: string,
+  content: string
+): Promise<ScriptTemplate> {
+  const trimmed = content.slice(0, 10000)
+  const { data, error } = await supabase
+    .from('script_templates')
+    .insert({ user_id: userId, name, content: trimmed })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function toggleScriptTemplateActive(
+  templateId: string,
+  isActive: boolean
+): Promise<void> {
+  const { error } = await supabase
+    .from('script_templates')
+    .update({ is_active: isActive })
+    .eq('id', templateId)
+
+  if (error) throw error
+}
+
+export async function deleteScriptTemplate(templateId: string): Promise<void> {
+  const { error } = await supabase
+    .from('script_templates')
+    .delete()
+    .eq('id', templateId)
+
+  if (error) throw error
+}
+

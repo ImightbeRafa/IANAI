@@ -27,7 +27,7 @@ export interface AiMemoryRow {
  * Phase 1: SQL filtering with smart ordering (product-specific first, highest confidence, most recent).
  * Phase 2: Will add optional embedding-based cosine similarity.
  */
-export async function getRelevantMemories(
+async function getRelevantMemories(
   userId: string,
   productId: string | null,
   options?: {
@@ -86,7 +86,7 @@ export async function getRelevantMemories(
  * Battle-tested format with HIGHEST PRIORITY override language.
  * Place right after the master system prompt, before the task.
  */
-export function buildMemoryInjection(
+function buildMemoryInjection(
   memories: AiMemoryRow[],
   language: 'es' | 'en' = 'es'
 ): string {

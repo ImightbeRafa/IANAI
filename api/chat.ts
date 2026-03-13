@@ -1273,92 +1273,6 @@ function buildStructuredContext(biz: BusinessContext | undefined, product: Produ
   return header + '\n\n' + sections.join('\n\n---\n\n')
 }
 
-function buildConsciousnessPrompt(level: 'cold' | 'warm' | 'hot' | undefined, language: 'en' | 'es'): string {
-  if (!level) return ''
-  const isEs = language === 'es'
-
-  const prompts: Record<'cold' | 'warm' | 'hot', { es: string; en: string }> = {
-    cold: {
-      es: `
-===================================================================
-NIVEL DE CONCIENCIA DEL ESPECTADOR: FRÍO (No sabe que tiene el problema)
-===================================================================
-El espectador NO sabe que tiene este problema todavía. Debes:
-- Primero REVELAR un problema que no sabía que tenía. Usar ganchos de curiosidad que le hagan darse cuenta de una carencia o riesgo.
-- EDUCAR antes de vender. El desarrollo debe construir la conciencia del problema de forma progresiva.
-- Mostrar las CONSECUENCIAS de no actuar (qué pierde, qué riesgo corre).
-- Solo al final presentar el producto/servicio como la solución natural al problema que acabas de revelar.
-- El tono debe generar curiosidad y "momento ajá", NO presión de compra directa.
-- Los ganchos deben usar formatos como: "Lo que nadie te dice sobre...", "¿Sabías que...?", "El error que comete el 90% de la gente con..."`,
-      en: `
-===================================================================
-VIEWER CONSCIOUSNESS LEVEL: COLD (Doesn't know they have the problem)
-===================================================================
-The viewer does NOT know they have this problem yet. You must:
-- First REVEAL a problem they didn't know they had. Use curiosity-driven hooks that make them realize a gap or risk.
-- EDUCATE before selling. The development should build problem awareness progressively.
-- Show the CONSEQUENCES of not acting (what they lose, what risk they run).
-- Only at the end present the product/service as the natural solution to the problem you just revealed.
-- The tone should generate curiosity and "aha moments", NOT direct buying pressure.
-- Hooks should use formats like: "What nobody tells you about...", "Did you know...?", "The mistake 90% of people make with..."`
-    },
-    warm: {
-      es: `
-===================================================================
-NIVEL DE CONCIENCIA DEL ESPECTADOR: TIBIO (Sabe del problema, busca solución)
-===================================================================
-El espectador YA SABE que tiene el problema y está explorando soluciones. Debes:
-- RECONOCER su dolor directamente en el gancho. Hablarle de lo que ya está sintiendo/experimentando.
-- Posicionarte como la MEJOR solución comparada con lo que ya intentó o lo que existe.
-- VALIDAR sus intentos fallidos anteriores y explicar por qué no funcionaron.
-- El desarrollo debe enfocarse en por qué ESTA solución es diferente y mejor que las alternativas.
-- Incluir propuestas de valor concretas, resultados tangibles y diferenciadores claros.
-- El CTA debe guiar al siguiente paso lógico (escribir mensaje, agendar cita, etc.).`,
-      en: `
-===================================================================
-VIEWER CONSCIOUSNESS LEVEL: WARM (Knows the problem, seeks solution)
-===================================================================
-The viewer already KNOWS they have the problem and is exploring solutions. You must:
-- ACKNOWLEDGE their pain directly in the hook. Speak to what they're already feeling/experiencing.
-- Position as the BEST solution compared to what they've already tried or what exists.
-- VALIDATE their previous failed attempts and explain why they didn't work.
-- The development should focus on why THIS solution is different and better than alternatives.
-- Include concrete value propositions, tangible results, and clear differentiators.
-- The CTA should guide to the next logical step (send message, schedule appointment, etc.).`
-    },
-    hot: {
-      es: `
-===================================================================
-NIVEL DE CONCIENCIA DEL ESPECTADOR: CALIENTE (Listo para comprar)
-===================================================================
-El espectador está LISTO PARA COMPRAR — está buscando activamente este tipo de producto/servicio. Debes:
-- Ser DIRECTO y específico desde el primer segundo. No educar, no contar historias largas.
-- Liderar con la OFERTA concreta: qué es exactamente, especificaciones, precio/valor.
-- Usar ganchos de definición directa: "Este es un [producto] que [beneficio principal]".
-- El desarrollo debe ser una lista de propuestas de valor tangibles, sin relleno.
-- Incluir pruebas sociales, garantías, y elementos que eliminen la última duda.
-- Crear URGENCIA real (stock limitado, oferta temporal, cupos limitados) solo si es verdad.
-- El CTA debe ser muy claro y directo: exactamente qué hacer y cómo comprar AHORA.
-- Formato dinámico tipo bulletpoints. Cada frase debe vender.`,
-      en: `
-===================================================================
-VIEWER CONSCIOUSNESS LEVEL: HOT (Ready to buy)
-===================================================================
-The viewer is READY TO BUY — they're actively looking for this exact product/service. You must:
-- Be DIRECT and specific from the first second. No educating, no long stories.
-- Lead with the CONCRETE OFFER: what it is exactly, specifications, price/value.
-- Use direct definition hooks: "This is a [product] that [main benefit]".
-- The development should be a list of tangible value propositions, no filler.
-- Include social proof, guarantees, and elements that eliminate the last doubt.
-- Create REAL urgency (limited stock, time-limited offer, limited spots) only if true.
-- The CTA must be very clear and direct: exactly what to do and how to buy NOW.
-- Dynamic bullet-point format. Every sentence should sell.`
-    }
-  }
-
-  return prompts[level][isEs ? 'es' : 'en']
-}
-
 function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, language: 'en' | 'es'): string {
   if (!settings) return ''
 
@@ -1585,6 +1499,51 @@ Use ALL provided business and product/service information to create descriptions
 4. Work as paid ad text (not organic caption)`
 }
 
+async function buildScriptTemplatesPrompt(
+  userId: string,
+  templateIds: string[] | undefined,
+  language: 'en' | 'es'
+): Promise<string> {
+  if (!templateIds || templateIds.length === 0 || !memorySupabase) return ''
+
+  try {
+    const { data: templates, error } = await memorySupabase
+      .from('script_templates')
+      .select('name, content')
+      .eq('user_id', userId)
+      .in('id', templateIds.slice(0, 10))
+      .eq('is_active', true)
+
+    if (error || !templates || templates.length === 0) return ''
+
+    const isEs = language === 'es'
+    const header = isEs
+      ? `\n\n===================================================================
+PLANTILLAS DE GUIONES GANADORES (REFERENCIA)
+===================================================================
+El usuario ha guardado los siguientes guiones como ejemplos ganadores.
+ESTUDIA su estructura, ritmo, ganchos, desarrollo y CTAs.
+INSPÍRATE en estos patrones para generar guiones con calidad similar.
+NO copies los guiones textualmente — adapta la estructura y estilo al producto/servicio actual.`
+      : `\n\n===================================================================
+WINNING SCRIPT TEMPLATES (REFERENCE)
+===================================================================
+The user has saved the following scripts as winning examples.
+STUDY their structure, rhythm, hooks, development and CTAs.
+BE INSPIRED by these patterns to generate scripts of similar quality.
+Do NOT copy the scripts verbatim — adapt the structure and style to the current product/service.`
+
+    const templatesText = templates.map((t, i) => {
+      return `\n--- ${isEs ? 'Plantilla' : 'Template'} ${i + 1}: ${t.name} ---\n${t.content}`
+    }).join('\n')
+
+    return header + templatesText
+  } catch (e) {
+    console.warn('Failed to load script templates:', e)
+    return ''
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
@@ -1737,7 +1696,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     } catch { /* ignore */ }
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + brandVoicePrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    // Script Templates: inject winning script references if active
+    const scriptTemplateIds = req.body.scriptTemplateIds as string[] | undefined
+    let scriptTemplatesPrompt = ''
+    if (feature !== 'description') {
+      try {
+        scriptTemplatesPrompt = await buildScriptTemplatesPrompt(user.id, scriptTemplateIds, language as 'es' | 'en')
+      } catch (e) {
+        console.warn('Failed to build script templates prompt:', e)
+      }
+    }
+
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {
