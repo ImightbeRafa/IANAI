@@ -118,6 +118,7 @@ export default function PostWorkspace() {
   const [mobileConfigOpen, setMobileConfigOpen] = useState(() => window.innerWidth >= 1024)
 
   const isProductMode = postStyle === 'product'
+  const isAnuncioMode = postStyle === 'anuncio-conversion'
 
   const labels = {
     es: {
@@ -181,7 +182,9 @@ export default function PostWorkspace() {
       generateProduct: 'Generar Foto',
       generatingProduct: 'Generando foto...',
       productInstructions: 'Instrucciones adicionales (opcional)',
-      productInstructionsPlaceholder: 'Ej: "Ángulo lateral", "Colores cálidos", "Fondo oscuro"...'
+      productInstructionsPlaceholder: 'Ej: "Ángulo lateral", "Colores cálidos", "Fondo oscuro"...',
+      anuncioType: 'Anuncio de Conversión',
+      anuncioTypeDesc: 'Imagen publicitaria de alto impacto para Instagram Ads'
     },
     en: {
       back: 'Back',
@@ -244,7 +247,9 @@ export default function PostWorkspace() {
       generateProduct: 'Generate Photo',
       generatingProduct: 'Generating photo...',
       productInstructions: 'Additional instructions (optional)',
-      productInstructionsPlaceholder: 'E.g.: "Side angle", "Warm colors", "Dark background"...'
+      productInstructionsPlaceholder: 'E.g.: "Side angle", "Warm colors", "Dark background"...',
+      anuncioType: 'Conversion Ad',
+      anuncioTypeDesc: 'High-impact ad image for Instagram Ads'
     }
   }
 
@@ -492,13 +497,13 @@ export default function PostWorkspace() {
         requestBody = {
           prompt: script,
           mode: 'post',
-          postStyle: postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
-          presetId: postStyle === 'venta-directa' || isCustomType ? undefined : postStyle,
+          postStyle: postStyle === 'anuncio-conversion' ? 'anuncio-conversion' : postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
+          presetId: postStyle === 'venta-directa' || postStyle === 'anuncio-conversion' || isCustomType ? undefined : postStyle,
           customPostTypeId: isCustomType ? postStyle.replace('custom-', '') : undefined,
           productId,
           aspectRatio,
-          width: isVertical ? 1080 : 1080,
-          height: isVertical ? 1920 : 1440,
+          width: 1080,
+          height: isVertical ? 1920 : aspectRatio === '1:1' ? 1080 : 1440,
           model: imageModel,
           language,
           colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
@@ -1036,14 +1041,16 @@ export default function PostWorkspace() {
                 className="w-full flex items-center justify-between px-3 py-2.5 bg-dark-50 rounded-lg text-sm text-dark-700 hover:bg-dark-100 transition-colors border border-dark-200"
               >
                 <span className="flex items-center gap-2 truncate">
-                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
-                  {postStyle === 'product'
-                    ? t.productType
-                    : postStyle === 'venta-directa'
-                      ? t.styleDirectSale
-                      : postStyle.startsWith('custom-')
-                        ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
-                        : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
+                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : isAnuncioMode ? <Sparkles className="w-4 h-4 text-orange-500 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
+                  {postStyle === 'anuncio-conversion'
+                    ? t.anuncioType
+                    : postStyle === 'product'
+                      ? t.productType
+                      : postStyle === 'venta-directa'
+                        ? t.styleDirectSale
+                        : postStyle.startsWith('custom-')
+                          ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
+                          : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
                   }
                 </span>
                 {showStyleDropdown ? <ChevronUp className="w-4 h-4 text-dark-400" /> : <ChevronDown className="w-4 h-4 text-dark-400" />}
@@ -1051,6 +1058,25 @@ export default function PostWorkspace() {
 
               {showStyleDropdown && (
                 <div className="absolute z-30 mt-1 w-full bg-dark-100 rounded-xl shadow-xl border border-dark-200 max-h-[400px] overflow-y-auto">
+                  {/* Anuncio de Conversión — top of dropdown */}
+                  <button
+                    onClick={() => { setPostStyle('anuncio-conversion'); setStreamlinedScript(null); setShowStyleDropdown(false); if (aspectRatio === '9:16') setAspectRatio('3:4') }}
+                    className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
+                      postStyle === 'anuncio-conversion' ? 'bg-primary-900/20' : ''
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center flex-shrink-0">
+                      <Sparkles className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-dark-800">{t.anuncioType}</div>
+                      <div className="text-[11px] text-dark-400 mt-0.5">{t.anuncioTypeDesc}</div>
+                    </div>
+                    {postStyle === 'anuncio-conversion' && (
+                      <div className="w-2 h-2 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
+                    )}
+                  </button>
+
                   {/* Venta Directa — always first */}
                   <button
                     onClick={() => { setPostStyle('venta-directa'); setStreamlinedScript(null); setShowStyleDropdown(false) }}
@@ -1627,8 +1653,11 @@ export default function PostWorkspace() {
                 <ImageIcon className="w-3.5 h-3.5 text-primary-500" />
                 {t.formatLabel}
               </label>
-              <div className={`grid gap-1.5 ${isProductMode ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                {([
+              <div className={`grid gap-1.5 ${isProductMode ? 'grid-cols-3' : isAnuncioMode ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                {(isAnuncioMode ? [
+                  { id: '3:4' as PostAspectRatio, name: t.squarePost, sub: '3:4 (1080×1350)' },
+                  { id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1 (1080×1080)' },
+                ] : [
                   { id: '9:16' as PostAspectRatio, name: t.reelStory, sub: '9:16' },
                   { id: '3:4' as PostAspectRatio, name: t.squarePost, sub: '3:4' },
                   ...(isProductMode ? [{ id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1' }] : []),

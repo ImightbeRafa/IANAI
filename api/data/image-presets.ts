@@ -895,3 +895,230 @@ export function buildProductPrompt(
 
 GENERA LA IMAGEN. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`
 }
+
+// =============================================
+// ANUNCIO DE CONVERSIÓN — Niche Detection
+// Maps product type + category to a visual strategy niche
+// =============================================
+
+export type AnuncioNiche = 'physical' | 'food' | 'service' | 'fashion' | 'digital'
+
+const FOOD_KEYWORDS = ['comida', 'food', 'bebida', 'drink', 'alimento', 'snack', 'café', 'coffee', 'tea', 'té', 'juice', 'jugo', 'cerveza', 'beer', 'vino', 'wine', 'panadería', 'bakery', 'repostería', 'pastelería', 'helado', 'ice cream', 'restaurante', 'cocina', 'kitchen', 'gourmet', 'orgánico', 'organic', 'suplemento', 'supplement', 'proteína', 'protein']
+const FASHION_KEYWORDS = ['ropa', 'clothing', 'moda', 'fashion', 'accesorio', 'accessory', 'joyería', 'jewelry', 'zapato', 'shoe', 'bolso', 'bag', 'reloj', 'watch', 'lentes', 'glasses', 'sombrero', 'hat', 'camiseta', 'shirt', 'vestido', 'dress', 'pantalón', 'pants', 'calzado', 'footwear', 'textil', 'textile']
+const DIGITAL_KEYWORDS = ['curso', 'course', 'ebook', 'e-book', 'digital', 'online', 'software', 'app', 'aplicación', 'plantilla', 'template', 'membership', 'membresía', 'suscripción', 'subscription', 'coaching', 'mentoría', 'mentoring', 'webinar', 'taller online', 'workshop', 'descargable', 'downloadable']
+
+export function detectProductNiche(product: {
+  type?: string
+  product_category?: string
+  product_category_custom?: string
+  product_description?: string
+  svc_service_type?: string
+}): AnuncioNiche {
+  const pType = (product.type || '').toLowerCase()
+
+  // Direct type mapping
+  if (pType === 'servicio') return 'service'
+  if (pType === 'indumentaria') return 'fashion'
+  if (pType === 'restaurante') return 'food'
+
+  // For 'producto' and others, check category + description keywords
+  const searchText = [
+    product.product_category || '',
+    product.product_category_custom || '',
+    product.product_description || '',
+    product.svc_service_type || ''
+  ].join(' ').toLowerCase()
+
+  if (FOOD_KEYWORDS.some(kw => searchText.includes(kw))) return 'food'
+  if (FASHION_KEYWORDS.some(kw => searchText.includes(kw))) return 'fashion'
+  if (DIGITAL_KEYWORDS.some(kw => searchText.includes(kw))) return 'digital'
+
+  // Default fallback
+  return 'physical'
+}
+
+// =============================================
+// ANUNCIO DE CONVERSIÓN — Master Prompt Builder
+// High-conversion Instagram ad image generator
+// =============================================
+
+function buildNicheStrategy(niche: AnuncioNiche): string {
+  switch (niche) {
+    case 'physical':
+      return `ESTRATEGIA VISUAL — PRODUCTO FÍSICO (Electrónica, Salud, Belleza, Hogar):
+- Hero shot: Producto sobre superficie premium (mármol, madera, negro mate) con iluminación dramática.
+- Ángulo preferido: 45° — muestra dimensión y sensación premium.
+- Glow sutil del entorno o rim lighting en los bordes del producto.
+- Badge de precio: bold, alto contraste, esquina inferior-derecha o superior-izquierda.
+- Máximo 4-6 palabras de texto superpuesto.
+- Si hay descuento: usar formato diagonal tachado o "antes/ahora".`
+
+    case 'food':
+      return `ESTRATEGIA VISUAL — ALIMENTOS Y BEBIDAS:
+- Ángulo cenital u overhead, o 30° — ingredientes esparcidos artísticamente alrededor del producto.
+- Vapor, condensación o desenfoque de movimiento para implicar frescura.
+- Temperatura de color cálida (sensación golden hour).
+- Texto superpuesto mínimo — que la comida se venda sola.
+- Precio u oferta en badge limpio que NO compita con la comida.
+- Texturas visibles: gotas, brillo, textura de superficie.`
+
+    case 'service':
+      return `ESTRATEGIA VISUAL — SERVICIOS (Limpieza, Consultoría, Fitness, Belleza):
+- Antes/después split (si aplica) — formato más poderoso para servicios.
+- O: persona EXPERIMENTANDO el resultado (no el proceso).
+- Elementos de confianza integrados: calificación de estrellas, número de clientes, badge de garantía.
+- El texto CTA es más prominente aquí ya que no hay producto físico como ancla.
+- Mostrar el RESULTADO, no el servicio en sí.`
+
+    case 'fashion':
+      return `ESTRATEGIA VISUAL — MODA Y ACCESORIOS:
+- Preferir modelo usando el producto sobre flat lay.
+- Contexto lifestyle: la persona USANDO el artículo en un entorno deseable.
+- Texto mínimo — el styling ES el anuncio.
+- Precio y CTA en barra translúcida en la parte inferior.
+- Iluminación editorial, sensación aspiracional.`
+
+    case 'digital':
+      return `ESTRATEGIA VISUAL — PRODUCTOS DIGITALES Y CURSOS:
+- Mockup en dispositivo (laptop, teléfono) en un entorno lifestyle.
+- Mostrar un screenshot o resultado convincente, NO la miniatura del curso.
+- Elemento de prueba social: "500+ estudiantes" o snippet de testimonio.
+- Más texto es aceptable aquí — la propuesta de valor necesita palabras.
+- Enfoque en el RESULTADO que el cliente obtiene, no en el producto digital en sí.`
+  }
+}
+
+export function buildAnuncioPrompt(
+  aspectRatio: PostAspectRatio,
+  language: string,
+  hasProductImages: boolean,
+  niche: AnuncioNiche
+): string {
+  const langLabel = language === 'es' ? 'ESPAÑOL' : 'ENGLISH'
+  const isSquare = aspectRatio === '3:4' ? false : true // 1:1 treated via override
+  const formatLabel = isSquare ? '1:1 cuadrado (1080×1080, post de feed)' : '3:4 vertical (1080×1350, feed + stories optimizado)'
+
+  const langRule = `═══════════════════════════════════════════════
+REGLA #0 — IDIOMA Y TEXTO (NO NEGOCIABLE)
+═══════════════════════════════════════════════
+- El idioma de TODOS los textos visibles en la imagen DEBE ser: ${langLabel}.
+- COPIA el texto del guión TAL CUAL está escrito — NO traduzcas, NO parafrasees.
+- PROHIBIDO mezclar idiomas. PROHIBIDO usar texto placeholder o lorem ipsum.
+- VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
+═══════════════════════════════════════════════
+
+`
+
+  const productRefRule = hasProductImages
+    ? `═══════════════════════════════════════════════
+REGLA #1 — IMÁGENES DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
+═══════════════════════════════════════════════
+Se adjuntan fotos del PRODUCTO REAL del usuario.
+- El producto DEBE verse EXACTAMENTE como en las fotos de referencia.
+- USA las fotos de referencia como fuente de verdad para forma, silueta, color, textura.
+- NO inventes, NO rediseñes, NO reimagines el producto.
+- La forma del producto NO se modifica bajo ninguna circunstancia.
+═══════════════════════════════════════════════
+
+`
+    : ''
+
+  const nicheStrategy = buildNicheStrategy(niche)
+
+  return `${langRule}${productRefRule}Eres un director creativo de performance especializado en anuncios de respuesta directa para Instagram Ads, enfocado en pequeñas y medianas empresas en Latinoamérica. Tu trabajo es generar imágenes publicitarias que CONVIERTEN — no solo que se vean bonitas.
+
+OBJETIVO:
+Generar UNA (1) imagen publicitaria de alto impacto optimizada para conversión en Instagram Ads. Formato: ${formatLabel}.
+La imagen debe DETENER el scroll, crear DESEO y dirigir al CLIC.
+
+CONTEXTO DE NEGOCIO:
+Recibirás un guión/script con estructura Gancho/Desarrollo/CTA más información del producto. USARÁS TODO este contexto. El anuncio debe sentirse como si perteneciera a ESTA marca específica — no como una plantilla genérica.
+
+${nicheStrategy}
+
+═══════════════════════════════════════════════
+REGLAS DE COMPOSICIÓN (TODAS LAS CATEGORÍAS)
+═══════════════════════════════════════════════
+
+1. **UN SOLO PUNTO FOCAL.** Un producto, un mensaje, una acción. Nunca saturar.
+2. **Test de 3 segundos.** Si alguien no puede entender qué se vende y por qué debería importarle en 3 segundos a tamaño miniatura, rediseñar.
+3. **Jerarquía de texto:**
+   - Línea gancho (más grande): máximo 4-6 palabras, responde "¿por qué debería importarme?"
+   - Detalle de apoyo (más pequeño): precio, oferta o beneficio clave
+   - CTA (elemento tipo botón): "Comprar Ahora", "Ver Más", "Pedir Ya"
+4. **Zonas seguras:** Mantener texto/elementos críticos alejados de los bordes. Usar margen de ~60px en todos los lados.
+5. **Integración de marca:** Logo pequeño, ubicación en esquina (inferior-derecha preferida). Colores de marca solo en elementos de acento — nunca abrumador.
+6. **Nada de estética stock.** Si se usan las imágenes de referencia del producto, integrarlas en una escena que se sienta fotografiada con propósito.
+
+═══════════════════════════════════════════════
+PRINCIPIOS DE COLOR Y CONTRASTE
+═══════════════════════════════════════════════
+
+- El fondo debe contrastar con el feed de Instagram (evitar blanco puro para feeds en modo claro).
+- Fondos oscuros y moody funcionan universalmente para sensación premium.
+- Usar color de acento de marca para el elemento CTA y el precio.
+- Texto: blanco sobre fondos oscuros, oscuro sobre claros — NUNCA texto de color sobre fondos de color.
+- Si el producto es oscuro, usar superficie clara/contrastante o rim lighting.
+
+═══════════════════════════════════════════════
+TEXTO EN IMAGEN — REGLAS DE COPY
+═══════════════════════════════════════════════
+
+Extraer del guión/script pero COMPRIMIR sin piedad:
+
+- **Gancho:** Extraer el beneficio más convincente o punto de dolor del script.
+  - Bien: "Presión arterial en 30 segundos"
+  - Mal: "Monitor Digital de Presión Arterial de Muñeca con Pantalla LED"
+- **Precio/Oferta:** Hacerlo escaneable.
+  - Bien: "₡14,900" o "50% OFF — Solo Hoy"
+  - Mal: "Precio especial de catorce mil novecientos colones"
+- **CTA:** Verbo de acción + urgencia.
+  - Bien: "Pedí el tuyo →"
+  - Mal: "Haga clic aquí para obtener más información"
+
+═══════════════════════════════════════════════
+ESPECIFICACIONES DE SALIDA
+═══════════════════════════════════════════════
+
+- Formato: ${formatLabel}
+- Estilo: Render fotorrealista de producto con elementos de diseño superpuestos
+- SIN watermarks, SIN texto placeholder, SIN lorem ipsum
+- Todo el texto en ${langLabel}
+- Archivo: PNG, alta calidad
+
+═══════════════════════════════════════════════
+QUÉ EVITAR
+═══════════════════════════════════════════════
+
+- Layouts saturados con más de 3 elementos de texto
+- Fondos de gradiente genéricos sin relación al producto
+- Texto ilegible a tamaño de pantalla de teléfono
+- Personas con aspecto de stock con expresiones exageradas
+- Emojis en la imagen (reservar para el caption)
+- Códigos QR (no funcionan en anuncios de feed)
+- Múltiples productos en una imagen
+- Bordes o marcos que desperdicien espacio
+- Número de slide (1/1, 2/2, etc.)
+- Anotaciones técnicas, dimensiones o medidas visibles
+
+DIRECCIÓN DE ARTE PREMIUM:
+El diseño debe verse como una marca grande: minimalista premium + editorial + alto impacto.
+Tipografía: máximo 2 familias sans-serif premium (estilo SF/Inter/Helvetica).
+El anuncio debe detener el scroll INMEDIATAMENTE y comunicar valor en 3 segundos.
+
+${hasProductImages
+    ? `VISUAL (OBLIGATORIO: USAR LAS FOTOS DE PRODUCTO PROPORCIONADAS):
+Se adjuntan fotos reales del producto. USÁLAS como base visual principal.
+- El producto DEBE aparecer con su apariencia REAL (forma, color, textura de las fotos de referencia).
+- Podés ubicar el producto en un contexto atractivo, pero su forma DEBE ser fiel a la referencia.
+- NO generes un producto inventado. NO cambies su silueta, proporciones ni detalles.
+- El producto debe ser el héroe visual del anuncio.`
+    : `VISUAL (INFERIR DEL GUIÓN):
+Como no hay fotos del producto, inferí la mejor escena visual que represente la propuesta de valor del guión.
+- La escena debe comunicar el beneficio principal inmediatamente.
+- Elegí UN escenario que muestre el producto/servicio en su mejor contexto de uso.
+- La imagen debe sentirse auténtica, profesional y aspiracional.`}
+
+GUIÓN DEL USUARIO:
+`
+}

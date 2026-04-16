@@ -4,7 +4,7 @@ import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from '
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
-import { buildPostPrompt, buildPresetPrompt, buildProductPrompt } from './data/image-presets.js'
+import { buildPostPrompt, buildPresetPrompt, buildProductPrompt, buildAnuncioPrompt, detectProductNiche } from './data/image-presets.js'
 import type { PostAspectRatio } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
@@ -771,6 +771,29 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         } catch {
           enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
+      } else if (postStyle === 'anuncio-conversion') {
+        // ANUNCIO DE CONVERSIÓN MODE: high-conversion Instagram ad with niche-adaptive prompt
+        let niche: 'physical' | 'food' | 'service' | 'fashion' | 'digital' = 'physical'
+        if (imageParams.productId && imgMemSupabase) {
+          try {
+            const { data: prod } = await imgMemSupabase
+              .from('products')
+              .select('type, product_category, product_category_custom, product_description, svc_service_type')
+              .eq('id', imageParams.productId)
+              .single()
+            if (prod) niche = detectProductNiche(prod)
+          } catch { /* fallback to physical */ }
+        }
+        const anuncioAR: PostAspectRatio = imageParams.aspectRatio === '1:1' ? '3:4' : postAspectRatio
+        if (imageParams.aspectRatio === '1:1') {
+          imageParams.width = 1080
+          imageParams.height = 1080
+        }
+        const anuncioFormatPrefix = imageParams.aspectRatio === '1:1'
+          ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
+          : aspectRatioPrefix
+        const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
+        enhancedPrompt = anuncioFormatPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
         const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
