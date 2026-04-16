@@ -169,7 +169,7 @@ Edit instruction: ${editPrompt}`
         }
 
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
-        const editAR = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+        const editAR = imageParams.aspectRatio === '1:1' ? '1:1' : imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
 
         // Retry once on transient errors (503, 500, etc.)
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
@@ -527,7 +527,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
-        const enhanceAR = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+        const enhanceAR = imageParams.aspectRatio === '1:1' ? '1:1' : imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
 
         // Retry once on transient 503 errors
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>

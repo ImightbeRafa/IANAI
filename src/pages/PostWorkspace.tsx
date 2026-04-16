@@ -64,6 +64,21 @@ const preloadImage = (url: string): Promise<void> =>
     img.src = url
   })
 
+// Detect the actual aspect ratio of an image from its URL so edits/enhances preserve it
+const detectImageAspectRatio = (imageUrl: string): Promise<PostAspectRatio> =>
+  new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const ratio = img.naturalWidth / img.naturalHeight
+      if (Math.abs(ratio - 1) < 0.1) resolve('1:1')
+      else if (Math.abs(ratio - 3 / 4) < 0.1) resolve('3:4')
+      else resolve('9:16')
+    }
+    img.onerror = () => resolve('9:16') // fallback
+    img.crossOrigin = 'anonymous'
+    img.src = imageUrl
+  })
+
 export default function PostWorkspace() {
   const { productId } = useParams<{ productId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -641,6 +656,7 @@ export default function PostWorkspace() {
       const token = session?.access_token
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
+      const detectedAR = await detectImageAspectRatio(imageUrl)
       const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
       const compressedRefImages = editRefImages.length > 0
         ? await Promise.all(editRefImages.map(img => compressBase64ForApi(img)))
@@ -656,7 +672,7 @@ export default function PostWorkspace() {
           action: 'edit',
           editPrompt: editPrompt.trim(),
           editImage: base64Image,
-          aspectRatio,
+          aspectRatio: detectedAR,
           brandKitId: selectedBrandKitId || undefined,
           ...(compressedRefImages ? { editReferenceImages: compressedRefImages } : {})
         })
@@ -753,6 +769,7 @@ export default function PostWorkspace() {
       const token = session?.access_token
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
+      const detectedAR = await detectImageAspectRatio(imageUrl)
       const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
 
       const response = await fetch(API_URL, {
@@ -764,7 +781,7 @@ export default function PostWorkspace() {
         body: JSON.stringify({
           action: 'enhance',
           enhanceImage: base64Image,
-          aspectRatio,
+          aspectRatio: detectedAR,
           language,
           brandKitId: selectedBrandKitId || undefined,
           productReferenceImages: productImages.length > 0
