@@ -63,6 +63,7 @@ export type FeatureType =
   | 'brand_extraction'   // Brand identity extraction from URL
   | 'reply'              // Client reply generation (Respuestas)
   | 'ocr'                // Image OCR text extraction
+  | 'logo'               // Logo generation / enhancement
 
 interface UsageLogParams {
   userId?: string

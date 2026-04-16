@@ -187,4 +187,112 @@ export const PRODUCT_SUB_STYLES: ProductSubStyle[] = [
   },
 ];
 
+// =============================================
+// LOGO GENERATOR — Archetype metadata (frontend picker)
+// =============================================
+
+export interface LogoArchetypeOption {
+  id: 'auto' | 'wordmark' | 'lettermark' | 'pictorial' | 'abstract' | 'emblem';
+  name: string;
+  nameEs: string;
+  description: string;
+  descriptionEs: string;
+  icon: string;
+}
+
+export const LOGO_ARCHETYPES: LogoArchetypeOption[] = [
+  {
+    id: 'auto',
+    name: 'Let AI Choose',
+    nameEs: 'Que la IA Elija',
+    description: 'AI picks the best archetype for your business',
+    descriptionEs: 'La IA elige el mejor arquetipo para tu negocio',
+    icon: '✨',
+  },
+  {
+    id: 'wordmark',
+    name: 'Wordmark',
+    nameEs: 'Wordmark (Tipográfico)',
+    description: 'Pure typography — like Google, Coca-Cola, FedEx',
+    descriptionEs: 'Pura tipografía — como Google, Coca-Cola, FedEx',
+    icon: 'Aa',
+  },
+  {
+    id: 'lettermark',
+    name: 'Lettermark',
+    nameEs: 'Lettermark (Monograma)',
+    description: 'Initials or monogram — like IBM, HBO, CNN',
+    descriptionEs: 'Iniciales o monograma — como IBM, HBO, CNN',
+    icon: 'M',
+  },
+  {
+    id: 'pictorial',
+    name: 'Pictorial',
+    nameEs: 'Pictórico (Ícono)',
+    description: 'Iconic symbol + name — like Apple, Twitter, Target',
+    descriptionEs: 'Símbolo icónico + nombre — como Apple, Twitter, Target',
+    icon: '◉',
+  },
+  {
+    id: 'abstract',
+    name: 'Abstract',
+    nameEs: 'Abstracto',
+    description: 'Geometric mark — like Nike, Pepsi, Chase',
+    descriptionEs: 'Marca geométrica — como Nike, Pepsi, Chase',
+    icon: '◈',
+  },
+  {
+    id: 'emblem',
+    name: 'Emblem',
+    nameEs: 'Emblema (Badge)',
+    description: 'Text in container — like Starbucks, Harley-Davidson',
+    descriptionEs: 'Texto en contenedor — como Starbucks, Harley-Davidson',
+    icon: '⬡',
+  },
+];
+
+export interface LogoBackgroundOption {
+  id: 'transparent' | 'white' | 'dark';
+  name: string;
+  nameEs: string;
+}
+
+export const LOGO_BACKGROUNDS: LogoBackgroundOption[] = [
+  { id: 'transparent', name: 'Neutral', nameEs: 'Neutral' },
+  { id: 'white', name: 'White', nameEs: 'Blanco' },
+  { id: 'dark', name: 'Dark', nameEs: 'Oscuro' },
+];
+
+export interface LogoEnhanceTierOption {
+  id: 'refine' | 'modernize' | 'rebuild';
+  name: string;
+  nameEs: string;
+  description: string;
+  descriptionEs: string;
+}
+
+export const LOGO_ENHANCE_TIERS: LogoEnhanceTierOption[] = [
+  {
+    id: 'refine',
+    name: 'Refine',
+    nameEs: 'Refinar',
+    description: 'Minimal changes — fix execution issues',
+    descriptionEs: 'Cambios mínimos — arregla la ejecución',
+  },
+  {
+    id: 'modernize',
+    name: 'Modernize',
+    nameEs: 'Modernizar',
+    description: 'Update to current design language',
+    descriptionEs: 'Actualizar al lenguaje de diseño actual',
+  },
+  {
+    id: 'rebuild',
+    name: 'Rebuild',
+    nameEs: 'Reconstruir',
+    description: 'Same DNA, brand-new execution',
+    descriptionEs: 'Mismo DNA, nueva ejecución',
+  },
+];
+
 export default IMAGE_PRESETS;

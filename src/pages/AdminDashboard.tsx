@@ -275,6 +275,7 @@ export default function AdminDashboard() {
       brand_extraction: 'Extracción de Marca',
       reply: 'Respuestas a Clientes',
       ocr: 'OCR de Imágenes',
+      logo: 'Generador de Logos',
       noData: 'No hay datos de uso aún',
       user: 'Usuario',
       time: 'Hora',
@@ -327,6 +328,7 @@ export default function AdminDashboard() {
       brand_extraction: 'Brand Extraction',
       reply: 'Client Replies',
       ocr: 'Image OCR',
+      logo: 'Logo Generator',
       noData: 'No usage data yet',
       user: 'User',
       time: 'Time',
@@ -1330,6 +1332,7 @@ export default function AdminDashboard() {
                         {feature === 'brand_extraction' && <Sparkles className="w-5 h-5 text-indigo-500" />}
                         {feature === 'reply' && <MessageSquarePlus className="w-5 h-5 text-teal-500" />}
                         {feature === 'ocr' && <FileText className="w-5 h-5 text-gray-500" />}
+                        {feature === 'logo' && <Sparkles className="w-5 h-5 text-pink-500" />}
                         <span className="font-medium text-dark-900">
                           {t[feature as keyof typeof t] || feature}
                         </span>

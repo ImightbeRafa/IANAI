@@ -988,6 +988,434 @@ function buildNicheStrategy(niche: AnuncioNiche): string {
   }
 }
 
+// =============================================
+// LOGO GENERATOR & ENHANCER — Master Prompt Builder
+// Creates distinctive, functional, timeless logos across 5 archetypes.
+// Two modes: "generate" (new concepts) and "enhance" (refine uploaded logo).
+// =============================================
+
+export type LogoArchetype = 'wordmark' | 'lettermark' | 'pictorial' | 'abstract' | 'emblem' | 'auto'
+export type LogoMode = 'generate' | 'enhance'
+export type LogoEnhanceTier = 'refine' | 'modernize' | 'rebuild'
+export type LogoBackground = 'transparent' | 'white' | 'dark'
+
+export interface LogoPromptOptions {
+  mode: LogoMode
+  businessName: string
+  industry?: string
+  description?: string
+  brandValues?: string
+  targetAudience?: string
+  archetype?: LogoArchetype
+  stylePreference?: string
+  colorPreferences?: string
+  avoid?: string
+  background?: LogoBackground
+  enhanceTier?: LogoEnhanceTier
+  userKeeps?: string
+  userChanges?: string
+  language?: string
+}
+
+function logoSystemPrompt(language: string): string {
+  const isES = language === 'es'
+  if (!isES) {
+    return `You are a senior brand identity designer with 15 years of experience creating logos for companies ranging from local businesses to global brands. You think like Michael Bierut, Paula Scher, and Sagi Haviv — not like an AI that generates generic emblems.
+
+Your job is to create a logo that is DISTINCTIVE, FUNCTIONAL, and TIMELESS. Not trendy. Not generic. Not cluttered.
+
+## CORE PRINCIPLES (NON-NEGOTIABLE)
+
+1. **Reduction test.** The logo must remain recognizable at 16x16px (favicon), in single color, when photocopied, embroidered, or viewed from across a room. If it needs fine detail, gradients, or color to be recognized, it fails.
+
+2. **A logo is not an illustration.** AVOID: literal pictures of what the business does, detailed scenery, realistic objects with shadows and highlights, clip-art aesthetics. EMBRACE: geometric abstraction, clever negative space, typographic wit, symbolic reduction, unexpected letterform treatments.
+
+3. **Typography is 80% of great logos.** Before reaching for symbols, consider a wordmark with a distinctive typographic treatment (Google, Coca-Cola, FedEx, IBM, Disney are all "just type done well").
+
+4. **Distinctiveness over prettiness.** A "pretty" logo that looks like 500 others in the same industry is a failed logo.
+
+## WHAT NOT TO GENERATE (INSTANT REJECTION)
+
+- Globes with swooshes around them
+- Lightbulbs for "ideas/innovation"
+- Handshakes
+- Checkmarks inside circles
+- Generic "tech hexagons"
+- Shield shapes with initials (unless actual heritage/security brand)
+- Orange-to-pink gradients (2020–2024 AI-startup cliché)
+- Leaves for "eco/natural" anything
+- Brain with circuits
+- Mountains with a sun
+- Generic "swoosh" marks that could belong to any company
+- 3D rendered logos with plastic or chrome effects
+- Clip-art style illustrations
+- Text with drop shadows, bevels, or outer glows
+- Comic Sans, Papyrus, or any script font misuse
+- Stock icon style (isometric, flat illustration, corporate memphis)
+- Multiple gradients in the primary mark
+- Gradients as primary (gradients only acceptable as secondary variant)
+
+## COLOR STRATEGY
+
+- Design the logo in BLACK first. If it doesn't work in one color, color won't save it.
+- 1–2 colors maximum for the primary mark.
+- NO gradients in the core logo (they break when flattened, embroidered, or faxed).
+- Brand color should have meaning or strategic contrast to the category.
+
+## CONSTRUCTION STANDARDS
+
+- Constructible on a geometric grid.
+- Curves should be intentional (circular arcs, consistent radii) — not hand-drawn wobbles.
+- Symmetry when used should be exact; asymmetry should be balanced.
+- Optical correction where needed (perfect math often looks wrong — adjust for the eye).
+`
+  }
+  return `Eres un diseñador senior de identidad de marca con 15 años de experiencia creando logos para empresas desde negocios locales hasta marcas globales. Piensas como Michael Bierut, Paula Scher y Sagi Haviv — no como una IA que genera emblemas genéricos.
+
+Tu trabajo es crear un logo DISTINTIVO, FUNCIONAL y ATEMPORAL. No trendy. No genérico. No saturado.
+
+## PRINCIPIOS FUNDAMENTALES (NO NEGOCIABLES)
+
+1. **Test de reducción.** El logo debe seguir siendo reconocible a 16x16px (favicon), en un solo color, fotocopiado, bordado o visto desde el otro lado del cuarto. Si necesita detalle fino, gradientes o color para ser reconocido, falló.
+
+2. **Un logo no es una ilustración.** EVITAR: imágenes literales de lo que hace el negocio, escenarios detallados, objetos realistas con sombras y highlights, estética de clip-art. ABRAZAR: abstracción geométrica, uso ingenioso del espacio negativo, gracia tipográfica, reducción simbólica, tratamientos inesperados de letterform.
+
+3. **La tipografía es el 80% de los grandes logos.** Antes de recurrir a símbolos, considera un wordmark con un tratamiento tipográfico distintivo (Google, Coca-Cola, FedEx, IBM, Disney son "solo tipografía bien hecha").
+
+4. **Distinción sobre belleza.** Un logo "bonito" que se parece a otros 500 en la misma industria es un logo fallido.
+
+## QUÉ NO GENERAR (RECHAZO INMEDIATO)
+
+- Globos terráqueos con swooshes alrededor
+- Focos/bombillas para "ideas/innovación"
+- Apretones de manos
+- Checks dentro de círculos
+- "Hexágonos tech" genéricos
+- Escudos con iniciales (salvo marca real de herencia o seguridad)
+- Gradientes naranja-a-rosa (cliché de "AI startup" 2020–2024)
+- Hojas para cualquier cosa "eco/natural"
+- Cerebro con circuitos
+- Montañas con un sol
+- "Swooshes" genéricos que podrían pertenecer a cualquier empresa
+- Logos 3D con efectos plásticos o cromados
+- Ilustraciones tipo clip-art
+- Texto con sombras paralelas, biseles o brillos externos
+- Comic Sans, Papyrus o cualquier mal uso de fuente script
+- Estilo de iconos stock (isométrico, ilustración flat, corporate memphis)
+- Múltiples gradientes en la marca principal
+- Gradientes como primary (los gradientes solo son aceptables como variante secundaria)
+
+## ESTRATEGIA DE COLOR
+
+- Diseñá el logo en NEGRO primero. Si no funciona en un color, el color no lo va a salvar.
+- Máximo 1–2 colores para la marca principal.
+- NADA de gradientes en el logo core (se rompen al aplanarlos, bordarlos o faxearlos).
+- El color de marca debe tener significado o contraste estratégico con la categoría.
+
+## ESTÁNDARES DE CONSTRUCCIÓN
+
+- Construible sobre una grilla geométrica.
+- Las curvas deben ser intencionales (arcos circulares, radios consistentes) — no wobbles hechos a mano.
+- Simetría exacta cuando se usa; asimetría balanceada cuando se usa.
+- Corrección óptica cuando sea necesario (la matemática perfecta a menudo se ve mal — ajustá para el ojo).
+`
+}
+
+function archetypeInstruction(archetype: LogoArchetype, language: string): string {
+  const isES = language === 'es'
+  switch (archetype) {
+    case 'wordmark':
+      return isES
+        ? `ARQUETIPO OBLIGATORIO: **WORDMARK (LOGOTIPO)**.
+Pura tipografía. El nombre de la empresa renderizado en una tipografía distintiva, custom, o cuidadosamente elegida con espaciado, peso y tratamiento de carácter intencional.
+Referencias: Google, Coca-Cola, Visa, FedEx.
+Movimientos clave: letterforms custom, ligaduras inesperadas, contraste de pesos, UNA sola letra "trick".
+PROHIBIDO agregar ningún símbolo, ícono o marca pictórica. SOLO TEXTO.`
+        : `REQUIRED ARCHETYPE: **WORDMARK (LOGOTYPE)**.
+Pure typography. The company name rendered in a distinctive, custom, or carefully-chosen typeface with intentional spacing, weight, and character treatment.
+References: Google, Coca-Cola, Visa, FedEx.
+Key moves: custom letterforms, unexpected ligatures, weight contrast, a single "trick" letter.
+FORBIDDEN to add any symbol, icon, or pictorial mark. TEXT ONLY.`
+    case 'lettermark':
+      return isES
+        ? `ARQUETIPO OBLIGATORIO: **LETTERMARK (MONOGRAMA)**.
+Usa iniciales o una sola letra como marca principal.
+Referencias: IBM, HP, CNN, HBO, CC de Chanel.
+Movimientos clave: construcción geométrica, letras entrelazadas, juegos de espacio negativo.
+Podés usar un contenedor geométrico sutil (círculo, cuadrado) pero sin convertirlo en escudo.`
+        : `REQUIRED ARCHETYPE: **LETTERMARK (MONOGRAM)**.
+Uses initials or a single letter as the primary mark.
+References: IBM, HP, CNN, HBO, Chanel's CC.
+Key moves: geometric construction, interlocking letters, negative space plays.
+You may use a subtle geometric container (circle, square) but don't turn it into a shield.`
+    case 'pictorial':
+      return isES
+        ? `ARQUETIPO OBLIGATORIO: **PICTORIAL MARK (ÍCONO + WORDMARK)**.
+Un símbolo simple e icónico emparejado con el nombre de la empresa.
+Referencias: Apple, pájaro de Twitter, Shell, Target.
+Movimientos clave: simplificación extrema, forma continua única, ingenio en espacio negativo.
+El símbolo debe ser construible con UN solo trazo conceptual. Nada de ilustración detallada.`
+        : `REQUIRED ARCHETYPE: **PICTORIAL MARK (ICON + WORDMARK)**.
+A simple, iconic symbol paired with the company name.
+References: Apple, Twitter bird, Shell, Target.
+Key moves: extreme simplification, single continuous shape, negative space cleverness.
+The symbol must be constructible with ONE conceptual stroke. No detailed illustration.`
+    case 'abstract':
+      return isES
+        ? `ARQUETIPO OBLIGATORIO: **ABSTRACT MARK**.
+Forma geométrica o abstracta que no representa nada literalmente.
+Referencias: Nike swoosh, Pepsi, trébol de Adidas, octágono de Chase.
+Movimientos clave: geometría dinámica, construcción en golden ratio, movimiento implícito en la forma.
+Debe verse intencional y construido — no un garabato genérico.`
+        : `REQUIRED ARCHETYPE: **ABSTRACT MARK**.
+Geometric or abstract shape that doesn't represent anything literally.
+References: Nike swoosh, Pepsi, Adidas trefoil, Chase octagon.
+Key moves: dynamic geometry, golden ratio construction, motion implied through form.
+Must look intentional and constructed — not a generic squiggle.`
+    case 'emblem':
+      return isES
+        ? `ARQUETIPO OBLIGATORIO: **EMBLEM / BADGE**.
+Texto integrado dentro de un símbolo o forma contenedora.
+Referencias: Starbucks, Harley-Davidson, logos de equipos de la NFL.
+Movimientos clave: contenedor circular o tipo escudo, tipografía balanceada adentro, restricción con el detalle.
+Apropiado para marcas heritage, F&B, oficios artesanales.`
+        : `REQUIRED ARCHETYPE: **EMBLEM / BADGE**.
+Text integrated inside a symbol or container shape.
+References: Starbucks, Harley-Davidson, NFL team logos.
+Key moves: circular or shield container, balanced typography within, restraint with detail.
+Appropriate for heritage brands, F&B, craft trades.`
+    case 'auto':
+    default:
+      return isES
+        ? `ARQUETIPO: **LA IA DECIDE**.
+Elegí el arquetipo más apropiado para este negocio entre: wordmark, lettermark, pictorial mark, abstract mark, o emblem. Basá la decisión en:
+- Largo del nombre (nombres cortos → wordmark; nombres largos → lettermark)
+- Industria (tech/services → wordmark o abstract; F&B/heritage → emblem; retail/consumer → pictorial)
+- Tono de marca
+Justificá tu elección con la ejecución visual, no con texto.`
+        : `ARCHETYPE: **AI CHOOSES**.
+Pick the most appropriate archetype for this business from: wordmark, lettermark, pictorial mark, abstract mark, or emblem. Base the decision on:
+- Name length (short names → wordmark; long names → lettermark)
+- Industry (tech/services → wordmark or abstract; F&B/heritage → emblem; retail/consumer → pictorial)
+- Brand tone
+Justify your choice through the visual execution, not through text.`
+  }
+}
+
+function nicheGuidance(industry: string | undefined, language: string): string {
+  if (!industry) return ''
+  const isES = language === 'es'
+  const lower = industry.toLowerCase()
+
+  // Heuristic industry matching
+  let guidance = ''
+  if (/tech|saas|software|app|digital|platform/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — TECH / SAAS / SOFTWARE:
+- Inclinación: wordmark o abstract mark.
+- Estilo: geométrico, limpio, a menudo sans-serif.
+- Evitá: engranajes, circuitos, globos, manos estrechándose.
+- Hacé: considerá letterforms custom, símbolos geométricos sutiles.`
+      : `INDUSTRY GUIDANCE — TECH / SAAS / SOFTWARE:
+- Lean: wordmark or abstract mark.
+- Style: geometric, clean, often sans-serif.
+- Avoid: gears, circuits, globes, people shaking hands.
+- Do: consider custom letterforms, subtle geometric symbols.`
+  } else if (/food|restaurant|cafe|bakery|coffee|comida|bebida|resto|pasteler/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — COMIDA Y BEBIDA:
+- Inclinación: emblem, pictorial, o wordmark con personalidad.
+- Estilo: más cálido, más personalidad, script OK para feel artesanal.
+- Evitá: gorros de chef genéricos, tenedores/cuchillos, espigas de trigo (a menos que uses real ingenio).
+- Hacé: evocar sabor y experiencia, no el ingrediente.`
+      : `INDUSTRY GUIDANCE — FOOD & BEVERAGE:
+- Lean: emblem, pictorial, or wordmark with character.
+- Style: warmer, more personality, script OK for artisan feel.
+- Avoid: generic chef hats, forks/knives, wheat stalks (unless done with real wit).
+- Do: evoke taste and experience, not the ingredient.`
+  } else if (/health|medical|clinic|wellness|salud|médic|clínic|fitness/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — SALUD / MEDICINA:
+- Inclinación: pictorial o abstract mark.
+- Estilo: confiable, limpio, a menudo geométrico.
+- Evitá: cruces rojas (marca registrada), estetoscopios, caduceus genérico.
+- Hacé: considerá simbolismo sutil de cuidado, balance o vitalidad.`
+      : `INDUSTRY GUIDANCE — HEALTH / MEDICAL:
+- Lean: pictorial or abstract mark.
+- Style: trustworthy, clean, often geometric.
+- Avoid: red crosses (trademarked), stethoscopes, generic caduceus.
+- Do: consider subtle symbolism of care, balance, or vitality.`
+  } else if (/fashion|beauty|cosmet|moda|belleza|ropa|apparel|jewel/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — MODA Y BELLEZA:
+- Inclinación: wordmark o lettermark.
+- Estilo: elegante, a menudo serif o sans-serif refinado, letterspacing ajustado.
+- Evitá: mariposas, flourishes genéricos, clichés femeninos.
+- Hacé: dejá que la tipografía haga el trabajo, pensá editorial.`
+      : `INDUSTRY GUIDANCE — FASHION & BEAUTY:
+- Lean: wordmark or lettermark.
+- Style: elegant, often serif or refined sans-serif, tight letterspacing.
+- Avoid: butterflies, generic flourishes, feminine clichés.
+- Do: let type do the work, think editorial.`
+  } else if (/consult|law|legal|finance|advisor|account|consult|abogad|financ|contador/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — SERVICIOS PROFESIONALES:
+- Inclinación: lettermark o wordmark.
+- Estilo: confiado, establecido, a menudo serif o geometric sans.
+- Evitá: edificios, apretones de manos, balanzas de justicia, flechas hacia arriba.
+- Hacé: confianza tipográfica, detalles custom sutiles.`
+      : `INDUSTRY GUIDANCE — PROFESSIONAL SERVICES:
+- Lean: lettermark or wordmark.
+- Style: confident, established, often serif or geometric sans.
+- Avoid: buildings, handshakes, scales of justice, upward arrows.
+- Do: typographic confidence, subtle custom details.`
+  } else if (/retail|ecommerce|shop|tienda|e-commerce|store/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — E-COMMERCE / RETAIL:
+- Inclinación: wordmark o pictorial.
+- Estilo: amigable, memorable, versátil a través de contextos de producto.
+- Evitá: bolsas de compras, carritos, dibujos literales del producto.
+- Hacé: crear una marca que viva en productos Y en storefronts.`
+      : `INDUSTRY GUIDANCE — E-COMMERCE / RETAIL:
+- Lean: wordmark or pictorial.
+- Style: friendly, memorable, versatile across product contexts.
+- Avoid: shopping bags, carts, literal product drawings.
+- Do: create a mark that can live on products AND storefronts.`
+  } else if (/clean|construc|delivery|plumb|electric|limpiez|construc|entrega|plomer/.test(lower)) {
+    guidance = isES
+      ? `GUÍA DE INDUSTRIA — OFICIOS Y SERVICIOS:
+- Inclinación: emblem o pictorial con wordmark.
+- Estilo: bold, legible desde lejos (estos van en camiones y uniformes).
+- Evitá: personajes de dibujos animados haciendo el trabajo, herramientas genéricas.
+- Hacé: silueta fuerte, funciona en un color, legible a 50 metros.`
+      : `INDUSTRY GUIDANCE — TRADES & SERVICES:
+- Lean: emblem or pictorial with wordmark.
+- Style: bold, legible from distance (these go on trucks and uniforms).
+- Avoid: cartoon characters doing the job, generic tools.
+- Do: strong silhouette, works in one color, readable at 50 meters.`
+  }
+  return guidance ? guidance + '\n\n' : ''
+}
+
+function backgroundInstruction(bg: LogoBackground, language: string): string {
+  const isES = language === 'es'
+  switch (bg) {
+    case 'white':
+      return isES
+        ? `FONDO: BLANCO PURO (#FFFFFF). Logo en su versión primaria, centrado con márgenes generosos (min 20% de padding en todos los lados).`
+        : `BACKGROUND: PURE WHITE (#FFFFFF). Logo in its primary version, centered with generous margins (min 20% padding on all sides).`
+    case 'dark':
+      return isES
+        ? `FONDO: GRIS OSCURO / NEGRO (#0F0F11). Logo en su versión reversa (blanco o colores invertidos), centrado con márgenes generosos. Probar contraste.`
+        : `BACKGROUND: DARK GRAY / BLACK (#0F0F11). Logo in its reverse version (white or inverted colors), centered with generous margins. Test contrast.`
+    case 'transparent':
+    default:
+      return isES
+        ? `FONDO: BLANCO NEUTRO (#FAFAFA) — simulando fondo transparente/neutral. Logo en su versión primaria, centrado con márgenes generosos (min 20% padding). NO decorado. NO escenas. NO texturas.`
+        : `BACKGROUND: NEUTRAL WHITE (#FAFAFA) — simulating transparent/neutral background. Logo in its primary version, centered with generous margins (min 20% padding). NO decoration. NO scenes. NO textures.`
+  }
+}
+
+export function buildLogoPrompt(opts: LogoPromptOptions): string {
+  const lang = opts.language || 'es'
+  const isES = lang === 'es'
+  const bg = opts.background || 'transparent'
+
+  const system = logoSystemPrompt(lang)
+  const archetype = archetypeInstruction(opts.archetype || 'auto', lang)
+  const niche = nicheGuidance(opts.industry, lang)
+  const bgRule = backgroundInstruction(bg, lang)
+
+  const businessBlock = isES
+    ? `CONTEXTO DEL NEGOCIO:
+- NOMBRE DE LA EMPRESA: ${opts.businessName || '(no proporcionado)'}
+- INDUSTRIA / NICHO: ${opts.industry || '(no especificado — inferí del contexto)'}${opts.description ? `\n- DESCRIPCIÓN: ${opts.description}` : ''}${opts.brandValues ? `\n- VALORES DE MARCA: ${opts.brandValues}` : ''}${opts.targetAudience ? `\n- AUDIENCIA OBJETIVO: ${opts.targetAudience}` : ''}${opts.stylePreference ? `\n- PREFERENCIA DE ESTILO: ${opts.stylePreference}` : ''}${opts.colorPreferences ? `\n- PREFERENCIAS DE COLOR: ${opts.colorPreferences}` : '\n- PREFERENCIAS DE COLOR: elección del diseñador (siempre empezar monocromo)'}${opts.avoid ? `\n- EVITAR: ${opts.avoid}` : ''}
+
+IMPORTANTE: El texto del logo DEBE ser exactamente "${opts.businessName}" — deletreado tal cual, sin abreviaturas, sin cambios de mayúsculas/minúsculas no intencionales.`
+    : `BUSINESS CONTEXT:
+- BUSINESS NAME: ${opts.businessName || '(not provided)'}
+- INDUSTRY / NICHE: ${opts.industry || '(not specified — infer from context)'}${opts.description ? `\n- DESCRIPTION: ${opts.description}` : ''}${opts.brandValues ? `\n- BRAND VALUES: ${opts.brandValues}` : ''}${opts.targetAudience ? `\n- TARGET AUDIENCE: ${opts.targetAudience}` : ''}${opts.stylePreference ? `\n- STYLE PREFERENCE: ${opts.stylePreference}` : ''}${opts.colorPreferences ? `\n- COLOR PREFERENCES: ${opts.colorPreferences}` : '\n- COLOR PREFERENCES: designer\'s choice (always start monochrome)'}${opts.avoid ? `\n- AVOID: ${opts.avoid}` : ''}
+
+IMPORTANT: The logo text MUST be exactly "${opts.businessName}" — spelled as-is, no abbreviations, no unintended case changes.`
+
+  const outputRule = isES
+    ? `═══════════════════════════════════════════════
+SALIDA REQUERIDA — UNA (1) IMAGEN
+═══════════════════════════════════════════════
+- Formato: CUADRADO 1:1 (1024×1024 o superior), alta resolución
+- ${bgRule}
+- El logo ocupa el centro con márgenes generosos (mínimo 18–22% de padding en cada lado)
+- CERO texto adicional más allá del nombre del negocio (nada de tagline, slogan, año de fundación, o texto de prueba)
+- CERO elementos decorativos alrededor (nada de marcos, fondos texturizados, grids visibles, regla/guías, mockups, rótulos, sombras dramáticas)
+- El logo se ve como un ENTREGABLE FINAL listo para colocar en un deck, web, o tarjeta — no un proceso o exploración
+- Nitidez vectorial: bordes limpios, curvas suaves, sin artifacts ni bordes pixelados
+- Proporciones intencionales: la construcción debe verse pensada, no algorítmica
+═══════════════════════════════════════════════
+
+GENERÁ LA IMAGEN FINAL DEL LOGO.`
+    : `═══════════════════════════════════════════════
+REQUIRED OUTPUT — ONE (1) IMAGE
+═══════════════════════════════════════════════
+- Format: SQUARE 1:1 (1024×1024 or higher), high resolution
+- ${bgRule}
+- Logo occupies the center with generous margins (minimum 18–22% padding on each side)
+- ZERO additional text beyond the business name (no tagline, slogan, founding year, or test text)
+- ZERO decorative elements around (no frames, textured backgrounds, visible grids, rulers/guides, mockups, labels, dramatic shadows)
+- The logo should look like a FINAL DELIVERABLE ready to place on a deck, website, or card — not a process or exploration
+- Vector sharpness: clean edges, smooth curves, no artifacts or pixelated borders
+- Intentional proportions: the construction must look thought-out, not algorithmic
+═══════════════════════════════════════════════
+
+GENERATE THE FINAL LOGO IMAGE.`
+
+  if (opts.mode === 'enhance') {
+    const tier = opts.enhanceTier || 'modernize'
+    const tierDetail = isES
+      ? (tier === 'refine'
+          ? `- **REFINE (cambio mínimo):** Mantené el concepto core. Arreglá problemas obvios de ejecución (mejor tipografía, geometría más limpia, forma más simple). El resultado debe ser reconocible como "el mismo logo, pero mejor hecho".`
+          : tier === 'modernize'
+            ? `- **MODERNIZE (actualización significativa):** Mantené la idea core pero traducila al lenguaje de diseño actual. Eliminá efectos dated. Actualizá la tipografía. Simplificá la geometría. El resultado debe sentirse "fresco pero familiar".`
+            : `- **REBUILD (reconstrucción):** Preservá el equity de marca (iniciales, símbolo clave, color si es icónico) pero reconstruí con ejecución completamente nueva. Mismo DNA, nueva ejecución.`)
+      : (tier === 'refine'
+          ? `- **REFINE (minimal change):** Keep the core concept. Fix obvious execution issues (better typography, cleaner geometry, simpler form). The result must be recognizable as "the same logo, but better executed".`
+          : tier === 'modernize'
+            ? `- **MODERNIZE (meaningful update):** Keep the core idea but translate it to current design language. Remove dated effects. Update typography. Simplify geometry. The result should feel "fresh but familiar".`
+            : `- **REBUILD (reconstruction):** Preserve brand equity (initials, key symbol, color if iconic) but rebuild with completely new execution. Same DNA, new execution.`)
+    const enhanceIntro = isES
+      ? `MODO: MEJORAR LOGO EXISTENTE.
+
+Se adjunta una imagen del logo actual del usuario. Tu trabajo NO es reemplazarlo completamente — es mejorar su ejecución preservando su equity de marca.
+
+PRIMERO ANALIZÁ el logo adjunto:
+1. Identificá el arquetipo actual (wordmark, mark, combinación).
+2. Diagnosticá problemas: ¿pasa el test de reducción? ¿La tipografía es débil o genérica? ¿Demasiados elementos? ¿Proporciones raras? ¿Está anticuado (gradientes, biseles, efectos 2010)? ¿Demasiado similar a competidores?
+3. Determiná la estrategia de mejora.
+
+NIVEL DE MEJORA SOLICITADO: **${tier.toUpperCase()}**.
+
+${tierDetail}${opts.userKeeps ? `\n\nEL USUARIO QUIERE MANTENER: ${opts.userKeeps}` : ''}${opts.userChanges ? `\nEL USUARIO QUIERE CAMBIAR: ${opts.userChanges}` : ''}
+`
+      : `MODE: ENHANCE EXISTING LOGO.
+
+An image of the user's current logo is attached. Your job is NOT to replace it entirely — it's to improve its execution while preserving its brand equity.
+
+FIRST ANALYZE the attached logo:
+1. Identify the current archetype (wordmark, mark, combination).
+2. Diagnose problems: does it pass the reduction test? Is the typography weak or generic? Too many elements? Off proportions? Dated (gradients, bevels, 2010-era effects)? Too similar to competitors?
+3. Determine the enhancement strategy.
+
+REQUESTED ENHANCEMENT TIER: **${tier.toUpperCase()}**.
+
+${tierDetail}${opts.userKeeps ? `\n\nUSER WANTS TO KEEP: ${opts.userKeeps}` : ''}${opts.userChanges ? `\nUSER WANTS TO CHANGE: ${opts.userChanges}` : ''}
+`
+    const archetypeBlock = (opts.archetype && opts.archetype !== 'auto') ? archetype + '\n\n' : ''
+    return `${enhanceIntro}\n${system}\n${archetypeBlock}${niche}${businessBlock}\n\n${outputRule}`
+  }
+
+  // Generate new mode
+  return `${system}\n${archetype}\n\n${niche}${businessBlock}\n\n${outputRule}`
+}
+
 export function buildAnuncioPrompt(
   aspectRatio: PostAspectRatio,
   language: string,

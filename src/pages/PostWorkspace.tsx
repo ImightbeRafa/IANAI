@@ -33,7 +33,7 @@ import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
 import UsageBanner from '../components/UsageBanner'
 import { useUsageLimits } from '../hooks/useUsageLimits'
-import { IMAGE_PRESETS, PRODUCT_SUB_STYLES } from '../data/image-presets'
+import { IMAGE_PRESETS, PRODUCT_SUB_STYLES, LOGO_ARCHETYPES, LOGO_BACKGROUNDS, LOGO_ENHANCE_TIERS } from '../data/image-presets'
 import { COLOR_PALETTES } from '../data/color-palettes'
 import { getCustomPalettes, createCustomPalette, deleteCustomPalette, getCustomPostTypes, createCustomPostType, deleteCustomPostType } from '../services/database'
 import type { CustomColorPalette } from '../services/database'
@@ -132,8 +132,23 @@ export default function PostWorkspace() {
   const [backgroundDescription, setBackgroundDescription] = useState('')
   const [mobileConfigOpen, setMobileConfigOpen] = useState(() => window.innerWidth >= 1024)
 
+  // Logo generator state
+  const [logoMode, setLogoMode] = useState<'generate' | 'enhance'>('generate')
+  const [logoArchetype, setLogoArchetype] = useState<string>('auto')
+  const [logoBackground, setLogoBackground] = useState<'transparent' | 'white' | 'dark'>('transparent')
+  const [logoEnhanceTier, setLogoEnhanceTier] = useState<'refine' | 'modernize' | 'rebuild'>('modernize')
+  const [logoBusinessName, setLogoBusinessName] = useState<string>('')
+  const [logoIndustry, setLogoIndustry] = useState<string>('')
+  const [logoAvoid, setLogoAvoid] = useState<string>('')
+  const [logoStylePref, setLogoStylePref] = useState<string>('')
+  const [logoUserKeeps, setLogoUserKeeps] = useState<string>('')
+  const [logoUserChanges, setLogoUserChanges] = useState<string>('')
+  const [existingLogoImage, setExistingLogoImage] = useState<string | null>(null)
+  const existingLogoInputRef = useRef<HTMLInputElement>(null)
+
   const isProductMode = postStyle === 'product'
   const isAnuncioMode = postStyle === 'anuncio-conversion'
+  const isLogoMode = postStyle === 'logo'
 
   const labels = {
     es: {
@@ -145,6 +160,31 @@ export default function PostWorkspace() {
       styleDirectSaleDesc: 'Headline + bullets + CTA',
       styleOrganic: 'Contenido Orgánico',
       styleOrganicDesc: 'Foto + frase educativa',
+      logoType: 'Generador de Logos',
+      logoTypeDesc: 'Crea o mejora el logo de tu marca',
+      logoModeGenerate: 'Crear Nuevo',
+      logoModeEnhance: 'Mejorar Existente',
+      logoArchetypeLabel: 'Arquetipo de Logo',
+      logoBackgroundLabel: 'Fondo',
+      logoEnhanceTierLabel: 'Nivel de Mejora',
+      logoBusinessNameLabel: 'Nombre del negocio',
+      logoBusinessNamePlaceholder: 'Ej: Nova Café',
+      logoIndustryLabel: 'Industria / Nicho',
+      logoIndustryPlaceholder: 'Ej: Cafetería, SaaS, Moda, Consultoría...',
+      logoStylePrefLabel: 'Estilo (opcional)',
+      logoStylePrefPlaceholder: 'Ej: moderno, minimalista, clásico, playful...',
+      logoAvoidLabel: 'Evitar (opcional)',
+      logoAvoidPlaceholder: 'Ej: no usar azul, no usar imágenes literales...',
+      logoAdditionalLabel: 'Instrucciones adicionales (opcional)',
+      logoAdditionalPlaceholder: 'Preferencias, referencias de marcas que te gusten...',
+      logoExistingLabel: 'Sube tu logo actual (requerido)',
+      logoExistingHint: 'Se analizará y mejorará preservando el equity de marca.',
+      logoUserKeepsLabel: 'Qué conservar (opcional)',
+      logoUserKeepsPlaceholder: 'Ej: las iniciales, el color azul, el símbolo...',
+      logoUserChangesLabel: 'Qué cambiar (opcional)',
+      logoUserChangesPlaceholder: 'Ej: tipografía anticuada, el gradiente...',
+      generateLogo: 'Generar Logo',
+      generatingLogo: 'Diseñando logo...',
       scriptLabel: 'Guión',
       selectScript: 'Seleccionar guión guardado',
       pasteScript: 'O pega un guión directamente',
@@ -210,6 +250,31 @@ export default function PostWorkspace() {
       styleDirectSaleDesc: 'Headline + bullets + CTA',
       styleOrganic: 'Organic Content',
       styleOrganicDesc: 'Photo + educational phrase',
+      logoType: 'Logo Generator',
+      logoTypeDesc: 'Create or enhance your brand logo',
+      logoModeGenerate: 'Create New',
+      logoModeEnhance: 'Enhance Existing',
+      logoArchetypeLabel: 'Logo Archetype',
+      logoBackgroundLabel: 'Background',
+      logoEnhanceTierLabel: 'Enhancement Tier',
+      logoBusinessNameLabel: 'Business name',
+      logoBusinessNamePlaceholder: 'E.g. Nova Café',
+      logoIndustryLabel: 'Industry / Niche',
+      logoIndustryPlaceholder: 'E.g. Café, SaaS, Fashion, Consulting...',
+      logoStylePrefLabel: 'Style (optional)',
+      logoStylePrefPlaceholder: 'E.g. modern, minimal, classic, playful...',
+      logoAvoidLabel: 'Avoid (optional)',
+      logoAvoidPlaceholder: 'E.g. no blue, no literal imagery...',
+      logoAdditionalLabel: 'Additional instructions (optional)',
+      logoAdditionalPlaceholder: 'Preferences, brand references you like...',
+      logoExistingLabel: 'Upload your current logo (required)',
+      logoExistingHint: 'It will be analyzed and improved while preserving brand equity.',
+      logoUserKeepsLabel: 'What to keep (optional)',
+      logoUserKeepsPlaceholder: 'E.g. the initials, the blue color, the symbol...',
+      logoUserChangesLabel: 'What to change (optional)',
+      logoUserChangesPlaceholder: 'E.g. outdated typography, the gradient...',
+      generateLogo: 'Generate Logo',
+      generatingLogo: 'Designing logo...',
       scriptLabel: 'Script',
       selectScript: 'Select saved script',
       pasteScript: 'Or paste a script directly',
@@ -270,6 +335,13 @@ export default function PostWorkspace() {
 
   const t = labels[language]
 
+  // Force 1:1 aspect ratio whenever logo mode becomes active
+  useEffect(() => {
+    if (isLogoMode && aspectRatio !== '1:1') {
+      setAspectRatio('1:1')
+    }
+  }, [isLogoMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handle script content passed from ScriptCard via sessionStorage
   useEffect(() => {
     const scriptKey = searchParams.get('scriptKey')
@@ -296,6 +368,16 @@ export default function PostWorkspace() {
           getCustomPostTypes(user.id)
         ])
         setProduct(productData)
+        // Prefill logo fields from product
+        if (productData?.name && !logoBusinessName) setLogoBusinessName(productData.name)
+        if (!logoIndustry) {
+          const inferredIndustry = (productData?.product_category_custom ||
+            productData?.product_category ||
+            productData?.svc_service_type_custom ||
+            productData?.svc_service_type ||
+            productData?.type || '') as string
+          if (inferredIndustry) setLogoIndustry(inferredIndustry)
+        }
         setScripts(scriptsData)
         setCustomPalettes(userPalettes)
         setProductImages(prodImages)
@@ -465,7 +547,16 @@ export default function PostWorkspace() {
   }
 
   const handleGenerate = async () => {
-    if (isProductMode) {
+    if (isLogoMode) {
+      if (!logoBusinessName.trim()) {
+        setError(language === 'es' ? 'Ingresá el nombre del negocio.' : 'Enter the business name.')
+        return
+      }
+      if (logoMode === 'enhance' && !existingLogoImage) {
+        setError(language === 'es' ? 'Subí el logo actual para mejorar.' : 'Upload the existing logo to enhance.')
+        return
+      }
+    } else if (isProductMode) {
       if (productImages.length === 0) {
         setError(t.productRefRequired)
         return
@@ -489,7 +580,38 @@ export default function PostWorkspace() {
 
       let requestBody: Record<string, unknown>
 
-      if (isProductMode) {
+      if (isLogoMode) {
+        const extra = additionalInstructions.trim()
+        requestBody = {
+          prompt: extra || '',
+          mode: 'post',
+          postStyle: 'logo',
+          productId,
+          aspectRatio: '1:1',
+          width: 1024,
+          height: 1024,
+          model: imageModel,
+          language,
+          brandKitId: selectedBrandKitId || undefined,
+          colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
+          customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
+          logoMode,
+          logoArchetype,
+          logoBackground,
+          logoEnhanceTier,
+          logoBusinessName: logoBusinessName.trim(),
+          logoIndustry: logoIndustry.trim() || undefined,
+          logoStyle: logoStylePref.trim() || undefined,
+          logoAvoid: logoAvoid.trim() || undefined,
+          logoUserKeeps: logoUserKeeps.trim() || undefined,
+          logoUserChanges: logoUserChanges.trim() || undefined
+        }
+        // Attach uploaded logo as input_image for enhance mode
+        if (logoMode === 'enhance' && existingLogoImage) {
+          const base64 = await compressBase64ForApi(existingLogoImage)
+          requestBody.input_image = base64
+        }
+      } else if (isProductMode) {
         const extraInstructions = additionalInstructions.trim()
         requestBody = {
           prompt: extraInstructions || 'Professional product photograph',
@@ -527,12 +649,15 @@ export default function PostWorkspace() {
         }
       }
 
-      const selectedUrls = getProductImageUrls()
-      if (selectedUrls.length > 0) {
-        const base64Images = await Promise.all(selectedUrls.map(async u => compressBase64ForApi(await urlToBase64(u))))
-        base64Images.forEach((img, i) => {
-          requestBody[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img
-        })
+      // Attach product images as input_image[s] — skipped in logo mode (logo uses its own uploaded logo)
+      if (!isLogoMode) {
+        const selectedUrls = getProductImageUrls()
+        if (selectedUrls.length > 0) {
+          const base64Images = await Promise.all(selectedUrls.map(async u => compressBase64ForApi(await urlToBase64(u))))
+          base64Images.forEach((img, i) => {
+            requestBody[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img
+          })
+        }
       }
 
       const response = await fetch(API_URL, {
@@ -598,8 +723,8 @@ export default function PostWorkspace() {
               const savedUrl = await uploadPostImageOriginal(user.id, productId, imageUrl)
               const post = await createPost(productId, user.id, {
                 prompt: usedPrompt,
-                width: 1080,
-                height: aspectRatio === '1:1' ? 1080 : aspectRatio === '9:16' ? 1920 : 1440,
+                width: isLogoMode ? 1024 : 1080,
+                height: isLogoMode ? 1024 : (aspectRatio === '1:1' ? 1080 : aspectRatio === '9:16' ? 1920 : 1440),
                 output_format: 'png',
                 model: imageModel
               })
@@ -1058,16 +1183,18 @@ export default function PostWorkspace() {
                 className="w-full flex items-center justify-between px-3 py-2.5 bg-dark-50 rounded-lg text-sm text-dark-700 hover:bg-dark-100 transition-colors border border-dark-200"
               >
                 <span className="flex items-center gap-2 truncate">
-                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : isAnuncioMode ? <Sparkles className="w-4 h-4 text-orange-500 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
+                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : isAnuncioMode ? <Sparkles className="w-4 h-4 text-orange-500 flex-shrink-0" /> : isLogoMode ? <Sparkles className="w-4 h-4 text-pink-500 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
                   {postStyle === 'anuncio-conversion'
                     ? t.anuncioType
                     : postStyle === 'product'
                       ? t.productType
-                      : postStyle === 'venta-directa'
-                        ? t.styleDirectSale
-                        : postStyle.startsWith('custom-')
-                          ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
-                          : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
+                      : postStyle === 'logo'
+                        ? t.logoType
+                        : postStyle === 'venta-directa'
+                          ? t.styleDirectSale
+                          : postStyle.startsWith('custom-')
+                            ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
+                            : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
                   }
                 </span>
                 {showStyleDropdown ? <ChevronUp className="w-4 h-4 text-dark-400" /> : <ChevronDown className="w-4 h-4 text-dark-400" />}
@@ -1128,6 +1255,25 @@ export default function PostWorkspace() {
                       <div className="text-[11px] text-dark-400 mt-0.5">{t.productTypeDesc}</div>
                     </div>
                     {postStyle === 'product' && (
+                      <div className="w-2 h-2 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
+                    )}
+                  </button>
+
+                  {/* Logo Generator — third */}
+                  <button
+                    onClick={() => { setPostStyle('logo'); setStreamlinedScript(null); setShowStyleDropdown(false); setAspectRatio('1:1') }}
+                    className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-dark-50 border-b border-dark-100 ${
+                      postStyle === 'logo' ? 'bg-primary-900/20' : ''
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-pink-500 to-violet-600 flex items-center justify-center flex-shrink-0">
+                      <Sparkles className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-dark-800">{t.logoType}</div>
+                      <div className="text-[11px] text-dark-400 mt-0.5">{t.logoTypeDesc}</div>
+                    </div>
+                    {postStyle === 'logo' && (
                       <div className="w-2 h-2 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
                     )}
                   </button>
@@ -1440,8 +1586,266 @@ export default function PostWorkspace() {
               </div>
             )}
 
-            {/* Script selector — hidden in product mode */}
-            {!isProductMode && (
+            {/* Logo Generator config — only when in logo mode */}
+            {isLogoMode && (
+              <div className="space-y-3">
+                {/* Mode toggle: generate vs enhance */}
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                    <Sparkles className="w-3.5 h-3.5 text-pink-500" />
+                    {language === 'es' ? 'Modo' : 'Mode'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      onClick={() => setLogoMode('generate')}
+                      className={`p-2.5 rounded-lg text-xs transition-colors ${
+                        logoMode === 'generate'
+                          ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                      }`}
+                    >
+                      <div className="font-medium">{t.logoModeGenerate}</div>
+                    </button>
+                    <button
+                      onClick={() => setLogoMode('enhance')}
+                      className={`p-2.5 rounded-lg text-xs transition-colors ${
+                        logoMode === 'enhance'
+                          ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                      }`}
+                    >
+                      <div className="font-medium">{t.logoModeEnhance}</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Existing logo uploader — enhance mode only */}
+                {logoMode === 'enhance' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                      {t.logoExistingLabel}
+                    </label>
+                    <p className="text-[10px] text-dark-400 mb-2">{t.logoExistingHint}</p>
+                    <div className="flex gap-2 items-center">
+                      {existingLogoImage ? (
+                        <div className="relative group">
+                          <div className="w-20 h-20 rounded-lg overflow-hidden border-2 border-primary-500 ring-2 ring-primary-500/30 bg-white">
+                            <img src={existingLogoImage} alt="Existing logo" className="w-full h-full object-contain" />
+                          </div>
+                          <button
+                            onClick={() => setExistingLogoImage(null)}
+                            className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => existingLogoInputRef.current?.click()}
+                          className="w-20 h-20 rounded-lg border-2 border-dashed border-dark-200 flex flex-col items-center justify-center text-dark-400 hover:border-primary-400 hover:text-primary-500 transition-colors"
+                        >
+                          <Upload className="w-4 h-4" />
+                          <span className="text-[9px] mt-0.5">{language === 'es' ? 'Subir logo' : 'Upload logo'}</span>
+                        </button>
+                      )}
+                      <input
+                        ref={existingLogoInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          const reader = new FileReader()
+                          reader.onloadend = () => setExistingLogoImage(reader.result as string)
+                          reader.readAsDataURL(file)
+                          if (existingLogoInputRef.current) existingLogoInputRef.current.value = ''
+                        }}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Enhance tier — enhance mode only */}
+                {logoMode === 'enhance' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                      {t.logoEnhanceTierLabel}
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {LOGO_ENHANCE_TIERS.map(tier => (
+                        <button
+                          key={tier.id}
+                          onClick={() => setLogoEnhanceTier(tier.id)}
+                          className={`p-2 rounded-lg text-left transition-colors ${
+                            logoEnhanceTier === tier.id
+                              ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          <div className="text-[11px] font-semibold">{language === 'es' ? tier.nameEs : tier.name}</div>
+                          <div className="text-[9px] text-dark-400 mt-0.5 leading-tight">{language === 'es' ? tier.descriptionEs : tier.description}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* What to keep / change — enhance mode only */}
+                {logoMode === 'enhance' && (
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                        {t.logoUserKeepsLabel}
+                      </label>
+                      <input
+                        type="text"
+                        value={logoUserKeeps}
+                        onChange={(e) => setLogoUserKeeps(e.target.value)}
+                        placeholder={t.logoUserKeepsPlaceholder}
+                        className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                        {t.logoUserChangesLabel}
+                      </label>
+                      <input
+                        type="text"
+                        value={logoUserChanges}
+                        onChange={(e) => setLogoUserChanges(e.target.value)}
+                        placeholder={t.logoUserChangesPlaceholder}
+                        className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Business name */}
+                <div>
+                  <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                    {t.logoBusinessNameLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={logoBusinessName}
+                    onChange={(e) => setLogoBusinessName(e.target.value)}
+                    placeholder={t.logoBusinessNamePlaceholder}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
+
+                {/* Industry */}
+                <div>
+                  <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                    {t.logoIndustryLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={logoIndustry}
+                    onChange={(e) => setLogoIndustry(e.target.value)}
+                    placeholder={t.logoIndustryPlaceholder}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
+
+                {/* Archetype picker — generate mode only */}
+                {logoMode === 'generate' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                      {t.logoArchetypeLabel}
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {LOGO_ARCHETYPES.map(arch => (
+                        <button
+                          key={arch.id}
+                          onClick={() => setLogoArchetype(arch.id)}
+                          className={`flex items-start gap-2 p-2.5 rounded-lg text-left transition-all ${
+                            logoArchetype === arch.id
+                              ? 'bg-primary-900/20 text-primary-700 border border-primary-300 shadow-sm'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          <span className="text-base leading-none mt-0.5 font-bold">{arch.icon}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[11px] font-semibold">{language === 'es' ? arch.nameEs : arch.name}</div>
+                            <div className="text-[9px] text-dark-400 mt-0.5 leading-tight">{language === 'es' ? arch.descriptionEs : arch.description}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Background picker */}
+                <div>
+                  <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                    {t.logoBackgroundLabel}
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {LOGO_BACKGROUNDS.map(bg => (
+                      <button
+                        key={bg.id}
+                        onClick={() => setLogoBackground(bg.id)}
+                        className={`p-2 rounded-lg text-xs transition-colors ${
+                          logoBackground === bg.id
+                            ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                            : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                        }`}
+                      >
+                        <div className={`w-full h-6 rounded mb-1 border ${bg.id === 'white' ? 'bg-white border-dark-200' : bg.id === 'dark' ? 'bg-dark-900 border-dark-800' : 'bg-gradient-to-br from-dark-50 to-white border-dark-200'}`} />
+                        <div className="font-medium">{language === 'es' ? bg.nameEs : bg.name}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Style preference */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {t.logoStylePrefLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={logoStylePref}
+                    onChange={(e) => setLogoStylePref(e.target.value)}
+                    placeholder={t.logoStylePrefPlaceholder}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                  />
+                </div>
+
+                {/* Avoid */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {t.logoAvoidLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={logoAvoid}
+                    onChange={(e) => setLogoAvoid(e.target.value)}
+                    placeholder={t.logoAvoidPlaceholder}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300"
+                  />
+                </div>
+
+                {/* Additional instructions */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {t.logoAdditionalLabel}
+                  </label>
+                  <textarea
+                    value={additionalInstructions}
+                    onChange={(e) => setAdditionalInstructions(e.target.value)}
+                    placeholder={t.logoAdditionalPlaceholder}
+                    rows={2}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Script selector — hidden in product and logo modes */}
+            {!isProductMode && !isLogoMode && (
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 {t.scriptLabel}
@@ -1592,7 +1996,8 @@ export default function PostWorkspace() {
             </div>
             )}
 
-            {/* Product images — persistent, all used as reference */}
+            {/* Product images — persistent, all used as reference. Hidden in logo mode (logo uses its own uploader). */}
+            {!isLogoMode && (
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 {isProductMode
@@ -1662,9 +2067,11 @@ export default function PostWorkspace() {
                 </p>
               )}
             </div>
+            )}
 
 
-            {/* Aspect Ratio */}
+            {/* Aspect Ratio — hidden in logo mode (forced to 1:1) */}
+            {!isLogoMode && (
             <div>
               <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 <ImageIcon className="w-3.5 h-3.5 text-primary-500" />
@@ -1696,6 +2103,7 @@ export default function PostWorkspace() {
                 ))}
               </div>
             </div>
+            )}
 
             {/* Error */}
             {error && (
@@ -1712,18 +2120,24 @@ export default function PostWorkspace() {
           <div className="px-5 py-4 border-t border-dark-100">
             <button
               onClick={handleGenerate}
-              disabled={generating || (isProductMode ? productImages.length === 0 : !hasScript)}
+              disabled={generating || (
+                isLogoMode
+                  ? (!logoBusinessName.trim() || (logoMode === 'enhance' && !existingLogoImage))
+                  : isProductMode
+                    ? productImages.length === 0
+                    : !hasScript
+              )}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl btn-glow font-medium text-sm"
             >
               {generating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {isProductMode ? t.generatingProduct : t.generating}
+                  {isLogoMode ? t.generatingLogo : isProductMode ? t.generatingProduct : t.generating}
                 </>
               ) : (
                 <>
-                  {isProductMode ? <Camera className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                  {isProductMode ? t.generateProduct : t.generate}
+                  {isLogoMode ? <Sparkles className="w-4 h-4" /> : isProductMode ? <Camera className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                  {isLogoMode ? t.generateLogo : isProductMode ? t.generateProduct : t.generate}
                 </>
               )}
             </button>
@@ -1749,7 +2163,13 @@ export default function PostWorkspace() {
             </button>
             <button
               onClick={handleGenerate}
-              disabled={generating || (isProductMode ? productImages.length === 0 : !hasScript)}
+              disabled={generating || (
+                isLogoMode
+                  ? (!logoBusinessName.trim() || (logoMode === 'enhance' && !existingLogoImage))
+                  : isProductMode
+                    ? productImages.length === 0
+                    : !hasScript
+              )}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg btn-glow text-xs font-medium"
             >
               {generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}

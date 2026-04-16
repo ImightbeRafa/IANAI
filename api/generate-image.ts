@@ -4,8 +4,8 @@ import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from '
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
-import { buildPostPrompt, buildPresetPrompt, buildProductPrompt, buildAnuncioPrompt, detectProductNiche } from './data/image-presets.js'
-import type { PostAspectRatio } from './data/image-presets.js'
+import { buildPostPrompt, buildPresetPrompt, buildProductPrompt, buildAnuncioPrompt, buildLogoPrompt, detectProductNiche } from './data/image-presets.js'
+import type { PostAspectRatio, LogoArchetype, LogoEnhanceTier, LogoBackground } from './data/image-presets.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
@@ -635,6 +635,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const isGeminiModel = selectedModel === 'nano-banana' || selectedModel === 'nano-banana-pro'
     const isPostMode = imageParams.mode === 'post'
     const isProductMode = isPostMode && (imageParams.postStyle || '') === 'product'
+    const isLogoMode = isPostMode && (imageParams.postStyle || '') === 'logo'
     
     let enhancedPrompt: string
 
@@ -648,7 +649,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
       const postStyle: string = imageParams.postStyle || 'venta-directa'
 
-      if (imageParams.aspectRatio === '1:1' && isProductMode) {
+      if (isLogoMode) {
+        // Force 1:1 for logos regardless of incoming aspectRatio
+        imageParams.width = 1024
+        imageParams.height = 1024
+      } else if (imageParams.aspectRatio === '1:1' && isProductMode) {
         imageParams.width = 1080
         imageParams.height = 1080
       } else if (postAspectRatio === '9:16') {
@@ -728,7 +733,84 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       } catch { /* ignore */ }
 
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-      if (isProductMode) {
+      if (isLogoMode) {
+        // LOGO GENERATOR MODE: premium brand identity design with archetypes
+        const VALID_ARCHETYPES = ['wordmark', 'lettermark', 'pictorial', 'abstract', 'emblem', 'auto']
+        const VALID_TIERS = ['refine', 'modernize', 'rebuild']
+        const VALID_BGS = ['transparent', 'white', 'dark']
+        const logoMode = imageParams.logoMode === 'enhance' ? 'enhance' : 'generate'
+        const rawArch = (imageParams.logoArchetype as string) || 'auto'
+        const archetype = (VALID_ARCHETYPES.includes(rawArch) ? rawArch : 'auto') as LogoArchetype
+        const rawTier = (imageParams.logoEnhanceTier as string) || 'modernize'
+        const enhanceTier = (VALID_TIERS.includes(rawTier) ? rawTier : 'modernize') as LogoEnhanceTier
+        const rawBg = (imageParams.logoBackground as string) || 'transparent'
+        const background = (VALID_BGS.includes(rawBg) ? rawBg : 'transparent') as LogoBackground
+
+        // Resolve business name: explicit param > brand kit > product name
+        let resolvedBusinessName = typeof imageParams.logoBusinessName === 'string' && imageParams.logoBusinessName.trim()
+          ? imageParams.logoBusinessName.trim()
+          : (brandKit?.name || '')
+        let resolvedIndustry = typeof imageParams.logoIndustry === 'string' && imageParams.logoIndustry.trim()
+          ? imageParams.logoIndustry.trim()
+          : (brandKit?.industry || '')
+        let resolvedDescription: string | undefined
+        let resolvedBrandValues: string | undefined = brandKit?.tone_keywords?.join(', ')
+        let resolvedTargetAudience: string | undefined = brandKit?.target_audience || undefined
+
+        // Pull from product if we still need context
+        if (imageParams.productId && imgMemSupabase && (!resolvedBusinessName || !resolvedIndustry || !resolvedDescription)) {
+          try {
+            const { data: prod } = await imgMemSupabase
+              .from('products')
+              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom')
+              .eq('id', imageParams.productId)
+              .single()
+            if (prod) {
+              if (!resolvedBusinessName) resolvedBusinessName = prod.name || ''
+              if (!resolvedIndustry) {
+                resolvedIndustry = prod.product_category_custom || prod.product_category || prod.svc_service_type_custom || prod.svc_service_type || prod.type || ''
+              }
+              resolvedDescription = prod.product_description || prod.description || undefined
+              if (!resolvedTargetAudience) resolvedTargetAudience = prod.target_audience || undefined
+            }
+          } catch { /* ignore */ }
+        }
+
+        const isEnhance = logoMode === 'enhance'
+        if (isEnhance && !hasProductImages) {
+          return res.status(400).json({
+            error: postLanguage === 'es'
+              ? 'Se requiere subir una imagen del logo existente para usar el modo Mejorar.'
+              : 'You must upload the existing logo image to use Enhance mode.'
+          })
+        }
+
+        const logoPrompt = buildLogoPrompt({
+          mode: logoMode as 'generate' | 'enhance',
+          businessName: resolvedBusinessName,
+          industry: resolvedIndustry || undefined,
+          description: resolvedDescription,
+          brandValues: resolvedBrandValues,
+          targetAudience: resolvedTargetAudience,
+          archetype,
+          stylePreference: typeof imageParams.logoStyle === 'string' ? imageParams.logoStyle : undefined,
+          colorPreferences: typeof imageParams.logoColorPreferences === 'string' ? imageParams.logoColorPreferences : undefined,
+          avoid: typeof imageParams.logoAvoid === 'string' ? imageParams.logoAvoid : undefined,
+          background,
+          enhanceTier,
+          userKeeps: typeof imageParams.logoUserKeeps === 'string' ? imageParams.logoUserKeeps : undefined,
+          userChanges: typeof imageParams.logoUserChanges === 'string' ? imageParams.logoUserChanges : undefined,
+          language: postLanguage
+        })
+
+        // Force 1:1 formatting prefix (overrides the aspectRatioPrefix built earlier)
+        const logoFormatPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrada (1024×1024 o mayor). No uses otro aspect ratio.\n\n`
+        // Logos: respect user colors if provided; ignore brand kit visual style/logo injection (we're DESIGNING a logo, not placing an existing one)
+        // Also skip visual memory (learned post styles don't apply to logo design)
+        // Skip tail user prompt concatenation — buildLogoPrompt is self-contained.
+        const userExtra = userPrompt.trim() ? `\n\nINSTRUCCIONES ADICIONALES DEL USUARIO:\n${userPrompt.trim()}\n` : ''
+        enhancedPrompt = logoFormatPrefix + colorPrefix + logoPrompt + userExtra
+      } else if (isProductMode) {
         // PRODUCT PHOTOGRAPHY MODE: high-quality product images without text overlays
         if (!hasProductImages) {
           return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
@@ -839,7 +921,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const promptParts: PromptPart[] = [{ text: enhancedPrompt }]
 
         // Brand Kit: inject logo as FIRST inline image (highest visual priority for Gemini)
-        if (brandKit && brandKit.logo_url && isPostMode && !isProductMode) {
+        // Skip in product/logo modes — product uses its own refs; logo mode IS the logo design
+        if (brandKit && brandKit.logo_url && isPostMode && !isProductMode && !isLogoMode) {
           try {
             const logoData = await fetchBrandLogoAsBase64(brandKit)
             if (logoData) {
@@ -871,13 +954,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             }
           }
         }
-        if (productImageParts.length > 0 && isPostMode) {
+        if (productImageParts.length > 0 && isPostMode && !isLogoMode) {
           promptParts.push({ text: '══ IMÁGENES DE REFERENCIA DEL PRODUCTO REAL ══\nEstas son fotos REALES del producto del usuario. El producto en el diseño DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:' })
+        }
+        if (productImageParts.length > 0 && isLogoMode) {
+          promptParts.push({ text: '══ LOGO EXISTENTE DEL USUARIO (PARA ANALIZAR Y MEJORAR) ══\nEsta es la imagen del logo ACTUAL del usuario. Analizalo y aplicá la estrategia de mejora solicitada. Preservá el equity de marca (nombre, iniciales, símbolo clave si aplica) pero mejorá la ejecución según el nivel pedido.' })
         }
         promptParts.push(...productImageParts)
 
         // Closing reinforcement if product images were provided
-        if (productImageParts.length > 0 && isPostMode) {
+        if (productImageParts.length > 0 && isPostMode && !isLogoMode) {
           promptParts.push({ text: 'RECORDATORIO: El producto en el diseño DEBE ser IDÉNTICO a las fotos de referencia proporcionadas arriba. NO inventes otro producto. Copia forma, color, silueta y textura EXACTAMENTE de las referencias.' })
         }
 
@@ -936,13 +1022,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
-          feature: 'image',
+          feature: isLogoMode ? 'logo' : 'image',
           model: selectedModel,
           inputTokens: genInputTokens,
           outputTokens: genOutputTokens,
           thinkingTokens: genThinkingTokens,
           success: true,
-          metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image, brandKitId: brandKit?.id, brandKitName: brandKit?.name }
+          metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image, brandKitId: brandKit?.id, brandKitName: brandKit?.name, ...(isLogoMode ? { logoMode: imageParams.logoMode, archetype: imageParams.logoArchetype } : {}) }
         })
 
         // Return immediately (no polling needed for Gemini)
