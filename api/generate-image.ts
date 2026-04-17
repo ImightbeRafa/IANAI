@@ -304,6 +304,11 @@ Edit instruction: ${editPrompt}`
 
       const hasProductRef = Array.isArray(imageParams.productReferenceImages) && imageParams.productReferenceImages.length > 0
 
+      // Enhance tier: 'polish' | 'modernize' | 'rebuild' (default 'modernize')
+      const rawTier = (imageParams.enhanceTier || 'modernize') as string
+      const enhanceTier: 'polish' | 'modernize' | 'rebuild' =
+        rawTier === 'polish' || rawTier === 'rebuild' ? rawTier : 'modernize'
+
       const productRefRule = hasProductRef
         ? `\n═══════════════════════════════════════════════
 REGLA #0 — IMAGEN DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
@@ -316,7 +321,8 @@ Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
 `
         : ''
 
-      const ENHANCE_SYSTEM_PROMPT = `${productRefRule}
+      // Shared non-negotiable header for all tiers
+      const HARD_CONSTRAINTS = `${productRefRule}
 ═══════════════════════════════════════════════
 REGLA #1 — TEXTO Y LENGUAJE (NO NEGOCIABLE)
 ═══════════════════════════════════════════════
@@ -330,149 +336,108 @@ REGLA #1 — TEXTO Y LENGUAJE (NO NEGOCIABLE)
 - VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
 ═══════════════════════════════════════════════
 
-ACTÚA COMO:
-Director Creativo + Director de Arte Senior + Diseñador Editorial de marcas globales (Apple / Aesop / Jacquemus / Nike Campaign Level).
+REGLA #2 — PRODUCTO INTACTO (NO NEGOCIABLE)
+${hasProductRef ? 'Se proporcionan imágenes de referencia del producto real. USA ESAS REFERENCIAS como la ÚNICA fuente de verdad para la apariencia del producto.' : 'La forma del producto NO se modifica bajo ninguna circunstancia.'}
+- PROHIBIDO rediseñar la silueta, proporciones, ángulos, texturas ni detalles físicos del producto.
+- PROHIBIDO "estilizar" el producto, convertirlo en cartoon, 3D fake, ilustración o reinterpretación.
+- El producto debe verse EXACTAMENTE como${hasProductRef ? ' en las imágenes de referencia adjuntas' : ' en el input original'}.
 
-TAREA:
-Vas a REINTERPRETAR el diseño que te paso.
-No es solo "mejorarlo".
-Es llevarlo a una versión más inteligente, más conceptual, más coherente visualmente y con mayor impacto creativo.
+REGLA #3 — LOGO INTACTO (NO NEGOCIABLE)
+- Si hay un logo en la imagen original O se adjunta como referencia, COPIALO PÍXEL POR PÍXEL.
+- PROHIBIDO redibujar, estilizar, reubicar, reinterpretar, reemplazar o modificar el logo.
+- El logo debe aparecer idéntico en forma, color y proporciones.
 
-Puedes:
-- Cambiar composición
-- Cambiar estructura visual
-- Cambiar jerarquía
-- Cambiar distribución de elementos
-- Cambiar dirección de arte
-- Proponer una narrativa visual diferente
-
-No puedes:
-- Cambiar el mensaje central
-- Cambiar el texto
-- Alterar la intención comercial
-
-Tu objetivo es que el diseño tenga:
-- Más intención
-- Más concepto
-- Más carácter
-- Más tensión visual
-- Más autoridad
-
----
-
-ENFOQUE CREATIVO (OBLIGATORIO)
-
-1) Primero analiza:
-   - ¿Qué quiere comunicar realmente esta pieza?
-   - ¿Es aspiracional? ¿Es técnico? ¿Es emocional? ¿Es agresivo?
-   - ¿La composición actual refleja eso o es genérica?
-
-2) Luego elige UNA dirección creativa clara:
-   Ejemplos posibles (elige la más lógica según el diseño):
-   - Editorial de revista de lujo
-   - Minimalismo brutalista
-   - High-fashion campaign
-   - Tech futurista limpio
-   - Conceptual con uso fuerte de espacio negativo
-   - Layout modular tipo sistema de diseño
-   - Composición asimétrica dinámica
-   - Enfoque tipográfico dominante
-   - Imagen dominante con microcopy sutil
-   - Dirección artística cinematográfica
-
-3) El diseño debe sentirse intencional.
-Nada centrado por default.
-Nada simétrico porque sí.
-Nada "Canva vibes".
-
----
-
-REGLAS DE ALTO NIVEL
-
-* Diseña con concepto, no con decoración.
-* El espacio negativo es parte activa del diseño.
-* El contraste genera jerarquía.
-* La tipografía debe tener personalidad.
-* Si todo destaca, nada destaca.
-* El diseño debe tener un punto focal claro.
-* Menos elementos, pero más poder.
-
----
-
-PERMITE CAMBIOS ESTRUCTURALES
-
-- Puedes eliminar elementos que no aporten.
-- Puedes cambiar proporciones.
-- Puedes convertir bullets en bloques visuales.
-- Puedes usar texto como elemento gráfico.
-- Puedes romper la cuadrícula si tiene intención.
-- Puedes crear tensión entre bloques.
-- Puedes usar sobreposición inteligente.
-- Puedes introducir ritmo visual.
-
----
-
-TIPOGRAFÍA
-
-No te limites a Inter.
-Explora:
-- Serif moderna para contraste elegante
-- Sans ultra bold para impacto
-- Condensed para carácter
-- Tracking intencional
-- Uso de mayúsculas estratégico
-- Escalas tipográficas marcadas
-
-Máximo 2 familias.
-
----
-
-COLOR
-
-Puedes:
-- Simplificar a monocromático
-- Usar contraste dramático
-- Usar un acento inesperado
-- Trabajar con bloques sólidos
-- Crear un mood más definido
-
-Evita:
-- Colores corporativos sin intención
-- Degradados genéricos
-- Saturación innecesaria
-
----
-
-REGLA CRÍTICA — PRODUCTO INTACTO (NO NEGOCIABLE):
-${hasProductRef ? 'Se proporcionan imágenes de referencia del producto real. USA ESAS REFERENCIAS para mantener el producto fiel a la realidad.' : 'La forma del producto NO se modifica bajo ninguna circunstancia.'}
-- No rediseñar la silueta, proporciones, ángulos ni detalles físicos.
-- No "stylize", no cartoon, no 3D fake, no reinterpretación del objeto.
-- El producto debe mantenerse EXACTAMENTE como está${hasProductRef ? ' en las imágenes de referencia' : ' en el input'} (misma forma real).
-- Solo se permite: mejora de recorte/limpieza, iluminación/contraste, nitidez, corrección de color, sombra sutil realista y fondo/entorno.
-Si el producto no está en imagen y es un vector: NO lo redibujes, solo optimiza su presentación (escala, ubicación, márgenes, halo/sombra suave).
-
----
-
-REGLA DE FORMATO (NO NEGOCIABLE):
+REGLA #4 — FORMATO (NO NEGOCIABLE)
 - La imagen de salida debe mantener EXACTAMENTE el mismo aspect ratio que la imagen de entrada.
 - NO cambies de vertical a horizontal ni viceversa.
+═══════════════════════════════════════════════
+`
 
----
+      // Tier-specific creative direction
+      const POLISH_BODY = `
+MODO: POLISH (pulido quirúrgico — cambio mínimo, máxima fidelidad).
 
-OBJETIVO FINAL
+Tu tarea NO es rediseñar. Es PULIR ejecución conservando el diseño original al 100%.
 
-Que esta pieza no se vea como:
-- Un diseño hecho por IA.
-- Una plantilla de Canva.
-- Un post genérico de Instagram.
+PERMITIDO (y esperado):
+- Refinar tipografía (kerning, tracking, jerarquía sutil, eliminar rarezas).
+- Mejorar espaciado y alineación (grillas más limpias, márgenes consistentes).
+- Ajustar contraste, balance de color, saturación, luminosidad (mantener paleta original).
+- Limpiar fondo (eliminar artefactos, ruido, suciedad de IA).
+- Mejorar iluminación y sombras sutiles del producto (manteniendo su apariencia).
+- Corregir imperfecciones de renderizado (bordes sucios, halos, compresión).
 
-Debe verse como:
-Una campaña real de marca grande.
-Algo que alguien guardaría en Pinterest.
-Algo que podría estar en Behance.
-Algo que tenga identidad.
-Algo que tenga carácter.
-Algo creativo de verdad.
+PROHIBIDO:
+- Cambiar composición, layout, jerarquía o distribución de elementos.
+- Mover, redimensionar o reorganizar elementos.
+- Agregar, eliminar o reemplazar elementos.
+- Cambiar la dirección de arte, el mood o el concepto.
+- Cambiar familias tipográficas (solo refinar las existentes).
+- Cambiar la paleta de colores (solo ajustar balance).
+- Reinterpretar el producto, el logo o las imágenes.
+
+OBJETIVO: El usuario debe poder comparar antes/después y decir "es el mismo diseño, pero mejor ejecutado".
+`
+
+      const MODERNIZE_BODY = `
+MODO: MODERNIZE (actualización significativa conservando identidad).
+
+Tu tarea es llevar el diseño a un nivel de ejecución actual, preservando su concepto, mensaje y elementos clave.
+
+PERMITIDO:
+- Refinar composición sin alterar la jerarquía principal (ajustes de balance, ritmo, respiración).
+- Actualizar tipografía (cambiar una familia si la actual es genérica/dated; máximo 2 familias total).
+- Mejorar jerarquía visual y punto focal.
+- Ajustar paleta para mayor carácter (mismo mood, mejor ejecución).
+- Mejorar tratamiento de fondo, sombras, iluminación.
+- Refinar tratamiento de texto (peso, tracking, escala).
+- Modernizar estilos dated (degradados genéricos, biseles, efectos 2010).
+
+PROHIBIDO:
+- Cambiar el concepto, el mensaje o la intención del diseño.
+- Eliminar elementos clave (producto, CTA, título principal, logo).
+- Redibujar o reinterpretar el producto o el logo.
+- Cambiar el texto (cada palabra se copia idéntica).
+- Cambiar el aspect ratio.
+- "Canva vibes" — todo debe sentirse intencional.
+
+OBJETIVO: El resultado debe sentirse "fresco pero familiar" — el mismo diseño, traducido al lenguaje de diseño actual.
+`
+
+      const REBUILD_BODY = `
+MODO: REBUILD (reinterpretación creativa agresiva).
+
+ACTÚA COMO: Director Creativo + Director de Arte Senior de marcas globales (Apple / Aesop / Jacquemus / Nike Campaign Level).
+
+Vas a REINTERPRETAR el diseño. Llevalo a una versión más inteligente, más conceptual, con mayor impacto creativo.
+
+PERMITIDO (con los límites de las reglas #1-4 arriba):
+- Cambiar composición, estructura visual, jerarquía, distribución de elementos.
+- Cambiar dirección de arte, mood, narrativa visual.
+- Eliminar elementos decorativos que no aporten.
+- Convertir bullets en bloques visuales; usar texto como elemento gráfico.
+- Romper la cuadrícula con intención; crear tensión entre bloques.
+- Simplificar a monocromático o usar contraste dramático.
+- Explorar tipografía (serif moderna, sans ultra bold, condensed, tracking intencional).
+
+PROHIBIDO (sin excepción):
+- Cambiar, traducir, parafrasear o reescribir CUALQUIER texto (Regla #1).
+- Rediseñar, estilizar o reinterpretar el producto (Regla #2).
+- Modificar el logo en forma, color o estilo (Regla #3).
+- Cambiar el aspect ratio (Regla #4).
+
+ENFOQUE:
+1) Analizá qué quiere comunicar la pieza (aspiracional / técnico / emocional / agresivo).
+2) Elegí UNA dirección creativa clara (editorial de lujo / minimalismo brutalista / high-fashion / tech futurista / conceptual con espacio negativo / asimétrica dinámica / tipográfica dominante / cinematográfica).
+3) El diseño debe sentirse intencional. Nada centrado por default. Nada "Canva vibes".
+
+OBJETIVO: Una campaña real de marca grande. Algo que alguien guardaría en Pinterest o en Behance.
+`
+
+      const TIER_BODY = enhanceTier === 'polish' ? POLISH_BODY : enhanceTier === 'rebuild' ? REBUILD_BODY : MODERNIZE_BODY
+
+      const ENHANCE_SYSTEM_PROMPT = `${HARD_CONSTRAINTS}
+${TIER_BODY}
 
 GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`
 
@@ -508,7 +473,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           try {
             const logoData = await fetchBrandLogoAsBase64(brandKit)
             if (logoData) {
-              promptParts.push({ text: `══ LOGO DE MARCA "${brandKit.name}" ══\nSi el logo aparece en la imagen original, MANTENLO exactamente igual. Si NO aparece, AGRÉGALO en una posición prominente (esquina superior). Reprodúcelo fielmente de la referencia adjunta:` })
+              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit.name}" (NO NEGOCIABLE) ══\nEste es el logo REAL y OFICIAL del usuario. Reglas absolutas:\n1. Si el logo aparece en la imagen original, REEMPLÁZALO con esta versión oficial, COPIÁNDOLA PÍXEL POR PÍXEL.\n2. Si el logo NO aparece en la imagen original, AGRÉGALO en una posición prominente (esquina superior), COPIÁNDOLO PÍXEL POR PÍXEL desde esta referencia.\n3. PROHIBIDO redibujar, estilizar, reinterpretar, rediseñar, recolorear, rotar, deformar o modificar el logo de CUALQUIER forma.\n4. PROHIBIDO cambiar el tipo de letra, la forma, el color, las proporciones o el espaciado del logo.\n5. El logo debe aparecer IDÉNTICO a la referencia adjunta — como si lo hubieras pegado directamente desde la imagen de referencia.` })
               promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
               console.log(`Brand logo injected in enhance for "${brandKit.name}"`)
             }
@@ -518,7 +483,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         // NOW add the image to enhance (AFTER product refs + logo so model has truth established)
-        promptParts.push({ text: '══ IMAGEN A MEJORAR ══\nEsta es la imagen de diseño que debes reinterpretar y mejorar. Aplica las reglas anteriores:' })
+        promptParts.push({ text: '══ IMAGEN A MEJORAR ══\nEsta es la imagen de diseño sobre la que debes aplicar la mejora. Respeta TODAS las reglas no negociables (#1 texto, #2 producto, #3 logo, #4 formato) declaradas arriba, y aplica SOLO los cambios permitidos por el tier seleccionado:' })
         promptParts.push({ inlineData: { mimeType: base64Match[1], data: base64Match[2] } })
 
         // Closing reinforcement if product refs were provided
@@ -926,7 +891,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           try {
             const logoData = await fetchBrandLogoAsBase64(brandKit)
             if (logoData) {
-              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit.name}" ══\nEsta es la imagen del logo que DEBES incluir en el diseño. Reprodúcelo FIELMENTE, sin modificar, en una posición prominente (esquina superior o centrado arriba).` })
+              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit.name}" (NO NEGOCIABLE) ══\nDEBES incluir este logo EXACTO en el diseño, COPIÁNDOLO PÍXEL POR PÍXEL desde la referencia adjunta. Reglas absolutas:\n1. Ubícalo en una posición prominente (esquina superior o centrado arriba).\n2. PROHIBIDO redibujar, estilizar, reinterpretar, rediseñar, recolorear, rotar o deformar el logo.\n3. PROHIBIDO cambiar el tipo de letra, la forma, el color, las proporciones o el espaciado del logo.\n4. El logo debe aparecer IDÉNTICO a la referencia — como si lo hubieras pegado directamente.` })
               promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
               console.log(`Brand logo injected inline for "${brandKit.name}" (${logoData.mimeType}, ${Math.round(logoData.data.length / 1024)}KB)`)
             } else {
@@ -955,7 +920,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
         }
         if (productImageParts.length > 0 && isPostMode && !isLogoMode) {
-          promptParts.push({ text: '══ IMÁGENES DE REFERENCIA DEL PRODUCTO REAL ══\nEstas son fotos REALES del producto del usuario. El producto en el diseño DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:' })
+          const refCount = productImageParts.length
+          promptParts.push({ text: `══ ${refCount} IMÁGEN${refCount > 1 ? 'ES' : ''} DE REFERENCIA DEL PRODUCTO REAL (OBLIGATORIO USAR TODAS) ══\n${refCount > 1 ? `Se adjuntan ${refCount} fotos REALES del producto del usuario. Cada una muestra un ángulo, vista, contexto o escena distinta del MISMO producto.\n\nOBLIGATORIO: DEBES examinar y usar la información de TODAS las ${refCount} imágenes — no solo la primera. Cada imagen aporta información visual distinta que el diseño debe reflejar:\n- Forma, silueta, proporciones y color del producto → tomado de las fotos donde el producto aparece claramente.\n- Textura, materiales y detalles físicos → tomado de las fotos con más nitidez sobre el producto.\n- Contexto de uso, escena, personas, ambiente → tomado de las fotos lifestyle/en uso si las hay.\n- PROHIBIDO ignorar imágenes. PROHIBIDO usar solo la primera. Considera TODAS como fuente de verdad complementaria.` : `Se adjunta una foto REAL del producto del usuario.`}\n\nEl producto en el diseño DEBE verse EXACTAMENTE como aparece en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Estas imágenes son la ÚNICA fuente de verdad:` })
         }
         if (productImageParts.length > 0 && isLogoMode) {
           promptParts.push({ text: '══ LOGO EXISTENTE DEL USUARIO (PARA ANALIZAR Y MEJORAR) ══\nEsta es la imagen del logo ACTUAL del usuario. Analizalo y aplicá la estrategia de mejora solicitada. Preservá el equity de marca (nombre, iniciales, símbolo clave si aplica) pero mejorá la ejecución según el nivel pedido.' })

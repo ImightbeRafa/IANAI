@@ -4,125 +4,101 @@ import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 
 const XAI_API_URL = 'https://api.x.ai/v1/chat/completions'
 
+// Product context sent from the frontend to anchor the output to THIS specific product
+interface ProductContext {
+  name?: string
+  description?: string
+  niche?: string
+  differentiation?: string
+}
+
 // Post-type-aware condensation rules
-function getSystemPrompt(postStyle: string, language: string): string {
+function getSystemPrompt(postStyle: string, language: string, productContext?: ProductContext): string {
   const lang = language === 'en' ? 'English' : 'Spanish'
 
-  const baseRules = `You are a senior copywriter specializing in condensing advertising scripts for social media image posts.
-The user will give you a full script that follows a persuasion structure (Hook → Development → CTA).
+  const baseRules = `You are a senior copywriter condensing advertising scripts into short, punchy image copy for social media posts.
 
-YOUR JOB: Distill it into short, punchy image copy — BUT you MUST preserve the script's core persuasion arc:
-1. THE HOOK — the attention-grabbing opening idea. Keep its essence; don't genericize it.
-2. THE KEY ARGUMENT — the unique selling point, differentiator, or proof from the development section. This is the "why buy" — never lose it.
-3. THE CTA — the closing push to action. Keep the urgency/incentive if present.
+YOUR JOB: Distill the user's script into image-ready copy. The output must feel like a distilled version of THIS SPECIFIC script — not a generic ad and not a copy of other outputs you've produced before.
 
-CRITICAL RULES:
-- Output ONLY the condensed text. No explanations, no labels, no markdown, no commentary.
+NON-NEGOTIABLE RULES:
+- Output ONLY the condensed copy. No explanations, no labels, no markdown, no commentary, no quotation marks around the whole thing.
 - Keep the SAME language as the input (${lang}). Do NOT translate.
-- Condense ≠ rewrite from scratch. The output must feel like a distilled version of THIS specific script, not a generic ad.
-- Remove filler, transitions, repetition, and verbose phrasing — but KEEP specific claims, numbers, product names, and unique angles.
-- If the script mentions a specific benefit, stat, or differentiator, it MUST appear in the output.
-- The result should read as a coherent mini-pitch, not disconnected fragments.
-- Output must be ready to paste directly into an image generation prompt.`
+- SPECIFICITY OVER GENERICNESS: Lift the script's own distinctive words, numbers, product names, claims, and angles — verbatim or lightly reworded. If the script contains a stat, a unique phrase, a specific ingredient, a time frame, or a named benefit, it MUST appear in the output.
+- The output must read like copy someone wrote AFTER reading this particular script, not copy that could apply to any product in the category.
+- Remove filler, transitions, repetition, and verbose phrasing — but preserve the script's unique angle.
+- Use short lines, separated by line breaks. The total output should be ~40-60 words, feeling natural and readable (not robotic slot-fills).
+- The result should be ready to paste directly into an image generation prompt.`
 
+  const contextBlock = productContext && (productContext.name || productContext.description || productContext.niche)
+    ? `
+
+PRODUCT CONTEXT (anchor the output on THIS product — do not drift into generic category copy):
+${productContext.name ? `- Product: ${productContext.name}` : ''}
+${productContext.niche ? `- Niche / category: ${productContext.niche}` : ''}
+${productContext.description ? `- Description: ${productContext.description}` : ''}
+${productContext.differentiation ? `- Differentiation: ${productContext.differentiation}` : ''}`
+    : ''
+
+  // Style-specific INTENT (shape + purpose), not rigid line counts. Lets the model
+  // choose natural line lengths while preserving the post style's communicative goal.
   const styleRules: Record<string, string> = {
     'venta-directa': `
 
-OUTPUT FORMAT:
-Line 1: Hook headline — the script's opening idea condensed into one punchy line (max 10 words)
-Lines 2-4: 3 key selling points from the script's development — each a short, specific claim (max 6 words each). Use the script's own arguments, not generic benefits.
-Line 5: CTA — the script's call to action, condensed (max 5 words). Keep any urgency/offer.
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — VENTA DIRECTA (direct-sale ad):
+Shape the output as: a hook headline, 3 key selling points pulled from THIS script's development, and a CTA. Aim for ~50 words total. Each element on its own line. The 3 selling points must be script-specific claims — not generic benefits like "better quality" or "save time".`,
 
     'features-benefits': `
 
-OUTPUT FORMAT:
-Line 1: Product name or hook headline from the script (max 8 words)
-Lines 2-5: 3-4 feature→benefit labels extracted from the script's development (3-4 words each). Each should be a SPECIFIC feature or benefit mentioned in the script, not invented.
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — FEATURES & BENEFITS:
+Shape the output as: a headline with the product name or hook, followed by 3-4 feature→benefit pairs lifted from the script. Each feature→benefit pair should be short enough to fit as a label on an image. Every feature must come from the script, not invented.`,
 
     'product-showcase': `
 
-OUTPUT FORMAT:
-Line 1: The script's hook idea as a bold headline (max 10 words)
-Lines 2-4: 3 product highlights from the script's key arguments (max 5 words each)
-Line 5: CTA from the script (max 4 words)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — PRODUCT SHOWCASE:
+Shape the output as: a bold headline (hook from the script), followed by 3 product highlights lifted from the script's key arguments, closing with a CTA. Keep each element terse and visual-ready. ~45 words total.`,
 
     'social-proof': `
 
-OUTPUT FORMAT:
-Line 1: A testimonial-style quote that captures the script's main promise (max 18 words) — paraphrase the script's hook/development as if a customer said it
-Line 2: Customer name (can be invented if not in script)
-Line 3: The script's key benefit as a headline (max 8 words)
-Line 4: Star rating (e.g. ★★★★★)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — SOCIAL PROOF:
+Shape the output as: a testimonial-style quote that paraphrases THIS script's main promise as if a real customer said it, followed by a customer name (invent a realistic one if the script doesn't name anyone), the script's key benefit as a short headline, and a star rating line (★★★★★). The quote must reflect the script's actual argument, not a generic "great product, highly recommend".`,
 
     'comparison': `
 
-OUTPUT FORMAT:
-Line 1: Option A name — the "without" or competitor (max 4 words)
-Line 2: Option B name — the product/solution from the script (max 4 words)
-Lines 3-8: 3 comparison points extracted from the script's arguments, each with ✓ or ✗ (max 5 words each)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — COMPARISON:
+Shape the output as: two option names (A = without the product / competitor / old way; B = the product from the script), followed by 3 comparison points lifted from the script. Mark each point with ✓ (for B) or ✗ (for A). The differences must come from the script, not generic "faster / cheaper / better" contrasts.`,
 
     'before-after': `
 
-OUTPUT FORMAT:
-Line 1: "Before" — the problem/pain from the script's hook (max 8 words)
-Line 2: "After" — the transformation/result from the script's development (max 8 words)
-Line 3: Key metric or proof from the script (e.g. percentage, time saved, specific result)
-Line 4: Headline that captures the script's core promise (max 10 words)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — BEFORE / AFTER:
+Shape the output as: a "Before" line (problem/pain from the script's hook), an "After" line (transformation/result from the script), a specific metric or proof point from the script (percentage, time, measurable result), and a closing headline that captures the promise.`,
 
     'collage': `
 
-OUTPUT FORMAT:
-Line 1: Main headline from the script's hook (max 10 words)
-Lines 2-5: 3-4 panel captions — each one a key point from the script's development (max 6 words each)
-Line 6: CTA from the script (max 4 words)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — COLLAGE:
+Shape the output as: a main headline (from the script's hook), 3-4 panel captions each representing a different key point from the script's development, and a CTA. Panels should feel like distinct moments/angles of the same product story.`,
 
     'deals-discounts': `
 
-OUTPUT FORMAT:
-Line 1: Discount/offer amount from the script (e.g. "30% OFF", "$10 OFF", "2x1")
-Line 2: Product/offer name (max 6 words)
-Line 3: Urgency phrase from the script's CTA (max 6 words)
-Line 4: CTA button text (max 4 words)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — DEALS & DISCOUNTS:
+Shape the output as: the offer amount (e.g. "30% OFF", "$10 OFF", "2x1" — lift from the script if mentioned, otherwise pick a believable one), the product/offer name, an urgency phrase from the script's CTA (e.g. "hasta agotar stock", "solo hoy"), and a short CTA button text.`,
 
     'testimonial': `
 
-OUTPUT FORMAT:
-Line 1: Testimonial quote — distill the script's main argument as if a real customer said it (max 22 words)
-Line 2: Customer name (use from script or invent a realistic one)
-Line 3: The script's key benefit as a short tagline (max 6 words)
-Line 4: Star rating (e.g. ★★★★★)
-
-Separate each element with a line break. Nothing else.`,
+STYLE INTENT — TESTIMONIAL:
+Shape the output as: a customer quote that distills THIS script's main argument in a real-person voice (not marketing-speak), followed by a realistic customer name, a short tagline capturing the key benefit, and a star rating line (★★★★★). The quote must sound like a genuine user reflecting the script's specific claims, not a generic endorsement.`,
   }
 
   // Default generic condensation for custom types, organic, etc.
   const defaultStyleRules = `
 
-OUTPUT FORMAT:
-Distill the script into max 60 words total, preserving its persuasion arc:
-- Start with the hook idea (condensed)
-- Include the 2-3 strongest arguments or proof points from the development
-- End with the CTA
-Remove filler and repetition, but keep specific claims, numbers, and the script's unique angle.
-Output as short lines separated by line breaks. Nothing else.`
+STYLE INTENT — GENERAL:
+Distill the script into ~40-60 words, preserving its unique angle:
+- Open with the script's hook idea (condensed, keeping its specific phrasing).
+- Include the 2-3 strongest, most specific arguments or proof points from the development.
+- End with the script's CTA (keep any urgency/incentive).
+Short lines, separated by breaks. Specificity over genericness.`
 
-  return baseRules + (styleRules[postStyle] || defaultStyleRules)
+  return baseRules + contextBlock + (styleRules[postStyle] || defaultStyleRules)
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -137,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return
 
   try {
-    const { script, postStyle = 'venta-directa', language = 'es' } = req.body
+    const { script, postStyle = 'venta-directa', language = 'es', productContext } = req.body
 
     if (!script || typeof script !== 'string' || script.trim().length === 0) {
       return res.status(400).json({ error: 'Script text is required' })
@@ -148,7 +124,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'API key not configured' })
     }
 
-    const systemPrompt = getSystemPrompt(postStyle, language)
+    // Sanitize productContext: only accept known string fields, trim, cap length
+    const safeContext: ProductContext | undefined = productContext && typeof productContext === 'object'
+      ? {
+          name: typeof productContext.name === 'string' ? productContext.name.trim().slice(0, 200) : undefined,
+          description: typeof productContext.description === 'string' ? productContext.description.trim().slice(0, 800) : undefined,
+          niche: typeof productContext.niche === 'string' ? productContext.niche.trim().slice(0, 200) : undefined,
+          differentiation: typeof productContext.differentiation === 'string' ? productContext.differentiation.trim().slice(0, 400) : undefined,
+        }
+      : undefined
+
+    const systemPrompt = getSystemPrompt(postStyle, language, safeContext)
 
     const response = await fetch(XAI_API_URL, {
       method: 'POST',
@@ -157,12 +143,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${xaiApiKey}`
       },
       body: JSON.stringify({
-        model: 'grok-3-fast',
+        model: 'grok-4-fast-non-reasoning',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: script.trim() }
         ],
-        temperature: 0.3,
+        temperature: 0.85,
         max_tokens: 300
       })
     })
@@ -187,11 +173,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'prompt_condense',
-      model: 'grok-3-fast',
+      model: 'grok-4-fast-non-reasoning',
       inputTokens,
       outputTokens,
       success: true,
-      metadata: { action: 'streamline_script', postStyle, language }
+      metadata: { action: 'streamline_script', postStyle, language, hasProductContext: !!safeContext }
     })
 
     return res.status(200).json({ streamlined })
@@ -203,7 +189,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'prompt_condense',
-      model: 'grok-3-fast',
+      model: 'grok-4-fast-non-reasoning',
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

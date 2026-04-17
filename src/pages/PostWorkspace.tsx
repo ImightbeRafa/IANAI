@@ -108,6 +108,7 @@ export default function PostWorkspace() {
   const usageLimits = useUsageLimits()
   const [enhancingPostId, setEnhancingPostId] = useState<string | null>(null)
   const enhancingPostIdRef = useRef<string | null>(null)
+  const [enhanceMenuFor, setEnhanceMenuFor] = useState<string | null>(null)
   const [customPalettes, setCustomPalettes] = useState<CustomColorPalette[]>([])
   const [showColorCreator, setShowColorCreator] = useState(false)
   const [newPaletteName, setNewPaletteName] = useState('')
@@ -216,6 +217,12 @@ export default function PostWorkspace() {
       enhanceError: 'Error al mejorar imagen',
       saveAsStyle: 'Guardar como estilo',
       enhanceTip: '¡Prueba mejorarla!',
+      tierPolish: 'Pulir',
+      tierPolishDesc: 'Cambios mínimos. Mejor tipografía, espaciado y color.',
+      tierModernize: 'Modernizar',
+      tierModernizeDesc: 'Actualiza ejecución. Mantiene concepto y elementos clave.',
+      tierRebuild: 'Reconstruir',
+      tierRebuildDesc: 'Reinterpretación creativa agresiva. Puede cambiar composición.',
       createPalette: 'Crear paleta',
       paletteName: 'Nombre',
       paletteColors: 'Colores',
@@ -306,6 +313,12 @@ export default function PostWorkspace() {
       enhanceError: 'Error enhancing image',
       saveAsStyle: 'Save as style',
       enhanceTip: 'Try enhancing it!',
+      tierPolish: 'Polish',
+      tierPolishDesc: 'Minimal changes. Refines typography, spacing, and color.',
+      tierModernize: 'Modernize',
+      tierModernizeDesc: 'Updates execution. Keeps concept and key elements.',
+      tierRebuild: 'Rebuild',
+      tierRebuildDesc: 'Aggressive creative reinterpretation. May change composition.',
       createPalette: 'Create palette',
       paletteName: 'Name',
       paletteColors: 'Colors',
@@ -444,6 +457,14 @@ export default function PostWorkspace() {
         resolvedStyle = postStyle
       }
 
+      // Build product context to anchor the output on THIS specific product
+      const productContext = product ? {
+        name: product.name || undefined,
+        description: product.product_description || product.description || undefined,
+        niche: product.product_category_custom || product.product_category || undefined,
+        differentiation: product.differentiation || product.unique_value || undefined,
+      } : undefined
+
       const resp = await fetch(STREAMLINE_API_URL, {
         method: 'POST',
         headers: {
@@ -453,7 +474,8 @@ export default function PostWorkspace() {
         body: JSON.stringify({
           script: rawScript,
           postStyle: resolvedStyle,
-          language
+          language,
+          productContext
         })
       })
 
@@ -882,11 +904,12 @@ export default function PostWorkspace() {
     if (editFileInputRef.current) editFileInputRef.current.value = ''
   }
 
-  const handleEnhance = async (postId: string, imageUrl: string) => {
+  const handleEnhance = async (postId: string, imageUrl: string, tier: 'polish' | 'modernize' | 'rebuild' = 'modernize') => {
     if (enhancingPostId) return
 
     setEnhancingPostId(postId)
     enhancingPostIdRef.current = postId
+    setEnhanceMenuFor(null)
     setError('')
 
     try {
@@ -908,6 +931,7 @@ export default function PostWorkspace() {
           enhanceImage: base64Image,
           aspectRatio: detectedAR,
           language,
+          enhanceTier: tier,
           brandKitId: selectedBrandKitId || undefined,
           productReferenceImages: productImages.length > 0
             ? await Promise.all(getProductImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
@@ -2202,16 +2226,63 @@ export default function PostWorkspace() {
                         className={`w-full h-auto transition-all duration-700 ${isProcessing ? 'blur-[8px] scale-[1.04] brightness-[0.5]' : ''}`}
                       />
                       {/* Top-right action buttons */}
-                      <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
-                        {/* Magic Wand — enhance button */}
-                        <button
-                          onClick={() => { handleEnhance(post.id, post.imageUrl); dismissEnhanceTip() }}
-                          disabled={!!enhancingPostId || editing}
-                          className="w-9 h-9 rounded-lg bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/80 hover:bg-black/60 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                          title={t.enhance}
-                        >
-                          <Wand2 className="w-5 h-5" />
-                        </button>
+                      <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all z-20">
+                        {/* Magic Wand — opens tier popover */}
+                        <div className="relative">
+                          <button
+                            onClick={() => {
+                              dismissEnhanceTip()
+                              setEnhanceMenuFor(prev => prev === post.id ? null : post.id)
+                            }}
+                            disabled={!!enhancingPostId || editing}
+                            className={`w-9 h-9 rounded-lg backdrop-blur-sm flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                              enhanceMenuFor === post.id
+                                ? 'bg-primary-600 text-white'
+                                : 'bg-black/40 text-white/80 hover:bg-black/60 hover:text-white'
+                            }`}
+                            title={t.enhance}
+                          >
+                            <Wand2 className="w-5 h-5" />
+                          </button>
+                          {enhanceMenuFor === post.id && (
+                            <>
+                              {/* Click-outside backdrop */}
+                              <div
+                                className="fixed inset-0 z-30"
+                                onClick={() => setEnhanceMenuFor(null)}
+                              />
+                              <div className="absolute top-0 right-11 w-60 bg-dark-100 border border-dark-200 rounded-xl shadow-2xl overflow-hidden z-40">
+                                <div className="px-3 py-2 border-b border-dark-200 bg-dark-50">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-dark-500 flex items-center gap-1.5">
+                                    <Wand2 className="w-3 h-3" />
+                                    {t.enhance}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => handleEnhance(post.id, post.imageUrl, 'polish')}
+                                  className="w-full text-left px-3 py-2.5 hover:bg-dark-200 transition-colors border-b border-dark-200"
+                                >
+                                  <p className="text-sm font-medium text-dark-700">{t.tierPolish}</p>
+                                  <p className="text-[11px] text-dark-500 mt-0.5 leading-tight">{t.tierPolishDesc}</p>
+                                </button>
+                                <button
+                                  onClick={() => handleEnhance(post.id, post.imageUrl, 'modernize')}
+                                  className="w-full text-left px-3 py-2.5 hover:bg-dark-200 transition-colors border-b border-dark-200"
+                                >
+                                  <p className="text-sm font-medium text-dark-700">{t.tierModernize}</p>
+                                  <p className="text-[11px] text-dark-500 mt-0.5 leading-tight">{t.tierModernizeDesc}</p>
+                                </button>
+                                <button
+                                  onClick={() => handleEnhance(post.id, post.imageUrl, 'rebuild')}
+                                  className="w-full text-left px-3 py-2.5 hover:bg-dark-200 transition-colors"
+                                >
+                                  <p className="text-sm font-medium text-dark-700">{t.tierRebuild}</p>
+                                  <p className="text-[11px] text-dark-500 mt-0.5 leading-tight">{t.tierRebuildDesc}</p>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
                         {/* Save as style button */}
                         <button
                           onClick={() => handleCreateStyleFromPost(post.imageUrl)}
