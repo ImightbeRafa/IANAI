@@ -16,18 +16,33 @@ interface ProductContext {
 function getSystemPrompt(postStyle: string, language: string, productContext?: ProductContext): string {
   const lang = language === 'en' ? 'English' : 'Spanish'
 
-  const baseRules = `You are a senior copywriter condensing advertising scripts into short, punchy image copy for social media posts.
+  const baseRules = `You are a senior copywriter adapting long advertising scripts into short, punchy post copy.
 
-YOUR JOB: Distill the user's script into image-ready copy. The output must feel like a distilled version of THIS SPECIFIC script — not a generic ad and not a copy of other outputs you've produced before.
+YOUR JOB: The input is a full advertising script — typically 150 to 500+ words of persuasion copy written for video/audio. Your job is to extract its CORE IDEA and ADAPT it into concise copy that fits on a social media post. You are NOT summarizing the script, NOT rewriting it sentence by sentence, and NOT preserving its structure. You are distilling its essence into something much shorter and punchier.
 
-NON-NEGOTIABLE RULES:
-- Output ONLY the condensed copy. No explanations, no labels, no markdown, no commentary, no quotation marks around the whole thing.
+SIZE CONTRACT (HARD LIMIT):
+- Output MUST be significantly shorter than the input. Target ~40-60 words total. Absolute maximum: 70 words.
+- If your output is longer than 25% of the input's word count, you have failed.
+- The input is a SCRIPT (spoken/read at length). The output is POST COPY (scanned in 2 seconds).
+
+TONE PRESERVATION (CRITICAL):
+- Match the script's voice and register EXACTLY. If the script is casual → casual. Urgent → urgent. Witty → witty. Warm → warm. Direct/aggressive → direct/aggressive. Educational → educational.
+- The reader should feel the SAME brand is speaking, just in far fewer words.
+- Do NOT flatten the tone into generic "marketing voice". Do NOT make a casual script sound corporate, or a witty script sound dry.
+
+IDEA OVER WORDING:
+- Keep the script's CORE ANGLE (what makes this script compelling) and the 1-2 MOST distinctive claims. Drop everything else.
+- Do NOT try to include every specific claim, feature, or number from the script. Pick the strongest 1-2 and let the rest go.
+- The output is not a shortened copy of the script — it is the script's IDEA rewritten as post copy.
+
+SPECIFICITY:
+- The output must clearly be about the script's specific product/offer — not interchangeable category copy. Reference the product's actual angle, not generic benefits like "better quality" or "save time".
+- But you do NOT need to preserve specific claims verbatim. Reword freely to fit the shorter format.
+
+OUTPUT FORMAT:
+- Output ONLY the adapted post copy. No explanations, no labels, no markdown, no headers, no commentary, no quotation marks around the whole thing.
 - Keep the SAME language as the input (${lang}). Do NOT translate.
-- SPECIFICITY OVER GENERICNESS: Lift the script's own distinctive words, numbers, product names, claims, and angles — verbatim or lightly reworded. If the script contains a stat, a unique phrase, a specific ingredient, a time frame, or a named benefit, it MUST appear in the output.
-- The output must read like copy someone wrote AFTER reading this particular script, not copy that could apply to any product in the category.
-- Remove filler, transitions, repetition, and verbose phrasing — but preserve the script's unique angle.
-- Use short lines, separated by line breaks. The total output should be ~40-60 words, feeling natural and readable (not robotic slot-fills).
-- The result should be ready to paste directly into an image generation prompt.`
+- Use short lines separated by line breaks. Natural, readable, easy to scan.`
 
   const contextBlock = productContext && (productContext.name || productContext.description || productContext.niche)
     ? `

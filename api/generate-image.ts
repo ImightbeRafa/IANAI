@@ -455,15 +455,27 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         ]
 
         // PRODUCT REFERENCE IMAGES FIRST — Gemini must see product truth BEFORE the design
+        // IMPORTANT: interleave a labeled text part BEFORE each image so Gemini treats them as
+        // distinct references instead of anchoring on the first one.
         let productRefCount = 0
         if (hasProductRef) {
-          promptParts.push({ text: '══ IMÁGENES DE REFERENCIA DEL PRODUCTO REAL ══\nEstas son fotos REALES del producto del usuario. El producto en el diseño mejorado DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:' })
+          // Pre-parse valid refs so we know the real count for labels
+          const parsedRefs: { mimeType: string; data: string }[] = []
           for (const refImg of imageParams.productReferenceImages!.slice(0, 4)) {
             const refMatch = refImg.match(/^data:([^;]+);base64,(.+)$/)
-            if (refMatch) {
-              promptParts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } })
+            if (refMatch) parsedRefs.push({ mimeType: refMatch[1], data: refMatch[2] })
+          }
+          const total = parsedRefs.length
+          if (total > 0) {
+            promptParts.push({ text: `══ ${total} IMÁGEN${total > 1 ? 'ES' : ''} DE REFERENCIA DEL PRODUCTO REAL (OBLIGATORIO USAR TODAS) ══\n${total > 1 ? `Se adjuntan ${total} fotos REALES del MISMO producto desde distintos ángulos/vistas/contextos. DEBES fusionar la información de las ${total} — no te limites a la primera. Cada imagen aporta verdad complementaria que el diseño final debe reflejar.` : 'Esta es una foto REAL del producto del usuario.'}\n\nEl producto en el diseño mejorado DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:` })
+            parsedRefs.forEach((ref, idx) => {
+              const label = total > 1
+                ? `── REFERENCIA ${idx + 1} de ${total} (analizá esta imagen de forma independiente y extraé información visual complementaria a las demás) ──`
+                : '── REFERENCIA DEL PRODUCTO ──'
+              promptParts.push({ text: label })
+              promptParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } })
               productRefCount++
-            }
+            })
           }
           console.log(`Enhance: ${productRefCount} product reference images injected BEFORE enhance image`)
         }
@@ -869,10 +881,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
       const geminiModelId = GEMINI_IMAGE_MODELS[selectedModel]
 
+      const receivedImageCount = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
+        .filter(k => typeof imageParams[k] === 'string' && imageParams[k].length > 0).length
       console.log('Submitting to Gemini Image API:', { 
         model: geminiModelId,
         prompt: enhancedPrompt.substring(0, 100) + '...',
         hasInputImage: !!imageParams.input_image,
+        productImageCount: receivedImageCount,
         language: postLanguage,
         hasProductImages
       })
@@ -903,34 +918,45 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         // Add ALL product reference images (input_image, input_image_2, input_image_3, input_image_4)
+        // IMPORTANT: Interleave a labeled text part BEFORE each image. Gemini 3 Pro Image tends
+        // to anchor on the first image when multiple inlineData parts are stacked consecutively.
+        // Labeling each image explicitly forces the model to treat them as distinct references.
         const inputImageKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
-        const productImageParts: PromptPart[] = []
+        type ProductImg = { mimeType: string; data: string }
+        const productImages: ProductImg[] = []
         for (const key of inputImageKeys) {
           const img = imageParams[key]
           if (img && typeof img === 'string') {
             const base64Match = img.match(/^data:([^;]+);base64,(.+)$/)
             if (base64Match) {
-              productImageParts.push({
-                inlineData: {
-                  mimeType: base64Match[1],
-                  data: base64Match[2]
-                }
-              })
+              productImages.push({ mimeType: base64Match[1], data: base64Match[2] })
             }
           }
         }
-        if (productImageParts.length > 0 && isPostMode && !isLogoMode) {
-          const refCount = productImageParts.length
-          promptParts.push({ text: `══ ${refCount} IMÁGEN${refCount > 1 ? 'ES' : ''} DE REFERENCIA DEL PRODUCTO REAL (OBLIGATORIO USAR TODAS) ══\n${refCount > 1 ? `Se adjuntan ${refCount} fotos REALES del producto del usuario. Cada una muestra un ángulo, vista, contexto o escena distinta del MISMO producto.\n\nOBLIGATORIO: DEBES examinar y usar la información de TODAS las ${refCount} imágenes — no solo la primera. Cada imagen aporta información visual distinta que el diseño debe reflejar:\n- Forma, silueta, proporciones y color del producto → tomado de las fotos donde el producto aparece claramente.\n- Textura, materiales y detalles físicos → tomado de las fotos con más nitidez sobre el producto.\n- Contexto de uso, escena, personas, ambiente → tomado de las fotos lifestyle/en uso si las hay.\n- PROHIBIDO ignorar imágenes. PROHIBIDO usar solo la primera. Considera TODAS como fuente de verdad complementaria.` : `Se adjunta una foto REAL del producto del usuario.`}\n\nEl producto en el diseño DEBE verse EXACTAMENTE como aparece en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Estas imágenes son la ÚNICA fuente de verdad:` })
-        }
-        if (productImageParts.length > 0 && isLogoMode) {
+        const refCount = productImages.length
+
+        if (refCount > 0 && isPostMode && !isLogoMode) {
+          // Master header for all references
+          promptParts.push({ text: `══ ${refCount} IMÁGEN${refCount > 1 ? 'ES' : ''} DE REFERENCIA DEL PRODUCTO REAL (OBLIGATORIO USAR TODAS) ══\n${refCount > 1 ? `Se adjuntan ${refCount} fotos REALES del MISMO producto, cada una desde un ángulo, vista o contexto distinto. DEBES examinar y fusionar la información visual de las ${refCount} — no te limites a la primera. Cada imagen aporta verdad complementaria (forma, textura, detalles, contexto de uso) que el diseño final debe reflejar.\n\nPROHIBIDO ignorar imágenes. PROHIBIDO usar solo una. Considera TODAS como fuente de verdad.` : `Se adjunta una foto REAL del producto del usuario.`}\n\nEl producto en el diseño DEBE verse EXACTAMENTE como aparece en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto.` })
+
+          // Interleave a per-image label before each inlineData so Gemini tokenizes each one independently
+          productImages.forEach((img, idx) => {
+            const label = refCount > 1
+              ? `── REFERENCIA ${idx + 1} de ${refCount} (analizá esta imagen de forma independiente y extraé información visual complementaria a las demás) ──`
+              : '── REFERENCIA DEL PRODUCTO ──'
+            promptParts.push({ text: label })
+            promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+          })
+        } else if (refCount > 0 && isLogoMode) {
           promptParts.push({ text: '══ LOGO EXISTENTE DEL USUARIO (PARA ANALIZAR Y MEJORAR) ══\nEsta es la imagen del logo ACTUAL del usuario. Analizalo y aplicá la estrategia de mejora solicitada. Preservá el equity de marca (nombre, iniciales, símbolo clave si aplica) pero mejorá la ejecución según el nivel pedido.' })
+          productImages.forEach((img) => {
+            promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+          })
         }
-        promptParts.push(...productImageParts)
 
         // Closing reinforcement if product images were provided
-        if (productImageParts.length > 0 && isPostMode && !isLogoMode) {
-          promptParts.push({ text: 'RECORDATORIO: El producto en el diseño DEBE ser IDÉNTICO a las fotos de referencia proporcionadas arriba. NO inventes otro producto. Copia forma, color, silueta y textura EXACTAMENTE de las referencias.' })
+        if (refCount > 0 && isPostMode && !isLogoMode) {
+          promptParts.push({ text: `RECORDATORIO FINAL: El producto en el diseño DEBE ser IDÉNTICO a las ${refCount} foto${refCount > 1 ? 's' : ''} de referencia proporcionada${refCount > 1 ? 's' : ''} arriba. ${refCount > 1 ? `Fusioná la información de las ${refCount} imágenes — cada una muestra un aspecto distinto del MISMO producto. ` : ''}NO inventes otro producto. Copia forma, color, silueta y textura EXACTAMENTE de las referencias.` })
         }
 
         // Determine aspect ratio from dimensions

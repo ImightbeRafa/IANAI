@@ -637,6 +637,15 @@ export async function ratePost(postId: string, rating: number | null): Promise<v
   if (error) throw error
 }
 
+export async function deletePost(postId: string): Promise<void> {
+  const { error } = await supabase
+    .from('posts')
+    .delete()
+    .eq('id', postId)
+
+  if (error) throw error
+}
+
 // =============================================
 // CONTEXT DOCUMENTS FUNCTIONS
 // =============================================

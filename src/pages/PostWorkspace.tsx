@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost } from '../services/database'
+import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost, deletePost } from '../services/database'
 import type { ProductImage } from '../services/database'
 import type { Product, Script, ImageModel } from '../types'
 import Layout from '../components/Layout'
@@ -109,6 +109,8 @@ export default function PostWorkspace() {
   const [enhancingPostId, setEnhancingPostId] = useState<string | null>(null)
   const enhancingPostIdRef = useRef<string | null>(null)
   const [enhanceMenuFor, setEnhanceMenuFor] = useState<string | null>(null)
+  const [deleteConfirmFor, setDeleteConfirmFor] = useState<string | null>(null)
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null)
   const [customPalettes, setCustomPalettes] = useState<CustomColorPalette[]>([])
   const [showColorCreator, setShowColorCreator] = useState(false)
   const [newPaletteName, setNewPaletteName] = useState('')
@@ -216,6 +218,10 @@ export default function PostWorkspace() {
       enhancing: 'Mejorando...',
       enhanceError: 'Error al mejorar imagen',
       saveAsStyle: 'Guardar como estilo',
+      deletePost: 'Eliminar post',
+      deletePostConfirm: '¿Eliminar este post? Esta acción no se puede deshacer.',
+      deletePostError: 'Error al eliminar el post',
+      cancel: 'Cancelar',
       enhanceTip: '¡Prueba mejorarla!',
       tierPolish: 'Pulir',
       tierPolishDesc: 'Cambios mínimos. Mejor tipografía, espaciado y color.',
@@ -312,6 +318,10 @@ export default function PostWorkspace() {
       enhancing: 'Enhancing...',
       enhanceError: 'Error enhancing image',
       saveAsStyle: 'Save as style',
+      deletePost: 'Delete post',
+      deletePostConfirm: 'Delete this post? This cannot be undone.',
+      deletePostError: 'Failed to delete post',
+      cancel: 'Cancel',
       enhanceTip: 'Try enhancing it!',
       tierPolish: 'Polish',
       tierPolishDesc: 'Minimal changes. Refines typography, spacing, and color.',
@@ -902,6 +912,36 @@ export default function PostWorkspace() {
     }
     setEditRefImages(prev => [...prev, ...newImages].slice(0, 4))
     if (editFileInputRef.current) editFileInputRef.current.value = ''
+  }
+
+  const handleDeletePost = async (postId: string) => {
+    if (deletingPostId) return
+    setDeletingPostId(postId)
+    setDeleteConfirmFor(null)
+    setError('')
+    // Optimistic removal from UI
+    const previousPosts = generatedPosts
+    setGeneratedPosts(prev => prev.filter(p => p.id !== postId))
+    try {
+      // Only delete the DB row if this post was actually persisted (tempIds from
+      // in-flight generations start with 'post-' / 'enhance-' / 'edit-' and are
+      // not UUIDs — skip the DB call for those).
+      const isPersistedId = !/^(post|enhance|edit)-/.test(postId)
+      if (isPersistedId) {
+        await deletePost(postId)
+      }
+      // NOTE: we intentionally do NOT adjust usage counters here.
+      // The generation was already billed against the user's quota at the
+      // moment the image was produced. Deleting the post is a UI cleanup only,
+      // so usage, bonus_images, and admin logs remain untouched.
+    } catch (err) {
+      console.error('Delete post failed:', err)
+      setError(err instanceof Error ? err.message : t.deletePostError)
+      // Roll back on failure
+      setGeneratedPosts(previousPosts)
+    } finally {
+      setDeletingPostId(null)
+    }
   }
 
   const handleEnhance = async (postId: string, imageUrl: string, tier: 'polish' | 'modernize' | 'rebuild' = 'modernize') => {
@@ -2291,6 +2331,52 @@ export default function PostWorkspace() {
                         >
                           <Palette className="w-5 h-5" />
                         </button>
+                        {/* Delete button — removes post from DB but does NOT refund usage */}
+                        <div className="relative">
+                          <button
+                            onClick={() => setDeleteConfirmFor(prev => prev === post.id ? null : post.id)}
+                            disabled={deletingPostId === post.id || isProcessing}
+                            className={`w-9 h-9 rounded-lg backdrop-blur-sm flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                              deleteConfirmFor === post.id
+                                ? 'bg-red-600 text-white'
+                                : 'bg-black/40 text-white/80 hover:bg-red-600/80 hover:text-white'
+                            }`}
+                            title={t.deletePost}
+                          >
+                            {deletingPostId === post.id ? (
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-5 h-5" />
+                            )}
+                          </button>
+                          {deleteConfirmFor === post.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-30"
+                                onClick={() => setDeleteConfirmFor(null)}
+                              />
+                              <div className="absolute top-0 right-11 w-60 bg-dark-100 border border-dark-200 rounded-xl shadow-2xl overflow-hidden z-40">
+                                <div className="px-3 py-2.5 border-b border-dark-200 bg-dark-50">
+                                  <p className="text-[11px] text-dark-600 leading-snug">{t.deletePostConfirm}</p>
+                                </div>
+                                <div className="flex">
+                                  <button
+                                    onClick={() => setDeleteConfirmFor(null)}
+                                    className="flex-1 px-3 py-2 text-xs font-medium text-dark-600 hover:bg-dark-200 transition-colors border-r border-dark-200"
+                                  >
+                                    {t.cancel}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeletePost(post.id)}
+                                    className="flex-1 px-3 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors"
+                                  >
+                                    {t.deletePost}
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
                       {/* Enhance tip tooltip — shows once on first post */}
                       {showEnhanceTip && index === 0 && (
