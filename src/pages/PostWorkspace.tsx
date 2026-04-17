@@ -127,6 +127,8 @@ export default function PostWorkspace() {
   const [streamlinedScript, setStreamlinedScript] = useState<string | null>(null)
   const [streamlining, setStreamlining] = useState(false)
   const productImageInputRef = useRef<HTMLInputElement>(null)
+  const contextImageInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingContextImage, setUploadingContextImage] = useState(false)
   const POSTS_PAGE_SIZE = 20
   const [totalPostCount, setTotalPostCount] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -541,27 +543,34 @@ export default function PostWorkspace() {
     })
   }
 
-  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUploadByKind = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    kind: 'product' | 'context'
+  ) => {
     const files = e.target.files
     if (!files || !user || !productId) return
-    const maxNew = 4 - productImages.length
+    const current = productImages.filter(i => (i.kind || 'product') === kind)
+    const maxNew = 4 - current.length
     if (maxNew <= 0) return
     const filesToProcess = Array.from(files).slice(0, maxNew)
 
-    setUploadingProductImage(true)
+    const setBusy = kind === 'product' ? setUploadingProductImage : setUploadingContextImage
+    const inputRef = kind === 'product' ? productImageInputRef : contextImageInputRef
+
+    setBusy(true)
     try {
       for (const file of filesToProcess) {
         const dataUrl = await normalizeImageToJpeg(file)
         const publicUrl = await uploadProductImage(user.id, productId, dataUrl)
-        const saved = await createProductImage(productId, user.id, publicUrl, file.name)
+        const saved = await createProductImage(productId, user.id, publicUrl, file.name, kind)
         setProductImages(prev => [saved, ...prev])
       }
     } catch (err) {
-      console.error('Product image upload failed:', err)
+      console.error(`${kind} image upload failed:`, err)
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
-      setUploadingProductImage(false)
-      if (productImageInputRef.current) productImageInputRef.current.value = ''
+      setBusy(false)
+      if (inputRef.current) inputRef.current.value = ''
     }
   }
 
@@ -575,7 +584,11 @@ export default function PostWorkspace() {
   }
 
   const getProductImageUrls = (): string[] => {
-    return productImages.map(img => img.image_url)
+    return productImages.filter(img => (img.kind || 'product') === 'product').map(img => img.image_url)
+  }
+
+  const getContextImageUrls = (): string[] => {
+    return productImages.filter(img => img.kind === 'context').map(img => img.image_url)
   }
 
   const handleGenerate = async () => {
@@ -689,6 +702,16 @@ export default function PostWorkspace() {
           base64Images.forEach((img, i) => {
             requestBody[i === 0 ? 'input_image' : `input_image_${i + 1}`] = img
           })
+        }
+
+        // Attach context/inspiration images (mood, audience, scene) — separate from product truth.
+        // Not used in product mode (product mode is strict single-product rendering).
+        if (!isProductMode) {
+          const contextUrls = getContextImageUrls()
+          if (contextUrls.length > 0) {
+            const base64Context = await Promise.all(contextUrls.map(async u => compressBase64ForApi(await urlToBase64(u))))
+            requestBody.contextImages = base64Context
+          }
         }
       }
 
@@ -973,8 +996,11 @@ export default function PostWorkspace() {
           language,
           enhanceTier: tier,
           brandKitId: selectedBrandKitId || undefined,
-          productReferenceImages: productImages.length > 0
+          productReferenceImages: getProductImageUrls().length > 0
             ? await Promise.all(getProductImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
+            : undefined,
+          contextReferenceImages: getContextImageUrls().length > 0
+            ? await Promise.all(getContextImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
             : undefined
         })
       })
@@ -2060,78 +2086,147 @@ export default function PostWorkspace() {
             </div>
             )}
 
-            {/* Product images — persistent, all used as reference. Hidden in logo mode (logo uses its own uploader). */}
-            {!isLogoMode && (
-            <div>
-              <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
-                {isProductMode
-                  ? (language === 'es' ? 'Foto del producto (requerida)' : 'Product photo (required)')
-                  : t.refImages}
-              </label>
-              <p className="text-[10px] text-dark-400 mb-2">
-                {isProductMode
-                  ? (language === 'es'
-                    ? 'Sube la foto de tu producto. La IA generará una versión profesional.'
-                    : 'Upload your product photo. AI will generate a professional version.')
-                  : (language === 'es'
-                    ? 'Sube fotos de tu producto. Todas se usarán como referencia en generación y mejora.'
-                    : 'Upload product photos. All will be used as reference for generation and enhancement.')}
-              </p>
+            {/* Product images — persistent, used as strict product truth. Hidden in logo mode. */}
+            {!isLogoMode && (() => {
+              const productRefs = productImages.filter(i => (i.kind || 'product') === 'product')
+              const contextRefs = productImages.filter(i => i.kind === 'context')
+              return (
+              <>
+              <div>
+                <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                  {isProductMode
+                    ? (language === 'es' ? 'Foto del producto (requerida)' : 'Product photo (required)')
+                    : (language === 'es' ? 'Imágenes del producto (opcional)' : 'Product images (optional)')}
+                </label>
+                <p className="text-[10px] text-dark-400 mb-2">
+                  {isProductMode
+                    ? (language === 'es'
+                      ? 'Sube la foto de tu producto. La IA generará una versión profesional.'
+                      : 'Upload your product photo. AI will generate a professional version.')
+                    : (language === 'es'
+                      ? 'Fotos reales del producto. La IA las respetará EXACTAMENTE (forma, color, detalles).'
+                      : 'Real product photos. AI will preserve them EXACTLY (shape, color, details).')}
+                </p>
 
-              {/* Image grid */}
-              <div className="flex gap-2 flex-wrap">
-                {productImages.map((img) => (
-                    <div key={img.id} className="relative group">
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-primary-500 ring-2 ring-primary-500/30">
-                        <img src={img.image_url} alt="Product" className="w-full h-full object-cover" />
+                <div className="flex gap-2 flex-wrap">
+                  {productRefs.map((img) => (
+                      <div key={img.id} className="relative group">
+                        <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-primary-500 ring-2 ring-primary-500/30">
+                          <img src={img.image_url} alt="Product" className="w-full h-full object-cover" />
+                        </div>
+                        <button
+                          onClick={() => handleDeleteProductImage(img.id)}
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:bg-red-700"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
                       </div>
-                      <button
-                        onClick={() => handleDeleteProductImage(img.id)}
-                        className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:bg-red-700"
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                  ))}
+                    ))}
 
-                {/* Upload button */}
-                {productImages.length < 4 && (
-                  <button
-                    onClick={() => productImageInputRef.current?.click()}
-                    disabled={uploadingProductImage}
-                    className="w-16 h-16 rounded-lg border-2 border-dashed border-dark-200 flex flex-col items-center justify-center text-dark-400 hover:border-primary-400 hover:text-primary-500 transition-colors disabled:opacity-50"
-                  >
-                    {uploadingProductImage ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4" />
-                        <span className="text-[8px] mt-0.5">
-                          {language === 'es' ? 'Subir' : 'Upload'}
-                        </span>
-                      </>
-                    )}
-                  </button>
+                  {productRefs.length < 4 && (
+                    <button
+                      onClick={() => productImageInputRef.current?.click()}
+                      disabled={uploadingProductImage}
+                      className="w-16 h-16 rounded-lg border-2 border-dashed border-dark-200 flex flex-col items-center justify-center text-dark-400 hover:border-primary-400 hover:text-primary-500 transition-colors disabled:opacity-50"
+                    >
+                      {uploadingProductImage ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          <span className="text-[8px] mt-0.5">
+                            {language === 'es' ? 'Subir' : 'Upload'}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <input
+                    ref={productImageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+                    multiple
+                    onChange={(e) => handleImageUploadByKind(e, 'product')}
+                    className="hidden"
+                  />
+                </div>
+
+                {productRefs.length > 0 && (
+                  <p className="text-[10px] text-primary-500 mt-1.5 font-medium">
+                    {language === 'es'
+                      ? `${productRefs.length} imagen(es) del producto`
+                      : `${productRefs.length} product image(s)`}
+                  </p>
                 )}
-                <input
-                  ref={productImageInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
-                  multiple
-                  onChange={handleProductImageUpload}
-                  className="hidden"
-                />
               </div>
 
-              {productImages.length > 0 && (
-                <p className="text-[10px] text-primary-500 mt-1.5 font-medium">
+              {/* Context / inspiration images — mood, audience, scene. Not product truth. */}
+              {!isProductMode && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                  {language === 'es' ? 'Imágenes de contexto (opcional)' : 'Context images (optional)'}
+                </label>
+                <p className="text-[10px] text-dark-400 mb-2">
                   {language === 'es'
-                    ? `${productImages.length} imagen(es) se usarán como referencia`
-                    : `${productImages.length} image(s) will be used as reference`}
+                    ? 'Inspiración: familia feliz, escena, audiencia, estilo de vida. La IA usa el ambiente — no copia el producto de estas.'
+                    : 'Inspiration: happy family, scene, audience, lifestyle. AI uses the mood — not the product from these.'}
                 </p>
+
+                <div className="flex gap-2 flex-wrap">
+                  {contextRefs.map((img) => (
+                      <div key={img.id} className="relative group">
+                        <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-amber-400 ring-2 ring-amber-400/30">
+                          <img src={img.image_url} alt="Context" className="w-full h-full object-cover" />
+                        </div>
+                        <button
+                          onClick={() => handleDeleteProductImage(img.id)}
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:bg-red-700"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    ))}
+
+                  {contextRefs.length < 4 && (
+                    <button
+                      onClick={() => contextImageInputRef.current?.click()}
+                      disabled={uploadingContextImage}
+                      className="w-16 h-16 rounded-lg border-2 border-dashed border-dark-200 flex flex-col items-center justify-center text-dark-400 hover:border-amber-400 hover:text-amber-500 transition-colors disabled:opacity-50"
+                    >
+                      {uploadingContextImage ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          <span className="text-[8px] mt-0.5">
+                            {language === 'es' ? 'Subir' : 'Upload'}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  <input
+                    ref={contextImageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+                    multiple
+                    onChange={(e) => handleImageUploadByKind(e, 'context')}
+                    className="hidden"
+                  />
+                </div>
+
+                {contextRefs.length > 0 && (
+                  <p className="text-[10px] text-amber-600 mt-1.5 font-medium">
+                    {language === 'es'
+                      ? `${contextRefs.length} imagen(es) de inspiración`
+                      : `${contextRefs.length} inspiration image(s)`}
+                  </p>
+                )}
+              </div>
               )}
-            </div>
-            )}
+              </>
+              )
+            })()}
 
 
             {/* Aspect Ratio — hidden in logo mode (forced to 1:1) */}

@@ -494,13 +494,42 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
         }
 
-        // NOW add the image to enhance (AFTER product refs + logo so model has truth established)
+        // CONTEXT / INSPIRATION images for enhance — mood, audience, scene (not product truth)
+        let ctxRefCount = 0
+        if (Array.isArray(imageParams.contextReferenceImages) && imageParams.contextReferenceImages.length > 0) {
+          const parsedCtx: { mimeType: string; data: string }[] = []
+          for (const ctxImg of imageParams.contextReferenceImages.slice(0, 4)) {
+            if (typeof ctxImg === 'string') {
+              const m = ctxImg.match(/^data:([^;]+);base64,(.+)$/)
+              if (m) parsedCtx.push({ mimeType: m[1], data: m[2] })
+            }
+          }
+          if (parsedCtx.length > 0) {
+            promptParts.push({ text: `══ ${parsedCtx.length} IMÁGEN${parsedCtx.length > 1 ? 'ES' : ''} DE CONTEXTO / INSPIRACIÓN (NO ES EL PRODUCTO) ══\nEstas imágenes NO son el producto. Son referencia de AMBIENTE, AUDIENCIA, ESCENA, MOOD o ESTILO DE VIDA.\nUSO: inspirarte en el tipo de personas, ambiente, iluminación, emoción o contexto de uso.\nPROHIBIDO copiar el producto de estas imágenes. PROHIBIDO inventar variaciones del producto basándote en ellas. Tratálas como moodboard — extraé el ESPÍRITU, no los objetos físicos.` })
+            parsedCtx.forEach((ref, idx) => {
+              const label = parsedCtx.length > 1
+                ? `── INSPIRACIÓN ${idx + 1} de ${parsedCtx.length} (moodboard — ambiente/audiencia/escena, NO el producto) ──`
+                : '── INSPIRACIÓN (moodboard — ambiente/audiencia/escena, NO el producto) ──'
+              promptParts.push({ text: label })
+              promptParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } })
+              ctxRefCount++
+            })
+            console.log(`Enhance: ${ctxRefCount} context reference images injected`)
+          }
+        }
+
+        // NOW add the image to enhance (AFTER product refs + logo + context so model has truth & mood established)
         promptParts.push({ text: '══ IMAGEN A MEJORAR ══\nEsta es la imagen de diseño sobre la que debes aplicar la mejora. Respeta TODAS las reglas no negociables (#1 texto, #2 producto, #3 logo, #4 formato) declaradas arriba, y aplica SOLO los cambios permitidos por el tier seleccionado:' })
         promptParts.push({ inlineData: { mimeType: base64Match[1], data: base64Match[2] } })
 
         // Closing reinforcement if product refs were provided
         if (productRefCount > 0) {
           promptParts.push({ text: 'RECORDATORIO FINAL: El producto en la imagen mejorada DEBE ser IDÉNTICO a las fotos de referencia del producto proporcionadas arriba. NO inventes otro producto. NO cambies forma, color, silueta ni textura. Copia el producto EXACTAMENTE de las referencias.' })
+        }
+        if (ctxRefCount > 0 && productRefCount > 0) {
+          promptParts.push({ text: `SEPARACIÓN CLARA: El PRODUCTO se copia EXACTAMENTE de las fotos de referencia del producto. La ESCENA / AUDIENCIA / MOOD se inspira en las ${ctxRefCount} imagen${ctxRefCount > 1 ? 'es' : ''} de contexto. NO mezcles: no inventes productos parecidos a los de las imágenes de contexto.` })
+        } else if (ctxRefCount > 0) {
+          promptParts.push({ text: 'RECORDATORIO: Las imágenes de contexto son moodboard (ambiente, audiencia, escena). No son el producto.' })
         }
 
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
@@ -957,6 +986,39 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Closing reinforcement if product images were provided
         if (refCount > 0 && isPostMode && !isLogoMode) {
           promptParts.push({ text: `RECORDATORIO FINAL: El producto en el diseño DEBE ser IDÉNTICO a las ${refCount} foto${refCount > 1 ? 's' : ''} de referencia proporcionada${refCount > 1 ? 's' : ''} arriba. ${refCount > 1 ? `Fusioná la información de las ${refCount} imágenes — cada una muestra un aspecto distinto del MISMO producto. ` : ''}NO inventes otro producto. Copia forma, color, silueta y textura EXACTAMENTE de las referencias.` })
+        }
+
+        // CONTEXT / INSPIRATION images — distinct from product truth.
+        // Used for mood, audience, scene, lifestyle. The product must NOT be copied from these.
+        type ContextImg = { mimeType: string; data: string }
+        const contextImages: ContextImg[] = []
+        if (Array.isArray(imageParams.contextImages) && isPostMode && !isLogoMode) {
+          for (const ctxImg of imageParams.contextImages.slice(0, 4)) {
+            if (typeof ctxImg === 'string') {
+              const m = ctxImg.match(/^data:([^;]+);base64,(.+)$/)
+              if (m) contextImages.push({ mimeType: m[1], data: m[2] })
+            }
+          }
+        }
+        const ctxCount = contextImages.length
+
+        if (ctxCount > 0) {
+          promptParts.push({ text: `══ ${ctxCount} IMÁGEN${ctxCount > 1 ? 'ES' : ''} DE CONTEXTO / INSPIRACIÓN (NO ES EL PRODUCTO) ══\nEstas imágenes NO son el producto. Son referencia de AMBIENTE, AUDIENCIA, ESCENA, ESTILO DE VIDA, EMOCIÓN o MOOD.\n\nUSO PERMITIDO:\n- Inspirarte en el tipo de personas (edad, composición familiar, expresiones, estilo).\n- Captar el ambiente, la iluminación, la atmósfera, la paleta emocional.\n- Entender el escenario o contexto de uso (hogar, exterior, cocina, oficina, etc.).\n- Replicar el mood, el momento, la energía, la interacción humana.\n\nPROHIBIDO:\n- Copiar el producto desde estas imágenes (el producto real está en las referencias del producto arriba).\n- Inventar variaciones del producto basándote en estas imágenes.\n- Ignorarlas: SÍ deben influir en el diseño final vía escena/mood/audiencia.\n\nTratá estas imágenes como un moodboard: extraé el ESPÍRITU, no los objetos físicos.` })
+
+          contextImages.forEach((img, idx) => {
+            const label = ctxCount > 1
+              ? `── INSPIRACIÓN ${idx + 1} de ${ctxCount} (moodboard — ambiente/audiencia/escena, NO el producto) ──`
+              : '── INSPIRACIÓN (moodboard — ambiente/audiencia/escena, NO el producto) ──'
+            promptParts.push({ text: label })
+            promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+          })
+
+          // Closing reinforcement that ties product truth vs context inspiration together
+          if (refCount > 0) {
+            promptParts.push({ text: `SEPARACIÓN CLARA: El PRODUCTO se copia EXACTAMENTE de las ${refCount} foto${refCount > 1 ? 's' : ''} de referencia del producto. La ESCENA / AUDIENCIA / MOOD se inspira en las ${ctxCount} imagen${ctxCount > 1 ? 'es' : ''} de contexto. NO mezcles: no inventes productos parecidos a los de las imágenes de contexto, y no ignores el ambiente/personas que muestran.` })
+          } else {
+            promptParts.push({ text: `RECORDATORIO: Usá estas imágenes como moodboard (ambiente, personas, escena). No son el producto.` })
+          }
         }
 
         // Determine aspect ratio from dimensions

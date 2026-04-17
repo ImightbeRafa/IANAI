@@ -751,6 +751,7 @@ export interface ProductImage {
   user_id: string
   image_url: string
   label: string | null
+  kind: 'product' | 'context'
   created_at: string
 }
 
@@ -769,7 +770,8 @@ export async function createProductImage(
   productId: string,
   userId: string,
   imageUrl: string,
-  label?: string
+  label?: string,
+  kind: 'product' | 'context' = 'product'
 ): Promise<ProductImage> {
   const { data, error } = await supabase
     .from('product_images')
@@ -777,7 +779,8 @@ export async function createProductImage(
       product_id: productId,
       user_id: userId,
       image_url: imageUrl,
-      label: label || null
+      label: label || null,
+      kind
     })
     .select()
     .single()
