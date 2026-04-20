@@ -815,17 +815,40 @@ export default function ProductWorkspace() {
           mostrar_servicio: { es: 'Mostrar el Servicio/Producto', en: 'Show Service/Product' },
           variedad_productos: { es: 'Variedad de Productos', en: 'Product Variety' },
           paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' },
-          reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' }
+          reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' },
+          // Organic
+          educativo: { es: 'Educativo (orgánico)', en: 'Educational (organic)' },
+          storytelling: { es: 'Storytelling (orgánico)', en: 'Storytelling (organic)' },
+          tendencia: { es: 'Tendencia (orgánico)', en: 'Trending (organic)' },
+          engagement: { es: 'Engagement (orgánico)', en: 'Engagement (organic)' }
         }
+        const ORGANIC_KEYS = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
         const config = scriptSettings.scriptTypeConfig
         const reconocimientoCount = config.reconocimiento ?? 0
         const otherCount = Object.entries(config).filter(([k]) => k !== 'reconocimiento').reduce((s, [, n]) => s + n, 0)
         const isOnlyReconocimiento = reconocimientoCount > 0 && otherCount === 0
+        const organicCount = ORGANIC_KEYS.reduce((s, k) => s + (config[k] ?? 0), 0)
+        const nonOrganicCount = Object.entries(config).filter(([k]) => !(ORGANIC_KEYS as readonly string[]).includes(k)).reduce((s, [, n]) => s + n, 0)
+        const isOnlyOrganic = organicCount > 0 && nonOrganicCount === 0
 
         if (isOnlyReconocimiento) {
           generatePrompt = language === 'es'
             ? `Genera exactamente ${reconocimientoCount} guión(es) de reconocimiento de marca (micro-historias).\nCada guión DEBE tener un MOTOR EMOCIONAL DIFERENTE.\nLa marca debe aparecer como consecuencia natural de la historia, NO como protagonista.\nNO repitas la misma emoción o enfoque. Varía obligatoriamente.`
             : `Generate exactly ${reconocimientoCount} brand awareness script(s) (micro-stories).\nEach script MUST have a DIFFERENT EMOTIONAL MOTOR.\nThe brand must appear as a natural consequence of the story, NOT as the protagonist.\nDo NOT repeat the same emotion or approach. Vary obligatorily.`
+        } else if (isOnlyOrganic) {
+          const parts: string[] = []
+          for (const key of ORGANIC_KEYS) {
+            const count = config[key] ?? 0
+            if (count > 0) {
+              const label = typeLabels[key]?.[language] || key
+              parts.push(language === 'es'
+                ? `${count} guión(es) de tipo "${label}"`
+                : `${count} "${label}" script(s)`)
+            }
+          }
+          generatePrompt = language === 'es'
+            ? `Genera exactamente ${organicCount} guión(es) de contenido ORGÁNICO: ${parts.join(', ')}.\nEstos NO son anuncios. NO son guiónes de venta. Son contenido de valor, historia, tendencia o engagement.\nCada guión debe seguir la estructura propia de su tipo (no la estructura HOOK/DESARROLLO/CTA comercial).\nVaría obligatoriamente el ángulo, tono o historia entre guiónes del mismo tipo.`
+            : `Generate exactly ${organicCount} ORGANIC content script(s): ${parts.join(', ')}.\nThese are NOT ads. NOT sales scripts. They are value, story, trend, or engagement content.\nEach script must follow the structure of its own type (not the commercial HOOK/DEVELOPMENT/CTA structure).\nMandatorily vary angle, tone, or story across scripts of the same type.`
         } else {
           const parts: string[] = []
           for (const [key, count] of Object.entries(config)) {
@@ -837,9 +860,14 @@ export default function ProductWorkspace() {
             }
           }
           const total = Object.values(config).reduce((s, n) => s + n, 0)
+          const mixedNote = organicCount > 0
+            ? (language === 'es'
+                ? '\nIMPORTANTE: algunos son de VENTA y otros son ORGÁNICOS — cada uno debe seguir su propia estructura (ventas: HOOK/DESARROLLO/CTA; orgánico: estructura específica del tipo).'
+                : '\nIMPORTANT: some are SALES and others ORGANIC — each must follow its own structure (sales: HOOK/DEVELOPMENT/CTA; organic: type-specific structure).')
+            : ''
           generatePrompt = language === 'es'
-            ? `Genera exactamente ${total} guión(es) de venta: ${parts.join(', ')}.`
-            : `Generate exactly ${total} sales script(s): ${parts.join(', ')}.`
+            ? `Genera exactamente ${total} guión(es): ${parts.join(', ')}.${mixedNote}`
+            : `Generate exactly ${total} script(s): ${parts.join(', ')}.${mixedNote}`
         }
       } else {
         generatePrompt = language === 'es' 
@@ -851,12 +879,20 @@ export default function ProductWorkspace() {
       const isReconocimientoOnly = scriptSettings.generationMode === 'by_type' 
         && (scriptSettings.scriptTypeConfig.reconocimiento ?? 0) > 0
         && Object.entries(scriptSettings.scriptTypeConfig).every(([k, n]) => k === 'reconocimiento' || n === 0)
+      const ORGANIC_KEYS_INSTR = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
+      const isOrganicOnly = scriptSettings.generationMode === 'by_type'
+        && ORGANIC_KEYS_INSTR.some(k => (scriptSettings.scriptTypeConfig[k] ?? 0) > 0)
+        && Object.entries(scriptSettings.scriptTypeConfig).every(([k, n]) => (ORGANIC_KEYS_INSTR as readonly string[]).includes(k) || n === 0)
       if (input.trim()) {
         const userInstruction = input.trim()
         if (isReconocimientoOnly) {
           generatePrompt += language === 'es'
             ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque en las micro-historias. NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
             : `\n\nUSER STYLE PREFERENCE: "${userInstruction}"\nIMPORTANT: Apply this tone/focus preference within the micro-stories. Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
+        } else if (isOrganicOnly) {
+          generatePrompt += language === 'es'
+            ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura específica de cada tipo orgánico (valor, historia, tendencia, engagement — no estructura comercial). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`
+            : `\n\nUSER STYLE PREFERENCE: "${userInstruction}"\nIMPORTANT: Apply this tone/focus preference WITHIN each organic type's own structure (value, story, trend, engagement — not commercial structure). Do NOT change the delivery format. Do NOT respond conversationally. Generate scripts exactly in the format established by the system.`
         } else {
           generatePrompt += language === 'es'
             ? `\n\nPREFERENCIA DE ESTILO DEL USUARIO: "${userInstruction}"\nIMPORTANTE: Aplica esta preferencia de tono/enfoque DENTRO de la estructura obligatoria de guiones (GANCHO/DESARROLLO/CTA). NO cambies el formato de entrega. NO respondas de forma conversacional. Genera los guiones exactamente en el formato establecido por el sistema.`

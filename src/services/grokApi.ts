@@ -128,8 +128,13 @@ export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
     mostrar_servicio: 1,
     variedad_productos: 0,
     paso_a_paso: 0,
-    reconocimiento: 0
-  }
+    reconocimiento: 0,
+    educativo: 0,
+    storytelling: 0,
+    tendencia: 0,
+    engagement: 0
+  },
+  ctaStrength: 'sales'
 }
 
 export async function sendMessageToGrok(

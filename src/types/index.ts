@@ -9,7 +9,18 @@ type SessionStatus = 'active' | 'completed' | 'archived'
 // =============================================
 // Script Enhancement Types
 // =============================================
-export type ScriptFramework = 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso' | 'reconocimiento'
+export type ScriptFramework =
+  | 'venta_directa'
+  | 'desvalidar_alternativas'
+  | 'mostrar_servicio'
+  | 'variedad_productos'
+  | 'paso_a_paso'
+  | 'reconocimiento'
+  // Organic content frameworks (top-of-funnel, value-first)
+  | 'educativo'
+  | 'storytelling'
+  | 'tendencia'
+  | 'engagement'
 type GenerationMode = 'mixed' | 'by_type'
 
 export interface ScriptTypeConfig {
@@ -19,7 +30,33 @@ export interface ScriptTypeConfig {
   variedad_productos: number
   paso_a_paso: number
   reconocimiento: number
+  // Organic
+  educativo: number
+  storytelling: number
+  tendencia: number
+  engagement: number
 }
+
+// Organic frameworks — single source of truth for UI grouping and backend routing
+export const ORGANIC_SCRIPT_FRAMEWORKS: readonly ScriptFramework[] = [
+  'educativo',
+  'storytelling',
+  'tendencia',
+  'engagement',
+] as const
+
+export function isOrganicFramework(f: ScriptFramework): boolean {
+  return (ORGANIC_SCRIPT_FRAMEWORKS as readonly string[]).includes(f)
+}
+
+/**
+ * CTA strength controls how aggressive the call-to-action is in the generated content.
+ * - none: no CTA (pure value / story ending)
+ * - soft: save / share / follow / comment (organic default)
+ * - brand_mention: subtle brand mention, no hard ask
+ * - sales: full sales CTA — message us, click ad, visit store, etc. (sales default)
+ */
+export type CTAStrength = 'none' | 'soft' | 'brand_mention' | 'sales'
 export type AIModel = 'grok' | 'gemini'
 export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
 export type VideoModel = 'grok-imagine-video'
@@ -482,6 +519,38 @@ export interface ScriptGenerationSettings {
   model: AIModel
   generationMode: GenerationMode
   scriptTypeConfig: ScriptTypeConfig
+  ctaStrength?: CTAStrength
+}
+
+// =============================================
+// Organic Post Types (carousel + single image)
+// =============================================
+export type OrganicCarouselSubtype =
+  | 'educational-list'      // "7 things you didn't know about X"
+  | 'how-to-steps'          // numbered actionable steps
+  | 'before-after'          // transformation narrative
+  | 'myth-vs-fact'          // alternating myth/fact pairs
+
+export type OrganicSingleSubtype =
+  | 'quote-motivational'    // quote-dominant
+  | 'infographic'           // data + hierarchy
+  | 'product-showcase-organic' // product hero, soft CTA
+  | 'aesthetic-brand'       // full-bleed brand aesthetic
+
+export type OrganicSubtype = OrganicCarouselSubtype | OrganicSingleSubtype
+
+export interface CarouselSlidePlan {
+  index: number              // 1-based
+  role: 'hook' | 'body' | 'cta' | 'recap'
+  headline: string
+  body?: string
+  note?: string              // designer note (e.g., "myth side — red tone")
+}
+
+export interface CarouselPlan {
+  subtype: OrganicCarouselSubtype
+  totalSlides: number
+  slides: CarouselSlidePlan[]
 }
 
 // =============================================

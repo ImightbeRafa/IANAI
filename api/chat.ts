@@ -5,6 +5,19 @@ import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
+import {
+  ORGANIC_MASTER_PROMPT,
+  ORGANIC_FRAMEWORK_RULES,
+  buildCTAStrengthPrompt,
+  buildMixedOrganicOverrideBlock,
+  type OrganicScriptFramework,
+  type CTAStrength,
+} from './data/organic-script-prompts.js'
+
+const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
+function isOrganicKey(key: string): key is OrganicScriptFramework {
+  return (ORGANIC_FRAMEWORKS as readonly string[]).includes(key)
+}
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -268,14 +281,30 @@ interface ScriptTypeConfig {
   variedad_productos: number
   paso_a_paso: number
   reconocimiento: number
+  // Organic
+  educativo: number
+  storytelling: number
+  tendencia: number
+  engagement: number
 }
 
 interface ScriptSettings {
-  framework: 'venta_directa' | 'desvalidar_alternativas' | 'mostrar_servicio' | 'variedad_productos' | 'paso_a_paso' | 'reconocimiento'
+  framework:
+    | 'venta_directa'
+    | 'desvalidar_alternativas'
+    | 'mostrar_servicio'
+    | 'variedad_productos'
+    | 'paso_a_paso'
+    | 'reconocimiento'
+    | 'educativo'
+    | 'storytelling'
+    | 'tendencia'
+    | 'engagement'
   variations: number
   model?: AIModel
   generationMode?: 'mixed' | 'by_type'
   scriptTypeConfig?: ScriptTypeConfig
+  ctaStrength?: CTAStrength
 }
 
 interface ContextDocumentData {
@@ -1624,14 +1653,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const hasReconocimiento = scriptSettings?.generationMode === 'by_type' && (scriptSettings?.scriptTypeConfig?.reconocimiento ?? 0) > 0
     const onlyReconocimiento = hasReconocimiento && Object.entries(scriptSettings?.scriptTypeConfig ?? {}).every(([k, v]) => k === 'reconocimiento' || v === 0)
 
+    // Detect organic-only vs organic-mixed runs.
+    const cfg = scriptSettings?.scriptTypeConfig ?? ({} as Record<string, number>)
+    const byType = scriptSettings?.generationMode === 'by_type'
+    const hasAnyOrganic = byType && ORGANIC_FRAMEWORKS.some(k => (cfg as Record<string, number | undefined>)[k] && ((cfg as Record<string, number | undefined>)[k] ?? 0) > 0)
+    const onlyOrganic = byType && hasAnyOrganic && Object.entries(cfg).every(([k, v]) => isOrganicKey(k) || (v ?? 0) === 0)
+    const mixedOrganic = byType && hasAnyOrganic && !onlyOrganic
+
+    // Effective CTA strength — organic-only defaults to 'soft' if the user didn't pick one; sales defaults to 'sales'.
+    const effectiveCTAStrength: CTAStrength = scriptSettings?.ctaStrength
+      ?? (onlyOrganic ? 'soft' : 'sales')
+
+    // When CTA is NOT sales, suppress the aggressive channel-CTA rules in buildBusinessRulesPrompt.
+    const suppressBusinessCTA = effectiveCTAStrength !== 'sales' || onlyReconocimiento
+
     if (feature === 'description') {
       basePrompt = DESCRIPTION_PROMPTS[language]
     } else {
       if (onlyReconocimiento) {
         basePrompt = RECONOCIMIENTO_PROMPTS[language]
+      } else if (onlyOrganic) {
+        // All requested types are organic — replace sales master with organic master.
+        basePrompt = ORGANIC_MASTER_PROMPT[language]
       } else {
         basePrompt = MASTER_PROMPTS[language]
-        
+
         if (productType === 'restaurant') {
           basePrompt = RESTAURANT_PROMPTS[language]
         } else if (productType === 'real_estate') {
@@ -1647,7 +1693,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Build structured prompt sections from new businessContext/productContext
-    const businessRulesPrompt = buildBusinessRulesPrompt(businessContext, language, activeSalesChannel, onlyReconocimiento)
+    const businessRulesPrompt = buildBusinessRulesPrompt(businessContext, language, activeSalesChannel, suppressBusinessCTA)
     const productRulesPrompt = buildProductRulesPrompt(productContext, language)
     const structuredContextPrompt = buildStructuredContext(businessContext, productContext, language)
     // Legacy fallback: if no structured context, use old businessDetails JSON dump
@@ -1707,7 +1753,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    // Organic content layer: inject framework-specific rules + CTA strength control.
+    // - onlyOrganic: append the single active framework's rules (for clarity / reinforcement).
+    // - mixedOrganic: append per-framework override blocks so organic scripts don't inherit sales DNA.
+    // - CTA strength: injected for any non-'sales' strength (including sales runs where the user picked 'soft').
+    let organicRulesPrompt = ''
+    if (feature !== 'description') {
+      if (onlyOrganic) {
+        const activeOrganic = ORGANIC_FRAMEWORKS.filter(k => ((cfg as Record<string, number | undefined>)[k] ?? 0) > 0)
+        if (activeOrganic.length > 0) {
+          const header = language === 'es'
+            ? '\n\n===================================================================\nREGLAS ESPECÍFICAS POR TIPO DE GUIÓN ORGÁNICO\n==================================================================='
+            : '\n\n===================================================================\nTYPE-SPECIFIC ORGANIC SCRIPT RULES\n==================================================================='
+          organicRulesPrompt = header + '\n' + activeOrganic.map(t => ORGANIC_FRAMEWORK_RULES[t][language]).join('\n\n')
+        }
+      } else if (mixedOrganic) {
+        const mixedCfg: Partial<Record<OrganicScriptFramework, number>> = {}
+        for (const k of ORGANIC_FRAMEWORKS) {
+          mixedCfg[k] = (cfg as Record<string, number | undefined>)[k] ?? 0
+        }
+        organicRulesPrompt = buildMixedOrganicOverrideBlock(mixedCfg, language)
+      }
+    }
+
+    const ctaStrengthPrompt = feature === 'description' ? '' : buildCTAStrengthPrompt(effectiveCTAStrength, language)
+
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {

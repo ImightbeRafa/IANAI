@@ -544,7 +544,7 @@ export async function getDashboardStats(userId: string): Promise<DashboardStats>
 // POST FUNCTIONS (AI Image Generation)
 // =============================================
 
-interface Post {
+export interface Post {
   id: string
   product_id: string
   created_by: string
@@ -558,8 +558,58 @@ interface Post {
   model?: string
   error_message?: string
   rating?: number | null
+  // Carousel (organic) grouping — NULL for standalone posts.
+  carousel_group_id?: string | null
+  slide_index?: number | null
+  slide_total?: number | null
+  carousel_subtype?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface CarouselSlideInsert {
+  prompt: string
+  generated_image_url: string
+  width: number
+  height: number
+  slide_index: number
+  slide_total: number
+  carousel_subtype: string
+}
+
+/**
+ * Persist all slides of a carousel as linked `posts` rows sharing a `carousel_group_id`.
+ * Returns the inserted rows sorted by slide_index ascending.
+ */
+export async function createCarouselPosts(
+  productId: string,
+  userId: string,
+  carouselGroupId: string,
+  slides: CarouselSlideInsert[],
+  model: string = 'nano-banana-pro'
+): Promise<Post[]> {
+  if (!slides.length) return []
+  const rows = slides.map(s => ({
+    product_id: productId,
+    created_by: userId,
+    prompt: s.prompt,
+    generated_image_url: s.generated_image_url,
+    status: 'completed' as const,
+    width: s.width,
+    height: s.height,
+    output_format: 'jpeg',
+    model,
+    carousel_group_id: carouselGroupId,
+    slide_index: s.slide_index,
+    slide_total: s.slide_total,
+    carousel_subtype: s.carousel_subtype,
+  }))
+  const { data, error } = await supabase
+    .from('posts')
+    .insert(rows)
+    .select()
+  if (error) throw error
+  return (data || []).sort((a, b) => (a.slide_index ?? 0) - (b.slide_index ?? 0))
 }
 
 export async function createPost(

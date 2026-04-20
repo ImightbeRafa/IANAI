@@ -6,6 +6,8 @@ import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
 import { buildPostPrompt, buildPresetPrompt, buildProductPrompt, buildAnuncioPrompt, buildLogoPrompt, detectProductNiche } from './data/image-presets.js'
 import type { PostAspectRatio, LogoArchetype, LogoEnhanceTier, LogoBackground } from './data/image-presets.js'
+import { buildOrganicSinglePrompt, type OrganicSingleSubtype, type OrganicAspectRatio } from './data/organic-post-prompts.js'
+import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
@@ -890,6 +892,45 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         } else {
           enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
+      } else if (postStyle === 'organic-single' && imageParams.organicSubtype) {
+        // ORGANIC SINGLE IMAGE MODE — top-of-funnel aesthetic post (quote, infographic, showcase, aesthetic).
+        // Supports 1:1 natively (most common for organic on IG feed). Honors brand_voice for style direction.
+        const organicSubtypeRaw = (imageParams.organicSubtype as string) || ''
+        const VALID_ORGANIC_SINGLE: OrganicSingleSubtype[] = ['quote-motivational', 'infographic', 'product-showcase-organic', 'aesthetic-brand']
+        const organicSubtype: OrganicSingleSubtype = (VALID_ORGANIC_SINGLE as string[]).includes(organicSubtypeRaw)
+          ? (organicSubtypeRaw as OrganicSingleSubtype)
+          : 'aesthetic-brand'
+        // Resolve aspect ratio: allow 1:1 for organic posts even though PostAspectRatio doesn't include it natively.
+        const rawAR = imageParams.aspectRatio as string | undefined
+        const organicAR: OrganicAspectRatio = rawAR === '1:1' ? '1:1' : rawAR === '4:5' ? '4:5' : rawAR === '3:4' ? '3:4' : '9:16'
+        // Reset width/height if 1:1 was requested (earlier block only branches 1:1 on product mode).
+        if (rawAR === '1:1') { imageParams.width = 1080; imageParams.height = 1080 }
+        else if (rawAR === '4:5') { imageParams.width = 1080; imageParams.height = 1350 }
+
+        const organicCTA: CTAStrength = ((): CTAStrength => {
+          const raw = (imageParams.ctaStrength as string | undefined) || 'soft'
+          return (['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).includes(raw as CTAStrength)
+            ? (raw as CTAStrength) : 'soft'
+        })()
+
+        const organicPrompt = buildOrganicSinglePrompt({
+          subtype: organicSubtype,
+          aspectRatio: organicAR,
+          language: postLanguage === 'en' ? 'en' : 'es',
+          hasProductImages,
+          brandVoice: brandKit?.brand_voice ?? null,
+          ctaStrength: organicCTA,
+          content: {
+            headline: typeof imageParams.organicHeadline === 'string' ? imageParams.organicHeadline : undefined,
+            body: typeof imageParams.organicBody === 'string' ? imageParams.organicBody : undefined,
+            quote: typeof imageParams.organicQuote === 'string' ? imageParams.organicQuote : undefined,
+            attribution: typeof imageParams.organicAttribution === 'string' ? imageParams.organicAttribution : undefined,
+          },
+          scriptContext: typeof imageParams.scriptContext === 'string' ? imageParams.scriptContext : undefined,
+        })
+
+        // Organic builds its own language / aspect-ratio rules internally; skip the sales aspectRatioPrefix.
+        enhancedPrompt = colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
       } else {
         // VENTA DIRECTA (default)
         enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt

@@ -442,6 +442,25 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
     )
   }
 
+  const CarouselBtn = ({ versionIndex }: { versionIndex: number }) => {
+    if (!productId) return null
+    return (
+      <button
+        onClick={() => {
+          const content = getVersionContent(versionIndex)
+          const key = `scriptToPost_${Date.now()}`
+          sessionStorage.setItem(key, content)
+          navigate(`/posts/product/${productId}?scriptKey=${key}&autoOpen=carousel`)
+        }}
+        className="inline-flex items-center gap-1 text-[11px] text-dark-400 hover:bg-emerald-900/20 hover:text-emerald-400 px-2 py-0.5 rounded-md transition-colors"
+        title={language === 'es' ? 'Convertir en carrusel orgánico (2–10 slides)' : 'Convert to organic carousel (2–10 slides)'}
+      >
+        <FileText className="w-3 h-3" />
+        {language === 'es' ? 'Carrusel' : 'Carousel'}
+      </button>
+    )
+  }
+
   const TemplateBtn = ({ versionIndex }: { versionIndex: number }) => {
     if (!onSaveAsTemplate) return null
     return (
@@ -716,6 +735,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
           <SaveBtn versionIndex={-1} />
           <RateBtn versionIndex={-1} />
           <PostBtn versionIndex={-1} />
+          <CarouselBtn versionIndex={-1} />
           <TemplateBtn versionIndex={-1} />
           <VersionActions versionIndex={-1} />
         </div>
@@ -750,6 +770,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
                 <SaveBtn versionIndex={index} />
                 <RateBtn versionIndex={index} />
                 <PostBtn versionIndex={index} />
+                <CarouselBtn versionIndex={index} />
                 <TemplateBtn versionIndex={index} />
                 <VersionActions versionIndex={index} />
               </div>

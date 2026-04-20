@@ -4,7 +4,9 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost, deletePost } from '../services/database'
 import type { ProductImage } from '../services/database'
-import type { Product, Script, ImageModel } from '../types'
+import type { Product, Script, ImageModel, OrganicSingleSubtype, CTAStrength } from '../types'
+import OrganicCarouselModal from '../components/OrganicCarouselModal'
+import CarouselGroupCard, { type CarouselSlide } from '../components/CarouselGroupCard'
 import Layout from '../components/Layout'
 import { uploadPostImageOriginal, uploadProductImage, urlToBase64, compressBase64ForApi } from '../utils/imageCompression'
 import { 
@@ -50,6 +52,11 @@ interface GeneratedPost {
   createdAt: Date
   model?: string
   saved?: boolean
+  // Carousel grouping (organic carousels only; undefined for standalone posts)
+  carouselGroupId?: string | null
+  slideIndex?: number | null
+  slideTotal?: number | null
+  carouselSubtype?: string | null
 }
 
 const API_URL = import.meta.env.PROD ? '/api/generate-image' : 'http://localhost:3000/api/generate-image'
@@ -154,6 +161,15 @@ export default function PostWorkspace() {
   const isProductMode = postStyle === 'product'
   const isAnuncioMode = postStyle === 'anuncio-conversion'
   const isLogoMode = postStyle === 'logo'
+  // Organic post state
+  // postStyle 'organic-single:<subtype>' → single-image organic post (routed through /api/generate-image).
+  // postStyle 'organic-carousel'         → opens the OrganicCarouselModal (routed through /api/generate-carousel).
+  const isOrganicSingleMode = postStyle.startsWith('organic-single:')
+  const organicSingleSubtype: OrganicSingleSubtype | null = isOrganicSingleMode
+    ? (postStyle.replace('organic-single:', '') as OrganicSingleSubtype)
+    : null
+  const [ctaStrength, setCtaStrength] = useState<CTAStrength>('soft')
+  const [carouselModalOpen, setCarouselModalOpen] = useState(false)
 
   const labels = {
     es: {
@@ -367,14 +383,19 @@ export default function PostWorkspace() {
     }
   }, [isLogoMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Handle script content passed from ScriptCard via sessionStorage
+  // Handle script content passed from ScriptCard via sessionStorage.
+  // Optional ?autoOpen=carousel → opens the OrganicCarouselModal with the script pre-filled.
   useEffect(() => {
     const scriptKey = searchParams.get('scriptKey')
+    const autoOpen = searchParams.get('autoOpen')
     if (scriptKey) {
       const content = sessionStorage.getItem(scriptKey)
       if (content) {
         setScriptText(content)
         sessionStorage.removeItem(scriptKey)
+        if (autoOpen === 'carousel') {
+          setCarouselModalOpen(true)
+        }
       }
       setSearchParams({}, { replace: true })
     }
@@ -418,7 +439,11 @@ export default function PostWorkspace() {
             prompt: post.prompt,
             createdAt: new Date(post.created_at),
             model: post.model,
-            saved: true
+            saved: true,
+            carouselGroupId: post.carousel_group_id ?? null,
+            slideIndex: post.slide_index ?? null,
+            slideTotal: post.slide_total ?? null,
+            carouselSubtype: post.carousel_subtype ?? null,
           }))
         setGeneratedPosts(loadedPosts)
 
@@ -674,6 +699,34 @@ export default function PostWorkspace() {
           customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
           brandKitId: selectedBrandKitId || undefined
         }
+      } else if (isOrganicSingleMode && organicSingleSubtype) {
+        // ORGANIC SINGLE IMAGE — top-of-funnel aesthetic post (quote, infographic, showcase, brand aesthetic).
+        const script = getScriptPrompt()
+        requestBody = {
+          prompt: script || additionalInstructions.trim() || '',
+          mode: 'post',
+          postStyle: 'organic-single',
+          organicSubtype: organicSingleSubtype,
+          ctaStrength,
+          // Pass raw script as context so prompt builder has the underlying idea (non-literal).
+          scriptContext: script || undefined,
+          // Map organic-single idea text into content hints based on subtype.
+          organicHeadline: organicSingleSubtype === 'infographic' || organicSingleSubtype === 'product-showcase-organic' || organicSingleSubtype === 'aesthetic-brand'
+            ? (script || additionalInstructions.trim() || undefined)
+            : undefined,
+          organicQuote: organicSingleSubtype === 'quote-motivational'
+            ? (script || additionalInstructions.trim() || undefined)
+            : undefined,
+          productId,
+          aspectRatio,
+          width: 1080,
+          height: isVertical ? 1920 : aspectRatio === '1:1' ? 1080 : 1440,
+          model: imageModel,
+          language,
+          colorPaletteId: colorPaletteId !== 'auto' && colorPaletteId !== 'custom' ? colorPaletteId : undefined,
+          customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
+          brandKitId: selectedBrandKitId || undefined
+        }
       } else {
         const script = getScriptPrompt()
         requestBody = {
@@ -822,6 +875,56 @@ export default function PostWorkspace() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Download failed:', err)
+    }
+  }
+
+  // Download a single carousel slide with a meaningful filename (product-carousel-slide-N.jpg).
+  const handleDownloadCarouselSlide = async (slide: CarouselSlide) => {
+    try {
+      const response = await fetch(slide.imageUrl)
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${product?.name || 'post'}-carousel-slide-${slide.slideIndex}.jpg`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Download slide failed:', err)
+    }
+  }
+
+  // Download every slide of a carousel sequentially (tiny delay prevents browser rate-limit on download prompt).
+  const handleDownloadCarouselAll = async (slides: CarouselSlide[]) => {
+    for (const slide of slides) {
+      await handleDownloadCarouselSlide(slide)
+      await new Promise(r => setTimeout(r, 150))
+    }
+  }
+
+  // Delete all slides of a carousel (one DB delete per slide; optimistic UI).
+  const handleDeleteCarousel = async (slides: CarouselSlide[]) => {
+    if (deletingPostId) return
+    const slideIds = new Set(slides.map(s => s.id))
+    const previousPosts = generatedPosts
+    setDeletingPostId(slides[0]?.id ?? null)
+    setGeneratedPosts(prev => prev.filter(p => !slideIds.has(p.id)))
+    try {
+      // Only persisted slides hit the DB (ids starting with 'post-'/'enhance-'/'edit-' are in-flight temp ids).
+      await Promise.all(
+        slides
+          .filter(s => !/^(post-|enhance-|edit-)/.test(s.id))
+          .map(s => deletePost(s.id))
+      )
+      setTotalPostCount(c => Math.max(0, c - slides.length))
+    } catch (err) {
+      console.error('Delete carousel failed:', err)
+      setError(err instanceof Error ? err.message : t.deletePostError)
+      setGeneratedPosts(previousPosts)
+    } finally {
+      setDeletingPostId(null)
     }
   }
 
@@ -1168,7 +1271,11 @@ export default function PostWorkspace() {
           prompt: post.prompt,
           createdAt: new Date(post.created_at),
           model: post.model,
-          saved: true
+          saved: true,
+          carouselGroupId: post.carousel_group_id ?? null,
+          slideIndex: post.slide_index ?? null,
+          slideTotal: post.slide_total ?? null,
+          carouselSubtype: post.carousel_subtype ?? null,
         }))
       setGeneratedPosts(prev => [...prev, ...morePosts])
     } catch (err) {
@@ -1367,6 +1474,68 @@ export default function PostWorkspace() {
                       <div className="w-2 h-2 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
                     )}
                   </button>
+
+                  {/* ORGANIC SECTION — top-of-funnel content (no hard sales CTA) */}
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-emerald-900/10 border-y border-emerald-800/30">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
+                      {language === 'es' ? 'Orgánico' : 'Organic'}
+                    </span>
+                    <span className="text-[9px] text-dark-400 truncate">
+                      · {language === 'es' ? 'valor, historia, aesthetic' : 'value, story, aesthetic'}
+                    </span>
+                  </div>
+
+                  {/* Organic Carousel — opens dedicated modal */}
+                  <button
+                    onClick={() => { setCarouselModalOpen(true); setShowStyleDropdown(false) }}
+                    className="w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-emerald-900/10 border-b border-dark-100"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-dark-800">
+                        {language === 'es' ? 'Carrusel Orgánico' : 'Organic Carousel'}
+                      </div>
+                      <div className="text-[11px] text-dark-400 mt-0.5">
+                        {language === 'es' ? '2–10 slides con consistencia visual' : '2–10 slides with visual consistency'}
+                      </div>
+                    </div>
+                    <div className="px-2 py-0.5 rounded-md bg-emerald-900/30 text-emerald-300 text-[9px] font-bold uppercase tracking-wider">
+                      Nuevo
+                    </div>
+                  </button>
+
+                  {/* Organic Single Images — 4 subtypes */}
+                  {([
+                    { id: 'quote-motivational', es: 'Cita / Motivacional', en: 'Quote / Motivational', desc_es: 'Frase dominante, fondo aesthetic', desc_en: 'Dominant quote, aesthetic background' },
+                    { id: 'infographic', es: 'Infografía', en: 'Infographic', desc_es: 'Datos con jerarquía visual', desc_en: 'Data with visual hierarchy' },
+                    { id: 'product-showcase-organic', es: 'Showcase Orgánico', en: 'Organic Showcase', desc_es: 'Producto editorial (no ad)', desc_en: 'Editorial product (not ad)' },
+                    { id: 'aesthetic-brand', es: 'Brand Aesthetic', en: 'Brand Aesthetic', desc_es: 'Full-bleed de marca', desc_en: 'Full-bleed brand statement' },
+                  ] as { id: OrganicSingleSubtype; es: string; en: string; desc_es: string; desc_en: string }[]).map(o => {
+                    const value = `organic-single:${o.id}`
+                    return (
+                      <button
+                        key={o.id}
+                        onClick={() => { setPostStyle(value); setStreamlinedScript(null); setShowStyleDropdown(false); if (aspectRatio === '9:16') setAspectRatio('1:1') }}
+                        className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-emerald-900/10 border-b border-dark-100 ${
+                          postStyle === value ? 'bg-emerald-900/25' : ''
+                        }`}
+                      >
+                        <div className="w-10 h-10 rounded-lg bg-emerald-900/30 border border-emerald-800/40 flex items-center justify-center flex-shrink-0">
+                          <Sparkles className="w-4 h-4 text-emerald-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-dark-800">{language === 'es' ? o.es : o.en}</div>
+                          <div className="text-[11px] text-dark-400 mt-0.5">{language === 'es' ? o.desc_es : o.desc_en}</div>
+                        </div>
+                        {postStyle === value && (
+                          <div className="w-2 h-2 rounded-full bg-emerald-500 mt-2 flex-shrink-0" />
+                        )}
+                      </button>
+                    )
+                  })}
 
                   {/* Preset styles */}
                   {IMAGE_PRESETS.map(preset => (
@@ -2243,7 +2412,7 @@ export default function PostWorkspace() {
                 ] : [
                   { id: '9:16' as PostAspectRatio, name: t.reelStory, sub: '9:16' },
                   { id: '3:4' as PostAspectRatio, name: t.squarePost, sub: '3:4' },
-                  ...(isProductMode ? [{ id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1' }] : []),
+                  ...(isProductMode || isOrganicSingleMode ? [{ id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1' }] : []),
                 ] as { id: PostAspectRatio; name: string; sub: string }[]).map(f => (
                   <button
                     key={f.id}
@@ -2262,6 +2431,43 @@ export default function PostWorkspace() {
                 ))}
               </div>
             </div>
+            )}
+
+            {/* CTA Strength — organic-single only */}
+            {isOrganicSingleMode && (
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                  {language === 'es' ? 'Fuerza del CTA' : 'CTA Strength'}
+                </label>
+                <div className="grid grid-cols-4 gap-1">
+                  {(['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).map(s => {
+                    const labels: Record<CTAStrength, { es: string; en: string }> = {
+                      none: { es: 'Ninguno', en: 'None' },
+                      soft: { es: 'Suave', en: 'Soft' },
+                      brand_mention: { es: 'Marca', en: 'Brand' },
+                      sales: { es: 'Ventas', en: 'Sales' },
+                    }
+                    const active = ctaStrength === s
+                    const isSales = s === 'sales'
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setCtaStrength(s)}
+                        className={`px-2 py-2 text-[11px] font-medium rounded-lg transition-all ${
+                          active
+                            ? isSales
+                              ? 'bg-primary-500 text-white shadow-md'
+                              : 'bg-emerald-600 text-white shadow-md'
+                            : 'bg-dark-50 text-dark-500 hover:bg-dark-100 border border-dark-200'
+                        }`}
+                      >
+                        {language === 'es' ? labels[s].es : labels[s].en}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             )}
 
             {/* Error */}
@@ -2349,6 +2555,35 @@ export default function PostWorkspace() {
                   />
                 )}
                 {generatedPosts.map((post, index) => {
+                  // Carousel grouping: skip non-anchor slides; render CarouselGroupCard for anchor slides.
+                  if (post.carouselGroupId) {
+                    const siblings = generatedPosts
+                      .filter(p => p.carouselGroupId === post.carouselGroupId)
+                      .sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0))
+                    const anchorId = siblings[0]?.id
+                    if (post.id !== anchorId) return null // skip non-anchor slides
+                    const slides: CarouselSlide[] = siblings.map(s => ({
+                      id: s.id,
+                      imageUrl: s.imageUrl,
+                      slideIndex: s.slideIndex ?? 1,
+                      slideTotal: s.slideTotal ?? siblings.length,
+                      prompt: s.prompt,
+                    }))
+                    const isDeleting = deletingPostId != null && siblings.some(s => s.id === deletingPostId)
+                    return (
+                      <CarouselGroupCard
+                        key={post.carouselGroupId}
+                        groupId={post.carouselGroupId}
+                        subtype={post.carouselSubtype ?? null}
+                        slides={slides}
+                        onDownloadSlide={handleDownloadCarouselSlide}
+                        onDownloadAll={handleDownloadCarouselAll}
+                        onDeleteCarousel={handleDeleteCarousel}
+                        deleting={isDeleting}
+                        language={language}
+                      />
+                    )
+                  }
                   const isEnhancing = enhancingPostId === post.id
                   const isEditing = editing && editingPostId === post.id
                   const isProcessing = isEnhancing || isEditing
@@ -2720,6 +2955,44 @@ export default function PostWorkspace() {
             })
             setCustomPostTypes(prev => [saved, ...prev])
             setPostStyle(`custom-${saved.id}`)
+          }}
+        />
+      )}
+
+      {/* Organic Carousel Modal */}
+      {user && productId && (
+        <OrganicCarouselModal
+          open={carouselModalOpen}
+          onClose={() => setCarouselModalOpen(false)}
+          productId={productId}
+          userId={user.id}
+          language={language}
+          brandKitId={selectedBrandKitId || undefined}
+          initialScriptContent={selectedScript?.content || scriptText}
+          remainingImageCredits={
+            usageLimits.imagesLimit === -1
+              ? null
+              : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+          }
+          onPersisted={(inserted) => {
+            // Refresh the posts list so the new carousel appears in the gallery.
+            const newPosts: GeneratedPost[] = inserted.map(p => ({
+              id: p.id,
+              imageUrl: p.generated_image_url || '',
+              prompt: p.prompt,
+              createdAt: new Date(p.created_at),
+              model: p.model,
+              saved: true,
+              carouselGroupId: p.carousel_group_id ?? null,
+              slideIndex: p.slide_index ?? null,
+              slideTotal: p.slide_total ?? null,
+              carouselSubtype: p.carousel_subtype ?? null,
+            }))
+            // Sort slides by index so Slide 1 displays first when rendered as a group.
+            newPosts.sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0))
+            setGeneratedPosts(prev => [...newPosts, ...prev])
+            setTotalPostCount(c => c + inserted.length)
+            usageLimits.refresh()
           }}
         />
       )}

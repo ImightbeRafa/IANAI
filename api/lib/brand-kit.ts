@@ -183,8 +183,38 @@ Se adjunta el logotipo oficial de la marca "${kit.name}" como imagen inline.
 }
 
 /**
+ * MIME types accepted by the Gemini image API for inline image inputs.
+ * Anything outside this set will be rejected with 400 INVALID_ARGUMENT.
+ * Ref: https://ai.google.dev/gemini-api/docs/image-generation
+ */
+const GEMINI_SUPPORTED_IMAGE_MIMES = new Set<string>([
+  'image/png',
+  'image/jpeg',
+  'image/jpg', // non-standard but sometimes returned by servers
+  'image/webp',
+  'image/heic',
+  'image/heif',
+])
+
+/**
+ * Infer a Gemini-compatible MIME type from a URL extension, used as a fallback when
+ * the server returns a generic content-type (e.g. application/octet-stream).
+ */
+function inferMimeFromUrl(url: string): string | null {
+  const clean = url.split('?')[0].split('#')[0].toLowerCase()
+  if (clean.endsWith('.png')) return 'image/png'
+  if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg'
+  if (clean.endsWith('.webp')) return 'image/webp'
+  if (clean.endsWith('.heic')) return 'image/heic'
+  if (clean.endsWith('.heif')) return 'image/heif'
+  return null
+}
+
+/**
  * Fetch the brand kit logo from its URL and return as base64 data for inline Gemini usage.
- * Returns null if fetch fails or no logo is set.
+ * Returns null if fetch fails, no logo is set, or the MIME type is not supported by Gemini
+ * (e.g. .ico, .svg, .gif, .bmp). In those cases the caller will generate without the logo
+ * rather than failing the whole image generation.
  */
 export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeType: string; data: string } | null> {
   if (!kit.logo_url) return null
@@ -194,10 +224,32 @@ export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeTy
       console.warn('Failed to fetch brand logo:', resp.status, kit.logo_url)
       return null
     }
-    const contentType = resp.headers.get('content-type') || 'image/webp'
+    // Strip parameters (e.g. "image/png; charset=utf-8") and lowercase.
+    const rawContentType = (resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+
+    // Resolve an effective MIME: prefer server header if supported, else infer from URL extension.
+    let effectiveMime: string | null = GEMINI_SUPPORTED_IMAGE_MIMES.has(rawContentType) ? rawContentType : null
+    if (!effectiveMime) {
+      const inferred = inferMimeFromUrl(kit.logo_url)
+      if (inferred && GEMINI_SUPPORTED_IMAGE_MIMES.has(inferred)) {
+        effectiveMime = inferred
+      }
+    }
+
+    if (!effectiveMime) {
+      console.warn(
+        `Brand logo MIME type not supported by Gemini (got "${rawContentType || 'unknown'}" for kit "${kit.name}"). ` +
+        `Supported: PNG, JPEG, WEBP, HEIC, HEIF. Skipping logo injection — please re-upload the logo as PNG or JPEG.`
+      )
+      return null
+    }
+
+    // Normalize legacy "image/jpg" to the canonical "image/jpeg".
+    if (effectiveMime === 'image/jpg') effectiveMime = 'image/jpeg'
+
     const buffer = await resp.arrayBuffer()
     const base64 = Buffer.from(buffer).toString('base64')
-    return { mimeType: contentType, data: base64 }
+    return { mimeType: effectiveMime, data: base64 }
   } catch (err) {
     console.warn('Error fetching brand logo for inline injection:', err)
     return null
