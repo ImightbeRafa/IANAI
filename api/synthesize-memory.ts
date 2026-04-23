@@ -1,11 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
+import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
@@ -60,6 +57,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const user = await requireAuth(req, res)
   if (!user) return
+
+  if (!supabase) {
+    return res.status(500).json({ error: 'Server not configured' })
+  }
 
   const grokApiKey = process.env.GROK_API_KEY
   if (!grokApiKey) {

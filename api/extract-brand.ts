@@ -1,14 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { GoogleGenAI } from '@google/genai'
-
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-const supabase = supabaseUrl && supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null
+import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
 
 // ── Helpers: extract brand hints from raw HTML ──────────────────────
 function extractColorsFromHtml(html: string): string[] {

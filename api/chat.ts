@@ -1,10 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
 import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
+import { supabaseAdmin as memorySupabase } from './lib/supabase-admin.js'
 import {
   ORGANIC_MASTER_PROMPT,
   ORGANIC_FRAMEWORK_RULES,
@@ -20,10 +20,6 @@ function isOrganicKey(key: string): key is OrganicScriptFramework {
 }
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
-
-const memorySupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-const memorySupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-const memorySupabase = memorySupabaseUrl && memorySupabaseKey ? createClient(memorySupabaseUrl, memorySupabaseKey) : null
 
 type AIModel = 'grok'
 

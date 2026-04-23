@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
@@ -11,12 +10,9 @@ import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
+import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
-
-const imgMemSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-const imgMemSupabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-const imgMemSupabase = imgMemSupabaseUrl && imgMemSupabaseKey ? createClient(imgMemSupabaseUrl, imgMemSupabaseKey) : null
 
 // Gemini Image Generation Models (from official SDK documentation)
 const GEMINI_IMAGE_MODELS: Record<string, string> = {
@@ -830,17 +826,49 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const bgDesc = typeof imageParams.backgroundDescription === 'string'
           ? imageParams.backgroundDescription.slice(0, 500)
           : undefined
-        const productPrompt = buildProductPrompt(
-          productSubStyle,
-          productAR,
-          postLanguage,
-          bgDesc
-        )
-        if (productPrompt) {
-          enhancedPrompt = colorPrefix + productPrompt
-        } else {
-          enhancedPrompt = colorPrefix + buildProductPrompt('studio-hero', productAR, postLanguage)!
+
+        // Load product context + detect niche so the prompt adapts to the actual product
+        let productContext: {
+          name?: string
+          category?: string
+          description?: string
+          targetAudience?: string
+          niche?: 'physical' | 'food' | 'service' | 'fashion' | 'digital'
+        } = {}
+        if (imageParams.productId && imgMemSupabase) {
+          try {
+            const { data: prod } = await imgMemSupabase
+              .from('products')
+              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom')
+              .eq('id', imageParams.productId)
+              .single()
+            if (prod) {
+              productContext = {
+                name: prod.name || undefined,
+                category: prod.product_category_custom || prod.product_category || prod.svc_service_type_custom || prod.svc_service_type || prod.type || undefined,
+                description: prod.product_description || prod.description || undefined,
+                targetAudience: prod.target_audience || undefined,
+                niche: detectProductNiche(prod),
+              }
+            }
+          } catch { /* fallback: no context */ }
         }
+
+        // Force 1:1 format prefix (supersedes aspectRatioPrefix) or fall back to the standard prefix
+        const productFormatPrefix = imageParams.aspectRatio === '1:1'
+          ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
+          : aspectRatioPrefix
+
+        // Filter out the generic frontend fallback string so it doesn't become "user instructions"
+        const rawUserPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+        const PRODUCT_FALLBACK_PROMPTS = new Set(['Professional product photograph', 'professional product photograph'])
+        const userInstr = PRODUCT_FALLBACK_PROMPTS.has(rawUserPrompt) ? '' : rawUserPrompt
+        const productOpts = { backgroundDescription: bgDesc, productContext, userInstructions: userInstr }
+
+        const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
+          || buildProductPrompt('studio-hero', productAR, postLanguage, productOpts)!
+
+        enhancedPrompt = productFormatPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
       } else if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
         // CUSTOM POST TYPE MODE: load master prompt from DB
         try {

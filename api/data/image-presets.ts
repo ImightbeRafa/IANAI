@@ -662,6 +662,156 @@ RESOLUCIÓN: Máxima calidad disponible, detalles nítidos, sin artefactos.
 `
 }
 
+// =============================================
+// PRODUCT PROMPT — Smart context & niche overlay
+// Injects product intelligence into ANY sub-style so
+// the AI adapts composition, props and lighting to the
+// actual product (food, fashion, tech, beauty, etc.)
+// =============================================
+
+export interface ProductPromptContext {
+  name?: string
+  category?: string
+  description?: string
+  targetAudience?: string
+  niche?: AnuncioNiche
+}
+
+function buildProductContextBlock(ctx: ProductPromptContext | undefined, language: string): string {
+  if (!ctx) return ''
+  const hasAny = !!(ctx.name || ctx.category || ctx.description || ctx.targetAudience || ctx.niche)
+  if (!hasAny) return ''
+  const isES = language === 'es'
+  const lines: string[] = []
+  if (ctx.name) lines.push(isES ? `- PRODUCTO: ${ctx.name}` : `- PRODUCT: ${ctx.name}`)
+  if (ctx.category) lines.push(isES ? `- CATEGORÍA: ${ctx.category}` : `- CATEGORY: ${ctx.category}`)
+  if (ctx.description) lines.push(isES ? `- DESCRIPCIÓN: ${ctx.description.slice(0, 400)}` : `- DESCRIPTION: ${ctx.description.slice(0, 400)}`)
+  if (ctx.targetAudience) lines.push(isES ? `- AUDIENCIA: ${ctx.targetAudience}` : `- AUDIENCE: ${ctx.targetAudience}`)
+  if (ctx.niche) lines.push(isES ? `- NICHO DETECTADO: ${ctx.niche}` : `- DETECTED NICHE: ${ctx.niche}`)
+  const header = isES
+    ? '═══════════════════════════════════════════════\nCONTEXTO DEL PRODUCTO (USA ESTA INFORMACIÓN PARA CALIBRAR TODAS LAS DECISIONES VISUALES)\n═══════════════════════════════════════════════'
+    : '═══════════════════════════════════════════════\nPRODUCT CONTEXT (USE THIS TO CALIBRATE EVERY VISUAL DECISION)\n═══════════════════════════════════════════════'
+  const footer = isES
+    ? 'Adaptá superficies, props, iluminación, paleta y mood a la naturaleza específica de este producto — NO uses defaults genéricos.'
+    : 'Adapt surfaces, props, lighting, palette and mood to the specific nature of this product — do NOT use generic defaults.'
+  return `${header}\n${lines.join('\n')}\n\n${footer}\n═══════════════════════════════════════════════\n\n`
+}
+
+function buildProductNicheOverlay(niche: AnuncioNiche | undefined, language: string): string {
+  if (!niche) return ''
+  const isES = language === 'es'
+  const header = isES
+    ? '═══════════════════════════════════════════════\nAJUSTE POR NICHO (SE APLICA SOBRE EL ESTILO BASE)\n═══════════════════════════════════════════════'
+    : '═══════════════════════════════════════════════\nNICHE-SPECIFIC ADJUSTMENTS (LAYER ON TOP OF BASE STYLE)\n═══════════════════════════════════════════════'
+  let body = ''
+  if (isES) {
+    switch (niche) {
+      case 'food':
+        body = `- Superficies coherentes con gastronomía: madera natural, mármol, lino crudo, cerámica rústica, tabla de pan.
+- Temperatura cálida (golden/ámbar sutil). Micro-detalles de frescura: condensación, vapor, gotas, brillo en líquidos.
+- 0–4 ingredientes complementarios como garnish visual — NUNCA saturar.
+- Si es bebida/líquido: implicá frescura con condensación o vertido congelado.
+- Evitar: fondos fríos estériles, iluminación neutra plana, props no relacionados con la cocina.`
+        break
+      case 'fashion':
+        body = `- Texturas premium cerca del producto: tela con drape, cuero, mármol pulido, metal cepillado.
+- Iluminación editorial (key angular + rim light), colores saturados pero controlados, negros profundos.
+- Si aplica, mostrar micro-detalles: costura, textura de tejido, tacto visible.
+- Mood aspiracional (referencias: Vogue, Net-a-Porter, SSENSE, Jacquemus).
+- Evitar: fondos genéricos de estudio amateur, iluminación plana sin dirección, props de catálogo barato.`
+        break
+      case 'digital':
+        body = `- Mostrar el producto digital dentro de un mockup FÍSICO real: laptop, tablet, smartphone con interfaz coherente.
+- Entorno: escritorio aspiracional, espacio de trabajo limpio, luz de ventana o golden hour.
+- Pantalla nítida, sin moiré, con resplandor realista (no artificial).
+- Puede incluir devices secundarios o props de oficio (cuaderno, café, planta) que refuercen el contexto de uso.
+- Evitar: íconos flotantes, "código" volando, estética "AI genérica" de stock.`
+        break
+      case 'service':
+        body = `- Enfoque en el RESULTADO o el ENTORNO donde se entrega el servicio, no en iconos o logos del servicio.
+- Si existe un objeto físico asociado (herramienta, envase, uniforme), ese objeto ES el hero; si no, enfocá el espacio limpio post-servicio.
+- Luz natural confiable, estética profesional impecable.
+- Evitar: handshakes, personas sonriendo sin contexto, íconos genéricos de servicio.`
+        break
+      case 'physical':
+      default:
+        body = `- Elegí superficies coherentes con la categoría: mármol/piedra para belleza/lujo, madera/concreto para hogar, metal cepillado para tech, acrílico para gadgets.
+- Iluminación que revele materialidad: producto brillante → rim light + control de reflejo; producto mate → soft diffuse.
+- Si la categoría lo sugiere (skincare, beauty), agregar micro-detalles sensoriales (brillo de envase, gota, polvo sutil).
+- Evitar: props irrelevantes a la categoría, superficies que undersell el tier premium del producto.`
+    }
+  } else {
+    switch (niche) {
+      case 'food':
+        body = `- Kitchen/food-coherent surfaces: natural wood, marble, raw linen, rustic ceramic, bread board.
+- Warm temperature (subtle golden/amber). Freshness micro-details: condensation, steam, droplets, liquid glint.
+- 0–4 complementary ingredients as visual garnish — NEVER oversaturate.
+- If beverage/liquid: imply freshness via condensation or frozen pour.
+- Avoid: cold sterile backgrounds, flat neutral lighting, non-kitchen props.`
+        break
+      case 'fashion':
+        body = `- Premium textures near product: draped fabric, leather, polished marble, brushed metal.
+- Editorial lighting (angular key + rim light), saturated-but-controlled colors, deep blacks.
+- Where applicable, show micro-details: stitching, weave texture, visible tactility.
+- Aspirational mood (refs: Vogue, Net-a-Porter, SSENSE, Jacquemus).
+- Avoid: amateur studio backdrops, flat directionless lighting, cheap-catalog props.`
+        break
+      case 'digital':
+        body = `- Show the digital product inside a real PHYSICAL mockup: laptop, tablet, smartphone with coherent interface.
+- Environment: aspirational desk, clean workspace, window light or golden hour.
+- Sharp screen, no moiré, realistic glow (not artificial).
+- May include secondary devices or craft props (notebook, coffee, plant) that reinforce usage context.
+- Avoid: floating icons, flying "code", generic stock "AI" aesthetic.`
+        break
+      case 'service':
+        body = `- Focus on the RESULT or the ENVIRONMENT where the service is delivered — not on service icons/logos.
+- If there's an associated physical object (tool, bottle, uniform), that object IS the hero; otherwise, focus on the clean post-service space.
+- Trustworthy natural light, flawless professional aesthetic.
+- Avoid: handshakes, context-less smiling people, generic service icons.`
+        break
+      case 'physical':
+      default:
+        body = `- Pick surfaces coherent with the category: marble/stone for beauty/luxury, wood/concrete for home, brushed metal for tech, acrylic for gadgets.
+- Lighting that reveals materiality: glossy product → rim light + reflection control; matte product → soft diffuse.
+- If the category suggests it (skincare, beauty), add sensory micro-details (bottle sheen, droplet, subtle powder).
+- Avoid: category-irrelevant props, surfaces that undersell the product's premium tier.`
+    }
+  }
+  return `${header}\n${body}\n═══════════════════════════════════════════════\n\n`
+}
+
+function buildProductRenderBlock(language: string): string {
+  const isES = language === 'es'
+  if (isES) {
+    return `═══════════════════════════════════════════════
+CALIDAD DE RENDER (NO NEGOCIABLE)
+═══════════════════════════════════════════════
+- OUTPUT MULTIUSO: El render debe funcionar SIN retoque adicional como (1) hero de sitio web, (2) imagen principal de página de producto (PDP), (3) post de redes sociales, (4) banner de marketplace, (5) catálogo impreso.
+- RESOLUCIÓN: Máxima disponible. Densidad de detalle nivel 4K+.
+- NITIDEZ: Macro-sharp en el producto. Bordes limpios. Texturas reales visibles (grano, fibra, brillo, poros, relieve de materiales). CERO suavizado tipo AI.
+- COLOR: Fiel al producto real. Sin filtros vintage, sin teal/orange grading artificial, sin HDR exagerado, sin sobre-saturación.
+- PACKAGING/ETIQUETA: Si el producto tiene texto impreso, marca o etiqueta — DEBE quedar perfectamente legible, sin deformación ni invención.
+- ARTEFACTOS: CERO halo de recorte, CERO blur sobre el producto, CERO compresión visible, CERO ghosting, CERO doble contorno.
+- COMPOSICIÓN: Espacio negativo intencional para permitir crops (16:9 para hero web, 1:1 para feed, 4:5 para PDP) sin perder al producto.
+═══════════════════════════════════════════════
+
+`
+  }
+  return `═══════════════════════════════════════════════
+RENDER QUALITY (NON-NEGOTIABLE)
+═══════════════════════════════════════════════
+- MULTI-USE OUTPUT: The render must work WITHOUT further retouching as (1) website hero, (2) product detail page (PDP) main image, (3) social feed post, (4) marketplace banner, (5) print catalog.
+- RESOLUTION: Maximum available. 4K+-level detail density.
+- SHARPNESS: Macro-sharp on the product. Clean edges. Real textures visible (grain, fiber, sheen, pores, material relief). ZERO AI-smoothing.
+- COLOR: Faithful to the real product. No vintage filters, no artificial teal/orange grade, no overblown HDR, no oversaturation.
+- PACKAGING/LABEL: If the product has printed text, brand mark or label — it MUST remain perfectly legible, no deformation, no invention.
+- ARTIFACTS: ZERO cutout halo, ZERO product blur, ZERO visible compression, ZERO ghosting, ZERO double contour.
+- COMPOSITION: Intentional negative space so the image can be cropped (16:9 website hero, 1:1 feed, 4:5 PDP) without losing the product.
+═══════════════════════════════════════════════
+
+`
+}
+
 const PRODUCT_LAYOUT_BUILDERS: Record<string, ProductLayoutBuilder> = {
 
   'studio-hero': (aspectRatio) => {
@@ -874,26 +1024,50 @@ Elegante, elevado, premium, con presencia escultórica.`
 // Combines product foundation + sub-style-specific direction
 // =============================================
 
+export interface ProductPromptOptions {
+  backgroundDescription?: string
+  productContext?: ProductPromptContext
+  userInstructions?: string
+}
+
 export function buildProductPrompt(
   subStyle: string,
   aspectRatio: PostAspectRatio | '1:1',
   language: string,
-  backgroundDescription?: string
+  options?: ProductPromptOptions | string
 ): string | null {
   const layoutBuilder = PRODUCT_LAYOUT_BUILDERS[subStyle]
   if (!layoutBuilder) return null
 
+  // Back-compat: old signature passed backgroundDescription as 4th arg (string)
+  const opts: ProductPromptOptions = typeof options === 'string'
+    ? { backgroundDescription: options }
+    : (options || {})
+
   const normalizedAR: PostAspectRatio = aspectRatio === '1:1' ? '3:4' : aspectRatio
   const foundation = buildProductFoundation(normalizedAR, aspectRatio)
-  const layout = layoutBuilder(normalizedAR, backgroundDescription)
+  const contextBlock = buildProductContextBlock(opts.productContext, language)
+  const nicheOverlay = buildProductNicheOverlay(opts.productContext?.niche, language)
+  const renderBlock = buildProductRenderBlock(language)
+  const layout = layoutBuilder(normalizedAR, opts.backgroundDescription)
+
+  const isES = language === 'es'
+  const userInstrTrim = opts.userInstructions?.trim()
+  const userBlock = userInstrTrim
+    ? `═══════════════════════════════════════════════\n${isES ? 'INSTRUCCIONES ADICIONALES DEL USUARIO (MÁXIMA PRIORIDAD — SOBRESCRIBE DEFAULTS GENÉRICOS)' : 'ADDITIONAL USER INSTRUCTIONS (HIGHEST PRIORITY — OVERRIDE GENERIC DEFAULTS)'}\n═══════════════════════════════════════════════\n${userInstrTrim}\n═══════════════════════════════════════════════\n\n`
+    : ''
 
   const formatOverride = aspectRatio === '1:1'
     ? `FORMATO OBLIGATORIO: Cuadrado 1:1 (1080×1080). La imagen DEBE ser perfectamente cuadrada.\n\n`
     : ''
 
-  return `${formatOverride}${foundation}${layout}
+  const closing = isES
+    ? 'GENERA LA IMAGEN. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.'
+    : 'GENERATE THE IMAGE. Do NOT output descriptive text or justification. Return ONLY the resulting image.'
 
-GENERA LA IMAGEN. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`
+  return `${formatOverride}${foundation}${contextBlock}${nicheOverlay}${layout}
+
+${renderBlock}${userBlock}${closing}`
 }
 
 // =============================================

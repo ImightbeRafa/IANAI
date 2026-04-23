@@ -684,7 +684,7 @@ export default function PostWorkspace() {
       } else if (isProductMode) {
         const extraInstructions = additionalInstructions.trim()
         requestBody = {
-          prompt: extraInstructions || 'Professional product photograph',
+          prompt: extraInstructions,
           mode: 'post',
           postStyle: 'product',
           productSubStyle: productSubStyle,

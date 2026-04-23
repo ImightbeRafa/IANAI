@@ -50,8 +50,10 @@ cp .env.example .env
 Edit `.env` with your credentials:
 ```
 VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_GROK_API_KEY=your_grok_api_key
+VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SECRET_KEY=your_supabase_secret_key
+GROK_API_KEY=your_grok_api_key
 ```
 
 4. Set up Supabase database:
@@ -67,7 +69,7 @@ npm run dev
 ## Supabase Setup
 
 1. Create a new project at [supabase.com](https://supabase.com)
-2. Go to **Settings > API** to get your URL and anon key
+2. Go to **Settings > API Keys** to create/copy your publishable key (`sb_publishable_...`) and secret key (`sb_secret_...`)
 3. Run the SQL schema in **SQL Editor** (see `supabase/schema.sql`)
 4. Enable Email auth in **Authentication > Providers**
 
@@ -77,8 +79,10 @@ npm run dev
 2. Connect repository to Vercel
 3. Add environment variables in Vercel dashboard:
    - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-   - `VITE_GROK_API_KEY`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_SECRET_KEY`
+   - `GROK_API_KEY`
 4. Deploy
 
 ## Project Structure

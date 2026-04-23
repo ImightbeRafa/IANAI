@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseAdmin as supabase } from '../lib/supabase-admin.js'
 
 /**
  * TiloPay Webhook Handler
@@ -19,13 +19,7 @@ import { createClient } from '@supabase/supabase-js'
  * https://advanceai.studio/api/tilopay/webhook?event=reactive&secret=YOUR_SECRET
  */
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 const WEBHOOK_SECRET = process.env.TILOPAY_WEBHOOK_SECRET
-
-const supabase = supabaseUrl && supabaseServiceKey 
-  ? createClient(supabaseUrl, supabaseServiceKey) 
-  : null
 
 // TiloPay webhook payload structure (based on their API docs)
 interface TiloPayWebhookData {

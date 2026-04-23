@@ -1,8 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { createClient } from '@supabase/supabase-js'
-
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+import { supabaseAdmin } from './lib/supabase-admin.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -18,11 +15,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Missing authorization' })
   }
 
-  if (!supabaseUrl || !supabaseServiceKey) {
+  const supabase = supabaseAdmin
+  if (!supabase) {
     return res.status(500).json({ error: 'Server configuration error' })
   }
-
-  const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
   // Verify the token and check admin status
   const token = authHeader.replace('Bearer ', '')
