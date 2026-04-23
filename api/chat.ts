@@ -13,6 +13,7 @@ import {
   type OrganicScriptFramework,
   type CTAStrength,
 } from './data/organic-script-prompts.js'
+import { buildWinningScriptDnaPrompt } from './data/winning-script-dna.js'
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
@@ -1309,7 +1310,11 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
       mostrar_servicio: { es: 'Mostrar el Servicio/Producto', en: 'Show Service/Product' },
       variedad_productos: { es: 'Variedad de Productos (Beneficios)', en: 'Product Variety (Benefits)' },
       paso_a_paso: { es: 'Paso a Paso', en: 'Step by Step' },
-      reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' }
+      reconocimiento: { es: 'Reconocimiento (TOF / Branding)', en: 'Brand Awareness (TOF / Branding)' },
+      educativo: { es: 'Educativo (organico)', en: 'Educational (organic)' },
+      storytelling: { es: 'Storytelling (organico)', en: 'Storytelling (organic)' },
+      tendencia: { es: 'Tendencia (organico)', en: 'Trending (organic)' },
+      engagement: { es: 'Engagement (organico)', en: 'Engagement (organic)' }
     }
 
     const config = settings.scriptTypeConfig
@@ -1354,21 +1359,35 @@ function buildScriptSettingsPrompt(settings: ScriptSettings | undefined, languag
 - TIPOS ESPECÍFICOS SOLICITADOS:
 ${parts.join('\n')}
 - Cada guión debe estar claramente etiquetado con su tipo (ej: "OPCIÓN #1 - Venta Directa").
-- Si se piden múltiples guiones del mismo tipo, varía el enfoque/gancho entre ellos.`
+- Si se piden múltiples guiones del mismo tipo, varía el enfoque/gancho entre ellos.
+- Cada guión debe usar un mecanismo de gancho distinto cuando sea posible: miedo de compra, lista/opciones, prueba, proceso, precio/ubicación, comparación o logística.
+- Cada guión comercial debe incluir minimo 4 detalles concretos del contexto o placeholders especificos si faltan datos.
+- Prohibido entregar frases genericas sin prueba inmediata: "alta calidad", "mejor servicio", "solucion ideal", "rapido y facil".`
     } else {
       return `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:
 - TOTAL QUANTITY: Generate EXACTLY ${total} script(s). NO MORE, NO LESS.
 - SPECIFIC TYPES REQUESTED:
 ${parts.join('\n')}
 - Each script must be clearly labeled with its type (e.g., "OPTION #1 - Direct Sale").
-- If multiple scripts of the same type are requested, vary the approach/hook between them.`
+- If multiple scripts of the same type are requested, vary the approach/hook between them.
+- Each script should use a different hook mechanism when possible: buyer fear, list/options, proof, process, price/location, comparison, or logistics.
+- Each commercial script must include at least 4 concrete context details or specific placeholders if facts are missing.
+- Forbidden to deliver generic phrases without immediate proof: "high quality", "best service", "ideal solution", "fast and easy".`
     }
   }
 
   // Mixed mode: just count
   const variationInstruction = language === 'es'
-    ? `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:\n- CANTIDAD: Genera EXACTAMENTE ${settings.variations} guión(es). NI MÁS NI MENOS.`
-    : `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:\n- QUANTITY: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS.`
+    ? `\n\n⚠️ REQUISITOS OBLIGATORIOS PARA ESTA GENERACIÓN:
+- CANTIDAD: Genera EXACTAMENTE ${settings.variations} guión(es). NI MÁS NI MENOS.
+- No repitas el mismo tipo de gancho. Elige los angulos mas fuertes segun el contexto: venta directa, miedo de compra, comparacion, lista/opciones, proceso, prueba social, logistica o precio/ubicacion.
+- Cada guión comercial debe incluir minimo 4 detalles concretos del negocio/producto o placeholders especificos si faltan datos.
+- Antes de responder, elimina cualquier guion que suene generico y reescribelo con mas hechos.`
+    : `\n\n⚠️ MANDATORY REQUIREMENTS FOR THIS GENERATION:
+- QUANTITY: Generate EXACTLY ${settings.variations} script(s). NO MORE, NO LESS.
+- Do not repeat the same hook type. Choose the strongest angles from the context: direct sale, buyer fear, comparison, list/options, process, social proof, logistics, or price/location.
+- Each commercial script must include at least 4 concrete business/product details or specific placeholders if facts are missing.
+- Before answering, remove any script that sounds generic and rewrite it with more facts.`
   
   return variationInstruction
 }
@@ -1773,8 +1792,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const ctaStrengthPrompt = feature === 'description' ? '' : buildCTAStrengthPrompt(effectiveCTAStrength, language)
+    const winningScriptDnaPrompt = feature === 'description'
+      ? ''
+      : buildWinningScriptDnaPrompt({
+          language,
+          mode: onlyReconocimiento ? 'awareness' : onlyOrganic ? 'organic' : 'sales',
+          business: businessContext,
+          product: productContext,
+          activeSalesChannel,
+          ctaStrength: effectiveCTAStrength
+        })
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + winningScriptDnaPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {
