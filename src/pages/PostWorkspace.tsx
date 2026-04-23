@@ -9,6 +9,7 @@ import OrganicCarouselModal from '../components/OrganicCarouselModal'
 import CarouselGroupCard, { type CarouselSlide } from '../components/CarouselGroupCard'
 import Layout from '../components/Layout'
 import { uploadPostImageOriginal, uploadProductImage, urlToBase64, compressBase64ForApi } from '../utils/imageCompression'
+import { fetchJson } from '../utils/apiFetch'
 import { 
   ArrowLeft,
   ImageIcon,
@@ -61,6 +62,34 @@ interface GeneratedPost {
 
 const API_URL = import.meta.env.PROD ? '/api/generate-image' : 'http://localhost:3000/api/generate-image'
 const STREAMLINE_API_URL = import.meta.env.PROD ? '/api/streamline-script' : 'http://localhost:3000/api/streamline-script'
+const IMAGE_REQUEST_TIMEOUT_MS = 150_000
+
+type ImageApiResponse = {
+  status?: string
+  result?: { sample?: string }
+  model?: string
+  textWarning?: boolean
+  enhanced?: boolean
+  edited?: boolean
+}
+
+const imageApiMessages = (language: string, fallback: string) => ({
+  timeoutMessage: language === 'es'
+    ? 'La generación está tardando demasiado. Intenta de nuevo en unos segundos o usa una imagen/prompt más simple.'
+    : 'Image generation is taking too long. Try again in a few seconds or use a simpler image/prompt.',
+  invalidJsonMessage: language === 'es'
+    ? 'El servidor devolvió una respuesta inválida durante la generación'
+    : 'The server returned an invalid response during generation',
+  fallbackError: fallback,
+  statusMessages: {
+    413: language === 'es'
+      ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.'
+      : 'Image is too large. Try a smaller or lower-resolution image.',
+    504: language === 'es'
+      ? 'La generación tardó demasiado y fue detenida. Intenta de nuevo en unos segundos.'
+      : 'Generation took too long and was stopped. Try again in a few seconds.',
+  }
+})
 
 // Preload an image into the browser cache so URL swaps don't cause a blank flash
 const preloadImage = (url: string): Promise<void> =>
@@ -768,18 +797,17 @@ export default function PostWorkspace() {
         }
       }
 
-      const response = await fetch(API_URL, {
+      const result = await fetchJson<ImageApiResponse>(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(requestBody)
+      }, {
+        timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
+        ...imageApiMessages(language, t.error)
       })
-
-      if (response.status === 413) throw new Error(language === 'es' ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.' : 'Image is too large. Try a smaller or lower-resolution image.')
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || t.error)
 
       if (result.status === 'Ready' && result.result?.sample) {
         const imageUrl = result.result.sample
@@ -945,7 +973,7 @@ export default function PostWorkspace() {
         ? await Promise.all(editRefImages.map(img => compressBase64ForApi(img)))
         : undefined
 
-      const response = await fetch(API_URL, {
+      const result = await fetchJson<ImageApiResponse>(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -959,11 +987,10 @@ export default function PostWorkspace() {
           brandKitId: selectedBrandKitId || undefined,
           ...(compressedRefImages ? { editReferenceImages: compressedRefImages } : {})
         })
+      }, {
+        timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
+        ...imageApiMessages(language, t.editError)
       })
-
-      if (response.status === 413) throw new Error(language === 'es' ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.' : 'Image is too large. Try a smaller or lower-resolution image.')
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || t.editError)
 
       if (result.status === 'Ready' && result.result?.sample) {
         const editedUrl = result.result.sample
@@ -1086,7 +1113,7 @@ export default function PostWorkspace() {
       const detectedAR = await detectImageAspectRatio(imageUrl)
       const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
 
-      const response = await fetch(API_URL, {
+      const result = await fetchJson<ImageApiResponse>(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1106,11 +1133,10 @@ export default function PostWorkspace() {
             ? await Promise.all(getContextImageUrls().map(async u => compressBase64ForApi(await urlToBase64(u))))
             : undefined
         })
+      }, {
+        timeoutMs: IMAGE_REQUEST_TIMEOUT_MS,
+        ...imageApiMessages(language, t.enhanceError)
       })
-
-      if (response.status === 413) throw new Error(language === 'es' ? 'La imagen es demasiado grande. Intenta con una imagen más pequeña o de menor resolución.' : 'Image is too large. Try a smaller or lower-resolution image.')
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || t.enhanceError)
 
       if (result.status === 'Ready' && result.result?.sample) {
         const enhancedUrl = result.result.sample

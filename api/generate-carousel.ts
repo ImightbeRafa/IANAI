@@ -28,10 +28,29 @@ import type { CTAStrength } from './data/organic-script-prompts.js'
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview'
+const GEMINI_CAROUSEL_SLIDE_TIMEOUT_MS = 120_000
 
 const VALID_SUBTYPES: OrganicCarouselSubtype[] = ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact']
 const VALID_ASPECT_RATIOS: OrganicAspectRatio[] = ['1:1', '4:5', '9:16', '3:4']
 const VALID_CTA: CTAStrength[] = ['none', 'soft', 'brand_mention', 'sales']
+
+class UpstreamTimeoutError extends Error {
+  constructor(label: string) {
+    super(`${label} timed out after ${Math.round(GEMINI_CAROUSEL_SLIDE_TIMEOUT_MS / 1000)} seconds`)
+    this.name = 'UpstreamTimeoutError'
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new UpstreamTimeoutError(label)), GEMINI_CAROUSEL_SLIDE_TIMEOUT_MS)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId)
+  })
+}
 
 interface CarouselRequestBody {
   productId: string
@@ -234,14 +253,14 @@ async function renderCarouselSlide(opts: {
   }
 
   const geminiAspectRatio: '1:1' | '4:5' | '9:16' | '3:4' = aspectRatio
-  const response = await ai.models.generateContent({
+  const response = await withTimeout(ai.models.generateContent({
     model: GEMINI_IMAGE_MODEL,
     contents: parts,
     config: {
       responseModalities: ['TEXT', 'IMAGE'],
       imageConfig: { aspectRatio: geminiAspectRatio, imageSize: '2K' },
     },
-  })
+  }), `Gemini carousel slide ${slide.index}`)
 
   const candidates = response.candidates || []
   const responseParts = candidates[0]?.content?.parts || []

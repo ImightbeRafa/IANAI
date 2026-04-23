@@ -13,6 +13,7 @@ import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, build
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
+const GEMINI_IMAGE_TIMEOUT_MS = 135_000
 
 // Gemini Image Generation Models (from official SDK documentation)
 const GEMINI_IMAGE_MODELS: Record<string, string> = {
@@ -21,6 +22,46 @@ const GEMINI_IMAGE_MODELS: Record<string, string> = {
 }
 
 type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
+
+class UpstreamTimeoutError extends Error {
+  constructor(label: string) {
+    super(`${label} timed out after ${Math.round(GEMINI_IMAGE_TIMEOUT_MS / 1000)} seconds`)
+    this.name = 'UpstreamTimeoutError'
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new UpstreamTimeoutError(label)), GEMINI_IMAGE_TIMEOUT_MS)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId)
+  })
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof UpstreamTimeoutError
+    || (error instanceof Error && error.message.toLowerCase().includes('timed out'))
+}
+
+function isTransientGeminiError(error: unknown): boolean {
+  if (isTimeoutError(error)) return true
+  const status = typeof error === 'object' && error !== null && 'status' in error
+    ? Number((error as { status?: unknown }).status)
+    : NaN
+  const message = error instanceof Error ? error.message : String(error)
+  return status === 500
+    || status === 503
+    || status === 504
+    || message.includes('INTERNAL')
+    || message.includes('UNAVAILABLE')
+    || message.includes('RESOURCE_EXHAUSTED')
+    || message.includes('429')
+    || message.includes('500')
+    || message.includes('503')
+}
 
 // Map width/height to aspect ratio string
 function getAspectRatio(width: number, height: number): string {
@@ -172,7 +213,7 @@ Edit instruction: ${editPrompt}`
         // Retry once on transient errors (503, 500, etc.)
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
         try {
-          response = await ai.models.generateContent({
+          response = await withTimeout(ai.models.generateContent({
             model: editModelId,
             contents: promptParts,
             config: {
@@ -182,11 +223,11 @@ Edit instruction: ${editPrompt}`
                 aspectRatio: editAR
               }
             }
-          })
+          }), 'Gemini edit')
         } catch (firstErr) {
           console.warn('Gemini edit first attempt failed, retrying:', firstErr instanceof Error ? firstErr.message : firstErr)
           await new Promise(r => setTimeout(r, 2000))
-          response = await ai.models.generateContent({
+          response = await withTimeout(ai.models.generateContent({
             model: editModelId,
             contents: promptParts,
             config: {
@@ -196,7 +237,7 @@ Edit instruction: ${editPrompt}`
                 aspectRatio: editAR
               }
             }
-          })
+          }), 'Gemini edit retry')
         }
 
         const candidates = response.candidates || []
@@ -259,9 +300,10 @@ Edit instruction: ${editPrompt}`
           metadata: { action: 'edit' }
         })
 
-        return res.status(500).json({
+        return res.status(isTimeoutError(editError) ? 504 : 500).json({
           error: 'Image edit failed',
-          details: editError instanceof Error ? editError.message : 'Unknown error'
+          details: editError instanceof Error ? editError.message : 'Unknown error',
+          retryable: isTimeoutError(editError)
         })
       }
     }
@@ -536,27 +578,26 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Retry once on transient 503 errors
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
         try {
-          response = await ai.models.generateContent({
+          response = await withTimeout(ai.models.generateContent({
             model: enhanceModelId,
             contents: promptParts,
             config: {
               responseModalities: ['TEXT', 'IMAGE'],
               imageConfig: { imageSize: '2K', aspectRatio: enhanceAR }
             }
-          })
+          }), 'Gemini enhance')
         } catch (firstTry) {
-          const is503 = firstTry instanceof Error && (firstTry.message.includes('503') || firstTry.message.includes('UNAVAILABLE'))
-          if (!is503) throw firstTry
-          console.warn('Gemini enhance 503 — retrying once after 2s...')
+          if (!isTransientGeminiError(firstTry)) throw firstTry
+          console.warn('Gemini enhance transient error — retrying once after 2s:', firstTry instanceof Error ? firstTry.message : firstTry)
           await new Promise(r => setTimeout(r, 2000))
-          response = await ai.models.generateContent({
+          response = await withTimeout(ai.models.generateContent({
             model: enhanceModelId,
             contents: promptParts,
             config: {
               responseModalities: ['TEXT', 'IMAGE'],
               imageConfig: { imageSize: '2K', aspectRatio: enhanceAR }
             }
-          })
+          }), 'Gemini enhance retry')
         }
 
         const candidates = response.candidates || []
@@ -608,7 +649,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         console.error('Gemini enhance error:', enhanceError)
 
         const errMsg = enhanceError instanceof Error ? enhanceError.message : 'Unknown error'
-        const isTransient = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')
+        const isTransient = isTransientGeminiError(enhanceError)
 
         await logApiUsage({
           userId: user.id,
@@ -621,7 +662,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         if (isTransient) {
-          return res.status(503).json({
+          return res.status(isTimeoutError(enhanceError) ? 504 : 503).json({
             error: 'El servicio de IA está temporalmente saturado. Intenta de nuevo en unos segundos.',
             retryable: true
           })
@@ -1103,14 +1144,29 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           imageConfig.imageSize = '2K'
         }
 
-        const response = await ai.models.generateContent({
-          model: geminiModelId,
-          contents: promptParts,
-          config: {
-            responseModalities: ['TEXT', 'IMAGE'],
-            imageConfig
-          }
-        })
+        let response: Awaited<ReturnType<typeof ai.models.generateContent>>
+        try {
+          response = await withTimeout(ai.models.generateContent({
+            model: geminiModelId,
+            contents: promptParts,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig
+            }
+          }), 'Gemini image generation')
+        } catch (firstTry) {
+          if (!isTransientGeminiError(firstTry)) throw firstTry
+          console.warn('Gemini image transient error — retrying once after 2s:', firstTry instanceof Error ? firstTry.message : firstTry)
+          await new Promise(r => setTimeout(r, 2000))
+          response = await withTimeout(ai.models.generateContent({
+            model: geminiModelId,
+            contents: promptParts,
+            config: {
+              responseModalities: ['TEXT', 'IMAGE'],
+              imageConfig
+            }
+          }), 'Gemini image generation retry')
+        }
 
         // Extract image from response
         const candidates = response.candidates || []
@@ -1180,14 +1236,17 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Pass through quota/rate limit errors with proper status code
         const isQuotaError = geminiError instanceof Error && 
           (geminiError.message.includes('RESOURCE_EXHAUSTED') || geminiError.message.includes('429'))
-        const statusCode = isQuotaError ? 429 : 500
+        const statusCode = isTimeoutError(geminiError) ? 504 : isQuotaError ? 429 : 500
         const userMessage = isQuotaError 
           ? 'El servicio de generación de imágenes ha alcanzado su límite temporal. Por favor intenta de nuevo en unos minutos.'
+          : isTimeoutError(geminiError)
+            ? 'La generación de imágenes tardó demasiado y fue detenida. Intenta de nuevo en unos segundos.'
           : 'Gemini image generation failed'
 
         return res.status(statusCode).json({ 
           error: userMessage,
-          details: geminiError instanceof Error ? geminiError.message : 'Unknown error'
+          details: geminiError instanceof Error ? geminiError.message : 'Unknown error',
+          retryable: isTimeoutError(geminiError) || isQuotaError
         })
       }
     }

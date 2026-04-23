@@ -6,6 +6,12 @@
     "api/analyze-style.ts": {
       "maxDuration": 60
     },
+    "api/generate-image.ts": {
+      "maxDuration": 180
+    },
+    "api/generate-carousel.ts": {
+      "maxDuration": 240
+    },
     "api/reflect-memory.ts": {
       "maxDuration": 30
     },

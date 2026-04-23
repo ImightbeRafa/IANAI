@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import type { OrganicCarouselSubtype, CTAStrength } from '../types'
+import { fetchJson } from '../utils/apiFetch'
 
 const CAROUSEL_API_URL = import.meta.env.PROD
   ? '/api/generate-carousel'
@@ -50,18 +51,18 @@ export async function generateCarousel(req: GenerateCarouselRequest): Promise<Ge
   const token = session?.access_token
   if (!token) throw new Error('Not authenticated')
 
-  const response = await fetch(CAROUSEL_API_URL, {
+  const data = await fetchJson<GenerateCarouselResponse>(CAROUSEL_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(req),
+  }, {
+    timeoutMs: 240_000,
+    timeoutMessage: 'Carousel generation is taking too long. Try fewer slides or try again in a few seconds.',
+    invalidJsonMessage: 'The server returned an invalid response during carousel generation',
+    fallbackError: 'Carousel generation failed',
   })
-
-  const data = await response.json()
-  if (!response.ok) {
-    throw new Error(data.error || `Carousel generation failed (${response.status})`)
-  }
-  return data as GenerateCarouselResponse
+  return data
 }
