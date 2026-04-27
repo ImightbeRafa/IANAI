@@ -17,6 +17,19 @@ export interface GenerateCarouselRequest {
   language: 'en' | 'es'
   brandKitId?: string
   ctaStrength?: CTAStrength
+  productContext?: {
+    name?: string
+    type?: string
+    category?: string
+    description?: string
+    audience?: string
+    differentiation?: string
+    result?: string
+    objection?: string
+    logistics?: string
+  }
+  productReferenceImages?: string[]
+  contextReferenceImages?: string[]
 }
 
 export interface GeneratedSlide {

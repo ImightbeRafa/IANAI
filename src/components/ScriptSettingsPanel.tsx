@@ -32,7 +32,9 @@ const LABELS = {
     byType: 'By Type',
     byTypeDesc: 'Choose specific types',
     total: 'Total',
-    scriptTypes: 'Script Types'
+    scriptTypes: 'Script Types',
+    diverseAngles: 'Force diverse angles',
+    diverseAnglesDesc: 'Uses the new strategy-first pipeline'
   },
   es: {
     variations: '¿Cuántos guiones?',
@@ -46,7 +48,9 @@ const LABELS = {
     byType: 'Por Tipo',
     byTypeDesc: 'Elige tipos específicos',
     total: 'Total',
-    scriptTypes: 'Tipos de Guión'
+    scriptTypes: 'Tipos de Guión',
+    diverseAngles: 'Forzar angulos diversos',
+    diverseAnglesDesc: 'Usa el nuevo pipeline estrategico'
   }
 }
 
@@ -119,6 +123,10 @@ export default function ScriptSettingsPanel({
 
   const updateCTAStrength = (strength: CTAStrength) => {
     onChange({ ...settings, ctaStrength: strength })
+  }
+
+  const updateStructuredPipeline = (enabled: boolean) => {
+    onChange({ ...settings, useStructuredPipeline: enabled })
   }
 
   const totalByType = getTotalByType(settings.scriptTypeConfig)
@@ -223,6 +231,27 @@ export default function ScriptSettingsPanel({
           </div>
         </div>
       )}
+
+      <div className="flex items-center justify-between rounded-lg bg-dark-200 border border-dark-300 px-3 py-2">
+        <div>
+          <div className="text-sm font-medium text-dark-700">{t.diverseAngles}</div>
+          <div className="text-[10px] text-dark-400">{t.diverseAnglesDesc}</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => updateStructuredPipeline(!settings.useStructuredPipeline)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            settings.useStructuredPipeline ? 'bg-emerald-600' : 'bg-dark-400'
+          }`}
+          title={t.diverseAnglesDesc}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              settings.useStructuredPipeline ? 'translate-x-6' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
 
       {/* By Type Mode: Per-type quantity controls */}
       {settings.generationMode === 'by_type' && (

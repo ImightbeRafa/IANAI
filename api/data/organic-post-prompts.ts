@@ -435,6 +435,17 @@ export interface CarouselSlidePromptInput {
   slideRole: SlideRole
   slideContent: { headline: string; body?: string; note?: string }
   scriptContext?: string                 // raw script/idea text the user wants turned into a carousel
+  productContext?: {
+    name?: string
+    type?: string
+    category?: string
+    description?: string
+    audience?: string
+    differentiation?: string
+    result?: string
+    objection?: string
+    logistics?: string
+  }
   aspectRatio: OrganicAspectRatio
   language: 'en' | 'es'
   hasProductImages: boolean
@@ -446,7 +457,7 @@ export interface CarouselSlidePromptInput {
 export function buildOrganicCarouselPrompt(input: CarouselSlidePromptInput): string {
   const {
     subtype, slideIndex, totalSlides, slideRole, slideContent, scriptContext,
-    aspectRatio, language, hasProductImages, brandVoice, ctaStrength, hasReferenceSlide,
+    productContext, aspectRatio, language, hasProductImages, brandVoice, ctaStrength, hasReferenceSlide,
   } = input
   const isEs = language === 'es'
 
@@ -471,6 +482,24 @@ export function buildOrganicCarouselPrompt(input: CarouselSlidePromptInput): str
       : `\nSOURCE IDEA / SCRIPT (for context, NOT to render literally):\n${scriptContext.slice(0, 1500)}`)
     : ''
 
+  const productFacts = productContext ? [
+    productContext.name ? (isEs ? `- Producto/marca: ${productContext.name}` : `- Product/brand: ${productContext.name}`) : '',
+    productContext.type ? (isEs ? `- Tipo: ${productContext.type}` : `- Type: ${productContext.type}`) : '',
+    productContext.category ? (isEs ? `- Categoria: ${productContext.category}` : `- Category: ${productContext.category}`) : '',
+    productContext.description ? (isEs ? `- Descripcion: ${productContext.description}` : `- Description: ${productContext.description}`) : '',
+    productContext.audience ? (isEs ? `- Audiencia: ${productContext.audience}` : `- Audience: ${productContext.audience}`) : '',
+    productContext.differentiation ? (isEs ? `- Diferencial: ${productContext.differentiation}` : `- Differentiation: ${productContext.differentiation}`) : '',
+    productContext.result ? (isEs ? `- Resultado prometido: ${productContext.result}` : `- Promised result: ${productContext.result}`) : '',
+    productContext.objection ? (isEs ? `- Objecion clave: ${productContext.objection}` : `- Key objection: ${productContext.objection}`) : '',
+    productContext.logistics ? (isEs ? `- Logistica/oferta: ${productContext.logistics}` : `- Logistics/offer: ${productContext.logistics}`) : '',
+  ].filter(Boolean).join('\n') : ''
+
+  const productBlock = productFacts
+    ? (isEs
+      ? `\nCONTEXTO REAL DEL PRODUCTO (usar para exactitud, NO inventar claims):\n${productFacts.slice(0, 1800)}`
+      : `\nREAL PRODUCT CONTEXT (use for accuracy, do NOT invent claims):\n${productFacts.slice(0, 1800)}`)
+    : ''
+
   const deliverable = isEs
     ? `ENTREGABLE:
 Generá UNA imagen — el slide ${slideIndex} de ${totalSlides} — cumpliendo todo lo anterior. Sin número de slide visible, sin anotaciones técnicas, sin texto placeholder.`
@@ -484,6 +513,7 @@ ${referenceNote}
 
 ${contentBlock}
 ${scriptBlock}
+${productBlock}
 
 ${deliverable}
 `

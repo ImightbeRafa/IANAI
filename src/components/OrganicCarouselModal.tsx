@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Sparkles, Loader2, Minus, Plus, AlertTriangle, Leaf, ListChecks, ListOrdered, ArrowRightLeft, Scale, Download } from 'lucide-react'
 import type { OrganicCarouselSubtype, CTAStrength } from '../types'
 import { generateCarousel, type GenerateCarouselResponse, type CarouselAspectRatio } from '../services/carouselApi'
 import { createCarouselPosts, type CarouselSlideInsert, type Post } from '../services/database'
+import { compressBase64ForApi, urlToBase64 } from '../utils/imageCompression'
 
 type Language = 'en' | 'es'
 
@@ -15,6 +16,20 @@ interface Props {
   brandKitId?: string
   /** Pre-fills the script textarea if opening from a script card. */
   initialScriptContent?: string
+  savedScripts?: Array<{ id: string; title: string; content: string }>
+  productContext?: {
+    name?: string
+    type?: string
+    category?: string
+    description?: string
+    audience?: string
+    differentiation?: string
+    result?: string
+    objection?: string
+    logistics?: string
+  }
+  productReferenceImageUrls?: string[]
+  contextReferenceImageUrls?: string[]
   /** Called once the carousel has been generated AND persisted. Passes the inserted slides (array of post rows). */
   onPersisted?: (slides: Post[], meta: GenerateCarouselResponse) => void
   /** Used to show cost confirmation and gate generation. */
@@ -51,17 +66,28 @@ const CTA_OPTIONS: { id: CTAStrength; es: string; en: string }[] = [
 ]
 
 export default function OrganicCarouselModal({
-  open, onClose, productId, userId, language, brandKitId, initialScriptContent, onPersisted, remainingImageCredits,
+  open, onClose, productId, userId, language, brandKitId, initialScriptContent, savedScripts = [],
+  productContext, productReferenceImageUrls = [], contextReferenceImageUrls = [], onPersisted, remainingImageCredits,
 }: Props) {
   const [subtype, setSubtype] = useState<OrganicCarouselSubtype>('educational-list')
   const [slideCount, setSlideCount] = useState<number>(5)
   const [aspectRatio, setAspectRatio] = useState<CarouselAspectRatio>('1:1')
   const [ctaStrength, setCtaStrength] = useState<CTAStrength>('soft')
   const [scriptContent, setScriptContent] = useState<string>(initialScriptContent ?? '')
+  const [selectedSavedScriptId, setSelectedSavedScriptId] = useState<string>('')
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<GenerateCarouselResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmCost, setConfirmCost] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setScriptContent(initialScriptContent ?? '')
+    setSelectedSavedScriptId('')
+    setConfirmCost(false)
+    setResult(null)
+    setError(null)
+  }, [open, initialScriptContent])
 
   if (!open) return null
 
@@ -80,6 +106,13 @@ export default function OrganicCarouselModal({
     }
     setGenerating(true)
     try {
+      const productReferenceImages = await Promise.all(
+        productReferenceImageUrls.slice(0, 4).map(async url => compressBase64ForApi(await urlToBase64(url)))
+      )
+      const contextReferenceImages = await Promise.all(
+        contextReferenceImageUrls.slice(0, 4).map(async url => compressBase64ForApi(await urlToBase64(url)))
+      )
+
       const resp = await generateCarousel({
         productId,
         subtype,
@@ -89,6 +122,9 @@ export default function OrganicCarouselModal({
         language,
         brandKitId,
         ctaStrength,
+        productContext,
+        productReferenceImages,
+        contextReferenceImages,
       })
       setResult(resp)
 
@@ -348,9 +384,33 @@ export default function OrganicCarouselModal({
                 <label className="text-xs font-medium text-dark-700 mb-2 block">
                   {t('Guión o idea', 'Script or idea')}
                 </label>
+                {savedScripts.length > 0 && (
+                  <select
+                    value={selectedSavedScriptId}
+                    onChange={e => {
+                      const id = e.target.value
+                      setSelectedSavedScriptId(id)
+                      const picked = savedScripts.find(s => s.id === id)
+                      if (picked) {
+                        setScriptContent(picked.content)
+                        setConfirmCost(false)
+                      }
+                    }}
+                    className="w-full mb-2 px-3 py-2 bg-dark-50 border border-dark-200 rounded-lg text-xs text-dark-700 focus:outline-none focus:border-emerald-700"
+                  >
+                    <option value="">{t('Usar texto actual / pegado', 'Use current / pasted text')}</option>
+                    {savedScripts.map(script => (
+                      <option key={script.id} value={script.id}>{script.title}</option>
+                    ))}
+                  </select>
+                )}
                 <textarea
                   value={scriptContent}
-                  onChange={e => setScriptContent(e.target.value)}
+                  onChange={e => {
+                    setScriptContent(e.target.value)
+                    setSelectedSavedScriptId('')
+                    setConfirmCost(false)
+                  }}
                   rows={5}
                   placeholder={t(
                     'Pegá el guión original o describí la idea (ej: 5 errores comunes al elegir un colchón)...',
@@ -358,6 +418,14 @@ export default function OrganicCarouselModal({
                   )}
                   className="w-full px-3 py-2.5 bg-dark-50 border border-dark-200 rounded-lg text-sm text-dark-700 placeholder-dark-400 focus:outline-none focus:border-emerald-700 resize-none"
                 />
+                {(productReferenceImageUrls.length > 0 || contextReferenceImageUrls.length > 0 || productContext) && (
+                  <div className="mt-2 text-[10px] text-dark-400">
+                    {t(
+                      `Se usara contexto del producto${productReferenceImageUrls.length ? ` + ${Math.min(productReferenceImageUrls.length, 4)} foto(s) reales` : ''}${contextReferenceImageUrls.length ? ` + ${Math.min(contextReferenceImageUrls.length, 4)} referencia(s) de contexto` : ''}.`,
+                      `Product context will be used${productReferenceImageUrls.length ? ` + ${Math.min(productReferenceImageUrls.length, 4)} real product photo(s)` : ''}${contextReferenceImageUrls.length ? ` + ${Math.min(contextReferenceImageUrls.length, 4)} context reference(s)` : ''}.`
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Cost / warnings */}

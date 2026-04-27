@@ -645,6 +645,46 @@ export default function PostWorkspace() {
     return productImages.filter(img => img.kind === 'context').map(img => img.image_url)
   }
 
+  const getCarouselProductImageUrls = (): string[] => {
+    const urls = [
+      ...getProductImageUrls(),
+      ...((product?.ind_product_images || []) as string[]),
+    ].filter(Boolean)
+    return Array.from(new Set(urls)).slice(0, 4)
+  }
+
+  const getCarouselProductContext = () => {
+    if (!product) return undefined
+    const category = product.product_category_custom || product.product_category ||
+      product.svc_service_type_custom || product.svc_service_type ||
+      product.ind_article_type_custom || product.ind_article_type ||
+      product.re_business_type || product.type
+    const audience = product.best_customers || product.target_audience || product.business?.icp_description
+    const description = [
+      product.product_description || product.description || product.menu_text,
+      product.ind_variations_description ? `Variaciones: ${product.ind_variations_description}` : '',
+      product.ind_main_material ? `Material: ${product.ind_main_material}` : '',
+      product.ind_quality_description ? `Calidad: ${product.ind_quality_description}` : '',
+      product.technical_specs ? `Specs: ${product.technical_specs}` : '',
+    ].filter(Boolean).join('\n')
+    const result = product.expected_result || product.result || product.svc_concrete_result ||
+      product.svc_life_change || product.re_highlights
+    const objection = product.key_objection || product.svc_main_objection
+    const logistics = product.shipping_info || product.price_range || product.re_price || product.re_cta || product.location
+
+    return {
+      name: product.name || undefined,
+      type: product.type || undefined,
+      category: category || undefined,
+      description: description || undefined,
+      audience: audience || undefined,
+      differentiation: product.differentiation || product.unique_value || product.svc_differentiation || undefined,
+      result: result || undefined,
+      objection: objection || undefined,
+      logistics: logistics || undefined,
+    }
+  }
+
   const handleGenerate = async () => {
     if (isLogoMode) {
       if (!logoBusinessName.trim()) {
@@ -2995,6 +3035,10 @@ export default function PostWorkspace() {
           language={language}
           brandKitId={selectedBrandKitId || undefined}
           initialScriptContent={selectedScript?.content || scriptText}
+          savedScripts={scripts.map(s => ({ id: s.id, title: s.title, content: s.content }))}
+          productContext={getCarouselProductContext()}
+          productReferenceImageUrls={getCarouselProductImageUrls()}
+          contextReferenceImageUrls={getContextImageUrls()}
           remainingImageCredits={
             usageLimits.imagesLimit === -1
               ? null

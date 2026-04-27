@@ -14,6 +14,7 @@ import {
   type CTAStrength,
 } from './data/organic-script-prompts.js'
 import { buildWinningScriptDnaPrompt } from './data/winning-script-dna.js'
+import { runGuionesStructuredPipeline } from './lib/guiones/script-pipeline.js'
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
@@ -21,6 +22,11 @@ function isOrganicKey(key: string): key is OrganicScriptFramework {
 }
 
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
+
+const LEGACY_SCRIPT_BRIEF_BLOCK = {
+  es: `\n\n===================================================================\nINSTRUCCION CRITICA DE DIVERSIDAD ESTRATEGICA\n===================================================================\nAntes de escribir cualquier guion, crea PRIVADAMENTE un Script Brief unico por cada guion solicitado.\nCada brief DEBE diferenciarse en:\n- hookMechanism (direct_offer, alternative_invalidation, checklist, hidden_cost, use_case_split, myth_busting, process_certainty, social_proof, price_location, story_scene)\n- buyerStage (cold, warm, hot)\n- duda principal eliminada\n- fuente de prueba usada\n\nSi dos briefs son demasiado parecidos, reemplaza el mas debil antes de escribir.\nNO muestres los briefs. Usalos internamente para escribir guiones mas distintos y mas fuertes.`,
+  en: `\n\n===================================================================\nCRITICAL STRATEGIC DIVERSITY INSTRUCTION\n===================================================================\nBefore writing any script, PRIVATELY create one unique Script Brief per requested script.\nEach brief MUST differ in:\n- hookMechanism (direct_offer, alternative_invalidation, checklist, hidden_cost, use_case_split, myth_busting, process_certainty, social_proof, price_location, story_scene)\n- buyerStage (cold, warm, hot)\n- main doubt eliminated\n- proof source used\n\nIf two briefs are too similar, replace the weaker one before writing.\nDo NOT output the briefs. Use them internally to write more distinct and stronger scripts.`
+}
 
 type AIModel = 'grok'
 
@@ -302,6 +308,8 @@ interface ScriptSettings {
   generationMode?: 'mixed' | 'by_type'
   scriptTypeConfig?: ScriptTypeConfig
   ctaStrength?: CTAStrength
+  useStructuredPipeline?: boolean
+  forceFreshAngles?: boolean
 }
 
 interface ContextDocumentData {
@@ -343,7 +351,7 @@ REGLAS SEGÚN TIPO DE RESTAURANTE:
 INSTRUCCIONES DE GENERACIÓN:
 Crea guiones de venta directa, cada uno para un platillo REAL que exista en el menú (PROHIBIDO inventar platillos), priorizando platillos IMPORTANTES/VIRALES/gancho (los más antojables visualmente, abundantes, crocantes, con salsa, para compartir, etc.).
 
-El último guión debe ser platillo ejecutivo/almuerzo (si no hay algo definido, inventa un ejemplo inspirado estrictamente en el menú y deja claro "este es un ejemplo, se debe adaptar al platillo real el día de grabación").
+Si el menú/contexto muestra almuerzo ejecutivo o una ocasión de almuerzo fuerte, puedes usarlo como un ángulo más. No lo fuerces como último guión si no fue solicitado o no hay datos.
 
 ESTRUCTURA ESTRICTA POR GUIÓN:
 Título + "Gancho (0–3s)" + "Desarrollo (8–16s)" + "Cierre (4–6s)"
@@ -380,7 +388,7 @@ Gancho (0–3s): "Vea qué locura esta burger… la tenemos en [NOMBRE RESTAURAN
 Desarrollo (10–14s): "Burger hecha con carne Angus, buena cantidad de queso, nuestra salsa especial secreta de la casa y acompañada de papas. Jugosa, grande y bien cargada. Vea como se ve esto, me va a decir que no se le antoja?"
 Cierre (4–5s): "Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
 
-GUION 5 — ALMUERZO EJECUTIVO (ejemplo)
+REFERENCIA OPCIONAL — ALMUERZO EJECUTIVO (solo si aplica)
 Gancho (0–3s): "Si usted trabaja en Curri y sus almuerzos no se ven así… usted ya está perdiendo."
 Desarrollo (12–16s): "Por ¢X.xx usted puede almorzar como un rey. Nuestro almuerzo ejecutivo incluye: ___ gramos de chicharrón crocante. Solo escuche esto.. (sonido del chicharrón crocante) o también puede elegir cerdo ahumado, No puede faltar obvio el arroz, los frijoles, ensalada, maduro, guacamole y bebida incluida.."
 Horario + cierre (5–6s): "Almuerzos ejecutivos de lunes a viernes desde las 12 del mediodía a 3 de la tarde. Estamos ubicados en [UBICACIÓN], abiertos [HORARIO], los estamos esperando!"
@@ -404,7 +412,7 @@ RULES BASED ON RESTAURANT TYPE:
 GENERATION INSTRUCTIONS:
 Create direct sales scripts, each for a REAL dish that exists in the menu (FORBIDDEN to invent dishes), prioritizing IMPORTANT/VIRAL/hook dishes (the most visually appetizing, abundant, crispy, saucy, shareable, etc.).
 
-The last script should be for lunch special/executive meal (if none defined, create an example strictly inspired by the menu and clearly state "this is an example, should be adapted to the actual dish on filming day").
+If the menu/context includes a lunch special or a strong lunch occasion, you may use it as one more angle. Do not force it as the last script if it was not requested or there are no facts.
 
 STRICT STRUCTURE PER SCRIPT:
 Title + "Hook (0–3s)" + "Development (8–16s)" + "Closing (4–6s)"
@@ -542,12 +550,7 @@ INSTRUCCIONES DE TRABAJO:
 
 Usa la información del servicio proporcionada en el contexto del negocio para generar guiones.
 
-GENERA 5 GUIONES con ángulos diferentes:
-- Guion 1: ÁNGULO DE AUTORIDAD (El experto muestra resultados). *Usa [PLACEHOLDERS] para casos de éxito.*
-- Guion 2: ÁNGULO DE PROCESO (La certeza del paso a paso). *Describe cómo se entrega el servicio.*
-- Guion 3: ÁNGULO DE DOLOR VS SOLUCIÓN (Agitar el problema y presentar el servicio como alivio inmediato).
-- Guion 4: ÁNGULO EDUCATIVO/LISTA (Mencionar tipos/opciones para demostrar dominio del tema).
-- Guion 5: ÁNGULO DE OFERTA IRRESISTIBLE (Enfocado en precio, tiempos o garantías).
+Genera la cantidad exacta de guiones que indique la configuración. Usa ángulos diferentes según lo solicitado: autoridad/resultados, proceso, dolor vs solución, educativo/lista, oferta, desvalidar alternativas, prueba, logística o cualquier ángulo que el contexto soporte.
 
 FORMATO DE ENTREGA:
 
@@ -589,12 +592,7 @@ WORK INSTRUCTIONS:
 
 Use the service information provided in the business context to generate scripts.
 
-GENERATE 5 SCRIPTS with different angles:
-- Script 1: AUTHORITY ANGLE (The expert shows results). *Use [PLACEHOLDERS] for success cases.*
-- Script 2: PROCESS ANGLE (Step-by-step certainty). *Describe how the service is delivered.*
-- Script 3: PAIN VS SOLUTION ANGLE (Agitate the problem and present the service as immediate relief).
-- Script 4: EDUCATIONAL/LIST ANGLE (Mention types/options to demonstrate topic mastery).
-- Script 5: IRRESISTIBLE OFFER ANGLE (Focused on price, timing or guarantees).
+Generate the exact number of scripts indicated by the configuration. Use different angles according to the request: authority/results, process, pain vs solution, educational/list, offer, invalidate alternatives, proof, logistics, or any angle supported by the context.
 
 DELIVERY FORMAT:
 
@@ -1803,11 +1801,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ctaStrength: effectiveCTAStrength
         })
 
-    const systemPrompt = basePrompt + businessRulesPrompt + productRulesPrompt + winningScriptDnaPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt + structuredContextPrompt + legacyContextPrompt
+    const legacyBriefPrompt = feature === 'description' ? '' : LEGACY_SCRIPT_BRIEF_BLOCK[language]
+    const systemPrompt = basePrompt + legacyBriefPrompt + structuredContextPrompt + legacyContextPrompt + businessRulesPrompt + productRulesPrompt + winningScriptDnaPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {
       return res.status(200).json({ preview: true, systemPrompt })
+    }
+
+    if (feature !== 'description' && scriptSettings?.useStructuredPipeline === true) {
+      try {
+        const structured = await runGuionesStructuredPipeline({
+          apiKey: grokApiKey,
+          businessContext: businessContext as Parameters<typeof runGuionesStructuredPipeline>[0]['businessContext'],
+          productContext: productContext as Parameters<typeof runGuionesStructuredPipeline>[0]['productContext'],
+          contextDocuments,
+          activeSalesChannel,
+          language,
+          scriptSettings,
+          styleMemoryPrompt,
+          scriptTemplatesPrompt,
+        })
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: usageAction,
+          model: 'grok-4-1-fast-reasoning+grok-3-fast',
+          inputTokens: estimateTokens(JSON.stringify(structured.contextProfile) + structured.promptPreview),
+          outputTokens: estimateTokens(structured.content),
+          success: true,
+          metadata: {
+            productType,
+            variations: scriptSettings?.variations,
+            structuredPipeline: true,
+            briefs: structured.briefs.length,
+          }
+        })
+
+        await incrementUsage(user.id, usageAction)
+
+        return res.status(200).json({
+          content: structured.content,
+          remaining: remaining - 1,
+          model: selectedModel,
+          _debug: {
+            systemPrompt: structured.promptPreview,
+            contextProfile: structured.contextProfile,
+            angleCandidates: structured.angleCandidates,
+            briefs: structured.briefs,
+            qualityReports: structured.qualityReports,
+          }
+        })
+      } catch (structuredError) {
+        console.warn('Structured guiones pipeline failed, falling back to legacy prompt:', structuredError)
+      }
     }
 
     // =============================================

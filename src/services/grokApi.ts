@@ -2,6 +2,7 @@ import type { Message, ScriptGenerationSettings, ProductType, ContextDocument, B
 import { supabase } from '../lib/supabase'
 
 const CHAT_API_URL = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
+const EDIT_SCRIPT_API_URL = import.meta.env.PROD ? '/api/edit-script' : 'http://localhost:3000/api/edit-script'
 
 type Language = 'en' | 'es'
 
@@ -134,7 +135,9 @@ export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
     tendencia: 0,
     engagement: 0
   },
-  ctaStrength: 'sales'
+  ctaStrength: 'sales',
+  useStructuredPipeline: false,
+  forceFreshAngles: false
 }
 
 export async function sendMessageToGrok(
@@ -153,7 +156,7 @@ export async function sendMessageToGrok(
   aiMemoryEnabled?: boolean,
   brandKitId?: string,
   scriptTemplateIds?: string[]
-): Promise<{ content: string; _debug?: { systemPrompt: string } }> {
+): Promise<{ content: string; _debug?: { systemPrompt: string; contextProfile?: unknown; angleCandidates?: unknown[]; briefs?: unknown[]; qualityReports?: unknown[] } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
 
@@ -168,7 +171,7 @@ export async function sendMessageToGrok(
     url: doc.url
   })) || []
 
-  const response = await fetch(CHAT_API_URL, {
+  const response = await fetch(EDIT_SCRIPT_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -309,6 +312,11 @@ STRICT RULES:
       'Authorization': `Bearer ${token}`,
     },
     body: JSON.stringify({
+      originalScript,
+      editInstruction,
+      businessContext: businessCtx,
+      productContext: productCtx,
+      editType: editType || 'script_edit',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }

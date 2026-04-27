@@ -7,7 +7,6 @@ import type {
   ChatSession, 
   Message, 
   Script,
-  ProductFormData,
   DashboardStats,
   ContextDocument,
   ContextDocumentFormData,
@@ -213,6 +212,100 @@ export async function getSuccessCases(productId: string): Promise<SuccessCase[]>
 // =============================================
 // PRODUCT FUNCTIONS
 // =============================================
+const PRODUCT_UPDATE_COLUMNS = new Set([
+  'client_id',
+  'business_id',
+  'name',
+  'type',
+  'product_description',
+  'main_problem',
+  'best_customers',
+  'failed_attempts',
+  'attention_grabber',
+  'real_pain',
+  'pain_consequences',
+  'expected_result',
+  'differentiation',
+  'key_objection',
+  'shipping_info',
+  'awareness_level',
+  'description',
+  'offer',
+  'market_alternatives',
+  'customer_values',
+  'purchase_reason',
+  'target_audience',
+  'unique_value',
+  'call_to_action',
+  'product_category',
+  'product_category_custom',
+  'current_alternatives',
+  'alternatives_disadvantages',
+  'product_variations',
+  'technical_specs',
+  'utility',
+  'result',
+  'has_guarantee',
+  'guarantee_details',
+  'price_range',
+  'stock_limited',
+  'ind_article_type',
+  'ind_article_type_custom',
+  'ind_model_count',
+  'ind_variations_description',
+  'ind_sizes',
+  'ind_main_material',
+  'ind_quality_description',
+  'ind_accepts_changes',
+  'ind_change_policy',
+  'ind_customizable',
+  'ind_customization_description',
+  'ind_product_images',
+  'svc_service_type',
+  'svc_service_type_custom',
+  'svc_problem',
+  'svc_current_pain',
+  'svc_alternatives_tried',
+  'svc_alternatives_failures',
+  'svc_concrete_result',
+  'svc_result_timeline',
+  'svc_life_change',
+  'svc_process_steps',
+  'svc_service_format',
+  'svc_service_duration',
+  'svc_differentiation',
+  'svc_has_own_method',
+  'svc_method_name',
+  'svc_main_objection',
+  'svc_has_guarantee',
+  'svc_guarantee_details',
+  'svc_has_success_cases',
+  'menu_text',
+  'menu_pdf_url',
+  'location',
+  'schedule',
+  'is_new_restaurant',
+  're_business_type',
+  're_price',
+  're_location',
+  're_construction_size',
+  're_bedrooms',
+  're_capacity',
+  're_bathrooms',
+  're_parking',
+  're_highlights',
+  're_location_reference',
+  're_cta',
+  'context_links',
+  'context_links_content',
+])
+
+function sanitizeProductUpdates(updates: Partial<Product> & Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(updates).filter(([key, value]) => PRODUCT_UPDATE_COLUMNS.has(key) && value !== undefined)
+  )
+}
+
 export async function createProduct(
   data: Record<string, unknown> & { name: string; type: string; business_id?: string },
   ownerId: string,
@@ -282,10 +375,13 @@ export async function getProduct(productId: string): Promise<Product | null> {
   return data
 }
 
-export async function updateProduct(productId: string, updates: Partial<ProductFormData>): Promise<void> {
+export async function updateProduct(productId: string, updates: Partial<Product> & Record<string, unknown>): Promise<void> {
+  const updatePayload = sanitizeProductUpdates(updates)
+  if (Object.keys(updatePayload).length === 0) return
+
   const { error } = await supabase
     .from('products')
-    .update(updates)
+    .update(updatePayload)
     .eq('id', productId)
 
   if (error) throw error

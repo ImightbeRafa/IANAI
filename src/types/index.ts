@@ -520,6 +520,93 @@ export interface ScriptGenerationSettings {
   generationMode: GenerationMode
   scriptTypeConfig: ScriptTypeConfig
   ctaStrength?: CTAStrength
+  useStructuredPipeline?: boolean
+  forceFreshAngles?: boolean
+}
+
+export type BuyerStage = 'cold' | 'warm' | 'hot'
+
+export interface ScriptContextProfile {
+  productType: ProductType
+  productName: string
+  businessName?: string
+  category?: string
+  audienceSegments: string[]
+  buyerReadinessSignals: string[]
+  pains: string[]
+  desires: string[]
+  objections: string[]
+  alternatives: Array<{ name: string; weakness?: string; ethicalContrast?: string }>
+  proof: string[]
+  logistics: string[]
+  offerFacts: string[]
+  sensoryFacts: string[]
+  missingFacts: string[]
+  bannedClaims: string[]
+  activeSalesChannel?: SalesChannel
+  ctaStrength?: CTAStrength
+}
+
+export interface AngleCandidate {
+  id: string
+  scriptType: ScriptFramework
+  hookMechanism: string
+  buyerStage: BuyerStage
+  audienceSegment: string
+  coreDoubt: string
+  proofToUse: string[]
+  logisticsToUse: string[]
+  hookDraft: string
+  whyItCouldWin: string
+  score?: number
+}
+
+export interface ScriptBrief {
+  index: number
+  scriptType: ScriptFramework
+  productType: ProductType
+  angleId: string
+  hookMechanism: string
+  buyerStage: BuyerStage
+  openingPromise: string
+  developmentBeats: string[]
+  mustIncludeFacts: string[]
+  mustAvoid: string[]
+  cta: {
+    strength: CTAStrength
+    channel?: SalesChannel
+    textDirection: string
+  }
+  coreDoubt: string
+  proofToUse: string[]
+}
+
+export interface GeneratedScript {
+  index: number
+  title: string
+  scriptType: ScriptFramework
+  hookMechanism: string
+  buyerStage: BuyerStage
+  spokenScript: {
+    hook: string
+    development: string
+    ctaOrClose: string
+  }
+  qualityScore: number
+}
+
+export interface ScriptQualityReport {
+  index: number
+  passed: boolean
+  specificity: number
+  hookStrength: number
+  detailDensity: number
+  categoryFit: number
+  ctaFit: number
+  repetitionRisk: number
+  inventedClaimRisk: number
+  genericPhrases: string[]
+  repairInstruction?: string
 }
 
 // =============================================

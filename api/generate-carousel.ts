@@ -61,7 +61,79 @@ interface CarouselRequestBody {
   language: 'en' | 'es'
   brandKitId?: string
   ctaStrength?: CTAStrength
+  productContext?: CarouselProductContext
+  productReferenceImages?: string[]
+  contextReferenceImages?: string[]
   hasProductImages?: boolean // currently unused — product refs can be added later
+}
+
+interface CarouselProductContext {
+  name?: string
+  type?: string
+  category?: string
+  description?: string
+  audience?: string
+  differentiation?: string
+  result?: string
+  objection?: string
+  logistics?: string
+}
+
+type InlineImage = { mimeType: string; data: string }
+
+function sanitizeText(value: unknown, maxLength = 700): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const cleaned = value.replace(/\s+/g, ' ').trim()
+  return cleaned ? cleaned.slice(0, maxLength) : undefined
+}
+
+function sanitizeProductContext(raw: unknown): CarouselProductContext | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const context: CarouselProductContext = {
+    name: sanitizeText(obj.name, 160),
+    type: sanitizeText(obj.type, 120),
+    category: sanitizeText(obj.category, 180),
+    description: sanitizeText(obj.description, 700),
+    audience: sanitizeText(obj.audience, 500),
+    differentiation: sanitizeText(obj.differentiation, 500),
+    result: sanitizeText(obj.result, 400),
+    objection: sanitizeText(obj.objection, 400),
+    logistics: sanitizeText(obj.logistics, 400),
+  }
+  return Object.values(context).some(Boolean) ? context : undefined
+}
+
+function productContextToText(context: CarouselProductContext | undefined, language: 'en' | 'es'): string {
+  if (!context) return ''
+  const isEs = language === 'es'
+  const lines = [
+    context.name ? (isEs ? `Producto/marca: ${context.name}` : `Product/brand: ${context.name}`) : '',
+    context.type ? (isEs ? `Tipo: ${context.type}` : `Type: ${context.type}`) : '',
+    context.category ? (isEs ? `Categoria: ${context.category}` : `Category: ${context.category}`) : '',
+    context.description ? (isEs ? `Descripcion: ${context.description}` : `Description: ${context.description}`) : '',
+    context.audience ? (isEs ? `Audiencia: ${context.audience}` : `Audience: ${context.audience}`) : '',
+    context.differentiation ? (isEs ? `Diferencial: ${context.differentiation}` : `Differentiation: ${context.differentiation}`) : '',
+    context.result ? (isEs ? `Resultado: ${context.result}` : `Result: ${context.result}`) : '',
+    context.objection ? (isEs ? `Objecion clave: ${context.objection}` : `Key objection: ${context.objection}`) : '',
+    context.logistics ? (isEs ? `Logistica/oferta: ${context.logistics}` : `Logistics/offer: ${context.logistics}`) : '',
+  ].filter(Boolean)
+  return lines.join('\n')
+}
+
+function parseInlineImages(raw: unknown, maxImages = 4): InlineImage[] {
+  if (!Array.isArray(raw)) return []
+  const images: InlineImage[] = []
+  for (const item of raw.slice(0, maxImages)) {
+    if (typeof item !== 'string') continue
+    if (item.length > 2_500_000) continue
+    const match = item.match(/^data:([^;]+);base64,([A-Za-z0-9+/=]+)$/)
+    if (!match) continue
+    const mimeType = match[1].toLowerCase()
+    if (!['image/png', 'image/jpeg', 'image/jpg', 'image/webp'].includes(mimeType)) continue
+    images.push({ mimeType: mimeType === 'image/jpg' ? 'image/jpeg' : mimeType, data: match[2] })
+  }
+  return images
 }
 
 // =============================================
@@ -73,11 +145,13 @@ async function planCarouselSlides(opts: {
   subtype: OrganicCarouselSubtype
   slideCount: number
   scriptContent: string
+  productContext?: CarouselProductContext
   language: 'en' | 'es'
   brandName?: string | null
 }): Promise<CarouselSlidePlan[]> {
-  const { grokApiKey, subtype, slideCount, scriptContent, language, brandName } = opts
+  const { grokApiKey, subtype, slideCount, scriptContent, productContext, language, brandName } = opts
   const isEs = language === 'es'
+  const productFacts = productContextToText(productContext, language)
 
   const subtypeGuide: Record<OrganicCarouselSubtype, string> = {
     'educational-list': isEs
@@ -129,12 +203,14 @@ Rules:
 Tipo de carousel: ${subtype}\n
 Guía estructural del subtipo:\n${subtypeGuide[subtype]}\n
 Cantidad de slides: ${slideCount}\n
+\nCONTEXTO REAL DEL PRODUCTO:\n${productFacts || '(sin contexto adicional)'}\n
 \nIDEA / GUIÓN FUENTE del usuario:\n"""\n${scriptContent.slice(0, 3000)}\n"""\n
 \nDevolvé SOLO el array JSON con ${slideCount} slides. Nada más.`
     : `Brand context: ${brandName || '(no name)'}\n
 Carousel type: ${subtype}\n
 Subtype structural guide:\n${subtypeGuide[subtype]}\n
 Slide count: ${slideCount}\n
+\nREAL PRODUCT CONTEXT:\n${productFacts || '(no additional context)'}\n
 \nUSER'S SOURCE IDEA / SCRIPT:\n"""\n${scriptContent.slice(0, 3000)}\n"""\n
 \nReturn ONLY the JSON array with ${slideCount} slides. Nothing else.`
 
@@ -208,12 +284,16 @@ async function renderCarouselSlide(opts: {
   brandVoice: string | null | undefined
   ctaStrength: CTAStrength
   scriptContext: string
+  productContext?: CarouselProductContext
+  productReferenceImages: InlineImage[]
+  contextReferenceImages: InlineImage[]
   referenceSlide1?: { mimeType: string; data: string } | null
   prefixes: { color: string; brandVisual: string; brandLogo: string; logoInline: { mimeType: string; data: string } | null }
 }): Promise<{ imageUrl: string; usage: { input: number; output: number; thinking: number } }> {
   const {
     geminiApiKey, aspectRatio, subtype, slide, totalSlides, language,
-    hasProductImages, brandVoice, ctaStrength, scriptContext, referenceSlide1, prefixes,
+    hasProductImages, brandVoice, ctaStrength, scriptContext, productContext,
+    productReferenceImages, contextReferenceImages, referenceSlide1, prefixes,
   } = opts
 
   const ai = new GoogleGenAI({ apiKey: geminiApiKey })
@@ -231,6 +311,7 @@ async function renderCarouselSlide(opts: {
     brandVoice,
     ctaStrength,
     hasReferenceSlide: !!referenceSlide1,
+    productContext,
   })
 
   const fullPromptText = prefixes.color + prefixes.brandVisual + prefixes.brandLogo + basePrompt
@@ -242,6 +323,32 @@ async function renderCarouselSlide(opts: {
   if (prefixes.logoInline) {
     parts.push({ text: `══ LOGO OFICIAL DE LA MARCA (NO NEGOCIABLE) ══\nIncluí este logo EXACTO en el slide si el subtipo lo contempla. NO lo rediseñes ni cambies sus proporciones.` })
     parts.push({ inlineData: prefixes.logoInline })
+  }
+
+  if (productReferenceImages.length > 0) {
+    const count = productReferenceImages.length
+    parts.push({ text: language === 'es'
+      ? `REFERENCIAS DEL PRODUCTO REAL (${count}) - OBLIGATORIO: estas imagenes son la fuente de verdad del producto. Usa TODAS para copiar forma, color, silueta, textura y detalles. No inventes otro producto ni copies el producto desde imagenes de contexto.`
+      : `REAL PRODUCT REFERENCES (${count}) - REQUIRED: these images are the source of truth for the product. Use ALL of them to copy shape, color, silhouette, texture, and details. Do not invent another product or copy the product from context images.` })
+    productReferenceImages.forEach((img, idx) => {
+      parts.push({ text: language === 'es'
+        ? `REFERENCIA DE PRODUCTO ${idx + 1} de ${count}`
+        : `PRODUCT REFERENCE ${idx + 1} of ${count}` })
+      parts.push({ inlineData: img })
+    })
+  }
+
+  if (contextReferenceImages.length > 0) {
+    const count = contextReferenceImages.length
+    parts.push({ text: language === 'es'
+      ? `IMAGENES DE CONTEXTO / MOODBOARD (${count}): NO son producto. Usalas solo para ambiente, audiencia, escena, lifestyle, iluminacion o energia. Prohibido copiar objetos como si fueran el producto.`
+      : `CONTEXT / MOODBOARD IMAGES (${count}): these are NOT the product. Use them only for environment, audience, scene, lifestyle, lighting, or mood. Do not copy objects from them as the product.` })
+    contextReferenceImages.forEach((img, idx) => {
+      parts.push({ text: language === 'es'
+        ? `CONTEXTO ${idx + 1} de ${count}`
+        : `CONTEXT ${idx + 1} of ${count}` })
+      parts.push({ inlineData: img })
+    })
   }
 
   // Slide-1 reference for consistency
@@ -326,6 +433,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const language: 'en' | 'es' = body.language === 'en' ? 'en' : 'es'
     const ctaStrength: CTAStrength = VALID_CTA.includes(body.ctaStrength as CTAStrength)
       ? (body.ctaStrength as CTAStrength) : 'soft'
+    const productContext = sanitizeProductContext(body.productContext)
+    const productReferenceImages = parseInlineImages(body.productReferenceImages, 4)
+    const contextReferenceImages = parseInlineImages(body.contextReferenceImages, 4)
 
     // Upfront usage check: carousel requires slideCount generations.
     const usage = await checkUsageLimit(user.id, 'image')
@@ -357,6 +467,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       subtype,
       slideCount,
       scriptContent,
+      productContext,
       language,
       brandName: brandKit?.name,
     })
@@ -377,10 +488,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sharedPrefixes = { color: colorPrefix, brandVisual: brandVisualPrefix, brandLogo: brandLogoPrefix, logoInline }
     const renderOptsBase = {
       geminiApiKey, aspectRatio, subtype, totalSlides: slideCount, language,
-      hasProductImages: false, // carousels v1 don't accept product refs (can be added later)
+      hasProductImages: productReferenceImages.length > 0,
       brandVoice: brandKit?.brand_voice ?? null,
       ctaStrength,
       scriptContext: scriptContent,
+      productContext,
+      productReferenceImages,
+      contextReferenceImages,
       prefixes: sharedPrefixes,
     } as const
 
@@ -444,6 +558,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         aspectRatio,
         brandKitId: brandKit?.id,
         brandKitName: brandKit?.name,
+        productRefCount: productReferenceImages.length,
+        contextRefCount: contextReferenceImages.length,
+        hasProductContext: !!productContext,
       },
     })
 

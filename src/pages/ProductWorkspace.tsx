@@ -37,6 +37,23 @@ import ThinkingAnimation from '../components/ThinkingAnimation'
 import ScriptSettingsPanel from '../components/ScriptSettingsPanel'
 import ScriptCard from '../components/ScriptCard'
 import { parseScripts, isScriptContent } from '../utils/scriptParser'
+
+interface PipelineDebug {
+  briefs?: Array<{
+    index?: number
+    hookMechanism?: string
+    buyerStage?: string
+    coreDoubt?: string
+    proofToUse?: string[]
+  }>
+  qualityReports?: Array<{
+    index?: number
+    passed?: boolean
+    specificity?: number
+    detailDensity?: number
+    repetitionRisk?: number
+  }>
+}
 import UsageBanner from '../components/UsageBanner'
 import BrandKitSelector from '../components/BrandKitSelector'
 import { useUsageLimits } from '../hooks/useUsageLimits'
@@ -104,6 +121,7 @@ export default function ProductWorkspace() {
   const [debugDocId, setDebugDocId] = useState<string | null>(null)
   const [expandedPrompts, setExpandedPrompts] = useState<Record<string, boolean>>({})
   const [previewSystemPrompt, setPreviewSystemPrompt] = useState<string | null>(null)
+  const [pipelineDebug, setPipelineDebug] = useState<PipelineDebug | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [bulkLinkProgress, setBulkLinkProgress] = useState<{ current: number; total: number } | null>(null)
   const [failedLinks, setFailedLinks] = useState<string[]>([])
@@ -915,6 +933,12 @@ export default function ProductWorkspace() {
       const activeGenTemplateIds = scriptTemplates.filter(t => t.is_active).map(t => t.id)
       const aiResponse = await sendMessageToGrok(allMessages, productContext, language, scriptSettings, undefined, contextDocs, undefined, bizCtx, prodCtx, undefined, activeSalesChannel ?? undefined, product.id, aiMemoryEnabled, selectedBrandKitId ?? undefined, activeGenTemplateIds)
       const usedPrompt = aiResponse._debug?.systemPrompt || undefined
+      setPipelineDebug(aiResponse._debug?.briefs || aiResponse._debug?.qualityReports
+        ? {
+            briefs: aiResponse._debug?.briefs as PipelineDebug['briefs'],
+            qualityReports: aiResponse._debug?.qualityReports as PipelineDebug['qualityReports'],
+          }
+        : null)
 
       const savedAiMessage = await addMessage(session.id, 'assistant', aiResponse.content, usedPrompt)
       setMessages(prev => [...prev, savedAiMessage])
@@ -2395,6 +2419,27 @@ export default function ProductWorkspace() {
               <pre className="text-[11px] text-dark-700 whitespace-pre-wrap break-words font-mono bg-dark-100 p-3 rounded-lg border border-amber-200 leading-relaxed">
                 {previewSystemPrompt}
               </pre>
+            </div>
+          )}
+
+          {isAdmin && pipelineDebug?.briefs && pipelineDebug.briefs.length > 0 && (
+            <div className="border-b border-emerald-700/30 bg-emerald-900/10 px-6 py-3">
+              <p className="text-xs font-mono font-bold text-emerald-700 mb-2">
+                {language === 'es' ? 'DEBUG PIPELINE ESTRATEGICO' : 'STRATEGY PIPELINE DEBUG'}
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {pipelineDebug.briefs.map((brief, i) => (
+                  <div key={i} className="rounded-lg border border-emerald-800/20 bg-dark-100 p-2 text-[11px] text-dark-700">
+                    <div className="font-semibold text-emerald-600">
+                      #{brief.index ?? i + 1} · {brief.hookMechanism || 'hook'} · {brief.buyerStage || 'stage'}
+                    </div>
+                    <div>{brief.coreDoubt || ''}</div>
+                    {brief.proofToUse && brief.proofToUse.length > 0 && (
+                      <div className="text-dark-500 mt-1">{brief.proofToUse.slice(0, 2).join(' | ')}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
