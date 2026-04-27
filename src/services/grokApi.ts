@@ -171,7 +171,7 @@ export async function sendMessageToGrok(
     url: doc.url
   })) || []
 
-  const response = await fetch(EDIT_SCRIPT_API_URL, {
+  const response = await fetch(CHAT_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -305,7 +305,7 @@ STRICT RULES:
     ? `GUIÓN ORIGINAL:\n${originalScript}\n\nEDICIÓN SOLICITADA: ${editInstruction}`
     : `ORIGINAL SCRIPT:\n${originalScript}\n\nREQUESTED EDIT: ${editInstruction}`
 
-  const response = await fetch(CHAT_API_URL, {
+  const response = await fetch(EDIT_SCRIPT_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

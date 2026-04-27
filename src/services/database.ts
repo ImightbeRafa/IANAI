@@ -1323,7 +1323,7 @@ export async function getProductAiMemory(productId: string, userId: string): Pro
     .select('*')
     .eq('product_id', productId)
     .eq('user_id', userId)
-    .single()
+    .maybeSingle()
 
   if (error || !data) return null
   return data
