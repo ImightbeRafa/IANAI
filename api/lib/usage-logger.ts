@@ -1,62 +1,42 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
+import { GROK_TEXT_MODEL } from './grok-models.js'
 
-// Cost per 1M tokens (in USD) - Update these based on actual pricing
+// Cost per 1M tokens (in USD) - update these based on actual pricing.
 const MODEL_COSTS = {
-  // Script generation models (per 1M tokens)
+  // Script generation models
   'grok': { input: 3.00, output: 15.00 },
-  'grok-3-fast': { input: 3.00, output: 15.00 },
-  'grok-3-mini': { input: 0.30, output: 0.50 },
-  'grok-3-mini-fast': { input: 0.30, output: 0.50 },
-  'grok-4-fast-non-reasoning': { input: 0.20, output: 0.50 },
-  'grok-4-1-fast-reasoning': { input: 2.00, output: 10.00 },
-  'grok-2-vision-latest': { input: 2.00, output: 10.00 },
+  [GROK_TEXT_MODEL]: { input: 2.00, output: 10.00 },
   'gemini': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60, thinking: 3.50 },
-  
-  // Image generation models
-  // Gemini 2.5 Flash (nano-banana): ~$0.0315/image (1K) + input tokens ($0.10/1M) + thinking ($1.25/1M)
-  'nano-banana': { perImage: 0.0315, inputPer1M: 0.10, thinkingPer1M: 1.25 },
-  // Gemini 3 Pro (nano-banana-pro): ~$0.134/image (2K) + input tokens ($2.00/1M) + thinking ($12.00/1M)
-  'nano-banana-pro': { perImage: 0.134, inputPer1M: 2.00, thinkingPer1M: 12.00 },
-  // Grok Imagine: $0.07/image (flat)
-  'grok-imagine': { perImage: 0.07 },
-  
-  // Voice transcription (per minute of audio)
-  // OpenAI Whisper: ~$0.006/min
-  'whisper-1': { perMinute: 0.006 },
 
-  // Video generation models (per second of output)
-  // Grok Imagine Video: $0.07/sec (including audio)
-  'grok-imagine-video-480p': { perSecond: 0.05 },
-  'grok-imagine-video-720p': { perSecond: 0.07 },
-  // Kling 3.0 via fal.ai: $0.224/sec (no audio), $0.336/sec (with audio)
-  'fal-ai/kling-video/v3/pro/text-to-video': { perSecond: 0.224 },
-  'fal-ai/kling-video/o3/standard/image-to-video': { perSecond: 0.224 },
+  // Image generation models
+  'nano-banana': { perImage: 0.0315, inputPer1M: 0.10, thinkingPer1M: 1.25 },
+  'nano-banana-pro': { imageOutputPer1M: 120.00, fallback1K2K: 0.134, fallback4K: 0.24, inputPer1M: 2.00, thinkingPer1M: 12.00 },
+  'grok-imagine': { perImage: 0.07 },
+
+  // Voice transcription
+  'whisper-1': { perMinute: 0.006 },
 }
 
-// Feature types for tracking
-export type FeatureType = 
-  | 'script'           // Script generation
-  | 'description'      // Description generation
-  | 'image'            // Image generation
-  | 'edit'             // Image edit (text instruction edits) — costs 1 image credit
-  | 'enhance'          // Image enhance (magic wand) — costs 0.5 image credit
-  | 'video'            // Video generation
-  | 'paste_organize'   // Auto-fill/paste organize
-  | 'prompt_enhance'   // Prompt enhancement
-  | 'pdf_extract'      // PDF text extraction
-  | 'url_fetch'        // URL content fetching
-  | 'ad_prompt_build'  // Ad video prompt pipeline (Module A+B+C)
-  | 'kling_video'      // Kling AI video generation (fal.ai)
-  | 'prompt_condense'  // Prompt condensing for video APIs
-  | 'voice_transcription' // Voice-to-text transcription
-  | 'style_analysis'      // Custom post type style analysis
-  | 'memory_reflection'   // AI memory reflection (typed memories)
-  | 'memory_synthesis'   // AI memory style synthesis (global/product)
-  | 'brand_extraction'   // Brand identity extraction from URL
-  | 'reply'              // Client reply generation (Respuestas)
-  | 'ocr'                // Image OCR text extraction
-  | 'logo'               // Logo generation / enhancement
+export type FeatureType =
+  | 'script'
+  | 'description'
+  | 'image'
+  | 'edit'
+  | 'enhance'
+  | 'paste_organize'
+  | 'prompt_enhance'
+  | 'pdf_extract'
+  | 'url_fetch'
+  | 'prompt_condense'
+  | 'voice_transcription'
+  | 'style_analysis'
+  | 'memory_reflection'
+  | 'memory_synthesis'
+  | 'brand_extraction'
+  | 'reply'
+  | 'ocr'
+  | 'logo'
 
 interface UsageLogParams {
   userId?: string
@@ -66,6 +46,9 @@ interface UsageLogParams {
   inputTokens?: number
   outputTokens?: number
   thinkingTokens?: number
+  generationId?: string
+  costOverrideUsd?: number
+  costSource?: string
   success?: boolean
   errorMessage?: string
   metadata?: Record<string, unknown>
@@ -86,61 +69,74 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       inputTokens = 0,
       outputTokens = 0,
       thinkingTokens = 0,
+      generationId,
+      costOverrideUsd,
+      costSource,
       success = true,
       errorMessage,
       metadata = {}
     } = params
 
-    // Calculate estimated cost
     let estimatedCostUsd = 0
     const modelCosts = MODEL_COSTS[model as keyof typeof MODEL_COSTS]
-    
-    if (modelCosts) {
+
+    if (typeof costOverrideUsd === 'number' && Number.isFinite(costOverrideUsd)) {
+      estimatedCostUsd = costOverrideUsd
+    } else if (modelCosts) {
       if ('perMinute' in modelCosts) {
-        // Voice model - cost per minute (duration estimated from metadata)
         const durationSec = (metadata?.estimatedDurationSec as number) || 10
         estimatedCostUsd = (modelCosts.perMinute as number) * (durationSec / 60)
+      } else if ('imageOutputPer1M' in modelCosts) {
+        if ('inputPer1M' in modelCosts && inputTokens > 0) {
+          estimatedCostUsd += (inputTokens / 1_000_000) * (modelCosts.inputPer1M as number)
+        }
+        if (outputTokens > 0) {
+          estimatedCostUsd += (outputTokens / 1_000_000) * (modelCosts.imageOutputPer1M as number)
+        } else {
+          const imageSize = metadata?.imageSize === '4K' ? '4K' : '1K/2K'
+          estimatedCostUsd += imageSize === '4K'
+            ? (modelCosts.fallback4K as number)
+            : (modelCosts.fallback1K2K as number)
+        }
+        if ('thinkingPer1M' in modelCosts && thinkingTokens > 0) {
+          estimatedCostUsd += (thinkingTokens / 1_000_000) * (modelCosts.thinkingPer1M as number)
+        }
       } else if ('perImage' in modelCosts) {
-        // Image model - base per-image cost
         estimatedCostUsd = modelCosts.perImage as number
-        // Add Gemini token costs if available (input + thinking)
         if ('inputPer1M' in modelCosts && inputTokens > 0) {
           estimatedCostUsd += (inputTokens / 1_000_000) * (modelCosts.inputPer1M as number)
         }
         if ('thinkingPer1M' in modelCosts && thinkingTokens > 0) {
           estimatedCostUsd += (thinkingTokens / 1_000_000) * (modelCosts.thinkingPer1M as number)
         }
-      } else if ('perSecond' in modelCosts) {
-        // Video model - cost per second (duration passed in metadata)
-        const duration = (metadata?.duration as number) || 5
-        let perSecondRate = modelCosts.perSecond as number
-        // Kling 3.0 with audio: $0.224 → $0.336 (1.5x multiplier)
-        if (metadata?.generate_audio === true) {
-          perSecondRate *= 1.5
-        }
-        estimatedCostUsd = perSecondRate * duration
       } else if ('input' in modelCosts && 'output' in modelCosts) {
-        // Text model - cost based on tokens
         const inputCost = (inputTokens / 1_000_000) * (modelCosts.input as number)
         const outputCost = (outputTokens / 1_000_000) * (modelCosts.output as number)
         estimatedCostUsd = inputCost + outputCost
-        // Add thinking token cost if model supports it (e.g. Gemini Flash)
         if ('thinking' in modelCosts && thinkingTokens > 0) {
           estimatedCostUsd += (thinkingTokens / 1_000_000) * (modelCosts.thinking as number)
         }
       }
     }
 
-    // Store thinking tokens in metadata for visibility
-    const enrichedMetadata = thinkingTokens > 0
-      ? { ...metadata, thinkingTokens }
-      : metadata
+    const inferredCostSource = costSource
+      || (typeof costOverrideUsd === 'number' ? 'provider_usage' : undefined)
+      || (model === 'nano-banana-pro'
+        ? (outputTokens > 0 ? 'provider_usage' : 'documented_image_size_fallback')
+        : undefined)
 
-    const { error } = await supabase.from('api_usage_logs').insert({
+    const enrichedMetadata = {
+      ...metadata,
+      ...(thinkingTokens > 0 ? { thinkingTokens } : {}),
+      ...(inferredCostSource ? { costSource: inferredCostSource } : {})
+    }
+
+    const insertPayload = {
       user_id: userId,
       user_email: userEmail,
       feature,
       model,
+      generation_id: generationId,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
       total_tokens: inputTokens + outputTokens + thinkingTokens,
@@ -148,7 +144,15 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       success,
       error_message: errorMessage,
       metadata: enrichedMetadata
-    })
+    }
+
+    let { error } = await supabase.from('api_usage_logs').insert(insertPayload)
+
+    if (error && generationId && /generation_id/i.test(error.message || '')) {
+      const { generation_id: _generationId, ...fallbackPayload } = insertPayload
+      const retry = await supabase.from('api_usage_logs').insert(fallbackPayload)
+      error = retry.error
+    }
 
     if (error) {
       console.error('Failed to log API usage:', error)
@@ -158,8 +162,6 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
   }
 }
 
-// Helper to estimate token count from text (rough approximation)
 export function estimateTokens(text: string): number {
-  // Rough estimate: ~4 characters per token for English
   return Math.ceil(text.length / 4)
 }

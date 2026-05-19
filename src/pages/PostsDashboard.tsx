@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { 
   createProduct,
-  getBusinessProducts
+  getBusinessProducts,
+  getOrCreateQuickPostProduct,
+  QUICK_POST_PRODUCT_NAME
 } from '../services/database'
 import type { Product, RestaurantFormData, Business, ProductType, NewProductFormData, NewServiceFormData, IndumentariaFormData, RealEstateFormData } from '../types'
 import Layout from '../components/Layout'
@@ -27,12 +29,18 @@ import {
   ArrowLeft,
   UtensilsCrossed,
   Home,
-  Share2
+  Share2,
+  Sparkles,
+  Camera,
+  Layers3,
+  Type,
+  Wand2
 } from 'lucide-react'
 
 export default function PostsDashboard() {
   const { user } = useAuth()
   const { language } = useLanguage()
+  const navigate = useNavigate()
   const dashData = useDashboardData()
   const [showProductForm, setShowProductForm] = useState(false)
   const [showRestaurantForm, setShowRestaurantForm] = useState(false)
@@ -44,10 +52,11 @@ export default function PostsDashboard() {
   const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(null)
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null)
   const [businessProducts, setBusinessProducts] = useState<Product[]>([])
+  const [quickLaunching, setQuickLaunching] = useState<string | null>(null)
 
   const businesses = dashData.businesses
-  const products = dashData.products
-  const sharedProducts = dashData.sharedProducts
+  const products = dashData.products.filter(p => p.name !== QUICK_POST_PRODUCT_NAME)
+  const sharedProducts = dashData.sharedProducts.filter(p => p.name !== QUICK_POST_PRODUCT_NAME)
   const loading = dashData.loading
 
   const labels = {
@@ -72,7 +81,18 @@ export default function PostsDashboard() {
       sharedWithMe: 'Compartidos Conmigo',
       sharedBy: 'por',
       roleViewer: 'Lector',
-      roleEditor: 'Editor'
+      roleEditor: 'Editor',
+      quickTitle: 'Generador Rapido',
+      quickSubtitle: 'Crea imagenes sin configurar un negocio o producto primero.',
+      quickProduct: 'Foto de producto',
+      quickProductDesc: 'Sube una foto y genera una version profesional lista para publicar.',
+      quickCarousel: 'Carrusel organico',
+      quickCarouselDesc: 'De una idea simple o un plan slide por slide a un carrusel completo.',
+      quickOrganic: 'Post organico',
+      quickOrganicDesc: 'Texto, imagen o diseño editorial con brand kit y colores opcionales.',
+      quickPrompt: 'Imagen libre',
+      quickPromptDesc: 'Describe cualquier visual y genera una imagen de uso general.',
+      openGenerator: 'Abrir generador'
     },
     en: {
       title: 'Instagram Posts',
@@ -95,7 +115,18 @@ export default function PostsDashboard() {
       sharedWithMe: 'Shared With Me',
       sharedBy: 'by',
       roleViewer: 'Viewer',
-      roleEditor: 'Editor'
+      roleEditor: 'Editor',
+      quickTitle: 'Quick Generator',
+      quickSubtitle: 'Create images without setting up a business or product first.',
+      quickProduct: 'Product photo',
+      quickProductDesc: 'Upload a photo and generate a polished publish-ready product image.',
+      quickCarousel: 'Organic carousel',
+      quickCarouselDesc: 'Turn a simple idea or slide-by-slide plan into a full carousel.',
+      quickOrganic: 'Organic post',
+      quickOrganicDesc: 'Text, image, or editorial design with optional brand kit and colors.',
+      quickPrompt: 'Free image',
+      quickPromptDesc: 'Describe any visual and generate a general-purpose image.',
+      openGenerator: 'Open generator'
     }
   }
 
@@ -174,6 +205,20 @@ export default function PostsDashboard() {
     else if (type === 'indumentaria') setShowIndumentariaForm(true)
     else if (type === 'restaurant') setShowRestaurantForm(true)
     else if (type === 'real_estate') setShowRealEstateForm(true)
+  }
+
+  const openQuickGenerator = async (mode: string) => {
+    if (!user) return
+    setQuickLaunching(mode)
+    try {
+      const quickProduct = await getOrCreateQuickPostProduct(user.id)
+      const query = mode === 'organic-carousel' ? 'autoOpen=carousel&quick=1' : `mode=${encodeURIComponent(mode)}&quick=1`
+      navigate(`/posts/product/${quickProduct.id}?${query}`)
+    } catch (error) {
+      console.error('Failed to open quick generator:', error)
+    } finally {
+      setQuickLaunching(null)
+    }
   }
 
   const getProductIcon = (type: string) => {
@@ -255,6 +300,37 @@ export default function PostsDashboard() {
     </button>
   )
 
+  const quickCards = [
+    {
+      id: 'product',
+      title: t.quickProduct,
+      desc: t.quickProductDesc,
+      icon: Camera,
+      className: 'from-sky-500 to-indigo-600'
+    },
+    {
+      id: 'organic-carousel',
+      title: t.quickCarousel,
+      desc: t.quickCarouselDesc,
+      icon: Layers3,
+      className: 'from-emerald-500 to-teal-600'
+    },
+    {
+      id: 'organic-single:infographic',
+      title: t.quickOrganic,
+      desc: t.quickOrganicDesc,
+      icon: Type,
+      className: 'from-violet-500 to-fuchsia-600'
+    },
+    {
+      id: 'general-image',
+      title: t.quickPrompt,
+      desc: t.quickPromptDesc,
+      icon: Wand2,
+      className: 'from-amber-500 to-rose-600'
+    }
+  ]
+
   if (loading) {
     return (
       <Layout>
@@ -294,6 +370,50 @@ export default function PostsDashboard() {
             )}
           </div>
         </div>
+
+        <section className="mb-8">
+          <div className="flex items-end justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-primary-500" />
+                {t.quickTitle}
+              </h2>
+              <p className="text-sm text-dark-500 mt-1">{t.quickSubtitle}</p>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {quickCards.map(card => {
+              const Icon = card.icon
+              const busy = quickLaunching === card.id
+              return (
+                <button
+                  key={card.id}
+                  onClick={() => openQuickGenerator(card.id)}
+                  disabled={!!quickLaunching}
+                  className="group text-left bg-dark-100 border border-dark-200 rounded-xl p-4 hover:border-primary-300 hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-wait"
+                >
+                  <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${card.className} flex items-center justify-center shadow-sm mb-4`}>
+                    {busy ? (
+                      <div className="w-5 h-5 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                    ) : (
+                      <Icon className="w-5 h-5 text-white" />
+                    )}
+                  </div>
+                  <h3 className="font-semibold text-dark-900 group-hover:text-primary-600 transition-colors">
+                    {card.title}
+                  </h3>
+                  <p className="text-sm text-dark-500 mt-1 leading-relaxed min-h-[3.2rem]">
+                    {card.desc}
+                  </p>
+                  <div className="mt-4 flex items-center justify-between text-xs font-semibold text-primary-600">
+                    <span>{t.openGenerator}</span>
+                    <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </section>
 
         {/* Unassigned products */}
         {products.length > 0 && !selectedBusiness && (

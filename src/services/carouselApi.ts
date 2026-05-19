@@ -17,6 +17,9 @@ export interface GenerateCarouselRequest {
   language: 'en' | 'es'
   brandKitId?: string
   ctaStrength?: CTAStrength
+  designDirection?: string
+  slideDetails?: string
+  previewFirstSlideOnly?: boolean
   productContext?: {
     name?: string
     type?: string
@@ -30,6 +33,7 @@ export interface GenerateCarouselRequest {
   }
   productReferenceImages?: string[]
   contextReferenceImages?: string[]
+  carouselReferenceImages?: string[]
 }
 
 export interface GeneratedSlide {
@@ -52,6 +56,7 @@ export interface GenerateCarouselResponse {
   plan: Array<{ index: number; role: string; headline: string; body?: string; note?: string }>
   slides: GeneratedSlide[]
   usage: { charged: number; total: number }
+  previewFirstSlideOnly?: boolean
 }
 
 /**

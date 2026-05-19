@@ -5,6 +5,7 @@ export interface AuthenticatedUser {
   id: string
   email?: string
   plan?: string
+  isAdmin?: boolean
 }
 
 export interface AuthResult {
@@ -61,6 +62,27 @@ async function verifyAuth(req: VercelRequest): Promise<AuthResult> {
 }
 
 /**
+ * Server-side admin check using profiles.is_admin.
+ * Kept separate from requireAuth so regular endpoints do not pay for this query.
+ */
+export async function isAdminUser(userId: string): Promise<boolean> {
+  if (!supabaseAdmin) return false
+
+  try {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('is_admin')
+      .eq('id', userId)
+      .maybeSingle()
+
+    return data?.is_admin === true
+  } catch (err) {
+    console.error('Admin status check error:', err)
+    return false
+  }
+}
+
+/**
  * Middleware helper to require authentication
  * Returns true if authenticated, false if response was sent
  */
@@ -83,7 +105,7 @@ export async function requireAuth(
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image' | 'video' | 'description' | 'enhance' | 'reply'
+  action: 'script' | 'image' | 'description' | 'enhance' | 'reply'
 ): Promise<{ allowed: boolean; remaining: number; limit: number }> {
   if (!supabaseAdmin) {
     console.error('Usage limit check: Supabase not configured — denying request')
@@ -135,9 +157,7 @@ export async function checkUsageLimit(
         ? limits.images_per_month 
         : effectiveAction === 'description'
           ? (limits.descriptions_per_month ?? -1)
-          : effectiveAction === 'reply'
-            ? (limits.replies_per_month ?? 10)
-            : limits.videos_per_month || 10
+          : (limits.replies_per_month ?? 10)
 
     // -1 means unlimited
     if (limit === -1) {
@@ -174,9 +194,7 @@ export async function checkUsageLimit(
         ? (usage?.images_generated || 0) + Math.floor((usage?.enhances_generated || 0) / 2)
         : effectiveAction === 'description'
           ? (usage?.descriptions_generated || 0)
-          : effectiveAction === 'reply'
-            ? (usage?.replies_generated || 0)
-            : (usage?.videos_generated || 0)
+          : (usage?.replies_generated || 0)
 
     const remaining = limit - currentUsage
     const allowed = remaining > 0
@@ -214,7 +232,7 @@ export async function deductBonusImage(userId: string): Promise<void> {
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image' | 'video' | 'description' | 'enhance' | 'reply'
+  action: 'script' | 'image' | 'description' | 'enhance' | 'reply'
 ): Promise<void> {
   if (!supabaseAdmin) return
 

@@ -15,8 +15,6 @@ const ScriptsDashboard = lazy(() => import('./pages/Dashboard'))
 const ProductWorkspace = lazy(() => import('./pages/ProductWorkspace'))
 const PostsDashboard = lazy(() => import('./pages/PostsDashboard'))
 const PostWorkspace = lazy(() => import('./pages/PostWorkspace'))
-const BRollDashboard = lazy(() => import('./pages/BRollDashboard'))
-const BRollWorkspace = lazy(() => import('./pages/BRollWorkspace'))
 const Settings = lazy(() => import('./pages/Settings'))
 const TeamManagement = lazy(() => import('./pages/TeamManagement'))
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'))
@@ -100,22 +98,6 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <PostWorkspace />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/broll"
-              element={
-                <ProtectedRoute>
-                  <BRollDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/broll/product/:productId"
-              element={
-                <ProtectedRoute>
-                  <BRollWorkspace />
                 </ProtectedRoute>
               }
             />

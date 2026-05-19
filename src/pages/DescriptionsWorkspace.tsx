@@ -42,7 +42,7 @@ export default function DescriptionsWorkspace() {
 
   const labels = {
     es: {
-      title: 'Descripciones de Video',
+      title: 'Descripciones',
       back: 'Volver a Descripciones',
       selectScript: 'Seleccionar Guión',
       noScripts: 'No hay guiones guardados para este producto. Genera guiones primero en el workspace de Scripts.',
@@ -50,14 +50,14 @@ export default function DescriptionsWorkspace() {
       changeScript: 'Cambiar',
       placeholder: 'Escribe instrucciones adicionales para la descripción...',
       generateDesc: 'Generar Descripciones',
-      startPrompt: 'Selecciona un guión guardado y genera descripciones para tus videos de redes sociales.',
+      startPrompt: 'Selecciona un guión guardado y genera descripciones para tus anuncios y posts de redes sociales.',
       copy: 'Copiar',
       copied: '¡Copiado!',
       pasteScript: 'O pega un guión directamente en el chat',
       scriptsFor: 'Guiones de'
     },
     en: {
-      title: 'Video Descriptions',
+      title: 'Descriptions',
       back: 'Back to Descriptions',
       selectScript: 'Select Script',
       noScripts: 'No saved scripts for this product. Generate scripts first in the Scripts workspace.',
@@ -65,7 +65,7 @@ export default function DescriptionsWorkspace() {
       changeScript: 'Change',
       placeholder: 'Type additional instructions for the description...',
       generateDesc: 'Generate Descriptions',
-      startPrompt: 'Select a saved script and generate descriptions for your social media videos.',
+      startPrompt: 'Select a saved script and generate descriptions for your social media ads and posts.',
       copy: 'Copy',
       copied: 'Copied!',
       pasteScript: 'Or paste a script directly in the chat',
@@ -140,8 +140,8 @@ export default function DescriptionsWorkspace() {
       ? scriptContent
       : selectedScript 
         ? (language === 'es' 
-          ? `Genera descripciones de video para redes sociales basándote en este guión:\n\n${scriptContent}`
-          : `Generate social media video descriptions based on this script:\n\n${scriptContent}`)
+          ? `Genera descripciones para redes sociales basándote en este guión:\n\n${scriptContent}`
+          : `Generate social media descriptions based on this script:\n\n${scriptContent}`)
         : scriptContent
 
     try {
@@ -155,8 +155,8 @@ export default function DescriptionsWorkspace() {
         product_type: product.type,
         product_description: product.product_description,
         additional_context: language === 'es'
-          ? 'Genera descripciones cortas y atractivas para videos de redes sociales (Instagram, TikTok, YouTube Shorts). Incluye hashtags relevantes. Formato: 3-5 variaciones de descripción, cada una con diferente enfoque (informativo, emocional, urgente, social proof).'
-          : 'Generate short, engaging descriptions for social media videos (Instagram, TikTok, YouTube Shorts). Include relevant hashtags. Format: 3-5 description variations, each with a different approach (informative, emotional, urgent, social proof).'
+          ? 'Genera descripciones cortas y atractivas para anuncios y posts de redes sociales. Incluye hashtags relevantes solo si aportan valor. Formato: 3-5 variaciones de descripción, cada una con diferente enfoque (informativo, emocional, urgente, social proof).'
+          : 'Generate short, engaging descriptions for social media ads and posts. Include relevant hashtags only when useful. Format: 3-5 description variations, each with a different approach (informative, emotional, urgent, social proof).'
       }
 
       const allMessages = [...messages, savedUserMsg]

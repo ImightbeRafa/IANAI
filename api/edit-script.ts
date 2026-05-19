@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
-
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
 type Language = 'en' | 'es'
 type EditType = 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
@@ -75,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${grokApiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-3-fast',
+        model: GROK_TEXT_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -93,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'script',
-      model: 'grok-3-fast',
+      model: GROK_TEXT_MODEL,
       inputTokens: data.usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
       outputTokens: data.usage?.completion_tokens || estimateTokens(content),
       success: true,
@@ -106,4 +105,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' })
   }
 }
-

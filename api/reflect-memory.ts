@@ -3,10 +3,9 @@ import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 
 // =============================================
 // SYNTHESIS PROMPT — bilingual-aware, JSON mode
@@ -270,7 +269,7 @@ ${ratedPostsText}` : ''}`
         'Authorization': `Bearer ${grokApiKey}`
       },
       body: JSON.stringify({
-        model: 'grok-4-1-fast-reasoning',
+        model: GROK_TEXT_MODEL,
         messages: [
           { role: 'system', content: SYNTHESIS_SYSTEM },
           { role: 'user', content: userContent }
@@ -289,7 +288,7 @@ ${ratedPostsText}` : ''}`
         userId,
         userEmail: user.email,
         feature: 'memory_reflection',
-        model: 'grok-4-1-fast-reasoning',
+        model: GROK_TEXT_MODEL,
         inputTokens: estimateTokens(SYNTHESIS_SYSTEM + userContent),
         outputTokens: 0,
         success: false,
@@ -464,7 +463,7 @@ ${ratedPostsText}` : ''}`
       userId,
       userEmail: user.email,
       feature: 'memory_reflection',
-      model: 'grok-4-1-fast-reasoning',
+      model: GROK_TEXT_MODEL,
       inputTokens: usage.prompt_tokens || estimateTokens(SYNTHESIS_SYSTEM + userContent),
       outputTokens: usage.completion_tokens || estimateTokens(rawContent),
       success: true,

@@ -161,7 +161,7 @@ function buildMemoryInjection(
     }
   }
 
-  // Visual style (for image/video pipelines)
+  // Visual style (for image pipelines)
   if (visualStyle.length > 0) {
     parts.push(isEs
       ? `\nESTILO VISUAL APRENDIDO:`
@@ -194,7 +194,7 @@ function buildMemoryInjection(
 
 /**
  * Convenience: fetch memories + build injection in one call.
- * Used by chat.ts, generate-image.ts, build-ad-prompt.ts
+ * Used by chat.ts and generate-image.ts
  */
 export async function getMemoryInjection(
   userId: string,

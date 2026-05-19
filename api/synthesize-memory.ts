@@ -2,9 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
-
-
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
 const GLOBAL_SYNTHESIS_SYSTEM = `You are a copywriting style analyst. You will receive a user's saved scripts, editing patterns, behavioral signals, and ANTI-PATTERNS (things the user explicitly rejects) across all their products.
 
@@ -143,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Authorization': `Bearer ${grokApiKey}`
         },
         body: JSON.stringify({
-          model: 'grok-3-mini-fast',
+          model: GROK_TEXT_MODEL,
           messages: [
             { role: 'system', content: GLOBAL_SYNTHESIS_SYSTEM },
             { role: 'user', content: globalUserContent }
@@ -173,7 +171,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             userId,
             userEmail: user.email,
             feature: 'memory_synthesis',
-            model: 'grok-3-mini-fast',
+            model: GROK_TEXT_MODEL,
             inputTokens: usage.prompt_tokens || estimateTokens(GLOBAL_SYNTHESIS_SYSTEM + globalUserContent),
             outputTokens: usage.completion_tokens || estimateTokens(summary),
             success: true,
@@ -185,7 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           userId,
           userEmail: user.email,
           feature: 'memory_synthesis',
-          model: 'grok-3-mini-fast',
+          model: GROK_TEXT_MODEL,
           inputTokens: estimateTokens(GLOBAL_SYNTHESIS_SYSTEM + globalUserContent),
           success: false,
           errorMessage: `API error: ${globalResponse.status}`,
@@ -237,7 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'Authorization': `Bearer ${grokApiKey}`
           },
           body: JSON.stringify({
-            model: 'grok-3-mini-fast',
+            model: GROK_TEXT_MODEL,
             messages: [
               { role: 'system', content: PRODUCT_SYNTHESIS_SYSTEM },
               { role: 'user', content: productUserContent }
@@ -268,7 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               userId,
               userEmail: user.email,
               feature: 'memory_synthesis',
-              model: 'grok-3-mini-fast',
+              model: GROK_TEXT_MODEL,
               inputTokens: usage.prompt_tokens || estimateTokens(PRODUCT_SYNTHESIS_SYSTEM + productUserContent),
               outputTokens: usage.completion_tokens || estimateTokens(summary),
               success: true,
@@ -280,7 +278,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             userId,
             userEmail: user.email,
             feature: 'memory_synthesis',
-            model: 'grok-3-mini-fast',
+            model: GROK_TEXT_MODEL,
             inputTokens: estimateTokens(PRODUCT_SYNTHESIS_SYSTEM + productUserContent),
             success: false,
             errorMessage: `API error: ${productResponse.status}`,
@@ -302,7 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'memory_synthesis',
-      model: 'grok-3-mini-fast',
+      model: GROK_TEXT_MODEL,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { X, Sparkles, Loader2, Minus, Plus, AlertTriangle, Leaf, ListChecks, ListOrdered, ArrowRightLeft, Scale, Download } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { X, Sparkles, Loader2, Minus, Plus, AlertTriangle, Leaf, ListChecks, ListOrdered, ArrowRightLeft, Scale, Download, Upload, Trash2 } from 'lucide-react'
 import type { OrganicCarouselSubtype, CTAStrength } from '../types'
 import { generateCarousel, type GenerateCarouselResponse, type CarouselAspectRatio } from '../services/carouselApi'
 import { createCarouselPosts, type CarouselSlideInsert, type Post } from '../services/database'
@@ -74,11 +74,16 @@ export default function OrganicCarouselModal({
   const [aspectRatio, setAspectRatio] = useState<CarouselAspectRatio>('1:1')
   const [ctaStrength, setCtaStrength] = useState<CTAStrength>('soft')
   const [scriptContent, setScriptContent] = useState<string>(initialScriptContent ?? '')
+  const [designDirection, setDesignDirection] = useState<string>('')
+  const [slideDetails, setSlideDetails] = useState<string>('')
+  const [previewFirstSlideOnly, setPreviewFirstSlideOnly] = useState<boolean>(false)
+  const [carouselReferenceImages, setCarouselReferenceImages] = useState<string[]>([])
   const [selectedSavedScriptId, setSelectedSavedScriptId] = useState<string>('')
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<GenerateCarouselResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmCost, setConfirmCost] = useState(false)
+  const carouselRefInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -87,11 +92,39 @@ export default function OrganicCarouselModal({
     setConfirmCost(false)
     setResult(null)
     setError(null)
+    setDesignDirection('')
+    setSlideDetails('')
+    setPreviewFirstSlideOnly(false)
+    setCarouselReferenceImages([])
   }, [open, initialScriptContent])
 
   if (!open) return null
 
   const t = (es: string, en: string) => (language === 'es' ? es : en)
+
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(new Error(t('No se pudo leer la imagen.', 'Could not read the image.')))
+      reader.readAsDataURL(file)
+    })
+
+  const handleCarouselReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const remaining = 8 - carouselReferenceImages.length
+    const selected = Array.from(files).slice(0, remaining)
+    try {
+      const dataUrls = await Promise.all(selected.map(fileToDataUrl))
+      setCarouselReferenceImages(prev => [...prev, ...dataUrls])
+      setConfirmCost(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (carouselRefInputRef.current) carouselRefInputRef.current.value = ''
+    }
+  }
 
   const handleGenerate = async () => {
     setError(null)
@@ -112,6 +145,9 @@ export default function OrganicCarouselModal({
       const contextReferenceImages = await Promise.all(
         contextReferenceImageUrls.slice(0, 4).map(async url => compressBase64ForApi(await urlToBase64(url)))
       )
+      const uploadedCarouselReferenceImages = await Promise.all(
+        carouselReferenceImages.map(img => compressBase64ForApi(img))
+      )
 
       const resp = await generateCarousel({
         productId,
@@ -122,9 +158,13 @@ export default function OrganicCarouselModal({
         language,
         brandKitId,
         ctaStrength,
+        designDirection: designDirection.trim() || undefined,
+        slideDetails: slideDetails.trim() || undefined,
+        previewFirstSlideOnly,
         productContext,
         productReferenceImages,
         contextReferenceImages,
+        carouselReferenceImages: uploadedCarouselReferenceImages,
       })
       setResult(resp)
 
@@ -158,7 +198,8 @@ export default function OrganicCarouselModal({
     }
   }
 
-  const cost = slideCount
+  const cost = previewFirstSlideOnly ? 1 : slideCount
+  const renderSlideCount = previewFirstSlideOnly ? 1 : slideCount
   const hasEnoughCredits = remainingImageCredits === null || remainingImageCredits >= cost
 
   return (
@@ -428,6 +469,122 @@ export default function OrganicCarouselModal({
                 )}
               </div>
 
+              <div>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <label className="text-xs font-medium text-dark-700 block">
+                    {t('Imagenes para este carrusel', 'Images for this carousel')}
+                  </label>
+                  <span className="text-[10px] text-dark-400">
+                    {carouselReferenceImages.length}/8
+                  </span>
+                </div>
+                <p className="text-[10px] text-dark-400 mb-2 leading-relaxed">
+                  {t(
+                    'Subi referencias de estilo, ejemplos de posts, fotos o assets que queres usar en slides especificos. Explica como usarlas en Direccion de diseno o Detalle slide por slide.',
+                    'Upload style references, post examples, photos, or assets you want used on specific slides. Explain how to use them in Design direction or Slide-by-slide detail.'
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {carouselReferenceImages.map((img, idx) => (
+                    <div key={`${idx}-${img.slice(0, 20)}`} className="relative group/ref">
+                      <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-emerald-700/60 ring-2 ring-emerald-700/20 bg-dark-200">
+                        <img src={img} alt={`Carousel reference ${idx + 1}`} className="w-full h-full object-cover" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCarouselReferenceImages(prev => prev.filter((_, i) => i !== idx))
+                          setConfirmCost(false)
+                        }}
+                        className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center opacity-100 lg:opacity-0 lg:group-hover/ref:opacity-100 transition-opacity hover:bg-red-700"
+                        aria-label={t('Quitar imagen', 'Remove image')}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {carouselReferenceImages.length < 8 && (
+                    <button
+                      type="button"
+                      onClick={() => carouselRefInputRef.current?.click()}
+                      className="w-16 h-16 rounded-lg border-2 border-dashed border-dark-300 flex flex-col items-center justify-center text-dark-400 hover:border-emerald-500 hover:text-emerald-400 transition-colors"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span className="text-[8px] mt-0.5">
+                        {t('Subir', 'Upload')}
+                      </span>
+                    </button>
+                  )}
+                  <input
+                    ref={carouselRefInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+                    multiple
+                    onChange={handleCarouselReferenceUpload}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-dark-700 mb-2 block">
+                  {t('Direccion de diseno (opcional)', 'Design direction (optional)')}
+                </label>
+                <textarea
+                  value={designDirection}
+                  onChange={e => {
+                    setDesignDirection(e.target.value)
+                    setConfirmCost(false)
+                  }}
+                  rows={3}
+                  placeholder={t(
+                    'Ej: fondo crema, tipografia editorial, fotos limpias, mucho aire, inspirado en el post que subi como referencia...',
+                    'E.g. cream background, editorial typography, clean photos, generous spacing, inspired by the post I uploaded as reference...'
+                  )}
+                  className="w-full px-3 py-2.5 bg-dark-50 border border-dark-200 rounded-lg text-sm text-dark-700 placeholder-dark-400 focus:outline-none focus:border-emerald-700 resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-dark-700 mb-2 block">
+                  {t('Detalle slide por slide (opcional)', 'Slide-by-slide detail (optional)')}
+                </label>
+                <textarea
+                  value={slideDetails}
+                  onChange={e => {
+                    setSlideDetails(e.target.value)
+                    setConfirmCost(false)
+                  }}
+                  rows={4}
+                  placeholder={t(
+                    'Ej: Slide 1: titulo. Slide 2: problema. Slide 3: checklist. Si lo dejas vacio, la IA arma la estructura.',
+                    'E.g. Slide 1: title. Slide 2: problem. Slide 3: checklist. Leave blank and AI will build the structure.'
+                  )}
+                  className="w-full px-3 py-2.5 bg-dark-50 border border-dark-200 rounded-lg text-sm text-dark-700 placeholder-dark-400 focus:outline-none focus:border-emerald-700 resize-none"
+                />
+              </div>
+
+              <label className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-dark-50 border border-dark-200 cursor-pointer">
+                <span>
+                  <span className="block text-xs font-medium text-dark-700">
+                    {t('Generar solo slide 1', 'Generate slide 1 only')}
+                  </span>
+                  <span className="block text-[10px] text-dark-400 mt-0.5">
+                    {t('Previsualiza la direccion antes del carrusel completo.', 'Preview the direction before the full carousel.')}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={previewFirstSlideOnly}
+                  onChange={e => {
+                    setPreviewFirstSlideOnly(e.target.checked)
+                    setConfirmCost(false)
+                  }}
+                  className="w-4 h-4 accent-emerald-600"
+                />
+              </label>
+
               {/* Cost / warnings */}
               <div className={`flex items-center gap-2 text-xs px-3 py-2.5 rounded-lg ${
                 hasEnoughCredits ? 'bg-dark-50 text-dark-500' : 'bg-amber-900/20 text-amber-400 border border-amber-800/30'
@@ -478,7 +635,7 @@ export default function OrganicCarouselModal({
                     {t('Preparando slides con consistencia visual...', 'Preparing slides with visual consistency...')}
                   </div>
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {Array.from({ length: slideCount }).map((_, i) => (
+                    {Array.from({ length: renderSlideCount }).map((_, i) => (
                       <div
                         key={i}
                         className="aspect-square rounded-lg bg-gradient-to-br from-dark-200 to-dark-100 relative overflow-hidden border border-emerald-900/20"

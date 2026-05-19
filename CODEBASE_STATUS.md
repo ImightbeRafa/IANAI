@@ -430,7 +430,7 @@ Original content collapses to 2-line preview when edited version exists.
 
 ### Configuration
 - `vite.config.ts` has `server.allowedHosts: true` and `server.host: true` for ngrok access
-- Grok API model: `grok-3-fast`
+- Grok API text model: `grok-4.3`
 
 ### Architecture Notes
 - The system supports BOTH legacy (`businessDetails` JSON dump) and structured (`businessContext`/`productContext`) context paths. Structured is preferred when available.

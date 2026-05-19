@@ -334,7 +334,7 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - Uses `@fal-ai/client` package (fal.queue.submit / fal.queue.status / fal.queue.result)
   - Models: `fal-ai/kling-video/v2.6/pro/text-to-video` and `fal-ai/kling-video/v2.6/pro/image-to-video`
   - Duration: 5-30 seconds in 5s increments
-  - Prompt limit: 3000 chars (condensed via grok-3-mini if motherPrompt exceeds)
+  - Prompt limit: 3000 chars (condensed via `grok-4.3` if motherPrompt exceeds)
   - Task ID format: `modelId::requestId` (double colon separator)
   - Pricing: $0.07/sec (no audio), $0.14/sec (with audio)
   - Auth: single `FAL_KEY` env var (removed KLING_ACCESS_KEY/SECRET_KEY and JWT generation)
@@ -346,7 +346,7 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
     - Module C: Mother Prompt Fusion (Visual DNA + Cinematic Script → final video prompt)
   - Modules A+B run in parallel for reduced latency
   - Output capped at 3000 chars to fit video API limits
-  - Uses grok-3-mini for all three modules
+  - Uses `grok-4.3` for all three modules
 - [x] **Frontend: Dual Video Model Support**
   - Model selector: Kling 2.6 Pro (fal.ai) vs Grok (xAI)
   - Kling mode selector: Standard vs Professional with bilingual descriptions
@@ -357,7 +357,7 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - Prompt preview auto-shows when mother prompt is built
   - Generate button hidden until motherPrompt is set
 - [x] **Usage Tracking Overhaul**
-  - Added `grok-3-mini` to MODEL_COSTS ($0.30/1M in, $0.50/1M out)
+  - Added Grok text model cost tracking
   - Added Kling fal.ai model cost entries ($0.07/sec per model)
   - Added `prompt_condense` feature type for tracking condense calls
   - Both video endpoints now log condense usage separately
@@ -365,7 +365,7 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
   - Fixed Grok video error log using wrong model string (was `grok-imagine-video`, now uses resolution-based string)
 - [x] **Admin Dashboard Updates**
   - Added all Kling fal.ai models to MODEL_INFO with display names + colors
-  - Added `grok-3-mini`, `grok-imagine-video-480p`, `grok-imagine-video-720p` to MODEL_INFO
+  - Added Grok text and video model entries to MODEL_INFO
   - Added all new models to MODEL_PRICING reference display
   - Added `kling_video`, `ad_prompt_build`, `prompt_condense` to bilingual feature labels
   - Added feature icons for all new feature types
@@ -378,7 +378,7 @@ Using the NEW schema from `supabase/migrations/001_teams_restructure.sql`:
 - [x] **Files Updated:**
   - `api/generate-video.ts` - Added prompt condense logging, fixed error model string
   - `api/proxy-video.ts` - Added fal.ai domains
-  - `api/lib/usage-logger.ts` - Added grok-3-mini, Kling costs, prompt_condense feature
+  - `api/lib/usage-logger.ts` - Added Grok text model, Kling costs, prompt_condense feature
   - `src/pages/BRollWorkspace.tsx` - Dual model UI, ad prompt pipeline, script paste
   - `src/pages/AdminDashboard.tsx` - All new models/features/labels/icons
 - [x] **Dependencies:**
@@ -978,7 +978,7 @@ In Supabase dashboard, check:
 
 ### Grok API Endpoint
 - URL: `https://api.x.ai/v1/chat/completions`
-- Model: `grok-4-1-fast-reasoning`
+- Model: `grok-4.3`
 - The system prompt includes Ian's copywriting methodology with examples
 
 ### Request Body

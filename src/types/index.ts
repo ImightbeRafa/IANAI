@@ -58,10 +58,7 @@ export function isOrganicFramework(f: ScriptFramework): boolean {
  */
 export type CTAStrength = 'none' | 'soft' | 'brand_mention' | 'sales'
 export type AIModel = 'grok' | 'gemini'
-export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
-export type VideoModel = 'grok-imagine-video'
-export type AspectRatio = '16:9' | '4:3' | '1:1' | '9:16' | '3:4' | '3:2' | '2:3'
-export type VideoResolution = '720p' | '480p'
+export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine' | 'gpt-image-2'
 
 // =============================================
 // Core Entities

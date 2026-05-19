@@ -10,7 +10,6 @@ import {
   PenTool,
   Mic,
   Image,
-  Video,
   Layers
 } from 'lucide-react'
 
@@ -52,7 +51,7 @@ export default function Home() {
       },
       flow: {
         title: 'El flujo que genera ventas',
-        steps: ['Meta Ads', 'Mensaje de cliente', 'Video', 'Ventas']
+        steps: ['Meta Ads', 'Mensaje de cliente', 'Contenido', 'Ventas']
       },
       reinforcement: 'Hacemos que vender por redes sociales sea más fácil',
       pricing: {
@@ -112,7 +111,6 @@ export default function Home() {
           'Crea diferentes perfiles de consumidor',
           'Genera posts de venta directa con IA',
           'Genera posts de contenido orgánico con IA',
-          'Generación de videos con IA'
         ]
       },
       scripts: {
@@ -186,7 +184,7 @@ export default function Home() {
       },
       flow: {
         title: 'The flow that drives sales',
-        steps: ['Meta Ads', 'Client message', 'Video', 'Sales']
+        steps: ['Meta Ads', 'Client message', 'Content', 'Sales']
       },
       reinforcement: 'We make selling on social media easier',
       pricing: {
@@ -246,7 +244,6 @@ export default function Home() {
           'Create different consumer profiles',
           'Generate direct sale posts with AI',
           'Generate organic content posts with AI',
-          'AI video generation'
         ]
       },
       scripts: {
@@ -566,7 +563,7 @@ export default function Home() {
             {[
               { icon: <PenTool className="w-5 h-5" />, text: language === 'es' ? 'Descripciones optimizadas para Ads' : 'Optimized ad descriptions' },
               { icon: <Mic className="w-5 h-5" />, text: language === 'es' ? 'Entrada de voz para guiones' : 'Voice input for scripts' },
-              { icon: <Video className="w-5 h-5" />, text: language === 'es' ? 'Generación de videos con IA' : 'AI video generation' },
+              { icon: <Image className="w-5 h-5" />, text: language === 'es' ? 'Posts orgánicos y de venta directa' : 'Organic and direct-sale posts' },
             ].map((feat, i) => (
               <div key={i} className="flex items-center gap-3 bg-dark-50 border border-dark-100 rounded-xl p-4 hover:border-primary-200 transition-colors">
                 <div className="w-10 h-10 bg-primary-900/30 rounded-xl flex items-center justify-center text-primary-600 flex-shrink-0">

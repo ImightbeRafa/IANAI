@@ -5,8 +5,7 @@ import { checkRateLimit } from './lib/rate-limit.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandVoicePrompt } from './lib/brand-kit.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
-
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -323,7 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${grokApiKey}`
       },
       body: JSON.stringify({
-        model: 'grok-3-fast',
+        model: GROK_TEXT_MODEL,
         messages: grokMessages,
         temperature: 0.7,
         max_tokens: 2048,
@@ -348,7 +347,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'reply',
-      model: 'grok-3-fast',
+      model: GROK_TEXT_MODEL,
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
@@ -370,7 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'reply',
-      model: 'grok-3-fast',
+      model: GROK_TEXT_MODEL,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

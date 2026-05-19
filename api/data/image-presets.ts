@@ -6,6 +6,28 @@
 // =============================================
 export type PostAspectRatio = '9:16' | '3:4'
 
+function buildProductReferenceRoleRule(langLabel: string): string {
+  return `========================================================================
+REGLA #1 - REFERENCIAS VISUALES DEL PRODUCTO / OFERTA (MAXIMA PRIORIDAD)
+========================================================================
+Se adjuntan una o mas imagenes relacionadas con el producto/oferta real del usuario.
+
+NO asumas automaticamente que todas las imagenes son el mismo objeto.
+NO fusiones varias fotos en un producto hibrido.
+
+Antes de disenar, clasifica mentalmente cada referencia:
+- PRODUCTO HEROE: objeto vendible real, empaque, prenda, plato, dispositivo o set. Debe verse fiel a la foto.
+- VARIANTE / SABOR / COLOR: otro item real de la misma linea. Mostrarlo separado o como lineup limpio, no mezclado.
+- RESULTADO / PRUEBA / DETALLE: antes-despues, dientes, piel, textura, close-up, ingrediente, captura o evidencia. Usarlo como inset, panel de prueba, textura sutil o apoyo visual; no convertirlo en parte del empaque.
+- CONTEXTO / ESTILO: escena, fondo, mood, lifestyle o composicion. Usarlo para ambiente y direccion de arte.
+
+El post final debe tener UNA idea visual coherente: un heroe claro y referencias secundarias usadas solo en su rol correcto.
+El idioma de cualquier texto visible sigue siendo ${langLabel}.
+========================================================================
+
+`
+}
+
 export function buildPostPrompt(aspectRatio: PostAspectRatio, language: string = 'es', hasProductImages: boolean = false): string {
   const isVertical = aspectRatio === '9:16'
   const formatLabel = isVertical ? 'vertical (story/reel)' : 'cuadrado (post de feed)'
@@ -28,20 +50,7 @@ REGLA #0 — IDIOMA Y TEXTO (NO NEGOCIABLE)
 
 `
 
-  const productRefRule = hasProductImages
-    ? `═══════════════════════════════════════════════
-REGLA #1 — IMÁGENES DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
-═══════════════════════════════════════════════
-Se adjuntan fotos del PRODUCTO REAL del usuario.
-- El producto en el post DEBE verse EXACTAMENTE como en las fotos de referencia.
-- USA las fotos de referencia como fuente de verdad para la forma, silueta, color, textura, ángulo y detalles reales del producto.
-- NO inventes, NO rediseñes, NO reimagines el producto. Usa la referencia fielmente.
-- Si necesitas mostrar el producto en acción, mantené su apariencia idéntica a la referencia.
-- La forma del producto NO se modifica bajo ninguna circunstancia: no stylize, no cartoon, no 3D fake.
-═══════════════════════════════════════════════
-
-`
-    : ''
+  const productRefRule = hasProductImages ? buildProductReferenceRoleRule(langLabel) : ''
 
   return `${langRule}${productRefRule}ACTÚA COMO: Director de Arte + Diseñador Gráfico Senior + Copywriter de Performance (venta directa). Tu única meta es crear un post que convierta.
 
@@ -140,13 +149,13 @@ TRATAMIENTO DE IMAGEN (70–80% del post) — PRODUCT-LED:
 PROHIBIDO: filtros fuertes, HDR exagerado, texturas baratas, collages.
 
 ${hasProductImages
-    ? `VISUAL (OBLIGATORIO: USAR LAS FOTOS DE PRODUCTO PROPORCIONADAS):
-Se te adjuntan fotos reales del producto. USÁLAS como base visual principal del post.
-- El producto DEBE aparecer en el post con su apariencia REAL (forma, color, textura, ángulo de las fotos de referencia).
-- Podés ubicar el producto en un contexto de uso o lifestyle, pero su forma DEBE ser fiel a la referencia.
-- NO generes un producto inventado. NO cambies su silueta, proporciones ni detalles.
-- Elegí el mejor ángulo/foto de las referencias para la composición.
-- El producto debe ocupar un lugar prominente en la composición (60–80% del área visual).`
+    ? `VISUAL (OBLIGATORIO: USAR LAS REFERENCIAS POR ROL):
+Se te adjuntan referencias reales del producto/oferta. Primero identifica cual imagen muestra el producto heroe vendible y cuales muestran variantes, resultado, prueba, detalle, contexto o estilo.
+- El producto heroe DEBE aparecer con apariencia REAL si existe una referencia clara (forma, color, textura, angulo, proporciones).
+- Si hay variantes/sabores/colores, mostralos como items separados o lineup limpio; nunca los mezcles en un solo producto.
+- Si hay resultado/prueba/detalle (ej. dientes, piel, close-up, ingrediente), usalo como inset, panel secundario, textura sutil o apoyo visual; no lo pegues encima del producto.
+- NO generes un producto inventado. NO cambies silueta, proporciones ni detalles del producto real.
+- Elegi una composicion coherente donde cada referencia cumple una funcion clara.`
     : `VISUAL (OBLIGATORIO: PRODUCTO/SERVICIO EN ACCIÓN, NO EN EXHIBICIÓN):
 Como el guión no trae visuales, vos debés inferir la mejor escena que demuestre la función principal del guión.
 Elegí UNA escena y construí la imagen alrededor:
@@ -184,7 +193,7 @@ COMPOSICIÓN FINAL (RECOMENDADA):
 ENTREGABLE:
 Generá el arte final (UNA imagen) del post, cumpliendo TODO:
 - Headline + 3–5 bullets + CTA en un solo slide
-- ${hasProductImages ? 'Visual basada en las fotos de producto proporcionadas (producto REAL, fiel a la referencia)' : 'Visual en acción inferida inteligentemente del guión'}
+- ${hasProductImages ? 'Visual basada en las referencias proporcionadas, usadas por rol y sin amalgamar imagenes distintas' : 'Visual en acción inferida inteligentemente del guión'}
 - Márgenes generosos respetados estrictamente
 - Dirección de arte premium (Apple/IG/Spotify) con mucho aire y coherencia visual
 - Sin número de slide
@@ -223,19 +232,7 @@ REGLA #0 — IDIOMA Y TEXTO (NO NEGOCIABLE)
 
 `
 
-  const productRefRule = hasProductImages
-    ? `═══════════════════════════════════════════════
-REGLA #1 — IMÁGENES DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
-═══════════════════════════════════════════════
-Se adjuntan fotos del PRODUCTO REAL del usuario.
-- El producto en el post DEBE verse EXACTAMENTE como en las fotos de referencia.
-- USA las fotos de referencia como fuente de verdad para la forma, silueta, color, textura, ángulo y detalles reales del producto.
-- NO inventes, NO rediseñes, NO reimagines el producto. Usa la referencia fielmente.
-- La forma del producto NO se modifica bajo ninguna circunstancia: no stylize, no cartoon, no 3D fake.
-═══════════════════════════════════════════════
-
-`
-    : ''
+  const productRefRule = hasProductImages ? buildProductReferenceRoleRule(langLabel) : ''
 
   const designRules = `REGLAS DE DISEÑO (CALIDAD VISUAL PRO):
 
@@ -293,12 +290,13 @@ BADGE / SELLOS — QUIET LUXURY:
 - Nunca compite con headline ni con CTA.`
 
   const visualRule = hasProductImages
-    ? `VISUAL — PRODUCTO REAL (OBLIGATORIO):
-Se te adjuntan fotos reales del producto. USÁLAS como base visual principal del post.
-- El producto DEBE aparecer con su apariencia REAL (forma, color, textura, ángulo de las fotos de referencia).
-- Podés ubicar el producto en un contexto de uso o lifestyle, pero su forma DEBE ser fiel a la referencia.
-- NO generes un producto inventado. NO cambies su silueta, proporciones ni detalles.
-- El producto debe ocupar un lugar prominente en la composición.`
+    ? `VISUAL - REFERENCIAS REALES (OBLIGATORIO):
+Se te adjuntan referencias reales del producto/oferta. Usalas por rol, no como collage aleatorio.
+- Producto heroe: apariencia real, fiel a la referencia.
+- Variantes: items separados o lineup limpio.
+- Resultado/prueba/detalle: inset, panel secundario, textura sutil o apoyo visual.
+- Contexto/estilo: ambiente y direccion de arte.
+- NO generes un producto inventado. NO mezcles varias referencias en un producto hibrido.`
     : `VISUAL — PRODUCTO/SERVICIO EN ACCIÓN:
 Como el guión no trae visuales, inferí la mejor escena que demuestre la función principal del guión.
 Elegí UNA escena relevante y construí la imagen alrededor del producto/servicio en uso real.
@@ -1611,19 +1609,7 @@ REGLA #0 — IDIOMA Y TEXTO (NO NEGOCIABLE)
 
 `
 
-  const productRefRule = hasProductImages
-    ? `═══════════════════════════════════════════════
-REGLA #1 — IMÁGENES DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
-═══════════════════════════════════════════════
-Se adjuntan fotos del PRODUCTO REAL del usuario.
-- El producto DEBE verse EXACTAMENTE como en las fotos de referencia.
-- USA las fotos de referencia como fuente de verdad para forma, silueta, color, textura.
-- NO inventes, NO rediseñes, NO reimagines el producto.
-- La forma del producto NO se modifica bajo ninguna circunstancia.
-═══════════════════════════════════════════════
-
-`
-    : ''
+  const productRefRule = hasProductImages ? buildProductReferenceRoleRule(langLabel) : ''
 
   const nicheStrategy = buildNicheStrategy(niche)
 
@@ -1709,12 +1695,13 @@ Tipografía: máximo 2 familias sans-serif premium (estilo SF/Inter/Helvetica).
 El anuncio debe detener el scroll INMEDIATAMENTE y comunicar valor en 3 segundos.
 
 ${hasProductImages
-    ? `VISUAL (OBLIGATORIO: USAR LAS FOTOS DE PRODUCTO PROPORCIONADAS):
-Se adjuntan fotos reales del producto. USÁLAS como base visual principal.
-- El producto DEBE aparecer con su apariencia REAL (forma, color, textura de las fotos de referencia).
-- Podés ubicar el producto en un contexto atractivo, pero su forma DEBE ser fiel a la referencia.
-- NO generes un producto inventado. NO cambies su silueta, proporciones ni detalles.
-- El producto debe ser el héroe visual del anuncio.`
+    ? `VISUAL (OBLIGATORIO: USAR LAS REFERENCIAS POR ROL):
+Se adjuntan referencias reales del producto/oferta. Clasifica cada una antes de componer.
+- Producto heroe: apariencia real y fiel a la referencia.
+- Variantes: separadas o en lineup limpio.
+- Resultado/prueba/detalle: inset, panel secundario, textura sutil o apoyo visual.
+- Contexto/estilo: ambiente y direccion de arte.
+- NO generes un producto inventado. NO mezcles varias referencias en un producto hibrido.`
     : `VISUAL (INFERIR DEL GUIÓN):
 Como no hay fotos del producto, inferí la mejor escena visual que represente la propuesta de valor del guión.
 - La escena debe comunicar el beneficio principal inmediatamente.

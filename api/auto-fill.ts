@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 const MAX_CONTENT_LENGTH = 15_000
 
 type FormType = 'business' | 'service' | 'indumentaria' | 'restaurant' | 'product' | 'real_estate'
@@ -230,7 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${grokApiKey}`,
       },
       body: JSON.stringify({
-        model: 'grok-3-mini-fast',
+        model: GROK_TEXT_MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
@@ -248,7 +248,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: 'grok-3-mini-fast',
+        model: GROK_TEXT_MODEL,
         success: false,
         errorMessage: `Grok ${response.status}: ${errorText.slice(0, 200)}`,
         metadata: { formType },
@@ -277,7 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: 'grok-3-mini-fast',
+        model: GROK_TEXT_MODEL,
         success: false,
         errorMessage: 'Empty AI response',
         metadata: { formType },
@@ -299,7 +299,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: 'grok-3-mini-fast',
+        model: GROK_TEXT_MODEL,
         success: false,
         errorMessage: 'No JSON in response',
         metadata: { formType, responsePreview: aiContent.slice(0, 200) },
@@ -322,7 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: 'grok-3-mini-fast',
+        model: GROK_TEXT_MODEL,
         success: false,
         errorMessage: 'JSON parse failed',
         metadata: { formType },
@@ -341,7 +341,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'paste_organize',
-      model: 'grok-3-mini-fast',
+      model: GROK_TEXT_MODEL,
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + userMessage),
       outputTokens: usage.completion_tokens || estimateTokens(aiContent),
       success: true,
@@ -359,7 +359,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'paste_organize',
-      model: 'grok-3-mini-fast',
+      model: GROK_TEXT_MODEL,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error',
     })

@@ -13,7 +13,6 @@ import {
   Calendar,
   RefreshCw,
   AlertCircle,
-  Video,
   Sparkles,
   FileUp,
   Link2,
@@ -59,10 +58,29 @@ interface RecentLog {
   user_email: string
   feature: string
   model: string
+  generation_id?: string | null
   total_tokens: number
   estimated_cost_usd: number
   success: boolean
   created_at: string
+}
+
+interface ImageModelPerformance {
+  model: string
+  attempts: number
+  successes: number
+  failures: number
+  total_tokens: number
+  total_cost_usd: number
+  avg_cost_success_usd: number
+  posts_generated: number
+  upvotes: number
+  downvotes: number
+  rated_count: number
+  upvote_rate: number | null
+  cost_per_upvote_usd: number | null
+  uncorrelated_logs: number
+  uncorrelated_posts: number
 }
 
 interface UserUsageStats {
@@ -73,7 +91,6 @@ interface UserUsageStats {
   script_calls: number
   description_calls: number
   image_calls: number
-  video_calls: number
   voice_calls: number
   other_calls: number
   last_active: string
@@ -153,53 +170,31 @@ const PLAN_COLORS: Record<string, string> = {
 // Model display names and colors
 const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'grok': { name: 'Grok (xAI)', color: 'bg-purple-500' },
-  'grok-3-fast': { name: 'Grok 3 Fast', color: 'bg-purple-500' },
-  'grok-3-mini': { name: 'Grok 3 Mini', color: 'bg-purple-400' },
-  'grok-3-mini-fast': { name: 'Grok 3 Mini Fast', color: 'bg-purple-300' },
-  'grok-4-fast-non-reasoning': { name: 'Grok 4 Fast', color: 'bg-purple-600' },
-  'grok-2-vision-latest': { name: 'Grok 2 Vision', color: 'bg-purple-700' },
+  'grok-4.3': { name: 'Grok 4.3', color: 'bg-violet-500' },
   'whisper-1': { name: 'Whisper (OpenAI)', color: 'bg-green-500' },
   'gemini': { name: 'Gemini 3 Pro', color: 'bg-blue-500' },
   'nano-banana': { name: 'Nano Banana', color: 'bg-yellow-500' },
   'nano-banana-pro': { name: 'Nano Banana Pro', color: 'bg-orange-500' },
+  'gpt-image-2': { name: 'GPT Image 2', color: 'bg-emerald-500' },
   'grok-imagine': { name: 'Grok Imagine', color: 'bg-pink-500' },
-  'grok-imagine-video': { name: 'Grok Video', color: 'bg-red-500' },
-  'grok-imagine-video-480p': { name: 'Grok Video 480p', color: 'bg-red-400' },
-  'grok-imagine-video-720p': { name: 'Grok Video 720p', color: 'bg-red-500' },
-  'fal-ai/kling-video/v3/pro/text-to-video': { name: 'Kling 3.0 Text', color: 'bg-cyan-500' },
-  'fal-ai/kling-video/o3/standard/image-to-video': { name: 'Kling 3.0 Image', color: 'bg-cyan-600' },
-  'fal-ai/kling-video/v2.6/pro/text-to-video': { name: 'Kling 2.6 Text', color: 'bg-cyan-400' },
-  'fal-ai/kling-video/v2.6/pro/image-to-video': { name: 'Kling 2.6 Image', color: 'bg-cyan-400' },
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
   'gemini-2.5-flash': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
-  'grok-4-1-fast-reasoning': { name: 'Grok 4.1 Fast (Memory)', color: 'bg-violet-500' },
 }
 
-// Cost per 1M tokens or per image/video (for reference display)
+// Cost per 1M tokens or per image (for reference display)
 const MODEL_PRICING: Record<string, string> = {
   'grok': '$3/1M in, $15/1M out',
-  'grok-3-fast': '$3/1M in, $15/1M out',
-  'grok-3-mini': '$0.30/1M in, $0.50/1M out',
-  'grok-3-mini-fast': '$0.30/1M in, $0.50/1M out',
-  'grok-4-fast-non-reasoning': '$0.20/1M in, $0.50/1M out',
-  'grok-2-vision-latest': '$2/1M in, $10/1M out',
+  'grok-4.3': '$2/1M in, $10/1M out',
   'whisper-1': '~$0.006/min',
   'gemini': '$0.15/1M in, $0.60/1M out',
   'nano-banana': '~$0.02/image',
-  'nano-banana-pro': '~$0.05/image',
+  'nano-banana-pro': '$2/1M in, $120/1M image out',
+  'gpt-image-2': '$5/1M text in, $8/1M image in, $30/1M image out',
   'grok-imagine': '~$0.07/image',
-  'grok-imagine-video': '$0.07/sec',
-  'grok-imagine-video-480p': '$0.05/sec',
-  'grok-imagine-video-720p': '$0.07/sec',
-  'fal-ai/kling-video/v3/pro/text-to-video': '$0.224/sec',
-  'fal-ai/kling-video/o3/standard/image-to-video': '$0.224/sec',
-  'fal-ai/kling-video/v2.6/pro/text-to-video': '$0.07/sec',
-  'fal-ai/kling-video/v2.6/pro/image-to-video': '$0.07/sec',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
   'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
-  'grok-4-1-fast-reasoning': '$2/1M in, $10/1M out',
 }
 
 export default function AdminDashboard() {
@@ -212,6 +207,7 @@ export default function AdminDashboard() {
   const [usageSummary, setUsageSummary] = useState<UsageSummary[]>([])
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
   const [recentLogs, setRecentLogs] = useState<RecentLog[]>([])
+  const [imageModelPerformance, setImageModelPerformance] = useState<ImageModelPerformance[]>([])
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([])
   const [referralSignups, setReferralSignups] = useState<ReferralSignup[]>([])
@@ -256,9 +252,6 @@ export default function AdminDashboard() {
       image: 'Imágenes',
       edit: 'Ediciones de Imagen',
       enhance: 'Mejoras de Imagen',
-      video: 'Videos (Grok)',
-      kling_video: 'Videos (Kling)',
-      ad_prompt_build: 'Prompt de Anuncio (A+B+C)',
       prompt_condense: 'Condensar Prompt',
       paste_organize: 'Auto-llenado',
       prompt_enhance: 'Mejora de Prompts',
@@ -309,9 +302,6 @@ export default function AdminDashboard() {
       image: 'Images',
       edit: 'Image Edits',
       enhance: 'Image Enhance',
-      video: 'Videos (Grok)',
-      kling_video: 'Videos (Kling)',
-      ad_prompt_build: 'Ad Prompt Build (A+B+C)',
       prompt_condense: 'Prompt Condense',
       paste_organize: 'Auto-fill',
       prompt_enhance: 'Prompt Enhancement',
@@ -467,6 +457,17 @@ export default function AdminDashboard() {
             setAllPayments((billingData.payments || []) as AdminPayment[])
           } else {
             console.warn('Admin billing API failed:', billingResp.status)
+          }
+
+          const imagePerformanceApiUrl = import.meta.env.PROD ? '/api/admin-image-performance' : 'http://localhost:3000/api/admin-image-performance'
+          const imagePerfResp = await fetch(`${imagePerformanceApiUrl}?start_date=${encodeURIComponent(startDate.toISOString())}&end_date=${encodeURIComponent(new Date().toISOString())}`, {
+            headers: { 'Authorization': `Bearer ${adminSession.access_token}` }
+          })
+          if (imagePerfResp.ok) {
+            const imagePerfData = await imagePerfResp.json()
+            setImageModelPerformance((imagePerfData.performance || []) as ImageModelPerformance[])
+          } else {
+            console.warn('Admin image performance API failed:', imagePerfResp.status)
           }
         }
       } catch { /* billing non-critical */ }
@@ -1295,6 +1296,70 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+            {/* Image Model Performance */}
+            <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100 mb-8">
+              <div className="p-4 sm:p-6 border-b border-dark-100">
+                <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-primary-500" />
+                  {language === 'es' ? 'Rendimiento de Modelos de Imagen' : 'Image Model Performance'}
+                </h2>
+                <p className="text-xs text-dark-400 mt-1">
+                  {language === 'es'
+                    ? 'Costos y votos se correlacionan por generation_id cuando existe; filas antiguas sin ID aparecen como no correlacionadas.'
+                    : 'Costs and votes are correlated by generation_id when available; older rows without IDs are shown as uncorrelated.'}
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-dark-50">
+                    <tr>
+                      <th className="px-3 sm:px-5 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Intentos' : 'Attempts'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.success}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.failed}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Posts' : 'Posts'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Costo/ok' : 'Cost/ok'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Arriba' : 'Up'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Abajo' : 'Down'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? '% arriba' : 'Up %'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? '$/arriba' : '$/up'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Sin ID' : 'No ID'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-dark-100">
+                    {imageModelPerformance.length === 0 ? (
+                      <tr>
+                        <td colSpan={12} className="px-5 py-6 text-sm text-dark-400 text-center">
+                          {language === 'es' ? 'Sin datos de imagen en este rango.' : 'No image data in this range.'}
+                        </td>
+                      </tr>
+                    ) : imageModelPerformance.map(row => (
+                      <tr key={row.model} className="hover:bg-dark-50">
+                        <td className="px-3 sm:px-5 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${MODEL_INFO[row.model]?.color || 'bg-gray-400'}`} />
+                            <span className="font-medium text-dark-900 text-sm">{MODEL_INFO[row.model]?.name || row.model}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.attempts.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.successes.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.failures.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.posts_generated.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">${row.total_cost_usd.toFixed(4)}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">${row.avg_cost_success_usd.toFixed(4)}</td>
+                        <td className="px-3 py-3 text-sm text-right text-emerald-600">{row.upvotes}</td>
+                        <td className="px-3 py-3 text-sm text-right text-red-500">{row.downvotes}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.upvote_rate === null ? '-' : `${(row.upvote_rate * 100).toFixed(1)}%`}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.cost_per_upvote_usd === null ? '-' : `$${row.cost_per_upvote_usd.toFixed(4)}`}</td>
+                        <td className="px-3 py-3 text-xs text-right text-dark-500">{row.uncorrelated_logs + row.uncorrelated_posts}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Usage by Feature */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
               <div className="bg-dark-100 rounded-xl shadow-sm border border-dark-100">
@@ -1313,9 +1378,6 @@ export default function AdminDashboard() {
                         {feature === 'image' && <ImageIcon className="w-5 h-5 text-green-500" />}
                         {feature === 'edit' && <Pencil className="w-5 h-5 text-emerald-500" />}
                         {feature === 'enhance' && <Wand2 className="w-5 h-5 text-pink-500" />}
-                        {feature === 'video' && <Video className="w-5 h-5 text-red-500" />}
-                        {feature === 'kling_video' && <Video className="w-5 h-5 text-cyan-500" />}
-                        {feature === 'ad_prompt_build' && <Sparkles className="w-5 h-5 text-violet-500" />}
                         {feature === 'prompt_condense' && <Cpu className="w-5 h-5 text-indigo-500" />}
                         {feature === 'paste_organize' && <FileText className="w-5 h-5 text-purple-500" />}
                         {feature === 'prompt_enhance' && <Sparkles className="w-5 h-5 text-amber-500" />}
@@ -1405,7 +1467,6 @@ export default function AdminDashboard() {
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Guiones' : 'Scripts'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Desc.' : 'Desc.'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Imágenes' : 'Images'}</th>
-                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Videos' : 'Videos'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Voz' : 'Voice'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Otro' : 'Other'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.calls}</th>
@@ -1422,7 +1483,6 @@ export default function AdminDashboard() {
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.script_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.description_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.image_calls || 0}</td>
-                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.video_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.voice_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.other_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">{u.total_calls}</td>

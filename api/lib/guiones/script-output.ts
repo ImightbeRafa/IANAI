@@ -1,5 +1,6 @@
 import type { GeneratedScript, Language, ScriptBrief, ScriptContextProfile } from './types.js'
 import { safeJsonParse, typeLabel } from './utils.js'
+import { GROK_API_URL, GROK_TEXT_MODEL } from '../grok-models.js'
 
 interface DraftScriptsInput {
   apiKey: string
@@ -11,14 +12,14 @@ interface DraftScriptsInput {
 }
 
 async function callDraft(apiKey: string, messages: Array<{ role: string; content: string }>): Promise<string> {
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
+  const response = await fetch(GROK_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'grok-3-fast',
+      model: GROK_TEXT_MODEL,
       messages,
       temperature: 0.8,
       max_tokens: 5000,
@@ -114,4 +115,3 @@ export function renderScriptsAsText(scripts: GeneratedScript[], language: Langua
 [${ctaLabel}]: ${script.spokenScript.ctaOrClose}`
   }).join('\n\n')
 }
-

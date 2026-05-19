@@ -25,8 +25,8 @@ import {
   type CarouselSlidePlan,
 } from './data/organic-post-prompts.js'
 import type { CTAStrength } from './data/organic-script-prompts.js'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
 const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const GEMINI_CAROUSEL_SLIDE_TIMEOUT_MS = 120_000
 
@@ -61,9 +61,13 @@ interface CarouselRequestBody {
   language: 'en' | 'es'
   brandKitId?: string
   ctaStrength?: CTAStrength
+  designDirection?: string
+  slideDetails?: string
+  previewFirstSlideOnly?: boolean
   productContext?: CarouselProductContext
   productReferenceImages?: string[]
   contextReferenceImages?: string[]
+  carouselReferenceImages?: string[]
   hasProductImages?: boolean // currently unused — product refs can be added later
 }
 
@@ -148,8 +152,10 @@ async function planCarouselSlides(opts: {
   productContext?: CarouselProductContext
   language: 'en' | 'es'
   brandName?: string | null
+  designDirection?: string
+  slideDetails?: string
 }): Promise<CarouselSlidePlan[]> {
-  const { grokApiKey, subtype, slideCount, scriptContent, productContext, language, brandName } = opts
+  const { grokApiKey, subtype, slideCount, scriptContent, productContext, language, brandName, designDirection, slideDetails } = opts
   const isEs = language === 'es'
   const productFacts = productContextToText(productContext, language)
 
@@ -214,6 +220,10 @@ Slide count: ${slideCount}\n
 \nUSER'S SOURCE IDEA / SCRIPT:\n"""\n${scriptContent.slice(0, 3000)}\n"""\n
 \nReturn ONLY the JSON array with ${slideCount} slides. Nothing else.`
 
+  const directionBlock = isEs
+    ? `\n\nDIRECCION DE DISENO DEL USUARIO:\n${designDirection || '(sin direccion adicional)'}\n\nDETALLE SLIDE POR SLIDE DEL USUARIO:\n${slideDetails || '(sin detalle slide por slide)'}\n\nSi el usuario dio detalle slide por slide, respetalo por encima de la guia estructural.`
+    : `\n\nUSER DESIGN DIRECTION:\n${designDirection || '(no additional direction)'}\n\nUSER SLIDE-BY-SLIDE DETAIL:\n${slideDetails || '(no slide-by-slide detail)'}\n\nIf the user gave slide-by-slide detail, follow it over the structural guide.`
+
   const response = await fetch(GROK_API_URL, {
     method: 'POST',
     headers: {
@@ -221,10 +231,10 @@ Slide count: ${slideCount}\n
       'Authorization': `Bearer ${grokApiKey}`,
     },
     body: JSON.stringify({
-      model: 'grok-4-latest',
+      model: GROK_TEXT_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
+        { role: 'user', content: userPrompt + directionBlock },
       ],
       temperature: 0.7,
       max_tokens: 2000,
@@ -284,16 +294,18 @@ async function renderCarouselSlide(opts: {
   brandVoice: string | null | undefined
   ctaStrength: CTAStrength
   scriptContext: string
+  designDirection?: string
   productContext?: CarouselProductContext
   productReferenceImages: InlineImage[]
   contextReferenceImages: InlineImage[]
+  carouselReferenceImages: InlineImage[]
   referenceSlide1?: { mimeType: string; data: string } | null
   prefixes: { color: string; brandVisual: string; brandLogo: string; logoInline: { mimeType: string; data: string } | null }
 }): Promise<{ imageUrl: string; usage: { input: number; output: number; thinking: number } }> {
   const {
     geminiApiKey, aspectRatio, subtype, slide, totalSlides, language,
-    hasProductImages, brandVoice, ctaStrength, scriptContext, productContext,
-    productReferenceImages, contextReferenceImages, referenceSlide1, prefixes,
+    hasProductImages, brandVoice, ctaStrength, scriptContext, designDirection, productContext,
+    productReferenceImages, contextReferenceImages, carouselReferenceImages, referenceSlide1, prefixes,
   } = opts
 
   const ai = new GoogleGenAI({ apiKey: geminiApiKey })
@@ -314,7 +326,12 @@ async function renderCarouselSlide(opts: {
     productContext,
   })
 
-  const fullPromptText = prefixes.color + prefixes.brandVisual + prefixes.brandLogo + basePrompt
+  const designDirectionPrefix = designDirection
+    ? (language === 'es'
+      ? `DIRECCION DE DISENO DEL USUARIO (OBLIGATORIA): ${designDirection}\n\n`
+      : `USER DESIGN DIRECTION (REQUIRED): ${designDirection}\n\n`)
+    : ''
+  const fullPromptText = prefixes.color + prefixes.brandVisual + prefixes.brandLogo + designDirectionPrefix + basePrompt
 
   type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
   const parts: PromptPart[] = [{ text: fullPromptText }]
@@ -347,6 +364,19 @@ async function renderCarouselSlide(opts: {
       parts.push({ text: language === 'es'
         ? `CONTEXTO ${idx + 1} de ${count}`
         : `CONTEXT ${idx + 1} of ${count}` })
+      parts.push({ inlineData: img })
+    })
+  }
+
+  if (carouselReferenceImages.length > 0) {
+    const count = carouselReferenceImages.length
+    parts.push({ text: language === 'es'
+      ? `IMAGENES DE REFERENCIA ESPECIFICAS PARA ESTE CARRUSEL (${count}): el usuario las subio dentro del modal del carrusel. Pueden ser referencias de estilo, layouts, fotos que quiere usar, assets visuales, ejemplos de posts o mood. Usalas segun la DIRECCION DE DISENO y el DETALLE SLIDE POR SLIDE. Si el usuario pide que una imagen aparezca en un slide, incorporala. Si son ejemplos de estilo, copia el sistema visual (composicion, paleta, jerarquia, energia) sin copiar texto accidental. No reemplaces la verdad del producto si tambien hay referencias de producto reales.`
+      : `CAROUSEL-SPECIFIC REFERENCE IMAGES (${count}): the user uploaded these inside the carousel modal. They may be style references, layouts, photos to use, visual assets, post examples, or mood. Use them according to the DESIGN DIRECTION and SLIDE-BY-SLIDE DETAIL. If the user asks for an image to appear on a slide, incorporate it. If they are style examples, copy the visual system (composition, palette, hierarchy, energy) without accidentally copying text. Do not override real product truth if product references are also provided.` })
+    carouselReferenceImages.forEach((img, idx) => {
+      parts.push({ text: language === 'es'
+        ? `REFERENCIA DEL CARRUSEL ${idx + 1} de ${count}`
+        : `CAROUSEL REFERENCE ${idx + 1} of ${count}` })
       parts.push({ inlineData: img })
     })
   }
@@ -433,21 +463,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const language: 'en' | 'es' = body.language === 'en' ? 'en' : 'es'
     const ctaStrength: CTAStrength = VALID_CTA.includes(body.ctaStrength as CTAStrength)
       ? (body.ctaStrength as CTAStrength) : 'soft'
+    const designDirection = sanitizeText(body.designDirection, 1500)
+    const slideDetails = sanitizeText(body.slideDetails, 3000)
+    const previewFirstSlideOnly = body.previewFirstSlideOnly === true
     const productContext = sanitizeProductContext(body.productContext)
     const productReferenceImages = parseInlineImages(body.productReferenceImages, 4)
     const contextReferenceImages = parseInlineImages(body.contextReferenceImages, 4)
+    const carouselReferenceImages = parseInlineImages(body.carouselReferenceImages, 8)
 
     // Upfront usage check: carousel requires slideCount generations.
     const usage = await checkUsageLimit(user.id, 'image')
     if (!usage.allowed) {
       return res.status(429).json({ error: 'Image limit reached. Upgrade for more.', limit: usage.limit, remaining: usage.remaining })
     }
-    if (usage.remaining !== -1 && usage.remaining < slideCount) {
+    const requiredCredits = previewFirstSlideOnly ? 1 : slideCount
+    if (usage.remaining !== -1 && usage.remaining < requiredCredits) {
       return res.status(429).json({
-        error: `A ${slideCount}-slide carousel requires ${slideCount} image credits, but you only have ${usage.remaining} remaining.`,
+        error: `This carousel requires ${requiredCredits} image credits, but you only have ${usage.remaining} remaining.`,
         limit: usage.limit,
         remaining: usage.remaining,
-        required: slideCount,
+        required: requiredCredits,
       })
     }
 
@@ -470,6 +505,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productContext,
       language,
       brandName: brandKit?.name,
+      designDirection,
+      slideDetails,
     })
 
     // Build shared prefixes (color palette override, brand visual prompt, brand logo prompt).
@@ -492,9 +529,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       brandVoice: brandKit?.brand_voice ?? null,
       ctaStrength,
       scriptContext: scriptContent,
+      designDirection,
       productContext,
       productReferenceImages,
       contextReferenceImages,
+      carouselReferenceImages,
       prefixes: sharedPrefixes,
     } as const
 
@@ -506,7 +545,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const slide1Reference = slide1DataMatch ? { mimeType: slide1DataMatch[1], data: slide1DataMatch[2] } : null
 
     // 3. RENDER SLIDES 2..N IN PARALLEL
-    const restPromises = plan.slice(1).map(slide =>
+    const restPromises = previewFirstSlideOnly ? [] : plan.slice(1).map(slide =>
       renderCarouselSlide({ ...renderOptsBase, slide, referenceSlide1: slide1Reference })
         .then(r => ({ slide, result: r, error: null as null | string }))
         .catch(err => ({ slide, result: null as null | { imageUrl: string; usage: { input: number; output: number; thinking: number } }, error: (err as Error).message }))
@@ -560,7 +599,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         brandKitName: brandKit?.name,
         productRefCount: productReferenceImages.length,
         contextRefCount: contextReferenceImages.length,
+        carouselRefCount: carouselReferenceImages.length,
         hasProductContext: !!productContext,
+        hasDesignDirection: !!designDirection,
+        hasSlideDetails: !!slideDetails,
+        previewFirstSlideOnly,
+        provider: 'google',
+        providerModel: GEMINI_IMAGE_MODEL,
+        imageSize: '2K',
       },
     })
 
@@ -576,7 +622,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ctaStrength,
       plan,
       slides,
-      usage: { charged: succeeded, total: slideCount },
+      previewFirstSlideOnly,
+      usage: { charged: succeeded, total: requiredCredits },
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Carousel generation failed'

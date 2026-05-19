@@ -1,5 +1,6 @@
 import type { AngleCandidate, Language, ScriptContextProfile, ScriptSettings } from './types.js'
 import { getRequestedScriptTypes, getTotalRequested, safeJsonParse } from './utils.js'
+import { GROK_API_URL, GROK_TEXT_MODEL } from '../grok-models.js'
 
 interface GenerateAngleInventoryInput {
   apiKey: string
@@ -14,7 +15,7 @@ interface GenerateAngleInventoryInput {
 }
 
 async function callGrokJson(apiKey: string, model: string, messages: Array<{ role: string; content: string }>, temperature: number, maxTokens: number): Promise<string> {
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
+  const response = await fetch(GROK_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -99,16 +100,13 @@ JSON schema:
 
   let text = ''
   try {
-    text = await callGrokJson(input.apiKey, 'grok-4-1-fast-reasoning', [
+    text = await callGrokJson(input.apiKey, GROK_TEXT_MODEL, [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ], 0.7, 4000)
   } catch (error) {
-    console.warn('Planning model failed, falling back to grok-3-fast:', error)
-    text = await callGrokJson(input.apiKey, 'grok-3-fast', [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ], 0.75, 4000)
+    console.warn('Planning model failed:', error)
+    throw error
   }
 
   const parsed = safeJsonParse<{ candidates?: Partial<AngleCandidate>[] }>(text)
@@ -120,4 +118,3 @@ JSON schema:
     .slice(0, Math.max(needed, requested.length))
     .map((candidate, index) => normalizeCandidate(candidate, index, requested[index % requested.length] || 'venta_directa'))
 }
-

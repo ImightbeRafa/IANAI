@@ -396,6 +396,31 @@ export async function deleteProduct(productId: string): Promise<void> {
   if (error) throw error
 }
 
+export const QUICK_POST_PRODUCT_NAME = 'Quick Use Image Studio'
+
+export async function getOrCreateQuickPostProduct(userId: string): Promise<Product> {
+  const { data: existing, error: lookupError } = await supabase
+    .from('products')
+    .select('*')
+    .eq('owner_id', userId)
+    .eq('name', QUICK_POST_PRODUCT_NAME)
+    .is('business_id', null)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (lookupError) throw lookupError
+  if (existing) return existing
+
+  return createProduct({
+    name: QUICK_POST_PRODUCT_NAME,
+    type: 'product',
+    product_description: 'General quick-use image generation workspace for product photos, organic posts, carousels, and free prompt image generation.',
+    target_audience: 'General social media content',
+    product_category: 'general'
+  }, userId)
+}
+
 // =============================================
 // CHAT SESSION FUNCTIONS
 // =============================================
@@ -652,6 +677,7 @@ export interface Post {
   height: number
   output_format: string
   model?: string
+  generation_id?: string | null
   error_message?: string
   rating?: number | null
   // Carousel (organic) grouping — NULL for standalone posts.
@@ -718,23 +744,38 @@ export async function createPost(
     height?: number
     output_format?: string
     model?: string
+    generation_id?: string
   }
 ): Promise<Post> {
-  const { data: post, error } = await supabase
+  const insertPayload = {
+    product_id: productId,
+    created_by: userId,
+    prompt: data.prompt,
+    input_images: data.input_images || [],
+    width: data.width || 1080,
+    height: data.height || 1080,
+    output_format: data.output_format || 'jpeg',
+    model: data.model || 'nano-banana-pro',
+    generation_id: data.generation_id || null,
+    status: 'generating'
+  }
+
+  let { data: post, error } = await supabase
     .from('posts')
-    .insert({
-      product_id: productId,
-      created_by: userId,
-      prompt: data.prompt,
-      input_images: data.input_images || [],
-      width: data.width || 1080,
-      height: data.height || 1080,
-      output_format: data.output_format || 'jpeg',
-      model: data.model || 'nano-banana-pro',
-      status: 'generating'
-    })
+    .insert(insertPayload)
     .select()
     .single()
+
+  if (error && /generation_id/i.test(error.message || '')) {
+    const { generation_id: _generationId, ...fallbackPayload } = insertPayload
+    const retry = await supabase
+      .from('posts')
+      .insert(fallbackPayload)
+      .select()
+      .single()
+    post = retry.data
+    error = retry.error
+  }
 
   if (error) throw error
   return post

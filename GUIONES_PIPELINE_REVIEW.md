@@ -96,7 +96,7 @@ Backend flow:
    - context documents
    - structured context
    - legacy context fallback
-6. Backend sends the full prompt to `grok-3-fast` with `temperature: 0.8` and `max_tokens: 4096`.
+6. Backend sends the full prompt to `grok-4.3` with `temperature: 0.8` and `max_tokens: 4096`.
 7. Response is stored as an assistant message with the generated system prompt saved for debug.
 
 Important files:
@@ -973,7 +973,7 @@ interface GenerateScriptsResponse {
 - Service prompt conflicts with settings by hard-coding 5 scripts.
 - Restaurant prompt may conflict by forcing final lunch script.
 - Product-type prompts are whole masters, not composable lenses.
-- `grok-3-fast` with `temperature: 0.8` is used for all script generation. There is no model/temperature adjustment by task.
+- `grok-4.3` with `temperature: 0.8` is used for all script generation. There is no model/temperature adjustment by task.
 
 ### `src/services/grokApi.ts`
 
@@ -1064,7 +1064,7 @@ Better implementation: generate structured briefs in code/model, validate them, 
 3. Should the system store generated brief metadata in the `scripts` table?
 4. Should user prompt input be classified before being appended?
 5. Should templates become typed by product type/script type/hook mechanism?
-6. Should `grok-3-fast` remain the default drafting model, or should planning/evaluation use a stronger reasoning model?
+6. Should `grok-4.3` remain the default drafting model, or should planning/evaluation use a different reasoning model?
 7. Should we add a hard server-side validator for exact script counts and required sections?
 8. Should AI memory be disabled by default for first-pass ideation and only applied to style after angle selection?
 

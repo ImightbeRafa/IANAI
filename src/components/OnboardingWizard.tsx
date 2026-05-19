@@ -83,13 +83,13 @@ function getStepContent(step: OnboardingStep, language: 'en' | 'es'): StepConten
     },
     descriptions: {
       es: {
-        title: 'Descripciones de Video',
-        description: 'Genera descripciones automáticas para tus videos de Instagram, TikTok y YouTube Shorts a partir de tus guiones.',
+        title: 'Descripciones',
+        description: 'Genera descripciones automáticas para tus anuncios y posts de redes sociales a partir de tus guiones.',
         subTip: 'Incluye hashtags relevantes y múltiples variaciones de tono.',
       },
       en: {
-        title: 'Video Descriptions',
-        description: 'Auto-generate descriptions for your Instagram, TikTok, and YouTube Shorts videos from your scripts.',
+        title: 'Descriptions',
+        description: 'Auto-generate descriptions for social media ads and posts from your scripts.',
         subTip: 'Includes relevant hashtags and multiple tone variations.',
       },
     },

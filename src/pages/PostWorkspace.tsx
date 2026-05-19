@@ -3,13 +3,14 @@ import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost, deletePost } from '../services/database'
-import type { ProductImage } from '../services/database'
-import type { Product, Script, ImageModel, OrganicSingleSubtype, CTAStrength } from '../types'
-import OrganicCarouselModal from '../components/OrganicCarouselModal'
+import type { ProductImage, CarouselSlideInsert } from '../services/database'
+import { createCarouselPosts } from '../services/database'
+import type { Product, Script, ImageModel, OrganicSingleSubtype, OrganicCarouselSubtype, CTAStrength } from '../types'
 import CarouselGroupCard, { type CarouselSlide } from '../components/CarouselGroupCard'
 import Layout from '../components/Layout'
 import { uploadPostImageOriginal, uploadProductImage, urlToBase64, compressBase64ForApi } from '../utils/imageCompression'
 import { fetchJson } from '../utils/apiFetch'
+import { generateCarousel, type CarouselAspectRatio } from '../services/carouselApi'
 import { 
   ArrowLeft,
   ImageIcon,
@@ -30,7 +31,13 @@ import {
   Palette,
   ThumbsUp,
   ThumbsDown,
-  Camera
+  Camera,
+  ListChecks,
+  ListOrdered,
+  ArrowRightLeft,
+  Scale,
+  Minus,
+  AlertTriangle
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import GeneratingPlaceholder from '../components/GeneratingPlaceholder'
@@ -45,6 +52,36 @@ import CreateCustomPostType from '../components/CreateCustomPostType'
 import BrandKitSelector from '../components/BrandKitSelector'
 
 type PostAspectRatio = '9:16' | '3:4' | '1:1'
+type PostTextDensity = 'hard' | 'medium' | 'standard'
+
+type CarouselSubtypeOption = {
+  id: OrganicCarouselSubtype
+  es: string
+  en: string
+  descEs: string
+  descEn: string
+  Icon: typeof ListChecks
+}
+
+const CAROUSEL_SUBTYPES: CarouselSubtypeOption[] = [
+  { id: 'educational-list', es: 'Lista Educativa', en: 'Educational List', descEs: '"7 cosas que no sabias sobre..."', descEn: '"7 things you did not know about..."', Icon: ListChecks },
+  { id: 'how-to-steps', es: 'How-To / Pasos', en: 'How-To / Steps', descEs: 'Pasos numerados accionables', descEn: 'Numbered actionable steps', Icon: ListOrdered },
+  { id: 'before-after', es: 'Antes / Despues', en: 'Before / After', descEs: 'Narrativa de transformacion', descEn: 'Transformation narrative', Icon: ArrowRightLeft },
+  { id: 'myth-vs-fact', es: 'Mito vs Realidad', en: 'Myth vs Fact', descEs: 'Desarma creencias comunes', descEn: 'Debunk common beliefs', Icon: Scale },
+]
+
+const CAROUSEL_ASPECT_RATIOS: { id: CarouselAspectRatio; label: string }[] = [
+  { id: '1:1', label: '1:1' },
+  { id: '4:5', label: '4:5' },
+  { id: '9:16', label: '9:16' },
+]
+
+const CTA_STRENGTH_OPTIONS: { id: CTAStrength; es: string; en: string }[] = [
+  { id: 'none', es: 'Ninguno', en: 'None' },
+  { id: 'soft', es: 'Suave', en: 'Soft' },
+  { id: 'brand_mention', es: 'Marca', en: 'Brand' },
+  { id: 'sales', es: 'Ventas', en: 'Sales' },
+]
 
 interface GeneratedPost {
   id: string
@@ -52,6 +89,7 @@ interface GeneratedPost {
   prompt: string
   createdAt: Date
   model?: string
+  generationId?: string | null
   saved?: boolean
   // Carousel grouping (organic carousels only; undefined for standalone posts)
   carouselGroupId?: string | null
@@ -68,6 +106,8 @@ type ImageApiResponse = {
   status?: string
   result?: { sample?: string }
   model?: string
+  generationId?: string
+  providerModel?: string
   textWarning?: boolean
   enhanced?: boolean
   edited?: boolean
@@ -118,7 +158,7 @@ const detectImageAspectRatio = (imageUrl: string): Promise<PostAspectRatio> =>
 export default function PostWorkspace() {
   const { productId } = useParams<{ productId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const { language } = useLanguage()
 
   const [product, setProduct] = useState<Product | null>(null)
@@ -131,7 +171,7 @@ export default function PostWorkspace() {
   const [generating, setGenerating] = useState(false)
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
-  const imageModel: ImageModel = 'nano-banana-pro'
+  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const [postStyle, setPostStyle] = useState<string>('venta-directa')
   const [showStyleDropdown, setShowStyleDropdown] = useState(false)
@@ -161,6 +201,7 @@ export default function PostWorkspace() {
   const [uploadingProductImage, setUploadingProductImage] = useState(false)
   const [selectedBrandKitId, setSelectedBrandKitId] = useState<string | null>(null)
   const [streamlinedScript, setStreamlinedScript] = useState<string | null>(null)
+  const [postTextDensity, setPostTextDensity] = useState<PostTextDensity>('medium')
   const [streamlining, setStreamlining] = useState(false)
   const productImageInputRef = useRef<HTMLInputElement>(null)
   const contextImageInputRef = useRef<HTMLInputElement>(null)
@@ -190,15 +231,25 @@ export default function PostWorkspace() {
   const isProductMode = postStyle === 'product'
   const isAnuncioMode = postStyle === 'anuncio-conversion'
   const isLogoMode = postStyle === 'logo'
+  const isGeneralImageMode = postStyle === 'general-image'
+  const isCarouselMode = postStyle === 'organic-carousel'
   // Organic post state
   // postStyle 'organic-single:<subtype>' → single-image organic post (routed through /api/generate-image).
-  // postStyle 'organic-carousel'         → opens the OrganicCarouselModal (routed through /api/generate-carousel).
+  // postStyle 'organic-carousel'         → sidebar carousel builder (routed through /api/generate-carousel).
   const isOrganicSingleMode = postStyle.startsWith('organic-single:')
   const organicSingleSubtype: OrganicSingleSubtype | null = isOrganicSingleMode
     ? (postStyle.replace('organic-single:', '') as OrganicSingleSubtype)
     : null
   const [ctaStrength, setCtaStrength] = useState<CTAStrength>('soft')
-  const [carouselModalOpen, setCarouselModalOpen] = useState(false)
+  const [carouselSubtype, setCarouselSubtype] = useState<OrganicCarouselSubtype>('educational-list')
+  const [carouselSlideCount, setCarouselSlideCount] = useState(5)
+  const [carouselAspectRatio, setCarouselAspectRatio] = useState<CarouselAspectRatio>('1:1')
+  const [carouselDesignDirection, setCarouselDesignDirection] = useState('')
+  const [carouselSlideDetails, setCarouselSlideDetails] = useState('')
+  const [carouselPreviewFirstSlideOnly, setCarouselPreviewFirstSlideOnly] = useState(false)
+  const [carouselReferenceImages, setCarouselReferenceImages] = useState<string[]>([])
+  const [carouselConfirmCost, setCarouselConfirmCost] = useState(false)
+  const carouselReferenceInputRef = useRef<HTMLInputElement>(null)
 
   const labels = {
     es: {
@@ -216,6 +267,13 @@ export default function PostWorkspace() {
       logoModeEnhance: 'Mejorar Existente',
       logoArchetypeLabel: 'Arquetipo de Logo',
       logoBackgroundLabel: 'Fondo',
+      generalType: 'Imagen Libre',
+      generalTypeDesc: 'Genera cualquier visual con un prompt',
+      generalPromptLabel: 'Prompt',
+      generalPromptHint: 'Describe la imagen que queres generar',
+      generalPromptPlaceholder: 'Ej: foto editorial de un pato amarillo con lentes de sol en una piscina, luz de tarde...',
+      generateImage: 'Generar Imagen',
+      generatingImage: 'Generando imagen...',
       logoEnhanceTierLabel: 'Nivel de Mejora',
       logoBusinessNameLabel: 'Nombre del negocio',
       logoBusinessNamePlaceholder: 'Ej: Nova Café',
@@ -287,6 +345,13 @@ export default function PostWorkspace() {
       streamlining: 'Optimizando...',
       streamlined: 'Guión optimizado',
       revertStreamline: 'Usar original',
+      textDensityLabel: 'Cantidad de texto',
+      textDensityHard: 'Hard',
+      textDensityHardDesc: 'Lo mas corto posible',
+      textDensityMedium: 'Medio',
+      textDensityMediumDesc: 'Mas directo, mantiene lo inteligente',
+      textDensityStandard: 'Estandar',
+      textDensityStandardDesc: 'Como el optimizador actual',
       productType: 'Foto de Producto',
       productTypeDesc: 'Imagen profesional del producto',
       productSubStyleLabel: 'Estilo de foto',
@@ -316,6 +381,13 @@ export default function PostWorkspace() {
       logoModeEnhance: 'Enhance Existing',
       logoArchetypeLabel: 'Logo Archetype',
       logoBackgroundLabel: 'Background',
+      generalType: 'Free Image',
+      generalTypeDesc: 'Generate any visual from a prompt',
+      generalPromptLabel: 'Prompt',
+      generalPromptHint: 'Describe the image you want to generate',
+      generalPromptPlaceholder: 'E.g. editorial photo of a yellow duck wearing sunglasses in a pool, late afternoon light...',
+      generateImage: 'Generate Image',
+      generatingImage: 'Generating image...',
       logoEnhanceTierLabel: 'Enhancement Tier',
       logoBusinessNameLabel: 'Business name',
       logoBusinessNamePlaceholder: 'E.g. Nova Café',
@@ -387,6 +459,13 @@ export default function PostWorkspace() {
       streamlining: 'Optimizing...',
       streamlined: 'Optimized script',
       revertStreamline: 'Use original',
+      textDensityLabel: 'Text amount',
+      textDensityHard: 'Hard',
+      textDensityHardDesc: 'As short as possible',
+      textDensityMedium: 'Medium',
+      textDensityMediumDesc: 'Tighter, keeps the smart angle',
+      textDensityStandard: 'Standard',
+      textDensityStandardDesc: 'Current fuller optimizer',
       productType: 'Product Photo',
       productTypeDesc: 'Professional product image',
       productSubStyleLabel: 'Photo style',
@@ -413,19 +492,53 @@ export default function PostWorkspace() {
   }, [isLogoMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle script content passed from ScriptCard via sessionStorage.
-  // Optional ?autoOpen=carousel → opens the OrganicCarouselModal with the script pre-filled.
+  // Optional ?autoOpen=carousel → switches to the carousel builder with the script pre-filled.
   useEffect(() => {
     const scriptKey = searchParams.get('scriptKey')
     const autoOpen = searchParams.get('autoOpen')
+    const mode = searchParams.get('mode')
     if (scriptKey) {
       const content = sessionStorage.getItem(scriptKey)
       if (content) {
         setScriptText(content)
         sessionStorage.removeItem(scriptKey)
         if (autoOpen === 'carousel') {
-          setCarouselModalOpen(true)
+          setPostStyle('organic-carousel')
+          setCarouselAspectRatio('1:1')
+          setMobileConfigOpen(true)
         }
       }
+      setSearchParams({}, { replace: true })
+      return
+    }
+
+    const allowedModes = new Set([
+      'product',
+      'logo',
+      'general-image',
+      'organic-single:quote-motivational',
+      'organic-single:infographic',
+      'organic-single:product-showcase-organic',
+      'organic-single:aesthetic-brand',
+      'organic-carousel',
+    ])
+    if (mode && allowedModes.has(mode)) {
+      setPostStyle(mode)
+      setStreamlinedScript(null)
+      if (mode === 'product' || mode === 'logo' || mode.startsWith('organic-single:')) {
+        setAspectRatio('1:1')
+      }
+      if (mode === 'organic-carousel') {
+        setCarouselAspectRatio('1:1')
+      }
+      setSearchParams({}, { replace: true })
+      return
+    }
+
+    if (autoOpen === 'carousel') {
+      setPostStyle('organic-carousel')
+      setCarouselAspectRatio('1:1')
+      setMobileConfigOpen(true)
       setSearchParams({}, { replace: true })
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -468,6 +581,7 @@ export default function PostWorkspace() {
             prompt: post.prompt,
             createdAt: new Date(post.created_at),
             model: post.model,
+            generationId: post.generation_id ?? null,
             saved: true,
             carouselGroupId: post.carousel_group_id ?? null,
             slideIndex: post.slide_index ?? null,
@@ -540,6 +654,7 @@ export default function PostWorkspace() {
         body: JSON.stringify({
           script: rawScript,
           postStyle: resolvedStyle,
+          textDensity: postTextDensity,
           language,
           productContext
         })
@@ -613,11 +728,15 @@ export default function PostWorkspace() {
 
     setBusy(true)
     try {
+      const savedImages: ProductImage[] = []
       for (const file of filesToProcess) {
         const dataUrl = await normalizeImageToJpeg(file)
         const publicUrl = await uploadProductImage(user.id, productId, dataUrl)
         const saved = await createProductImage(productId, user.id, publicUrl, file.name, kind)
-        setProductImages(prev => [saved, ...prev])
+        savedImages.push(saved)
+      }
+      if (savedImages.length > 0) {
+        setProductImages(prev => [...savedImages, ...prev])
       }
     } catch (err) {
       console.error(`${kind} image upload failed:`, err)
@@ -685,7 +804,130 @@ export default function PostWorkspace() {
     }
   }
 
+  const handleCarouselReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const remaining = 8 - carouselReferenceImages.length
+    const selected = Array.from(files).slice(0, remaining)
+    try {
+      const dataUrls = await Promise.all(selected.map(file => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error(language === 'es' ? 'No se pudo leer la imagen.' : 'Could not read the image.'))
+        reader.readAsDataURL(file)
+      })))
+      setCarouselReferenceImages(prev => [...prev, ...dataUrls])
+      setCarouselConfirmCost(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (carouselReferenceInputRef.current) carouselReferenceInputRef.current.value = ''
+    }
+  }
+
+  const handleGenerateCarousel = async () => {
+    if (!productId || !user) return
+    const content = getScriptPrompt()
+    if (!content.trim()) {
+      setError(language === 'es' ? 'Pega o selecciona un guion primero.' : 'Paste or select a script first.')
+      return
+    }
+
+    const cost = carouselPreviewFirstSlideOnly ? 1 : carouselSlideCount
+    const remainingImageCredits = usageLimits.imagesLimit === -1
+      ? null
+      : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+    const hasEnoughCredits = remainingImageCredits === null || remainingImageCredits >= cost
+    if (!hasEnoughCredits) {
+      setError(language === 'es'
+        ? `Necesitas ${cost} creditos de imagen. Te quedan ${remainingImageCredits}.`
+        : `You need ${cost} image credits. You have ${remainingImageCredits}.`)
+      return
+    }
+
+    if (!carouselConfirmCost) {
+      setCarouselConfirmCost(true)
+      return
+    }
+
+    setGenerating(true)
+    setError('')
+    try {
+      const productReferenceImages = await Promise.all(
+        getCarouselProductImageUrls().slice(0, 4).map(async url => compressBase64ForApi(await urlToBase64(url)))
+      )
+      const contextReferenceImages = await Promise.all(
+        getContextImageUrls().slice(0, 4).map(async url => compressBase64ForApi(await urlToBase64(url)))
+      )
+      const uploadedCarouselReferenceImages = await Promise.all(
+        carouselReferenceImages.map(img => compressBase64ForApi(img))
+      )
+
+      const resp = await generateCarousel({
+        productId,
+        subtype: carouselSubtype,
+        slideCount: carouselSlideCount,
+        scriptContent: content.trim(),
+        aspectRatio: carouselAspectRatio,
+        language,
+        brandKitId: selectedBrandKitId || undefined,
+        ctaStrength,
+        designDirection: carouselDesignDirection.trim() || undefined,
+        slideDetails: carouselSlideDetails.trim() || undefined,
+        previewFirstSlideOnly: carouselPreviewFirstSlideOnly,
+        productContext: getCarouselProductContext(),
+        productReferenceImages,
+        contextReferenceImages,
+        carouselReferenceImages: uploadedCarouselReferenceImages,
+      })
+
+      const succeeded = resp.slides.filter(s => !!s.imageUrl)
+      if (succeeded.length > 0) {
+        const toInsert: CarouselSlideInsert[] = succeeded.map(s => ({
+          prompt: s.headline + (s.body ? `\n\n${s.body}` : ''),
+          generated_image_url: s.imageUrl!,
+          width: 1080,
+          height: carouselAspectRatio === '1:1' ? 1080 : carouselAspectRatio === '4:5' ? 1350 : 1920,
+          slide_index: s.index,
+          slide_total: resp.totalSlides,
+          carousel_subtype: resp.subtype,
+        }))
+        const inserted = await createCarouselPosts(productId, user.id, resp.carouselGroupId, toInsert)
+        const newPosts: GeneratedPost[] = inserted.map(p => ({
+          id: p.id,
+          imageUrl: p.generated_image_url || '',
+          prompt: p.prompt,
+          createdAt: new Date(p.created_at),
+          model: p.model,
+          generationId: p.generation_id ?? null,
+          saved: true,
+          carouselGroupId: p.carousel_group_id ?? null,
+          slideIndex: p.slide_index ?? null,
+          slideTotal: p.slide_total ?? null,
+          carouselSubtype: p.carousel_subtype ?? null,
+        }))
+        newPosts.sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0))
+        setGeneratedPosts(prev => [...newPosts, ...prev])
+        setTotalPostCount(c => c + inserted.length)
+        usageLimits.refresh()
+        if (window.innerWidth < 1024) setMobileConfigOpen(false)
+      } else {
+        setError(language === 'es' ? 'No se pudo generar ningun slide.' : 'No slides could be generated.')
+      }
+      setCarouselConfirmCost(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   const handleGenerate = async () => {
+    if (isCarouselMode) {
+      await handleGenerateCarousel()
+      return
+    }
+
     if (isLogoMode) {
       if (!logoBusinessName.trim()) {
         setError(language === 'es' ? 'Ingresá el nombre del negocio.' : 'Enter the business name.')
@@ -696,7 +938,7 @@ export default function PostWorkspace() {
         return
       }
     } else if (isProductMode) {
-      if (productImages.length === 0) {
+      if (getProductImageUrls().length === 0) {
         setError(t.productRefRequired)
         return
       }
@@ -713,6 +955,7 @@ export default function PostWorkspace() {
       const token = session?.access_token
       if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
 
+      const generationId = crypto.randomUUID()
       const isVertical = aspectRatio === '9:16'
       const isSquare = aspectRatio === '1:1'
       const isCustomType = postStyle.startsWith('custom-')
@@ -768,6 +1011,16 @@ export default function PostWorkspace() {
           customColors: colorPaletteId === 'custom' && customColors ? customColors : undefined,
           brandKitId: selectedBrandKitId || undefined
         }
+      } else if (isGeneralImageMode) {
+        const prompt = getScriptPrompt()
+        requestBody = {
+          prompt,
+          aspectRatio,
+          width: 1080,
+          height: isSquare ? 1080 : isVertical ? 1920 : 1440,
+          model: imageModel,
+          language
+        }
       } else if (isOrganicSingleMode && organicSingleSubtype) {
         // ORGANIC SINGLE IMAGE — top-of-funnel aesthetic post (quote, infographic, showcase, brand aesthetic).
         const script = getScriptPrompt()
@@ -775,6 +1028,7 @@ export default function PostWorkspace() {
           prompt: script || additionalInstructions.trim() || '',
           mode: 'post',
           postStyle: 'organic-single',
+          textDensity: postTextDensity,
           organicSubtype: organicSingleSubtype,
           ctaStrength,
           // Pass raw script as context so prompt builder has the underlying idea (non-literal).
@@ -802,6 +1056,7 @@ export default function PostWorkspace() {
           prompt: script,
           mode: 'post',
           postStyle: postStyle === 'anuncio-conversion' ? 'anuncio-conversion' : postStyle === 'venta-directa' ? 'venta-directa' : isCustomType ? 'custom-type' : 'preset',
+          textDensity: postTextDensity,
           presetId: postStyle === 'venta-directa' || postStyle === 'anuncio-conversion' || isCustomType ? undefined : postStyle,
           customPostTypeId: isCustomType ? postStyle.replace('custom-', '') : undefined,
           productId,
@@ -817,6 +1072,8 @@ export default function PostWorkspace() {
       }
 
       // Attach product images as input_image[s] — skipped in logo mode (logo uses its own uploaded logo)
+      requestBody.generationId = generationId
+
       if (!isLogoMode) {
         const selectedUrls = getProductImageUrls()
         if (selectedUrls.length > 0) {
@@ -875,7 +1132,8 @@ export default function PostWorkspace() {
           imageUrl,
           prompt: usedPrompt,
           createdAt: new Date(),
-          model: imageModel,
+          model: result.model || imageModel,
+          generationId: result.generationId || generationId,
           saved: false
         }, ...prev])
 
@@ -902,13 +1160,14 @@ export default function PostWorkspace() {
                 width: isLogoMode ? 1024 : 1080,
                 height: isLogoMode ? 1024 : (aspectRatio === '1:1' ? 1080 : aspectRatio === '9:16' ? 1920 : 1440),
                 output_format: 'png',
-                model: imageModel
+                model: result.model || imageModel,
+                generation_id: result.generationId || generationId
               })
               await updatePostStatus(post.id, 'completed', savedUrl)
               // Preload into browser cache before swapping URL to avoid blank flash
               await preloadImage(savedUrl)
               setGeneratedPosts(prev => prev.map(p =>
-                p.id === tempId ? { ...p, id: post.id, imageUrl: savedUrl, saved: true } : p
+                p.id === tempId ? { ...p, id: post.id, imageUrl: savedUrl, saved: true, generationId: result.generationId || generationId } : p
               ))
               // Sync enhancing/editing refs if they were tracking this tempId
               if (enhancingPostIdRef.current === tempId) {
@@ -1337,6 +1596,7 @@ export default function PostWorkspace() {
           prompt: post.prompt,
           createdAt: new Date(post.created_at),
           model: post.model,
+          generationId: post.generation_id ?? null,
           saved: true,
           carouselGroupId: post.carousel_group_id ?? null,
           slideIndex: post.slide_index ?? null,
@@ -1394,6 +1654,19 @@ export default function PostWorkspace() {
   }
 
   const hasScript = !!selectedScript || !!scriptText.trim()
+  const carouselCost = carouselPreviewFirstSlideOnly ? 1 : carouselSlideCount
+  const remainingImageCredits = usageLimits.imagesLimit === -1
+    ? null
+    : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+  const hasEnoughCarouselCredits = remainingImageCredits === null || remainingImageCredits >= carouselCost
+  const textInputLabel = isGeneralImageMode ? t.generalPromptLabel : t.scriptLabel
+  const textInputHint = isGeneralImageMode ? t.generalPromptHint : t.pasteScript
+  const textInputPlaceholder = isGeneralImageMode ? t.generalPromptPlaceholder : t.scriptPlaceholder
+  const textDensityOptions: Array<{ id: PostTextDensity; label: string; desc: string }> = [
+    { id: 'hard', label: t.textDensityHard, desc: t.textDensityHardDesc },
+    { id: 'medium', label: t.textDensityMedium, desc: t.textDensityMediumDesc },
+    { id: 'standard', label: t.textDensityStandard, desc: t.textDensityStandardDesc },
+  ]
 
   return (
     <Layout>
@@ -1446,18 +1719,22 @@ export default function PostWorkspace() {
                 className="w-full flex items-center justify-between px-3 py-2.5 bg-dark-50 rounded-lg text-sm text-dark-700 hover:bg-dark-100 transition-colors border border-dark-200"
               >
                 <span className="flex items-center gap-2 truncate">
-                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : isAnuncioMode ? <Sparkles className="w-4 h-4 text-orange-500 flex-shrink-0" /> : isLogoMode ? <Sparkles className="w-4 h-4 text-pink-500 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
+                  {isProductMode ? <Camera className="w-4 h-4 text-primary-400 flex-shrink-0" /> : isAnuncioMode ? <Sparkles className="w-4 h-4 text-orange-500 flex-shrink-0" /> : isLogoMode ? <Sparkles className="w-4 h-4 text-pink-500 flex-shrink-0" /> : isGeneralImageMode ? <Wand2 className="w-4 h-4 text-amber-500 flex-shrink-0" /> : isCarouselMode ? <FileText className="w-4 h-4 text-emerald-500 flex-shrink-0" /> : <ImageIcon className="w-4 h-4 text-dark-400 flex-shrink-0" />}
                   {postStyle === 'anuncio-conversion'
                     ? t.anuncioType
                     : postStyle === 'product'
                       ? t.productType
-                      : postStyle === 'logo'
+                    : postStyle === 'logo'
                         ? t.logoType
-                        : postStyle === 'venta-directa'
-                          ? t.styleDirectSale
-                          : postStyle.startsWith('custom-')
-                            ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
-                            : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
+                        : isGeneralImageMode
+                          ? t.generalType
+                          : isCarouselMode
+                            ? (language === 'es' ? 'Carrusel Organico' : 'Organic Carousel')
+                          : postStyle === 'venta-directa'
+                            ? t.styleDirectSale
+                            : postStyle.startsWith('custom-')
+                              ? (customPostTypes.find(c => `custom-${c.id}` === postStyle)?.name || postStyle)
+                              : (IMAGE_PRESETS.find(p => p.id === postStyle)?.[language === 'es' ? 'nameEs' : 'name'] || postStyle)
                   }
                 </span>
                 {showStyleDropdown ? <ChevronUp className="w-4 h-4 text-dark-400" /> : <ChevronDown className="w-4 h-4 text-dark-400" />}
@@ -1542,6 +1819,24 @@ export default function PostWorkspace() {
                   </button>
 
                   {/* ORGANIC SECTION — top-of-funnel content (no hard sales CTA) */}
+                  <button
+                    onClick={() => { setPostStyle('general-image'); setStreamlinedScript(null); setShowStyleDropdown(false); if (aspectRatio === '9:16') setAspectRatio('1:1') }}
+                    className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-amber-900/10 border-b border-dark-100 ${
+                      isGeneralImageMode ? 'bg-amber-900/20' : ''
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center flex-shrink-0">
+                      <Wand2 className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-dark-800">{t.generalType}</div>
+                      <div className="text-[11px] text-dark-400 mt-0.5">{t.generalTypeDesc}</div>
+                    </div>
+                    {isGeneralImageMode && (
+                      <div className="w-2 h-2 rounded-full bg-amber-500 mt-2 flex-shrink-0" />
+                    )}
+                  </button>
+
                   <div className="flex items-center gap-1.5 px-3 py-2 bg-emerald-900/10 border-y border-emerald-800/30">
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
@@ -1554,8 +1849,10 @@ export default function PostWorkspace() {
 
                   {/* Organic Carousel — opens dedicated modal */}
                   <button
-                    onClick={() => { setCarouselModalOpen(true); setShowStyleDropdown(false) }}
-                    className="w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-emerald-900/10 border-b border-dark-100"
+                    onClick={() => { setPostStyle('organic-carousel'); setStreamlinedScript(null); setShowStyleDropdown(false); setCarouselAspectRatio('1:1') }}
+                    className={`w-full flex items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-emerald-900/10 border-b border-dark-100 ${
+                      isCarouselMode ? 'bg-emerald-900/25' : ''
+                    }`}
                   >
                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-5 h-5 text-white" />
@@ -1568,9 +1865,13 @@ export default function PostWorkspace() {
                         {language === 'es' ? '2–10 slides con consistencia visual' : '2–10 slides with visual consistency'}
                       </div>
                     </div>
-                    <div className="px-2 py-0.5 rounded-md bg-emerald-900/30 text-emerald-300 text-[9px] font-bold uppercase tracking-wider">
-                      Nuevo
-                    </div>
+                    {isCarouselMode ? (
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 mt-2 flex-shrink-0" />
+                    ) : (
+                      <div className="px-2 py-0.5 rounded-md bg-emerald-900/30 text-emerald-300 text-[9px] font-bold uppercase tracking-wider">
+                        Nuevo
+                      </div>
+                    )}
                   </button>
 
                   {/* Organic Single Images — 4 subtypes */}
@@ -1706,6 +2007,7 @@ export default function PostWorkspace() {
             </div>
 
             {/* Brand Kit Selector */}
+            {!isGeneralImageMode && (
             <div>
               <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 Brand Kit
@@ -1716,8 +2018,10 @@ export default function PostWorkspace() {
                 productId={productId}
               />
             </div>
+            )}
 
             {/* Color Palette selector */}
+            {!isGeneralImageMode && !isCarouselMode && (
             <div>
               <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 <Sparkles className="w-3.5 h-3.5 text-primary-500" />
@@ -1851,6 +2155,7 @@ export default function PostWorkspace() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Product mode: sub-style picker + background input */}
             {isProductMode && (
@@ -2173,10 +2478,11 @@ export default function PostWorkspace() {
             {!isProductMode && !isLogoMode && (
             <div>
               <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
-                {t.scriptLabel}
+                {textInputLabel}
               </label>
 
               {/* Saved scripts picker */}
+              {!isGeneralImageMode && (
               <div className="relative">
                 <button
                   onClick={() => setShowScriptPicker(!showScriptPicker)}
@@ -2224,9 +2530,38 @@ export default function PostWorkspace() {
                   </div>
                 )}
               </div>
+              )}
+
+              {!isGeneralImageMode && (selectedScript || scriptText.trim()) && !streamlinedScript && (
+                <div className="mt-2">
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {t.textDensityLabel}
+                  </label>
+                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-dark-50 border border-dark-200 p-1">
+                    {textDensityOptions.map(option => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setPostTextDensity(option.id)}
+                        title={option.desc}
+                        className={`px-2 py-1.5 rounded-md text-[10px] font-semibold transition-colors ${
+                          postTextDensity === option.id
+                            ? 'bg-primary-600 text-white shadow-sm'
+                            : 'text-dark-500 hover:bg-dark-100 hover:text-dark-700'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10px] text-dark-400 leading-tight">
+                    {textDensityOptions.find(option => option.id === postTextDensity)?.desc}
+                  </p>
+                </div>
+              )}
 
               {/* Selected script preview */}
-              {selectedScript && (
+              {!isGeneralImageMode && selectedScript && (
                 <div className="mt-2 bg-primary-900/20 border border-primary-100 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-[10px] font-semibold text-primary-700 uppercase tracking-wide">{t.selectedScript}</p>
@@ -2282,15 +2617,15 @@ export default function PostWorkspace() {
               {/* Or paste directly */}
               {!selectedScript && (
                 <>
-                  <p className="text-[10px] text-dark-400 text-center my-2">{t.pasteScript}</p>
+                  <p className="text-[10px] text-dark-400 text-center my-2">{textInputHint}</p>
                   <textarea
                     value={scriptText}
                     onChange={(e) => { setScriptText(e.target.value); setStreamlinedScript(null) }}
-                    placeholder={t.scriptPlaceholder}
+                    placeholder={textInputPlaceholder}
                     rows={4}
                     className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent placeholder:text-dark-300 input-glow"
                   />
-                  {scriptText.trim() && !streamlinedScript && (
+                  {!isGeneralImageMode && scriptText.trim() && !streamlinedScript && (
                     <button
                       onClick={handleStreamline}
                       disabled={streamlining}
@@ -2321,8 +2656,202 @@ export default function PostWorkspace() {
             </div>
             )}
 
+            {/* Carousel settings */}
+            {isCarouselMode && (
+              <div className="space-y-4">
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                    <FileText className="w-3.5 h-3.5 text-emerald-500" />
+                    {language === 'es' ? 'Tipo de carrusel' : 'Carousel type'}
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {CAROUSEL_SUBTYPES.map(option => {
+                      const Icon = option.Icon
+                      const active = carouselSubtype === option.id
+                      return (
+                        <button
+                          key={option.id}
+                          onClick={() => { setCarouselSubtype(option.id); setCarouselConfirmCost(false) }}
+                          className={`p-2.5 rounded-lg text-left transition-all ${
+                            active
+                              ? 'bg-emerald-900/25 text-emerald-200 border border-emerald-600/60 shadow-sm'
+                              : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Icon className={`w-3.5 h-3.5 ${active ? 'text-emerald-300' : 'text-dark-400'}`} />
+                            <span className="text-[11px] font-semibold">{language === 'es' ? option.es : option.en}</span>
+                          </div>
+                          <p className="text-[9px] text-dark-400 leading-tight">{language === 'es' ? option.descEs : option.descEn}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                      {language === 'es' ? 'Cantidad de slides' : 'Slide count'}
+                    </label>
+                    <span className="text-xs text-dark-400">{carouselSlideCount}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setCarouselSlideCount(n => Math.max(2, n - 1)); setCarouselConfirmCost(false) }}
+                      className="w-8 h-8 rounded-lg bg-dark-50 border border-dark-200 text-dark-500 hover:bg-dark-100 flex items-center justify-center"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <input
+                      type="range"
+                      min={2}
+                      max={10}
+                      value={carouselSlideCount}
+                      onChange={(e) => { setCarouselSlideCount(parseInt(e.target.value)); setCarouselConfirmCost(false) }}
+                      className="flex-1 h-1.5 bg-dark-200 rounded-full appearance-none accent-emerald-500"
+                    />
+                    <button
+                      onClick={() => { setCarouselSlideCount(n => Math.min(10, n + 1)); setCarouselConfirmCost(false) }}
+                      className="w-8 h-8 rounded-lg bg-dark-50 border border-dark-200 text-dark-500 hover:bg-dark-100 flex items-center justify-center"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <label className="block text-xs font-semibold text-dark-600 tracking-wide uppercase">
+                      {language === 'es' ? 'Imagenes del carrusel' : 'Carousel images'}
+                    </label>
+                    <span className="text-[10px] text-dark-400">{carouselReferenceImages.length}/8</span>
+                  </div>
+                  <p className="text-[10px] text-dark-400 mb-2 leading-relaxed">
+                    {language === 'es'
+                      ? 'Referencias de estilo, ejemplos de posts, fotos o assets especificos para estos slides.'
+                      : 'Style references, post examples, photos, or specific assets for these slides.'}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {carouselReferenceImages.map((img, idx) => (
+                      <div key={`${idx}-${img.slice(0, 20)}`} className="relative group">
+                        <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-emerald-600 ring-2 ring-emerald-600/20 bg-dark-200">
+                          <img src={img} alt={`Carousel reference ${idx + 1}`} className="w-full h-full object-cover" />
+                        </div>
+                        <button
+                          onClick={() => {
+                            setCarouselReferenceImages(prev => prev.filter((_, i) => i !== idx))
+                            setCarouselConfirmCost(false)
+                          }}
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity hover:bg-red-700"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+                    ))}
+                    {carouselReferenceImages.length < 8 && (
+                      <button
+                        onClick={() => carouselReferenceInputRef.current?.click()}
+                        className="w-16 h-16 rounded-lg border-2 border-dashed border-dark-200 flex flex-col items-center justify-center text-dark-400 hover:border-emerald-500 hover:text-emerald-500 transition-colors"
+                      >
+                        <Upload className="w-4 h-4" />
+                        <span className="text-[8px] mt-0.5">{language === 'es' ? 'Subir' : 'Upload'}</span>
+                      </button>
+                    )}
+                    <input
+                      ref={carouselReferenceInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+                      multiple
+                      onChange={handleCarouselReferenceUpload}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {language === 'es' ? 'Direccion de diseno (opcional)' : 'Design direction (optional)'}
+                  </label>
+                  <textarea
+                    value={carouselDesignDirection}
+                    onChange={(e) => { setCarouselDesignDirection(e.target.value); setCarouselConfirmCost(false) }}
+                    placeholder={language === 'es'
+                      ? 'Ej: editorial, limpio, mucho aire, inspirado en una referencia subida...'
+                      : 'E.g. editorial, clean, generous spacing, inspired by an uploaded reference...'}
+                    rows={3}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-semibold text-dark-500 uppercase tracking-wide mb-1.5">
+                    {language === 'es' ? 'Detalle slide por slide (opcional)' : 'Slide-by-slide detail (optional)'}
+                  </label>
+                  <textarea
+                    value={carouselSlideDetails}
+                    onChange={(e) => { setCarouselSlideDetails(e.target.value); setCarouselConfirmCost(false) }}
+                    placeholder={language === 'es'
+                      ? 'Ej: Slide 1: titulo. Slide 2: problema. Slide 3: checklist.'
+                      : 'E.g. Slide 1: title. Slide 2: problem. Slide 3: checklist.'}
+                    rows={3}
+                    className="w-full text-sm bg-dark-50 text-dark-900 border border-dark-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-transparent placeholder:text-dark-300 input-glow"
+                  />
+                </div>
+
+                <label className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-dark-50 border border-dark-200 cursor-pointer">
+                  <span>
+                    <span className="block text-xs font-medium text-dark-700">
+                      {language === 'es' ? 'Generar solo slide 1' : 'Generate slide 1 only'}
+                    </span>
+                    <span className="block text-[10px] text-dark-400 mt-0.5">
+                      {language === 'es' ? 'Previsualiza antes del carrusel completo.' : 'Preview before the full carousel.'}
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={carouselPreviewFirstSlideOnly}
+                    onChange={(e) => { setCarouselPreviewFirstSlideOnly(e.target.checked); setCarouselConfirmCost(false) }}
+                    className="w-4 h-4 accent-emerald-600"
+                  />
+                </label>
+
+                <div className={`flex items-center gap-2 text-xs px-3 py-2.5 rounded-lg ${
+                  hasEnoughCarouselCredits ? 'bg-dark-50 text-dark-500' : 'bg-amber-900/20 text-amber-400 border border-amber-800/30'
+                }`}>
+                  {hasEnoughCarouselCredits ? (
+                    <span>
+                      {language === 'es'
+                        ? `Usara ${carouselCost} generacion(es) de imagen.`
+                        : `This will use ${carouselCost} image generation(s).`}
+                      {remainingImageCredits !== null && (
+                        <span className="text-dark-400"> {language === 'es' ? `Te quedan ${remainingImageCredits}.` : `You have ${remainingImageCredits} left.`}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <>
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>
+                        {language === 'es'
+                          ? `Necesitas ${carouselCost} creditos de imagen. Te quedan ${remainingImageCredits}.`
+                          : `You need ${carouselCost} image credits. You have ${remainingImageCredits}.`}
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {carouselConfirmCost && !generating && hasEnoughCarouselCredits && (
+                  <div className="bg-emerald-900/20 border border-emerald-800/40 text-emerald-200 text-xs px-3 py-2.5 rounded-lg">
+                    {language === 'es'
+                      ? `Confirma para generar ${carouselCost} imagen(es) con consistencia visual.`
+                      : `Confirm to generate ${carouselCost} image(s) with visual consistency.`}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Product images — persistent, used as strict product truth. Hidden in logo mode. */}
-            {!isLogoMode && (() => {
+            {!isLogoMode && !isGeneralImageMode && (() => {
               const productRefs = productImages.filter(i => (i.kind || 'product') === 'product')
               const contextRefs = productImages.filter(i => i.kind === 'context')
               return (
@@ -2339,8 +2868,8 @@ export default function PostWorkspace() {
                       ? 'Sube la foto de tu producto. La IA generará una versión profesional.'
                       : 'Upload your product photo. AI will generate a professional version.')
                     : (language === 'es'
-                      ? 'Fotos reales del producto. La IA las respetará EXACTAMENTE (forma, color, detalles).'
-                      : 'Real product photos. AI will preserve them EXACTLY (shape, color, details).')}
+                      ? 'Producto, empaque, variantes o prueba visual. La IA asignará un rol a cada imagen para evitar mezclas raras.'
+                      : 'Product, packaging, variants, or proof visuals. AI will assign each image a role to avoid strange blends.')}
                 </p>
 
                 <div className="flex gap-2 flex-wrap">
@@ -2464,8 +2993,32 @@ export default function PostWorkspace() {
             })()}
 
 
+            {isCarouselMode && (
+            <div>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                <ImageIcon className="w-3.5 h-3.5 text-emerald-500" />
+                {t.formatLabel}
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {CAROUSEL_ASPECT_RATIOS.map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => { setCarouselAspectRatio(f.id); setCarouselConfirmCost(false) }}
+                    className={`p-2.5 rounded-lg text-xs transition-colors ${
+                      carouselAspectRatio === f.id
+                        ? 'bg-emerald-900/25 text-emerald-200 border border-emerald-600/60'
+                        : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                    }`}
+                  >
+                    <div className="font-medium">{f.label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
+
             {/* Aspect Ratio — hidden in logo mode (forced to 1:1) */}
-            {!isLogoMode && (
+            {!isLogoMode && !isCarouselMode && (
             <div>
               <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                 <ImageIcon className="w-3.5 h-3.5 text-primary-500" />
@@ -2478,7 +3031,7 @@ export default function PostWorkspace() {
                 ] : [
                   { id: '9:16' as PostAspectRatio, name: t.reelStory, sub: '9:16' },
                   { id: '3:4' as PostAspectRatio, name: t.squarePost, sub: '3:4' },
-                  ...(isProductMode || isOrganicSingleMode ? [{ id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1' }] : []),
+                  ...(isProductMode || isOrganicSingleMode || isGeneralImageMode ? [{ id: '1:1' as PostAspectRatio, name: t.squareFormat, sub: '1:1' }] : []),
                 ] as { id: PostAspectRatio; name: string; sub: string }[]).map(f => (
                   <button
                     key={f.id}
@@ -2499,36 +3052,61 @@ export default function PostWorkspace() {
             </div>
             )}
 
+            {isAdmin && !isCarouselMode && (
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
+                  <Sparkles className="w-3.5 h-3.5 text-primary-500" />
+                  {language === 'es' ? 'Modelo de imagen' : 'Image model'}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {([
+                    { id: 'nano-banana-pro' as ImageModel, name: 'Nano Banana Pro', sub: language === 'es' ? 'Actual' : 'Current' },
+                    { id: 'gpt-image-2' as ImageModel, name: 'GPT Image 2', sub: 'Admin' },
+                  ]).map(option => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setImageModel(option.id)}
+                      className={`p-2.5 rounded-lg text-xs transition-colors ${
+                        imageModel === option.id
+                          ? 'bg-primary-900/20 text-primary-700 border border-primary-300'
+                          : 'bg-dark-50 text-dark-600 border border-transparent hover:bg-dark-100'
+                      }`}
+                    >
+                      <div className="font-medium">{option.name}</div>
+                      <div className={`text-[10px] mt-0.5 ${imageModel === option.id ? 'text-primary-500' : 'text-dark-400'}`}>
+                        {option.sub}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* CTA Strength — organic-single only */}
-            {isOrganicSingleMode && (
+            {(isOrganicSingleMode || isCarouselMode) && (
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
                   {language === 'es' ? 'Fuerza del CTA' : 'CTA Strength'}
                 </label>
                 <div className="grid grid-cols-4 gap-1">
-                  {(['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).map(s => {
-                    const labels: Record<CTAStrength, { es: string; en: string }> = {
-                      none: { es: 'Ninguno', en: 'None' },
-                      soft: { es: 'Suave', en: 'Soft' },
-                      brand_mention: { es: 'Marca', en: 'Brand' },
-                      sales: { es: 'Ventas', en: 'Sales' },
-                    }
-                    const active = ctaStrength === s
-                    const isSales = s === 'sales'
+                  {CTA_STRENGTH_OPTIONS.map(option => {
+                    const active = ctaStrength === option.id
+                    const isSales = option.id === 'sales'
                     return (
                       <button
-                        key={s}
-                        onClick={() => setCtaStrength(s)}
+                        key={option.id}
+                        onClick={() => { setCtaStrength(option.id); setCarouselConfirmCost(false) }}
                         className={`px-2 py-2 text-[11px] font-medium rounded-lg transition-all ${
                           active
                             ? isSales
                               ? 'bg-primary-500 text-white shadow-md'
                               : 'bg-emerald-600 text-white shadow-md'
                             : 'bg-dark-50 text-dark-500 hover:bg-dark-100 border border-dark-200'
-                        }`}
+                          }`}
                       >
-                        {language === 'es' ? labels[s].es : labels[s].en}
+                        {language === 'es' ? option.es : option.en}
                       </button>
                     )
                   })}
@@ -2555,7 +3133,9 @@ export default function PostWorkspace() {
                 isLogoMode
                   ? (!logoBusinessName.trim() || (logoMode === 'enhance' && !existingLogoImage))
                   : isProductMode
-                    ? productImages.length === 0
+                    ? getProductImageUrls().length === 0
+                    : isCarouselMode
+                      ? (!hasScript || !hasEnoughCarouselCredits)
                     : !hasScript
               )}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl btn-glow font-medium text-sm"
@@ -2563,12 +3143,12 @@ export default function PostWorkspace() {
               {generating ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {isLogoMode ? t.generatingLogo : isProductMode ? t.generatingProduct : t.generating}
+                  {isLogoMode ? t.generatingLogo : isProductMode ? t.generatingProduct : isGeneralImageMode ? t.generatingImage : isCarouselMode ? (language === 'es' ? 'Generando carrusel...' : 'Generating carousel...') : t.generating}
                 </>
               ) : (
                 <>
-                  {isLogoMode ? <Sparkles className="w-4 h-4" /> : isProductMode ? <Camera className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                  {isLogoMode ? t.generateLogo : isProductMode ? t.generateProduct : t.generate}
+                  {isLogoMode ? <Sparkles className="w-4 h-4" /> : isProductMode ? <Camera className="w-4 h-4" /> : isGeneralImageMode ? <Wand2 className="w-4 h-4" /> : isCarouselMode ? <FileText className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                  {isLogoMode ? t.generateLogo : isProductMode ? t.generateProduct : isGeneralImageMode ? t.generateImage : isCarouselMode ? (carouselConfirmCost ? (language === 'es' ? 'Confirmar y generar' : 'Confirm & generate') : (language === 'es' ? 'Generar carrusel' : 'Generate carousel')) : t.generate}
                 </>
               )}
             </button>
@@ -2598,7 +3178,9 @@ export default function PostWorkspace() {
                 isLogoMode
                   ? (!logoBusinessName.trim() || (logoMode === 'enhance' && !existingLogoImage))
                   : isProductMode
-                    ? productImages.length === 0
+                    ? getProductImageUrls().length === 0
+                    : isCarouselMode
+                      ? (!hasScript || !hasEnoughCarouselCredits)
                     : !hasScript
               )}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg btn-glow text-xs font-medium"
@@ -2615,9 +3197,11 @@ export default function PostWorkspace() {
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {generating && (
                   <GeneratingPlaceholder
-                    aspectRatio={aspectRatio === '9:16' ? '9/16' : aspectRatio === '1:1' ? '1/1' : '3/4'}
-                    label={isProductMode ? t.generatingProduct : t.generating}
-                    sublabel={imageModel}
+                    aspectRatio={isCarouselMode
+                      ? (carouselAspectRatio === '9:16' ? '9/16' : carouselAspectRatio === '1:1' ? '1/1' : '4/5')
+                      : (aspectRatio === '9:16' ? '9/16' : aspectRatio === '1:1' ? '1/1' : '3/4')}
+                    label={isCarouselMode ? (language === 'es' ? 'Generando carrusel...' : 'Generating carousel...') : isProductMode ? t.generatingProduct : t.generating}
+                    sublabel={isCarouselMode ? 'nano-banana-pro' : imageModel}
                   />
                 )}
                 {generatedPosts.map((post, index) => {
@@ -3025,47 +3609,6 @@ export default function PostWorkspace() {
         />
       )}
 
-      {/* Organic Carousel Modal */}
-      {user && productId && (
-        <OrganicCarouselModal
-          open={carouselModalOpen}
-          onClose={() => setCarouselModalOpen(false)}
-          productId={productId}
-          userId={user.id}
-          language={language}
-          brandKitId={selectedBrandKitId || undefined}
-          initialScriptContent={selectedScript?.content || scriptText}
-          savedScripts={scripts.map(s => ({ id: s.id, title: s.title, content: s.content }))}
-          productContext={getCarouselProductContext()}
-          productReferenceImageUrls={getCarouselProductImageUrls()}
-          contextReferenceImageUrls={getContextImageUrls()}
-          remainingImageCredits={
-            usageLimits.imagesLimit === -1
-              ? null
-              : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
-          }
-          onPersisted={(inserted) => {
-            // Refresh the posts list so the new carousel appears in the gallery.
-            const newPosts: GeneratedPost[] = inserted.map(p => ({
-              id: p.id,
-              imageUrl: p.generated_image_url || '',
-              prompt: p.prompt,
-              createdAt: new Date(p.created_at),
-              model: p.model,
-              saved: true,
-              carouselGroupId: p.carousel_group_id ?? null,
-              slideIndex: p.slide_index ?? null,
-              slideTotal: p.slide_total ?? null,
-              carouselSubtype: p.carousel_subtype ?? null,
-            }))
-            // Sort slides by index so Slide 1 displays first when rendered as a group.
-            newPosts.sort((a, b) => (a.slideIndex ?? 0) - (b.slideIndex ?? 0))
-            setGeneratedPosts(prev => [...newPosts, ...prev])
-            setTotalPostCount(c => c + inserted.length)
-            usageLimits.refresh()
-          }}
-        />
-      )}
     </Layout>
   )
 }

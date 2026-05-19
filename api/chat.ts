@@ -15,20 +15,17 @@ import {
 } from './data/organic-script-prompts.js'
 import { buildWinningScriptDnaPrompt } from './data/winning-script-dna.js'
 import { runGuionesStructuredPipeline } from './lib/guiones/script-pipeline.js'
+import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
   return (ORGANIC_FRAMEWORKS as readonly string[]).includes(key)
 }
 
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions'
-
 const LEGACY_SCRIPT_BRIEF_BLOCK = {
   es: `\n\n===================================================================\nINSTRUCCION CRITICA DE DIVERSIDAD ESTRATEGICA\n===================================================================\nAntes de escribir cualquier guion, crea PRIVADAMENTE un Script Brief unico por cada guion solicitado.\nCada brief DEBE diferenciarse en:\n- hookMechanism (direct_offer, alternative_invalidation, checklist, hidden_cost, use_case_split, myth_busting, process_certainty, social_proof, price_location, story_scene)\n- buyerStage (cold, warm, hot)\n- duda principal eliminada\n- fuente de prueba usada\n\nSi dos briefs son demasiado parecidos, reemplaza el mas debil antes de escribir.\nNO muestres los briefs. Usalos internamente para escribir guiones mas distintos y mas fuertes.`,
   en: `\n\n===================================================================\nCRITICAL STRATEGIC DIVERSITY INSTRUCTION\n===================================================================\nBefore writing any script, PRIVATELY create one unique Script Brief per requested script.\nEach brief MUST differ in:\n- hookMechanism (direct_offer, alternative_invalidation, checklist, hidden_cost, use_case_split, myth_busting, process_certainty, social_proof, price_location, story_scene)\n- buyerStage (cold, warm, hot)\n- main doubt eliminated\n- proof source used\n\nIf two briefs are too similar, replace the weaker one before writing.\nDo NOT output the briefs. Use them internally to write more distinct and stronger scripts.`
 }
-
-type AIModel = 'grok'
 
 const MASTER_PROMPTS = {
   es: `ACTÚA COMO: Experto Senior en Copywriting y Guiones de Venta Directa, entrenado bajo el MÉTODO IAN de Ingeniería de Contenido.
@@ -276,6 +273,8 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
 }
+
+type AIModel = 'grok'
 
 interface ScriptTypeConfig {
   venta_directa: number
@@ -1420,15 +1419,15 @@ ${doc.url ? `URL: ${doc.url}` : ''}`
 }
 
 const DESCRIPTION_PROMPTS = {
-  es: `ACTÚA COMO: Especialista en descripciones para anuncios de video en Instagram y Facebook, optimizadas para el algoritmo de Meta.
+  es: `ACTÚA COMO: Especialista en descripciones para anuncios y posts en Instagram y Facebook, optimizadas para el algoritmo de Meta.
 
 IMPORTANTE: Siempre responde en Español.
 
 ===================================================================
 TU MISIÓN
 ===================================================================
-Escribir descripciones para videos de venta en Instagram que se utilizarán como anuncios pagados.
-Estas NO son guiones de video. Son el texto (caption) que acompaña al anuncio de video.
+Escribir descripciones para anuncios y posts de venta en Instagram y Facebook.
+Estas NO son guiones. Son el texto (caption) que acompaña al anuncio o post.
 
 ===================================================================
 OBJETIVO PRINCIPAL: OPTIMIZACIÓN PARA EL ALGORITMO DE META
@@ -1445,7 +1444,7 @@ El algoritmo de Meta usa el texto de la descripción para categorizar el anuncio
 ===================================================================
 REGLAS INQUEBRANTABLES
 ===================================================================
-1. La descripción NO puede ser igual ni parecida al guión del video. Debe ser contenido completamente diferente.
+1. La descripción NO puede ser igual ni parecida al guión base. Debe ser contenido completamente diferente.
 2. NO usar hashtags. Están prohibidos en anuncios pagados de Meta.
 3. Debe incluir un llamado a la acción claro y directo.
 4. Incluir palabras clave de la categoría, el producto, el problema que resuelve, la ubicación y el público objetivo.
@@ -1476,19 +1475,19 @@ INSTRUCCIONES
 ===================================================================
 Usa TODA la información del negocio y producto/servicio proporcionada para crear descripciones que:
 1. Le den al algoritmo de Meta el máximo contexto posible sobre lo que se vende
-2. Sean completamente diferentes al guión del video
+2. Sean completamente diferentes al guión base
 3. Incluyan un llamado a la acción en cada variación
 4. Funcionen como texto de anuncio pagado (no como caption orgánico)`,
 
-  en: `ACT AS: Specialist in descriptions for Instagram and Facebook video ads, optimized for Meta's algorithm.
+  en: `ACT AS: Specialist in descriptions for Instagram and Facebook ads and posts, optimized for Meta's algorithm.
 
 IMPORTANT: Always respond in English.
 
 ===================================================================
 YOUR MISSION
 ===================================================================
-Write descriptions for Instagram sales videos that will be used as paid ads.
-These are NOT video scripts. They are the text (caption) that accompanies the video ad.
+Write descriptions for Instagram and Facebook sales ads and posts.
+These are NOT scripts. They are the text (caption) that accompanies the ad or post.
 
 ===================================================================
 PRIMARY GOAL: OPTIMIZATION FOR META'S ALGORITHM
@@ -1505,7 +1504,7 @@ Meta's algorithm uses the description text to categorize the ad and show it to t
 ===================================================================
 UNBREAKABLE RULES
 ===================================================================
-1. The description must NOT be the same as or similar to the video script. It must be completely different content.
+1. The description must NOT be the same as or similar to the base script. It must be completely different content.
 2. Do NOT use hashtags. They are prohibited in Meta paid ads.
 3. Must include a clear, direct call to action.
 4. Include keywords about the category, product, problem it solves, location, and target audience.
@@ -1536,7 +1535,7 @@ INSTRUCTIONS
 ===================================================================
 Use ALL provided business and product/service information to create descriptions that:
 1. Give Meta's algorithm maximum possible context about what's being sold
-2. Are completely different from the video script
+2. Are completely different from the base script
 3. Include a call to action in each variation
 4. Work as paid ad text (not organic caption)`
 }
@@ -1626,7 +1625,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments, activeSalesChannel } = req.body as RequestBody
-    const selectedModel: AIModel = 'grok'
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' })
@@ -1827,7 +1825,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           userId: user.id,
           userEmail: user.email,
           feature: usageAction,
-          model: 'grok-4-1-fast-reasoning+grok-3-fast',
+          model: GROK_TEXT_MODEL,
           inputTokens: estimateTokens(JSON.stringify(structured.contextProfile) + structured.promptPreview),
           outputTokens: estimateTokens(structured.content),
           success: true,
@@ -1844,7 +1842,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({
           content: structured.content,
           remaining: remaining - 1,
-          model: selectedModel,
+          model: GROK_TEXT_MODEL,
           _debug: {
             systemPrompt: structured.promptPreview,
             contextProfile: structured.contextProfile,
@@ -1869,6 +1867,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }))
     ]
 
+    const chatModel = GROK_TEXT_MODEL
+
     const response = await fetch(GROK_API_URL, {
       method: 'POST',
       headers: {
@@ -1876,7 +1876,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${grokApiKey}`
       },
       body: JSON.stringify({
-        model: 'grok-3-fast',
+        model: chatModel,
         messages: grokMessages,
         temperature: 0.8,
         max_tokens: 4096
@@ -1900,7 +1900,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: usageAction,
-      model: 'grok-3-fast',
+      model: chatModel,
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
@@ -1910,7 +1910,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Increment usage counter after successful generation
     await incrementUsage(user.id, usageAction)
 
-    return res.status(200).json({ content, remaining: remaining - 1, model: selectedModel, _debug: { systemPrompt } })
+    return res.status(200).json({ content, remaining: remaining - 1, model: chatModel, _debug: { systemPrompt } })
   } catch (error) {
     console.error('Chat API error:', error)
 
@@ -1918,7 +1918,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: usageAction,
-      model: 'grok-3-fast',
+      model: GROK_TEXT_MODEL,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

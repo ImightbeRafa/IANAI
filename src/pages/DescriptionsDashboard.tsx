@@ -33,8 +33,8 @@ export default function DescriptionsDashboard() {
 
   const labels = {
     es: {
-      title: 'Descripciones de Video',
-      subtitle: 'Genera descripciones para tus videos de redes sociales',
+      title: 'Descripciones',
+      subtitle: 'Genera descripciones para tus anuncios y posts de redes sociales',
       noProducts: 'No hay productos aún',
       createFirst: 'Crea tu primer producto en el Dashboard para empezar a generar descripciones',
       yourBusinesses: 'Tus Negocios',
@@ -50,8 +50,8 @@ export default function DescriptionsDashboard() {
       roleEditor: 'Editor'
     },
     en: {
-      title: 'Video Descriptions',
-      subtitle: 'Generate descriptions for your social media videos',
+      title: 'Descriptions',
+      subtitle: 'Generate descriptions for your social media ads and posts',
       noProducts: 'No products yet',
       createFirst: 'Create your first product in the Dashboard to start generating descriptions',
       yourBusinesses: 'Your Businesses',

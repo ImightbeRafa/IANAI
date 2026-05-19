@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
+import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage, isAdminUser } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
@@ -13,6 +13,8 @@ import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, build
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
+const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations'
+const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits'
 const GEMINI_IMAGE_TIMEOUT_MS = 135_000
 
 // Gemini Image Generation Models (from official SDK documentation)
@@ -21,7 +23,24 @@ const GEMINI_IMAGE_MODELS: Record<string, string> = {
   'nano-banana-pro': 'gemini-3-pro-image-preview'   // High quality, reasoning (up to 4K)
 }
 
-type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine'
+type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine' | 'gpt-image-2'
+type PostTextDensity = 'hard' | 'medium' | 'standard'
+
+type InlineImageRef = {
+  label: string
+  mimeType: string
+  data: string
+}
+
+type OpenAIImageUsage = {
+  input_tokens?: number
+  input_tokens_details?: {
+    image_tokens?: number
+    text_tokens?: number
+  }
+  output_tokens?: number
+  total_tokens?: number
+}
 
 class UpstreamTimeoutError extends Error {
   constructor(label: string) {
@@ -63,6 +82,71 @@ function isTransientGeminiError(error: unknown): boolean {
     || message.includes('503')
 }
 
+function normalizePostTextDensity(value: unknown): PostTextDensity {
+  return value === 'hard' || value === 'standard' || value === 'medium' ? value : 'medium'
+}
+
+function buildPostTextDensityPrefix(language: string, density: PostTextDensity): string {
+  const isEs = language === 'es'
+  const copyRules = {
+    hard: isEs
+      ? 'MODO TEXTO HARD: usar la menor cantidad de texto posible. Maximo 1 headline corto, 1-2 micro-puntos y 1 CTA corto. No parrafos. No agregar beneficios extra.'
+      : 'TEXT MODE HARD: use the least text possible. Maximum 1 short headline, 1-2 micro-points, and 1 short CTA. No paragraphs. Do not add extra benefits.',
+    medium: isEs
+      ? 'MODO TEXTO MEDIO: post directo y escaneable. Maximo 1 headline, 2-3 puntos cortos y 1 CTA. Priorizar aire visual sobre explicar de mas.'
+      : 'TEXT MODE MEDIUM: direct, scannable post. Maximum 1 headline, 2-3 short points, and 1 CTA. Prioritize visual breathing room over extra explanation.',
+    standard: isEs
+      ? 'MODO TEXTO ESTANDAR: puedes usar el nivel actual de detalle, pero mantenlo limpio. Maximo 1 headline, 3-5 puntos y 1 CTA. No parrafos largos.'
+      : 'TEXT MODE STANDARD: you may use the current fuller detail level, but keep it clean. Maximum 1 headline, 3-5 points, and 1 CTA. No long paragraphs.'
+  }[density]
+
+  return `INSTRUCCION DE DENSIDAD DE TEXTO (NO RENDERIZAR ESTA INSTRUCCION): ${copyRules}\n\n`
+}
+
+function buildProductReferenceStrategyPrefix(language: string, refCount: number, isProductMode: boolean): string {
+  if (refCount <= 0) return ''
+  const isEs = language === 'es'
+  const modeRule = isProductMode
+    ? (isEs
+      ? 'Como estas en modo fotografia de producto, prioriza una representacion limpia del producto vendible. Si varias imagenes son vistas del mismo item, usalas para fidelidad; si son items distintos, no los mezcles.'
+      : 'Because this is product photography mode, prioritize a clean representation of the sellable product. If several images are views of the same item, use them for fidelity; if they are distinct items, do not blend them.')
+    : (isEs
+      ? 'Como estas creando un post/anuncio, usa las referencias secundarias como prueba visual, contexto o apoyo de composicion sin competir con el producto heroe.'
+      : 'Because this is a post/ad, use secondary references as proof, context, or composition support without competing with the hero product.')
+
+  if (refCount === 1) {
+    return isEs
+      ? `ESTRATEGIA DE REFERENCIA VISUAL (NO RENDERIZAR): Se adjunta 1 imagen de referencia del producto/oferta real. Usala como fuente visual principal. Copia su forma, color, textura, proporcion y detalles sin inventar otro producto.\n\n`
+      : `VISUAL REFERENCE STRATEGY (DO NOT RENDER): 1 reference image of the real product/offer is attached. Use it as the main visual source. Copy its shape, color, texture, proportions, and details without inventing another product.\n\n`
+  }
+
+  return isEs
+    ? `ESTRATEGIA DE REFERENCIAS MULTIPLES (NO RENDERIZAR, MAXIMA PRIORIDAD):
+Recibiras ${refCount} imagenes relacionadas con el producto/oferta. NO asumas automaticamente que todas son el mismo objeto ni las fusiones en un hibrido.
+
+Antes de disenar, clasifica mentalmente cada imagen en uno de estos roles:
+- PRODUCTO HEROE: el objeto vendible real, empaque, botella, prenda, plato, dispositivo o set que debe protagonizar.
+- VARIANTE / SABOR / COLOR: otro producto real de la misma linea. Si aparece, muestralo como item separado o lineup limpio, nunca mezclado con otro.
+- RESULTADO / PRUEBA / DETALLE: antes-despues, dientes, piel, textura, close-up, ingrediente, captura o evidencia. Usalo como inset, panel de prueba, textura sutil o contexto visual; NO lo pegues encima del producto ni lo conviertas en parte del empaque.
+- CONTEXTO / ESTILO: escena, fondo, mood, lifestyle o composicion. Usalo para ambiente y direccion de arte, no como producto.
+
+${modeRule}
+
+Regla de composicion: el resultado final debe tener UNA idea visual coherente. Elige un producto heroe claro y usa las demas referencias solo en su rol correcto. Prohibido amalgamar fotos distintas en un solo objeto raro. Prohibido poner una foto de resultado dentro del producto salvo que el empaque real ya la tenga. Prohibido ignorar referencias relevantes: si no son producto heroe, deben influir como prueba, detalle, contexto o estilo.\n\n`
+    : `MULTI-REFERENCE STRATEGY (DO NOT RENDER, HIGHEST PRIORITY):
+You will receive ${refCount} images related to the product/offer. Do NOT automatically assume they are all the same object, and do NOT fuse them into a hybrid.
+
+Before designing, silently classify each image into one of these roles:
+- HERO PRODUCT: the real sellable object, package, bottle, garment, dish, device, or set that should lead the ad.
+- VARIANT / FLAVOR / COLOR: another real product from the same line. Show it as a separate item or clean lineup, never blended into another product.
+- RESULT / PROOF / DETAIL: before-after, teeth, skin, texture, close-up, ingredient, screenshot, or evidence. Use it as an inset, proof panel, subtle texture, or visual context; do NOT paste it onto the product or turn it into packaging.
+- CONTEXT / STYLE: scene, background, mood, lifestyle, or composition. Use it for environment and art direction, not as the product.
+
+${modeRule}
+
+Composition rule: the final image must have ONE coherent visual idea. Choose a clear hero product and use the other references only in their correct roles. Do not amalgamate different photos into one strange object. Do not put a result photo inside the product unless the real packaging already contains it. Do not ignore relevant references: if they are not the hero product, they must influence proof, detail, context, or style.\n\n`
+}
+
 // Map width/height to aspect ratio string
 function getAspectRatio(width: number, height: number): string {
   const ratio = width / height
@@ -75,6 +159,59 @@ function getAspectRatio(width: number, height: number): string {
   if (Math.abs(ratio - 3/2) < 0.01) return '3:2'
   if (Math.abs(ratio - 2/3) < 0.01) return '2:3'
   return '1:1'
+}
+
+function parseDataUrlImage(value: unknown, label: string): InlineImageRef | null {
+  if (typeof value !== 'string') return null
+  const match = value.match(/^data:([^;]+);base64,(.+)$/)
+  if (!match) return null
+  return { label, mimeType: match[1], data: match[2] }
+}
+
+function dataUrlFromInline(ref: InlineImageRef): string {
+  return `data:${ref.mimeType};base64,${ref.data}`
+}
+
+function getOpenAIImageSize(width: number, height: number): '1024x1024' | '1024x1536' | '1536x1024' {
+  const ratio = width / height
+  if (Math.abs(ratio - 1) < 0.1) return '1024x1024'
+  return ratio > 1 ? '1536x1024' : '1024x1536'
+}
+
+function extractOpenAIUsage(result: Record<string, unknown>): OpenAIImageUsage | null {
+  const rootUsage = result.usage
+  if (rootUsage && typeof rootUsage === 'object') return rootUsage as OpenAIImageUsage
+
+  const firstData = Array.isArray(result.data) ? result.data[0] : null
+  if (firstData && typeof firstData === 'object' && 'usage' in firstData) {
+    const usage = (firstData as { usage?: unknown }).usage
+    if (usage && typeof usage === 'object') return usage as OpenAIImageUsage
+  }
+
+  return null
+}
+
+function calculateOpenAIImageCost(usage: OpenAIImageUsage | null): number | undefined {
+  if (!usage) return undefined
+  const textInputTokens = usage.input_tokens_details?.text_tokens || 0
+  const imageInputTokens = usage.input_tokens_details?.image_tokens || 0
+  const imageOutputTokens = usage.output_tokens || 0
+  if (textInputTokens === 0 && imageInputTokens === 0 && imageOutputTokens === 0) return undefined
+
+  return (textInputTokens / 1_000_000) * 5.00
+    + (imageInputTokens / 1_000_000) * 8.00
+    + (imageOutputTokens / 1_000_000) * 30.00
+}
+
+function buildOpenAIReferencePrompt(basePrompt: string, refs: InlineImageRef[]): string {
+  if (refs.length === 0) return basePrompt
+  const refGuide = refs.map((ref, index) => `${index + 1}. ${ref.label}`).join('\n')
+  return `${basePrompt}
+
+OPENAI REFERENCE IMAGE ORDER (DO NOT RENDER THIS TEXT):
+${refGuide}
+
+Use each attached image only for its stated role. Preserve sellable product/package references as product truth. Use proof, detail, context, and logo references as separate supporting information. Do not fuse multiple references into one hybrid object.`
 }
 
 // System prompt for Gemini (CAN render text) — used for generic image gen only
@@ -118,11 +255,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: `Invalid action. Must be one of: ${VALID_ACTIONS.join(', ')}` })
     }
 
-    const VALID_MODELS: ImageModel[] = ['nano-banana', 'nano-banana-pro', 'grok-imagine']
+    const VALID_MODELS: ImageModel[] = ['nano-banana', 'nano-banana-pro', 'grok-imagine', 'gpt-image-2']
     if (!VALID_MODELS.includes(model)) {
       return res.status(400).json({ error: `Invalid model. Must be one of: ${VALID_MODELS.join(', ')}` })
     }
     const selectedModel: ImageModel = model
+
+    if (selectedModel === 'gpt-image-2' && !(await isAdminUser(user.id))) {
+      return res.status(403).json({ error: 'Admin access required' })
+    }
+
+    const incomingGenerationId = typeof imageParams.generationId === 'string' ? imageParams.generationId : ''
+    const generationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(incomingGenerationId)
+      ? incomingGenerationId
+      : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`)
 
     const MAX_PROMPT_LENGTH = 50_000
     if (imageParams.prompt && typeof imageParams.prompt === 'string' && imageParams.prompt.length > MAX_PROMPT_LENGTH) {
@@ -276,7 +422,14 @@ Edit instruction: ${editPrompt}`
           outputTokens: editOutputTokens,
           thinkingTokens: editThinkingTokens,
           success: true,
-          metadata: { action: 'edit', editPrompt: editPrompt.substring(0, 100) }
+          metadata: {
+            action: 'edit',
+            provider: 'google',
+            providerModel: editModelId,
+            rawUsage: editUsage,
+            imageSize: '2K',
+            editPrompt: editPrompt.substring(0, 100)
+          }
         })
 
         return res.status(200).json({
@@ -297,7 +450,7 @@ Edit instruction: ${editPrompt}`
           model: 'nano-banana-pro',
           success: false,
           errorMessage: editError instanceof Error ? editError.message : 'Unknown error',
-          metadata: { action: 'edit' }
+          metadata: { action: 'edit', provider: 'google', providerModel: editModelId, costSource: 'unavailable' }
         })
 
         return res.status(isTimeoutError(editError) ? 504 : 500).json({
@@ -507,11 +660,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
           const total = parsedRefs.length
           if (total > 0) {
-            promptParts.push({ text: `══ ${total} IMÁGEN${total > 1 ? 'ES' : ''} DE REFERENCIA DEL PRODUCTO REAL (OBLIGATORIO USAR TODAS) ══\n${total > 1 ? `Se adjuntan ${total} fotos REALES del MISMO producto desde distintos ángulos/vistas/contextos. DEBES fusionar la información de las ${total} — no te limites a la primera. Cada imagen aporta verdad complementaria que el diseño final debe reflejar.` : 'Esta es una foto REAL del producto del usuario.'}\n\nEl producto en el diseño mejorado DEBE verse EXACTAMENTE como en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto. Usa ESTAS imágenes como la ÚNICA fuente de verdad:` })
+            promptParts.push({ text: `PRODUCT/OFFER VISUAL REFERENCES (${total}) - USE BY ROLE, DO NOT AMALGAMATE\n${total > 1 ? `These ${total} images are real references related to the user's product or offer. They may show different roles: hero product, packaging, variant, result/proof, detail, ingredient, texture, lifestyle, or style context. You MUST inspect every image, but you MUST NOT fuse unrelated images into one hybrid object.` : 'This is a real visual reference for the user product/offer.'}\n\nPreserve the real product/package when a reference shows it. Use result/proof/detail/context images only as supporting evidence, inset, mood, or art-direction cues. Do not invent another product.` })
             parsedRefs.forEach((ref, idx) => {
               const label = total > 1
-                ? `── REFERENCIA ${idx + 1} de ${total} (analizá esta imagen de forma independiente y extraé información visual complementaria a las demás) ──`
-                : '── REFERENCIA DEL PRODUCTO ──'
+                ? `REFERENCE ${idx + 1} of ${total}: analyze independently and assign a role (hero product, variant, proof/result, detail, context, or style). Use it only in that role.`
+                : 'PRODUCT/OFFER REFERENCE'
               promptParts.push({ text: label })
               promptParts.push({ inlineData: { mimeType: ref.mimeType, data: ref.data } })
               productRefCount++
@@ -564,7 +717,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         // Closing reinforcement if product refs were provided
         if (productRefCount > 0) {
-          promptParts.push({ text: 'RECORDATORIO FINAL: El producto en la imagen mejorada DEBE ser IDÉNTICO a las fotos de referencia del producto proporcionadas arriba. NO inventes otro producto. NO cambies forma, color, silueta ni textura. Copia el producto EXACTAMENTE de las referencias.' })
+          promptParts.push({ text: 'FINAL PRODUCT REFERENCE CHECK: Use every provided reference intelligently, by role. If a reference is the sellable product or package, preserve its real shape, color, silhouette, texture, and details. If a reference is a result/proof/detail/context image, use it as supporting evidence, inset, mood, or background cue. Do NOT blend multiple references into a strange single object.' })
         }
         if (ctxRefCount > 0 && productRefCount > 0) {
           promptParts.push({ text: `SEPARACIÓN CLARA: El PRODUCTO se copia EXACTAMENTE de las fotos de referencia del producto. La ESCENA / AUDIENCIA / MOOD se inspira en las ${ctxRefCount} imagen${ctxRefCount > 1 ? 'es' : ''} de contexto. NO mezcles: no inventes productos parecidos a los de las imágenes de contexto.` })
@@ -634,7 +787,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           outputTokens: enhanceOutputTokens,
           thinkingTokens: enhanceThinkingTokens,
           success: true,
-          metadata: { action: 'enhance' }
+          metadata: {
+            action: 'enhance',
+            provider: 'google',
+            providerModel: enhanceModelId,
+            rawUsage: enhanceUsage,
+            imageSize: '2K'
+          }
         })
 
         return res.status(200).json({
@@ -658,7 +817,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           model: 'nano-banana-pro',
           success: false,
           errorMessage: errMsg,
-          metadata: { action: 'enhance', transient: isTransient }
+          metadata: { action: 'enhance', transient: isTransient, provider: 'google', providerModel: enhanceModelId, costSource: 'unavailable' }
         })
 
         if (isTransient) {
@@ -685,8 +844,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     let enhancedPrompt: string
 
     // Detect whether product reference images are provided
-    const hasProductImages = !!(imageParams.input_image)
+    const productReferenceCount = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
+      .filter(k => typeof imageParams[k] === 'string' && imageParams[k].length > 0).length
+    const hasProductImages = productReferenceCount > 0
     const postLanguage: string = imageParams.language || 'es'
+    const postTextDensity = normalizePostTextDensity(imageParams.textDensity)
 
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
@@ -712,9 +874,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       // Explicit aspect ratio enforcement prefix
       const arLabel = postAspectRatio === '9:16' ? '9:16 vertical (1080×1920)' : '3:4 vertical (1080×1440)'
       const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
+      const productReferenceStrategyPrefix = buildProductReferenceStrategyPrefix(postLanguage, productReferenceCount, isProductMode)
 
       // Resolve color palette override (if any)
       // Priority: custom colors > predefined palette > brand kit colors > none
+      const textDensityPrefix = buildPostTextDensityPrefix(postLanguage, postTextDensity)
       let colorPrefix = ''
       if (imageParams.customColors && Array.isArray(imageParams.customColors) && imageParams.customColors.length > 0) {
         // Custom user-defined palette: array of hex strings
@@ -909,7 +1073,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
           || buildProductPrompt('studio-hero', productAR, postLanguage, productOpts)!
 
-        enhancedPrompt = productFormatPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
+        enhancedPrompt = productFormatPrefix + productReferenceStrategyPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
       } else if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
         // CUSTOM POST TYPE MODE: load master prompt from DB
         try {
@@ -922,13 +1086,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
-            enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
           }
         } catch {
-          enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'anuncio-conversion') {
         // ANUNCIO DE CONVERSIÓN MODE: high-conversion Instagram ad with niche-adaptive prompt
@@ -952,14 +1116,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
           : aspectRatioPrefix
         const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
-        enhancedPrompt = anuncioFormatPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
+        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
         const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
         if (presetPrompt) {
-          enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'organic-single' && imageParams.organicSubtype) {
         // ORGANIC SINGLE IMAGE MODE — top-of-funnel aesthetic post (quote, infographic, showcase, aesthetic).
@@ -999,14 +1163,213 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         // Organic builds its own language / aspect-ratio rules internally; skip the sales aspectRatioPrefix.
-        enhancedPrompt = colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
+        enhancedPrompt = productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
       enhancedPrompt = GEMINI_PROMPT_PREFIX + userPrompt
+    }
+
+    // =============================================
+    // OPENAI GPT IMAGE GENERATION (admin only)
+    // =============================================
+    if (selectedModel === 'gpt-image-2') {
+      const openAiApiKey = process.env.OPENAI_API_KEY
+      if (!openAiApiKey) {
+        return res.status(500).json({ error: 'OpenAI API key not configured' })
+      }
+
+      const providerModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
+      const references: InlineImageRef[] = []
+
+      if (brandKit && brandKit.logo_url && isPostMode && !isProductMode && !isLogoMode) {
+        try {
+          const logoData = await fetchBrandLogoAsBase64(brandKit)
+          if (logoData) {
+            references.push({
+              label: `Official brand logo for "${brandKit.name}". Copy exactly if a logo is needed; do not redraw or restyle it.`,
+              mimeType: logoData.mimeType,
+              data: logoData.data
+            })
+          }
+        } catch (logoErr) {
+          console.warn('Failed to inject brand logo for OpenAI image generation:', logoErr)
+        }
+      }
+
+      const inputImageKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
+      inputImageKeys.forEach((key, idx) => {
+        const ref = parseDataUrlImage(
+          imageParams[key],
+          isLogoMode
+            ? `Existing user logo image ${idx + 1}. Use only as logo source material for the requested logo task.`
+            : `Product/offer reference ${idx + 1}. Classify independently as hero product, variant, proof/result, detail, or context and use only in that role.`
+        )
+        if (ref) references.push(ref)
+      })
+
+      if (Array.isArray(imageParams.contextImages) && isPostMode && !isLogoMode) {
+        imageParams.contextImages.slice(0, 4).forEach((ctxImg: unknown, idx: number) => {
+          const ref = parseDataUrlImage(
+            ctxImg,
+            `Context/inspiration image ${idx + 1}. Use for audience, scene, mood, lighting, or lifestyle only; do not copy product objects from it.`
+          )
+          if (ref) references.push(ref)
+        })
+      }
+
+      const imageSize = getOpenAIImageSize(imageParams.width || 1080, imageParams.height || 1080)
+      const prompt = buildOpenAIReferencePrompt(enhancedPrompt, references)
+      const hasReferences = references.length > 0
+      const requestBody: Record<string, unknown> = {
+        model: providerModel,
+        prompt,
+        n: 1,
+        size: imageSize,
+        quality: 'medium',
+        output_format: 'png'
+      }
+      if (hasReferences) {
+        requestBody.images = references.slice(0, 16).map(ref => ({ image_url: dataUrlFromInline(ref) }))
+      }
+
+      try {
+        const response = await withTimeout(fetch(hasReferences ? OPENAI_IMAGES_EDITS_URL : OPENAI_IMAGES_GENERATIONS_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openAiApiKey}`
+          },
+          body: JSON.stringify(requestBody)
+        }), 'OpenAI image generation')
+
+        const responseText = await response.text()
+        let result: Record<string, unknown>
+        try {
+          result = JSON.parse(responseText) as Record<string, unknown>
+        } catch {
+          result = { raw: responseText }
+        }
+
+        if (!response.ok) {
+          const errorMessage = typeof result.error === 'object' && result.error && 'message' in result.error
+            ? String((result.error as { message?: unknown }).message)
+            : responseText
+
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: isLogoMode ? 'logo' : 'image',
+            model: selectedModel,
+            generationId,
+            success: false,
+            errorMessage,
+            metadata: {
+              provider: 'openai',
+              providerModel,
+              endpoint: hasReferences ? 'images.edits' : 'images.generations',
+              referenceCount: references.length,
+              size: imageSize,
+              quality: 'medium',
+              costSource: 'unavailable'
+            }
+          })
+
+          return res.status(response.status).json({
+            error: 'OpenAI image generation failed',
+            details: errorMessage
+          })
+        }
+
+        const firstData = Array.isArray(result.data) ? result.data[0] as Record<string, unknown> | undefined : undefined
+        const b64Data = typeof firstData?.b64_json === 'string'
+          ? firstData.b64_json
+          : typeof result.b64_json === 'string'
+            ? result.b64_json
+            : null
+        const hostedUrl = typeof firstData?.url === 'string' ? firstData.url : null
+
+        if (!b64Data && !hostedUrl) {
+          throw new Error('No image data in OpenAI response')
+        }
+
+        const imageUrl = b64Data ? `data:image/png;base64,${b64Data}` : hostedUrl!
+        const openAIUsage = extractOpenAIUsage(result)
+        const inputTokens = openAIUsage?.input_tokens || 0
+        const outputTokens = openAIUsage?.output_tokens || 0
+        const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
+
+        await incrementUsage(user.id, 'image')
+        await deductBonusImage(user.id)
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: isLogoMode ? 'logo' : 'image',
+          model: selectedModel,
+          inputTokens,
+          outputTokens,
+          generationId,
+          costOverrideUsd,
+          costSource: costOverrideUsd === undefined ? 'unavailable' : 'provider_usage',
+          success: true,
+          metadata: {
+            provider: 'openai',
+            providerModel,
+            endpoint: hasReferences ? 'images.edits' : 'images.generations',
+            rawUsage: openAIUsage,
+            textInputTokens: openAIUsage?.input_tokens_details?.text_tokens || 0,
+            imageInputTokens: openAIUsage?.input_tokens_details?.image_tokens || 0,
+            imageOutputTokens: outputTokens,
+            width: imageParams.width,
+            height: imageParams.height,
+            size: imageSize,
+            quality: 'medium',
+            referenceCount: references.length,
+            brandKitId: brandKit?.id,
+            brandKitName: brandKit?.name,
+            ...(isLogoMode ? { logoMode: imageParams.logoMode, archetype: imageParams.logoArchetype } : {})
+          }
+        })
+
+        return res.status(200).json({
+          status: 'Ready',
+          result: { sample: imageUrl },
+          model: selectedModel,
+          providerModel,
+          generationId,
+          textWarning: false
+        })
+      } catch (openAIError) {
+        console.error('OpenAI image generation error:', openAIError)
+
+        await logApiUsage({
+          userId: user.id,
+          userEmail: user.email,
+          feature: isLogoMode ? 'logo' : 'image',
+          model: selectedModel,
+          generationId,
+          success: false,
+          errorMessage: openAIError instanceof Error ? openAIError.message : 'Unknown error',
+          metadata: {
+            provider: 'openai',
+            providerModel,
+            referenceCount: references.length,
+            size: imageSize,
+            quality: 'medium',
+            costSource: 'unavailable'
+          }
+        })
+
+        return res.status(isTimeoutError(openAIError) ? 504 : 500).json({
+          error: isTimeoutError(openAIError) ? 'OpenAI image generation timed out' : 'OpenAI image generation failed',
+          details: openAIError instanceof Error ? openAIError.message : 'Unknown error',
+          retryable: isTimeoutError(openAIError)
+        })
+      }
     }
 
     // =============================================
@@ -1076,13 +1439,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         if (refCount > 0 && isPostMode && !isLogoMode) {
           // Master header for all references
-          promptParts.push({ text: `══ ${refCount} IMÁGEN${refCount > 1 ? 'ES' : ''} DE REFERENCIA DEL PRODUCTO REAL (OBLIGATORIO USAR TODAS) ══\n${refCount > 1 ? `Se adjuntan ${refCount} fotos REALES del MISMO producto, cada una desde un ángulo, vista o contexto distinto. DEBES examinar y fusionar la información visual de las ${refCount} — no te limites a la primera. Cada imagen aporta verdad complementaria (forma, textura, detalles, contexto de uso) que el diseño final debe reflejar.\n\nPROHIBIDO ignorar imágenes. PROHIBIDO usar solo una. Considera TODAS como fuente de verdad.` : `Se adjunta una foto REAL del producto del usuario.`}\n\nEl producto en el diseño DEBE verse EXACTAMENTE como aparece en estas fotos. NO inventes, NO modifiques, NO reimagines la apariencia del producto.` })
+          promptParts.push({ text: `PRODUCT/OFFER VISUAL REFERENCES (${refCount}) - USE BY ROLE, DO NOT AMALGAMATE\n${refCount > 1 ? `These ${refCount} images are real references related to the user's product or offer. They may show different roles: hero product, packaging, variant, result/proof, detail, ingredient, texture, lifestyle, or style context. You MUST inspect every image, but you MUST NOT fuse unrelated images into one hybrid object.\n\nClassify each image silently before rendering. Pick one coherent hero product/offer. Use secondary references only as separate variants, proof panels, detail insets, contextual mood, or art-direction cues as appropriate.` : `This is a real visual reference for the user's product/offer. Use it as visual truth.`}\n\nThe final design must look coherent and intentional. Do not invent another product. Do not paste a result/detail photo onto the product unless it is actually printed on the real packaging.` })
 
           // Interleave a per-image label before each inlineData so Gemini tokenizes each one independently
           productImages.forEach((img, idx) => {
             const label = refCount > 1
-              ? `── REFERENCIA ${idx + 1} de ${refCount} (analizá esta imagen de forma independiente y extraé información visual complementaria a las demás) ──`
-              : '── REFERENCIA DEL PRODUCTO ──'
+              ? `REFERENCE ${idx + 1} of ${refCount}: analyze independently and assign a role (hero product, variant, proof/result, detail, context, or style). Use it only in that role.`
+              : 'PRODUCT/OFFER REFERENCE'
             promptParts.push({ text: label })
             promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
           })
@@ -1095,7 +1458,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         // Closing reinforcement if product images were provided
         if (refCount > 0 && isPostMode && !isLogoMode) {
-          promptParts.push({ text: `RECORDATORIO FINAL: El producto en el diseño DEBE ser IDÉNTICO a las ${refCount} foto${refCount > 1 ? 's' : ''} de referencia proporcionada${refCount > 1 ? 's' : ''} arriba. ${refCount > 1 ? `Fusioná la información de las ${refCount} imágenes — cada una muestra un aspecto distinto del MISMO producto. ` : ''}NO inventes otro producto. Copia forma, color, silueta y textura EXACTAMENTE de las referencias.` })
+          promptParts.push({ text: `FINAL PRODUCT REFERENCE CHECK: Use every provided reference intelligently, by role. If a reference is the sellable product or package, preserve its real shape, color, silhouette, texture, and details. If a reference is a result/proof/detail/context image, use it as supporting evidence, inset, mood, or background cue. Do NOT blend multiple references into a strange single object. Do NOT ignore relevant references.` })
         }
 
         // CONTEXT / INSPIRATION images — distinct from product truth.
@@ -1206,8 +1569,20 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           inputTokens: genInputTokens,
           outputTokens: genOutputTokens,
           thinkingTokens: genThinkingTokens,
+          generationId,
           success: true,
-          metadata: { width: imageParams.width, height: imageParams.height, hasInputImage: !!imageParams.input_image, brandKitId: brandKit?.id, brandKitName: brandKit?.name, ...(isLogoMode ? { logoMode: imageParams.logoMode, archetype: imageParams.logoArchetype } : {}) }
+          metadata: {
+            provider: 'google',
+            providerModel: geminiModelId,
+            rawUsage: genUsage,
+            imageSize: imageConfig.imageSize || '1K',
+            width: imageParams.width,
+            height: imageParams.height,
+            hasInputImage: !!imageParams.input_image,
+            brandKitId: brandKit?.id,
+            brandKitName: brandKit?.name,
+            ...(isLogoMode ? { logoMode: imageParams.logoMode, archetype: imageParams.logoArchetype } : {})
+          }
         })
 
         // Return immediately (no polling needed for Gemini)
@@ -1216,6 +1591,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           status: 'Ready',
           result: { sample: imageUrl },
           model: selectedModel,
+          providerModel: geminiModelId,
+          generationId,
           textWarning: false
         })
 
@@ -1228,9 +1605,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           userEmail: user.email,
           feature: 'image',
           model: selectedModel,
+          generationId,
           success: false,
           errorMessage: geminiError instanceof Error ? geminiError.message : 'Unknown error',
-          metadata: { hasInputImage: !!imageParams.input_image }
+          metadata: { provider: 'google', providerModel: geminiModelId, hasInputImage: !!imageParams.input_image, costSource: 'unavailable' }
         })
 
         // Pass through quota/rate limit errors with proper status code
