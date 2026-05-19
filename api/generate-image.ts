@@ -178,6 +178,19 @@ function getOpenAIImageSize(width: number, height: number): '1024x1024' | '1024x
   return ratio > 1 ? '1536x1024' : '1024x1536'
 }
 
+function buildOpenAIAspectInstruction(width: number, height: number): string {
+  const ratio = width / height
+  const label = Math.abs(ratio - 1) < 0.1
+    ? '1:1 square feed post'
+    : ratio < 0.62
+      ? '9:16 vertical Reel/Story'
+      : ratio < 0.85
+        ? '3:4 vertical feed post'
+        : 'landscape post'
+
+  return `FINAL CANVAS REQUIREMENT: Compose for an exact ${label} crop. The app will enforce the final canvas to ${width}x${height}. Keep all important product, logo, faces, offer text, and CTA inside the central safe area. Do not render a smaller poster inside a different aspect-ratio frame. The design must be full-bleed for the requested social format.\n\n`
+}
+
 function extractOpenAIUsage(result: Record<string, unknown>): OpenAIImageUsage | null {
   const rootUsage = result.usage
   if (rootUsage && typeof rootUsage === 'object') return rootUsage as OpenAIImageUsage
@@ -300,15 +313,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // =============================================
-    // IMAGE EDIT MODE (Gemini only)
+    // IMAGE EDIT MODE
     // Send existing image + edit instruction → get edited image back
     // =============================================
     if (action === 'edit') {
-      const geminiApiKey = process.env.GEMINI_API_KEY
-      if (!geminiApiKey) {
-        return res.status(500).json({ error: 'Gemini API key not configured' })
-      }
-
       const editPrompt = imageParams.editPrompt || ''
       const editImage = imageParams.editImage || ''
 
@@ -316,28 +324,152 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'editPrompt and editImage are required for edit action' })
       }
 
-      // Always use Gemini 3 Pro for edits (best quality + reasoning)
-      const editModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
-
       const editRefImages: string[] = Array.isArray(imageParams.editReferenceImages) ? imageParams.editReferenceImages : []
       const hasRefs = editRefImages.length > 0
+      const editAR = imageParams.aspectRatio === '1:1' ? '1:1' : imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
 
-      const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images — use them as visual guidance for the requested change.' : ''}
+      const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images - use them as visual guidance for the requested change.' : ''}
 Your task: Apply ONLY the requested change to the image while preserving everything else exactly as-is.
 Keep the same composition, layout, colors, style, typography, and overall look.
-Make the minimum change necessary to fulfill the user's request.${hasRefs ? '\nUse the reference images to understand what the user wants — match their style, colors, elements, or content as needed.' : ''}
+Make the minimum change necessary to fulfill the user's request.${hasRefs ? '\nUse the reference images to understand what the user wants - match their style, colors, elements, or content as needed.' : ''}
 Return the edited image.
 
 Edit instruction: ${editPrompt}`
 
+      if (selectedModel === 'gpt-image-2') {
+        const openAiApiKey = process.env.OPENAI_API_KEY
+        if (!openAiApiKey) return res.status(500).json({ error: 'OpenAI API key not configured' })
+
+        const providerModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
+        const editImageRef = parseDataUrlImage(editImage, 'Image to edit. Apply only the requested change and preserve all other visible content.')
+        if (!editImageRef) return res.status(400).json({ error: 'Invalid image format - expected base64 data URL' })
+
+        const references: InlineImageRef[] = [editImageRef]
+        editRefImages.slice(0, 4).forEach((refImg, idx) => {
+          const ref = parseDataUrlImage(refImg, `Optional edit reference ${idx + 1}. Use only as visual guidance for the requested change.`)
+          if (ref) references.push(ref)
+        })
+
+        const size = getOpenAIImageSize(editAR === '1:1' ? 1024 : 1024, editAR === '1:1' ? 1024 : editAR === '3:4' ? 1365 : 1536)
+        const prompt = buildOpenAIReferencePrompt(
+          buildOpenAIAspectInstruction(
+            editAR === '1:1' ? 1080 : 1080,
+            editAR === '1:1' ? 1080 : editAR === '3:4' ? 1440 : 1920
+          ) + systemEditPrompt,
+          references
+        )
+
+        try {
+          const response = await withTimeout(fetch(OPENAI_IMAGES_EDITS_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openAiApiKey}` },
+            body: JSON.stringify({
+              model: providerModel,
+              prompt,
+              images: references.map(ref => ({ image_url: dataUrlFromInline(ref) })),
+              n: 1,
+              size,
+              quality: 'medium',
+              output_format: 'png'
+            })
+          }), 'OpenAI edit')
+
+          const responseText = await response.text()
+          let result: Record<string, unknown>
+          try { result = JSON.parse(responseText) as Record<string, unknown> } catch { result = { raw: responseText } }
+
+          if (!response.ok) {
+            const errorMessage = typeof result.error === 'object' && result.error && 'message' in (result.error as Record<string, unknown>)
+              ? String((result.error as { message?: unknown }).message)
+              : responseText
+            await logApiUsage({
+              userId: user.id,
+              userEmail: user.email,
+              feature: 'edit',
+              model: selectedModel,
+              generationId,
+              success: false,
+              errorMessage,
+              metadata: { action: 'edit', provider: 'openai', providerModel, referenceCount: references.length, size, quality: 'medium', costSource: 'unavailable' }
+            })
+            return res.status(response.status).json({ error: 'OpenAI image edit failed', details: errorMessage })
+          }
+
+          const firstData = Array.isArray(result.data) ? result.data[0] as Record<string, unknown> | undefined : undefined
+          const b64Data = typeof firstData?.b64_json === 'string' ? firstData.b64_json : null
+          const hostedUrl = typeof firstData?.url === 'string' ? firstData.url : null
+          if (!b64Data && !hostedUrl) throw new Error('No image data in OpenAI edit response')
+
+          const openAIUsage = extractOpenAIUsage(result)
+          const inputTokens = openAIUsage?.input_tokens || 0
+          const outputTokens = openAIUsage?.output_tokens || 0
+          const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
+
+          await incrementUsage(user.id, 'image')
+          await deductBonusImage(user.id)
+
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'edit',
+            model: selectedModel,
+            inputTokens,
+            outputTokens,
+            generationId,
+            costOverrideUsd,
+            costSource: costOverrideUsd === undefined ? 'unavailable' : 'provider_usage',
+            success: true,
+            metadata: {
+              action: 'edit',
+              provider: 'openai',
+              providerModel,
+              rawUsage: openAIUsage,
+              textInputTokens: openAIUsage?.input_tokens_details?.text_tokens || 0,
+              imageInputTokens: openAIUsage?.input_tokens_details?.image_tokens || 0,
+              imageOutputTokens: outputTokens,
+              referenceCount: references.length,
+              size,
+              quality: 'medium',
+              editPrompt: String(editPrompt).substring(0, 100)
+            }
+          })
+
+          return res.status(200).json({
+            status: 'Ready',
+            result: { sample: b64Data ? `data:image/png;base64,${b64Data}` : hostedUrl! },
+            model: selectedModel,
+            providerModel,
+            generationId,
+            textWarning: false,
+            edited: true
+          })
+        } catch (editError) {
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'edit',
+            model: selectedModel,
+            generationId,
+            success: false,
+            errorMessage: editError instanceof Error ? editError.message : 'Unknown error',
+            metadata: { action: 'edit', provider: 'openai', providerModel, referenceCount: references.length, size, quality: 'medium', costSource: 'unavailable' }
+          })
+          return res.status(isTimeoutError(editError) ? 504 : 500).json({
+            error: isTimeoutError(editError) ? 'OpenAI image edit timed out' : 'OpenAI image edit failed',
+            details: editError instanceof Error ? editError.message : 'Unknown error',
+            retryable: isTimeoutError(editError)
+          })
+        }
+      }
+
+      const geminiApiKey = process.env.GEMINI_API_KEY
+      if (!geminiApiKey) return res.status(500).json({ error: 'Gemini API key not configured' })
+      const editModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
+
       try {
         const ai = new GoogleGenAI({ apiKey: geminiApiKey })
-
-        // Extract base64 from data URL
         const base64Match = editImage.match(/^data:([^;]+);base64,(.+)$/)
-        if (!base64Match) {
-          return res.status(400).json({ error: 'Invalid image format — expected base64 data URL' })
-        }
+        if (!base64Match) return res.status(400).json({ error: 'Invalid image format - expected base64 data URL' })
 
         type PromptPart = { text: string } | { inlineData: { mimeType: string; data: string } }
         const promptParts: PromptPart[] = [
@@ -345,30 +477,17 @@ Edit instruction: ${editPrompt}`
           { inlineData: { mimeType: base64Match[1], data: base64Match[2] } }
         ]
 
-        // Add reference images if provided (up to 4)
         for (const refImg of editRefImages.slice(0, 4)) {
           const refMatch = refImg.match(/^data:([^;]+);base64,(.+)$/)
-          if (refMatch) {
-            promptParts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } })
-          }
+          if (refMatch) promptParts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } })
         }
 
-        // Map request aspect ratio to Gemini-compatible string (default 9:16)
-        const editAR = imageParams.aspectRatio === '1:1' ? '1:1' : imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
-
-        // Retry once on transient errors (503, 500, etc.)
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
         try {
           response = await withTimeout(ai.models.generateContent({
             model: editModelId,
             contents: promptParts,
-            config: {
-              responseModalities: ['TEXT', 'IMAGE'],
-              imageConfig: {
-                imageSize: '2K',
-                aspectRatio: editAR
-              }
-            }
+            config: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: '2K', aspectRatio: editAR } }
           }), 'Gemini edit')
         } catch (firstErr) {
           console.warn('Gemini edit first attempt failed, retrying:', firstErr instanceof Error ? firstErr.message : firstErr)
@@ -376,38 +495,23 @@ Edit instruction: ${editPrompt}`
           response = await withTimeout(ai.models.generateContent({
             model: editModelId,
             contents: promptParts,
-            config: {
-              responseModalities: ['TEXT', 'IMAGE'],
-              imageConfig: {
-                imageSize: '2K',
-                aspectRatio: editAR
-              }
-            }
+            config: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { imageSize: '2K', aspectRatio: editAR } }
           }), 'Gemini edit retry')
         }
 
-        const candidates = response.candidates || []
-        const parts = candidates[0]?.content?.parts || []
-
+        const parts = response.candidates?.[0]?.content?.parts || []
         let imageUrl: string | null = null
         for (const part of parts) {
           if ('inlineData' in part && part.inlineData?.data) {
-            const mimeType = part.inlineData.mimeType || 'image/png'
-            imageUrl = `data:${mimeType};base64,${part.inlineData.data}`
+            imageUrl = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`
             break
           }
         }
+        if (!imageUrl) return res.status(500).json({ error: 'Gemini did not return an edited image' })
 
-        if (!imageUrl) {
-          console.error('No image in Gemini edit response:', JSON.stringify(response, null, 2))
-          return res.status(500).json({ error: 'Gemini did not return an edited image' })
-        }
-
-        // Count edit as image usage
         await incrementUsage(user.id, 'image')
         await deductBonusImage(user.id)
 
-        // Extract token usage from Gemini response
         const editUsage = response.usageMetadata
         const editInputTokens = editUsage?.promptTokenCount || 0
         const editOutputTokens = editUsage?.candidatesTokenCount || 0
@@ -421,38 +525,31 @@ Edit instruction: ${editPrompt}`
           inputTokens: editInputTokens,
           outputTokens: editOutputTokens,
           thinkingTokens: editThinkingTokens,
+          generationId,
           success: true,
-          metadata: {
-            action: 'edit',
-            provider: 'google',
-            providerModel: editModelId,
-            rawUsage: editUsage,
-            imageSize: '2K',
-            editPrompt: editPrompt.substring(0, 100)
-          }
+          metadata: { action: 'edit', provider: 'google', providerModel: editModelId, rawUsage: editUsage, imageSize: '2K', editPrompt: String(editPrompt).substring(0, 100) }
         })
 
         return res.status(200).json({
           status: 'Ready',
           result: { sample: imageUrl },
           model: 'nano-banana-pro',
+          providerModel: editModelId,
+          generationId,
           textWarning: false,
           edited: true
         })
-
       } catch (editError) {
-        console.error('Gemini edit error:', editError)
-
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'edit',
           model: 'nano-banana-pro',
+          generationId,
           success: false,
           errorMessage: editError instanceof Error ? editError.message : 'Unknown error',
           metadata: { action: 'edit', provider: 'google', providerModel: editModelId, costSource: 'unavailable' }
         })
-
         return res.status(isTimeoutError(editError) ? 504 : 500).json({
           error: 'Image edit failed',
           details: editError instanceof Error ? editError.message : 'Unknown error',
@@ -460,7 +557,6 @@ Edit instruction: ${editPrompt}`
         })
       }
     }
-
     // Brand Kit: resolve by explicit ID or fallback to user default
     // Hoisted before enhance + generation so logo is available in both paths
     const brandKitIdParam = imageParams.brandKitId as string | undefined
@@ -634,6 +730,76 @@ ${TIER_BODY}
 
 GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`
 
+      if (selectedModel === 'gpt-image-2') {
+        const openAiApiKey = process.env.OPENAI_API_KEY
+        if (!openAiApiKey) return res.status(500).json({ error: 'OpenAI API key not configured' })
+
+        const providerModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
+        const enhanceImageRef = parseDataUrlImage(enhanceImage, 'Image to enhance. Improve the design according to the selected tier while preserving required text, product, logo, and aspect ratio constraints.')
+        if (!enhanceImageRef) return res.status(400).json({ error: 'Invalid image format - expected base64 data URL' })
+
+        const references: InlineImageRef[] = [enhanceImageRef]
+        if (Array.isArray(imageParams.productReferenceImages)) {
+          imageParams.productReferenceImages.slice(0, 4).forEach((refImg: unknown, idx: number) => {
+            const ref = parseDataUrlImage(refImg, `Product reference ${idx + 1}. Use as product truth; do not blend into a hybrid object.`)
+            if (ref) references.push(ref)
+          })
+        }
+        if (brandKit && brandKit.logo_url) {
+          try {
+            const logoData = await fetchBrandLogoAsBase64(brandKit)
+            if (logoData) references.push({ label: `Official brand logo for "${brandKit.name}". Copy exactly if needed.`, mimeType: logoData.mimeType, data: logoData.data })
+          } catch (logoErr) { console.warn('Failed to inject brand logo for OpenAI enhance:', logoErr) }
+        }
+        if (Array.isArray(imageParams.contextReferenceImages)) {
+          imageParams.contextReferenceImages.slice(0, 4).forEach((ctxImg: unknown, idx: number) => {
+            const ref = parseDataUrlImage(ctxImg, `Context/inspiration reference ${idx + 1}. Use only for scene, audience, lighting, or mood.`)
+            if (ref) references.push(ref)
+          })
+        }
+
+        const size = getOpenAIImageSize(imageParams.aspectRatio === '1:1' ? 1024 : 1024, imageParams.aspectRatio === '1:1' ? 1024 : imageParams.aspectRatio === '3:4' ? 1365 : 1536)
+        const prompt = buildOpenAIReferencePrompt(
+          buildOpenAIAspectInstruction(
+            imageParams.aspectRatio === '1:1' ? 1080 : 1080,
+            imageParams.aspectRatio === '1:1' ? 1080 : imageParams.aspectRatio === '3:4' ? 1440 : 1920
+          ) + ENHANCE_SYSTEM_PROMPT,
+          references
+        )
+
+        try {
+          const response = await withTimeout(fetch(OPENAI_IMAGES_EDITS_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openAiApiKey}` },
+            body: JSON.stringify({ model: providerModel, prompt, images: references.map(ref => ({ image_url: dataUrlFromInline(ref) })), n: 1, size, quality: 'medium', output_format: 'png' })
+          }), 'OpenAI enhance')
+          const responseText = await response.text()
+          let result: Record<string, unknown>
+          try { result = JSON.parse(responseText) as Record<string, unknown> } catch { result = { raw: responseText } }
+          if (!response.ok) {
+            const errorMessage = typeof result.error === 'object' && result.error && 'message' in (result.error as Record<string, unknown>) ? String((result.error as { message?: unknown }).message) : responseText
+            await logApiUsage({ userId: user.id, userEmail: user.email, feature: 'enhance', model: selectedModel, generationId, success: false, errorMessage, metadata: { action: 'enhance', provider: 'openai', providerModel, enhanceTier, referenceCount: references.length, size, quality: 'medium', costSource: 'unavailable' } })
+            return res.status(response.status).json({ error: 'OpenAI image enhance failed', details: errorMessage })
+          }
+          const firstData = Array.isArray(result.data) ? result.data[0] as Record<string, unknown> | undefined : undefined
+          const b64Data = typeof firstData?.b64_json === 'string' ? firstData.b64_json : null
+          const hostedUrl = typeof firstData?.url === 'string' ? firstData.url : null
+          if (!b64Data && !hostedUrl) throw new Error('No image data in OpenAI enhance response')
+          const openAIUsage = extractOpenAIUsage(result)
+          const inputTokens = openAIUsage?.input_tokens || 0
+          const outputTokens = openAIUsage?.output_tokens || 0
+          const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
+          await incrementUsage(user.id, 'enhance')
+          await logApiUsage({
+            userId: user.id, userEmail: user.email, feature: 'enhance', model: selectedModel, inputTokens, outputTokens, generationId, costOverrideUsd, costSource: costOverrideUsd === undefined ? 'unavailable' : 'provider_usage', success: true,
+            metadata: { action: 'enhance', provider: 'openai', providerModel, rawUsage: openAIUsage, textInputTokens: openAIUsage?.input_tokens_details?.text_tokens || 0, imageInputTokens: openAIUsage?.input_tokens_details?.image_tokens || 0, imageOutputTokens: outputTokens, enhanceTier, referenceCount: references.length, size, quality: 'medium' }
+          })
+          return res.status(200).json({ status: 'Ready', result: { sample: b64Data ? `data:image/png;base64,${b64Data}` : hostedUrl! }, model: selectedModel, providerModel, generationId, textWarning: false, enhanced: true })
+        } catch (enhanceError) {
+          await logApiUsage({ userId: user.id, userEmail: user.email, feature: 'enhance', model: selectedModel, generationId, success: false, errorMessage: enhanceError instanceof Error ? enhanceError.message : 'Unknown error', metadata: { action: 'enhance', provider: 'openai', providerModel, enhanceTier, referenceCount: references.length, size, quality: 'medium', costSource: 'unavailable' } })
+          return res.status(isTimeoutError(enhanceError) ? 504 : 500).json({ error: isTimeoutError(enhanceError) ? 'OpenAI image enhance timed out' : 'OpenAI image enhance failed', details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error', retryable: isTimeoutError(enhanceError) })
+        }
+      }
       try {
         const ai = new GoogleGenAI({ apiKey: geminiApiKey })
 
@@ -1222,7 +1388,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       }
 
       const imageSize = getOpenAIImageSize(imageParams.width || 1080, imageParams.height || 1080)
-      const prompt = buildOpenAIReferencePrompt(enhancedPrompt, references)
+      const prompt = buildOpenAIReferencePrompt(
+        buildOpenAIAspectInstruction(imageParams.width || 1080, imageParams.height || 1080) + enhancedPrompt,
+        references
+      )
       const hasReferences = references.length > 0
       const requestBody: Record<string, unknown> = {
         model: providerModel,

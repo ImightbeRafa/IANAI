@@ -155,6 +155,54 @@ const detectImageAspectRatio = (imageUrl: string): Promise<PostAspectRatio> =>
     img.src = imageUrl
   })
 
+const ASPECT_OUTPUT_SIZE: Record<PostAspectRatio, { width: number; height: number }> = {
+  '9:16': { width: 1080, height: 1920 },
+  '3:4': { width: 1080, height: 1440 },
+  '1:1': { width: 1080, height: 1080 },
+}
+
+const normalizeImageToAspectRatio = (imageUrl: string, targetAspect: PostAspectRatio): Promise<string> =>
+  new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const { width, height } = ASPECT_OUTPUT_SIZE[targetAspect]
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          resolve(imageUrl)
+          return
+        }
+
+        const targetRatio = width / height
+        const sourceRatio = img.naturalWidth / img.naturalHeight
+        let sx = 0
+        let sy = 0
+        let sw = img.naturalWidth
+        let sh = img.naturalHeight
+
+        if (sourceRatio > targetRatio) {
+          sw = img.naturalHeight * targetRatio
+          sx = (img.naturalWidth - sw) / 2
+        } else if (sourceRatio < targetRatio) {
+          sh = img.naturalWidth / targetRatio
+          sy = (img.naturalHeight - sh) / 2
+        }
+
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/png'))
+      } catch (err) {
+        console.warn('Aspect normalization failed:', err)
+        resolve(imageUrl)
+      }
+    }
+    img.onerror = () => resolve(imageUrl)
+    img.crossOrigin = 'anonymous'
+    img.src = imageUrl
+  })
+
 export default function PostWorkspace() {
   const { productId } = useParams<{ productId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -1107,7 +1155,10 @@ export default function PostWorkspace() {
       })
 
       if (result.status === 'Ready' && result.result?.sample) {
-        const imageUrl = result.result.sample
+        const imageUrl = await normalizeImageToAspectRatio(
+          result.result.sample,
+          isLogoMode ? '1:1' : aspectRatio
+        )
         const tempId = `post-${Date.now()}`
         const usedPrompt = requestBody.prompt as string || ''
 
@@ -1268,6 +1319,7 @@ export default function PostWorkspace() {
 
       const detectedAR = await detectImageAspectRatio(imageUrl)
       const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
+      const generationId = crypto.randomUUID()
       const compressedRefImages = editRefImages.length > 0
         ? await Promise.all(editRefImages.map(img => compressBase64ForApi(img)))
         : undefined
@@ -1280,6 +1332,8 @@ export default function PostWorkspace() {
         },
         body: JSON.stringify({
           action: 'edit',
+          model: imageModel,
+          generationId,
           editPrompt: editPrompt.trim(),
           editImage: base64Image,
           aspectRatio: detectedAR,
@@ -1292,7 +1346,7 @@ export default function PostWorkspace() {
       })
 
       if (result.status === 'Ready' && result.result?.sample) {
-        const editedUrl = result.result.sample
+        const editedUrl = await normalizeImageToAspectRatio(result.result.sample, detectedAR)
         const tempId = `edit-${Date.now()}`
         const editText = editPrompt.trim()
 
@@ -1305,7 +1359,8 @@ export default function PostWorkspace() {
             imageUrl: editedUrl,
             prompt: `✏️ ${editText}`,
             createdAt: new Date(),
-            model: 'nano-banana-pro',
+            model: result.model || imageModel,
+            generationId: result.generationId || generationId,
             saved: false
           })
           return next
@@ -1324,13 +1379,14 @@ export default function PostWorkspace() {
                 width: 0,
                 height: 0,
                 output_format: 'png',
-                model: 'nano-banana-pro'
+                model: result.model || imageModel,
+                generation_id: result.generationId || generationId
               })
               await updatePostStatus(dbPost.id, 'completed', savedUrl)
               // Preload into browser cache before swapping URL to avoid blank flash
               await preloadImage(savedUrl)
               setGeneratedPosts(prev => prev.map(p =>
-                p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
+                p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true, generationId: result.generationId || generationId } : p
               ))
               // Sync enhancing ref if it was tracking this tempId
               if (enhancingPostIdRef.current === tempId) {
@@ -1411,6 +1467,7 @@ export default function PostWorkspace() {
 
       const detectedAR = await detectImageAspectRatio(imageUrl)
       const base64Image = await compressBase64ForApi(await urlToBase64(imageUrl))
+      const generationId = crypto.randomUUID()
 
       const result = await fetchJson<ImageApiResponse>(API_URL, {
         method: 'POST',
@@ -1420,6 +1477,8 @@ export default function PostWorkspace() {
         },
         body: JSON.stringify({
           action: 'enhance',
+          model: imageModel,
+          generationId,
           enhanceImage: base64Image,
           aspectRatio: detectedAR,
           language,
@@ -1438,7 +1497,7 @@ export default function PostWorkspace() {
       })
 
       if (result.status === 'Ready' && result.result?.sample) {
-        const enhancedUrl = result.result.sample
+        const enhancedUrl = await normalizeImageToAspectRatio(result.result.sample, detectedAR)
         const tempId = `enhance-${Date.now()}`
 
         // Use ref to get the CURRENT post id (may have changed via background save)
@@ -1453,7 +1512,8 @@ export default function PostWorkspace() {
             imageUrl: enhancedUrl,
             prompt: `✨ Enhanced`,
             createdAt: new Date(),
-            model: 'nano-banana-pro',
+            model: result.model || imageModel,
+            generationId: result.generationId || generationId,
             saved: false
           })
           return next
@@ -1469,13 +1529,14 @@ export default function PostWorkspace() {
                 width: 0,
                 height: 0,
                 output_format: 'png',
-                model: 'nano-banana-pro'
+                model: result.model || imageModel,
+                generation_id: result.generationId || generationId
               })
               await updatePostStatus(dbPost.id, 'completed', savedUrl)
               // Preload into browser cache before swapping URL to avoid blank flash
               await preloadImage(savedUrl)
               setGeneratedPosts(prev => prev.map(p =>
-                p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true } : p
+                p.id === tempId ? { ...p, id: dbPost.id, imageUrl: savedUrl, saved: true, generationId: result.generationId || generationId } : p
               ))
               // Sync enhancing ref if user started enhancing this post before save finished
               if (enhancingPostIdRef.current === tempId) {
