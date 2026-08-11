@@ -3,6 +3,7 @@ import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
 import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { userHasProductAccess } from './lib/product-access.js'
 
 const GLOBAL_SYNTHESIS_SYSTEM = `You are a copywriting style analyst. You will receive a user's saved scripts, editing patterns, behavioral signals, and ANTI-PATTERNS (things the user explicitly rejects) across all their products.
 
@@ -66,8 +67,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { productId } = req.body as SynthesisRequest
+    const { productId: rawProductId } = req.body as SynthesisRequest
     const userId = user.id
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const productId = rawProductId && UUID_RE.test(rawProductId) ? rawProductId : undefined
+
+    if (rawProductId && !productId) {
+      return res.status(400).json({ error: 'Invalid productId format' })
+    }
+
+    if (productId) {
+      const allowed = await userHasProductAccess(userId, productId)
+      if (!allowed) {
+        return res.status(403).json({ error: 'Access denied to this product' })
+      }
+    }
 
     // Fetch both memory rows
     const [globalMemResult, productMemResult] = await Promise.all([

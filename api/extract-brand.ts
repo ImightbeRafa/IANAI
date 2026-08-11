@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { logApiUsage } from './lib/usage-logger.js'
 import { GoogleGenAI } from '@google/genai'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
+import { assertPublicHttpUrl, fetchPublicUrl } from './lib/url-safety.js'
 
 // ── Helpers: extract brand hints from raw HTML ──────────────────────
 function extractColorsFromHtml(html: string): string[] {
@@ -82,15 +83,6 @@ function extractLogoUrls(html: string, baseUrl: string): string[] {
   return logos.slice(0, 5)
 }
 
-// ── SSRF protection ──────────────────────────────────────────────────
-const BLOCKED_PATTERNS = [
-  'localhost', '127.0.0.1', '0.0.0.0', '::1',
-  '169.254.', '10.', '172.16.', '172.17.', '172.18.', '172.19.',
-  '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
-  '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.',
-  '192.168.', 'metadata.google', '169.254.169.254'
-]
-
 // ── Main handler ─────────────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -116,29 +108,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let parsedUrl: URL
     try {
-      parsedUrl = new URL(url)
-      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('bad protocol')
+      parsedUrl = assertPublicHttpUrl(url)
     } catch {
-      return res.status(400).json({ error: 'Invalid URL format' })
-    }
-
-    const hostname = parsedUrl.hostname.toLowerCase()
-    if (BLOCKED_PATTERNS.some(p => hostname.startsWith(p) || hostname === p)) {
-      return res.status(400).json({ error: 'URL not allowed' })
+      return res.status(400).json({ error: 'Invalid or disallowed URL' })
     }
 
     // ── 1. Fetch page HTML ───────────────────────────────────────────
     let html = ''
     try {
-      const response = await fetch(url, {
+      const response = await fetchPublicUrl(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
           'Accept-Encoding': 'identity',
         },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(15000)
+        timeoutMs: 15000
       })
       if (!response.ok) throw new Error(`${response.status}`)
       html = await response.text()

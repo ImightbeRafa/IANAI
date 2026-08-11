@@ -4,6 +4,7 @@ import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
 import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { userHasProductAccess } from './lib/product-access.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -73,6 +74,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Validate productId is a real UUID if provided (prevents filter injection)
     const productId = rawProductId && UUID_RE.test(rawProductId) ? rawProductId : undefined
+
+    if (productId) {
+      const allowed = await userHasProductAccess(userId, productId)
+      if (!allowed) {
+        return res.status(403).json({ error: 'Access denied to this product' })
+      }
+    }
 
     // =============================================
     // 1. CHECK IF REFLECTION IS NEEDED

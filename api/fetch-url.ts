@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { logApiUsage } from './lib/usage-logger.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
+import { assertPublicHttpUrl, fetchPublicUrl } from './lib/url-safety.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
@@ -40,32 +41,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'URL is required' })
     }
 
-    // Validate URL format
     let parsedUrl: URL
     try {
-      parsedUrl = new URL(url)
-      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-        throw new Error('Invalid protocol')
-      }
+      parsedUrl = assertPublicHttpUrl(url)
     } catch {
-      return res.status(400).json({ error: 'Invalid URL format' })
+      return res.status(400).json({ error: 'Invalid or disallowed URL' })
     }
 
-    // SSRF protection: block internal/private IPs and localhost
-    const hostname = parsedUrl.hostname.toLowerCase()
-    const blockedPatterns = [
-      'localhost', '127.0.0.1', '0.0.0.0', '::1',
-      '169.254.', '10.', '172.16.', '172.17.', '172.18.', '172.19.',
-      '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.',
-      '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.',
-      '192.168.', 'metadata.google', '169.254.169.254'
-    ]
-    if (blockedPatterns.some(p => hostname.startsWith(p) || hostname === p)) {
-      return res.status(400).json({ error: 'URL not allowed' })
-    }
-
-    // Fetch URL content with realistic browser headers
-    const response = await fetch(url, {
+    // Fetch URL content with realistic browser headers (SSRF-safe redirects)
+    const response = await fetchPublicUrl(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -78,8 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Sec-Fetch-User': '?1',
         'Upgrade-Insecure-Requests': '1'
       },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(15000) // 15 second timeout
+      timeoutMs: 15000
     })
 
     if (!response.ok) {

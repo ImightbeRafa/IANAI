@@ -145,7 +145,9 @@ export async function checkUsageLimit(
       .single()
 
     if (!limits) {
-      return { allowed: true, remaining: -1, limit: -1 }
+      // Fail closed: missing plan configuration must not grant unlimited usage
+      console.error('Usage limit check: missing plan_limits row for plan', plan)
+      return { allowed: false, remaining: 0, limit: 0 }
     }
 
     // Enhance checks against the image limit (at half rate)
