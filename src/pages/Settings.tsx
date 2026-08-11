@@ -1242,9 +1242,16 @@ export default function Settings() {
                         })
                         const data = await response.json()
                         if (data.success) {
-                          setMessage({ type: 'success', text: language === 'es' ? `¡+${data.bonusImages} diseños bonus activados!` : `+${data.bonusImages} bonus designs activated!` })
+                          setMessage({ type: 'success', text: language === 'es' ? `¡Diseños bonus confirmados! (${data.bonusImages ?? ''})` : `Bonus designs confirmed! (${data.bonusImages ?? ''})` })
                           setBoostPending(false)
                           usageLimits.refresh?.()
+                        } else if (response.status === 402 || data.code === 'PAYMENT_NOT_VERIFIED') {
+                          setMessage({
+                            type: 'error',
+                            text: language === 'es'
+                              ? 'Pago aún no verificado. Completa el checkout en TiloPay, espera unos segundos e intenta de nuevo.'
+                              : 'Payment not verified yet. Finish TiloPay checkout, wait a few seconds, then try again.'
+                          })
                         } else {
                           setMessage({ type: 'error', text: data.error || 'Error' })
                         }

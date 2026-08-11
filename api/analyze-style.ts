@@ -3,6 +3,7 @@ import { requireAuth } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
+import { fetchPublicUrl } from './lib/url-safety.js'
 
 export const config = {
   api: {
@@ -109,16 +110,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // If it's a regular URL (not base64), fetch and convert
       if (img.startsWith('http://') || img.startsWith('https://')) {
         try {
-          const imgResp = await fetch(img)
+          const imgResp = await fetchPublicUrl(img, { timeoutMs: 15000, maxRedirects: 3 })
           if (!imgResp.ok) {
             return res.status(400).json({ error: `Failed to fetch reference image ${i + 1} from URL` })
           }
           const contentType = imgResp.headers.get('content-type') || 'image/webp'
+          if (!contentType.startsWith('image/')) {
+            return res.status(400).json({ error: `Reference image ${i + 1} URL did not return an image` })
+          }
           const buffer = await imgResp.arrayBuffer()
+          if (buffer.byteLength > 8_000_000) {
+            return res.status(413).json({ error: `Reference image ${i + 1} is too large` })
+          }
           const base64 = Buffer.from(buffer).toString('base64')
-          img = `data:${contentType};base64,${base64}`
+          img = `data:${contentType.split(';')[0]};base64,${base64}`
         } catch (fetchErr) {
-          console.error(`Failed to fetch reference image ${i + 1}:`, fetchErr)
+          console.error(`Failed to fetch reference image ${i + 1}:`, fetchErr instanceof Error ? fetchErr.message : 'unknown')
           return res.status(400).json({ error: `Could not load reference image ${i + 1}. Please try re-uploading.` })
         }
       }

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage, isAdminUser } from './lib/auth.js'
+import { userHasProductAccess } from './lib/product-access.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
@@ -262,6 +263,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const { action, taskId, model = 'nano-banana', ...imageParams } = req.body
+
+    // Service-role product lookups later bypass RLS — enforce ownership up front
+    const rawProductId = typeof imageParams.productId === 'string' ? imageParams.productId : undefined
+    const UUID_RE_PRODUCT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (rawProductId) {
+      if (!UUID_RE_PRODUCT.test(rawProductId)) {
+        return res.status(400).json({ error: 'Invalid productId format' })
+      }
+      const allowedProduct = await userHasProductAccess(user.id, rawProductId)
+      if (!allowedProduct) {
+        return res.status(403).json({ error: 'Access denied to this product' })
+      }
+    }
 
     const VALID_ACTIONS = ['generate', 'edit', 'enhance', 'poll', 'post']
     if (action && !VALID_ACTIONS.includes(action)) {
