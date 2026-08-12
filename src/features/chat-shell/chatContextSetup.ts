@@ -72,6 +72,39 @@ export function resolveSetupInterviewPhase(options: {
   return 'hidden'
 }
 
+export function setupSkippedStorageKey(sessionId: string): string {
+  return `ianai.chat-shell.contextSetup.skipped.${sessionId}`
+}
+
+/** Persist Skip per session so reload keeps interview skipped until Setup reopen. */
+export function readSetupSkipped(
+  storage: { getItem(key: string): string | null } | null | undefined,
+  sessionId: string | null | undefined
+): boolean {
+  if (!storage || !sessionId) return false
+  try {
+    const raw = storage.getItem(setupSkippedStorageKey(sessionId))
+    return raw === '1' || raw === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function writeSetupSkipped(
+  storage: { setItem?(key: string, value: string): void; removeItem?(key: string): void } | null | undefined,
+  sessionId: string | null | undefined,
+  skipped: boolean
+): void {
+  if (!storage || !sessionId) return
+  try {
+    const key = setupSkippedStorageKey(sessionId)
+    if (skipped) storage.setItem?.(key, '1')
+    else storage.removeItem?.(key)
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 /** Normalize untrusted autofill JSON into an editable draft (invalid enums dropped). */
 export function normalizeSessionContextAutofill(
   raw: Record<string, unknown> | null | undefined

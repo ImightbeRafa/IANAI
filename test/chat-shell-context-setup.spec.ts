@@ -4,8 +4,11 @@ import {
   classifyGenerateReadiness,
   isSessionSetupComplete,
   normalizeSessionContextAutofill,
+  readSetupSkipped,
   resolveSetupInterviewPhase,
+  setupSkippedStorageKey,
   shouldShowSetupInterview,
+  writeSetupSkipped,
 } from '../src/features/chat-shell/chatContextSetup'
 
 describe('session setup interview helpers', () => {
@@ -55,6 +58,32 @@ describe('session setup interview helpers', () => {
         skippedSessionIds: new Set(),
       })
     ).toBe('visible')
+  })
+
+  it('persists Skip per session id in localStorage', () => {
+    const store: Record<string, string> = {}
+    const storage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v
+      },
+      removeItem: (k: string) => {
+        delete store[k]
+      },
+    }
+    expect(setupSkippedStorageKey('s1')).toBe('ianai.chat-shell.contextSetup.skipped.s1')
+    expect(readSetupSkipped(storage, 's1')).toBe(false)
+    writeSetupSkipped(storage, 's1', true)
+    expect(readSetupSkipped(storage, 's1')).toBe(true)
+    expect(readSetupSkipped(storage, 's2')).toBe(false)
+    writeSetupSkipped(storage, 's1', false)
+    expect(readSetupSkipped(storage, 's1')).toBe(false)
+    expect(store['ianai.chat-shell.contextSetup.skipped.s1']).toBeUndefined()
+  })
+
+  it('read/write Setup Skip tolerate missing storage', () => {
+    expect(readSetupSkipped(null, 's1')).toBe(false)
+    expect(() => writeSetupSkipped(null, 's1', true)).not.toThrow()
   })
 
   it('normalizes autofill and drops invalid enums', () => {

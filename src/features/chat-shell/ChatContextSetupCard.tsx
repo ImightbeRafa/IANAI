@@ -16,6 +16,7 @@ interface ChatContextSetupCardProps {
   session: ChatSession
   skipped: boolean
   forceOpen: boolean
+  language?: 'en' | 'es'
   onSkipped: () => void
   onForceOpenConsumed?: () => void
   onSaved: (updates: ChatSessionSafeUpdates) => void | Promise<void>
@@ -25,6 +26,7 @@ export default function ChatContextSetupCard({
   session,
   skipped,
   forceOpen,
+  language = 'es',
   onSkipped,
   onForceOpenConsumed,
   onSaved,
@@ -81,7 +83,7 @@ export default function ChatContextSetupCard({
           return
         }
         setStatus('Fetching URL…')
-        const { data, error: err } = await autoFillFromUrl(url.trim(), 'session_context', 'en')
+        const { data, error: err } = await autoFillFromUrl(url.trim(), 'session_context', language)
         if (requestId !== requestRef.current || sessionIdRef.current !== originSessionId) return
         if (!data || err) {
           setError(err || 'Could not extract content from link')
@@ -96,7 +98,7 @@ export default function ChatContextSetupCard({
           return
         }
         setStatus('Analyzing…')
-        const { data, error: err } = await autoFillFromText(paste.trim(), 'session_context', 'en')
+        const { data, error: err } = await autoFillFromText(paste.trim(), 'session_context', language)
         if (requestId !== requestRef.current || sessionIdRef.current !== originSessionId) return
         if (!data || err) {
           setError(err || 'Could not analyze pasted text')

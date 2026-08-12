@@ -3,7 +3,11 @@ import { X } from 'lucide-react'
 import type { Business, ChatSession, ChatSessionOffer, Product } from '../../types'
 import type { ChatSessionSafeUpdates, ProductImage } from '../../services/database'
 import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
-import { isSessionSetupComplete } from './chatContextSetup'
+import {
+  isSessionSetupComplete,
+  readSetupSkipped,
+  writeSetupSkipped,
+} from './chatContextSetup'
 import ChatContextSetupCard from './ChatContextSetupCard'
 import {
   formatImageAssumptions,
@@ -64,11 +68,17 @@ export default function ChatContextRail({
   onPatchImagePreferences,
   language = 'es',
 }: ChatContextRailProps) {
+  const storage = typeof localStorage !== 'undefined' ? localStorage : null
   const [title, setTitle] = useState(session?.title || '')
   const [context, setContext] = useState(session?.context || '')
   const [channel, setChannel] = useState(session?.primary_channel || '')
   const [awareness, setAwareness] = useState(session?.awareness_level || '')
-  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => new Set())
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => {
+    if (session?.id && readSetupSkipped(storage, session.id)) {
+      return new Set([session.id])
+    }
+    return new Set()
+  })
   const [forceSetup, setForceSetup] = useState(false)
 
   useEffect(() => {
@@ -81,6 +91,40 @@ export default function ChatContextRail({
   useEffect(() => {
     setForceSetup(false)
   }, [session?.id])
+
+  // Hydrate Skip persistence when the active session changes.
+  useEffect(() => {
+    const id = session?.id
+    if (!id) return
+    const stored = readSetupSkipped(storage, id)
+    setSkippedIds((prev) => {
+      const next = new Set(prev)
+      if (stored) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }, [session?.id, storage])
+
+  const markSkipped = (sessionId: string) => {
+    writeSetupSkipped(storage, sessionId, true)
+    setSkippedIds((prev) => new Set(prev).add(sessionId))
+    setForceSetup(false)
+  }
+
+  const clearSkipped = (sessionId: string) => {
+    writeSetupSkipped(storage, sessionId, false)
+    setSkippedIds((prev) => {
+      const next = new Set(prev)
+      next.delete(sessionId)
+      return next
+    })
+  }
+
+  const reopenSetup = () => {
+    if (!session) return
+    clearSkipped(session.id)
+    setForceSetup(true)
+  }
 
   const saveField = (updates: ChatSessionSafeUpdates) => {
     if (!session || !onPatchSession) return
@@ -158,17 +202,13 @@ export default function ChatContextRail({
                 session={session}
                 skipped={sessionSkipped}
                 forceOpen={forceSetup}
+                language={language}
                 onSkipped={() => {
-                  setSkippedIds((prev) => new Set(prev).add(session.id))
-                  setForceSetup(false)
+                  markSkipped(session.id)
                 }}
                 onSaved={async (updates) => {
                   await onPatchSession?.(updates)
-                  setSkippedIds((prev) => {
-                    const next = new Set(prev)
-                    next.delete(session.id)
-                    return next
-                  })
+                  clearSkipped(session.id)
                   setForceSetup(false)
                   if (typeof updates.title === 'string') setTitle(updates.title)
                   if (typeof updates.context === 'string') setContext(updates.context)
@@ -186,12 +226,14 @@ export default function ChatContextRail({
                   <button
                     type="button"
                     className="chat-shell__setup-btn"
-                    onClick={() => setForceSetup(true)}
+                    onClick={reopenSetup}
                   >
                     Setup
                   </button>
                   <span className="chat-shell__rail-hint">
-                    {setupComplete ? 'Setup saved.' : 'Setup skipped — composer still works.'}
+                    {setupComplete
+                      ? 'Setup saved.'
+                      : 'Setup incomplete — add context and a primary channel for stronger generations. Composer still works.'}
                   </span>
                 </div>
               ) : null}
