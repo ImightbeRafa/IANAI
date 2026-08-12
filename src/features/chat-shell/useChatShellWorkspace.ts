@@ -42,12 +42,23 @@ function readUrlSessionId(): string | null {
   return readUrlSelection().sessionId
 }
 
+/** Capture URL/stored selection once at hook boot (before any async hydrate). */
+function readBootSelection() {
+  return resolveInitialSelection(readUrlSelection(), readStoredSelection())
+}
+
 export function useChatShellWorkspace(userId: string | undefined) {
   const [, setSearchParams] = useSearchParams()
+  const bootRef = useRef<ReturnType<typeof readBootSelection> | null>(null)
+  if (bootRef.current === null) {
+    bootRef.current = readBootSelection()
+  }
+  const boot = bootRef.current
+
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
-  const [activeBrandId, setActiveBrandId] = useState<string | null>(null)
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [activeBrandId, setActiveBrandId] = useState<string | null>(() => boot.brandId)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => boot.sessionId)
   const [loadingBusinesses, setLoadingBusinesses] = useState(true)
   const [loadingSessions, setLoadingSessions] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -56,10 +67,15 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const [sessionCounts, setSessionCounts] = useState<Record<string, number>>({})
   const [firstUserPreviews, setFirstUserPreviews] = useState<Record<string, string>>({})
 
+  /**
+   * Authoritative session intent from boot URL / Skip pin / user select|create.
+   * List hydrate and syncUrl must not replace this with brand-newest.
+   */
+  const authoritativeSessionRef = useRef<string | null>(boot.sessionId)
   /** Hydrate / Quick hint — never trusted over a newer user click. */
-  const preferredSessionRef = useRef<string | null>(null)
-  const activeSessionIdRef = useRef<string | null>(null)
-  const activeBrandIdRef = useRef<string | null>(null)
+  const preferredSessionRef = useRef<string | null>(boot.sessionId)
+  const activeSessionIdRef = useRef<string | null>(boot.sessionId)
+  const activeBrandIdRef = useRef<string | null>(boot.brandId)
   /** Bumped on every user-driven selection/create so stale fetches cannot overwrite. */
   const selectionEpochRef = useRef(0)
   const sessionsRequestIdRef = useRef(0)
@@ -92,12 +108,29 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
   const syncUrlAndStorage = useCallback(
     (brandId: string | null, sessionId: string | null) => {
-      persistSelection({ brandId, sessionId })
-      const nextSelection = { brandId, sessionId }
+      // Never let hydrate/sync rewrite away from authoritative deep-link / Skip pin.
+      const auth = authoritativeSessionRef.current
+      let nextSessionId = sessionId
+      if (auth) {
+        if (!nextSessionId || nextSessionId !== auth) {
+          nextSessionId = auth
+        }
+      }
+      persistSelection({ brandId, sessionId: nextSessionId })
+      const nextSelection = { brandId, sessionId: nextSessionId }
       if (selectionsEqual(readUrlSelection(), nextSelection)) return
       setSearchParams(selectionToSearchParams(nextSelection), { replace: true })
     },
     [setSearchParams]
+  )
+
+  const setAuthoritativeSession = useCallback(
+    (sessionId: string | null) => {
+      authoritativeSessionRef.current = sessionId
+      preferredSessionRef.current = sessionId
+      commitSessionId(sessionId)
+    },
+    [commitSessionId]
   )
 
   const selectBrand = useCallback(
@@ -105,6 +138,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       if (brandId === activeBrandIdRef.current) return
       bumpSelectionEpoch()
       preferredSessionRef.current = null
+      authoritativeSessionRef.current = null
       activeBrandIdRef.current = brandId
       setActiveBrandId(brandId)
       commitSessionId(null)
@@ -119,8 +153,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     (session: ChatSession) => {
       const brandId = session.business_id || activeBrandIdRef.current
       bumpSelectionEpoch()
-      preferredSessionRef.current = session.id
-      commitSessionId(session.id)
+      setAuthoritativeSession(session.id)
       setNotice(null)
       if (brandId && brandId !== activeBrandIdRef.current) {
         activeBrandIdRef.current = brandId
@@ -128,7 +161,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       }
       syncUrlAndStorage(brandId, session.id)
     },
-    [bumpSelectionEpoch, commitSessionId, syncUrlAndStorage]
+    [bumpSelectionEpoch, setAuthoritativeSession, syncUrlAndStorage]
   )
 
   /**
@@ -140,12 +173,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
     (sessionId: string) => {
       if (!sessionId) return
       bumpSelectionEpoch()
-      preferredSessionRef.current = sessionId
-      commitSessionId(sessionId)
+      setAuthoritativeSession(sessionId)
       const brandId = activeBrandIdRef.current
       syncUrlAndStorage(brandId, sessionId)
     },
-    [bumpSelectionEpoch, commitSessionId, syncUrlAndStorage]
+    [bumpSelectionEpoch, setAuthoritativeSession, syncUrlAndStorage]
   )
 
   const refreshBusinesses = useCallback(async () => {
@@ -200,22 +232,29 @@ export function useChatShellWorkspace(userId: string | undefined) {
         readUrlSelection(),
         readStoredSelection()
       )
+      const deepLinkSession =
+        authoritativeSessionRef.current || initial.sessionId || null
       const brandStillValid = Boolean(
         initial.brandId && list.some((b) => b.id === initial.brandId)
       )
-      // Brand may be provisional when only ?session= is authoritative; never drop
-      // the URL/stored session id just because brand is missing or not in list yet.
+      // With an explicit ?session=, never invent list[0] brand — touch-load
+      // resolves the session's real brand. Falling to list[0] caused A→newest snaps.
       const nextBrandId = brandStillValid
         ? initial.brandId
-        : (list[0]?.id ?? null)
-      const nextSessionId = initial.sessionId
+        : deepLinkSession
+          ? (initial.brandId || activeBrandIdRef.current)
+          : (list[0]?.id ?? null)
+      const nextSessionId = deepLinkSession
 
       if (selectionEpochRef.current !== epochAtStart) {
         didHydrateSelectionRef.current = true
         return
       }
 
-      preferredSessionRef.current = nextSessionId
+      if (nextSessionId) {
+        authoritativeSessionRef.current = nextSessionId
+        preferredSessionRef.current = nextSessionId
+      }
       activeBrandIdRef.current = nextBrandId
       setActiveBrandId(nextBrandId)
       commitSessionId(nextSessionId)
@@ -294,10 +333,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
           return
         }
 
-        // Read selection at completion time (never use stale start-of-request preferred).
-        // urlId / preferred beat brand-newest — never rewrite deep-link away.
-        const urlId = readUrlSessionId()
-        const preferredId = preferredSessionRef.current
+        // Read selection at completion time — authoritative deep-link / Skip pin
+        // beats mutable window.location (which syncUrl may have raced).
+        const authId = authoritativeSessionRef.current
+        const urlId = readUrlSessionId() || authId
+        const preferredId = preferredSessionRef.current || authId
         const nextSessionId = resolveNextSessionId({
           sessionIds: list.map((s) => s.id),
           currentId:
@@ -308,29 +348,24 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
         if (selectionEpochRef.current !== epochAtStart) return
 
-        // Do NOT clear preferred here. Skip/pin and deep-link rely on preferred
-        // surviving list hydrate; only selectBrand / a newer select|create replaces it.
-        // Avoid redundant URL/storage writes that can thrash downstream effects.
-        if (nextSessionId !== activeSessionIdRef.current) {
-          // Stick guard: never let list hydrate jump away from url/preferred/current intent.
-          const pinned = urlId || preferredId || currentId
-          if (
-            pinned
-            && nextSessionId
-            && nextSessionId !== pinned
-            && !pendingDeletedRef.current.has(pinned)
-          ) {
-            commitSessionId(pinned)
-            syncUrlAndStorage(brandId, pinned)
-            return
-          }
-          commitSessionId(nextSessionId)
+        // Stick to authoritative / url / preferred — never brand-newest rewrite.
+        const pinned =
+          authId
+          || urlId
+          || preferredId
+          || (currentId && !pendingDeletedRef.current.has(currentId) ? currentId : null)
+        const stickId =
+          pinned && nextSessionId && nextSessionId !== pinned && !pendingDeletedRef.current.has(pinned)
+            ? pinned
+            : nextSessionId
+
+        if (stickId !== activeSessionIdRef.current) {
+          commitSessionId(stickId)
         }
-        // Never let list hydrate clear an authoritative url/preferred/current session to null.
-        const sessionForUrl =
-          nextSessionId
-          ?? (urlId || preferredId || currentId || activeSessionIdRef.current)
-        syncUrlAndStorage(brandId, sessionForUrl)
+        if (stickId) {
+          preferredSessionRef.current = preferredSessionRef.current || stickId
+        }
+        syncUrlAndStorage(brandId, stickId ?? pinned)
       } catch (err) {
         if (cancelled || requestId !== sessionsRequestIdRef.current) return
         if (selectionEpochRef.current !== epochAtStart) return
@@ -381,8 +416,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       // …but only select it if this create is still the live user action.
       // Skip/pin bumps epoch so a deferred create cannot rewrite ?session= A→B.
       if (!shouldCommitCreatedSession(epoch, selectionEpochRef.current)) return
-      preferredSessionRef.current = session.id
-      commitSessionId(session.id)
+      setAuthoritativeSession(session.id)
       syncUrlAndStorage(brandId, session.id)
     } catch (err) {
       console.error(err)
@@ -391,7 +425,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, commitSessionId])
+  }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   const createQuickSession = useCallback(async () => {
     if (!userId) return
@@ -415,11 +449,10 @@ export function useChatShellWorkspace(userId: string | undefined) {
       if (brandId !== activeBrandIdRef.current) {
         // Cross-brand Quick: only select while this create is still the live action.
         if (!epochLive) return
-        preferredSessionRef.current = session.id
         activeBrandIdRef.current = brandId
         setActiveBrandId(brandId)
         setSessions([session])
-        commitSessionId(session.id)
+        setAuthoritativeSession(session.id)
         syncUrlAndStorage(brandId, session.id)
         return
       }
@@ -428,8 +461,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       // Surface row even if Skip/pin made this create stale — never steal ?session=.
       setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
       if (!epochLive) return
-      preferredSessionRef.current = session.id
-      commitSessionId(session.id)
+      setAuthoritativeSession(session.id)
       syncUrlAndStorage(brandId, session.id)
     } catch (err) {
       console.error(err)
@@ -438,7 +470,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, businesses, busy, bumpSelectionEpoch, syncUrlAndStorage, commitSessionId])
+  }, [userId, businesses, busy, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   /**
    * O3: in-shell New brand — createBusiness + first session, stay on /chat.
@@ -465,6 +497,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       setSessionCounts((prev) => ({ ...prev, [brand.id]: 0 }))
 
       preferredSessionRef.current = null
+      authoritativeSessionRef.current = null
       activeBrandIdRef.current = brand.id
       setActiveBrandId(brand.id)
 
@@ -475,10 +508,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
       )
       if (selectionEpochRef.current !== epoch) return false
 
-      preferredSessionRef.current = session.id
       setSessions([session])
       setSessionCounts((prev) => ({ ...prev, [brand.id]: 1 }))
-      commitSessionId(session.id)
+      setAuthoritativeSession(session.id)
       syncUrlAndStorage(brand.id, session.id)
       setNotice(null)
       return true
@@ -490,7 +522,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, commitSessionId])
+  }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   const patchActiveSession = useCallback((next: ChatSession) => {
     setSessions((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)))
@@ -535,8 +567,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     if (wasActive) {
       // Switch main cleanly to a sibling (or null) — avoid blank crash on deleted active.
       const fallback = siblings[0] ?? null
-      preferredSessionRef.current = fallback?.id ?? null
-      commitSessionId(fallback?.id ?? null)
+      setAuthoritativeSession(fallback?.id ?? null)
       syncUrlAndStorage(brandId, fallback?.id ?? null)
     }
 
@@ -555,9 +586,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
         setSessionCounts((prev) => ({ ...prev, [brandId]: prevCount }))
       }
       if (wasActive) {
-        preferredSessionRef.current = sessionId
         bumpSelectionEpoch()
-        commitSessionId(prevActiveId)
+        setAuthoritativeSession(prevActiveId)
         syncUrlAndStorage(brandId, prevActiveId)
       }
       setError(err instanceof Error ? err.message : 'Failed to delete session')
@@ -570,7 +600,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     sessionCounts,
     firstUserPreviews,
     bumpSelectionEpoch,
-    commitSessionId,
+    setAuthoritativeSession,
     syncUrlAndStorage,
   ])
 
@@ -593,6 +623,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
         return
       }
       if (row.business_id && row.business_id !== activeBrandIdRef.current) {
+        authoritativeSessionRef.current = row.id
         preferredSessionRef.current = row.id
         activeBrandIdRef.current = row.business_id
         setActiveBrandId(row.business_id)
@@ -601,6 +632,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
         setSessions((prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
         return
       }
+      authoritativeSessionRef.current = row.id
       preferredSessionRef.current = row.id
       setSessions((prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
       syncUrlAndStorage(activeBrandIdRef.current, row.id)

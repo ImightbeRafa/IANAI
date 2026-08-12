@@ -8,7 +8,6 @@ import {
   isSessionSetupSkipped,
   writeSetupSkipped,
 } from './chatContextSetup'
-import { CHAT_SHELL_ACTIVE_SESSION_KEY } from './chatShellPersistence'
 import ChatContextSetupCard from './ChatContextSetupCard'
 import {
   formatImageAssumptions,
@@ -98,33 +97,13 @@ export default function ChatContextRail({
     // sessionId must be captured at Skip click — do not re-read session?.id here.
     if (!sessionId) return
 
-    // If URL / stored active id disagrees with the click-captured id (selection drift),
-    // write Skip for both so hard-reload cannot reopen against either identity.
+    // Write Skip only for the click-captured session (not URL/stored siblings).
     // Escape / backdrop / hydrate must never call this.
-    const siblingIds = new Set<string>([sessionId])
-    try {
-      const urlId =
-        typeof window !== 'undefined'
-          ? new URLSearchParams(window.location.search).get('session')
-          : null
-      if (urlId) siblingIds.add(urlId)
-      const storedId = storage?.getItem?.(CHAT_SHELL_ACTIVE_SESSION_KEY) ?? null
-      if (storedId) siblingIds.add(storedId)
-    } catch {
-      /* ignore */
-    }
-
-    let anyOk = false
-    let lastFailure: string | null = null
-    for (const id of siblingIds) {
-      const result = writeSetupSkipped(storage, id, true)
-      if (result.ok) anyOk = true
-      else lastFailure = result.reason
-    }
+    const result = writeSetupSkipped(storage, sessionId, true)
     setSkipTick((n) => n + 1)
-    if (!anyOk) {
+    if (!result.ok) {
       setSkipPersistError(
-        lastFailure === 'missing_storage' || lastFailure === 'storage_threw'
+        result.reason === 'missing_storage' || result.reason === 'storage_threw'
           ? 'Could not save Skip (storage unavailable). Try again.'
           : 'Could not save Skip for this session. Try again.'
       )
@@ -231,6 +210,7 @@ export default function ChatContextRail({
           ) : (
             <>
               <ChatContextSetupCard
+                key={session.id}
                 session={session}
                 skipped={sessionSkipped}
                 forceOpen={forceSetup}

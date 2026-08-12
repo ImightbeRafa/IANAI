@@ -166,8 +166,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               })
             }
             setLoading(false)
-            // Clean up URL params
-            window.history.replaceState({}, '', window.location.pathname)
+            // Clean OAuth params only — preserve chat-shell ?brand=&session= deep links.
+            try {
+              const next = new URL(window.location.href)
+              next.searchParams.delete('code')
+              next.searchParams.delete('error')
+              next.searchParams.delete('error_description')
+              next.searchParams.delete('state')
+              const qs = next.searchParams.toString()
+              window.history.replaceState({}, '', `${next.pathname}${qs ? `?${qs}` : ''}${next.hash}`)
+            } catch {
+              window.history.replaceState({}, '', window.location.pathname)
+            }
           }
         })
       }

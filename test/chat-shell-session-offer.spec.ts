@@ -420,6 +420,17 @@ describe('resolveNextSessionId', () => {
       })
     ).toBe(skippedA)
   })
+
+  it('hard-reload deep-link: urlId alone beats brand-newest even when A missing from list', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a89b72e3-newest', 'other'],
+        preferredId: null,
+        currentId: null,
+        urlId: '1088a18d-00c4-4fb8-95c2-c047c443f3b1',
+      })
+    ).toBe('1088a18d-00c4-4fb8-95c2-c047c443f3b1')
+  })
 })
 
 describe('shouldCommitCreatedSession', () => {
