@@ -105,6 +105,18 @@ export function writeSetupSkipped(
   }
 }
 
+/**
+ * Source-of-truth skip decision for the current session.
+ * Only Save / explicit Setup reopen should clear LS (write false).
+ * Remount/hydrate must never invent a clear.
+ */
+export function isSessionSetupSkipped(
+  storage: { getItem(key: string): string | null } | null | undefined,
+  sessionId: string | null | undefined
+): boolean {
+  return readSetupSkipped(storage, sessionId)
+}
+
 /** Normalize untrusted autofill JSON into an editable draft (invalid enums dropped). */
 export function normalizeSessionContextAutofill(
   raw: Record<string, unknown> | null | undefined

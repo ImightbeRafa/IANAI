@@ -3,6 +3,7 @@ import {
   buildSessionSetupUpdates,
   classifyGenerateReadiness,
   isSessionSetupComplete,
+  isSessionSetupSkipped,
   normalizeSessionContextAutofill,
   readSetupSkipped,
   resolveSetupInterviewPhase,
@@ -81,8 +82,60 @@ describe('session setup interview helpers', () => {
     expect(store['ianai.chat-shell.contextSetup.skipped.s1']).toBeUndefined()
   })
 
+  it('Skip survives remount hydrate; hydrate must not clear LS', () => {
+    const store: Record<string, string> = {}
+    const storage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v
+      },
+      removeItem: (k: string) => {
+        delete store[k]
+      },
+    }
+    const currentId = 'f18b984d-active'
+    const olderId = 'older-session'
+
+    writeSetupSkipped(storage, olderId, true)
+    writeSetupSkipped(storage, currentId, true)
+
+    // Simulate remount: LS is source of truth (no in-memory Set).
+    expect(isSessionSetupSkipped(storage, currentId)).toBe(true)
+    expect(isSessionSetupSkipped(storage, olderId)).toBe(true)
+    expect(store[setupSkippedStorageKey(currentId)]).toBe('1')
+
+    // Hydrate path must only READ — a false read for another id must not clear current.
+    expect(isSessionSetupSkipped(storage, 'not-skipped')).toBe(false)
+    expect(store[setupSkippedStorageKey(currentId)]).toBe('1')
+    expect(store[setupSkippedStorageKey(olderId)]).toBe('1')
+  })
+
+  it('only explicit clear removes Skip (Save / reopen Setup)', () => {
+    const store: Record<string, string> = {}
+    const storage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v
+      },
+      removeItem: (k: string) => {
+        delete store[k]
+      },
+    }
+    writeSetupSkipped(storage, 's1', true)
+    expect(isSessionSetupSkipped(storage, 's1')).toBe(true)
+    writeSetupSkipped(storage, 's1', false)
+    expect(isSessionSetupSkipped(storage, 's1')).toBe(false)
+    expect(shouldShowSetupInterview({
+      session: { id: 's1', context: '', primary_channel: null },
+      skippedSessionIds: new Set(
+        isSessionSetupSkipped(storage, 's1') ? ['s1'] : []
+      ),
+    })).toBe(true)
+  })
+
   it('read/write Setup Skip tolerate missing storage', () => {
     expect(readSetupSkipped(null, 's1')).toBe(false)
+    expect(isSessionSetupSkipped(null, 's1')).toBe(false)
     expect(() => writeSetupSkipped(null, 's1', true)).not.toThrow()
   })
 

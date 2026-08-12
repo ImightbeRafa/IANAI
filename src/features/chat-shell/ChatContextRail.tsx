@@ -5,7 +5,7 @@ import type { ChatSessionSafeUpdates, ProductImage } from '../../services/databa
 import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
 import {
   isSessionSetupComplete,
-  readSetupSkipped,
+  isSessionSetupSkipped,
   writeSetupSkipped,
 } from './chatContextSetup'
 import ChatContextSetupCard from './ChatContextSetupCard'
@@ -73,12 +73,8 @@ export default function ChatContextRail({
   const [context, setContext] = useState(session?.context || '')
   const [channel, setChannel] = useState(session?.primary_channel || '')
   const [awareness, setAwareness] = useState(session?.awareness_level || '')
-  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => {
-    if (session?.id && readSetupSkipped(storage, session.id)) {
-      return new Set([session.id])
-    }
-    return new Set()
-  })
+  /** Bumps so Skip/clear re-reads LS (source of truth) without a drifting Set. */
+  const [skipTick, setSkipTick] = useState(0)
   const [forceSetup, setForceSetup] = useState(false)
 
   useEffect(() => {
@@ -92,36 +88,25 @@ export default function ChatContextRail({
     setForceSetup(false)
   }, [session?.id])
 
-  // Hydrate Skip persistence when the active session changes.
-  useEffect(() => {
-    const id = session?.id
-    if (!id) return
-    const stored = readSetupSkipped(storage, id)
-    setSkippedIds((prev) => {
-      const next = new Set(prev)
-      if (stored) next.add(id)
-      else next.delete(id)
-      return next
-    })
-  }, [session?.id, storage])
-
   const markSkipped = (sessionId: string) => {
-    writeSetupSkipped(storage, sessionId, true)
-    setSkippedIds((prev) => new Set(prev).add(sessionId))
+    // Capture the id at Skip time — do not trust a later session snap-back.
+    const capturedSessionId = sessionId
+    if (!capturedSessionId) return
+    writeSetupSkipped(storage, capturedSessionId, true)
+    setSkipTick((n) => n + 1)
     setForceSetup(false)
   }
 
   const clearSkipped = (sessionId: string) => {
-    writeSetupSkipped(storage, sessionId, false)
-    setSkippedIds((prev) => {
-      const next = new Set(prev)
-      next.delete(sessionId)
-      return next
-    })
+    // Only Save / explicit Setup reopen may clear — never hydrate/remount.
+    const capturedSessionId = sessionId
+    if (!capturedSessionId) return
+    writeSetupSkipped(storage, capturedSessionId, false)
+    setSkipTick((n) => n + 1)
   }
 
   const reopenSetup = () => {
-    if (!session) return
+    if (!session?.id) return
     clearSkipped(session.id)
     setForceSetup(true)
   }
@@ -135,7 +120,11 @@ export default function ChatContextRail({
   const attachedIds = new Set(orderedOffers.map((o) => o.product_id))
   const availableProducts = brandProducts.filter((p) => !attachedIds.has(p.id))
   const setupComplete = isSessionSetupComplete(session)
-  const sessionSkipped = Boolean(session && skippedIds.has(session.id))
+  // LS is authoritative for the current session id (skipTick forces re-read after write).
+  void skipTick
+  const sessionSkipped = Boolean(
+    session?.id && isSessionSetupSkipped(storage, session.id)
+  )
   const interviewOpen = Boolean(
     session &&
     (forceSetup || (!setupComplete && !sessionSkipped))
@@ -204,6 +193,7 @@ export default function ChatContextRail({
                 forceOpen={forceSetup}
                 language={language}
                 onSkipped={() => {
+                  // Capture active id at click — avoid writing a snap-back session id.
                   markSkipped(session.id)
                 }}
                 onSaved={async (updates) => {
