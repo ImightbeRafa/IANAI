@@ -13,8 +13,10 @@ import type { FailedOfferBatch, ImageClarifyState } from './useChatSessionThread
 import { sortArtifactsByOrdinal, type ShellImageLike } from './chatShellImages'
 import {
   anuncioStyleChoices,
+  organicStyleChoices,
   productStyleChoices,
 } from './chatShellImageIntent'
+import type { ImageClarifyMode } from './chatShellImageIntent'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -38,7 +40,7 @@ interface ChatThreadProps {
   language?: 'en' | 'es'
   imageClarify?: ImageClarifyState | null
   onAnswerImageClarify?: (answer: {
-    mode?: 'anuncio' | 'product'
+    mode?: ImageClarifyMode
     styleId?: string
     switchToAnuncio?: boolean
   }) => void
@@ -378,6 +380,14 @@ export default function ChatThread({
                   >
                     {language === 'es' ? 'Producto' : 'Product'}
                   </button>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => onAnswerImageClarify?.({ mode: 'organic' })}
+                  >
+                    {language === 'es' ? 'Orgánico' : 'Organic'}
+                  </button>
                 </>
               ) : imageClarify.step === 'refs' ? (
                 <>
@@ -401,7 +411,9 @@ export default function ChatThread({
               ) : (
                 (imageClarify.mode === 'product'
                   ? productStyleChoices(language)
-                  : anuncioStyleChoices(language)
+                  : imageClarify.mode === 'organic'
+                    ? organicStyleChoices(language)
+                    : anuncioStyleChoices(language)
                 ).map((choice) => (
                   <button
                     key={choice.id}

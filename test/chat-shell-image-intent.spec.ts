@@ -4,6 +4,7 @@ import {
   buildShellImageGenerateBody,
   DEFAULT_IMAGE_PREFERENCES,
   formatImageAssumptions,
+  looksLikeOrganicScript,
   looksLikeSalesScript,
   parseChatShellImageIntent,
   planImageClarifications,
@@ -282,5 +283,85 @@ describe('resolveScriptPostPreferences (S3 Script→post)', () => {
     expect(body.prompt).toBe('SCRIPT BODY FOR POST')
     expect(body.scriptContext).toBe('SCRIPT BODY FOR POST')
     expect(body.postStyle).toBe('venta-directa')
+  })
+})
+
+describe('S4 organic-single + anuncio-conversion', () => {
+  it('parses organic subtype and anuncio-conversion from NL', () => {
+    expect(parseChatShellImageIntent('haz imagen cita motivacional', 'es').preferences.style).toEqual({
+      kind: 'organic',
+      organicSubtype: 'quote-motivational',
+    })
+    expect(parseChatShellImageIntent('haz imagen infografia', 'es').preferences.style).toEqual({
+      kind: 'organic',
+      organicSubtype: 'infographic',
+    })
+    expect(parseChatShellImageIntent('haz imagen brand aesthetic', 'es').preferences.style).toEqual({
+      kind: 'organic',
+      organicSubtype: 'aesthetic-brand',
+    })
+    expect(parseChatShellImageIntent('haz imagen anuncio conversion', 'es').preferences.style).toEqual({
+      kind: 'preset',
+      presetId: 'anuncio-conversion',
+    })
+  })
+
+  it('builds organic-single generate body with subtype + script hints', () => {
+    const body = buildShellImageGenerateBody({
+      preferences: {
+        style: { kind: 'organic', organicSubtype: 'quote-motivational' },
+        aspectRatio: '1:1',
+        model: 'nano-banana-pro',
+        density: 'medium',
+      },
+      productId: 'p1',
+      sessionId: 's1',
+      prompt: 'QUOTE TEXT',
+      language: 'es',
+      scriptText: 'QUOTE TEXT',
+    })
+    expect(body).toMatchObject({
+      postStyle: 'organic-single',
+      organicSubtype: 'quote-motivational',
+      organicQuote: 'QUOTE TEXT',
+      scriptContext: 'QUOTE TEXT',
+      ctaStrength: 'soft',
+    })
+    expect(body.width).toBe(1080)
+    expect(body.height).toBe(1080)
+    expect(requiresProductReferences({ kind: 'organic', organicSubtype: 'infographic' })).toBe(false)
+  })
+
+  it('builds anuncio-conversion body distinctly from venta-directa', () => {
+    const body = buildShellImageGenerateBody({
+      preferences: {
+        style: { kind: 'preset', presetId: 'anuncio-conversion' },
+        aspectRatio: '3:4',
+        model: 'nano-banana-pro',
+        density: 'medium',
+      },
+      productId: 'p1',
+      sessionId: 's1',
+      prompt: 'ad copy',
+      language: 'es',
+    })
+    expect(body.postStyle).toBe('anuncio-conversion')
+    expect(formatImageAssumptions({
+      style: { kind: 'preset', presetId: 'anuncio-conversion' },
+      aspectRatio: '3:4',
+      model: 'nano-banana-pro',
+      density: 'medium',
+    }, 'es')).toContain('Anuncio conversión')
+  })
+
+  it('detects organic scripts without forcing venta-directa', () => {
+    expect(looksLikeOrganicScript('Tip útil del día', 'Educativo')).toBe(true)
+    expect(looksLikeOrganicScript('Guión de venta', 'Venta Directa')).toBe(false)
+    const unresolved = resolveScriptPostPreferences({
+      scriptText: 'Historia real del cliente',
+      scriptTitle: 'Storytelling',
+    })
+    expect(unresolved.style).toBeUndefined()
+    expect(planImageClarifications(unresolved).step).toBe('mode')
   })
 })

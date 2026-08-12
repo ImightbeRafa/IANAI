@@ -27,6 +27,7 @@ import type {
   ChatSessionOffer,
   Message,
   MessageArtifact,
+  OrganicSingleSubtype,
   Product,
   ScriptGenerationSettings,
 } from '../../types'
@@ -66,6 +67,7 @@ import {
 } from './chatShellImages'
 import {
   formatImageAssumptions,
+  looksLikeOrganicScript,
   looksLikeSalesScript,
   parseChatShellImageIntent,
   planImageClarifications,
@@ -74,6 +76,7 @@ import {
   resolveImagePreferences,
   resolveScriptPostPreferences,
   writeImagePreferences,
+  type ImageClarifyMode,
   type ImageClarifyStep,
   type ShellImagePreferences,
   type ShellImageStyle,
@@ -89,7 +92,7 @@ import {
 export type ImageClarifyState = {
   sessionId: string
   step: ImageClarifyStep
-  mode?: 'anuncio' | 'product'
+  mode?: ImageClarifyMode
   originText: string
   productId: string
   scriptText?: string
@@ -1341,10 +1344,15 @@ export function useChatSessionThread(options: {
           )
     const plan = planImageClarifications(resolved)
     if (plan.needed && plan.step === 'mode') {
+      // S4: organic scripts skip Anuncio/Producto fork → ask organic subtype only (≤1 ask).
+      const preferOrganic =
+        options.source === 'script_card'
+        && looksLikeOrganicScript(options.scriptText, options.scriptTitle)
       setImagePrefs(resolved)
       setImageClarify({
         sessionId: session.id,
-        step: 'mode',
+        step: preferOrganic ? 'style' : 'mode',
+        mode: preferOrganic ? 'organic' : undefined,
         originText: options.userText || options.prompt || 'Generate image',
         productId,
         scriptText: options.scriptText,
@@ -1353,9 +1361,11 @@ export function useChatSessionThread(options: {
         partial: options.explicit || {},
       })
       setNotice(
-        language === 'es'
-          ? '¿Anuncio con texto o foto de producto?'
-          : 'Ad with text, or product photo?'
+        preferOrganic
+          ? (language === 'es' ? 'Elige subtipo orgánico:' : 'Pick an organic subtype:')
+          : (language === 'es'
+            ? '¿Anuncio, producto u orgánico?'
+            : 'Ad, product, or organic?')
       )
       return
     }
@@ -1384,7 +1394,7 @@ export function useChatSessionThread(options: {
 
   const answerImageClarify = useCallback(async (
     answer: {
-      mode?: 'anuncio' | 'product'
+      mode?: ImageClarifyMode
       styleId?: string
       /** From refs sticky: switch Producto → Anuncio without requiring a Ref. */
       switchToAnuncio?: boolean
@@ -1431,16 +1441,22 @@ export function useChatSessionThread(options: {
       setNotice(
         answer.mode === 'product'
           ? (language === 'es' ? 'Elige estilo de producto:' : 'Pick a product style:')
-          : (language === 'es' ? 'Elige estilo de anuncio:' : 'Pick an ad style:')
+          : answer.mode === 'organic'
+            ? (language === 'es' ? 'Elige subtipo orgánico:' : 'Pick an organic subtype:')
+            : (language === 'es' ? 'Elige estilo de anuncio:' : 'Pick an ad style:')
       )
       return
     }
 
     if (imageClarify.step === 'style' && answer.styleId) {
-      const style: ShellImageStyle =
-        imageClarify.mode === 'product'
-          ? { kind: 'product', productSubStyle: answer.styleId }
-          : { kind: 'preset', presetId: answer.styleId }
+      let style: ShellImageStyle
+      if (imageClarify.mode === 'product') {
+        style = { kind: 'product', productSubStyle: answer.styleId }
+      } else if (imageClarify.mode === 'organic') {
+        style = { kind: 'organic', organicSubtype: answer.styleId as OrganicSingleSubtype }
+      } else {
+        style = { kind: 'preset', presetId: answer.styleId }
+      }
       const resolved = resolveImagePreferences(
         { ...imageClarify.partial, style },
         resolveImagePreferences(readImagePreferences(storage, session.id), imagePrefs)

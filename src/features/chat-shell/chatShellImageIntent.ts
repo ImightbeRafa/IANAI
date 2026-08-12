@@ -2,7 +2,7 @@ import {
   IMAGE_PRESETS,
   PRODUCT_SUB_STYLES,
 } from '../../data/image-presets'
-import type { ImageModel } from '../../types'
+import type { ImageModel, OrganicSingleSubtype } from '../../types'
 import type { PostTextDensity } from './chatShellImages'
 import { normalizePostTextDensity } from './chatShellImages'
 
@@ -12,6 +12,7 @@ export type ShellImageDensity = PostTextDensity
 export type ShellImageStyle =
   | { kind: 'preset'; presetId: string }
   | { kind: 'product'; productSubStyle: string }
+  | { kind: 'organic'; organicSubtype: OrganicSingleSubtype }
 
 export interface ShellImagePreferences {
   style?: ShellImageStyle
@@ -27,11 +28,12 @@ export interface ShellImageIntent {
 }
 
 export type ImageClarifyStep = 'mode' | 'style' | 'refs'
+export type ImageClarifyMode = 'anuncio' | 'product' | 'organic'
 
 export interface ImageClarifyPlan {
   needed: boolean
   step: ImageClarifyStep | null
-  mode?: 'anuncio' | 'product'
+  mode?: ImageClarifyMode
   assumptions: string[]
 }
 
@@ -53,8 +55,17 @@ export const DEFAULT_IMAGE_PREFERENCES: ShellImagePreferences = {
   density: 'medium',
 }
 
+/** Workplace organic-single subtypes (no carousel). */
+export const ORGANIC_SINGLE_SUBTYPES: readonly OrganicSingleSubtype[] = [
+  'quote-motivational',
+  'infographic',
+  'product-showcase-organic',
+  'aesthetic-brand',
+] as const
+
 const PRESET_IDS = new Set(IMAGE_PRESETS.map((p) => p.id))
 const PRODUCT_SUB_IDS = new Set(PRODUCT_SUB_STYLES.map((s) => s.id))
+const ORGANIC_SUB_IDS = new Set<string>(ORGANIC_SINGLE_SUBTYPES)
 
 /** Extra anuncio-family ids (not in IMAGE_PRESETS catalog). */
 const ANUNCIO_STYLE_IDS = new Set(['venta-directa', 'anuncio-conversion'])
@@ -82,7 +93,12 @@ function normalizeText(text: string): string {
 function isValidStyle(style: ShellImageStyle | undefined): style is ShellImageStyle {
   if (!style) return false
   if (style.kind === 'product') return PRODUCT_SUB_IDS.has(style.productSubStyle)
-  return ANUNCIO_STYLE_IDS.has(style.presetId) || PRESET_IDS.has(style.presetId)
+  if (style.kind === 'organic') return ORGANIC_SUB_IDS.has(style.organicSubtype)
+  if (style.kind === 'preset') {
+    return ANUNCIO_STYLE_IDS.has(style.presetId) || PRESET_IDS.has(style.presetId)
+  }
+  const _exhaustive: never = style
+  return _exhaustive
 }
 
 export function requiresProductReferences(style: ShellImageStyle | undefined): boolean {
@@ -192,6 +208,37 @@ function matchProductSubStyle(normalized: string): string | null {
   return null
 }
 
+function matchOrganicSubtype(normalized: string): OrganicSingleSubtype | null {
+  if (
+    /\bquote[\s-]?motivational\b/.test(normalized)
+    || /\bcita(?:\s+motivacional)?\b/.test(normalized)
+    || /\bmotivacional\b/.test(normalized)
+    || /\bquote\b/.test(normalized)
+  ) {
+    return 'quote-motivational'
+  }
+  if (/\binfographic\b/.test(normalized) || /\binfografia\b/.test(normalized)) {
+    return 'infographic'
+  }
+  if (
+    /\bproduct[\s-]?showcase[\s-]?organic\b/.test(normalized)
+    || /\bshowcase\s+organic(?:o)?\b/.test(normalized)
+    || /\bshowcase\s+organico\b/.test(normalized)
+    || /\bexhibicion\s+organica\b/.test(normalized)
+  ) {
+    return 'product-showcase-organic'
+  }
+  if (
+    /\baesthetic[\s-]?brand\b/.test(normalized)
+    || /\bbrand\s+aesthetic\b/.test(normalized)
+    || /\baesthetic(?:a)?\s+(?:de\s+)?marca\b/.test(normalized)
+    || /\bmarca\s+aesthetic\b/.test(normalized)
+  ) {
+    return 'aesthetic-brand'
+  }
+  return null
+}
+
 function matchAspect(normalized: string): ShellImageAspect | null {
   if (/\b9\s*[:/x]\s*16\b/.test(normalized) || /\bstories?\b/.test(normalized) || /\breels?\b/.test(normalized)) {
     return '9:16'
@@ -242,9 +289,12 @@ export function parseChatShellImageIntent(
   const preferences: Partial<ShellImagePreferences> = {}
 
   const productSub = matchProductSubStyle(normalized)
+  const organicSub = matchOrganicSubtype(normalized)
   const presetId = matchPresetAlias(normalized)
   if (productSub) {
     preferences.style = { kind: 'product', productSubStyle: productSub }
+  } else if (organicSub) {
+    preferences.style = { kind: 'organic', organicSubtype: organicSub }
   } else if (presetId) {
     preferences.style = { kind: 'preset', presetId }
   }
@@ -264,7 +314,7 @@ export function parseChatShellImageIntent(
     return { matched: false, preferences: {}, wantsImage: false }
   }
 
-  if (!imageCue && !productSub) {
+  if (!imageCue && !productSub && !organicSub) {
     return { matched: false, preferences: {}, wantsImage: false }
   }
 
@@ -290,8 +340,13 @@ export function planImageClarifications(
   }
   if (resolved.style.kind === 'product') {
     assumptions.push(`Producto · ${resolved.style.productSubStyle}`)
-  } else {
+  } else if (resolved.style.kind === 'organic') {
+    assumptions.push(`Orgánico · ${resolved.style.organicSubtype}`)
+  } else if (resolved.style.kind === 'preset') {
     assumptions.push(`Anuncio · ${resolved.style.presetId}`)
+  } else {
+    const _exhaustive: never = resolved.style
+    void _exhaustive
   }
   assumptions.push(resolved.aspectRatio)
   assumptions.push(resolved.model)
@@ -311,12 +366,16 @@ export function formatImageAssumptions(
       PRODUCT_SUB_STYLES.find((s) => s.id === style.productSubStyle)?.[
         language === 'es' ? 'nameEs' : 'name'
       ] || style.productSubStyle
+  } else if (style?.kind === 'organic') {
+    styleLabel =
+      organicStyleChoices(language).find((c) => c.id === style.organicSubtype)?.label
+      || style.organicSubtype
   } else if (style?.kind === 'preset') {
     styleLabel =
       style.presetId === 'venta-directa'
         ? (language === 'es' ? 'Venta directa' : 'Direct sale')
         : style.presetId === 'anuncio-conversion'
-          ? (language === 'es' ? 'Anuncio' : 'Conversion ad')
+          ? (language === 'es' ? 'Anuncio conversión' : 'Conversion ad')
           : (IMAGE_PRESETS.find((p) => p.id === style.presetId)?.[
               language === 'es' ? 'nameEs' : 'name'
             ] || style.presetId)
@@ -380,23 +439,45 @@ export function buildShellImageGenerateBody(options: {
     return body
   }
 
-  const presetId = prefs.style.presetId
-  if (presetId === 'venta-directa') {
-    body.postStyle = 'venta-directa'
+  if (prefs.style.kind === 'organic') {
+    const subtype = prefs.style.organicSubtype
+    body.postStyle = 'organic-single'
+    body.organicSubtype = subtype
+    body.ctaStrength = 'soft'
+    // Workplace maps script idea into subtype-specific content hints.
+    if (subtype === 'quote-motivational') {
+      body.organicQuote = options.scriptText || options.prompt
+    } else {
+      body.organicHeadline = options.scriptText || options.prompt
+    }
     return body
   }
-  if (presetId === 'anuncio-conversion') {
-    body.postStyle = 'anuncio-conversion'
+
+  if (prefs.style.kind === 'preset') {
+    const presetId = prefs.style.presetId
+    if (presetId === 'venta-directa') {
+      body.postStyle = 'venta-directa'
+      return body
+    }
+    if (presetId === 'anuncio-conversion') {
+      body.postStyle = 'anuncio-conversion'
+      return body
+    }
+    body.postStyle = 'preset'
+    body.presetId = presetId
     return body
   }
-  body.postStyle = 'preset'
-  body.presetId = presetId
-  return body
+
+  const _exhaustive: never = prefs.style
+  return _exhaustive
 }
 
 export function anuncioStyleChoices(language: 'en' | 'es' = 'es'): Array<{ id: string; label: string }> {
   const venta = { id: 'venta-directa', label: language === 'es' ? 'Venta directa' : 'Direct sale' }
-  const anuncio = { id: 'anuncio-conversion', label: language === 'es' ? 'Anuncio' : 'Conversion ad' }
+  const anuncio = {
+    id: 'anuncio-conversion',
+    label: language === 'es' ? 'Anuncio conversión' : 'Conversion ad',
+  }
   const presets = IMAGE_PRESETS.map((p) => ({
     id: p.id,
     label: language === 'es' ? p.nameEs : p.name,
@@ -408,6 +489,19 @@ export function productStyleChoices(language: 'en' | 'es' = 'es'): Array<{ id: s
   return PRODUCT_SUB_STYLES.map((s) => ({
     id: s.id,
     label: language === 'es' ? s.nameEs : s.name,
+  }))
+}
+
+export function organicStyleChoices(language: 'en' | 'es' = 'es'): Array<{ id: OrganicSingleSubtype; label: string }> {
+  const labels: Record<OrganicSingleSubtype, { es: string; en: string }> = {
+    'quote-motivational': { es: 'Cita / Motivacional', en: 'Quote / Motivational' },
+    infographic: { es: 'Infografía', en: 'Infographic' },
+    'product-showcase-organic': { es: 'Showcase orgánico', en: 'Organic showcase' },
+    'aesthetic-brand': { es: 'Brand aesthetic', en: 'Brand aesthetic' },
+  }
+  return ORGANIC_SINGLE_SUBTYPES.map((id) => ({
+    id,
+    label: language === 'es' ? labels[id].es : labels[id].en,
   }))
 }
 
@@ -424,6 +518,21 @@ export function looksLikeSalesScript(text?: string | null, title?: string | null
     || /\bdirect\s+sale\b/.test(hay)
     || /\bsales?\s+script\b/.test(hay)
     || /\bguion(?:es)?\s+de\s+venta\b/.test(hay)
+  )
+}
+
+/** Organic script signals — prefer Orgánico clarify path (not venta-directa). */
+export function looksLikeOrganicScript(text?: string | null, title?: string | null): boolean {
+  if (looksLikeSalesScript(text, title)) return false
+  const hay = normalizeText(`${title || ''} ${text || ''}`)
+  if (!hay) return false
+  return (
+    /\beducativo\b/.test(hay)
+    || /\bstorytelling\b/.test(hay)
+    || /\btendencia\b/.test(hay)
+    || /\bengagement\b/.test(hay)
+    || /\borganic(?:o|a)?\b/.test(hay)
+    || /\borganico\b/.test(hay)
   )
 }
 
