@@ -28,6 +28,8 @@ Then ensure `profiles.is_admin = false` (and no privileged `role` / `account_typ
 2. Business B owned by a second non-admin user with product Q1.
 3. Optional: collaborator viewer/editor invites on P2 for a third user.
 
+If the QA user owns businesses but Brands stays empty, or Quick/New chat insert does not return a row, Preview RLS may still be incomplete — see `docs/operations/chat-shell-preview-rls.md` (do **not** apply those fixes on production AIIAN).
+
 ## Authorization matrix to execute
 
 | Actor | Action | Expected |

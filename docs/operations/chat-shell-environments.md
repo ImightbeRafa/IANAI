@@ -8,7 +8,10 @@
 | Vercel Preview | `*.vercel.app` preview | IANAI-preview `adrwkzibhfdpwuycnzaa` | `false` until QA flip | Pair all Preview env vars to this project |
 | Local | `localhost:5173` | Local Supabase **or** preview project | developer-controlled | `npm run dev` for UI; `npm run dev:vercel` for `/api/*` |
 
-See also `docs/operations/chat-shell-p0.md` for `/chat` UI verification and preview flag SQL.
+See also:
+
+- `docs/operations/chat-shell-p0.md` — `/chat` UI verification and preview flag SQL
+- `docs/operations/chat-shell-preview-rls.md` — Preview-only RLS bootstrap (deny-all tables + `chat_sessions` SELECT/`RETURNING`)
 
 ## Variable pairing (never mix projects)
 
@@ -44,5 +47,6 @@ WHERE key = 'chat_shell';
 ```
 
 4. Non-admin preview QA user: `docs/testing/chat-shell-preview-user.md`.
+5. If Brands is empty or New chat insert returns null on Preview, check `docs/operations/chat-shell-preview-rls.md` (Preview-only; never apply those policy fixes on AIIAN prod).
 
 Do **not** invent or commit credentials. Leave secrets in Vercel / Supabase dashboards only.
