@@ -210,21 +210,12 @@ function matchProductSubStyle(normalized: string): string | null {
 
 function matchOrganicSubtype(normalized: string): OrganicSingleSubtype | null {
   if (
-    /\bquote[\s-]?motivational\b/.test(normalized)
-    || /\bcita(?:\s+motivacional)?\b/.test(normalized)
-    || /\bmotivacional\b/.test(normalized)
-    || /\bquote\b/.test(normalized)
-  ) {
-    return 'quote-motivational'
-  }
-  if (/\binfographic\b/.test(normalized) || /\binfografia\b/.test(normalized)) {
-    return 'infographic'
-  }
-  if (
     /\bproduct[\s-]?showcase[\s-]?organic\b/.test(normalized)
     || /\bshowcase\s+organic(?:o)?\b/.test(normalized)
     || /\bshowcase\s+organico\b/.test(normalized)
     || /\bexhibicion\s+organica\b/.test(normalized)
+    || /\bproducto\s+editorial\b/.test(normalized)
+    || /\borganic\s+product\s+showcase\b/.test(normalized)
   ) {
     return 'product-showcase-organic'
   }
@@ -232,9 +223,25 @@ function matchOrganicSubtype(normalized: string): OrganicSingleSubtype | null {
     /\baesthetic[\s-]?brand\b/.test(normalized)
     || /\bbrand\s+aesthetic\b/.test(normalized)
     || /\baesthetic(?:a)?\s+(?:de\s+)?marca\b/.test(normalized)
+    || /\bestetica\s+(?:de\s+)?marca\b/.test(normalized)
     || /\bmarca\s+aesthetic\b/.test(normalized)
   ) {
     return 'aesthetic-brand'
+  }
+  if (/\binfographic\b/.test(normalized) || /\binfografia\b/.test(normalized)) {
+    return 'infographic'
+  }
+  if (
+    /\bquote[\s-]?motivational\b/.test(normalized)
+    || /\bcita\s+motivacional\b/.test(normalized)
+    || /\bfrase\s+motivacional\b/.test(normalized)
+    || /\bmotivational\s+quote\b/.test(normalized)
+  ) {
+    return 'quote-motivational'
+  }
+  // Ambiguous bare "cita"/"quote" — only when paired with image intent elsewhere.
+  if (/\b(?:cita|quote|motivacional)\b/.test(normalized)) {
+    return 'quote-motivational'
   }
   return null
 }
@@ -288,12 +295,22 @@ export function parseChatShellImageIntent(
   const normalized = normalizeText(text)
   const preferences: Partial<ShellImagePreferences> = {}
 
+  const imageCue = IMAGE_HINT.test(normalized)
+  const scriptCue = SCRIPT_HINT.test(normalized)
+
+  // Pure script asks without image language → not an image intent
+  if (scriptCue && !imageCue) {
+    return { matched: false, preferences: {}, wantsImage: false }
+  }
+
   const productSub = matchProductSubStyle(normalized)
-  const organicSub = matchOrganicSubtype(normalized)
+  // Organic aliases need image/post wording so bare "cita"/"quote" text asks are not stolen.
+  const organicSub = imageCue ? matchOrganicSubtype(normalized) : null
   const presetId = matchPresetAlias(normalized)
   if (productSub) {
     preferences.style = { kind: 'product', productSubStyle: productSub }
   } else if (organicSub) {
+    // Prefer organic-single over colliding anuncio presets (e.g. product-showcase).
     preferences.style = { kind: 'organic', organicSubtype: organicSub }
   } else if (presetId) {
     preferences.style = { kind: 'preset', presetId }
@@ -306,15 +323,7 @@ export function parseChatShellImageIntent(
   const density = matchDensity(normalized)
   if (density) preferences.density = density
 
-  const imageCue = IMAGE_HINT.test(normalized)
-  const scriptCue = SCRIPT_HINT.test(normalized)
-
-  // Pure script asks without image language → not an image intent
-  if (scriptCue && !imageCue) {
-    return { matched: false, preferences: {}, wantsImage: false }
-  }
-
-  if (!imageCue && !productSub && !organicSub) {
+  if (!imageCue && !productSub) {
     return { matched: false, preferences: {}, wantsImage: false }
   }
 
@@ -375,7 +384,7 @@ export function formatImageAssumptions(
       style.presetId === 'venta-directa'
         ? (language === 'es' ? 'Venta directa' : 'Direct sale')
         : style.presetId === 'anuncio-conversion'
-          ? (language === 'es' ? 'Anuncio conversión' : 'Conversion ad')
+          ? (language === 'es' ? 'Anuncio de conversión' : 'Conversion ad')
           : (IMAGE_PRESETS.find((p) => p.id === style.presetId)?.[
               language === 'es' ? 'nameEs' : 'name'
             ] || style.presetId)
@@ -476,7 +485,7 @@ export function anuncioStyleChoices(language: 'en' | 'es' = 'es'): Array<{ id: s
   const venta = { id: 'venta-directa', label: language === 'es' ? 'Venta directa' : 'Direct sale' }
   const anuncio = {
     id: 'anuncio-conversion',
-    label: language === 'es' ? 'Anuncio conversión' : 'Conversion ad',
+    label: language === 'es' ? 'Anuncio de conversión' : 'Conversion ad',
   }
   const presets = IMAGE_PRESETS.map((p) => ({
     id: p.id,
@@ -538,8 +547,9 @@ export function looksLikeOrganicScript(text?: string | null, title?: string | nu
 
 /**
  * Resolve prefs for ScriptCard→post:
- * explicit → sticky preset → sales venta-directa → unresolved.
+ * explicit → sticky preset/organic → sales venta-directa → unresolved.
  * Sticky `kind:'product'` must not hijack a sales ScriptCard→post path.
+ * Sticky organic (like sticky anuncio preset) beats sales fallback.
  */
 export function resolveScriptPostPreferences(options: {
   explicit?: Partial<ShellImagePreferences> | null
@@ -548,11 +558,12 @@ export function resolveScriptPostPreferences(options: {
   scriptTitle?: string | null
 }): ShellImagePreferences {
   const stickyBase = resolveImagePreferences(options.sticky, {})
-  const stickyPresetBeatsSales = stickyBase.style?.kind === 'preset'
+  const stickyPostStyleBeatsSales =
+    stickyBase.style?.kind === 'preset' || stickyBase.style?.kind === 'organic'
   const explicitStyle = sanitizePartialPreferences(options.explicit).style
   const salesFallback: Partial<ShellImagePreferences> =
     !explicitStyle
-    && !stickyPresetBeatsSales
+    && !stickyPostStyleBeatsSales
     && looksLikeSalesScript(options.scriptText, options.scriptTitle)
       ? { style: { kind: 'preset', presetId: 'venta-directa' } }
       : {}

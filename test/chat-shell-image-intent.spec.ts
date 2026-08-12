@@ -306,6 +306,17 @@ describe('S4 organic-single + anuncio-conversion', () => {
     })
   })
 
+  it('does not steal bare quote/cita text without image wording', () => {
+    expect(parseChatShellImageIntent('cita motivacional para el feed', 'es').matched).toBe(false)
+    expect(parseChatShellImageIntent('una quote inspiradora', 'es').matched).toBe(false)
+  })
+
+  it('prefers organic showcase over anuncio product-showcase preset', () => {
+    expect(
+      parseChatShellImageIntent('haz imagen showcase organico del producto', 'es').preferences.style
+    ).toEqual({ kind: 'organic', organicSubtype: 'product-showcase-organic' })
+  })
+
   it('builds organic-single generate body with subtype + script hints', () => {
     const body = buildShellImageGenerateBody({
       preferences: {
@@ -351,7 +362,7 @@ describe('S4 organic-single + anuncio-conversion', () => {
       aspectRatio: '3:4',
       model: 'nano-banana-pro',
       density: 'medium',
-    }, 'es')).toContain('Anuncio conversión')
+    }, 'es')).toContain('Anuncio de conversión')
   })
 
   it('detects organic scripts without forcing venta-directa', () => {
@@ -363,5 +374,21 @@ describe('S4 organic-single + anuncio-conversion', () => {
     })
     expect(unresolved.style).toBeUndefined()
     expect(planImageClarifications(unresolved).step).toBe('mode')
+  })
+
+  it('sticky organic beats sales fallback; sticky product does not', () => {
+    const organicSticky = resolveScriptPostPreferences({
+      scriptText: 'Guión de venta corto',
+      scriptTitle: 'Venta Directa',
+      sticky: { style: { kind: 'organic', organicSubtype: 'infographic' } },
+    })
+    expect(organicSticky.style).toEqual({ kind: 'organic', organicSubtype: 'infographic' })
+
+    const productSticky = resolveScriptPostPreferences({
+      scriptText: 'Guión de venta corto',
+      scriptTitle: 'Venta Directa',
+      sticky: { style: { kind: 'product', productSubStyle: 'studio-hero' } },
+    })
+    expect(productSticky.style).toEqual({ kind: 'preset', presetId: 'venta-directa' })
   })
 })
