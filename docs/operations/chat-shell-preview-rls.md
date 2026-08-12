@@ -214,6 +214,47 @@ Document-only nits. **No live DB change** from this tip. Later Preview-only if/w
 1. **Legacy null-session INSERT AND gap** — tight INSERT fails when `session_id` is null (`can_write_chat_session(null)` is false). Chat-shell Guardar always sets `session_id` → OK. Legacy `/scripts` creates with `session_id` null will 403 until an optional later relax (ops-owned).
 2. **SecureDog watch items** — keep alignment reviews on the backlog (e.g. historical OR vs AND shapes on related tables; regression watch if anyone rewrites `scripts_*` policies). Non-blocking for shell Guardar while the live AND set remains.
 
+### Prod cutover template (SecureDog advise — future AIIAN migration; do not apply on Preview tonight)
+
+**DOCUMENT ONLY.** Future production AIIAN cutover shape advised by SecureDog. **Do not apply on Preview tonight.** Do not change the live Preview `scripts_*` tight AND four. Do not `DROP` / `CREATE` / re-apply from this section. No Supabase MCP / CLI / SQL apply from this tip.
+
+Live Preview stays the current verified set:
+
+```text
+scripts_select / scripts_insert / scripts_update / scripts_delete
+— session_id AND product_id helpers (tight AND)
+— TO authenticated
+```
+
+No further Preview policy churn unless SecureDog explicitly asks.
+
+**Future AIIAN migration template** (mirrors migration `062` `message_artifacts` spirit + null-session legacy for old `/scripts` rows). **Do NOT copy any OR SELECT/DELETE into AIIAN.**
+
+```text
+-- FUTURE PROD (AIIAN) CUTOVER TEMPLATE — SecureDog advise
+-- DO NOT apply on IANAI-preview tonight
+-- DO NOT DROP-wipe live Preview from this doc
+
+SELECT:
+  can_read_product(product_id)
+  AND (session_id IS NULL OR can_read_chat_session(session_id))
+
+INSERT:
+  can_write_product(product_id)
+  AND can_write_chat_session(session_id)
+  -- chat-shell saveScript always sets session_id
+
+UPDATE USING + WITH CHECK:
+  can_write_product(product_id)
+  AND (session_id IS NULL OR can_write_chat_session(session_id))
+
+DELETE USING:
+  can_write_product(product_id)
+  AND (session_id IS NULL OR can_write_chat_session(session_id))
+```
+
+Intent: product write/read remains required; `session_id IS NULL` preserves legacy `/scripts` rows that never had a chat session; shell inserts still require a writable session. When a real prod cutover migration is authored, it belongs under SecureDog/CoS ownership — not a Preview docs tip.
+
 ## Related docs
 
 - Environment matrix: `docs/operations/chat-shell-environments.md`
