@@ -1,6 +1,8 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
+import ConfigErrorScreen from './components/ConfigErrorScreen'
+import { getSupabaseConfigError, isSupabaseConfigured } from './lib/supabase'
 import './index.css'
 
 if (import.meta.env.PROD) {
@@ -10,8 +12,15 @@ if (import.meta.env.PROD) {
   console.debug = noop
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const rootEl = document.getElementById('root')
+if (!rootEl) {
+  throw new Error('Missing #root element')
+}
+
+const configError = isSupabaseConfigured ? null : getSupabaseConfigError()
+
+ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
-    <App />
+    {configError ? <ConfigErrorScreen message={configError} /> : <App />}
   </React.StrictMode>,
 )

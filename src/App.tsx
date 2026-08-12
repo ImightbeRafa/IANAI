@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -24,13 +24,35 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const AdminTickets = lazy(() => import('./pages/AdminTickets'))
 const RespuestasDashboard = lazy(() => import('./pages/RespuestasDashboard'))
 const RespuestasWorkspace = lazy(() => import('./pages/RespuestasWorkspace'))
+const ChatShellPage = lazy(() => import('./pages/ChatShellPage'))
 
 function LazyFallback() {
+  const onChat =
+    typeof window !== 'undefined' && /^\/chat(?:\/|$)/.test(window.location.pathname)
+  if (onChat) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--bg, #0b0e14)', color: 'var(--text-muted, #9aa3b5)' }}
+      >
+        <div
+          className="animate-spin rounded-full h-8 w-8 border-b-2"
+          style={{ borderColor: 'var(--accent, #2563eb)' }}
+        />
+      </div>
+    )
+  }
   return (
     <div className="min-h-screen flex items-center justify-center bg-dark-50">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
     </div>
   )
+}
+
+function AppFeedback() {
+  const { pathname } = useLocation()
+  if (/^\/chat(?:\/|$)/.test(pathname)) return null
+  return <FeedbackButton />
 }
 
 export default function App() {
@@ -157,9 +179,17 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/chat"
+              element={
+                <ProtectedRoute>
+                  <ChatShellPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
-          <FeedbackButton />
+          <AppFeedback />
           </Suspense>
         </AuthProvider>
       </LanguageProvider>
