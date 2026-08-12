@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { parseScriptSections } from '../src/features/chat-shell/parseScriptSections'
+import {
+  classifySectionMarker,
+  parseScriptSections,
+  stripLeadingColon,
+} from '../src/features/chat-shell/parseScriptSections'
+
+describe('stripLeadingColon', () => {
+  it('strips leading colon and whitespace from section bodies', () => {
+    expect(stripLeadingColon(': Hook line')).toBe('Hook line')
+    expect(stripLeadingColon('  :  Body')).toBe('Body')
+    expect(stripLeadingColon(':\nCTA text')).toBe('CTA text')
+    expect(stripLeadingColon('No colon')).toBe('No colon')
+  })
+})
+
+describe('classifySectionMarker', () => {
+  it('maps CIERRE to label Cierre (never CTA)', () => {
+    expect(classifySectionMarker('CIERRE')).toEqual({ kind: 'cierre', label: 'Cierre' })
+    expect(classifySectionMarker('Cierre')).toEqual({ kind: 'cierre', label: 'Cierre' })
+    expect(classifySectionMarker('CLOSE')).toEqual({ kind: 'cierre', label: 'Cierre' })
+  })
+
+  it('keeps CTA distinct from Cierre', () => {
+    expect(classifySectionMarker('CTA')).toEqual({ kind: 'cta', label: 'CTA' })
+  })
+
+  it('strips Gancho A/B style suffixes from labels', () => {
+    expect(classifySectionMarker('GANCHO A')).toEqual({ kind: 'gancho', label: 'Gancho' })
+    expect(classifySectionMarker('GANCHO B')).toEqual({ kind: 'gancho', label: 'Gancho' })
+    expect(classifySectionMarker('HOOK A')).toEqual({ kind: 'gancho', label: 'Gancho' })
+  })
+})
 
 describe('parseScriptSections', () => {
   it('parses ordered GANCHO / DESARROLLO / CTA blocks', () => {
@@ -12,15 +43,43 @@ describe('parseScriptSections', () => {
     expect(sections[2]).toMatchObject({ label: 'CTA', body: 'Comment LISTO' })
   })
 
-  it('maps English aliases HOOK / DEVELOPMENT / CLOSE', () => {
+  it('strips leading colons from bodies after markers', () => {
+    const sections = parseScriptSections(
+      '[GANCHO]: ¿Sigues perdiendo ventas?\n[DESARROLLO]: Con un guion claro…\n[CIERRE]: Comenta LISTO'
+    )
+    expect(sections.map((s) => s.label)).toEqual(['Gancho', 'Desarrollo', 'Cierre'])
+    expect(sections[0].body).toBe('¿Sigues perdiendo ventas?')
+    expect(sections[1].body).toBe('Con un guion claro…')
+    expect(sections[2].body).toBe('Comenta LISTO')
+  })
+
+  it('maps CIERRE to Cierre and CLOSE alias; never CTA', () => {
+    const cierre = parseScriptSections('[CIERRE]\nEnd line')
+    expect(cierre[0]).toMatchObject({ kind: 'cierre', label: 'Cierre', body: 'End line' })
+
+    const close = parseScriptSections('[CLOSE]\nBye')
+    expect(close[0]).toMatchObject({ kind: 'cierre', label: 'Cierre', body: 'Bye' })
+
+    const cta = parseScriptSections('[CTA]\nAct')
+    expect(cta[0]).toMatchObject({ kind: 'cta', label: 'CTA', body: 'Act' })
+  })
+
+  it('maps English aliases HOOK / DEVELOPMENT without renaming CLOSE to CTA', () => {
     const sections = parseScriptSections(
       '[HOOK]\nH\n[DEVELOPMENT]\nD\n[CLOSE]\nC'
     )
     expect(sections.map((s) => ({ kind: s.kind, label: s.label }))).toEqual([
       { kind: 'gancho', label: 'Gancho' },
       { kind: 'desarrollo', label: 'Desarrollo' },
-      { kind: 'cta', label: 'CTA' },
+      { kind: 'cierre', label: 'Cierre' },
     ])
+  })
+
+  it('normalizes [GANCHO A] / [GANCHO B] labels', () => {
+    const sections = parseScriptSections('[GANCHO A]: First\n[GANCHO B]: Second')
+    expect(sections.map((s) => s.label)).toEqual(['Gancho', 'Gancho'])
+    expect(sections[0].body).toBe('First')
+    expect(sections[1].body).toBe('Second')
   })
 
   it('keeps unmarked leading text without dropping it', () => {
