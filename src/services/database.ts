@@ -551,10 +551,11 @@ export async function countBusinessChatSessions(businessId: string): Promise<num
  * Hard-delete a chat session (O1). Authz via existing 062 RLS
  * `chat_sessions_delete` → `can_write_chat_session(id)`.
  *
- * Ordered cleanup first: clear thread linkage on posts / product_images so
- * composite FK `(session_id, product_id) → chat_session_offers ON DELETE RESTRICT`
- * becomes MATCH SIMPLE (null session_id) and offers can CASCADE with the session.
- * Product ownership (`product_id`) and image/post assets are preserved.
+ * Ordered cleanup first: null `session_id` / `message_id` on posts and
+ * product_images (keeps `product_id` + assets). Preview offer FKs are now
+ * ON DELETE SET NULL (`preview_session_offer_fks_set_null`) as schema
+ * defense-in-depth; explicit cleanup stays for deterministic retained-row
+ * state and staged envs where prod still has 062 RESTRICT.
  *
  * Fail-closed: `.select('id')` + throw on empty result or server error (incl. 23503).
  * No soft-archive. Do not use `deleteSessionMessages` as hygiene.
@@ -585,7 +586,7 @@ export function formatChatSessionDeleteError(err: unknown): Error {
   return new Error(String(err || 'Session delete failed'))
 }
 
-/** Clear session/message thread links so offer RESTRICT FKs do not block session delete. */
+/** Clear session/message links before hard delete; preserve product ownership. Preview FK SET NULL is a schema fallback. */
 async function clearSessionThreadLinkages(sessionId: string): Promise<void> {
   const { error: imagesErr } = await supabase
     .from('product_images')
