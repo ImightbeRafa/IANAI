@@ -230,8 +230,9 @@ export default function ChatShell({
           imageClarify={thread.imageClarify}
           onAnswerImageClarify={(answer) => void thread.answerImageClarify(answer)}
           onCancelImageClarify={() => thread.cancelImageClarify()}
-          onGenerateImageFromScript={(scriptText, productId) =>
-            void thread.generateImageFromScript(scriptText, productId)
+          onUploadClarifyImage={(file, productId) => void thread.uploadOfferImage(file, productId)}
+          onGenerateImageFromScript={(scriptText, productId, scriptTitle) =>
+            void thread.generateImageFromScript(scriptText, productId, scriptTitle)
           }
           onEditOfferImage={(productImageId, imageUrl, instruction, productId) =>
             thread.editOfferImage(productImageId, imageUrl, instruction, productId)

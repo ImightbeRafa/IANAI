@@ -409,7 +409,7 @@ export default function ChatShellScriptCard({
             onClick={() => void onGenerateImage(displayContent)}
           >
             {imageBusy ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
-            {es ? 'Crear imagen' : 'Create image'}
+            {es ? 'Crear post' : 'Create post'}
           </button>
         ) : null}
         {offerImageId && offerImageUrl && onOptimizeOfferImage ? (

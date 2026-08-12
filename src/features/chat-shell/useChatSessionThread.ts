@@ -71,6 +71,7 @@ import {
   readImagePreferences,
   requiresProductReferences,
   resolveImagePreferences,
+  resolveScriptPostPreferences,
   writeImagePreferences,
   type ImageClarifyStep,
   type ShellImagePreferences,
@@ -93,6 +94,10 @@ export type ImageClarifyState = {
   scriptText?: string
   source: 'composer' | 'rail' | 'script_card'
   partial: Partial<ShellImagePreferences>
+  /** Full resolved prefs when waiting on refs (Producto without offer Ref). */
+  preferences?: ShellImagePreferences
+  prompt?: string
+  userText?: string
 }
 
 function buildLegacyProductContext(product: Product, additionalContext?: string) {
@@ -164,6 +169,7 @@ export function useChatSessionThread(options: {
   const [offerImages, setOfferImages] = useState<ProductImage[]>([])
   const [imageOfferId, setImageOfferId] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
+  const imageBusyRef = useRef(false)
   const [imagePrefs, setImagePrefs] = useState<ShellImagePreferences>(() =>
     resolveImagePreferences({}, {})
   )
@@ -174,8 +180,18 @@ export function useChatSessionThread(options: {
     prompt?: string
     userText?: string
     scriptText?: string
+    scriptTitle?: string | null
     source: 'composer' | 'rail' | 'script_card'
     explicit?: Partial<ShellImagePreferences>
+  }) => Promise<void>>(async () => {})
+
+  const runImageGenerateRef = useRef<(options: {
+    productId: string
+    preferences: ShellImagePreferences
+    prompt: string
+    userText: string
+    scriptText?: string
+    source: string
   }) => Promise<void>>(async () => {})
 
   const loadRequestRef = useRef(0)
@@ -1058,10 +1074,22 @@ export function useChatSessionThread(options: {
     setImageOfferId(productId)
   }, [])
 
-  const uploadOfferImage = useCallback(async (file: File) => {
-    if (!session || !activeImageOfferId || imageBusy) return
+  const uploadOfferImage = useCallback(async (
+    file: File,
+    productIdOverride?: string | null
+  ) => {
+    const targetProductId = productIdOverride || activeImageOfferId
+    if (!session || !targetProductId || imageBusyRef.current) return
+    const pendingRefs =
+      imageClarify
+      && imageClarify.sessionId === session.id
+      && imageClarify.step === 'refs'
+      && imageClarify.preferences
+        ? imageClarify
+        : null
     const originSessionId = session.id
     const originGen = sessionGenRef.current
+    imageBusyRef.current = true
     setImageBusy(true)
     setError(null)
     try {
@@ -1074,7 +1102,7 @@ export function useChatSessionThread(options: {
       await uploadShellOfferImage({
         userId,
         sessionId: originSessionId,
-        productId: activeImageOfferId,
+        productId: targetProductId,
         dataUrl,
         filename: file.name,
       })
@@ -1086,8 +1114,12 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
-      await refreshOfferImages(originSessionId, activeImageOfferId, loadRequestRef.current)
-      setNotice('Image uploaded for this offer.')
+      await refreshOfferImages(originSessionId, targetProductId, loadRequestRef.current)
+      setNotice(
+        language === 'es'
+          ? 'Foto de referencia lista.'
+          : 'Reference photo ready.'
+      )
     } catch (err) {
       console.error(err)
       if (isLiveThread(
@@ -1098,10 +1130,39 @@ export function useChatSessionThread(options: {
       )) {
         setError(err instanceof Error ? err.message : 'Upload failed')
       }
+      return
     } finally {
+      imageBusyRef.current = false
       setImageBusy(false)
     }
-  }, [session, activeImageOfferId, imageBusy, userId, refreshOfferImages])
+
+    // S3: resume Script→post / Producto generate after calm refs upload.
+    if (
+      pendingRefs?.preferences
+      && isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )
+    ) {
+      await runImageGenerateRef.current({
+        productId: targetProductId,
+        preferences: pendingRefs.preferences,
+        prompt: pendingRefs.prompt || pendingRefs.scriptText || pendingRefs.originText || 'Ad image',
+        userText: pendingRefs.userText || pendingRefs.originText,
+        scriptText: pendingRefs.scriptText,
+        source: pendingRefs.source,
+      })
+    }
+  }, [
+    session,
+    activeImageOfferId,
+    imageClarify,
+    userId,
+    refreshOfferImages,
+    language,
+  ])
 
   const patchImagePreferences = useCallback((patch: Partial<ShellImagePreferences>) => {
     setImagePrefs((prev) => {
@@ -1119,7 +1180,7 @@ export function useChatSessionThread(options: {
     scriptText?: string
     source: string
   }) => {
-    if (!session || imageBusy) return
+    if (!session || imageBusyRef.current) return
     const originSessionId = session.id
     const originGen = sessionGenRef.current
     const prefs = options.preferences
@@ -1128,6 +1189,12 @@ export function useChatSessionThread(options: {
       return
     }
 
+    const clarifySource: ImageClarifyState['source'] =
+      options.source === 'script_card' || options.source === 'rail' || options.source === 'composer'
+        ? options.source
+        : 'composer'
+
+    imageBusyRef.current = true
     setImageBusy(true)
     setError(null)
     setNotice(formatImageAssumptions(prefs, language))
@@ -1144,10 +1211,24 @@ export function useChatSessionThread(options: {
       setOfferImages(images)
       const productImageIds = selectProductReferenceImageIds(images)
       if (requiresProductReferences(prefs.style) && productImageIds.length === 0) {
-        setError(
+        // S3: calm sticky ask once — keep Script→post pending instead of hard-fail.
+        setImageClarify({
+          sessionId: originSessionId,
+          step: 'refs',
+          mode: 'product',
+          originText: options.userText,
+          productId: options.productId,
+          scriptText: options.scriptText,
+          source: clarifySource,
+          partial: { style: prefs.style },
+          preferences: prefs,
+          prompt: options.prompt,
+          userText: options.userText,
+        })
+        setNotice(
           language === 'es'
-            ? 'Sube al menos una imagen de referencia del producto para este estilo.'
-            : 'Upload at least one product reference image for this style.'
+            ? 'Sube una foto del producto (o elige Anuncio).'
+            : 'Upload a product photo (or switch to Ad).'
         )
         return
       }
@@ -1195,11 +1276,11 @@ export function useChatSessionThread(options: {
         setError(err instanceof Error ? err.message : 'Image generate failed')
       }
     } finally {
+      imageBusyRef.current = false
       setImageBusy(false)
     }
   }, [
     session,
-    imageBusy,
     language,
     brandKits,
     storage,
@@ -1207,11 +1288,14 @@ export function useChatSessionThread(options: {
     refreshOfferImages,
   ])
 
+  runImageGenerateRef.current = runImageGenerate
+
   const beginImageFlow = useCallback(async (options: {
     productId?: string | null
     prompt?: string
     userText?: string
     scriptText?: string
+    scriptTitle?: string | null
     source: 'composer' | 'rail' | 'script_card'
     explicit?: Partial<ShellImagePreferences>
   }) => {
@@ -1235,10 +1319,19 @@ export function useChatSessionThread(options: {
     }
 
     const sticky = readImagePreferences(storage, session.id)
-    const resolved = resolveImagePreferences(
-      { ...options.explicit },
-      resolveImagePreferences(sticky, imagePrefs)
-    )
+    const stickyMerged = resolveImagePreferences(sticky, imagePrefs)
+    const resolved =
+      options.source === 'script_card'
+        ? resolveScriptPostPreferences({
+            explicit: options.explicit,
+            sticky: stickyMerged,
+            scriptText: options.scriptText,
+            scriptTitle: options.scriptTitle,
+          })
+        : resolveImagePreferences(
+            { ...options.explicit },
+            stickyMerged
+          )
     const plan = planImageClarifications(resolved)
     if (plan.needed && plan.step === 'mode') {
       setImagePrefs(resolved)
@@ -1281,9 +1374,38 @@ export function useChatSessionThread(options: {
   beginImageFlowRef.current = beginImageFlow
 
   const answerImageClarify = useCallback(async (
-    answer: { mode?: 'anuncio' | 'product'; styleId?: string }
+    answer: {
+      mode?: 'anuncio' | 'product'
+      styleId?: string
+      /** From refs sticky: switch Producto → Anuncio/venta-directa without upload. */
+      switchToAnuncio?: boolean
+    }
   ) => {
     if (!imageClarify || !session || imageClarify.sessionId !== session.id) return
+
+    if (imageClarify.step === 'refs') {
+      if (answer.switchToAnuncio) {
+        const salesStyle: ShellImageStyle = { kind: 'preset', presetId: 'venta-directa' }
+        const base = imageClarify.preferences
+          || resolveImagePreferences(
+            imageClarify.partial,
+            resolveImagePreferences(readImagePreferences(storage, session.id), imagePrefs)
+          )
+        const resolved = resolveImagePreferences(
+          { style: salesStyle },
+          base
+        )
+        await runImageGenerate({
+          productId: imageClarify.productId,
+          preferences: resolved,
+          prompt: imageClarify.prompt || imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
+          userText: imageClarify.userText || imageClarify.originText,
+          scriptText: imageClarify.scriptText,
+          source: imageClarify.source,
+        })
+      }
+      return
+    }
 
     if (imageClarify.step === 'mode' && answer.mode) {
       setImageClarify({
@@ -1331,13 +1453,15 @@ export function useChatSessionThread(options: {
 
   const generateImageFromScript = useCallback(async (
     scriptText: string,
-    productId?: string | null
+    productId?: string | null,
+    scriptTitle?: string | null
   ) => {
     await beginImageFlow({
       productId: productId || activeImageOfferId || offerProductId,
       prompt: scriptText,
-      userText: language === 'es' ? 'Crear imagen desde guión' : 'Create image from script',
+      userText: language === 'es' ? 'Crear post desde guión' : 'Create post from script',
       scriptText,
+      scriptTitle,
       source: 'script_card',
     })
   }, [beginImageFlow, activeImageOfferId, offerProductId, language])

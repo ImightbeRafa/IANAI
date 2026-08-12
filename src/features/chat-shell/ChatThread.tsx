@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react'
+import { useRef, type KeyboardEvent } from 'react'
 import ChatShellScriptCard from './ChatShellScriptCard'
 import ChatShellImageCard from './ChatShellImageCard'
 import type {
@@ -37,9 +37,18 @@ interface ChatThreadProps {
   onRetryFailedOffers: () => void
   language?: 'en' | 'es'
   imageClarify?: ImageClarifyState | null
-  onAnswerImageClarify?: (answer: { mode?: 'anuncio' | 'product'; styleId?: string }) => void
+  onAnswerImageClarify?: (answer: {
+    mode?: 'anuncio' | 'product'
+    styleId?: string
+    switchToAnuncio?: boolean
+  }) => void
   onCancelImageClarify?: () => void
-  onGenerateImageFromScript?: (scriptText: string, productId?: string | null) => void | Promise<void>
+  onUploadClarifyImage?: (file: File, productId?: string | null) => void | Promise<void>
+  onGenerateImageFromScript?: (
+    scriptText: string,
+    productId?: string | null,
+    scriptTitle?: string | null
+  ) => void | Promise<void>
   onSaveScript: (
     content: string,
     title: string,
@@ -120,6 +129,7 @@ export default function ChatThread({
   imageClarify = null,
   onAnswerImageClarify,
   onCancelImageClarify,
+  onUploadClarifyImage,
   onGenerateImageFromScript,
   onSaveScript,
   onEditScript,
@@ -129,6 +139,7 @@ export default function ChatThread({
 }: ChatThreadProps) {
   const composerEnabled = Boolean(session) && !sending
   const generateBlocked = Boolean(session) && !offerProductId
+  const refsUploadRef = useRef<HTMLInputElement>(null)
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -253,7 +264,12 @@ export default function ChatThread({
                           }
                           onGenerateImage={
                             onGenerateImageFromScript
-                              ? (scriptText) => void onGenerateImageFromScript(scriptText, productId)
+                              ? (scriptText) =>
+                                  void onGenerateImageFromScript(
+                                    scriptText,
+                                    productId,
+                                    parsed.title
+                                  )
                               : undefined
                           }
                           onEditOfferImage={
@@ -311,7 +327,12 @@ export default function ChatThread({
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}
                         onGenerateImage={
                           onGenerateImageFromScript && offerProductId
-                            ? (scriptText) => void onGenerateImageFromScript(scriptText, offerProductId)
+                            ? (scriptText) =>
+                                void onGenerateImageFromScript(
+                                  scriptText,
+                                  offerProductId,
+                                  script.title
+                                )
                             : undefined
                         }
                       />
@@ -358,6 +379,36 @@ export default function ChatThread({
                   >
                     {language === 'es' ? 'Producto' : 'Product'}
                   </button>
+                </>
+              ) : imageClarify.step === 'refs' ? (
+                <>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => refsUploadRef.current?.click()}
+                  >
+                    {language === 'es' ? 'Subir foto' : 'Upload photo'}
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => onAnswerImageClarify?.({ switchToAnuncio: true })}
+                  >
+                    {language === 'es' ? 'Usar Anuncio' : 'Use Ad'}
+                  </button>
+                  <input
+                    ref={refsUploadRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (file) void onUploadClarifyImage?.(file, imageClarify.productId)
+                    }}
+                  />
                 </>
               ) : (
                 (imageClarify.mode === 'product'

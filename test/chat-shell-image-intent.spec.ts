@@ -4,11 +4,13 @@ import {
   buildShellImageGenerateBody,
   DEFAULT_IMAGE_PREFERENCES,
   formatImageAssumptions,
+  looksLikeSalesScript,
   parseChatShellImageIntent,
   planImageClarifications,
   readImagePreferences,
   requiresProductReferences,
   resolveImagePreferences,
+  resolveScriptPostPreferences,
   writeImagePreferences,
 } from '../src/features/chat-shell/chatShellImageIntent'
 
@@ -202,5 +204,56 @@ describe('buildShellImageGenerateBody', () => {
     expect(label).toContain('Comparación')
     expect(label).toContain('3:4')
     expect(label).toContain('Nano Banana Pro')
+  })
+})
+
+describe('resolveScriptPostPreferences (S3 Script→post)', () => {
+  it('detects sales scripts from title/body', () => {
+    expect(looksLikeSalesScript('Hook… CTA fuerte', 'Guión de venta 1')).toBe(true)
+    expect(looksLikeSalesScript('Educational tips about sleep', 'Educativo')).toBe(false)
+    expect(looksLikeSalesScript('GANCHO\n…\nCTA\nCompra ya\nCIERRE', null)).toBe(true)
+  })
+
+  it('prefers venta-directa for sales when sticky/explicit style missing', () => {
+    const resolved = resolveScriptPostPreferences({
+      scriptText: 'GANCHO\nDolor\nCTA\nCompra ahora\nCIERRE',
+      scriptTitle: 'Venta directa',
+      sticky: { aspectRatio: '9:16', model: 'nano-banana-pro', density: 'medium' },
+    })
+    expect(resolved.style).toEqual({ kind: 'preset', presetId: 'venta-directa' })
+    expect(planImageClarifications(resolved).needed).toBe(false)
+  })
+
+  it('keeps sticky/explicit style over sales fallback', () => {
+    const stickyWins = resolveScriptPostPreferences({
+      scriptText: 'Guión de venta',
+      sticky: { style: { kind: 'preset', presetId: 'comparison' } },
+    })
+    expect(stickyWins.style).toEqual({ kind: 'preset', presetId: 'comparison' })
+
+    const explicitWins = resolveScriptPostPreferences({
+      scriptText: 'Guión de venta',
+      sticky: { style: { kind: 'preset', presetId: 'comparison' } },
+      explicit: { style: { kind: 'product', productSubStyle: 'studio-hero' } },
+    })
+    expect(explicitWins.style).toEqual({ kind: 'product', productSubStyle: 'studio-hero' })
+  })
+
+  it('still injects script into generate body for Script→post', () => {
+    const prefs = resolveScriptPostPreferences({
+      scriptText: 'SCRIPT BODY FOR POST',
+      scriptTitle: 'Venta',
+    })
+    const body = buildShellImageGenerateBody({
+      preferences: prefs,
+      productId: 'p1',
+      sessionId: 's1',
+      prompt: 'SCRIPT BODY FOR POST',
+      language: 'es',
+      scriptText: 'SCRIPT BODY FOR POST',
+    })
+    expect(body.prompt).toBe('SCRIPT BODY FOR POST')
+    expect(body.scriptContext).toBe('SCRIPT BODY FOR POST')
+    expect(body.postStyle).toBe('venta-directa')
   })
 })

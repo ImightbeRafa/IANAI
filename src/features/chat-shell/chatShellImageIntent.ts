@@ -26,7 +26,7 @@ export interface ShellImageIntent {
   wantsImage: boolean
 }
 
-export type ImageClarifyStep = 'mode' | 'style'
+export type ImageClarifyStep = 'mode' | 'style' | 'refs'
 
 export interface ImageClarifyPlan {
   needed: boolean
@@ -409,4 +409,43 @@ export function productStyleChoices(language: 'en' | 'es' = 'es'): Array<{ id: s
     id: s.id,
     label: language === 'es' ? s.nameEs : s.name,
   }))
+}
+
+/**
+ * Detect sales-script handoff so ScriptCard→post can default to venta-directa
+ * when no sticky/explicit style exists.
+ */
+export function looksLikeSalesScript(text?: string | null, title?: string | null): boolean {
+  const hay = `${title || ''} ${text || ''}`.toLowerCase()
+  if (!hay.trim()) return false
+  return (
+    /\bventa(?:\s+directa)?\b/.test(hay)
+    || /\bdirect\s+sale\b/.test(hay)
+    || /\bsales?\s+script\b/.test(hay)
+    || /\bguion(?:es)?\s+de\s+venta\b/.test(hay)
+    || /\bcta\b/.test(hay) && /\b(gancho|hook|cierre|closing)\b/.test(hay)
+  )
+}
+
+/**
+ * Resolve prefs for ScriptCard→post:
+ * explicit → sticky → sales venta-directa fallback → unresolved (clarify).
+ */
+export function resolveScriptPostPreferences(options: {
+  explicit?: Partial<ShellImagePreferences> | null
+  sticky?: Partial<ShellImagePreferences> | null
+  scriptText?: string | null
+  scriptTitle?: string | null
+}): ShellImagePreferences {
+  const stickyBase = resolveImagePreferences(options.sticky, {})
+  const salesFallback: Partial<ShellImagePreferences> =
+    !stickyBase.style
+    && !options.explicit?.style
+    && looksLikeSalesScript(options.scriptText, options.scriptTitle)
+      ? { style: { kind: 'preset', presetId: 'venta-directa' } }
+      : {}
+  return resolveImagePreferences(
+    options.explicit,
+    resolveImagePreferences(salesFallback, stickyBase)
+  )
 }
