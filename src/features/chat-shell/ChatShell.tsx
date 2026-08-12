@@ -20,7 +20,8 @@ export default function ChatShell({
   initials,
 }: ChatShellProps) {
   const [navOpen, setNavOpen] = useState(false)
-  const [railOpen, setRailOpen] = useState(false)
+  // Default open so desktop matches the three-column Obsidian mock (push layout)
+  const [railOpen, setRailOpen] = useState(true)
   const [railTab, setRailTab] = useState<RailTab>('images')
 
   useEffect(() => {
@@ -34,7 +35,11 @@ export default function ChatShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const openRailTab = (tab: RailTab) => {
+  const selectRailTab = (tab: RailTab) => {
+    if (railOpen && railTab === tab) {
+      setRailOpen(false)
+      return
+    }
     setRailTab(tab)
     setRailOpen(true)
   }
@@ -47,15 +52,12 @@ export default function ChatShell({
 
   return (
     <div className={shellClass} data-theme={theme}>
-      {(navOpen || railOpen) && (
+      {navOpen && (
         <button
           type="button"
           className="chat-shell__drawer-backdrop"
-          aria-label="Close panels"
-          onClick={() => {
-            setNavOpen(false)
-            setRailOpen(false)
-          }}
+          aria-label="Close navigation"
+          onClick={() => setNavOpen(false)}
         />
       )}
 
@@ -82,22 +84,25 @@ export default function ChatShell({
           <div className="chat-shell__topbar-pills" role="tablist" aria-label="Stage panels">
             <button
               type="button"
-              className={`chat-shell__top-pill${railTab === 'context' ? ' is-on' : ''}`}
-              onClick={() => openRailTab('context')}
+              className={`chat-shell__top-pill${railOpen && railTab === 'context' ? ' is-on' : ''}`}
+              aria-pressed={railOpen && railTab === 'context'}
+              onClick={() => selectRailTab('context')}
             >
               Context
             </button>
             <button
               type="button"
-              className={`chat-shell__top-pill${railTab === 'offers' ? ' is-on' : ''}`}
-              onClick={() => openRailTab('offers')}
+              className={`chat-shell__top-pill${railOpen && railTab === 'offers' ? ' is-on' : ''}`}
+              aria-pressed={railOpen && railTab === 'offers'}
+              onClick={() => selectRailTab('offers')}
             >
               Offers <span className="chat-shell__count">2</span>
             </button>
             <button
               type="button"
-              className={`chat-shell__top-pill${railTab === 'images' ? ' is-on' : ''}`}
-              onClick={() => openRailTab('images')}
+              className={`chat-shell__top-pill${railOpen && railTab === 'images' ? ' is-on' : ''}`}
+              aria-pressed={railOpen && railTab === 'images'}
+              onClick={() => selectRailTab('images')}
             >
               Images <span className="chat-shell__count">3</span>
             </button>
@@ -106,8 +111,9 @@ export default function ChatShell({
             <button
               type="button"
               className="chat-shell__icon-btn chat-shell__rail-toggle"
-              aria-label="Open images rail"
-              onClick={() => setRailOpen(true)}
+              aria-label={railOpen ? 'Close context rail' : 'Open context rail'}
+              aria-pressed={railOpen}
+              onClick={() => setRailOpen((open) => !open)}
             >
               <PanelRight size={16} />
             </button>
@@ -117,7 +123,11 @@ export default function ChatShell({
         <ChatThread />
       </section>
 
-      <ChatContextRail tab={railTab} onTabChange={setRailTab} />
+      <ChatContextRail
+        tab={railTab}
+        onTabChange={setRailTab}
+        onClose={() => setRailOpen(false)}
+      />
     </div>
   )
 }

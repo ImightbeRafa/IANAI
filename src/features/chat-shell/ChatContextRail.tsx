@@ -1,13 +1,31 @@
+import { X } from 'lucide-react'
+
 export type RailTab = 'context' | 'offers' | 'images'
 
 interface ChatContextRailProps {
   tab: RailTab
   onTabChange: (tab: RailTab) => void
+  onClose: () => void
 }
 
-export default function ChatContextRail({ tab, onTabChange }: ChatContextRailProps) {
+export default function ChatContextRail({ tab, onTabChange, onClose }: ChatContextRailProps) {
   return (
     <aside className="chat-shell__rail" aria-label="Context rail">
+      <div className="chat-shell__rail-head">
+        <div className="chat-shell__rail-head-title">
+          <strong>Rail</strong>
+          <span className="chat-shell__rail-edit">edit</span>
+        </div>
+        <button
+          type="button"
+          className="chat-shell__icon-btn chat-shell__rail-close"
+          aria-label="Close rail"
+          onClick={onClose}
+        >
+          <X size={15} />
+        </button>
+      </div>
+
       <div className="chat-shell__tabs" role="tablist" aria-label="Rail sections">
         <button
           type="button"
