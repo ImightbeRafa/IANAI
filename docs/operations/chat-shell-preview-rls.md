@@ -207,7 +207,7 @@ Guidance locked by that PASS (docs only — no Preview DB churn):
 2. **No anon policies.** No `USING (true)` / open policies on `scripts`.
 3. **Pure AND blocks legacy null-session rows** — expected for the old `/scripts` path when `session_id` is null. Any AND **or** AND+null-session cutover ships only in a **reviewed migration** (not live-only ops — the DROP-wipe race already proved that).
 4. **Live Preview stays the current AND four** (`scripts_select` / `scripts_insert` / `scripts_update` / `scripts_delete`). No further Preview policy churn unless SecureDog explicitly asks.
-5. The **Prod cutover template** section below remains the future AIIAN migration docs (null-session legacy shape). **Do not apply on Preview tonight.**
+5. The **Prod cutover template** section below is the **SecureDog locked** future AIIAN **git migration** shape (null-session legacy). **Do not apply on Preview tonight.**
 
 ### Verify steps (Preview QA)
 
@@ -225,7 +225,7 @@ Document-only nits. **No live DB change** from this tip. Later Preview-only if/w
 
 1. **Legacy null-session INSERT AND gap** — pure AND blocks `session_id` null (`can_write_chat_session(null)` is false). Chat-shell Guardar always sets `session_id` → OK. Old `/scripts` null-session rows stay blocked until a **reviewed migration** (AND or AND+null-session) — not live-only ops.
 2. **SecureDog watch items** — keep alignment reviews on the backlog; non-blocking for shell Guardar while the live AND four remains.
-3. **Future AIIAN cutover** — use the SecureDog prod cutover template below in a reviewed migration only; do not apply that template on Preview tonight.
+3. **Future AIIAN cutover** — SecureDog locked prod git migration shape below; ships only as a reviewed git migration; do not apply that template on Preview tonight.
 
 ### Prod cutover template (SecureDog LOCKED — future AIIAN git migration; do not apply on Preview tonight)
 
