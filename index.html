@@ -5,9 +5,34 @@
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="google" content="notranslate" />
+    <!-- Chat-shell FOUC guard: theme class before paint on /chat only -->
+    <script>
+      (function () {
+        try {
+          var path = location.pathname || '';
+          if (!/^\/chat(?:\/|$)/.test(path)) return;
+          var key = 'ianai.chat-shell.theme';
+          var stored = null;
+          try { stored = localStorage.getItem(key); } catch (e) {}
+          var theme = (stored === 'obsidian-light' || stored === 'obsidian-dark')
+            ? stored
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'obsidian-light'
+              : 'obsidian-dark');
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.classList.add('chat-shell-route');
+          document.documentElement.style.colorScheme = theme === 'obsidian-light' ? 'light' : 'dark';
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      html.chat-shell-route { background: #0b0e14; }
+      html.chat-shell-route[data-theme="obsidian-light"] { background: #f4f6fb; }
+    </style>
+    <link rel="stylesheet" href="/design/chat-shell-obsidian-tokens.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet">
     <title>Advance AI - AI-Powered Ad Script Generator</title>
     <meta name="description" content="Generate high-conversion ad scripts for social media with AI">
   </head>
