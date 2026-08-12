@@ -90,18 +90,56 @@ export function readSetupSkipped(
   }
 }
 
+export type WriteSetupSkippedResult =
+  | { ok: true; key: string; skipped: boolean }
+  | { ok: false; key: string | null; skipped: boolean; reason: string }
+
+/**
+ * Persist or clear Skip for one session id.
+ * Verifies read-back so silent setItem failures cannot look like success.
+ * Callers must only invoke from explicit Skip / Save / Setup reopen.
+ */
 export function writeSetupSkipped(
-  storage: { setItem?(key: string, value: string): void; removeItem?(key: string): void } | null | undefined,
+  storage: {
+    getItem?(key: string): string | null
+    setItem?(key: string, value: string): void
+    removeItem?(key: string): void
+  } | null | undefined,
   sessionId: string | null | undefined,
   skipped: boolean
-): void {
-  if (!storage || !sessionId) return
+): WriteSetupSkippedResult {
+  if (!sessionId) {
+    return { ok: false, key: null, skipped, reason: 'missing_session_id' }
+  }
+  const key = setupSkippedStorageKey(sessionId)
+  if (!storage) {
+    return { ok: false, key, skipped, reason: 'missing_storage' }
+  }
   try {
-    const key = setupSkippedStorageKey(sessionId)
-    if (skipped) storage.setItem?.(key, '1')
-    else storage.removeItem?.(key)
+    if (skipped) {
+      if (typeof storage.setItem !== 'function' || typeof storage.getItem !== 'function') {
+        return { ok: false, key, skipped, reason: 'storage_methods_unavailable' }
+      }
+      storage.setItem(key, '1')
+      const raw = storage.getItem(key)
+      if (raw !== '1' && raw !== 'true') {
+        return { ok: false, key, skipped, reason: 'write_verify_failed' }
+      }
+    } else {
+      if (typeof storage.removeItem !== 'function') {
+        return { ok: false, key, skipped, reason: 'storage_methods_unavailable' }
+      }
+      storage.removeItem(key)
+      if (typeof storage.getItem === 'function') {
+        const raw = storage.getItem(key)
+        if (raw != null) {
+          return { ok: false, key, skipped, reason: 'clear_verify_failed' }
+        }
+      }
+    }
+    return { ok: true, key, skipped }
   } catch {
-    /* ignore quota / private mode */
+    return { ok: false, key, skipped, reason: 'storage_threw' }
   }
 }
 

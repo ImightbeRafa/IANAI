@@ -17,9 +17,11 @@ interface ChatContextSetupCardProps {
   skipped: boolean
   forceOpen: boolean
   language?: 'en' | 'es'
-  onSkipped: () => void
+  /** Must receive the session id captured at Skip click (not a later prop). */
+  onSkipped: (sessionId: string) => void
   onForceOpenConsumed?: () => void
-  onSaved: (updates: ChatSessionSafeUpdates) => void | Promise<void>
+  /** sessionId is captured at Save click so a delayed save cannot clear another session. */
+  onSaved: (updates: ChatSessionSafeUpdates, sessionId: string) => void | Promise<void>
 }
 
 export default function ChatContextSetupCard({
@@ -118,17 +120,31 @@ export default function ChatContextSetupCard({
   }
 
   const handleSave = async () => {
+    // Capture at click — do not trust a later session snap-back for clearSkipped.
+    const capturedSessionId = sessionIdRef.current
+    if (!capturedSessionId) return
     const result = buildSessionSetupUpdates(draft)
     if (!result.ok) {
       setSaveError(result.error)
       return
     }
     setSaveError(null)
-    await onSaved(result.updates as ChatSessionSafeUpdates)
+    await onSaved(result.updates as ChatSessionSafeUpdates, capturedSessionId)
+  }
+
+  const handleSkip = () => {
+    // Capture at Skip click boundary — rail must not re-read a possibly drifted prop.
+    const capturedSessionId = sessionIdRef.current
+    if (!capturedSessionId) return
+    onSkipped(capturedSessionId)
   }
 
   return (
-    <div className="chat-shell__setup" aria-label="Session setup">
+    <div
+      className="chat-shell__setup"
+      aria-label="Session setup"
+      data-session-id={session.id}
+    >
       <div className="chat-shell__setup-head">
         <strong>Setup</strong>
         <span>Brief this session — does not create products or offers.</span>
@@ -260,7 +276,9 @@ export default function ChatContextSetupCard({
           type="button"
           className="chat-shell__setup-btn"
           disabled={busy}
-          onClick={onSkipped}
+          data-session-id={session.id}
+          data-action="setup-skip"
+          onClick={handleSkip}
         >
           Skip
         </button>

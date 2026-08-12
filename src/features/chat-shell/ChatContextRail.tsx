@@ -8,6 +8,7 @@ import {
   isSessionSetupSkipped,
   writeSetupSkipped,
 } from './chatContextSetup'
+import { CHAT_SHELL_ACTIVE_SESSION_KEY } from './chatShellPersistence'
 import ChatContextSetupCard from './ChatContextSetupCard'
 import {
   formatImageAssumptions,
@@ -76,6 +77,7 @@ export default function ChatContextRail({
   /** Bumps so Skip/clear re-reads LS (source of truth) without a drifting Set. */
   const [skipTick, setSkipTick] = useState(0)
   const [forceSetup, setForceSetup] = useState(false)
+  const [skipPersistError, setSkipPersistError] = useState<string | null>(null)
 
   useEffect(() => {
     setTitle(session?.title || '')
@@ -86,23 +88,59 @@ export default function ChatContextRail({
 
   useEffect(() => {
     setForceSetup(false)
+    setSkipPersistError(null)
   }, [session?.id])
 
   const markSkipped = (sessionId: string) => {
-    // Capture the id at Skip time — do not trust a later session snap-back.
-    const capturedSessionId = sessionId
-    if (!capturedSessionId) return
-    writeSetupSkipped(storage, capturedSessionId, true)
+    // sessionId must be captured at Skip click — do not re-read session?.id here.
+    if (!sessionId) return
+
+    // If URL / stored active id disagrees with the click-captured id (selection drift),
+    // write Skip for both so hard-reload cannot reopen against either identity.
+    // Escape / backdrop / hydrate must never call this.
+    const siblingIds = new Set<string>([sessionId])
+    try {
+      const urlId =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('session')
+          : null
+      if (urlId) siblingIds.add(urlId)
+      const storedId = storage?.getItem?.(CHAT_SHELL_ACTIVE_SESSION_KEY) ?? null
+      if (storedId) siblingIds.add(storedId)
+    } catch {
+      /* ignore */
+    }
+
+    let anyOk = false
+    let lastFailure: string | null = null
+    for (const id of siblingIds) {
+      const result = writeSetupSkipped(storage, id, true)
+      if (result.ok) anyOk = true
+      else lastFailure = result.reason
+    }
     setSkipTick((n) => n + 1)
+    if (!anyOk) {
+      setSkipPersistError(
+        lastFailure === 'missing_storage' || lastFailure === 'storage_threw'
+          ? 'Could not save Skip (storage unavailable). Try again.'
+          : 'Could not save Skip for this session. Try again.'
+      )
+      return
+    }
+    setSkipPersistError(null)
     setForceSetup(false)
   }
 
   const clearSkipped = (sessionId: string) => {
-    // Only Save / explicit Setup reopen may clear — never hydrate/remount.
-    const capturedSessionId = sessionId
-    if (!capturedSessionId) return
-    writeSetupSkipped(storage, capturedSessionId, false)
+    // Only Save / explicit Setup reopen may clear — never hydrate/remount/Escape.
+    if (!sessionId) return
+    const result = writeSetupSkipped(storage, sessionId, false)
     setSkipTick((n) => n + 1)
+    if (!result.ok) {
+      setSkipPersistError('Could not clear Skip for this session.')
+      return
+    }
+    setSkipPersistError(null)
   }
 
   const reopenSetup = () => {
@@ -192,13 +230,11 @@ export default function ChatContextRail({
                 skipped={sessionSkipped}
                 forceOpen={forceSetup}
                 language={language}
-                onSkipped={() => {
-                  // Capture active id at click — avoid writing a snap-back session id.
-                  markSkipped(session.id)
-                }}
-                onSaved={async (updates) => {
+                onSkipped={markSkipped}
+                onSaved={async (updates, savedSessionId) => {
                   await onPatchSession?.(updates)
-                  clearSkipped(session.id)
+                  // Clear only the session that was Saved — never a snap-back id.
+                  clearSkipped(savedSessionId)
                   setForceSetup(false)
                   if (typeof updates.title === 'string') setTitle(updates.title)
                   if (typeof updates.context === 'string') setContext(updates.context)
@@ -210,6 +246,12 @@ export default function ChatContextRail({
                   }
                 }}
               />
+
+              {skipPersistError ? (
+                <p className="chat-shell__setup-status is-error" role="alert">
+                  {skipPersistError}
+                </p>
+              ) : null}
 
               {(setupComplete || sessionSkipped) && !forceSetup ? (
                 <div className="chat-shell__setup-reopen">
