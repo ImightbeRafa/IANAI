@@ -62,27 +62,32 @@
   --rail: #10151f;
   --shadow: none;
   --grid-line: color-mix(in srgb, var(--accent) 10%, transparent);
+  --chip-bg: color-mix(in srgb, var(--accent) 22%, transparent);
+  --chip-text: #93c5fd;
 }
 
-/* Light — same geometry, daylight surfaces */
+/* Light — same geometry, daylight surfaces (WCAG-ish body contrast) */
 [data-theme="obsidian-light"] {
   --bg: #f4f6fb;
   --bg-elevated: #ffffff;
   --bg-soft: #e8edf7;
   --bg-stage: #eef2f9;
   --tools-bg: #eef2f8;
-  --border: #d5dbe8;
-  --border-strong: #b7c0d4;
-  --text: #0f172a;
-  --text-muted: #5b657a;
-  --text-faint: #8b93a7;
-  --bubble-user: #e8eefc;
-  --bubble-user-border: rgba(79, 140, 255, 0.35);
+  --border: #c5cddd;
+  --border-strong: #9aa6bd;
+  --text: #0b1220;
+  --text-muted: #334155;
+  --text-faint: #526277;
+  --bubble-user: #e4ecfc;
+  --bubble-user-border: rgba(79, 140, 255, 0.4);
   --bubble-ai: #ffffff;
   --sidebar: #eef2f9;
   --rail: #f8fafc;
   --shadow: none;
   --grid-line: color-mix(in srgb, var(--accent) 8%, transparent);
+  /* Script tags / chips on light surfaces */
+  --chip-bg: color-mix(in srgb, var(--accent) 14%, #fff);
+  --chip-text: #1e40af;
 }
 
 body.obsidian-shell {

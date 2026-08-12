@@ -559,7 +559,7 @@
 
 .chat-shell__msg--ai {
   align-self: flex-start;
-  color: var(--text-muted);
+  color: var(--text);
   background: transparent;
   border: 0;
   padding: 2px 0;
@@ -584,7 +584,7 @@
 }
 
 .chat-shell__bubble--ai {
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 .chat-shell__script-stack {
@@ -594,31 +594,44 @@
   max-width: 720px;
 }
 
-/* Shell-scoped ScriptCard contrast — does not change legacy /scripts card. */
+/* Shell-scoped ScriptCard — token surfaces (Tailwind dark-* is inverted for /scripts). */
 .chat-shell .chat-shell-script-card {
   background: var(--bg-elevated) !important;
-  border: 1px solid var(--border) !important;
+  border: 1px solid var(--border-strong) !important;
   color: var(--text) !important;
   box-shadow: none !important;
 }
 
+.chat-shell .chat-shell-script-card .text-dark-950,
+.chat-shell .chat-shell-script-card .text-dark-900,
+.chat-shell .chat-shell-script-card .text-dark-800,
 .chat-shell .chat-shell-script-card .text-dark-700,
 .chat-shell .chat-shell-script-card .text-dark-600,
-.chat-shell .chat-shell-script-card .text-sm {
+.chat-shell .chat-shell-script-card .text-dark-500,
+.chat-shell .chat-shell-script-card .text-dark-400,
+.chat-shell .chat-shell-script-card .text-dark-300,
+.chat-shell .chat-shell-script-card .text-sm,
+.chat-shell .chat-shell-script-card .text-xs,
+.chat-shell .chat-shell-script-card .text-\[10px\],
+.chat-shell .chat-shell-script-card .text-\[11px\] {
   color: var(--text) !important;
 }
 
 .chat-shell .chat-shell-script-card .text-dark-400,
 .chat-shell .chat-shell-script-card .text-dark-500,
-.chat-shell .chat-shell-script-card .text-\[10px\],
-.chat-shell .chat-shell-script-card .text-\[11px\] {
+.chat-shell .chat-shell-script-card .text-dark-300 {
   color: var(--text-muted) !important;
 }
 
+.chat-shell .chat-shell-script-card .bg-dark-50,
 .chat-shell .chat-shell-script-card .bg-dark-100,
+.chat-shell .chat-shell-script-card .bg-dark-200,
 .chat-shell .chat-shell-script-card .bg-dark-200\/30,
-.chat-shell .chat-shell-script-card .bg-dark-200\/50 {
-  background: var(--bg-elevated) !important;
+.chat-shell .chat-shell-script-card .bg-dark-200\/40,
+.chat-shell .chat-shell-script-card .bg-dark-200\/50,
+.chat-shell .chat-shell-script-card .bg-dark-200\/80,
+.chat-shell .chat-shell-script-card .bg-primary-900\/5 {
+  background: var(--bg-soft) !important;
 }
 
 .chat-shell .chat-shell-script-card .border-dark-200,
@@ -632,10 +645,18 @@
   opacity: 1;
 }
 
+/* [GANCHO] / [CTA] chips — readable on both themes */
+.chat-shell .chat-shell-script-card .text-primary-400,
+.chat-shell .chat-shell-script-card .font-mono.font-bold {
+  color: var(--chip-text) !important;
+  background: var(--chip-bg) !important;
+  border: 1px solid var(--accent-border);
+}
+
 .chat-shell .chat-shell-script-card button {
   color: var(--text) !important;
-  background: var(--bg-stage) !important;
-  border: 1px solid var(--border) !important;
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border-strong) !important;
   border-radius: var(--radius-sm);
   opacity: 1 !important;
 }
@@ -648,24 +669,47 @@
 
 .chat-shell .chat-shell-script-card button:disabled,
 .chat-shell .chat-shell-script-card button[aria-disabled='true'] {
-  opacity: 0.5 !important;
+  opacity: 0.55 !important;
   color: var(--text-muted) !important;
 }
 
 .chat-shell .chat-shell-script-card textarea,
 .chat-shell .chat-shell-script-card input {
-  background: var(--bg-stage) !important;
+  background: var(--bg-elevated) !important;
   color: var(--text) !important;
-  border: 1px solid var(--border) !important;
+  border: 1px solid var(--border-strong) !important;
 }
 
 .chat-shell .chat-shell-script-card .text-red-400 {
-  color: #f87171 !important;
+  color: var(--danger) !important;
+}
+
+/* Light: force header/chrome off inverted Tailwind navy so title isn’t pale-on-dark */
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card {
+  background: #ffffff !important;
+  border-color: var(--border-strong) !important;
+}
+
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card [class*="bg-dark"],
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .rounded-t-xl {
+  background: var(--bg-soft) !important;
+  color: var(--text) !important;
+}
+
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card [class*="text-dark"],
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .leading-relaxed,
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .tracking-wide {
+  color: var(--text) !important;
+}
+
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .font-mono.font-bold,
+[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .text-primary-400 {
+  color: var(--chip-text) !important;
+  background: var(--chip-bg) !important;
 }
 
 .chat-shell__script-stack .group\/card,
 .chat-shell__script-stack > * {
-  /* Fallback when wrapper class missing */
   border-radius: var(--radius-md);
 }
 
