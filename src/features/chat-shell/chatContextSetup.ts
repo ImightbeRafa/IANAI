@@ -94,10 +94,50 @@ export type WriteSetupSkippedResult =
   | { ok: true; key: string; skipped: boolean }
   | { ok: false; key: string | null; skipped: boolean; reason: string }
 
+/** Why Skip LS was cleared — only Save / Setup reopen may clear. */
+export type ClearSetupSkippedReason = 'save' | 'reopen'
+
+export interface WriteSetupSkippedOptions {
+  /** Required when skipped=false so clears are attributable (instrumentation). */
+  clearReason?: ClearSetupSkippedReason
+}
+
+function shouldLogSetupSkippedClear(): boolean {
+  try {
+    if (import.meta.env.VITE_CHAT_SHELL_SKIP_DEBUG === 'true') return true
+    if (import.meta.env.VITE_CHAT_SHELL_SKIP_DEBUG === 'false') return false
+    // Preview hosts: always log clears so CoS can attribute Setup/Save/multi-tab.
+    if (typeof location !== 'undefined' && /\.vercel\.app$/i.test(location.hostname)) {
+      return true
+    }
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+function logSetupSkippedClear(sessionId: string, clearReason: ClearSetupSkippedReason | undefined): void {
+  if (!shouldLogSetupSkippedClear()) return
+  try {
+    const stack = (new Error('clearSetupSkipped').stack || '')
+      .split('\n')
+      .slice(0, 10)
+      .join('\n')
+    console.info('[chat-shell] clearSetupSkipped', {
+      sessionId,
+      clearReason: clearReason ?? 'unspecified',
+      stack,
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Persist or clear Skip for one session id.
  * Verifies read-back so silent setItem failures cannot look like success.
  * Callers must only invoke from explicit Skip / Save / Setup reopen.
+ * Remount/hydrate/Escape must never call with skipped=false.
  */
 export function writeSetupSkipped(
   storage: {
@@ -106,7 +146,8 @@ export function writeSetupSkipped(
     removeItem?(key: string): void
   } | null | undefined,
   sessionId: string | null | undefined,
-  skipped: boolean
+  skipped: boolean,
+  options?: WriteSetupSkippedOptions
 ): WriteSetupSkippedResult {
   if (!sessionId) {
     return { ok: false, key: null, skipped, reason: 'missing_session_id' }
@@ -129,6 +170,8 @@ export function writeSetupSkipped(
       if (typeof storage.removeItem !== 'function') {
         return { ok: false, key, skipped, reason: 'storage_methods_unavailable' }
       }
+      // Preview-safe attribution: only Save / reopen should reach here.
+      logSetupSkippedClear(sessionId, options?.clearReason)
       storage.removeItem(key)
       if (typeof storage.getItem === 'function') {
         const raw = storage.getItem(key)

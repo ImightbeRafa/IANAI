@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildSessionSetupUpdates,
   classifyGenerateReadiness,
@@ -179,9 +179,37 @@ describe('session setup interview helpers', () => {
         /* refuse to clear */
       },
     }
-    const result = writeSetupSkipped(storage, 's1', false)
+    const result = writeSetupSkipped(storage, 's1', false, { clearReason: 'reopen' })
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toBe('clear_verify_failed')
+  })
+
+  it('clear path accepts clearReason for Save / reopen attribution', () => {
+    const { storage } = memoryStorage()
+    writeSetupSkipped(storage, 's1', true)
+    expect(writeSetupSkipped(storage, 's1', false, { clearReason: 'save' }).ok).toBe(true)
+    writeSetupSkipped(storage, 's1', true)
+    expect(writeSetupSkipped(storage, 's1', false, { clearReason: 'reopen' }).ok).toBe(true)
+  })
+
+  it('instrumentation logs clear when VITE_CHAT_SHELL_SKIP_DEBUG=true', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const prev = import.meta.env.VITE_CHAT_SHELL_SKIP_DEBUG
+    import.meta.env.VITE_CHAT_SHELL_SKIP_DEBUG = 'true'
+    try {
+      const { storage } = memoryStorage()
+      writeSetupSkipped(storage, 's1', true)
+      writeSetupSkipped(storage, 's1', false, { clearReason: 'reopen' })
+      expect(info).toHaveBeenCalled()
+      const payload = info.mock.calls.find((c) => c[0] === '[chat-shell] clearSetupSkipped')
+      expect(payload?.[1]).toMatchObject({
+        sessionId: 's1',
+        clearReason: 'reopen',
+      })
+    } finally {
+      import.meta.env.VITE_CHAT_SHELL_SKIP_DEBUG = prev
+      info.mockRestore()
+    }
   })
 
   it('read/write Setup Skip tolerate missing storage', () => {

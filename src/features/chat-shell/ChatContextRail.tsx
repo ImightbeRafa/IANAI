@@ -131,10 +131,10 @@ export default function ChatContextRail({
     setForceSetup(false)
   }
 
-  const clearSkipped = (sessionId: string) => {
+  const clearSkipped = (sessionId: string, clearReason: 'save' | 'reopen') => {
     // Only Save / explicit Setup reopen may clear — never hydrate/remount/Escape.
     if (!sessionId) return
-    const result = writeSetupSkipped(storage, sessionId, false)
+    const result = writeSetupSkipped(storage, sessionId, false, { clearReason })
     setSkipTick((n) => n + 1)
     if (!result.ok) {
       setSkipPersistError('Could not clear Skip for this session.')
@@ -145,7 +145,7 @@ export default function ChatContextRail({
 
   const reopenSetup = () => {
     if (!session?.id) return
-    clearSkipped(session.id)
+    clearSkipped(session.id, 'reopen')
     setForceSetup(true)
   }
 
@@ -234,7 +234,7 @@ export default function ChatContextRail({
                 onSaved={async (updates, savedSessionId) => {
                   await onPatchSession?.(updates)
                   // Clear only the session that was Saved — never a snap-back id.
-                  clearSkipped(savedSessionId)
+                  clearSkipped(savedSessionId, 'save')
                   setForceSetup(false)
                   if (typeof updates.title === 'string') setTitle(updates.title)
                   if (typeof updates.context === 'string') setContext(updates.context)
@@ -258,9 +258,10 @@ export default function ChatContextRail({
                   <button
                     type="button"
                     className="chat-shell__setup-btn"
+                    data-action="setup-reopen"
                     onClick={reopenSetup}
                   >
-                    Setup
+                    Resume setup
                   </button>
                   <span className="chat-shell__rail-hint">
                     {setupComplete
