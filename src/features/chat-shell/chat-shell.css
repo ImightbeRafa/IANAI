@@ -1239,6 +1239,120 @@
   margin-bottom: 16px;
 }
 
+.chat-shell__offer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.chat-shell__offer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+}
+
+.chat-shell__offer-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.chat-shell__offer-pos {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chat-shell__offer-name {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-shell__offer-primary {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.chat-shell__offer-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-shell__offer-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-muted);
+  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-shell__offer-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-shell__offer-add {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-shell__retry-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.chat-shell__retry-btn {
+  appearance: none;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-muted);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chat-shell__retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .chat-shell__thumbs {
   display: grid;
   grid-template-columns: 1fr 1fr;

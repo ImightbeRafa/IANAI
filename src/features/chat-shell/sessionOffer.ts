@@ -1,6 +1,8 @@
 /**
- * Pure helpers for chat-shell single-offer resolution (unit-testable).
+ * Pure helpers for chat-shell offer selection + primary resolution (unit-testable).
  */
+
+export const CHAT_SHELL_MAX_OFFERS = 5
 
 export interface OfferLike {
   product_id: string
@@ -11,15 +13,46 @@ export interface SessionProductLike {
   product_id?: string | null
 }
 
-/** Prefer session.product_id, else lowest-position offer product. */
+/** Gap-free positions 1..n (n ≤ 5). Dedupes, preserves first-seen order. */
+export function normalizeOfferPositions(
+  productIds: string[]
+): Array<{ product_id: string; position: number }> {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const id of productIds) {
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    unique.push(id)
+    if (unique.length >= CHAT_SHELL_MAX_OFFERS) break
+  }
+  return unique.map((product_id, index) => ({
+    product_id,
+    position: index + 1,
+  }))
+}
+
+export function canAddSessionOffer(currentCount: number): boolean {
+  return currentCount < CHAT_SHELL_MAX_OFFERS
+}
+
+export function sortOffersByPosition<T extends OfferLike>(offers: T[]): T[] {
+  return [...offers].sort((a, b) => a.position - b.position)
+}
+
+/**
+ * Primary offer = position 1 when offers exist.
+ * Legacy: if offers empty, fall back to session.product_id.
+ * (Do NOT use this alone as the generate iterator — walk ALL offers.)
+ */
 export function resolveSessionOfferProductId(
   session: SessionProductLike | null | undefined,
   offers: OfferLike[] | null | undefined
 ): string | null {
-  if (session?.product_id) return session.product_id
-  if (!offers || offers.length === 0) return null
-  const sorted = [...offers].sort((a, b) => a.position - b.position)
-  return sorted[0]?.product_id ?? null
+  if (offers && offers.length > 0) {
+    const sorted = sortOffersByPosition(offers)
+    return sorted[0]?.product_id ?? null
+  }
+  return session?.product_id ?? null
 }
 
 export const CHAT_SESSION_SAFE_UPDATE_KEYS = [

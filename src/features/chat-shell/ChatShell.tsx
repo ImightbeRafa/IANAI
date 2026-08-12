@@ -73,7 +73,12 @@ export default function ChatShell({
     thread.activeProduct?.name || (workspace.activeSession ? 'No offer' : null),
   ].filter(Boolean).join(' / ')
 
-  const offerCount = thread.offers.length > 0 || thread.activeProduct ? 1 : 0
+  const offerCount =
+    thread.offers.length > 0
+      ? thread.offers.length
+      : thread.activeProduct
+        ? 1
+        : 0
 
   return (
     <div className={shellClass} data-theme={theme}>
@@ -171,11 +176,14 @@ export default function ChatShell({
           savingScript={thread.savingScript}
           activeProduct={thread.activeProduct}
           offerProductId={thread.offerProductId}
+          offerCount={offerCount}
           composer={thread.composer}
           onComposerChange={thread.setComposer}
           onSend={() => void thread.send()}
           error={thread.error}
           notice={thread.notice}
+          failedBatch={thread.failedBatch}
+          onRetryFailedOffers={() => void thread.retryFailedOffers()}
           onSaveScript={thread.handleSaveScript}
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
@@ -191,8 +199,11 @@ export default function ChatShell({
         offers={thread.offers}
         brandProducts={thread.brandProducts}
         activeProduct={thread.activeProduct}
+        offerBusy={thread.sending}
         onPatchSession={(updates) => void thread.patchSession(updates)}
-        onSelectOffer={(productId) => void thread.setPrimaryOffer(productId)}
+        onAddOffer={(productId) => void thread.addOffer(productId)}
+        onRemoveOffer={(productId) => void thread.removeOffer(productId)}
+        onMoveOffer={(productId, direction) => void thread.moveOffer(productId, direction)}
       />
     </div>
   )

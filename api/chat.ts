@@ -1637,6 +1637,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Chat-shell: when sessionId is present, bind generation to that session's offer/product.
+    // Require productId — one offer per call; client sequences up to five.
     // Legacy /scripts callers omit sessionId and keep prior behavior.
     const rawSessionId = (req.body as { sessionId?: unknown }).sessionId
     let authoritativeProductId: string | undefined
@@ -1645,20 +1646,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Invalid sessionId' })
       }
       const clientProductId = (req.body as { productId?: unknown }).productId
+      if (typeof clientProductId !== 'string' || !clientProductId) {
+        return res.status(400).json({
+          error: 'productId is required',
+          message: 'Chat-shell generation requires sessionId + productId for one offer.',
+        })
+      }
       const access = await resolveAuthorizedSessionProduct(
         user.id,
         rawSessionId,
-        typeof clientProductId === 'string' ? clientProductId : null
+        clientProductId
       )
       if (!access.ok) {
         return res.status(access.status).json({ error: access.error })
       }
-      if (!access.productId) {
-        return res.status(400).json({
-          error: 'Session has no product/offer',
-          message: 'Choose an offer for this session before generating scripts.',
-        })
-      }
+      // Authoritative product from server-side session+offers — ignore spoofed brand fields for authz.
       authoritativeProductId = access.productId
     } else {
       // Legacy path: if productId provided, require product access (cheap hardening).
@@ -1667,7 +1669,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!isUuid(legacyProductId)) {
           return res.status(400).json({ error: 'Invalid productId' })
         }
-        const { userHasProductAccess } = await import('./lib/product-access.js')
         if (!(await userHasProductAccess(user.id, legacyProductId))) {
           return res.status(403).json({ error: 'No access to product' })
         }

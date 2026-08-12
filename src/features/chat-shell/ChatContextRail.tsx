@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import type { Business, ChatSession, ChatSessionOffer, Product } from '../../types'
 import type { ChatSessionSafeUpdates } from '../../services/database'
+import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
 
 export type RailTab = 'context' | 'offers' | 'images'
 
@@ -14,8 +15,11 @@ interface ChatContextRailProps {
   offers?: ChatSessionOffer[]
   brandProducts?: Product[]
   activeProduct?: Product | null
+  offerBusy?: boolean
   onPatchSession?: (updates: ChatSessionSafeUpdates) => void
-  onSelectOffer?: (productId: string) => void
+  onAddOffer?: (productId: string) => void | Promise<void>
+  onRemoveOffer?: (productId: string) => void | Promise<void>
+  onMoveOffer?: (productId: string, direction: -1 | 1) => void | Promise<void>
 }
 
 export default function ChatContextRail({
@@ -27,8 +31,11 @@ export default function ChatContextRail({
   offers = [],
   brandProducts = [],
   activeProduct = null,
+  offerBusy = false,
   onPatchSession,
-  onSelectOffer,
+  onAddOffer,
+  onRemoveOffer,
+  onMoveOffer,
 }: ChatContextRailProps) {
   const [title, setTitle] = useState(session?.title || '')
   const [context, setContext] = useState(session?.context || '')
@@ -46,6 +53,10 @@ export default function ChatContextRail({
     if (!session || !onPatchSession) return
     onPatchSession(updates)
   }
+
+  const orderedOffers = sortOffersByPosition(offers)
+  const attachedIds = new Set(orderedOffers.map((o) => o.product_id))
+  const availableProducts = brandProducts.filter((p) => !attachedIds.has(p.id))
 
   return (
     <aside className="chat-shell__rail" aria-label="Context rail">
@@ -175,27 +186,87 @@ export default function ChatContextRail({
       {tab === 'offers' && (
         <div className="chat-shell__stack">
           {!session ? (
-            <p className="chat-shell__rail-hint">Select a session to attach one product offer.</p>
+            <p className="chat-shell__rail-hint">Select a session to attach product offers.</p>
           ) : !session.business_id ? (
             <p className="chat-shell__rail-hint">This session has no business_id — cannot attach offers.</p>
           ) : brandProducts.length === 0 ? (
             <p className="chat-shell__rail-hint">No products on this brand yet. Create one from Dashboard.</p>
           ) : (
             <>
-              <p className="chat-shell__rail-hint">Single offer for this phase. Multi-offer sequencing comes later.</p>
-              {brandProducts.map((product) => {
-                const selected = offers.some((o) => o.product_id === product.id) || activeProduct?.id === product.id
-                return (
-                  <button
-                    key={product.id}
-                    type="button"
-                    className={`chat-shell__nav-item chat-shell__nav-button${selected ? ' is-active' : ''}`}
-                    onClick={() => onSelectOffer?.(product.id)}
-                  >
-                    {product.name}
-                  </button>
-                )
-              })}
+              <p className="chat-shell__rail-hint">
+                Select up to {CHAT_SHELL_MAX_OFFERS} products. Position 1 is primary. Generate walks all offers in order.
+              </p>
+              {orderedOffers.length > 0 ? (
+                <ol className="chat-shell__offer-list">
+                  {orderedOffers.map((offer, index) => {
+                    const product =
+                      offer.product
+                      || brandProducts.find((p) => p.id === offer.product_id)
+                      || (activeProduct?.id === offer.product_id ? activeProduct : null)
+                    const label = product?.name ?? offer.product_id.slice(0, 8)
+                    return (
+                      <li key={offer.product_id} className="chat-shell__offer-row">
+                        <div className="chat-shell__offer-main">
+                          <span className="chat-shell__offer-pos">{offer.position}</span>
+                          <span className="chat-shell__offer-name">{label}</span>
+                          {offer.position === 1 ? (
+                            <span className="chat-shell__offer-primary">Primary</span>
+                          ) : null}
+                        </div>
+                        <div className="chat-shell__offer-actions">
+                          <button
+                            type="button"
+                            className="chat-shell__offer-btn"
+                            disabled={offerBusy || index === 0}
+                            onClick={() => void onMoveOffer?.(offer.product_id, -1)}
+                            aria-label={`Move ${label} up`}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="chat-shell__offer-btn"
+                            disabled={offerBusy || index === orderedOffers.length - 1}
+                            onClick={() => void onMoveOffer?.(offer.product_id, 1)}
+                            aria-label={`Move ${label} down`}
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            className="chat-shell__offer-btn"
+                            disabled={offerBusy}
+                            onClick={() => void onRemoveOffer?.(offer.product_id)}
+                            aria-label={`Remove ${label}`}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ol>
+              ) : (
+                <p className="chat-shell__rail-hint">No offers attached yet.</p>
+              )}
+
+              {orderedOffers.length >= CHAT_SHELL_MAX_OFFERS ? (
+                <p className="chat-shell__rail-hint">Maximum {CHAT_SHELL_MAX_OFFERS} offers reached.</p>
+              ) : (
+                <div className="chat-shell__offer-add">
+                  {availableProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      className="chat-shell__nav-item chat-shell__nav-button"
+                      disabled={offerBusy}
+                      onClick={() => void onAddOffer?.(product.id)}
+                    >
+                      + {product.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>

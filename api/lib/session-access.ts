@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
 import { userHasProductAccess } from './product-access.js'
+import { authorizeSessionOfferProduct } from './session-offer-auth.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -21,9 +22,10 @@ export interface ChatSessionRow {
 export interface SessionAccessOk {
   ok: true
   session: ChatSessionRow
-  /** Authoritative product for this call (session.product_id or first offer). */
-  productId: string | null
+  /** Authoritative product for this call (must ∈ offers, or legacy session.product_id). */
+  productId: string
   offerProductIds: string[]
+  mode: 'offers' | 'legacy'
 }
 
 export interface SessionAccessErr {
@@ -33,9 +35,11 @@ export interface SessionAccessErr {
 }
 
 /**
- * Cheap chat-shell authz: user must own the session (user_id).
- * When clientProductId is provided it must match the resolved session product
- * (session.product_id or first chat_session_offers row by position).
+ * Chat-shell authz for /api/chat:
+ * - User must own the session (user_id).
+ * - Load offers server-side; ignore client spoofed brand/business fields.
+ * - product_id must ∈ chat_session_offers when offers exist.
+ * - Legacy: if offers empty AND session.product_id set → allow that one product only.
  */
 export async function resolveAuthorizedSessionProduct(
   userId: string,
@@ -81,41 +85,25 @@ export async function resolveAuthorizedSessionProduct(
   }
 
   const offerProductIds = (offers || []).map((o) => o.product_id as string)
-  const productId =
-    (session.product_id as string | null)
-    || (offers && offers.length > 0 ? (offers[0].product_id as string) : null)
+  const decision = authorizeSessionOfferProduct({
+    offerProductIds,
+    sessionProductId: session.product_id as string | null,
+    clientProductId: clientProductId || null,
+  })
 
-  if (clientProductId) {
-    const allowed =
-      clientProductId === productId
-      || offerProductIds.includes(clientProductId)
-      || clientProductId === session.product_id
-    if (!allowed) {
-      return { ok: false, status: 403, error: 'productId is not an offer on this session' }
-    }
-    // Prefer explicit matching offer when client sends a valid session offer
-    const resolved = productId && clientProductId === productId
-      ? productId
-      : clientProductId
-    if (!(await userHasProductAccess(userId, resolved))) {
-      return { ok: false, status: 403, error: 'No access to product' }
-    }
-    return {
-      ok: true,
-      session: session as ChatSessionRow,
-      productId: resolved,
-      offerProductIds,
-    }
+  if (!decision.ok) {
+    return decision
   }
 
-  if (productId && !(await userHasProductAccess(userId, productId))) {
+  if (!(await userHasProductAccess(userId, decision.productId))) {
     return { ok: false, status: 403, error: 'No access to product' }
   }
 
   return {
     ok: true,
     session: session as ChatSessionRow,
-    productId,
+    productId: decision.productId,
     offerProductIds,
+    mode: decision.mode,
   }
 }

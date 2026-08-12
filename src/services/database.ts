@@ -1,4 +1,8 @@
 import { supabase } from '../lib/supabase'
+import {
+  CHAT_SHELL_MAX_OFFERS,
+  normalizeOfferPositions,
+} from '../features/chat-shell/sessionOffer'
 import type { 
   Profile, 
   Team, 
@@ -6,7 +10,8 @@ import type {
   Product, 
   ChatSession, 
   ChatSessionOffer,
-  Message, 
+  Message,
+  MessageArtifact,
   Script,
   DashboardStats,
   ContextDocument,
@@ -549,30 +554,102 @@ export async function setSessionPrimaryOffer(
   productId: string,
   userId: string
 ): Promise<ChatSessionOffer> {
-  const { error: delError } = await supabase
-    .from('chat_session_offers')
-    .delete()
-    .eq('session_id', sessionId)
+  return replaceSessionOffers(sessionId, businessId, [productId], userId).then((rows) => {
+    if (!rows[0]) throw new Error('Failed to set primary offer')
+    return rows[0]
+  })
+}
 
-  if (delError) throw delError
+/**
+ * Replace session offers with an ordered product list (max 5, gap-free positions).
+ * Does not delete offers that already have message_artifacts (cascade would wipe cards).
+ */
+export async function replaceSessionOffers(
+  sessionId: string,
+  businessId: string,
+  productIds: string[],
+  userId: string
+): Promise<ChatSessionOffer[]> {
+  if (!businessId) {
+    throw new Error('Session needs a brand (business_id) before attaching offers.')
+  }
 
-  const { data, error } = await supabase
-    .from('chat_session_offers')
-    .insert({
-      session_id: sessionId,
-      business_id: businessId,
-      product_id: productId,
-      position: 1,
-      created_by: userId,
-    })
-    .select('*, product:products(*)')
-    .single()
+  if (productIds.length > CHAT_SHELL_MAX_OFFERS) {
+    throw new Error(`At most ${CHAT_SHELL_MAX_OFFERS} offers per session`)
+  }
+  const nextRows = normalizeOfferPositions(productIds)
+  const nextIds = new Set(nextRows.map((r) => r.product_id))
 
-  if (error) throw error
-  return data
+  const current = await getSessionOffers(sessionId)
+  const toRemove = current.filter((row) => !nextIds.has(row.product_id))
+
+  if (toRemove.length > 0) {
+    const removedIds = toRemove.map((r) => r.product_id)
+    const { count, error: artErr } = await supabase
+      .from('message_artifacts')
+      .select('id', { count: 'exact', head: true })
+      .eq('session_id', sessionId)
+      .in('product_id', removedIds)
+    if (artErr) throw artErr
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        'Cannot remove offers that already have generated scripts in this session.'
+      )
+    }
+    const { error: delError } = await supabase
+      .from('chat_session_offers')
+      .delete()
+      .eq('session_id', sessionId)
+      .in('product_id', removedIds)
+    if (delError) throw delError
+  }
+
+  // Two-phase position rewrite to satisfy UNIQUE (session_id, position).
+  const kept = current.filter((row) => nextIds.has(row.product_id))
+  if (kept.length > 0) {
+    for (let i = 0; i < kept.length; i++) {
+      const { error } = await supabase
+        .from('chat_session_offers')
+        .update({ position: 100 + i })
+        .eq('session_id', sessionId)
+        .eq('product_id', kept[i].product_id)
+      if (error) throw error
+    }
+  }
+
+  for (const row of nextRows) {
+    const existing = current.find((c) => c.product_id === row.product_id)
+    if (existing) {
+      const { error } = await supabase
+        .from('chat_session_offers')
+        .update({ position: row.position })
+        .eq('session_id', sessionId)
+        .eq('product_id', row.product_id)
+      if (error) throw error
+    } else {
+      const { error } = await supabase.from('chat_session_offers').insert({
+        session_id: sessionId,
+        business_id: businessId,
+        product_id: row.product_id,
+        position: row.position,
+        created_by: userId,
+      })
+      if (error) throw error
+    }
+  }
+
+  return getSessionOffers(sessionId)
 }
 
 export async function clearSessionOffers(sessionId: string): Promise<void> {
+  const { count, error: artErr } = await supabase
+    .from('message_artifacts')
+    .select('id', { count: 'exact', head: true })
+    .eq('session_id', sessionId)
+  if (artErr) throw artErr
+  if ((count ?? 0) > 0) {
+    throw new Error('Cannot clear offers after scripts were generated for this session.')
+  }
   const { error } = await supabase
     .from('chat_session_offers')
     .delete()
@@ -627,7 +704,60 @@ export async function getMessages(sessionId: string): Promise<Message[]> {
     .order('created_at', { ascending: true })
 
   if (error) throw error
-  return data || []
+  const messages = data || []
+  if (messages.length === 0) return messages
+
+  const messageIds = messages.map((m) => m.id)
+  const { data: artifacts, error: artErr } = await supabase
+    .from('message_artifacts')
+    .select('*, script:scripts(*), product:products(*)')
+    .eq('session_id', sessionId)
+    .in('message_id', messageIds)
+    .order('ordinal', { ascending: true })
+
+  if (artErr) throw artErr
+
+  const byMessage = new Map<string, MessageArtifact[]>()
+  for (const row of artifacts || []) {
+    const list = byMessage.get(row.message_id) || []
+    list.push(row as MessageArtifact)
+    byMessage.set(row.message_id, list)
+  }
+
+  return messages.map((m) => ({
+    ...m,
+    artifacts: byMessage.get(m.id) || [],
+  }))
+}
+
+export async function insertScriptMessageArtifact(options: {
+  sessionId: string
+  messageId: string
+  productId: string
+  scriptId: string
+  ordinal: number
+  userId: string
+  actionType?: MessageArtifact['action_type']
+  metadata?: Record<string, unknown>
+}): Promise<MessageArtifact> {
+  const { data, error } = await supabase
+    .from('message_artifacts')
+    .insert({
+      session_id: options.sessionId,
+      message_id: options.messageId,
+      product_id: options.productId,
+      artifact_type: 'script',
+      script_id: options.scriptId,
+      ordinal: options.ordinal,
+      action_type: options.actionType || 'generate',
+      action_metadata: options.metadata || {},
+      created_by: options.userId,
+    })
+    .select('*, script:scripts(*), product:products(*)')
+    .single()
+
+  if (error) throw error
+  return data as MessageArtifact
 }
 
 // =============================================

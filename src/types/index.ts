@@ -321,6 +321,25 @@ export interface ChatSessionOffer {
   product?: Product
 }
 
+/** Typed message ↔ script|post|image link (migration 062). */
+export interface MessageArtifact {
+  id: string
+  session_id: string
+  message_id: string
+  product_id: string
+  artifact_type: 'script' | 'post' | 'image'
+  script_id?: string | null
+  post_id?: string | null
+  product_image_id?: string | null
+  ordinal: number
+  action_type: 'generate' | 'regenerate' | 'edit' | 'enhance' | 'optimize'
+  action_metadata: Record<string, unknown>
+  created_by: string
+  created_at: string
+  script?: Script
+  product?: Product
+}
+
 export interface Message {
   id: string
   session_id: string
@@ -328,6 +347,7 @@ export interface Message {
   content: string
   system_prompt?: string
   created_at: string
+  artifacts?: MessageArtifact[]
 }
 
 export interface Script {

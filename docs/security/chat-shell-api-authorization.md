@@ -38,6 +38,18 @@ Every generation/edit route must enforce **no cross-brand** and **no wrong-produ
 
 DB layer (migration 062): `chat_sessions.user_id`, `business_id`, and `product_id` are **immutable after create** for `authenticated` via trigger `prevent_chat_session_ownership_mutation`. Team writers who pass `can_write_chat_session` may update title/status/context/funnel fields but cannot steal ownership or re-point the session to another business/product.
 
+## Session+offer binding on `/api/chat` (C1b — Preview `chat-shell`)
+
+When the client sends `sessionId`:
+
+1. Require `productId` (one offer per call; client sequences ≤5).
+2. Load session + `chat_session_offers` **server-side**; ignore spoofed brand/business fields for authz.
+3. If offers exist: `productId` must ∈ that set (offers override stale `session.product_id`).
+4. **Legacy:** if offers are empty AND `session.product_id` is set → allow that one product only.
+5. Foreign `sessionId` / foreign `productId` → 4xx.
+
+Helpers: `api/lib/session-access.ts`, `api/lib/session-offer-auth.ts`.
+
 ## P-1 stub note
 
-No production route behavior changes ship in P-1. This document is the contract SecureDog / later phases should implement against.
+No production route behavior changes ship in P-1. This document is the contract SecureDog / later phases should implement against. Preview `chat-shell` implements the `/api/chat` binding above; other routes remain later.

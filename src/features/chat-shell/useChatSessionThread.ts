@@ -6,8 +6,9 @@ import {
   getMessages,
   getProduct,
   getSessionOffers,
+  insertScriptMessageArtifact,
+  replaceSessionOffers,
   saveScript,
-  setSessionPrimaryOffer,
   updateChatSession,
   type ChatSessionSafeUpdates,
 } from '../../services/database'
@@ -18,14 +19,31 @@ import {
   editScript,
   sendMessageToGrok,
 } from '../../services/grokApi'
-import type { Business, ChatSession, ChatSessionOffer, Message, Product } from '../../types'
+import type {
+  Business,
+  ChatSession,
+  ChatSessionOffer,
+  Message,
+  MessageArtifact,
+  Product,
+} from '../../types'
 import {
   addInFlightSession,
   isLiveThread,
   isSessionSending,
   removeInFlightSession,
 } from './chatShellAsync'
-import { resolveSessionOfferProductId } from './sessionOffer'
+import {
+  planOfferGenerationWalk,
+  planRetryOfferWalk,
+  type PlannedOfferStep,
+} from './chatShellGeneration'
+import {
+  canAddSessionOffer,
+  CHAT_SHELL_MAX_OFFERS,
+  resolveSessionOfferProductId,
+  sortOffersByPosition,
+} from './sessionOffer'
 
 const SHELL_SCRIPT_SETTINGS = {
   ...DEFAULT_SCRIPT_SETTINGS,
@@ -65,6 +83,12 @@ function buildLegacyProductContext(product: Product, additionalContext?: string)
   }
 }
 
+export interface FailedOfferBatch {
+  productIds: string[]
+  names: string[]
+  userText: string
+}
+
 export function useChatSessionThread(options: {
   userId: string
   brand: Business | null
@@ -84,6 +108,7 @@ export function useChatSessionThread(options: {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [composer, setComposer] = useState('')
+  const [failedBatch, setFailedBatch] = useState<FailedOfferBatch | null>(null)
 
   const loadRequestRef = useRef(0)
   const offerRequestRef = useRef(0)
@@ -91,7 +116,6 @@ export function useChatSessionThread(options: {
   const sessionGenRef = useRef(0)
   const activeThreadSessionIdRef = useRef<string | null>(null)
 
-  // Keep live session id readable synchronously during event handlers / awaits.
   activeThreadSessionIdRef.current = sessionId
 
   const sending = isSessionSending(inFlightSessions, sessionId)
@@ -101,7 +125,11 @@ export function useChatSessionThread(options: {
     [session, offers]
   )
 
-  const canGenerate = Boolean(sessionId && offerProductId && activeProduct && !sending)
+  const canGenerate = Boolean(
+    sessionId
+    && !sending
+    && (offers.length > 0 || Boolean(session?.product_id))
+  )
 
   const refreshOffersAndProduct = useCallback(async (
     sid: string,
@@ -145,7 +173,6 @@ export function useChatSessionThread(options: {
   }, [brand?.id])
 
   useEffect(() => {
-    // Invalidate every in-flight load/send commit target, including null clears.
     sessionGenRef.current += 1
     const requestId = ++loadRequestRef.current
 
@@ -156,14 +183,15 @@ export function useChatSessionThread(options: {
       setError(null)
       setNotice(null)
       setComposer('')
+      setFailedBatch(null)
       setLoadingMessages(false)
       return
     }
 
-    // Clear stale transcript immediately so highlight and thread stay in lockstep.
     setMessages([])
     setOffers([])
     setActiveProduct(null)
+    setFailedBatch(null)
     setLoadingMessages(true)
     setError(null)
     setNotice(null)
@@ -192,12 +220,11 @@ export function useChatSessionThread(options: {
         }
       }
     })()
-  // Only remount thread data when the selected session id changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, refreshOffersAndProduct])
 
-  const setPrimaryOffer = useCallback(async (productId: string) => {
-    if (!session || !session.business_id) {
+  const persistOffers = useCallback(async (productIds: string[]) => {
+    if (!session?.business_id) {
       setNotice('Session needs a brand (business_id) before attaching an offer.')
       return
     }
@@ -207,10 +234,10 @@ export function useChatSessionThread(options: {
     setError(null)
     setNotice(null)
     try {
-      const offer = await setSessionPrimaryOffer(
+      const list = await replaceSessionOffers(
         originSessionId,
         session.business_id,
-        productId,
+        productIds,
         userId
       )
       if (requestId !== offerRequestRef.current) return
@@ -222,18 +249,15 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
-      const product = offer.product || (await getProduct(productId))
-      if (requestId !== offerRequestRef.current) return
-      if (!isLiveThread(
-        activeThreadSessionIdRef.current,
-        sessionGenRef.current,
-        originSessionId,
-        originGen
-      )) {
-        return
-      }
-      setOffers([offer])
-      setActiveProduct(product)
+      setOffers(list)
+      const primaryId = resolveSessionOfferProductId(session, list)
+      setActiveProduct(
+        primaryId
+          ? (list.find((o) => o.product_id === primaryId)?.product
+            || brandProducts.find((p) => p.id === primaryId)
+            || null)
+          : null
+      )
     } catch (err) {
       if (requestId !== offerRequestRef.current) return
       if (!isLiveThread(
@@ -245,9 +269,66 @@ export function useChatSessionThread(options: {
         return
       }
       console.error(err)
-      setError(err instanceof Error ? err.message : 'Failed to set offer')
+      setError(err instanceof Error ? err.message : 'Failed to update offers')
+      try {
+        const fresh = await getSessionOffers(originSessionId)
+        if (
+          isLiveThread(
+            activeThreadSessionIdRef.current,
+            sessionGenRef.current,
+            originSessionId,
+            originGen
+          )
+        ) {
+          setOffers(fresh)
+        }
+      } catch {
+        /* ignore reload failure */
+      }
     }
-  }, [session, userId])
+  }, [session, userId, brandProducts])
+
+  const addOffer = useCallback(async (productId: string) => {
+    if (!canAddSessionOffer(offers.length)) {
+      setNotice(`At most ${CHAT_SHELL_MAX_OFFERS} offers per session.`)
+      return
+    }
+    if (offers.some((o) => o.product_id === productId)) return
+    const ordered = [
+      ...sortOffersByPosition(offers).map((o) => o.product_id),
+      productId,
+    ]
+    await persistOffers(ordered)
+  }, [offers, persistOffers])
+
+  const removeOffer = useCallback(async (productId: string) => {
+    const ordered = sortOffersByPosition(offers)
+      .map((o) => o.product_id)
+      .filter((id) => id !== productId)
+    await persistOffers(ordered)
+  }, [offers, persistOffers])
+
+  const moveOffer = useCallback(async (productId: string, direction: -1 | 1) => {
+    const ordered = sortOffersByPosition(offers).map((o) => o.product_id)
+    const index = ordered.indexOf(productId)
+    if (index < 0) return
+    const next = index + direction
+    if (next < 0 || next >= ordered.length) return
+    const swapped = [...ordered]
+    const tmp = swapped[index]
+    swapped[index] = swapped[next]
+    swapped[next] = tmp
+    await persistOffers(swapped)
+  }, [offers, persistOffers])
+
+  /** @deprecated Prefer addOffer — kept for single-click toggle from older wiring. */
+  const setPrimaryOffer = useCallback(async (productId: string) => {
+    if (offers.some((o) => o.product_id === productId)) {
+      await removeOffer(productId)
+      return
+    }
+    await addOffer(productId)
+  }, [offers, addOffer, removeOffer])
 
   const patchSession = useCallback(async (updates: ChatSessionSafeUpdates) => {
     if (!session) return
@@ -278,13 +359,182 @@ export function useChatSessionThread(options: {
     }
   }, [session, onSessionPatched])
 
+  const runOfferWalk = useCallback(async (
+    _userText: string,
+    steps: PlannedOfferStep[],
+    originSessionId: string,
+    originGen: number,
+    historyForApi: Message[]
+  ) => {
+    type OfferResult =
+      | { ok: true; step: PlannedOfferStep; content: string; product: Product }
+      | { ok: false; step: PlannedOfferStep; error: string }
+
+    const results: OfferResult[] = []
+
+    for (const step of steps) {
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return { aborted: true as const, results }
+      }
+
+      try {
+        const product =
+          offers.find((o) => o.product_id === step.productId)?.product
+          || brandProducts.find((p) => p.id === step.productId)
+          || (await getProduct(step.productId))
+        if (!product) {
+          results.push({ ok: false, step, error: 'Product not found' })
+          continue
+        }
+
+        const businessDetails = buildLegacyProductContext(product, session?.context || undefined)
+        const bizCtx = brand
+          ? buildApiBusinessContext(brand)
+          : buildApiBusinessContext(product.business)
+        const prodCtx = buildApiProductContext(product)
+        const channel = session?.primary_channel || undefined
+
+        const ai = await sendMessageToGrok(
+          historyForApi,
+          businessDetails,
+          'es',
+          SHELL_SCRIPT_SETTINGS,
+          product.type,
+          undefined,
+          'script',
+          bizCtx,
+          prodCtx,
+          undefined,
+          channel || undefined,
+          step.productId,
+          true,
+          undefined,
+          undefined,
+          originSessionId
+        )
+
+        results.push({ ok: true, step, content: ai.content, product })
+      } catch (err) {
+        console.error(err)
+        results.push({
+          ok: false,
+          step,
+          error: err instanceof Error ? err.message : 'Failed to generate',
+        })
+      }
+    }
+
+    return { aborted: false as const, results }
+  }, [offers, brandProducts, brand, session])
+
+  const persistSuccessfulBatch = useCallback(async (options: {
+    originSessionId: string
+    originGen: number
+    userText: string
+    successes: Array<{ step: PlannedOfferStep; content: string; product: Product }>
+  }) => {
+    const { originSessionId, originGen, userText, successes } = options
+    if (successes.length === 0) return null
+
+    const assistantParts = successes.map((s) => {
+      const label = s.step.name || s.product.name || s.step.productId
+      return `### ${s.step.ordinal}. ${label}\n\n${s.content}`
+    })
+    const assistantContent = assistantParts.join('\n\n---\n\n')
+
+    const savedUser = await addMessage(originSessionId, 'user', userText)
+    const savedAi = await addMessage(originSessionId, 'assistant', assistantContent)
+
+    if (!isLiveThread(
+      activeThreadSessionIdRef.current,
+      sessionGenRef.current,
+      originSessionId,
+      originGen
+    )) {
+      return null
+    }
+
+    const artifacts: MessageArtifact[] = []
+    for (const success of successes) {
+      const title = success.step.name || success.product.name || `Script ${success.step.ordinal}`
+      const script = await saveScript(
+        originSessionId,
+        success.step.productId,
+        title,
+        success.content,
+        undefined,
+        {
+          edit_source: 'generate',
+          message_id: savedAi.id,
+          script_index: success.step.ordinal,
+        }
+      )
+      const artifact = await insertScriptMessageArtifact({
+        sessionId: originSessionId,
+        messageId: savedAi.id,
+        productId: success.step.productId,
+        scriptId: script.id,
+        ordinal: success.step.ordinal,
+        userId,
+        metadata: {
+          offer_name: title,
+          position: success.step.position,
+        },
+      })
+      artifacts.push(artifact)
+    }
+
+    if (!isLiveThread(
+      activeThreadSessionIdRef.current,
+      sessionGenRef.current,
+      originSessionId,
+      originGen
+    )) {
+      return null
+    }
+
+    const assistantWithArtifacts: Message = { ...savedAi, artifacts }
+    return { savedUser, savedAi: assistantWithArtifacts }
+  }, [userId])
+
   const send = useCallback(async () => {
     const text = composer.trim()
     if (!text || !session) return
     if (inFlightSessions.has(session.id)) return
 
-    if (!offerProductId || !activeProduct) {
-      setNotice('Choose an offer (product) in the Context rail before generating scripts.')
+    let liveOffers = offers
+    let walk = planOfferGenerationWalk(liveOffers)
+
+    // Legacy: empty offers + session.product_id — materialize as position-1 offer when possible
+    // so message_artifacts FK to chat_session_offers can succeed.
+    if (walk.length === 0 && session.product_id) {
+      if (!session.business_id) {
+        setNotice('Session needs a brand (business_id) before generating.')
+        return
+      }
+      try {
+        liveOffers = await replaceSessionOffers(
+          session.id,
+          session.business_id,
+          [session.product_id],
+          userId
+        )
+        setOffers(liveOffers)
+        walk = planOfferGenerationWalk(liveOffers)
+      } catch (err) {
+        console.error(err)
+        setError(err instanceof Error ? err.message : 'Failed to attach legacy offer')
+        return
+      }
+    }
+
+    if (walk.length === 0) {
+      setNotice('Choose at least one offer in the Context rail before generating scripts.')
       return
     }
 
@@ -302,38 +552,28 @@ export function useChatSessionThread(options: {
     setInFlightSessions((prev) => addInFlightSession(prev, originSessionId))
     setError(null)
     setNotice(null)
+    setFailedBatch(null)
     setComposer('')
     setMessages((prev) => [...prev, optimisticUser])
 
     try {
       const historyForApi = [...messages, optimisticUser]
-      const businessDetails = buildLegacyProductContext(activeProduct, session.context)
-      const bizCtx = brand ? buildApiBusinessContext(brand) : buildApiBusinessContext(activeProduct.business)
-      const prodCtx = buildApiProductContext(activeProduct)
-      const channel = session.primary_channel || undefined
-
-      const ai = await sendMessageToGrok(
-        historyForApi,
-        businessDetails,
-        'es',
-        SHELL_SCRIPT_SETTINGS,
-        activeProduct.type,
-        undefined,
-        'script',
-        bizCtx,
-        prodCtx,
-        undefined,
-        channel || undefined,
-        offerProductId,
-        true,
-        undefined,
-        undefined,
-        originSessionId
+      const { aborted, results } = await runOfferWalk(
+        text,
+        walk,
+        originSessionId,
+        originGen,
+        historyForApi
       )
 
-      // Persist only after generation succeeds — avoids orphan user rows on failure.
-      const savedUser = await addMessage(originSessionId, 'user', text)
-      const savedAi = await addMessage(originSessionId, 'assistant', ai.content, ai._debug?.systemPrompt)
+      if (aborted) return
+
+      const successes = results.filter(
+        (r): r is Extract<typeof r, { ok: true }> => r.ok
+      )
+      const failures = results.filter(
+        (r): r is Extract<typeof r, { ok: false }> => !r.ok
+      )
 
       if (!isLiveThread(
         activeThreadSessionIdRef.current,
@@ -343,15 +583,59 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
+
+      if (successes.length === 0) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+        setComposer(text)
+        setError(failures[0]?.error || 'Failed to generate scripts')
+        return
+      }
+
+      const persisted = await persistSuccessfulBatch({
+        originSessionId,
+        originGen,
+        userText: text,
+        successes: successes.map((s) => ({
+          step: s.step,
+          content: s.content,
+          product: s.product,
+        })),
+      })
+
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+
+      if (!persisted) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+        return
+      }
+
       setMessages((prev) => [
         ...prev.filter((m) => m.id !== optimisticId),
-        savedUser,
-        savedAi,
+        persisted.savedUser,
+        persisted.savedAi,
       ])
+
+      if (failures.length > 0) {
+        setFailedBatch({
+          productIds: failures.map((f) => f.step.productId),
+          names: failures.map((f) => f.step.name || f.step.productId),
+          userText: text,
+        })
+        setNotice(
+          `Generated ${successes.length}/${walk.length} offers. Failed: ${failures
+            .map((f) => f.step.name || f.step.productId)
+            .join(', ')}. Retry those offers below.`
+        )
+      }
     } catch (err) {
       console.error(err)
-      const msg = err instanceof Error ? err.message : 'Failed to send'
-      // Roll back optimistic user bubble; restore composer for retry — only on live origin.
       if (!isLiveThread(
         activeThreadSessionIdRef.current,
         sessionGenRef.current,
@@ -362,31 +646,157 @@ export function useChatSessionThread(options: {
       }
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
       setComposer(text)
-      setError(msg)
+      setError(err instanceof Error ? err.message : 'Failed to send')
     } finally {
       setInFlightSessions((prev) => removeInFlightSession(prev, originSessionId))
     }
   }, [
     composer,
     session,
-    offerProductId,
-    activeProduct,
+    offers,
     messages,
-    brand,
     inFlightSessions,
+    userId,
+    runOfferWalk,
+    persistSuccessfulBatch,
+  ])
+
+  const retryFailedOffers = useCallback(async () => {
+    if (!session || !failedBatch || sending) return
+    const walk = planRetryOfferWalk(failedBatch.productIds, offers)
+    if (walk.length === 0) {
+      setFailedBatch(null)
+      return
+    }
+
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    const retryText = `Retry failed offers: ${failedBatch.names.join(', ')}`
+    const optimisticId = `optimistic-retry-${Date.now()}`
+    const optimisticUser: Message = {
+      id: optimisticId,
+      session_id: originSessionId,
+      role: 'user',
+      content: retryText,
+      created_at: new Date().toISOString(),
+    }
+
+    setInFlightSessions((prev) => addInFlightSession(prev, originSessionId))
+    setError(null)
+    setNotice(null)
+    setMessages((prev) => [...prev, optimisticUser])
+
+    try {
+      const historyForApi = [...messages, optimisticUser]
+      const { aborted, results } = await runOfferWalk(
+        retryText,
+        walk,
+        originSessionId,
+        originGen,
+        historyForApi
+      )
+      if (aborted) return
+
+      const successes = results.filter(
+        (r): r is Extract<typeof r, { ok: true }> => r.ok
+      )
+      const failures = results.filter(
+        (r): r is Extract<typeof r, { ok: false }> => !r.ok
+      )
+
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+
+      if (successes.length === 0) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+        setError(failures[0]?.error || 'Retry failed')
+        return
+      }
+
+      const persisted = await persistSuccessfulBatch({
+        originSessionId,
+        originGen,
+        userText: retryText,
+        successes: successes.map((s) => ({
+          step: s.step,
+          content: s.content,
+          product: s.product,
+        })),
+      })
+
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+
+      if (!persisted) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+        return
+      }
+
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== optimisticId),
+        persisted.savedUser,
+        persisted.savedAi,
+      ])
+
+      if (failures.length > 0) {
+        setFailedBatch({
+          productIds: failures.map((f) => f.step.productId),
+          names: failures.map((f) => f.step.name || f.step.productId),
+          userText: failedBatch.userText,
+        })
+        setNotice(`Retry partial: ${failures.length} offer(s) still failed.`)
+      } else {
+        setFailedBatch(null)
+      }
+    } catch (err) {
+      console.error(err)
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+      setError(err instanceof Error ? err.message : 'Retry failed')
+    } finally {
+      setInFlightSessions((prev) => removeInFlightSession(prev, originSessionId))
+    }
+  }, [
+    session,
+    failedBatch,
+    sending,
+    offers,
+    messages,
+    runOfferWalk,
+    persistSuccessfulBatch,
   ])
 
   const handleSaveScript = useCallback(async (
     content: string,
     title: string,
-    opts?: { edit_source?: string; message_id?: string; script_index?: number }
+    opts?: { edit_source?: string; message_id?: string; script_index?: number; product_id?: string }
   ): Promise<string | null> => {
-    if (!session || !offerProductId || savingScript) return null
+    const productId = opts?.product_id || offerProductId
+    if (!session || !productId || savingScript) return null
     const originSessionId = session.id
     const originGen = sessionGenRef.current
     setSavingScript(true)
     try {
-      const script = await saveScript(session.id, offerProductId, title, content, undefined, opts)
+      const script = await saveScript(session.id, productId, title, content, undefined, opts)
       if (!isLiveThread(
         activeThreadSessionIdRef.current,
         sessionGenRef.current,
@@ -416,14 +826,16 @@ export function useChatSessionThread(options: {
     parentId: string,
     content: string,
     editSource: string,
-    editLabel?: string
+    editLabel?: string,
+    productIdOverride?: string
   ): Promise<string | null> => {
-    if (!session || !offerProductId) return null
+    const productId = productIdOverride || offerProductId
+    if (!session || !productId) return null
     try {
       const version = await createScriptVersion(
         parentId,
         session.id,
-        offerProductId,
+        productId,
         'Script',
         content,
         editSource,
@@ -439,15 +851,18 @@ export function useChatSessionThread(options: {
   const handleEditScript = useCallback(async (
     originalContent: string,
     instruction: string,
-    editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
+    editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness',
+    productOverride?: Product | null
   ): Promise<string> => {
-    if (!session || !offerProductId || !activeProduct) {
+    const product = productOverride || activeProduct
+    const productId = product?.id || offerProductId
+    if (!session || !productId || !product) {
       throw new Error('Choose an offer before editing scripts.')
     }
     const bizCtx = brand
       ? (buildApiBusinessContext(brand) as Record<string, unknown> | undefined)
-      : (buildApiBusinessContext(activeProduct.business) as Record<string, unknown> | undefined)
-    const prodCtx = buildApiProductContext(activeProduct) as Record<string, unknown>
+      : (buildApiBusinessContext(product.business) as Record<string, unknown> | undefined)
+    const prodCtx = buildApiProductContext(product) as Record<string, unknown>
     return editScript(
       originalContent,
       instruction,
@@ -456,7 +871,7 @@ export function useChatSessionThread(options: {
       prodCtx,
       editType,
       session.id,
-      offerProductId
+      productId
     )
   }, [session, offerProductId, activeProduct, brand])
 
@@ -474,8 +889,13 @@ export function useChatSessionThread(options: {
     composer,
     setComposer,
     canGenerate,
+    failedBatch,
     send,
+    retryFailedOffers,
     setPrimaryOffer,
+    addOffer,
+    removeOffer,
+    moveOffer,
     patchSession,
     handleSaveScript,
     handleSaveVersion,

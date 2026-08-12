@@ -1,7 +1,14 @@
 import type { KeyboardEvent } from 'react'
 import ChatShellScriptCard from './ChatShellScriptCard'
-import type { Business, ChatSession, Message, Product } from '../../types'
-import { isScriptContent, parseScripts } from '../../utils/scriptParser'
+import type {
+  Business,
+  ChatSession,
+  Message,
+  MessageArtifact,
+  Product,
+} from '../../types'
+import { isScriptContent, parseScripts, type ParsedScript } from '../../utils/scriptParser'
+import type { FailedOfferBatch } from './useChatSessionThread'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -12,27 +19,49 @@ interface ChatThreadProps {
   savingScript: boolean
   activeProduct: Product | null
   offerProductId: string | null
+  offerCount: number
   composer: string
   onComposerChange: (value: string) => void
   onSend: () => void
   error: string | null
   notice: string | null
+  failedBatch: FailedOfferBatch | null
+  onRetryFailedOffers: () => void
   onSaveScript: (
     content: string,
     title: string,
-    opts?: { edit_source?: string; message_id?: string; script_index?: number }
+    opts?: { edit_source?: string; message_id?: string; script_index?: number; product_id?: string }
   ) => Promise<string | null>
   onEditScript: (
     originalContent: string,
     instruction: string,
-    editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
+    editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness',
+    productOverride?: Product | null
   ) => Promise<string>
   onSaveVersion: (
     parentId: string,
     content: string,
     editSource: string,
-    editLabel?: string
+    editLabel?: string,
+    productIdOverride?: string
   ) => Promise<string | null>
+}
+
+function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
+  const content = artifact.script?.content
+  if (!content) return null
+  const offerName =
+    (typeof artifact.action_metadata?.offer_name === 'string'
+      ? artifact.action_metadata.offer_name
+      : null)
+    || artifact.product?.name
+    || artifact.script?.title
+    || `Offer ${artifact.ordinal}`
+  return {
+    index: artifact.ordinal,
+    title: offerName,
+    content,
+  }
 }
 
 export default function ChatThread({
@@ -44,11 +73,14 @@ export default function ChatThread({
   savingScript,
   activeProduct,
   offerProductId,
+  offerCount,
   composer,
   onComposerChange,
   onSend,
   error,
   notice,
+  failedBatch,
+  onRetryFailedOffers,
   onSaveScript,
   onEditScript,
   onSaveVersion,
@@ -85,8 +117,8 @@ export default function ChatThread({
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">
               {offerProductId && activeProduct
-                ? `Session ready · offer ${activeProduct.name}. Ask for a script to generate.`
-                : 'Session ready · Quick / no offer yet. Choose a product in the Offers rail before generating.'}
+                ? `Session ready · ${offerCount > 1 ? `${offerCount} offers` : `offer ${activeProduct.name}`}. Ask for a script to generate.`
+                : 'Session ready · Quick / no offer yet. Choose products in the Offers rail before generating.'}
             </div>
           </div>
         ) : (
@@ -96,6 +128,59 @@ export default function ChatThread({
                 <div key={message.id} className="chat-shell__msg chat-shell__msg--user">
                   <span className="chat-shell__who">You</span>
                   <div className="chat-shell__bubble">{message.content}</div>
+                </div>
+              )
+            }
+
+            const scriptArtifacts = (message.artifacts || []).filter(
+              (a) => a.artifact_type === 'script' && a.script?.content
+            )
+
+            if (scriptArtifacts.length > 0) {
+              return (
+                <div key={message.id} className="chat-shell__msg chat-shell__msg--ai">
+                  <span className="chat-shell__who">Advance AI</span>
+                  <div className="chat-shell__script-stack">
+                    {scriptArtifacts.map((artifact) => {
+                      const parsed = artifactToParsedScript(artifact)
+                      if (!parsed) return null
+                      const product = artifact.product
+                      const productId = artifact.product_id
+                      const productName =
+                        product?.name
+                        || (typeof artifact.action_metadata?.offer_name === 'string'
+                          ? artifact.action_metadata.offer_name
+                          : null)
+                        || `Offer ${artifact.ordinal}`
+                      return (
+                        <ChatShellScriptCard
+                          key={artifact.id}
+                          script={parsed}
+                          language="es"
+                          productName={productName}
+                          productType={product?.type}
+                          productId={productId}
+                          messageId={message.id}
+                          scriptIndex={artifact.ordinal}
+                          savingScript={savingScript}
+                          onSave={(content, title, opts) =>
+                            onSaveScript(content, title, {
+                              ...opts,
+                              product_id: productId,
+                              message_id: message.id,
+                              script_index: artifact.ordinal,
+                            })
+                          }
+                          onEdit={(original, instruction, editType) =>
+                            onEditScript(original, instruction, editType, product || null)
+                          }
+                          onSaveVersion={(parentId, content, editSource, editLabel) =>
+                            onSaveVersion(parentId, content, editSource, editLabel, productId)
+                          }
+                        />
+                      )
+                    })}
+                  </div>
                 </div>
               )
             }
@@ -146,6 +231,21 @@ export default function ChatThread({
             {error || notice}
           </div>
         )}
+        {failedBatch && failedBatch.productIds.length > 0 ? (
+          <div className="chat-shell__retry-bar" role="status">
+            <span>
+              Failed offers: {failedBatch.names.join(', ')}. Retry creates a new message for those offers only.
+            </span>
+            <button
+              type="button"
+              className="chat-shell__retry-btn"
+              disabled={sending}
+              onClick={onRetryFailedOffers}
+            >
+              Retry failed offers
+            </button>
+          </div>
+        ) : null}
         <div className="chat-shell__composer">
           <div className="chat-shell__composer-chips">
             <span className="chat-shell__btn chat-shell__btn--pill">
@@ -154,9 +254,11 @@ export default function ChatThread({
             <span className="chat-shell__btn chat-shell__btn--pill">
               {!session
                 ? 'No session'
-                : activeProduct
-                  ? `Offer · ${activeProduct.name}`
-                  : 'Quick · choose offer'}
+                : offerCount > 1
+                  ? `${offerCount} offers`
+                  : activeProduct
+                    ? `Offer · ${activeProduct.name}`
+                    : 'Quick · choose offer'}
             </span>
           </div>
           <button type="button" className="chat-shell__btn" disabled aria-disabled="true" aria-label="Attach">+</button>
@@ -168,7 +270,7 @@ export default function ChatThread({
               !session
                 ? 'Select a session to compose'
                 : generateBlocked
-                  ? 'Choose an offer in the rail, then ask for a script…'
+                  ? 'Choose offers in the rail, then ask for a script…'
                   : 'Ask for scripts…'
             }
             disabled={!composerEnabled}
@@ -179,8 +281,8 @@ export default function ChatThread({
           <button
             type="button"
             className="chat-shell__send"
-            disabled={!session || sending || !composer.trim()}
-            aria-disabled={!session || sending || !composer.trim()}
+            disabled={!session || sending || !composer.trim() || generateBlocked}
+            aria-disabled={!session || sending || !composer.trim() || generateBlocked}
             aria-label="Send"
             onClick={onSend}
           >
