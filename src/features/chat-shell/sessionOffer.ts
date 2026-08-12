@@ -199,13 +199,11 @@ export function pickSafeChatSessionUpdates(
 }
 
 /**
- * Prefer live selection, then URL, then hydrate preferred, else first.
+ * Honor deep-link / preferred selection over live current and brand-newest.
  *
- * currentId wins when still in the list, or when it matches URL/preferred
- * (intentional click/create — list may lag).
- *
- * Deep-link: if urlId or preferredId is set, never fall through to sessionIds[0]
- * even when that id is not yet in the fetched list (reload race).
+ * Order: urlId → preferredId → currentId (when in list) → sessionIds[0].
+ * urlId/preferredId win even when absent from the fetched list (reload race /
+ * cross-brand deep link) so hydrate never rewrites to brand-newest.
  */
 export function resolveNextSessionId(options: {
   sessionIds: string[]
@@ -214,9 +212,8 @@ export function resolveNextSessionId(options: {
   urlId?: string | null
 }): string | null {
   const { sessionIds, preferredId, currentId, urlId } = options
-  if (currentId && sessionIds.includes(currentId)) return currentId
-  if (currentId && (currentId === urlId || currentId === preferredId)) return currentId
   if (urlId) return urlId
   if (preferredId) return preferredId
+  if (currentId && sessionIds.includes(currentId)) return currentId
   return sessionIds[0] ?? null
 }

@@ -72,6 +72,22 @@ describe('chatShellPersistence', () => {
     ).toEqual({ brandId: 'url-brand', sessionId: 'url-session' })
   })
 
+  it('keeps URL session even when brand is missing or mismatched in storage', () => {
+    expect(
+      resolveInitialSelection(
+        { brandId: null, sessionId: 'url-session' },
+        { brandId: 'other-brand', sessionId: 'stored-session' }
+      )
+    ).toEqual({ brandId: 'other-brand', sessionId: 'url-session' })
+
+    expect(
+      resolveInitialSelection(
+        { brandId: null, sessionId: 'deep-link' },
+        { brandId: null, sessionId: null }
+      )
+    ).toEqual({ brandId: null, sessionId: 'deep-link' })
+  })
+
   it('does not pair a URL brand with an unrelated stored session', () => {
     expect(
       resolveInitialSelection(

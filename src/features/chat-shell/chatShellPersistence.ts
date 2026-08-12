@@ -52,7 +52,9 @@ export function selectionToSearchParams(selection: ChatShellSelection): URLSearc
 
 /**
  * Prefer URL params, then localStorage.
- * Do not pair a URL brand with an unrelated stored session (or vice versa).
+ * URL session id is authoritative and must never be dropped because of a
+ * missing/mismatched brand — brand may be provisional until touch-load.
+ * Do not pair a URL brand with an unrelated stored session.
  */
 export function resolveInitialSelection(
   urlSelection: ChatShellSelection,
@@ -61,15 +63,8 @@ export function resolveInitialSelection(
   const brandId = urlSelection.brandId || storedSelection.brandId || null
 
   if (urlSelection.sessionId) {
-    // URL session wins; keep it only when brand is also from URL or matches storage brand.
-    if (
-      urlSelection.brandId
-      || !storedSelection.brandId
-      || storedSelection.brandId === brandId
-    ) {
-      return { brandId, sessionId: urlSelection.sessionId }
-    }
-    return { brandId, sessionId: null }
+    // URL session always wins — never erase deep-link intent for brand mismatch.
+    return { brandId, sessionId: urlSelection.sessionId }
   }
 
   if (storedSelection.sessionId) {

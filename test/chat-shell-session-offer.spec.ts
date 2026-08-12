@@ -314,56 +314,67 @@ describe('pickSafeChatSessionUpdates', () => {
 })
 
 describe('resolveNextSessionId', () => {
-  it('prefers live current selection over hydrate preferred', () => {
+  it('honors URL over live current and brand-newest', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b', 'c'],
         preferredId: 'a',
         currentId: 'b',
-        urlId: 'a',
+        urlId: 'c',
       })
-    ).toBe('b')
+    ).toBe('c')
   })
 
-  it('keeps optimistic current even when missing from list', () => {
+  it('honors preferred over current/newest when URL absent', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b', 'c'],
+        preferredId: 'a',
+        currentId: 'b',
+        urlId: null,
+      })
+    ).toBe('a')
+  })
+
+  it('keeps urlId even when missing from list (no newest fallthrough)', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],
-        preferredId: 'a',
+        preferredId: null,
+        currentId: 'a',
+        urlId: 'deep-link',
+      })
+    ).toBe('deep-link')
+  })
+
+  it('keeps preferred even when missing from list', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'gone',
+        currentId: 'a',
+        urlId: null,
+      })
+    ).toBe('gone')
+  })
+
+  it('keeps optimistic current via url/preferred match when list lags', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'new-optimistic',
         currentId: 'new-optimistic',
         urlId: 'new-optimistic',
       })
     ).toBe('new-optimistic')
   })
 
-  it('drops stale current that is neither in list nor URL/preferred', () => {
+  it('falls back to current in list then first when nothing authoritative', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],
-        preferredId: 'b',
-        currentId: 'deleted',
-        urlId: null,
-      })
-    ).toBe('b')
-  })
-
-  it('prefers URL when current is missing', () => {
-    expect(
-      resolveNextSessionId({
-        sessionIds: ['a', 'b', 'c'],
-        preferredId: 'a',
-        currentId: null,
-        urlId: 'c',
-      })
-    ).toBe('c')
-  })
-
-  it('falls back to preferred then first when nothing selected', () => {
-    expect(
-      resolveNextSessionId({
-        sessionIds: ['a', 'b'],
-        preferredId: 'b',
-        currentId: null,
+        preferredId: null,
+        currentId: 'b',
         urlId: null,
       })
     ).toBe('b')
@@ -377,7 +388,7 @@ describe('resolveNextSessionId', () => {
     ).toBe('a')
   })
 
-  it('keeps urlId/preferredId even when missing from list (no [0] fallthrough)', () => {
+  it('never rewrites urlId/preferredId to sessionIds[0]', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],

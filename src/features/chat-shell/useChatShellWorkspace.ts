@@ -186,10 +186,12 @@ export function useChatShellWorkspace(userId: string | undefined) {
       const brandStillValid = Boolean(
         initial.brandId && list.some((b) => b.id === initial.brandId)
       )
+      // Brand may be provisional when only ?session= is authoritative; never drop
+      // the URL/stored session id just because brand is missing or not in list yet.
       const nextBrandId = brandStillValid
         ? initial.brandId
         : (list[0]?.id ?? null)
-      const nextSessionId = brandStillValid ? initial.sessionId : null
+      const nextSessionId = initial.sessionId
 
       if (selectionEpochRef.current !== epochAtStart) {
         didHydrateSelectionRef.current = true
@@ -200,6 +202,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       activeBrandIdRef.current = nextBrandId
       setActiveBrandId(nextBrandId)
       commitSessionId(nextSessionId)
+      // Preserve deep-link session even when brand is provisional.
       syncUrlAndStorage(nextBrandId, nextSessionId)
       didHydrateSelectionRef.current = true
     } catch (err) {
@@ -275,32 +278,47 @@ export function useChatShellWorkspace(userId: string | undefined) {
         }
 
         // Read selection at completion time (never use stale start-of-request preferred).
+        // urlId / preferred beat brand-newest — never rewrite deep-link away.
+        const urlId = readUrlSessionId()
+        const preferredId = preferredSessionRef.current
         const nextSessionId = resolveNextSessionId({
           sessionIds: list.map((s) => s.id),
           currentId:
             currentId && pendingDeletedRef.current.has(currentId) ? null : currentId,
-          urlId: readUrlSessionId(),
-          preferredId: preferredSessionRef.current,
+          urlId,
+          preferredId,
         })
 
         if (selectionEpochRef.current !== epochAtStart) return
 
-        if (preferredSessionRef.current && preferredSessionRef.current === nextSessionId) {
+        // Keep preferred until the row is actually in the list (reload / deep-link race).
+        if (
+          preferredSessionRef.current &&
+          preferredSessionRef.current === nextSessionId &&
+          list.some((s) => s.id === nextSessionId)
+        ) {
           preferredSessionRef.current = null
         }
         // Avoid redundant URL/storage writes that can thrash downstream effects.
         if (nextSessionId !== activeSessionIdRef.current) {
           commitSessionId(nextSessionId)
         }
-        syncUrlAndStorage(brandId, nextSessionId)
+        // Never let list hydrate clear an authoritative url/preferred session to null.
+        const sessionForUrl =
+          nextSessionId
+          ?? (urlId || preferredId || activeSessionIdRef.current)
+        syncUrlAndStorage(brandId, sessionForUrl)
       } catch (err) {
         if (cancelled || requestId !== sessionsRequestIdRef.current) return
         if (selectionEpochRef.current !== epochAtStart) return
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load sessions')
-        setSessions([])
-        commitSessionId(null)
-        syncUrlAndStorage(brandId, null)
+        // Preserve active session + URL on list fetch failure — do not rewrite to null/newest.
+        setSessions((prev) => {
+          const keepId = activeSessionIdRef.current
+          if (!keepId) return []
+          return prev.filter((s) => s.id === keepId)
+        })
       } finally {
         if (!cancelled && requestId === sessionsRequestIdRef.current) {
           setLoadingSessions(false)
@@ -533,13 +551,24 @@ export function useChatShellWorkspace(userId: string | undefined) {
     let cancelled = false
     const sid = activeSessionId
     const epoch = selectionEpochRef.current
+    const urlIdAtStart = readUrlSessionId()
+    const preferredAtStart = preferredSessionRef.current
+    /** Authoritative deep-link / preferred — never mint or fall back while set. */
+    const authoritative =
+      sid === urlIdAtStart || sid === preferredAtStart || Boolean(urlIdAtStart && urlIdAtStart === sid)
+
     void (async () => {
       const row = await getChatSession(sid)
       if (cancelled) return
       if (activeSessionIdRef.current !== sid) return
       if (selectionEpochRef.current !== epoch) return
       if (!row) {
-        // Invalid deep link / deleted session — fall back to another row on this brand.
+        // Transient miss or deleted: while URL/preferred still points here, keep the id
+        // (do not rewrite to brand-newest and never create a replacement session).
+        if (authoritative || readUrlSessionId() === sid || preferredSessionRef.current === sid) {
+          preferredSessionRef.current = sid
+          return
+        }
         preferredSessionRef.current = null
         const brandId = activeBrandIdRef.current
         const fallback =
@@ -553,9 +582,14 @@ export function useChatShellWorkspace(userId: string | undefined) {
         preferredSessionRef.current = row.id
         activeBrandIdRef.current = row.business_id
         setActiveBrandId(row.business_id)
+        commitSessionId(row.id)
+        syncUrlAndStorage(row.business_id, row.id)
+        setSessions((prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
         return
       }
+      preferredSessionRef.current = row.id
       setSessions((prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
+      syncUrlAndStorage(activeBrandIdRef.current, row.id)
     })()
     return () => {
       cancelled = true
