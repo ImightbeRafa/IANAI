@@ -504,6 +504,14 @@
   box-shadow: var(--focus-ring);
 }
 
+.chat-shell__nav-new-brand {
+  color: var(--text-muted);
+}
+
+.chat-shell__nav-new-brand:hover:not(:disabled) {
+  color: var(--text);
+}
+
 .chat-shell__session-title {
   display: flex;
   align-items: center;

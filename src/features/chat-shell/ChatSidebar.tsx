@@ -221,8 +221,8 @@ export default function ChatSidebar({
               type="button"
               className="chat-shell__nav-item chat-shell__nav-button"
               onClick={onNewBrand}
-              disabled={busy}
-              aria-disabled={busy}
+              disabled={busy || loadingBusinesses}
+              aria-disabled={busy || loadingBusinesses}
             >
               + New brand…
             </button>
@@ -382,10 +382,10 @@ export default function ChatSidebar({
         })}
         <button
           type="button"
-          className="chat-shell__nav-item chat-shell__nav-button chat-shell__nav-link"
+          className="chat-shell__nav-item chat-shell__nav-button chat-shell__nav-new-brand"
           onClick={onNewBrand}
-          disabled={busy}
-          aria-disabled={busy}
+          disabled={busy || loadingBusinesses}
+          aria-disabled={busy || loadingBusinesses}
         >
           + New brand…
         </button>
