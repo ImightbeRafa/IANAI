@@ -1280,12 +1280,35 @@ export async function getSessionOfferImages(
 
 export async function createProductImage(
   productId: string,
-  userId: string,
+  _userId: string,
   imageUrl: string,
   label?: string,
   kind: 'product' | 'context' | 'generated' = 'product',
   opts?: { sessionId?: string; messageId?: string }
 ): Promise<ProductImage> {
+  // RLS WITH CHECK requires user_id = auth.uid(). Never trust a React prop that
+  // can diverge from the JWT (INSERT … RETURNING fails with "violates RLS").
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+  if (authError || !authData.user) {
+    throw new Error('Not authenticated')
+  }
+  const userId = authData.user.id
+
+  if (opts?.sessionId) {
+    const { data: offer, error: offerErr } = await supabase
+      .from('chat_session_offers')
+      .select('product_id')
+      .eq('session_id', opts.sessionId)
+      .eq('product_id', productId)
+      .maybeSingle()
+    if (offerErr) throw offerErr
+    if (!offer) {
+      throw new Error(
+        'This product is not an offer on the session; cannot upload a session-scoped image.'
+      )
+    }
+  }
+
   const insert: Record<string, unknown> = {
     product_id: productId,
     user_id: userId,

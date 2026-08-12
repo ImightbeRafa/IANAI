@@ -271,6 +271,53 @@ DELETE USING:
 
 Intent: product write/read remains required; `session_id IS NULL` preserves legacy `/scripts` rows that never had a chat session; shell inserts still require a writable session. When the real prod cutover migration is authored, it belongs under SecureDog/CoS ownership as a reviewed git migration — not a Preview docs tip or live-only ops apply.
 
+## product_images (Preview — owner SELECT restored)
+
+**Scope:** IANAI-preview only. **Do not apply blindly to production AIIAN tonight.**
+
+### Symptom (CoS S2 smoke)
+
+Images tab **Upload** failed with `new row violates row-level security policy` on `product_images` INSERT (storage `post-images` upload succeeded; row insert failed). ScriptCard **Crear imagen** could still pass when generation used existing refs.
+
+### Root cause (062)
+
+Migration `062` tightened INSERT:
+
+```text
+WITH CHECK (
+  user_id = auth.uid()
+  AND can_write_product(product_id)
+  AND (session_id IS NULL OR can_write_chat_session(session_id))
+)
+```
+
+and left SELECT primarily as session-reader (`session_id IS NOT NULL AND can_read_chat_session(session_id)`). Dropping **owner SELECT** made `INSERT … RETURNING` flaky/fail for the uploader when the new row was not visible under SELECT. FK `(session_id, product_id) ∈ chat_session_offers` still applies when `session_id` is set.
+
+### Preview fix (ops — already live)
+
+Ops restored **owner SELECT** on Preview:
+
+```text
+"Users can view own product images"
+  FOR SELECT TO authenticated
+  USING (user_id = auth.uid())
+```
+
+Alongside session-reader SELECT + the INSERT WITH CHECK above. **Confirmed live on IANAI-preview** (do not re-DROP).
+
+### Client harden (chat-shell tip)
+
+`createProductImage` always sets `user_id` from `supabase.auth.getUser()` (JWT `auth.uid()`), never a stale React `userId` prop. When `sessionId` is provided, the client verifies `(sessionId, productId)` exists in `chat_session_offers` before insert and returns a clear error if not.
+
+### Cutover must include
+
+When chat-shell lands on AIIAN, the reviewed prod migration must carry:
+
+1. **Owner SELECT** on `product_images` (`user_id = auth.uid()`), and  
+2. **INSERT WITH CHECK** shape above (uid + `can_write_product` + session write when session-scoped),
+
+plus the session-offer FK. **Do not copy Preview live-only churn onto prod tonight.**
+
 ## Related docs
 
 - Environment matrix: `docs/operations/chat-shell-environments.md`

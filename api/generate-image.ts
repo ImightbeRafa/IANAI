@@ -17,6 +17,7 @@ import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
+import { resolvePostModeAspect } from './lib/post-aspect.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicUrl } from './lib/url-safety.js'
 
@@ -1221,23 +1222,25 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
-      // Determine aspect ratio from request (default 9:16 for backward compat).
-      // Chat-shell sessions may request true 1:1 for presets/anuncios (Preview).
-      const shellSquare =
-        Boolean(rawSessionId)
-        && imageParams.aspectRatio === '1:1'
-        && !isLogoMode
-      const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+      // Chat-shell sessions may request true 1:1 — do not leave builders on 9:16.
+      const aspectResolved = resolvePostModeAspect({
+        aspectRatio: typeof imageParams.aspectRatio === 'string' ? imageParams.aspectRatio : null,
+        isProductMode,
+        isLogoMode,
+        hasSessionId: Boolean(rawSessionId),
+      })
+      const shellSquare = aspectResolved.shellSquare
+      const postAspectRatio: PostAspectRatio = aspectResolved.layout
       const postStyle: string = imageParams.postStyle || 'venta-directa'
 
       if (isLogoMode) {
         // Force 1:1 for logos regardless of incoming aspectRatio
         imageParams.width = 1024
         imageParams.height = 1024
-      } else if (imageParams.aspectRatio === '1:1' && (isProductMode || shellSquare)) {
+      } else if (aspectResolved.canvas === '1:1') {
         imageParams.width = 1080
         imageParams.height = 1080
-      } else if (postAspectRatio === '9:16') {
+      } else if (aspectResolved.canvas === '9:16') {
         imageParams.width = 1080
         imageParams.height = 1920
       } else {
@@ -1245,10 +1248,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         imageParams.height = 1440
       }
 
-      // Explicit aspect ratio enforcement prefix
-      const arLabel = shellSquare || (imageParams.aspectRatio === '1:1' && isProductMode)
+      // Explicit aspect ratio enforcement prefix (canvas, not layout fallback)
+      const arLabel = aspectResolved.canvas === '1:1'
         ? '1:1 cuadrado (1080×1080)'
-        : postAspectRatio === '9:16'
+        : aspectResolved.canvas === '9:16'
           ? '9:16 vertical (1080×1920)'
           : '3:4 vertical (1080×1440)'
       const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
