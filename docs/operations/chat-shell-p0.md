@@ -1,5 +1,7 @@
 # Chat-shell P0 — `/chat` foundation
 
+<!-- force preview rebuild for VITE env — 2026-08-12T01:54:00Z -->
+
 ## What shipped
 
 - Route: `/chat` (protected) with Obsidian electric **light + dark** shell UI
