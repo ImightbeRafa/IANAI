@@ -551,14 +551,32 @@ export async function countBusinessChatSessions(businessId: string): Promise<num
  * Hard-delete a chat session (O1). Authz via existing 062 RLS
  * `chat_sessions_delete` → `can_write_chat_session(id)`.
  * Related offers/messages cascade via FKs. No soft-archive path.
+ *
+ * Prefers `.select('id')` so a silent RLS 0-row delete (parent or CASCADE
+ * child policy gap) surfaces as a clear Error instead of a false success.
  */
+export function assertChatSessionDeleteResult(
+  data: Array<{ id: string }> | null | undefined
+): void {
+  if (!data || data.length === 0) {
+    throw new Error(
+      'Session delete failed: no row deleted (RLS blocked or session missing). On Preview, CASCADE children need DELETE/UPDATE policies — see docs/operations/chat-shell-preview-rls.md.'
+    )
+  }
+}
+
 export async function deleteChatSession(sessionId: string): Promise<void> {
-  const { error } = await supabase
+  if (!sessionId) {
+    throw new Error('Session delete failed: missing session id.')
+  }
+  const { data, error } = await supabase
     .from('chat_sessions')
     .delete()
     .eq('id', sessionId)
+    .select('id')
 
   if (error) throw error
+  assertChatSessionDeleteResult(data)
 }
 
 /** First user-message preview per session (for sidebar titles). */

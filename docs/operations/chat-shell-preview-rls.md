@@ -360,6 +360,46 @@ CoS can re-smoke Upload `tiny.png` against Preview even before the tip (storage 
 
 **Do not apply Preview storage UPDATE onto prod tonight.**
 
+## chat_sessions hard DELETE / CASCADE children (O1)
+
+**Scope:** IANAI-preview only. **Never apply to prod AIIAN / master. Never enable prod `chat_shell`.**
+
+### Symptom (O1 CoS smoke)
+
+Sidebar Delete called hard `deleteChatSession` but toast showed **Failed to delete session**; reload restored rows. Client `.delete().eq('id')` + 062 `chat_sessions_delete` (`can_write_chat_session(id)`) were correct — failure was **CASCADE / SET NULL child RLS**.
+
+### Root cause
+
+Deleting a real QA session (messages + artifacts + session-linked product images) failed because child tables had RLS on without matching DELETE/UPDATE policies:
+
+| Child | Parent FK | Gap |
+| --- | --- | --- |
+| `messages` | ON DELETE CASCADE from `chat_sessions` | no DELETE policy |
+| `message_artifacts` | CASCADE (via message/session) | no DELETE policy |
+| `context_documents` | CASCADE | RLS on, zero policies |
+| `product_images` | ON DELETE SET NULL from `chat_sessions` | no UPDATE policy (SET NULL blocked); offer FK ON DELETE RESTRICT also blocks when images remain offer-bound |
+| `scripts` | session-linked | DELETE too strict for some session-owned rows |
+
+### Preview fix (ops — already live; do NOT re-apply in tip)
+
+Migration name on IANAI-preview: **`preview_chat_session_delete_cascade_rls`**
+
+- `messages_delete` — `FOR DELETE` USING `can_write_chat_session(session_id)`
+- `message_artifacts_delete` — `FOR DELETE` USING `can_write_chat_session(session_id)`
+- `context_documents_delete` — `FOR DELETE` USING `session_id IS NOT NULL AND can_write_chat_session(session_id)`
+- `product_images_update_own` — `FOR UPDATE` so SET NULL can clear `session_id`
+- `scripts_delete` softened — `can_write_chat_session AND (product_id IS NULL OR can_write_product(product_id))`
+
+### Client harden (chat-shell tip)
+
+`deleteChatSession` uses `.delete().eq('id', sessionId).select('id')` and throws a clear Error if **zero rows** return (silent RLS / missing session). Still **hard delete only** — no soft-archive; do not use `deleteSessionMessages` as hygiene.
+
+### Cutover must include (not tonight)
+
+Before production cutover GO, prod AIIAN must get **matching** child DELETE/UPDATE policies (same intent as `preview_chat_session_delete_cascade_rls`). Parent `chat_sessions_delete` alone is not enough for real sessions with messages/artifacts/images.
+
+**Do not apply Preview cascade DELETE/UPDATE policies onto prod from this tip.**
+
 ## Related docs
 
 - Environment matrix: `docs/operations/chat-shell-environments.md`
