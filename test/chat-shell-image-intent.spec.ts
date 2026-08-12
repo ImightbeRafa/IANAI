@@ -226,6 +226,22 @@ describe('resolveScriptPostPreferences (S3 Script→post)', () => {
     expect(planImageClarifications(resolved).needed).toBe(false)
   })
 
+  it('ignores sticky Producto/studio-hero for sales ScriptCard→post', () => {
+    const resolved = resolveScriptPostPreferences({
+      scriptText: 'dame un guion corto de venta',
+      scriptTitle: 'Venta Directa',
+      sticky: {
+        style: { kind: 'product', productSubStyle: 'studio-hero' },
+        aspectRatio: '9:16',
+        model: 'nano-banana-pro',
+        density: 'medium',
+      },
+    })
+    expect(resolved.style).toEqual({ kind: 'preset', presetId: 'venta-directa' })
+    expect(resolved.aspectRatio).toBe('9:16')
+    expect(resolved.model).toBe('nano-banana-pro')
+  })
+
   it('does not force venta-directa on generic scripts without sticky style', () => {
     const resolved = resolveScriptPostPreferences({
       scriptText: 'GANCHO\nHistoria\nCTA\nCIERRE',
@@ -235,7 +251,7 @@ describe('resolveScriptPostPreferences (S3 Script→post)', () => {
     expect(planImageClarifications(resolved).step).toBe('mode')
   })
 
-  it('keeps sticky/explicit style over sales fallback', () => {
+  it('keeps sticky preset / explicit over sales fallback', () => {
     const stickyWins = resolveScriptPostPreferences({
       scriptText: 'Guión de venta',
       sticky: { style: { kind: 'preset', presetId: 'comparison' } },

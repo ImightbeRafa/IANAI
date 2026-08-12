@@ -429,7 +429,8 @@ export function looksLikeSalesScript(text?: string | null, title?: string | null
 
 /**
  * Resolve prefs for ScriptCard→post:
- * explicit → sticky → sales venta-directa fallback → unresolved (clarify).
+ * explicit → sticky preset → sales venta-directa → unresolved.
+ * Sticky `kind:'product'` must not hijack a sales ScriptCard→post path.
  */
 export function resolveScriptPostPreferences(options: {
   explicit?: Partial<ShellImagePreferences> | null
@@ -438,14 +439,21 @@ export function resolveScriptPostPreferences(options: {
   scriptTitle?: string | null
 }): ShellImagePreferences {
   const stickyBase = resolveImagePreferences(options.sticky, {})
+  const stickyPresetBeatsSales = stickyBase.style?.kind === 'preset'
+  const explicitStyle = sanitizePartialPreferences(options.explicit).style
   const salesFallback: Partial<ShellImagePreferences> =
-    !stickyBase.style
-    && !options.explicit?.style
+    !explicitStyle
+    && !stickyPresetBeatsSales
     && looksLikeSalesScript(options.scriptText, options.scriptTitle)
       ? { style: { kind: 'preset', presetId: 'venta-directa' } }
       : {}
+  // Drop product sticky style when sales fallback applies so resolve doesn't keep studio-hero.
+  const stickyForMerge: ShellImagePreferences =
+    salesFallback.style && stickyBase.style?.kind === 'product'
+      ? { ...stickyBase, style: undefined }
+      : stickyBase
   return resolveImagePreferences(
     options.explicit,
-    resolveImagePreferences(salesFallback, stickyBase)
+    resolveImagePreferences(salesFallback, stickyForMerge)
   )
 }
