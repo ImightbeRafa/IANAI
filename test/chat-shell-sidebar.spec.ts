@@ -124,4 +124,59 @@ describe('brand open persistence', () => {
     })
     expect(fresh.fresh).toBe(true) // null + active → default-expand
   })
+
+  it('does not force-open when stored null, previous false, becomes active', () => {
+    const map = resolveBrandOpenMap({
+      businessIds: ['b1'],
+      activeBrandId: 'b1',
+      readStored: () => null,
+      previous: { b1: false },
+    })
+    expect(map.b1).toBe(false)
+  })
+
+  it('default-expands when activeBrandId arrives after first paint with unset previous', () => {
+    const beforeActive = resolveBrandOpenMap({
+      businessIds: ['b1'],
+      activeBrandId: null,
+      readStored: () => null,
+    })
+    expect(beforeActive.b1).toBeUndefined()
+
+    const afterActive = resolveBrandOpenMap({
+      businessIds: ['b1'],
+      activeBrandId: 'b1',
+      readStored: () => null,
+      previous: beforeActive,
+    })
+    expect(afterActive.b1).toBe(true)
+  })
+
+  it('stored 0 wins across activeBrandId flips (no LS invent)', () => {
+    const store: Record<string, string> = {
+      'ianai.sidebar.brandOpen.b1': '0',
+    }
+    const storage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v
+      },
+    }
+    const first = resolveBrandOpenMap({
+      businessIds: ['b1', 'b2'],
+      activeBrandId: 'b2',
+      readStored: (id) => readBrandOpen(storage, id),
+    })
+    expect(first.b1).toBe(false)
+    expect(first.b2).toBe(true) // null + active, previous unset
+
+    const back = resolveBrandOpenMap({
+      businessIds: ['b1', 'b2'],
+      activeBrandId: 'b1',
+      readStored: (id) => readBrandOpen(storage, id),
+      previous: first,
+    })
+    expect(back.b1).toBe(false) // stored 0 still wins
+    expect(store['ianai.sidebar.brandOpen.b1']).toBe('0') // name/URL path must not write 1 over 0
+  })
 })

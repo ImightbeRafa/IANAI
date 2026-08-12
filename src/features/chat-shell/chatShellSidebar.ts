@@ -38,8 +38,9 @@ export function writeBrandOpen(
 /**
  * Resolve sidebar brand open/collapsed map.
  * - Honor explicit stored true/false (incl. `0` collapse across reload).
- * - Default-expand active brand only when storage is null/missing.
- * - Never invent writes — callers must not writeBrandOpen(true) from activeBrandId effects.
+ * - Default-expand active brand only when storage is null/missing AND previous is unset.
+ * - Never force-open over an existing previous false when becoming active.
+ * - Never invent writes — callers must not writeBrandOpen(true) from activeBrandId / URL / name-click.
  */
 export function resolveBrandOpenMap(options: {
   businessIds: string[]
@@ -54,11 +55,11 @@ export function resolveBrandOpenMap(options: {
       next[businessId] = stored
       continue
     }
-    // null/missing: default-expand only the active brand; leave others collapsed unless already set.
+    // null/missing: set only once. Wait for activeBrandId before defaulting so a
+    // first paint with active=null does not lock previous=false and block expand.
     if (next[businessId] === undefined) {
+      if (options.activeBrandId == null) continue
       next[businessId] = businessId === options.activeBrandId
-    } else if (businessId === options.activeBrandId) {
-      next[businessId] = true
     }
   }
   return next

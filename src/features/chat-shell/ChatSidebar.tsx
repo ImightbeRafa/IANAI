@@ -115,9 +115,8 @@ export default function ChatSidebar({
     }
   }
 
-  const selectBrandAndOpen = (brandId: string) => {
-    writeBrandOpen(storage, brandId, true)
-    setOpenByBrand((prev) => ({ ...prev, [brandId]: true }))
+  // Name click selects brand only — never writeBrandOpen(true) / force-open (chevron is the only LS writer).
+  const selectBrand = (brandId: string) => {
     onSelectBrand(brandId)
   }
 
@@ -211,7 +210,7 @@ export default function ChatSidebar({
                 <button
                   type="button"
                   className={`chat-shell__nav-item chat-shell__nav-button chat-shell__brand-name${isActive ? ' is-active' : ''}`}
-                  onClick={() => selectBrandAndOpen(brand.id)}
+                  onClick={() => selectBrand(brand.id)}
                 >
                   <span className="chat-shell__nav-item-label">{brand.name}</span>
                   {!isOpen && (
