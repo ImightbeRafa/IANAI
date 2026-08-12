@@ -20,7 +20,7 @@ import {
   selectionToSearchParams,
 } from './chatShellPersistence'
 import { buildMinimalBrandFormData, validateBrandCreateName } from './chatShellBrandCreate'
-import { resolveNextSessionId } from './sessionOffer'
+import { resolveNextSessionId, shouldCommitCreatedSession } from './sessionOffer'
 
 function defaultSessionTitle(): string {
   return 'New chat'
@@ -308,22 +308,28 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
         if (selectionEpochRef.current !== epochAtStart) return
 
-        // Keep preferred until the row is actually in the list (reload / deep-link race).
-        if (
-          preferredSessionRef.current &&
-          preferredSessionRef.current === nextSessionId &&
-          list.some((s) => s.id === nextSessionId)
-        ) {
-          preferredSessionRef.current = null
-        }
+        // Do NOT clear preferred here. Skip/pin and deep-link rely on preferred
+        // surviving list hydrate; only selectBrand / a newer select|create replaces it.
         // Avoid redundant URL/storage writes that can thrash downstream effects.
         if (nextSessionId !== activeSessionIdRef.current) {
+          // Stick guard: never let list hydrate jump away from url/preferred/current intent.
+          const pinned = urlId || preferredId || currentId
+          if (
+            pinned
+            && nextSessionId
+            && nextSessionId !== pinned
+            && !pendingDeletedRef.current.has(pinned)
+          ) {
+            commitSessionId(pinned)
+            syncUrlAndStorage(brandId, pinned)
+            return
+          }
           commitSessionId(nextSessionId)
         }
-        // Never let list hydrate clear an authoritative url/preferred session to null.
+        // Never let list hydrate clear an authoritative url/preferred/current session to null.
         const sessionForUrl =
           nextSessionId
-          ?? (urlId || preferredId || activeSessionIdRef.current)
+          ?? (urlId || preferredId || currentId || activeSessionIdRef.current)
         syncUrlAndStorage(brandId, sessionForUrl)
       } catch (err) {
         if (cancelled || requestId !== sessionsRequestIdRef.current) return
@@ -374,7 +380,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
       // …but only select it if this create is still the live user action.
       // Skip/pin bumps epoch so a deferred create cannot rewrite ?session= A→B.
-      if (selectionEpochRef.current !== epoch) return
+      if (!shouldCommitCreatedSession(epoch, selectionEpochRef.current)) return
       preferredSessionRef.current = session.id
       commitSessionId(session.id)
       syncUrlAndStorage(brandId, session.id)
@@ -404,10 +410,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setNotice(null)
     try {
       const session = await createBrandChatSession(brandId, userId, quickSessionTitle())
-      if (selectionEpochRef.current !== epoch) return
+      const epochLive = shouldCommitCreatedSession(epoch, selectionEpochRef.current)
 
       if (brandId !== activeBrandIdRef.current) {
-        // Cross-brand Quick: seed only while this create is still the live action.
+        // Cross-brand Quick: only select while this create is still the live action.
+        if (!epochLive) return
         preferredSessionRef.current = session.id
         activeBrandIdRef.current = brandId
         setActiveBrandId(brandId)
@@ -418,7 +425,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
       }
 
       if (activeBrandIdRef.current !== brandId) return
+      // Surface row even if Skip/pin made this create stale — never steal ?session=.
       setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+      if (!epochLive) return
       preferredSessionRef.current = session.id
       commitSessionId(session.id)
       syncUrlAndStorage(brandId, session.id)

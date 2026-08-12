@@ -7,6 +7,7 @@ import {
   planKeptOfferPositionUpdates,
   resolveNextSessionId,
   resolveSessionOfferProductId,
+  shouldCommitCreatedSession,
   type OfferLike,
 } from '../src/features/chat-shell/sessionOffer'
 import {
@@ -399,30 +400,33 @@ describe('resolveNextSessionId', () => {
     ).toBe('1088a18d-skipped')
   })
 
-  it('never rewrites urlId/preferredId/currentId to sessionIds[0]', () => {
+  it('CoS A→B: after Skip pin, list with newest B still resolves to A', () => {
+    const skippedA = '1088a18d-00c4-4fb8-95c2-c047c443f3b1'
+    const newestB = 'a89b72e3-drifted'
     expect(
       resolveNextSessionId({
-        sessionIds: ['a', 'b'],
-        preferredId: 'x',
-        currentId: null,
-        urlId: 'deep-link',
+        sessionIds: [newestB, skippedA, 'older'],
+        preferredId: skippedA,
+        currentId: skippedA,
+        urlId: skippedA,
       })
-    ).toBe('deep-link')
+    ).toBe(skippedA)
     expect(
       resolveNextSessionId({
-        sessionIds: ['a', 'b'],
-        preferredId: 'gone',
-        currentId: null,
+        sessionIds: [newestB, 'older'],
+        preferredId: skippedA,
+        currentId: skippedA,
         urlId: null,
       })
-    ).toBe('gone')
-    expect(
-      resolveNextSessionId({
-        sessionIds: ['a89b72e3-newest'],
-        preferredId: null,
-        currentId: '1088a18d-a',
-        urlId: null,
-      })
-    ).toBe('1088a18d-a')
+    ).toBe(skippedA)
+  })
+})
+
+describe('shouldCommitCreatedSession', () => {
+  it('blocks deferred create after Skip/pin bumps epoch (A→B steal)', () => {
+    const epochAtCreate = 2
+    const epochAfterSkipPin = 3
+    expect(shouldCommitCreatedSession(epochAtCreate, epochAfterSkipPin)).toBe(false)
+    expect(shouldCommitCreatedSession(epochAtCreate, epochAtCreate)).toBe(true)
   })
 })

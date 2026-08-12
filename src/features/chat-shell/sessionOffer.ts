@@ -199,6 +199,17 @@ export function pickSafeChatSessionUpdates(
 }
 
 /**
+ * Whether a deferred create may claim selection.
+ * Skip/pin bumps the live epoch so a late create cannot snap A→B.
+ */
+export function shouldCommitCreatedSession(
+  epochAtCreate: number,
+  liveEpoch: number
+): boolean {
+  return epochAtCreate === liveEpoch
+}
+
+/**
  * Honor deep-link / preferred / live selection over brand-newest.
  *
  * Order: urlId → preferredId → currentId (always, even if list lags) → sessionIds[0].
