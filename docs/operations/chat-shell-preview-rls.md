@@ -277,7 +277,7 @@ Intent: product write/read remains required; `session_id IS NULL` preserves lega
 
 ### Symptom (CoS S2 smoke)
 
-Images tab **Upload** failed with `new row violates row-level security policy` on `product_images` INSERT (storage `post-images` upload succeeded; row insert failed). ScriptCard **Crear imagen** could still pass when generation used existing refs.
+Images tab **Upload** failed with `new row violates row-level security policy`. Early diagnosis pointed at `product_images` INSERT; **CoS re-smoke on `1ef0212` confirmed the live failure was storage upsert** (see **post-images storage UPDATE** below). ScriptCard **Crear imagen** could still pass when generation used existing refs / unique storage paths.
 
 ### Root cause (062)
 
@@ -317,6 +317,48 @@ When chat-shell lands on AIIAN, the reviewed prod migration must carry:
 2. **INSERT WITH CHECK** shape above (uid + `can_write_product` + session write when session-scoped),
 
 plus the session-offer FK. **Do not copy Preview live-only churn onto prod tonight.**
+
+## post-images storage UPDATE (Preview — CoS Upload upsert)
+
+**Scope:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) only. **Do not apply to production AIIAN** (`lstzfxsdmggkoaxfawny`) in this tip.
+
+### Symptom (CoS re-smoke on `1ef0212`)
+
+Images tab **Upload** of `tiny.png` failed with RLS: `new row violates row-level security policy`.
+
+### Root cause (confirmed — not `product_images` INSERT)
+
+1. Live `product_images` INSERT WITH CHECK is fine — QA SQL probe insert for Preview offer + session **succeeded** (rolled back).
+2. ScriptCard **Crear imagen** on the same session/product **passed** — storage path uses unique `${Date.now()}.webp` → **INSERT**.
+3. Rail Upload passed `file.name` (`tiny.png`) into `uploadProductImage(..., upsert: true)`. Object `…/product-refs/tiny.png` already existed (C3 smoke, ~07:11Z). Re-upload → storage **UPDATE**.
+4. Preview `storage.objects` for bucket `post-images` had SELECT/INSERT/DELETE only — **no UPDATE policy** → RLS error on upsert overwrite.
+
+### Preview fix (ops — already live)
+
+Migration `preview_post_images_storage_update_rls` on IANAI-preview:
+
+```text
+"Users can update own post images"
+  FOR UPDATE TO authenticated
+  USING + WITH CHECK:
+    bucket_id = 'post-images'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+```
+
+**Prod AIIAN still lacks UPDATE today** — cutover must ship this shape; **do not apply to prod from this tip.**
+
+### Client harden (chat-shell tip)
+
+`uploadProductImage` / `uploadShellOfferImage` always use a **unique** object name (`${Date.now()}-…webp` via `buildUniqueProductRefFilename`) so first upload and re-upload are storage **INSERT**s and never depend on UPDATE. Upsert may remain; unique path is the hard fix. Original `file.name` stays as `product_images.label` only.
+
+CoS can re-smoke Upload `tiny.png` against Preview even before the tip (storage UPDATE already live); the unique-filename tip still ships for defense in depth.
+
+### Cutover must include
+
+1. Storage **UPDATE** policy on `post-images` (owner folder = `auth.uid()`), and  
+2. Prefer **unique filenames** for product-refs (never stable `tiny.png` paths).
+
+**Do not apply Preview storage UPDATE onto prod tonight.**
 
 ## Related docs
 

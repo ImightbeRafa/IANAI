@@ -263,6 +263,8 @@ export async function uploadShellOfferImage(options: {
   dataUrl: string
   filename?: string
 }): Promise<ProductImage> {
+  // uploadProductImage always unique-ifies the storage object name.
+  // Keep the original filename as the product_images label only.
   const publicUrl = await uploadProductImage(
     options.userId,
     options.productId,

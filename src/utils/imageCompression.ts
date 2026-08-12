@@ -54,6 +54,23 @@ function sanitizePathSegment(segment: string): string {
 }
 
 /**
+ * Unique storage object name for product-refs.
+ * Always timestamp-prefixed so re-uploads INSERT a new object and never
+ * depend on storage UPDATE (upsert overwrite) RLS.
+ */
+export function buildUniqueProductRefFilename(original?: string): string {
+  const ts = Date.now()
+  const raw = (original || '').trim()
+  if (!raw) return `${ts}.webp`
+  const base = raw
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+  return base ? `${ts}-${base}.webp` : `${ts}.webp`
+}
+
+/**
  * Upload an AI-generated image WITHOUT compression.
  * Preserves the original PNG quality from Gemini output.
  * Use this for AI-generated post images to avoid quality loss.
@@ -125,8 +142,8 @@ export async function uploadProductImage(
 ): Promise<string> {
   const compressedBlob = await compressImageToWebP(imageSource, 0.90)
 
-  const timestamp = Date.now()
-  const rawName = filename || `${timestamp}.webp`
+  // Always unique — never reuse file.name (e.g. tiny.png) which forces storage UPDATE via upsert.
+  const rawName = buildUniqueProductRefFilename(filename)
   const safeUserId = sanitizePathSegment(userId)
   const safeProductId = sanitizePathSegment(productId)
   const safeFileName = sanitizePathSegment(rawName)
