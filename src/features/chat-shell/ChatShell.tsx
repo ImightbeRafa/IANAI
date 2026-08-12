@@ -67,6 +67,14 @@ export default function ChatShell({
     brandKits,
   })
 
+  // S3 refs pause: surface Images rail so user can upload offer Ref (no inline uploader).
+  useEffect(() => {
+    if (thread.imageClarify?.step === 'refs') {
+      setRailOpen(true)
+      setRailTab('images')
+    }
+  }, [thread.imageClarify?.step])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -230,7 +238,10 @@ export default function ChatShell({
           imageClarify={thread.imageClarify}
           onAnswerImageClarify={(answer) => void thread.answerImageClarify(answer)}
           onCancelImageClarify={() => thread.cancelImageClarify()}
-          onUploadClarifyImage={(file, productId) => void thread.uploadOfferImage(file, productId)}
+          onOpenImagesRail={() => {
+            setRailOpen(true)
+            setRailTab('images')
+          }}
           onGenerateImageFromScript={(scriptText, productId, scriptTitle) =>
             void thread.generateImageFromScript(scriptText, productId, scriptTitle)
           }

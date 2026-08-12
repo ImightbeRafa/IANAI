@@ -414,16 +414,16 @@ export function productStyleChoices(language: 'en' | 'es' = 'es'): Array<{ id: s
 /**
  * Detect sales-script handoff so ScriptCard→post can default to venta-directa
  * when no sticky/explicit style exists.
+ * Explicit sales signals only — generic Gancho/CTA structure is not enough.
  */
 export function looksLikeSalesScript(text?: string | null, title?: string | null): boolean {
-  const hay = `${title || ''} ${text || ''}`.toLowerCase()
-  if (!hay.trim()) return false
+  const hay = normalizeText(`${title || ''} ${text || ''}`)
+  if (!hay) return false
   return (
     /\bventa(?:\s+directa)?\b/.test(hay)
     || /\bdirect\s+sale\b/.test(hay)
     || /\bsales?\s+script\b/.test(hay)
     || /\bguion(?:es)?\s+de\s+venta\b/.test(hay)
-    || /\bcta\b/.test(hay) && /\b(gancho|hook|cierre|closing)\b/.test(hay)
   )
 }
 

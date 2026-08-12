@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent } from 'react'
+import { type KeyboardEvent } from 'react'
 import ChatShellScriptCard from './ChatShellScriptCard'
 import ChatShellImageCard from './ChatShellImageCard'
 import type {
@@ -43,7 +43,7 @@ interface ChatThreadProps {
     switchToAnuncio?: boolean
   }) => void
   onCancelImageClarify?: () => void
-  onUploadClarifyImage?: (file: File, productId?: string | null) => void | Promise<void>
+  onOpenImagesRail?: () => void
   onGenerateImageFromScript?: (
     scriptText: string,
     productId?: string | null,
@@ -129,7 +129,7 @@ export default function ChatThread({
   imageClarify = null,
   onAnswerImageClarify,
   onCancelImageClarify,
-  onUploadClarifyImage,
+  onOpenImagesRail,
   onGenerateImageFromScript,
   onSaveScript,
   onEditScript,
@@ -139,7 +139,6 @@ export default function ChatThread({
 }: ChatThreadProps) {
   const composerEnabled = Boolean(session) && !sending
   const generateBlocked = Boolean(session) && !offerProductId
-  const refsUploadRef = useRef<HTMLInputElement>(null)
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -386,9 +385,9 @@ export default function ChatThread({
                     type="button"
                     className="chat-shell__btn chat-shell__btn--pill"
                     disabled={imageBusy}
-                    onClick={() => refsUploadRef.current?.click()}
+                    onClick={() => onOpenImagesRail?.()}
                   >
-                    {language === 'es' ? 'Subir foto' : 'Upload photo'}
+                    {language === 'es' ? 'Subir Ref' : 'Upload Ref'}
                   </button>
                   <button
                     type="button"
@@ -398,17 +397,6 @@ export default function ChatThread({
                   >
                     {language === 'es' ? 'Usar Anuncio' : 'Use Ad'}
                   </button>
-                  <input
-                    ref={refsUploadRef}
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      e.target.value = ''
-                      if (file) void onUploadClarifyImage?.(file, imageClarify.productId)
-                    }}
-                  />
                 </>
               ) : (
                 (imageClarify.mode === 'product'

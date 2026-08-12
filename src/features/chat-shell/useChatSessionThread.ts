@@ -66,6 +66,7 @@ import {
 } from './chatShellImages'
 import {
   formatImageAssumptions,
+  looksLikeSalesScript,
   parseChatShellImageIntent,
   planImageClarifications,
   readImagePreferences,
@@ -92,6 +93,7 @@ export type ImageClarifyState = {
   originText: string
   productId: string
   scriptText?: string
+  scriptTitle?: string | null
   source: 'composer' | 'rail' | 'script_card'
   partial: Partial<ShellImagePreferences>
   /** Full resolved prefs when waiting on refs (Producto without offer Ref). */
@@ -191,6 +193,7 @@ export function useChatSessionThread(options: {
     prompt: string
     userText: string
     scriptText?: string
+    scriptTitle?: string | null
     source: string
   }) => Promise<void>>(async () => {})
 
@@ -1152,6 +1155,7 @@ export function useChatSessionThread(options: {
         prompt: pendingRefs.prompt || pendingRefs.scriptText || pendingRefs.originText || 'Ad image',
         userText: pendingRefs.userText || pendingRefs.originText,
         scriptText: pendingRefs.scriptText,
+        scriptTitle: pendingRefs.scriptTitle,
         source: pendingRefs.source,
       })
     }
@@ -1178,6 +1182,7 @@ export function useChatSessionThread(options: {
     prompt: string
     userText: string
     scriptText?: string
+    scriptTitle?: string | null
     source: string
   }) => {
     if (!session || imageBusyRef.current) return
@@ -1212,6 +1217,7 @@ export function useChatSessionThread(options: {
       const productImageIds = selectProductReferenceImageIds(images)
       if (requiresProductReferences(prefs.style) && productImageIds.length === 0) {
         // S3: calm sticky ask once — keep Script→post pending instead of hard-fail.
+        setImageOfferId(options.productId)
         setImageClarify({
           sessionId: originSessionId,
           step: 'refs',
@@ -1219,6 +1225,7 @@ export function useChatSessionThread(options: {
           originText: options.userText,
           productId: options.productId,
           scriptText: options.scriptText,
+          scriptTitle: options.scriptTitle,
           source: clarifySource,
           partial: { style: prefs.style },
           preferences: prefs,
@@ -1227,8 +1234,8 @@ export function useChatSessionThread(options: {
         })
         setNotice(
           language === 'es'
-            ? 'Sube una foto del producto (o elige Anuncio).'
-            : 'Upload a product photo (or switch to Ad).'
+            ? 'Sube una Ref en Imágenes (o elige Anuncio).'
+            : 'Upload a Ref in Images (or switch to Ad).'
         )
         return
       }
@@ -1341,6 +1348,7 @@ export function useChatSessionThread(options: {
         originText: options.userText || options.prompt || 'Generate image',
         productId,
         scriptText: options.scriptText,
+        scriptTitle: options.scriptTitle,
         source: options.source,
         partial: options.explicit || {},
       })
@@ -1358,6 +1366,7 @@ export function useChatSessionThread(options: {
       prompt: options.prompt || options.scriptText || session.context || 'Ad image',
       userText: options.userText || options.prompt || 'Generate image for offer',
       scriptText: options.scriptText,
+      scriptTitle: options.scriptTitle,
       source: options.source,
     })
   }, [
@@ -1377,7 +1386,7 @@ export function useChatSessionThread(options: {
     answer: {
       mode?: 'anuncio' | 'product'
       styleId?: string
-      /** From refs sticky: switch Producto → Anuncio/venta-directa without upload. */
+      /** From refs sticky: switch Producto → Anuncio without requiring a Ref. */
       switchToAnuncio?: boolean
     }
   ) => {
@@ -1385,14 +1394,19 @@ export function useChatSessionThread(options: {
 
     if (imageClarify.step === 'refs') {
       if (answer.switchToAnuncio) {
-        const salesStyle: ShellImageStyle = { kind: 'preset', presetId: 'venta-directa' }
+        const anuncioStyle: ShellImageStyle = looksLikeSalesScript(
+          imageClarify.scriptText,
+          imageClarify.scriptTitle
+        )
+          ? { kind: 'preset', presetId: 'venta-directa' }
+          : { kind: 'preset', presetId: 'anuncio-conversion' }
         const base = imageClarify.preferences
           || resolveImagePreferences(
             imageClarify.partial,
             resolveImagePreferences(readImagePreferences(storage, session.id), imagePrefs)
           )
         const resolved = resolveImagePreferences(
-          { style: salesStyle },
+          { style: anuncioStyle },
           base
         )
         await runImageGenerate({
@@ -1401,6 +1415,7 @@ export function useChatSessionThread(options: {
           prompt: imageClarify.prompt || imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
           userText: imageClarify.userText || imageClarify.originText,
           scriptText: imageClarify.scriptText,
+          scriptTitle: imageClarify.scriptTitle,
           source: imageClarify.source,
         })
       }
@@ -1436,6 +1451,7 @@ export function useChatSessionThread(options: {
         prompt: imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
         userText: imageClarify.originText,
         scriptText: imageClarify.scriptText,
+        scriptTitle: imageClarify.scriptTitle,
         source: imageClarify.source,
       })
     }

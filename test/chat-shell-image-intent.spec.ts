@@ -208,10 +208,12 @@ describe('buildShellImageGenerateBody', () => {
 })
 
 describe('resolveScriptPostPreferences (S3 Script→post)', () => {
-  it('detects sales scripts from title/body', () => {
+  it('detects sales scripts from explicit signals only', () => {
     expect(looksLikeSalesScript('Hook… CTA fuerte', 'Guión de venta 1')).toBe(true)
+    expect(looksLikeSalesScript(null, 'Venta directa')).toBe(true)
     expect(looksLikeSalesScript('Educational tips about sleep', 'Educativo')).toBe(false)
-    expect(looksLikeSalesScript('GANCHO\n…\nCTA\nCompra ya\nCIERRE', null)).toBe(true)
+    // Generic Gancho/CTA structure is not enough without venta/sales wording.
+    expect(looksLikeSalesScript('GANCHO\n…\nCTA\nCompra ya\nCIERRE', null)).toBe(false)
   })
 
   it('prefers venta-directa for sales when sticky/explicit style missing', () => {
@@ -222,6 +224,15 @@ describe('resolveScriptPostPreferences (S3 Script→post)', () => {
     })
     expect(resolved.style).toEqual({ kind: 'preset', presetId: 'venta-directa' })
     expect(planImageClarifications(resolved).needed).toBe(false)
+  })
+
+  it('does not force venta-directa on generic scripts without sticky style', () => {
+    const resolved = resolveScriptPostPreferences({
+      scriptText: 'GANCHO\nHistoria\nCTA\nCIERRE',
+      scriptTitle: 'Storytelling 1',
+    })
+    expect(resolved.style).toBeUndefined()
+    expect(planImageClarifications(resolved).step).toBe('mode')
   })
 
   it('keeps sticky/explicit style over sales fallback', () => {
