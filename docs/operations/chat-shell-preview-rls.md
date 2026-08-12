@@ -1,0 +1,88 @@
+# Chat-shell Preview RLS bootstrap notes
+
+**Scope:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) only.  
+**Do not run these policies on production AIIAN** (`lstzfxsdmggkoaxfawny`). Do not enable production `chat_shell`. Do not apply migration `062` to production from this note.
+
+Ops already applied the Preview-only fixes below. This doc records symptoms, root causes, policy shapes, and verify steps so future Preview QA does not rediscover the same gaps.
+
+## Symptoms (before Preview fix)
+
+1. **Empty Brands** in `/chat` for a signed-in user who owns businesses — `getBusinesses` returned `[]` even though rows existed.
+2. **New chat / Quick session insert failed or returned null** — client `insert(…).select().single()` (PostgREST `INSERT … RETURNING`) did not return the new `chat_sessions` row to the inserting user.
+3. Downstream: sidebar stayed mock-empty; thread chrome never got a real session title.
+
+## Root causes
+
+### 1. RLS enabled with zero policies (deny-all)
+
+On Preview, some tables had **RLS enabled** but **no policies**. With RLS on and no `SELECT`/`INSERT` policies, every authenticated client call is denied (empty result / error), including:
+
+- `businesses`
+- `products`
+- `business_target_audiences`
+
+That alone empties Brands (and related product/audience reads) even when data and `user_id` ownership are correct.
+
+### 2. `chat_sessions` SELECT policy without owner clause (breaks `RETURNING`)
+
+Preview `chat_sessions_select` initially allowed only:
+
+```text
+can_read_chat_session(id)
+```
+
+`INSERT … RETURNING` requires the inserting role to **SELECT** the new row under RLS. For a brand-new row, the helper `can_read_chat_session(id)` did not see / authorize that row in the `RETURNING` path, so the insert “succeeded” server-side but the authenticated client got **no row back** (null / PGRST116-style failure depending on client options).
+
+Owner-visible SELECT fixes `RETURNING` for the creator.
+
+## Preview-only policy shapes (already applied)
+
+**Hard rule:** shapes below are documentation of Preview ops. **Do not apply on production AIIAN.**
+
+### Owner (and related) access on deny-all tables
+
+Preview added owner-oriented policies on `businesses` / `products` / `business_target_audiences` (exact names may vary; intent is: authenticated owners can read/write their own brand data under existing app conventions). Without at least `SELECT` for the owning user, Brands stays empty.
+
+### `chat_sessions` SELECT — owner OR helper
+
+SELECT policy should allow the owner to see their own rows **or** helper access:
+
+```sql
+-- IANAI-preview ONLY — do not run on production AIIAN
+-- Intent for chat_sessions SELECT:
+--   (user_id = auth.uid()) OR can_read_chat_session(id)
+
+-- Example shape (adjust policy name to match Preview):
+DROP POLICY IF EXISTS chat_sessions_select ON public.chat_sessions;
+
+CREATE POLICY chat_sessions_select
+  ON public.chat_sessions
+  FOR SELECT
+  TO authenticated
+  USING (
+    (user_id = auth.uid())
+    OR can_read_chat_session(id)
+  );
+```
+
+Keep INSERT constrained so creators still set `user_id = auth.uid()`, and keep ownership immutability triggers from `062` intact. This note does **not** authorize mutating `user_id` / `business_id` / `product_id` after insert.
+
+## Verify steps (Preview, authenticated client)
+
+Use a non-admin Preview QA user (`docs/testing/chat-shell-preview-user.md`) with at least one owned business.
+
+1. **List businesses**  
+   Authenticated anon/publishable client: `from('businesses').select('*')` (or app Brands sidebar) returns the user’s businesses — not `[]` when rows exist.
+
+2. **New chat `INSERT … RETURNING`**  
+   Insert a Quick/brand session (`business_id` set, `product_id` null, `user_id = auth.uid()`) with `.select().single()` / `RETURNING *`. The client must receive the inserted row (id + title), not null / “0 rows”.
+
+3. **UI smoke**  
+   `/chat` on Preview (`ianai-git-chat-shell-*.vercel.app`): Brands populated → **New chat** / **+ New session** / **Quick generate** create and select a session; reload keeps `?brand=&session=` when persisted.
+
+## Related docs
+
+- Environment matrix: `docs/operations/chat-shell-environments.md`
+- P0 `/chat` flag + blank-screen env notes: `docs/operations/chat-shell-p0.md`
+- Preview QA user seed: `docs/testing/chat-shell-preview-user.md`
+- Schema / RLS design (migration 062): `docs/adr/0001-chat-shell-foundation.md`
