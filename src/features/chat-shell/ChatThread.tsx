@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from 'react'
-import ScriptCard from '../../components/ScriptCard'
+import ChatShellScriptCard from './ChatShellScriptCard'
 import type { Business, ChatSession, Message, Product } from '../../types'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 
@@ -110,20 +110,19 @@ export default function ChatThread({
                   <span className="chat-shell__who">Advance AI</span>
                   <div className="chat-shell__script-stack">
                     {parsed.map((script) => (
-                      <ScriptCard
+                      <ChatShellScriptCard
                         key={`${message.id}-script-${script.index}`}
                         script={script}
                         language="es"
-                        actionsPreset="shell"
+                        productName={activeProduct?.name}
+                        productType={activeProduct?.type}
+                        productId={offerProductId || undefined}
+                        messageId={message.id}
+                        scriptIndex={script.index}
+                        savingScript={savingScript}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}
-                        savingScript={savingScript}
-                        productType={activeProduct?.type}
-                        productId={offerProductId || undefined}
-                        sessionId={session.id}
-                        messageId={message.id}
-                        scriptIndex={script.index}
                       />
                     ))}
                   </div>

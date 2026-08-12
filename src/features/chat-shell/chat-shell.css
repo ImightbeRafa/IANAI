@@ -594,123 +594,220 @@
   max-width: 720px;
 }
 
-/* Shell-scoped ScriptCard — token surfaces (Tailwind dark-* is inverted for /scripts). */
-.chat-shell .chat-shell-script-card {
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-strong) !important;
-  color: var(--text) !important;
-  box-shadow: none !important;
-}
-
-.chat-shell .chat-shell-script-card .text-dark-950,
-.chat-shell .chat-shell-script-card .text-dark-900,
-.chat-shell .chat-shell-script-card .text-dark-800,
-.chat-shell .chat-shell-script-card .text-dark-700,
-.chat-shell .chat-shell-script-card .text-dark-600,
-.chat-shell .chat-shell-script-card .text-dark-500,
-.chat-shell .chat-shell-script-card .text-dark-400,
-.chat-shell .chat-shell-script-card .text-dark-300,
-.chat-shell .chat-shell-script-card .text-sm,
-.chat-shell .chat-shell-script-card .text-xs,
-.chat-shell .chat-shell-script-card .text-\[10px\],
-.chat-shell .chat-shell-script-card .text-\[11px\] {
-  color: var(--text) !important;
-}
-
-.chat-shell .chat-shell-script-card .text-dark-400,
-.chat-shell .chat-shell-script-card .text-dark-500,
-.chat-shell .chat-shell-script-card .text-dark-300 {
-  color: var(--text-muted) !important;
-}
-
-.chat-shell .chat-shell-script-card .bg-dark-50,
-.chat-shell .chat-shell-script-card .bg-dark-100,
-.chat-shell .chat-shell-script-card .bg-dark-200,
-.chat-shell .chat-shell-script-card .bg-dark-200\/30,
-.chat-shell .chat-shell-script-card .bg-dark-200\/40,
-.chat-shell .chat-shell-script-card .bg-dark-200\/50,
-.chat-shell .chat-shell-script-card .bg-dark-200\/80,
-.chat-shell .chat-shell-script-card .bg-primary-900\/5 {
-  background: var(--bg-soft) !important;
-}
-
-.chat-shell .chat-shell-script-card .border-dark-200,
-.chat-shell .chat-shell-script-card .border-dark-200\/50,
-.chat-shell .chat-shell-script-card .border-dark-200\/60,
-.chat-shell .chat-shell-script-card .border-l-dark-300 {
-  border-color: var(--border) !important;
-}
-
-.chat-shell .chat-shell-script-card .opacity-60 {
-  opacity: 1;
-}
-
-/* [GANCHO] / [CTA] chips — readable on both themes */
-.chat-shell .chat-shell-script-card .text-primary-400,
-.chat-shell .chat-shell-script-card .font-mono.font-bold {
-  color: var(--chip-text) !important;
-  background: var(--chip-bg) !important;
-  border: 1px solid var(--accent-border);
-}
-
-.chat-shell .chat-shell-script-card button {
-  color: var(--text) !important;
-  background: var(--bg-elevated) !important;
-  border: 1px solid var(--border-strong) !important;
-  border-radius: var(--radius-sm);
-  opacity: 1 !important;
-}
-
-.chat-shell .chat-shell-script-card button:hover:not(:disabled) {
-  background: var(--accent-soft) !important;
-  border-color: var(--accent-border) !important;
-  color: var(--text) !important;
-}
-
-.chat-shell .chat-shell-script-card button:disabled,
-.chat-shell .chat-shell-script-card button[aria-disabled='true'] {
-  opacity: 0.55 !important;
-  color: var(--text-muted) !important;
-}
-
-.chat-shell .chat-shell-script-card textarea,
-.chat-shell .chat-shell-script-card input {
-  background: var(--bg-elevated) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--border-strong) !important;
-}
-
-.chat-shell .chat-shell-script-card .text-red-400 {
-  color: var(--danger) !important;
-}
-
-/* Light: force header/chrome off inverted Tailwind navy so title isn’t pale-on-dark */
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card {
-  background: #ffffff !important;
-  border-color: var(--border-strong) !important;
-}
-
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card [class*="bg-dark"],
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .rounded-t-xl {
-  background: var(--bg-soft) !important;
-  color: var(--text) !important;
-}
-
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card [class*="text-dark"],
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .leading-relaxed,
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .tracking-wide {
-  color: var(--text) !important;
-}
-
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .font-mono.font-bold,
-[data-theme="obsidian-light"] .chat-shell .chat-shell-script-card .text-primary-400 {
-  color: var(--chip-text) !important;
-  background: var(--chip-bg) !important;
-}
-
-.chat-shell__script-stack .group\/card,
-.chat-shell__script-stack > * {
+/* Obsidian-native script artifact (not legacy ScriptCard / Tailwind dark-*) */
+.chat-shell__artifact {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
+  color: var(--text);
+  overflow: visible;
+  animation: chat-shell-rise var(--dur-med) var(--ease-out) both;
+}
+
+.chat-shell__artifact-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--tools-bg);
+}
+
+.chat-shell__artifact-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.chat-shell__artifact-title {
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.chat-shell__artifact-offer {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.chat-shell__artifact-index {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.chat-shell__artifact-body {
+  padding: 12px;
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.chat-shell__script-chip {
+  display: inline-block;
+  margin: 0 4px 2px 0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: baseline;
+}
+
+.chat-shell__artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--tools-bg);
+}
+
+.chat-shell__artifact-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.chat-shell__artifact-action:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.chat-shell__artifact-action.is-on,
+.chat-shell__artifact-action.is-primary {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.chat-shell__artifact-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+
+.chat-shell__artifact-edit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+
+.chat-shell__artifact-edit textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 8px 10px;
+}
+
+.chat-shell__artifact-edit textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chat-shell__artifact-edit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-shell__artifact-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  background: var(--bg-soft);
+}
+
+.chat-shell__artifact-error {
+  padding: 8px 12px;
+  color: var(--danger);
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-shell__artifact-menu-wrap {
+  position: relative;
+}
+
+.chat-shell__artifact-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 180px;
+  max-height: 240px;
+  overflow: auto;
+  z-index: 5;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: none;
+  padding: 4px;
+}
+
+.chat-shell__artifact-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.chat-shell__artifact-menu button:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.chat-shell__spin {
+  animation: chat-shell-spin 0.8s linear infinite;
+}
+
+@keyframes chat-shell-spin {
+  to { transform: rotate(360deg); }
 }
 
 .chat-shell__thread-alert {
