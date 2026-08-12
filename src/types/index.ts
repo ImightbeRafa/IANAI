@@ -338,6 +338,20 @@ export interface MessageArtifact {
   created_at: string
   script?: Script
   product?: Product
+  product_image?: ProductImageRow
+}
+
+/** product_images row (reference + generated; migration 060/062/063). */
+export interface ProductImageRow {
+  id: string
+  product_id: string
+  user_id: string
+  image_url: string
+  label: string | null
+  kind: 'product' | 'context' | 'generated'
+  session_id?: string | null
+  message_id?: string | null
+  created_at: string
 }
 
 export interface Message {

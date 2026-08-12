@@ -1,6 +1,11 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
 import { userHasProductAccess } from './product-access.js'
 import { authorizeSessionOfferProduct } from './session-offer-auth.js'
+import {
+  authorizeSessionImageProduct,
+  authorizeProductImageForSession,
+  type ImageSessionAuthResult,
+} from './image-access.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -107,3 +112,101 @@ export async function resolveAuthorizedSessionProduct(
     mode: decision.mode,
   }
 }
+
+/**
+ * Chat-shell image authz (C3): sessionId present → product MUST ∈ offers (no legacy).
+ * Optionally authorize a product_image_id for edit/optimize.
+ */
+export async function resolveAuthorizedSessionImage(
+  userId: string,
+  sessionId: string,
+  clientProductId?: string | null,
+  productImageId?: string | null
+): Promise<
+  | (SessionAccessOk & { mode: 'offers' })
+  | SessionAccessErr
+> {
+  if (!isUuid(sessionId)) {
+    return { ok: false, status: 400, error: 'Invalid sessionId' }
+  }
+  if (clientProductId != null && clientProductId !== '' && !isUuid(clientProductId)) {
+    return { ok: false, status: 400, error: 'Invalid productId' }
+  }
+  if (productImageId != null && productImageId !== '' && !isUuid(productImageId)) {
+    return { ok: false, status: 400, error: 'Invalid productImageId' }
+  }
+  if (!supabase) {
+    return { ok: false, status: 500, error: 'Database not configured' }
+  }
+
+  const { data: session, error } = await supabase
+    .from('chat_sessions')
+    .select('id, user_id, business_id, product_id, title, context, primary_channel, awareness_level')
+    .eq('id', sessionId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('session-image-access load error', error)
+    return { ok: false, status: 500, error: 'Failed to load session' }
+  }
+  if (!session) {
+    return { ok: false, status: 404, error: 'Session not found' }
+  }
+  if (session.user_id !== userId) {
+    return { ok: false, status: 403, error: 'Not allowed for this session' }
+  }
+
+  const { data: offers, error: offersError } = await supabase
+    .from('chat_session_offers')
+    .select('product_id, position')
+    .eq('session_id', sessionId)
+    .order('position', { ascending: true })
+
+  if (offersError) {
+    console.error('session-image-access offers error', offersError)
+    return { ok: false, status: 500, error: 'Failed to load session offers' }
+  }
+
+  const offerProductIds = (offers || []).map((o) => o.product_id as string)
+  const decision = authorizeSessionImageProduct({
+    offerProductIds,
+    clientProductId: clientProductId || null,
+  })
+  if (!decision.ok) {
+    return decision
+  }
+
+  if (!(await userHasProductAccess(userId, decision.productId))) {
+    return { ok: false, status: 403, error: 'No access to product' }
+  }
+
+  if (productImageId) {
+    const { data: image, error: imgErr } = await supabase
+      .from('product_images')
+      .select('id, product_id, user_id, session_id, image_url')
+      .eq('id', productImageId)
+      .maybeSingle()
+    if (imgErr) {
+      console.error('session-image-access image error', imgErr)
+      return { ok: false, status: 500, error: 'Failed to load product image' }
+    }
+    const imageAuth = authorizeProductImageForSession({
+      image,
+      sessionId,
+      productId: decision.productId,
+    })
+    if (!imageAuth.ok) {
+      return imageAuth
+    }
+  }
+
+  return {
+    ok: true,
+    session: session as ChatSessionRow,
+    productId: decision.productId,
+    offerProductIds,
+    mode: 'offers',
+  }
+}
+
+export type { ImageSessionAuthResult }

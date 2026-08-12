@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from 'react'
 import ChatShellScriptCard from './ChatShellScriptCard'
+import ChatShellImageCard from './ChatShellImageCard'
 import type {
   Business,
   ChatSession,
@@ -9,6 +10,7 @@ import type {
 } from '../../types'
 import { isScriptContent, parseScripts, type ParsedScript } from '../../utils/scriptParser'
 import type { FailedOfferBatch } from './useChatSessionThread'
+import { sortArtifactsByOrdinal, type ShellImageLike } from './chatShellImages'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -20,6 +22,8 @@ interface ChatThreadProps {
   activeProduct: Product | null
   offerProductId: string | null
   offerCount: number
+  latestImagesByOffer: Map<string, ShellImageLike>
+  imageBusy: boolean
   composer: string
   onComposerChange: (value: string) => void
   onSend: () => void
@@ -45,6 +49,18 @@ interface ChatThreadProps {
     editLabel?: string,
     productIdOverride?: string
   ) => Promise<string | null>
+  onEditOfferImage: (
+    productImageId: string,
+    imageUrl: string,
+    instruction: string,
+    productId?: string
+  ) => Promise<void>
+  onOptimizeOfferImage: (
+    productImageId: string,
+    imageUrl: string,
+    productId?: string,
+    scriptText?: string
+  ) => Promise<void>
 }
 
 function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
@@ -74,6 +90,8 @@ export default function ChatThread({
   activeProduct,
   offerProductId,
   offerCount,
+  latestImagesByOffer,
+  imageBusy,
   composer,
   onComposerChange,
   onSend,
@@ -84,6 +102,8 @@ export default function ChatThread({
   onSaveScript,
   onEditScript,
   onSaveVersion,
+  onEditOfferImage,
+  onOptimizeOfferImage,
 }: ChatThreadProps) {
   const composerEnabled = Boolean(session) && !sending
   const generateBlocked = Boolean(session) && !offerProductId
@@ -132,16 +152,44 @@ export default function ChatThread({
               )
             }
 
-            const scriptArtifacts = (message.artifacts || []).filter(
-              (a) => a.artifact_type === 'script' && a.script?.content
+            const artifacts = sortArtifactsByOrdinal(message.artifacts || []).filter(
+              (a) =>
+                (a.artifact_type === 'script' && a.script?.content)
+                || (a.artifact_type === 'image' && a.product_image?.image_url)
             )
 
-            if (scriptArtifacts.length > 0) {
+            if (artifacts.length > 0) {
               return (
                 <div key={message.id} className="chat-shell__msg chat-shell__msg--ai">
                   <span className="chat-shell__who">Advance AI</span>
                   <div className="chat-shell__script-stack">
-                    {scriptArtifacts.map((artifact) => {
+                    {artifacts.map((artifact) => {
+                      if (artifact.artifact_type === 'image') {
+                        return (
+                          <ChatShellImageCard
+                            key={artifact.id}
+                            artifact={artifact}
+                            productName={artifact.product?.name}
+                            busy={imageBusy}
+                            onEditImage={(productImageId, imageUrl, instruction) =>
+                              onEditOfferImage(
+                                productImageId,
+                                imageUrl,
+                                instruction,
+                                artifact.product_id
+                              )
+                            }
+                            onOptimizeForPost={(productImageId, imageUrl) =>
+                              onOptimizeOfferImage(
+                                productImageId,
+                                imageUrl,
+                                artifact.product_id
+                              )
+                            }
+                          />
+                        )
+                      }
+
                       const parsed = artifactToParsedScript(artifact)
                       if (!parsed) return null
                       const product = artifact.product
@@ -152,6 +200,7 @@ export default function ChatThread({
                           ? artifact.action_metadata.offer_name
                           : null)
                         || `Offer ${artifact.ordinal}`
+                      const offerImage = latestImagesByOffer.get(productId)
                       return (
                         <ChatShellScriptCard
                           key={artifact.id}
@@ -163,6 +212,9 @@ export default function ChatThread({
                           messageId={message.id}
                           scriptIndex={artifact.ordinal}
                           savingScript={savingScript}
+                          offerImageId={offerImage?.id}
+                          offerImageUrl={offerImage?.image_url}
+                          imageBusy={imageBusy}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
                               ...opts,
@@ -176,6 +228,28 @@ export default function ChatThread({
                           }
                           onSaveVersion={(parentId, content, editSource, editLabel) =>
                             onSaveVersion(parentId, content, editSource, editLabel, productId)
+                          }
+                          onEditOfferImage={
+                            offerImage
+                              ? (instruction) =>
+                                  onEditOfferImage(
+                                    offerImage.id,
+                                    offerImage.image_url || '',
+                                    instruction,
+                                    productId
+                                  )
+                              : undefined
+                          }
+                          onOptimizeOfferImage={
+                            offerImage
+                              ? () =>
+                                  onOptimizeOfferImage(
+                                    offerImage.id,
+                                    offerImage.image_url || '',
+                                    productId,
+                                    parsed.content
+                                  )
+                              : undefined
                           }
                         />
                       )

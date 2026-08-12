@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import type { Business, ChatSession, ChatSessionOffer, Product } from '../../types'
-import type { ChatSessionSafeUpdates } from '../../services/database'
+import type { ChatSessionSafeUpdates, ProductImage } from '../../services/database'
 import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
 import { isSessionSetupComplete } from './chatContextSetup'
 import ChatContextSetupCard from './ChatContextSetupCard'
@@ -22,6 +22,12 @@ interface ChatContextRailProps {
   onAddOffer?: (productId: string) => void | Promise<void>
   onRemoveOffer?: (productId: string) => void | Promise<void>
   onMoveOffer?: (productId: string, direction: -1 | 1) => void | Promise<void>
+  activeImageOfferId?: string | null
+  offerImages?: ProductImage[]
+  imageBusy?: boolean
+  onSelectImageOffer?: (productId: string) => void
+  onUploadOfferImage?: (file: File) => void | Promise<void>
+  onGenerateOfferImage?: () => void | Promise<void>
 }
 
 export default function ChatContextRail({
@@ -38,6 +44,12 @@ export default function ChatContextRail({
   onAddOffer,
   onRemoveOffer,
   onMoveOffer,
+  activeImageOfferId = null,
+  offerImages = [],
+  imageBusy = false,
+  onSelectImageOffer,
+  onUploadOfferImage,
+  onGenerateOfferImage,
 }: ChatContextRailProps) {
   const [title, setTitle] = useState(session?.title || '')
   const [context, setContext] = useState(session?.context || '')
@@ -337,7 +349,83 @@ export default function ChatContextRail({
       )}
 
       {tab === 'images' && (
-        <p className="chat-shell__rail-hint">Image tools stay foundation-only in this phase.</p>
+        <div className="chat-shell__stack">
+          {!session ? (
+            <p className="chat-shell__rail-hint">Select a session to manage offer images.</p>
+          ) : orderedOffers.length === 0 ? (
+            <p className="chat-shell__rail-hint">
+              Attach at least one offer before uploading or generating images.
+            </p>
+          ) : (
+            <>
+              <p className="chat-shell__rail-hint">
+                Images are scoped to the selected offer. No carousel or video in shell.
+              </p>
+              <div className="chat-shell__image-offer-chips" role="tablist" aria-label="Image offer">
+                {orderedOffers.map((offer) => {
+                  const product =
+                    offer.product
+                    || brandProducts.find((p) => p.id === offer.product_id)
+                  const label = product?.name ?? offer.product_id.slice(0, 8)
+                  const selected = activeImageOfferId === offer.product_id
+                  return (
+                    <button
+                      key={offer.product_id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      className={`chat-shell__image-chip${selected ? ' is-on' : ''}`}
+                      disabled={imageBusy}
+                      onClick={() => onSelectImageOffer?.(offer.product_id)}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="chat-shell__image-actions">
+                <label className="chat-shell__setup-btn">
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    disabled={imageBusy || !activeImageOfferId}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (file) void onUploadOfferImage?.(file)
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="chat-shell__setup-btn is-primary"
+                  disabled={imageBusy || !activeImageOfferId}
+                  onClick={() => void onGenerateOfferImage?.()}
+                >
+                  {imageBusy ? 'Working…' : 'Generate'}
+                </button>
+              </div>
+
+              {offerImages.length === 0 ? (
+                <p className="chat-shell__rail-hint">No images for this offer yet.</p>
+              ) : (
+                <div className="chat-shell__image-grid">
+                  {offerImages.map((img) => (
+                    <figure key={img.id} className="chat-shell__image-thumb">
+                      <img src={img.image_url} alt={img.label || 'Offer image'} />
+                      <figcaption>
+                        {img.kind === 'generated' ? 'Generated' : img.kind === 'context' ? 'Context' : 'Ref'}
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </aside>
   )

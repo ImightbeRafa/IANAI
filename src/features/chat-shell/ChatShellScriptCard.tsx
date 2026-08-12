@@ -22,9 +22,14 @@ interface ChatShellScriptCardProps {
   messageId?: string
   scriptIndex?: number
   savingScript?: boolean
+  offerImageId?: string
+  offerImageUrl?: string
+  imageBusy?: boolean
   onSave?: (content: string, title: string, opts?: { edit_source?: string; message_id?: string; script_index?: number }) => Promise<string | null>
   onEdit?: (originalContent: string, instruction: string, editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness') => Promise<string>
   onSaveVersion?: (parentId: string, content: string, editSource: string, editLabel?: string) => Promise<string | null>
+  onEditOfferImage?: (instruction: string) => Promise<void>
+  onOptimizeOfferImage?: () => Promise<void>
 }
 
 const ENHANCE_PROMPT =
@@ -67,9 +72,14 @@ export default function ChatShellScriptCard({
   messageId,
   scriptIndex,
   savingScript,
+  offerImageId,
+  offerImageUrl,
+  imageBusy,
   onSave,
   onEdit,
   onSaveVersion,
+  onEditOfferImage,
+  onOptimizeOfferImage,
 }: ChatShellScriptCardProps) {
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -389,6 +399,33 @@ export default function ChatShellScriptCard({
             </div>
           )}
         </div>
+        {offerImageId && offerImageUrl && onOptimizeOfferImage ? (
+          <button
+            type="button"
+            className="chat-shell__artifact-action"
+            disabled={busy || imageBusy}
+            onClick={() => void onOptimizeOfferImage()}
+          >
+            {imageBusy ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
+            {es ? 'Optimizar imagen' : 'Optimize for post'}
+          </button>
+        ) : null}
+        {offerImageId && offerImageUrl && onEditOfferImage ? (
+          <button
+            type="button"
+            className="chat-shell__artifact-action"
+            disabled={busy || imageBusy}
+            onClick={() => {
+              const instruction = window.prompt(
+                es ? '¿Cómo editar la imagen de esta oferta?' : 'How should we edit this offer image?'
+              )
+              if (instruction?.trim()) void onEditOfferImage(instruction.trim())
+            }}
+          >
+            <Pencil size={13} />
+            {es ? 'Editar imagen' : 'Edit image'}
+          </button>
+        ) : null}
       </div>
     </article>
   )

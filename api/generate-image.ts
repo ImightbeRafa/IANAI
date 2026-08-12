@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage, isAdminUser } from './lib/auth.js'
 import { userHasProductAccess } from './lib/product-access.js'
+import { resolveAuthorizedSessionImage, isUuid } from './lib/session-access.js'
+import { authorizeShellImagePoll } from './lib/image-access.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
@@ -264,16 +266,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { action, taskId, model = 'nano-banana', ...imageParams } = req.body
 
+    // Chat-shell C3: when sessionId is present, bind product (+ optional productImageId) server-side.
+    // No legacy empty-offers fallback for images. Ignore spoofed brand fields for authz.
+    const rawSessionId = typeof imageParams.sessionId === 'string' ? imageParams.sessionId : undefined
+    let authoritativeProductId: string | undefined
+    if (rawSessionId) {
+      if (!isUuid(rawSessionId)) {
+        return res.status(400).json({ error: 'Invalid sessionId' })
+      }
+      if (action === 'poll') {
+        const pollAuth = authorizeShellImagePoll({ sessionId: rawSessionId, hasBoundTask: false })
+        if (!pollAuth.ok) {
+          return res.status(pollAuth.status).json({ error: pollAuth.error })
+        }
+      }
+      const rawProductImageId =
+        typeof imageParams.productImageId === 'string' ? imageParams.productImageId : undefined
+      const access = await resolveAuthorizedSessionImage(
+        user.id,
+        rawSessionId,
+        typeof imageParams.productId === 'string' ? imageParams.productId : null,
+        rawProductImageId || null
+      )
+      if (!access.ok) {
+        return res.status(access.status).json({ error: access.error })
+      }
+      authoritativeProductId = access.productId
+      imageParams.productId = access.productId
+    }
+
     // Service-role product lookups later bypass RLS — enforce ownership up front
-    const rawProductId = typeof imageParams.productId === 'string' ? imageParams.productId : undefined
+    const rawProductId =
+      authoritativeProductId
+      || (typeof imageParams.productId === 'string' ? imageParams.productId : undefined)
     const UUID_RE_PRODUCT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
     if (rawProductId) {
       if (!UUID_RE_PRODUCT.test(rawProductId)) {
         return res.status(400).json({ error: 'Invalid productId format' })
       }
-      const allowedProduct = await userHasProductAccess(user.id, rawProductId)
-      if (!allowedProduct) {
-        return res.status(403).json({ error: 'Access denied to this product' })
+      if (!authoritativeProductId) {
+        const allowedProduct = await userHasProductAccess(user.id, rawProductId)
+        if (!allowedProduct) {
+          return res.status(403).json({ error: 'Access denied to this product' })
+        }
       }
     }
 

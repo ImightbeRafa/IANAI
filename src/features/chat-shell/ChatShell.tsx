@@ -162,7 +162,7 @@ export default function ChatShell({
               aria-pressed={railOpen && railTab === 'images'}
               onClick={() => selectRailTab('images')}
             >
-              Images <span className="chat-shell__count">0</span>
+              Images <span className="chat-shell__count">{thread.filteredOfferImages.length}</span>
             </button>
           </div>
           <div className="chat-shell__topbar-actions">
@@ -188,6 +188,8 @@ export default function ChatShell({
           activeProduct={thread.activeProduct}
           offerProductId={thread.offerProductId}
           offerCount={offerCount}
+          latestImagesByOffer={thread.latestImagesByOffer}
+          imageBusy={thread.imageBusy}
           composer={thread.composer}
           onComposerChange={thread.setComposer}
           onSend={() => void thread.send()}
@@ -198,6 +200,12 @@ export default function ChatShell({
           onSaveScript={thread.handleSaveScript}
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
+          onEditOfferImage={(productImageId, imageUrl, instruction, productId) =>
+            thread.editOfferImage(productImageId, imageUrl, instruction, productId)
+          }
+          onOptimizeOfferImage={(productImageId, imageUrl, productId, scriptText) =>
+            thread.optimizeOfferImage(productImageId, imageUrl, productId, scriptText)
+          }
         />
       </section>
 
@@ -215,6 +223,12 @@ export default function ChatShell({
         onAddOffer={(productId) => void thread.addOffer(productId)}
         onRemoveOffer={(productId) => void thread.removeOffer(productId)}
         onMoveOffer={(productId, direction) => void thread.moveOffer(productId, direction)}
+        activeImageOfferId={thread.activeImageOfferId}
+        offerImages={thread.filteredOfferImages}
+        imageBusy={thread.imageBusy}
+        onSelectImageOffer={thread.selectImageOffer}
+        onUploadOfferImage={(file) => void thread.uploadOfferImage(file)}
+        onGenerateOfferImage={() => void thread.generateOfferImage()}
       />
     </div>
   )

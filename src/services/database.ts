@@ -780,7 +780,7 @@ export async function getMessages(sessionId: string): Promise<Message[]> {
   const messageIds = messages.map((m) => m.id)
   const { data: artifacts, error: artErr } = await supabase
     .from('message_artifacts')
-    .select('*, script:scripts(*), product:products(*)')
+    .select('*, script:scripts(*), product:products(*), product_image:product_images(*)')
     .eq('session_id', sessionId)
     .in('message_id', messageIds)
     .order('ordinal', { ascending: true })
@@ -1245,7 +1245,9 @@ export interface ProductImage {
   user_id: string
   image_url: string
   label: string | null
-  kind: 'product' | 'context'
+  kind: 'product' | 'context' | 'generated'
+  session_id?: string | null
+  message_id?: string | null
   created_at: string
 }
 
@@ -1260,22 +1262,43 @@ export async function getProductImages(productId: string): Promise<ProductImage[
   return data || []
 }
 
+/** Session-aware list: refs for product + generated images for this session. */
+export async function getSessionOfferImages(
+  productId: string,
+  sessionId: string
+): Promise<ProductImage[]> {
+  const { data, error } = await supabase
+    .from('product_images')
+    .select('*')
+    .eq('product_id', productId)
+    .or(`session_id.is.null,session_id.eq.${sessionId}`)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
 export async function createProductImage(
   productId: string,
   userId: string,
   imageUrl: string,
   label?: string,
-  kind: 'product' | 'context' = 'product'
+  kind: 'product' | 'context' | 'generated' = 'product',
+  opts?: { sessionId?: string; messageId?: string }
 ): Promise<ProductImage> {
+  const insert: Record<string, unknown> = {
+    product_id: productId,
+    user_id: userId,
+    image_url: imageUrl,
+    label: label || null,
+    kind,
+  }
+  if (opts?.sessionId) insert.session_id = opts.sessionId
+  if (opts?.messageId) insert.message_id = opts.messageId
+
   const { data, error } = await supabase
     .from('product_images')
-    .insert({
-      product_id: productId,
-      user_id: userId,
-      image_url: imageUrl,
-      label: label || null,
-      kind
-    })
+    .insert(insert)
     .select()
     .single()
 
@@ -1290,6 +1313,36 @@ export async function deleteProductImage(imageId: string): Promise<void> {
     .eq('id', imageId)
 
   if (error) throw error
+}
+
+export async function insertImageMessageArtifact(options: {
+  sessionId: string
+  messageId: string
+  productId: string
+  productImageId: string
+  ordinal: number
+  userId: string
+  actionType?: MessageArtifact['action_type']
+  metadata?: Record<string, unknown>
+}): Promise<MessageArtifact> {
+  const { data, error } = await supabase
+    .from('message_artifacts')
+    .insert({
+      session_id: options.sessionId,
+      message_id: options.messageId,
+      product_id: options.productId,
+      artifact_type: 'image',
+      product_image_id: options.productImageId,
+      ordinal: options.ordinal,
+      action_type: options.actionType || 'generate',
+      action_metadata: options.metadata || {},
+      created_by: options.userId,
+    })
+    .select('*, product_image:product_images(*), product:products(*)')
+    .single()
+
+  if (error) throw error
+  return data as MessageArtifact
 }
 
 // =============================================

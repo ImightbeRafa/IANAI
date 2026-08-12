@@ -11,6 +11,7 @@ import {
   saveScript,
   updateChatSession,
   type ChatSessionSafeUpdates,
+  type ProductImage,
 } from '../../services/database'
 import {
   buildApiBusinessContext,
@@ -44,6 +45,18 @@ import {
   resolveSessionOfferProductId,
   sortOffersByPosition,
 } from './sessionOffer'
+import {
+  filterImagesForOffer,
+  latestImageByProductId,
+  resolveActiveImageOfferId,
+} from './chatShellImages'
+import {
+  editShellOfferImage,
+  generateShellOfferImage,
+  getSessionOfferImages,
+  optimizeShellOfferImage,
+  uploadShellOfferImage,
+} from './chatShellImageApi'
 
 const SHELL_SCRIPT_SETTINGS = {
   ...DEFAULT_SCRIPT_SETTINGS,
@@ -109,6 +122,9 @@ export function useChatSessionThread(options: {
   const [notice, setNotice] = useState<string | null>(null)
   const [composer, setComposer] = useState('')
   const [failedBatch, setFailedBatch] = useState<FailedOfferBatch | null>(null)
+  const [offerImages, setOfferImages] = useState<ProductImage[]>([])
+  const [imageOfferId, setImageOfferId] = useState<string | null>(null)
+  const [imageBusy, setImageBusy] = useState(false)
 
   const loadRequestRef = useRef(0)
   const offerRequestRef = useRef(0)
@@ -125,11 +141,46 @@ export function useChatSessionThread(options: {
     [session, offers]
   )
 
+  const activeImageOfferId = useMemo(
+    () =>
+      resolveActiveImageOfferId({
+        offerProductIds: sortOffersByPosition(offers).map((o) => o.product_id),
+        preferredId: imageOfferId,
+        primaryProductId: offerProductId,
+      }),
+    [offers, imageOfferId, offerProductId]
+  )
+
+  const filteredOfferImages = useMemo(
+    () =>
+      filterImagesForOffer(offerImages, activeImageOfferId, {
+        sessionId: sessionId,
+      }),
+    [offerImages, activeImageOfferId, sessionId]
+  )
+
+  const latestImagesByOffer = useMemo(
+    () => latestImageByProductId(offerImages),
+    [offerImages]
+  )
+
   const canGenerate = Boolean(
     sessionId
     && !sending
     && (offers.length > 0 || Boolean(session?.product_id))
   )
+
+  const refreshOfferImages = useCallback(async (
+    sid: string,
+    productId: string,
+    requestId: number
+  ) => {
+    const list = await getSessionOfferImages(productId, sid)
+    if (requestId !== loadRequestRef.current) return list
+    if (activeThreadSessionIdRef.current !== sid) return list
+    setOfferImages(list)
+    return list
+  }, [])
 
   const refreshOffersAndProduct = useCallback(async (
     sid: string,
@@ -184,6 +235,8 @@ export function useChatSessionThread(options: {
       setNotice(null)
       setComposer('')
       setFailedBatch(null)
+      setOfferImages([])
+      setImageOfferId(null)
       setLoadingMessages(false)
       return
     }
@@ -192,6 +245,8 @@ export function useChatSessionThread(options: {
     setOffers([])
     setActiveProduct(null)
     setFailedBatch(null)
+    setOfferImages([])
+    setImageOfferId(null)
     setLoadingMessages(true)
     setError(null)
     setNotice(null)
@@ -222,6 +277,21 @@ export function useChatSessionThread(options: {
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, refreshOffersAndProduct])
+
+  useEffect(() => {
+    if (!sessionId || !activeImageOfferId) {
+      setOfferImages([])
+      return
+    }
+    const requestId = loadRequestRef.current
+    void (async () => {
+      try {
+        await refreshOfferImages(sessionId, activeImageOfferId, requestId)
+      } catch (err) {
+        console.error(err)
+      }
+    })()
+  }, [sessionId, activeImageOfferId, refreshOfferImages])
 
   const persistOffers = useCallback(async (productIds: string[]) => {
     if (!session?.business_id) {
@@ -881,6 +951,208 @@ export function useChatSessionThread(options: {
     )
   }, [session, offerProductId, activeProduct, brand])
 
+  const selectImageOffer = useCallback((productId: string) => {
+    setImageOfferId(productId)
+  }, [])
+
+  const uploadOfferImage = useCallback(async (file: File) => {
+    if (!session || !activeImageOfferId || imageBusy) return
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    setImageBusy(true)
+    setError(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Failed to read file'))
+        reader.readAsDataURL(file)
+      })
+      await uploadShellOfferImage({
+        userId,
+        sessionId: originSessionId,
+        productId: activeImageOfferId,
+        dataUrl,
+        filename: file.name,
+      })
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      await refreshOfferImages(originSessionId, activeImageOfferId, loadRequestRef.current)
+      setNotice('Image uploaded for this offer.')
+    } catch (err) {
+      console.error(err)
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Upload failed')
+      }
+    } finally {
+      setImageBusy(false)
+    }
+  }, [session, activeImageOfferId, imageBusy, userId, refreshOfferImages])
+
+  const generateOfferImage = useCallback(async () => {
+    if (!session || !activeImageOfferId || imageBusy) return
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    setImageBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const result = await generateShellOfferImage({
+        userId,
+        sessionId: originSessionId,
+        productId: activeImageOfferId,
+        prompt: session.context || 'Product hero image for ad',
+        originSessionId,
+        originGen,
+        activeThreadSessionId: activeThreadSessionIdRef.current,
+        sessionGen: sessionGenRef.current,
+      })
+      if (!result) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      await refreshOfferImages(originSessionId, activeImageOfferId, loadRequestRef.current)
+    } catch (err) {
+      console.error(err)
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Image generate failed')
+      }
+    } finally {
+      setImageBusy(false)
+    }
+  }, [session, activeImageOfferId, imageBusy, userId, refreshOfferImages])
+
+  const editOfferImage = useCallback(async (
+    productImageId: string,
+    imageUrl: string,
+    instruction: string,
+    productId?: string
+  ) => {
+    if (!session || imageBusy) return
+    const pid = productId || activeImageOfferId
+    if (!pid) return
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    setImageBusy(true)
+    setError(null)
+    try {
+      const result = await editShellOfferImage({
+        userId,
+        sessionId: originSessionId,
+        productId: pid,
+        productImageId,
+        imageUrl,
+        editPrompt: instruction,
+        actionType: 'edit',
+        userText: `Edit image: ${instruction}`,
+        originSessionId,
+        originGen,
+        activeThreadSessionId: activeThreadSessionIdRef.current,
+        sessionGen: sessionGenRef.current,
+      })
+      if (!result) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
+    } catch (err) {
+      console.error(err)
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Image edit failed')
+      }
+      throw err
+    } finally {
+      setImageBusy(false)
+    }
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages])
+
+  const optimizeOfferImage = useCallback(async (
+    productImageId: string,
+    imageUrl: string,
+    productId?: string,
+    scriptText?: string
+  ) => {
+    if (!session || imageBusy) return
+    const pid = productId || activeImageOfferId
+    if (!pid) return
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    setImageBusy(true)
+    setError(null)
+    try {
+      const result = await optimizeShellOfferImage({
+        userId,
+        sessionId: originSessionId,
+        productId: pid,
+        productImageId,
+        imageUrl,
+        scriptText: scriptText || session.context || undefined,
+        density: 'medium',
+        originSessionId,
+        originGen,
+        activeThreadSessionId: activeThreadSessionIdRef.current,
+        sessionGen: sessionGenRef.current,
+      })
+      if (!result) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
+    } catch (err) {
+      console.error(err)
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Optimize failed')
+      }
+      throw err
+    } finally {
+      setImageBusy(false)
+    }
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages])
+
   return {
     messages,
     offers,
@@ -906,5 +1178,14 @@ export function useChatSessionThread(options: {
     handleSaveScript,
     handleSaveVersion,
     handleEditScript,
+    activeImageOfferId,
+    filteredOfferImages,
+    latestImagesByOffer,
+    imageBusy,
+    selectImageOffer,
+    uploadOfferImage,
+    generateOfferImage,
+    editOfferImage,
+    optimizeOfferImage,
   }
 }
