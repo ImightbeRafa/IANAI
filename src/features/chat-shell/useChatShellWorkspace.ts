@@ -235,6 +235,10 @@ export function useChatShellWorkspace(userId: string | undefined) {
     }
   }, [userId, activeBrandId, businesses, syncUrlAndStorage])
 
+  const patchActiveSession = useCallback((next: ChatSession) => {
+    setSessions((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)))
+  }, [])
+
   /** Touch-load single session meta if missing from list (URL deep link). */
   useEffect(() => {
     if (!activeSessionId || sessions.some((s) => s.id === activeSessionId)) return
@@ -270,6 +274,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     selectSession,
     createSession,
     createQuickSession,
+    patchActiveSession,
     refreshBusinesses,
   }
 }

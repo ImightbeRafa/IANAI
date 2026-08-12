@@ -575,6 +575,79 @@
   font-size: 0.84rem;
 }
 
+.chat-shell__bubble {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.chat-shell__bubble--ai {
+  color: var(--text-muted);
+}
+
+.chat-shell__script-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  max-width: 720px;
+}
+
+.chat-shell__script-stack .group\/card,
+.chat-shell__script-stack > * {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.chat-shell__thread-alert {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.chat-shell__thread-alert.is-error {
+  border-color: color-mix(in srgb, #ef4444 45%, var(--border));
+  color: var(--text);
+}
+
+.chat-shell__rail-form {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-shell__field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.chat-shell__field input,
+.chat-shell__field textarea,
+.chat-shell__field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.chat-shell__field input:focus-visible,
+.chat-shell__field textarea:focus-visible,
+.chat-shell__field select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .chat-shell__card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

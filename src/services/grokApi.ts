@@ -155,7 +155,8 @@ export async function sendMessageToGrok(
   productId?: string,
   aiMemoryEnabled?: boolean,
   brandKitId?: string,
-  scriptTemplateIds?: string[]
+  scriptTemplateIds?: string[],
+  sessionId?: string
 ): Promise<{ content: string; _debug?: { systemPrompt: string; contextProfile?: unknown; angleCandidates?: unknown[]; briefs?: unknown[]; qualityReports?: unknown[] } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -194,7 +195,8 @@ export async function sendMessageToGrok(
       ...(productId ? { productId } : {}),
       ...(aiMemoryEnabled !== undefined ? { aiMemoryEnabled } : {}),
       ...(brandKitId ? { brandKitId } : {}),
-      ...(scriptTemplateIds && scriptTemplateIds.length > 0 ? { scriptTemplateIds } : {})
+      ...(scriptTemplateIds && scriptTemplateIds.length > 0 ? { scriptTemplateIds } : {}),
+      ...(sessionId ? { sessionId } : {})
     })
   })
 
@@ -261,7 +263,9 @@ export async function editScript(
   language: Language = 'es',
   businessCtx?: Record<string, unknown>,
   productCtx?: Record<string, unknown>,
-  editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
+  editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness',
+  sessionId?: string,
+  productId?: string
 ): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -323,7 +327,9 @@ STRICT RULES:
       ],
       businessDetails: {},
       language,
-      feature: editType || 'script'
+      feature: editType || 'script',
+      ...(sessionId ? { sessionId } : {}),
+      ...(productId ? { productId } : {})
     })
   })
 

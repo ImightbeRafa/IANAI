@@ -310,6 +310,17 @@ export interface ChatSession {
   messages_count?: number
 }
 
+/** Single-offer / multi-offer row for chat-shell sessions (migration 062). */
+export interface ChatSessionOffer {
+  session_id: string
+  business_id: string
+  product_id: string
+  position: number
+  created_by: string
+  created_at: string
+  product?: Product
+}
+
 export interface Message {
   id: string
   session_id: string

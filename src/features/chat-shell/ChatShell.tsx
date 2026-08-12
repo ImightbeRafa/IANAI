@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Menu, PanelRight } from 'lucide-react'
+import type { ChatSession } from '../../types'
 import ChatSidebar from './ChatSidebar'
 import ChatThread from './ChatThread'
 import ChatContextRail, { type RailTab } from './ChatContextRail'
 import ThemeToggle from './ThemeToggle'
 import type { ChatShellTheme } from './chatShellTheme'
 import { useChatShellWorkspace } from './useChatShellWorkspace'
+import { useChatSessionThread } from './useChatSessionThread'
 
 interface ChatShellProps {
   theme: ChatShellTheme
@@ -26,6 +28,18 @@ export default function ChatShell({
   const [railOpen, setRailOpen] = useState(true)
   const [railTab, setRailTab] = useState<RailTab>('context')
   const workspace = useChatShellWorkspace(userId)
+  const patchActiveSession = workspace.patchActiveSession
+
+  const onSessionPatched = useCallback((session: ChatSession) => {
+    patchActiveSession(session)
+  }, [patchActiveSession])
+
+  const thread = useChatSessionThread({
+    userId,
+    brand: workspace.activeBrand,
+    session: workspace.activeSession,
+    onSessionPatched,
+  })
 
   const createSession = workspace.createSession
 
@@ -64,7 +78,10 @@ export default function ChatShell({
   const crumbs = [
     workspace.activeBrand?.name || 'No brand',
     workspace.activeSession?.title || 'No session',
-  ].join(' / ')
+    thread.activeProduct?.name || (workspace.activeSession ? 'No offer' : null),
+  ].filter(Boolean).join(' / ')
+
+  const offerCount = thread.offers.length > 0 || thread.activeProduct ? 1 : 0
 
   return (
     <div className={shellClass} data-theme={theme}>
@@ -129,7 +146,7 @@ export default function ChatShell({
               aria-pressed={railOpen && railTab === 'offers'}
               onClick={() => selectRailTab('offers')}
             >
-              Offers <span className="chat-shell__count">0</span>
+              Offers <span className="chat-shell__count">{offerCount}</span>
             </button>
             <button
               type="button"
@@ -153,7 +170,24 @@ export default function ChatShell({
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           </div>
         </header>
-        <ChatThread brand={workspace.activeBrand} session={workspace.activeSession} />
+        <ChatThread
+          brand={workspace.activeBrand}
+          session={workspace.activeSession}
+          messages={thread.messages}
+          loadingMessages={thread.loadingMessages}
+          sending={thread.sending}
+          savingScript={thread.savingScript}
+          activeProduct={thread.activeProduct}
+          offerProductId={thread.offerProductId}
+          composer={thread.composer}
+          onComposerChange={thread.setComposer}
+          onSend={() => void thread.send()}
+          error={thread.error}
+          notice={thread.notice}
+          onSaveScript={thread.handleSaveScript}
+          onEditScript={thread.handleEditScript}
+          onSaveVersion={thread.handleSaveVersion}
+        />
       </section>
 
       <ChatContextRail
@@ -162,6 +196,11 @@ export default function ChatShell({
         onClose={() => setRailOpen(false)}
         brand={workspace.activeBrand}
         session={workspace.activeSession}
+        offers={thread.offers}
+        brandProducts={thread.brandProducts}
+        activeProduct={thread.activeProduct}
+        onPatchSession={(updates) => void thread.patchSession(updates)}
+        onSelectOffer={(productId) => void thread.setPrimaryOffer(productId)}
       />
     </div>
   )

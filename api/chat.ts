@@ -16,6 +16,8 @@ import {
 import { buildWinningScriptDnaPrompt } from './data/winning-script-dna.js'
 import { runGuionesStructuredPipeline } from './lib/guiones/script-pipeline.js'
 import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { resolveAuthorizedSessionProduct, isUuid } from './lib/session-access.js'
+import { userHasProductAccess } from './lib/product-access.js'
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
@@ -1634,6 +1636,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Language must be "en" or "es"' })
     }
 
+    // Chat-shell: when sessionId is present, bind generation to that session's offer/product.
+    // Legacy /scripts callers omit sessionId and keep prior behavior.
+    const rawSessionId = (req.body as { sessionId?: unknown }).sessionId
+    let authoritativeProductId: string | undefined
+    if (rawSessionId != null && rawSessionId !== '') {
+      if (!isUuid(rawSessionId)) {
+        return res.status(400).json({ error: 'Invalid sessionId' })
+      }
+      const clientProductId = (req.body as { productId?: unknown }).productId
+      const access = await resolveAuthorizedSessionProduct(
+        user.id,
+        rawSessionId,
+        typeof clientProductId === 'string' ? clientProductId : null
+      )
+      if (!access.ok) {
+        return res.status(access.status).json({ error: access.error })
+      }
+      if (!access.productId) {
+        return res.status(400).json({
+          error: 'Session has no product/offer',
+          message: 'Choose an offer for this session before generating scripts.',
+        })
+      }
+      authoritativeProductId = access.productId
+    } else {
+      // Legacy path: if productId provided, require product access (cheap hardening).
+      const legacyProductId = (req.body as { productId?: unknown }).productId
+      if (typeof legacyProductId === 'string' && legacyProductId) {
+        if (!isUuid(legacyProductId)) {
+          return res.status(400).json({ error: 'Invalid productId' })
+        }
+        const { userHasProductAccess } = await import('./lib/product-access.js')
+        if (!(await userHasProductAccess(user.id, legacyProductId))) {
+          return res.status(403).json({ error: 'No access to product' })
+        }
+        authoritativeProductId = legacyProductId
+      }
+    }
+
     const MAX_MESSAGE_LENGTH = 50_000
     for (const msg of messages) {
       if (!msg.content || typeof msg.content !== 'string') {
@@ -1723,7 +1764,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Build style memory prompt from hybrid AI memory system
-    const productId = req.body.productId as string | undefined
+    const productId = authoritativeProductId ?? (req.body.productId as string | undefined)
     const aiMemoryEnabled = req.body.aiMemoryEnabled !== false
     let styleMemoryPrompt = ''
     if (aiMemoryEnabled) {

@@ -5,6 +5,7 @@ import type {
   TeamMember, 
   Product, 
   ChatSession, 
+  ChatSessionOffer,
   Message, 
   Script,
   DashboardStats,
@@ -462,16 +463,31 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
   return data
 }
 
+/** Safe client updates — never includes user_id / business_id / product_id (immutable after insert). */
+export type ChatSessionSafeUpdates = Partial<
+  Pick<ChatSession, 'title' | 'status' | 'context' | 'primary_channel' | 'awareness_level'>
+>
+
 export async function updateChatSession(
-  sessionId: string, 
-  updates: Partial<Pick<ChatSession, 'title' | 'status' | 'context'>>
-): Promise<void> {
-  const { error } = await supabase
+  sessionId: string,
+  updates: ChatSessionSafeUpdates
+): Promise<ChatSession> {
+  const allowed: ChatSessionSafeUpdates = {}
+  if (updates.title !== undefined) allowed.title = updates.title
+  if (updates.status !== undefined) allowed.status = updates.status
+  if (updates.context !== undefined) allowed.context = updates.context
+  if (updates.primary_channel !== undefined) allowed.primary_channel = updates.primary_channel
+  if (updates.awareness_level !== undefined) allowed.awareness_level = updates.awareness_level
+
+  const { data, error } = await supabase
     .from('chat_sessions')
-    .update(updates)
+    .update(allowed)
     .eq('id', sessionId)
+    .select('*')
+    .single()
 
   if (error) throw error
+  return data
 }
 
 /**
@@ -510,6 +526,59 @@ export async function getBusinessChatSessions(businessId: string): Promise<ChatS
 
   if (error) throw error
   return data || []
+}
+
+export async function getSessionOffers(sessionId: string): Promise<ChatSessionOffer[]> {
+  const { data, error } = await supabase
+    .from('chat_session_offers')
+    .select('*, product:products(*)')
+    .eq('session_id', sessionId)
+    .order('position', { ascending: true })
+
+  if (error) throw error
+  return data || []
+}
+
+/**
+ * Single-offer P2: replace session offers with one position-1 product.
+ * Requires session.business_id (FK); product must belong to same business.
+ */
+export async function setSessionPrimaryOffer(
+  sessionId: string,
+  businessId: string,
+  productId: string,
+  userId: string
+): Promise<ChatSessionOffer> {
+  const { error: delError } = await supabase
+    .from('chat_session_offers')
+    .delete()
+    .eq('session_id', sessionId)
+
+  if (delError) throw delError
+
+  const { data, error } = await supabase
+    .from('chat_session_offers')
+    .insert({
+      session_id: sessionId,
+      business_id: businessId,
+      product_id: productId,
+      position: 1,
+      created_by: userId,
+    })
+    .select('*, product:products(*)')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function clearSessionOffers(sessionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('chat_session_offers')
+    .delete()
+    .eq('session_id', sessionId)
+
+  if (error) throw error
 }
 
 // =============================================
