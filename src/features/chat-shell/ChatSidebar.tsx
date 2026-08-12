@@ -61,7 +61,6 @@ export default function ChatSidebar({
         >
           <Plus size={15} aria-hidden />
           New chat
-          <span className="chat-shell__kbd">N</span>
         </button>
         <div className="chat-shell__search-wrap">
           <label className="chat-shell__sr-only" htmlFor="chat-shell-search">Search</label>

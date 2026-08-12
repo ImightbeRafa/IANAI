@@ -45,3 +45,15 @@ export function pickSafeChatSessionUpdates(
   }
   return out
 }
+
+/** Prefer explicit preferred (hydrate/click/Quick), else keep current, else first. */
+export function resolveNextSessionId(options: {
+  sessionIds: string[]
+  preferredId?: string | null
+  currentId?: string | null
+}): string | null {
+  const { sessionIds, preferredId, currentId } = options
+  if (preferredId && sessionIds.includes(preferredId)) return preferredId
+  if (currentId && sessionIds.includes(currentId)) return currentId
+  return sessionIds[0] ?? null
+}

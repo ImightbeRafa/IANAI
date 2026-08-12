@@ -14,6 +14,7 @@ import {
   selectionFromSearchParams,
   selectionToSearchParams,
 } from './chatShellPersistence'
+import { resolveNextSessionId } from './sessionOffer'
 
 function defaultSessionTitle(): string {
   return `Session · ${new Date().toLocaleString(undefined, {
@@ -45,9 +46,13 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  /** One-shot preferred session for the next brand sessions load (hydrate / deep link). */
+  /** One-shot preferred session for the next brand sessions load (hydrate / deep link / Quick). */
   const preferredSessionRef = useRef<string | null>(null)
+  /** Latest committed selection — brand load must not clobber an explicit session click. */
+  const activeSessionIdRef = useRef<string | null>(null)
   const sessionsRequestIdRef = useRef(0)
+  const createLockRef = useRef(false)
+  const hydratedUserRef = useRef<string | null>(null)
 
   const activeBrand = useMemo(
     () => businesses.find((b) => b.id === activeBrandId) ?? null,
@@ -57,6 +62,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
     () => sessions.find((s) => s.id === activeSessionId) ?? null,
     [sessions, activeSessionId]
   )
+
+  const commitSessionId = useCallback((sessionId: string | null) => {
+    activeSessionIdRef.current = sessionId
+    setActiveSessionId(sessionId)
+  }, [])
 
   const syncUrlAndStorage = useCallback(
     (brandId: string | null, sessionId: string | null) => {
@@ -69,22 +79,31 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
   const selectBrand = useCallback(
     (brandId: string) => {
+      // Same brand: do not clear sessions / selection (avoids thrash + empty list stuck state).
+      if (brandId === activeBrandId) return
       preferredSessionRef.current = null
+      activeSessionIdRef.current = null
       setActiveBrandId(brandId)
       setActiveSessionId(null)
       setSessions([])
       setNotice(null)
       syncUrlAndStorage(brandId, null)
     },
-    [syncUrlAndStorage]
+    [activeBrandId, syncUrlAndStorage]
   )
 
   const selectSession = useCallback(
     (session: ChatSession) => {
       const brandId = session.business_id || activeBrandId
-      if (brandId) setActiveBrandId(brandId)
+      // Explicit user selection — brand session loader must preserve this id.
+      preferredSessionRef.current = session.id
+      activeSessionIdRef.current = session.id
       setActiveSessionId(session.id)
       setNotice(null)
+      // Only change brand when the session belongs to a different brand (no same-brand reload).
+      if (brandId && brandId !== activeBrandId) {
+        setActiveBrandId(brandId)
+      }
       syncUrlAndStorage(brandId, session.id)
     },
     [activeBrandId, syncUrlAndStorage]
@@ -96,6 +115,10 @@ export function useChatShellWorkspace(userId: string | undefined) {
       setLoadingBusinesses(false)
       return
     }
+    // Hydrate once per user — avoid re-running selection resets on incidental deps.
+    if (hydratedUserRef.current === userId) return
+    hydratedUserRef.current = userId
+
     setLoadingBusinesses(true)
     setError(null)
     try {
@@ -115,7 +138,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
       preferredSessionRef.current = brandStillValid ? initial.sessionId : null
       setActiveBrandId(nextBrandId)
-      setActiveSessionId(null)
+      commitSessionId(null)
       if (nextBrandId) {
         syncUrlAndStorage(nextBrandId, brandStillValid ? initial.sessionId : null)
       } else {
@@ -123,6 +146,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       }
     } catch (err) {
       console.error(err)
+      hydratedUserRef.current = null
       setError(err instanceof Error ? err.message : 'Failed to load brands')
     } finally {
       setLoadingBusinesses(false)
@@ -143,7 +167,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
     const brandId = activeBrandId
     const preferred = preferredSessionRef.current
-    preferredSessionRef.current = null
+    // Do not clear preferred here if it matches an in-flight user click for this brand —
+    // consume after successful resolve so rapid clicks still win.
     const requestId = ++sessionsRequestIdRef.current
 
     let cancelled = false
@@ -155,16 +180,24 @@ export function useChatShellWorkspace(userId: string | undefined) {
         const list = await getBusinessChatSessions(brandId)
         if (cancelled || requestId !== sessionsRequestIdRef.current) return
         setSessions(list)
-        const stillThere = preferred && list.some((s) => s.id === preferred)
-        const nextSessionId = stillThere ? preferred : (list[0]?.id ?? null)
-        setActiveSessionId(nextSessionId)
+
+        const nextSessionId = resolveNextSessionId({
+          sessionIds: list.map((s) => s.id),
+          preferredId: preferred,
+          currentId: activeSessionIdRef.current,
+        })
+
+        if (preferred && preferred === nextSessionId) {
+          preferredSessionRef.current = null
+        }
+        commitSessionId(nextSessionId)
         syncUrlAndStorage(brandId, nextSessionId)
       } catch (err) {
         if (cancelled || requestId !== sessionsRequestIdRef.current) return
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load sessions')
         setSessions([])
-        setActiveSessionId(null)
+        commitSessionId(null)
         syncUrlAndStorage(brandId, null)
       } finally {
         if (!cancelled && requestId === sessionsRequestIdRef.current) {
@@ -176,7 +209,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
     return () => {
       cancelled = true
     }
-  }, [activeBrandId, syncUrlAndStorage])
+  // Intentionally only brandId — syncUrlAndStorage identity must not re-fetch / clobber selection.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBrandId])
 
   const createSession = useCallback(async (title?: string) => {
     if (!userId) return
@@ -184,6 +219,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
       setNotice('Pick a brand first to create a session (Quick has no product, but needs a brand).')
       return
     }
+    if (createLockRef.current || busy) return
+    createLockRef.current = true
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -193,16 +230,18 @@ export function useChatShellWorkspace(userId: string | undefined) {
         userId,
         title || defaultSessionTitle()
       )
+      preferredSessionRef.current = session.id
       setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
-      setActiveSessionId(session.id)
+      commitSessionId(session.id)
       syncUrlAndStorage(activeBrandId, session.id)
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to create session')
     } finally {
+      createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, activeBrandId, syncUrlAndStorage])
+  }, [userId, activeBrandId, busy, syncUrlAndStorage, commitSessionId])
 
   const createQuickSession = useCallback(async () => {
     if (!userId) return
@@ -213,27 +252,29 @@ export function useChatShellWorkspace(userId: string | undefined) {
       )
       return
     }
+    if (createLockRef.current || busy) return
+    createLockRef.current = true
     setBusy(true)
     setError(null)
     setNotice(null)
     try {
       const session = await createBrandChatSession(brandId, userId, quickSessionTitle())
+      preferredSessionRef.current = session.id
       if (brandId !== activeBrandId) {
-        preferredSessionRef.current = session.id
         setActiveBrandId(brandId)
       } else {
-        const list = await getBusinessChatSessions(brandId)
-        setSessions(list)
-        setActiveSessionId(session.id)
+        setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+        commitSessionId(session.id)
         syncUrlAndStorage(brandId, session.id)
       }
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to create Quick session')
     } finally {
+      createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, activeBrandId, businesses, syncUrlAndStorage])
+  }, [userId, activeBrandId, businesses, busy, syncUrlAndStorage, commitSessionId])
 
   const patchActiveSession = useCallback((next: ChatSession) => {
     setSessions((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)))
@@ -243,9 +284,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
   useEffect(() => {
     if (!activeSessionId || sessions.some((s) => s.id === activeSessionId)) return
     let cancelled = false
+    const sid = activeSessionId
     void (async () => {
-      const row = await getChatSession(activeSessionId)
+      const row = await getChatSession(sid)
       if (cancelled || !row) return
+      if (activeSessionIdRef.current !== sid) return
       if (row.business_id && row.business_id !== activeBrandId) {
         preferredSessionRef.current = row.id
         setActiveBrandId(row.business_id)

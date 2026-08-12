@@ -657,7 +657,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
   }
 
   return (
-    <div className="bg-dark-100 border border-dark-200 rounded-xl card-hover animate-entrance group/card">
+    <div className={`bg-dark-100 border border-dark-200 rounded-xl card-hover animate-entrance group/card${shellActions ? ' chat-shell-script-card' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-200 bg-dark-200/40 rounded-t-xl">
         <span className="text-xs font-semibold text-dark-600 tracking-wide">

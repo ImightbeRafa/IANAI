@@ -89,8 +89,13 @@ export function useChatSessionThread(options: {
 
   const canGenerate = Boolean(sessionId && offerProductId && activeProduct && !sending)
 
-  const refreshOffersAndProduct = useCallback(async (sid: string, sessionRow: ChatSession | null) => {
+  const refreshOffersAndProduct = useCallback(async (
+    sid: string,
+    sessionRow: ChatSession | null,
+    requestId: number
+  ) => {
     const list = await getSessionOffers(sid)
+    if (requestId !== loadRequestRef.current) return list
     setOffers(list)
     const pid = resolveSessionOfferProductId(sessionRow, list)
     if (!pid) {
@@ -98,6 +103,7 @@ export function useChatSessionThread(options: {
       return list
     }
     const product = list.find((o) => o.product_id === pid)?.product || (await getProduct(pid))
+    if (requestId !== loadRequestRef.current) return list
     setActiveProduct(product)
     return list
   }, [])
@@ -130,10 +136,15 @@ export function useChatSessionThread(options: {
       setError(null)
       setNotice(null)
       setComposer('')
+      setLoadingMessages(false)
       return
     }
 
     const requestId = ++loadRequestRef.current
+    // Clear stale transcript immediately so highlight and thread stay in lockstep.
+    setMessages([])
+    setOffers([])
+    setActiveProduct(null)
     setLoadingMessages(true)
     setError(null)
     setNotice(null)
@@ -142,7 +153,7 @@ export function useChatSessionThread(options: {
       try {
         const [msgs] = await Promise.all([
           getMessages(sessionId),
-          refreshOffersAndProduct(sessionId, session),
+          refreshOffersAndProduct(sessionId, session, requestId),
         ])
         if (requestId !== loadRequestRef.current) return
         setMessages(msgs)
@@ -198,19 +209,24 @@ export function useChatSessionThread(options: {
     }
 
     const originSessionId = session.id
+    const optimisticId = `optimistic-user-${Date.now()}`
+    const optimisticUser: Message = {
+      id: optimisticId,
+      session_id: originSessionId,
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+    }
+
     sendLockRef.current = true
     setSending(true)
     setError(null)
     setNotice(null)
     setComposer('')
+    setMessages((prev) => [...prev, optimisticUser])
 
     try {
-      const savedUser = await addMessage(originSessionId, 'user', text)
-      if (loadRequestRef.current && originSessionId === sessionId) {
-        setMessages((prev) => [...prev, savedUser])
-      }
-
-      const historyForApi = [...messages, savedUser]
+      const historyForApi = [...messages, optimisticUser]
       const businessDetails = buildLegacyProductContext(activeProduct, session.context)
       const bizCtx = brand ? buildApiBusinessContext(brand) : buildApiBusinessContext(activeProduct.business)
       const prodCtx = buildApiProductContext(activeProduct)
@@ -235,27 +251,25 @@ export function useChatSessionThread(options: {
         originSessionId
       )
 
-      // Stale session guard: still persist to origin, but only append UI if still selected
+      // Persist only after generation succeeds — avoids orphan user rows on failure.
+      const savedUser = await addMessage(originSessionId, 'user', text)
       const savedAi = await addMessage(originSessionId, 'assistant', ai.content, ai._debug?.systemPrompt)
-      if (originSessionId === sessionId) {
-        setMessages((prev) => [...prev, savedAi])
+
+      if (originSessionId === sessionId && loadRequestRef.current) {
+        setMessages((prev) => [
+          ...prev.filter((m) => m.id !== optimisticId),
+          savedUser,
+          savedAi,
+        ])
       }
     } catch (err) {
       console.error(err)
       const msg = err instanceof Error ? err.message : 'Failed to send'
-      setError(msg)
-      // Transient error bubble — not persisted
+      // Roll back optimistic user bubble; restore composer for retry.
       if (originSessionId === sessionId) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `local-error-${Date.now()}`,
-            session_id: originSessionId,
-            role: 'assistant',
-            content: `Error: ${msg}`,
-            created_at: new Date().toISOString(),
-          },
-        ])
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+        setComposer(text)
+        setError(msg)
       }
     } finally {
       sendLockRef.current = false

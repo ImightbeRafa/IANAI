@@ -594,10 +594,78 @@
   max-width: 720px;
 }
 
+/* Shell-scoped ScriptCard contrast — does not change legacy /scripts card. */
+.chat-shell .chat-shell-script-card {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+
+.chat-shell .chat-shell-script-card .text-dark-700,
+.chat-shell .chat-shell-script-card .text-dark-600,
+.chat-shell .chat-shell-script-card .text-sm {
+  color: var(--text) !important;
+}
+
+.chat-shell .chat-shell-script-card .text-dark-400,
+.chat-shell .chat-shell-script-card .text-dark-500,
+.chat-shell .chat-shell-script-card .text-\[10px\],
+.chat-shell .chat-shell-script-card .text-\[11px\] {
+  color: var(--text-muted) !important;
+}
+
+.chat-shell .chat-shell-script-card .bg-dark-100,
+.chat-shell .chat-shell-script-card .bg-dark-200\/30,
+.chat-shell .chat-shell-script-card .bg-dark-200\/50 {
+  background: var(--bg-elevated) !important;
+}
+
+.chat-shell .chat-shell-script-card .border-dark-200,
+.chat-shell .chat-shell-script-card .border-dark-200\/50,
+.chat-shell .chat-shell-script-card .border-dark-200\/60,
+.chat-shell .chat-shell-script-card .border-l-dark-300 {
+  border-color: var(--border) !important;
+}
+
+.chat-shell .chat-shell-script-card .opacity-60 {
+  opacity: 1;
+}
+
+.chat-shell .chat-shell-script-card button {
+  color: var(--text) !important;
+  background: var(--bg-stage) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm);
+  opacity: 1 !important;
+}
+
+.chat-shell .chat-shell-script-card button:hover:not(:disabled) {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent-border) !important;
+  color: var(--text) !important;
+}
+
+.chat-shell .chat-shell-script-card button:disabled,
+.chat-shell .chat-shell-script-card button[aria-disabled='true'] {
+  opacity: 0.5 !important;
+  color: var(--text-muted) !important;
+}
+
+.chat-shell .chat-shell-script-card textarea,
+.chat-shell .chat-shell-script-card input {
+  background: var(--bg-stage) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.chat-shell .chat-shell-script-card .text-red-400 {
+  color: #f87171 !important;
+}
+
 .chat-shell__script-stack .group\/card,
 .chat-shell__script-stack > * {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  /* Fallback when wrapper class missing */
   border-radius: var(--radius-md);
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   pickSafeChatSessionUpdates,
+  resolveNextSessionId,
   resolveSessionOfferProductId,
 } from '../src/features/chat-shell/sessionOffer'
 
@@ -51,5 +52,37 @@ describe('pickSafeChatSessionUpdates', () => {
       primary_channel: 'messages',
       awareness_level: 'warm',
     })
+  })
+})
+
+describe('resolveNextSessionId', () => {
+  it('prefers explicit preferred over current and first', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b', 'c'],
+        preferredId: 'b',
+        currentId: 'a',
+      })
+    ).toBe('b')
+  })
+
+  it('keeps current when preferred missing', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b', 'c'],
+        preferredId: null,
+        currentId: 'c',
+      })
+    ).toBe('c')
+  })
+
+  it('falls back to first when neither preferred nor current is valid', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'gone',
+        currentId: 'also-gone',
+      })
+    ).toBe('a')
   })
 })

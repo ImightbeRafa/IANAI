@@ -32,6 +32,8 @@ If the QA user owns businesses but Brands stays empty, or Quick/New chat insert 
 
 If send/generate is blocked immediately (usage limit 0) despite auth, Preview may be missing `plan_limits` rows or the QA user may lack an `active`/`trialing` subscription matching a seeded plan (ops used `pro`). Same bootstrap doc; **do not** seed `plan_limits` on production AIIAN.
 
+Preview QA `pro` / high script quota via Preview `plan_limits` + subscription is **intentional tracked Preview QA access**, not production policy.
+
 Also ensure:
 
 - `plan_limits` has `free` / `pro` / `starter` / `enterprise` (column shape from `checkUsageLimit` in `api/lib/auth.ts` — copy numeric quotas from a known-good inventory; do not invent prod numbers in git).

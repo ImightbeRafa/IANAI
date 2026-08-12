@@ -130,6 +130,8 @@ then `INSERT`/`UPSERT` the four plan rows on **IANAI-preview only**.
 
 Seeding `plan_limits` alone is not enough if the Preview QA user has no usable subscription row. Ops set the Preview QA user’s `subscriptions` plan to **`pro`** (status `active` or `trialing`) so `checkUsageLimit` resolves `plan = 'pro'` and finds the seeded row.
 
+**Tracked Preview QA access (intentional):** giving the Preview QA user a `pro` / high / unlimited script quota via Preview `plan_limits` + subscription is **intentional, tracked Preview-only QA access** so generate smoke can run without artificial blocks. It is **not** a production entitlement, billing policy, or a recommendation to change production AIIAN `plan_limits` / subscriptions. Do not seed or mirror this onto production.
+
 Checklist:
 
 1. `plan_limits` contains at least `free`, `pro`, `starter`, `enterprise`.

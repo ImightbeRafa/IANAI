@@ -41,24 +41,16 @@ export default function ChatShell({
     onSessionPatched,
   })
 
-  const createSession = workspace.createSession
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setNavOpen(false)
         setRailOpen(false)
       }
-      if ((e.key === 'n' || e.key === 'N') && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        const tag = (e.target as HTMLElement | null)?.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return
-        e.preventDefault()
-        void createSession()
-      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [createSession])
+  }, [])
 
   const selectRailTab = (tab: RailTab) => {
     if (railOpen && railTab === tab) {
