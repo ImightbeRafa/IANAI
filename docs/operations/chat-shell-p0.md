@@ -52,6 +52,28 @@ WHERE key = 'chat_shell';
 4. Reload `/chat` → Obsidian shell; test light/dark + mobile drawers
 5. Confirm production stays on AIIAN with flag off / no 062 apply
 
+## Blank Preview screen (missing/invalid Vite env)
+
+**Symptom:** After Vercel SSO, every route is a blank dark page; `#root` empty; console:
+`Uncaught Error: Invalid supabaseUrl: Must be a valid HTTP or HTTPS URL` (or `supabaseUrl is required`).
+
+**Cause:** Preview build missing or non-http(s) `VITE_SUPABASE_URL` / anon key. `createClient` used to throw at module init before React could mount.
+
+**Code fix:** validate URL before `createClient`; show `ConfigErrorScreen` instead of crashing.
+
+**Rafael — set Preview env (Vercel → Settings → Environment Variables → Preview), then redeploy:**
+
+| Variable | Value |
+|----------|--------|
+| `VITE_SUPABASE_URL` | `https://adrwkzibhfdpwuycnzaa.supabase.co` (must include `https://`) |
+| `VITE_SUPABASE_ANON_KEY` or `VITE_SUPABASE_PUBLISHABLE_KEY` | from IANAI-preview dashboard (do not invent) |
+
+Optional API pairing on Preview: `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` for the **same** preview project. Do not point Preview at production AIIAN.
+
+Env changes require a **new Preview redeploy** (existing deployment keeps old build-time `VITE_*` values).
+
+FOUC script in `index.html` only runs on `/chat` and cannot blank `/` or `/login`.
+
 ## Out of P0
 
 Multi-offer generation, setup interview, image optimize, enabling prod flag, applying 062 to prod, merging.

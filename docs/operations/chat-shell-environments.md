@@ -12,17 +12,17 @@ See also `docs/operations/chat-shell-p0.md` for `/chat` UI verification and prev
 
 ## Variable pairing (never mix projects)
 
-Frontend (Vite):
+Frontend (Vite) — **required on Preview** or the SPA blank-screens / shows ConfigErrorScreen:
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY` (or `VITE_SUPABASE_PUBLISHABLE_KEY`)
+- `VITE_SUPABASE_URL` = `https://adrwkzibhfdpwuycnzaa.supabase.co` (full `https://` URL)
+- `VITE_SUPABASE_ANON_KEY` (or `VITE_SUPABASE_PUBLISHABLE_KEY`) from IANAI-preview
 
 Backend (Vercel functions):
 
 - `SUPABASE_URL` (falls back to `VITE_SUPABASE_URL`)
 - `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_SECRET_KEY`
 
-**Rule:** preview frontend URL + preview anon key + preview service role must all be from the **same** Supabase project.
+**Rule:** preview frontend URL + preview anon key + preview service role must all be from the **same** Supabase project. After changing `VITE_*`, redeploy Preview.
 
 ## Feature flag design
 

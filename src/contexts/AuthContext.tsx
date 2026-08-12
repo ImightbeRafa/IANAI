@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react'
 import { User, Session } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 interface AuthContextType {
   user: User | null
@@ -39,6 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
+    // Fail soft when env is missing/invalid (main.tsx normally shows ConfigErrorScreen first)
+    if (!isSupabaseConfigured) {
+      setLoading(false)
+      return
+    }
+
     // Detect if this is an OAuth callback (URL has code, access_token, or error params)
     const params = new URLSearchParams(window.location.search)
     const hashParams = new URLSearchParams(window.location.hash.substring(1))
