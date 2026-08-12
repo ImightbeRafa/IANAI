@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertChatSessionDeleteResult,
+  assertSessionThreadLinkagesCleared,
   formatChatSessionDeleteError,
 } from '../src/services/database'
 
@@ -16,6 +17,31 @@ describe('assertChatSessionDeleteResult', () => {
   })
 })
 
+describe('assertSessionThreadLinkagesCleared', () => {
+  it('passes when verify select returns empty', () => {
+    expect(() => assertSessionThreadLinkagesCleared('product_images', [])).not.toThrow()
+    expect(() => assertSessionThreadLinkagesCleared('posts', [])).not.toThrow()
+  })
+
+  it('throws when rows remain after cleanup (silent RLS UPDATE)', () => {
+    expect(() =>
+      assertSessionThreadLinkagesCleared('product_images', [{ id: 'img-1' }])
+    ).toThrow(/product_images still linked|RLS/i)
+    expect(() => assertSessionThreadLinkagesCleared('posts', [{ id: 'p-1' }])).toThrow(
+      /posts still linked|RLS/i
+    )
+  })
+
+  it('throws fail-closed when verify result is null/undefined', () => {
+    expect(() => assertSessionThreadLinkagesCleared('product_images', null)).toThrow(
+      /could not verify/i
+    )
+    expect(() => assertSessionThreadLinkagesCleared('posts', undefined)).toThrow(
+      /could not verify/i
+    )
+  })
+})
+
 describe('formatChatSessionDeleteError', () => {
   it('surfaces PostgREST message and code (e.g. 23503)', () => {
     const err = formatChatSessionDeleteError({
@@ -25,5 +51,21 @@ describe('formatChatSessionDeleteError', () => {
     })
     expect(err.message).toContain('23503')
     expect(err.message).toMatch(/foreign key|product_images/i)
+  })
+
+  it('surfaces check-constraint 23514 (message_requires_session)', () => {
+    const err = formatChatSessionDeleteError({
+      message:
+        'new row for relation "product_images" violates check constraint "product_images_message_requires_session"',
+      code: '23514',
+    })
+    expect(err.message).toContain('23514')
+    expect(err.message).toMatch(/product_images_message_requires_session/)
+  })
+
+  it('preserves assert Error messages for toast (err.message)', () => {
+    const original = new Error('Session delete blocked: product_images still linked after cleanup')
+    const err = formatChatSessionDeleteError(original)
+    expect(err.message).toBe(original.message)
   })
 })

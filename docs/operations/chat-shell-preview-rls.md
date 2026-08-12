@@ -395,6 +395,25 @@ product_images (session_id, product_id) → chat_session_offers ON DELETE RESTRI
 
 Session delete → `chat_session_offers` CASCADE was **blocked** while posts/images still referenced those offers.
 
+#### 3) Check constraint `product_images_message_requires_session` (confirmed CoS FAIL on `ba0e9c9`)
+
+```text
+CHECK (message_id IS NULL OR session_id IS NOT NULL)
+```
+
+Sessions with `product_images` that have **both** `session_id` and `message_id` set (e.g. Quick “dame un guion…”) fail hard delete when:
+
+1. Client cleanup UPDATE silently affects **0 rows** under RLS (no PostgREST error — same class as silent 0-row delete), **or**
+2. Parent/offer path does **ON DELETE SET NULL** on `session_id` only while `message_id` stays set.
+
+Postgres then aborts with `23514`:
+
+```text
+new row for relation "product_images" violates check constraint "product_images_message_requires_session"
+```
+
+(Preview log sample: 2026-08-12T10:42:55Z.)
+
 ### Preview FK alter (ops — already live; do NOT re-apply)
 
 Migration name on IANAI-preview: **`preview_session_offer_fks_set_null`** (SecureDog preferred)
@@ -428,6 +447,17 @@ Migration name on IANAI-preview: **`preview_tighten_product_images_update_own`**
 
 SecureDog soft concern on Preview: UPDATE on `product_images` must stay owner-scoped. Live policy **`product_images_update_own`** is tightened so authorization is **always** `user_id = auth.uid()` (USING + WITH CHECK). Thread-clear / FK SET NULL paths still work for the owning uploader; non-owners cannot update another user’s image rows.
 
+#### D) Check-constraint companion trigger (ops — already live; do NOT re-apply)
+
+Migration name on IANAI-preview: **`preview_product_images_null_message_with_session`**
+
+Schema defense when `session_id` is nullified without clearing `message_id`:
+
+- `BEFORE UPDATE OF session_id` on **`product_images`** and **`posts`**: if `session_id` becomes NULL, force `message_id = NULL`
+- `product_images_update_own` WITH CHECK allows owner clear when `session_id IS NULL` (still always `user_id = auth.uid()`)
+
+This protects FK SET NULL paths; **client cleanup must still fail-closed** (silent RLS 0-row UPDATE is a separate bug class).
+
 CASCADE DELETE/UPDATE policies alone were **not** enough while offer FKs were RESTRICT; with Preview SET NULL they remain required so CASCADE children and thread-clear UPDATEs succeed under RLS.
 
 ### SecureDog soft concern — Preview status (DOCUMENT ONLY)
@@ -439,18 +469,20 @@ Verified live on IANAI-preview (`adrwkzibhfdpwuycnzaa`) — **do not re-apply**:
 | Offer FKs `posts_session_offer_fkey` / `product_images_session_offer_fkey` | **ON DELETE SET NULL** (verified live) |
 | `posts_update_thread_clear` | **exists** (via `preview_posts_update_for_session_delete`) |
 | `product_images_update_own` | **tightened** to always `user_id = auth.uid()` (`preview_tighten_product_images_update_own`) |
+| `preview_product_images_null_message_with_session` | **live** — null `message_id` when `session_id` becomes NULL (product_images + posts) |
 
 ### Client harden (chat-shell tip) — ordered cleanup + fail-closed
 
-`deleteChatSession` (hard delete only; **no soft-archive**). Keep this even with Preview SET NULL:
+`deleteChatSession` (hard delete only; **no soft-archive**). Keep this even with Preview SET NULL + trigger:
 
 1. **Before** session delete, clear thread linkage **without** destroying product ownership:
-   - `product_images`: `UPDATE SET session_id = NULL, message_id = NULL WHERE session_id = :id` (keeps `product_id`; requires owner UPDATE via tightened `product_images_update_own`)
-   - `posts`: same (requires `posts_update_thread_clear`)
-2. Hard-delete `chat_sessions` where `id = :id`.
-3. Preview SET NULL is **schema defense-in-depth** if an offer CASCADE still touches linked rows; explicit cleanup establishes the retained-row state first and keeps the client correct on staged envs where prod has not yet received SET NULL.
-4. Fail-closed: `.delete().eq('id').select('id')` — throw server `message`/`code` (e.g. **23503**) on error; throw clear “Session not deleted (RLS or missing)” on empty `data`.
-5. Do **not** use `deleteSessionMessages` as hygiene. Do **not** CASCADE-delete product_images/posts when offers go away.
+   - Prefer payload order **`message_id = NULL` then `session_id = NULL`** in one UPDATE (avoids check `product_images_message_requires_session`)
+   - `product_images` then `posts` (keeps `product_id`; needs owner UPDATE / `posts_update_thread_clear`)
+2. **Fail-closed verify:** `.select('id').eq('session_id', sessionId)` after each table’s UPDATE — if any rows remain (or verify is null), throw a clear Error (silent RLS blocked cleanup). Use `.update(...).select('id')` on the UPDATE call as well.
+3. Hard-delete `chat_sessions` where `id = :id` with `.select('id')` fail-closed.
+4. Preview SET NULL + null-message trigger are **schema defense-in-depth**; explicit cleanup + verify remains required for deterministic retained-row state and staged envs where prod has not yet received these alters.
+5. Surface real server `message`/`code` (e.g. **23503**, **23514**) in the sidebar error via `err.message` — do not replace with a generic-only string when an `Error` is thrown.
+6. Do **not** use `deleteSessionMessages` as hygiene. Do **not** CASCADE-delete product_images/posts when offers go away.
 
 ### Cutover must include (not tonight)
 
@@ -458,9 +490,10 @@ Before production cutover GO, prod AIIAN must get a **reviewed git migration** c
 
 1. Matching child DELETE/UPDATE policies (same intent as `preview_chat_session_delete_cascade_rls` + `preview_posts_update_for_session_delete` + owner-tight `product_images_update_own` / `preview_tighten_product_images_update_own`), **and**
 2. Offer FK alter to **ON DELETE SET NULL** on `posts_session_offer_fkey` / `product_images_session_offer_fkey` (same intent as `preview_session_offer_fks_set_null` — retain posts/images; do not CASCADE-delete them), **and**
-3. Client ordered cleanup remains as defense-in-depth across staged envs.
+3. Companion trigger/policy intent of **`preview_product_images_null_message_with_session`** (null `message_id` when `session_id` becomes NULL on product_images + posts; owner WITH CHECK for cleared state), **and**
+4. Client ordered cleanup + remaining-row verify remains as defense-in-depth across staged envs.
 
-**Do not apply Preview cascade policies, FK SET NULL alter, or the product_images UPDATE tighten onto prod from this tip. No soft-archive. No master.**
+**Do not apply Preview cascade policies, FK SET NULL alter, UPDATE tighten, or the null-message trigger onto prod from this tip. No soft-archive. No master.**
 
 ## Related docs
 

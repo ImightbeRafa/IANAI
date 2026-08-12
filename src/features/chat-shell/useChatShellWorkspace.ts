@@ -390,6 +390,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
   /**
    * Sidebar Delete (O1): hard deleteChatSession via 062 RLS.
    * Soft-archive is not used. deleteSessionMessages is not used as hygiene.
+   * Errors surface via err.message (server / fail-closed cleanup), not a generic-only toast.
    */
   const deleteSession = useCallback(async (sessionId: string) => {
     if (!sessionId || busy) return

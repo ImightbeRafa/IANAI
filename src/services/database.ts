@@ -551,13 +551,19 @@ export async function countBusinessChatSessions(businessId: string): Promise<num
  * Hard-delete a chat session (O1). Authz via existing 062 RLS
  * `chat_sessions_delete` → `can_write_chat_session(id)`.
  *
- * Ordered cleanup first: null `session_id` / `message_id` on posts and
- * product_images (keeps `product_id` + assets). Preview offer FKs are now
- * ON DELETE SET NULL (`preview_session_offer_fks_set_null`) as schema
- * defense-in-depth; explicit cleanup stays for deterministic retained-row
- * state and staged envs where prod still has 062 RESTRICT.
+ * Ordered cleanup first: null `message_id` then `session_id` on posts /
+ * product_images in one UPDATE (keeps `product_id` + assets). Required because
+ * check `product_images_message_requires_session` rejects session_id-null while
+ * message_id remains — which is what chat_sessions ON DELETE SET NULL alone does.
  *
- * Fail-closed: `.select('id')` + throw on empty result or server error (incl. 23503).
+ * Fail-closed cleanup: after UPDATE, re-SELECT remaining rows by session_id;
+ * throw if any remain (silent RLS 0-row UPDATE). Then hard delete with
+ * `.select('id')` + throw on empty / server error (23503 / 23514).
+ *
+ * Preview schema defense-in-depth (do not re-apply from tip):
+ * - offer FKs ON DELETE SET NULL
+ * - trigger `preview_product_images_null_message_with_session`
+ *
  * No soft-archive. Do not use `deleteSessionMessages` as hygiene.
  */
 export function assertChatSessionDeleteResult(
@@ -570,9 +576,27 @@ export function assertChatSessionDeleteResult(
   }
 }
 
+/** Fail-closed: leftover session-linked rows mean cleanup UPDATE was blocked (often silent RLS). */
+export function assertSessionThreadLinkagesCleared(
+  table: 'product_images' | 'posts',
+  remaining: Array<{ id: string }> | null | undefined
+): void {
+  if (remaining == null) {
+    throw new Error(
+      `Session delete blocked: could not verify ${table} thread cleanup (RLS or missing).`
+    )
+  }
+  if (remaining.length > 0) {
+    throw new Error(
+      `Session delete blocked: ${table} still linked after cleanup (RLS likely blocked UPDATE). Null message_id + session_id first — see docs/operations/chat-shell-preview-rls.md.`
+    )
+  }
+}
+
 export function formatChatSessionDeleteError(err: unknown): Error {
   if (err instanceof Error && !(err as Error & { code?: string }).code) {
-    // Prefer Postgrest-style shape when present on plain objects
+    // Already a clear Error (assert helpers) — keep message for toast.
+    return err
   }
   if (err && typeof err === 'object') {
     const row = err as { message?: string; code?: string; details?: string; hint?: string }
@@ -586,21 +610,36 @@ export function formatChatSessionDeleteError(err: unknown): Error {
   return new Error(String(err || 'Session delete failed'))
 }
 
-/** Clear session/message links before hard delete; preserve product ownership. Preview FK SET NULL is a schema fallback. */
+/**
+ * Clear session/message links before hard delete; preserve product ownership.
+ * message_id is listed first so a partial apply cannot leave message_id set
+ * with session_id null (check product_images_message_requires_session).
+ */
 async function clearSessionThreadLinkages(sessionId: string): Promise<void> {
-  const { error: imagesErr } = await supabase
-    .from('product_images')
-    .update({ session_id: null, message_id: null })
+  await clearTableThreadLinkages('product_images', sessionId)
+  await clearTableThreadLinkages('posts', sessionId)
+}
+
+async function clearTableThreadLinkages(
+  table: 'product_images' | 'posts',
+  sessionId: string
+): Promise<void> {
+  // Prefer message_id first in the payload; both null in one UPDATE so CHECK passes.
+  const { error: updateErr } = await supabase
+    .from(table)
+    .update({ message_id: null, session_id: null })
+    .eq('session_id', sessionId)
+    .select('id')
+
+  if (updateErr) throw formatChatSessionDeleteError(updateErr)
+
+  const { data: remaining, error: verifyErr } = await supabase
+    .from(table)
+    .select('id')
     .eq('session_id', sessionId)
 
-  if (imagesErr) throw formatChatSessionDeleteError(imagesErr)
-
-  const { error: postsErr } = await supabase
-    .from('posts')
-    .update({ session_id: null, message_id: null })
-    .eq('session_id', sessionId)
-
-  if (postsErr) throw formatChatSessionDeleteError(postsErr)
+  if (verifyErr) throw formatChatSessionDeleteError(verifyErr)
+  assertSessionThreadLinkagesCleared(table, remaining)
 }
 
 export async function deleteChatSession(sessionId: string): Promise<void> {
