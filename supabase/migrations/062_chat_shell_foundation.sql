@@ -579,20 +579,53 @@ CREATE POLICY "chat_sessions_insert"
   FOR INSERT
   TO authenticated
   WITH CHECK (
+    -- Creator-only ownership at insert time (cannot insert as another user)
     user_id = auth.uid()
     AND (product_id IS NOT NULL OR business_id IS NOT NULL)
     AND (product_id IS NULL OR public.can_write_product(product_id))
     AND (business_id IS NULL OR public.can_access_business(business_id))
   );
 
+-- S6: RLS WITH CHECK cannot compare OLD/NEW. Freeze ownership / association
+-- columns for authenticated clients so team writers cannot steal or re-point sessions.
+CREATE OR REPLACE FUNCTION public.prevent_chat_session_ownership_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.role() = 'authenticated' THEN
+    IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+      RAISE EXCEPTION 'chat_sessions.user_id is immutable after create';
+    END IF;
+    IF NEW.business_id IS DISTINCT FROM OLD.business_id THEN
+      RAISE EXCEPTION 'chat_sessions.business_id is immutable after create';
+    END IF;
+    IF NEW.product_id IS DISTINCT FROM OLD.product_id THEN
+      RAISE EXCEPTION 'chat_sessions.product_id is immutable after create';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_chat_sessions_ownership_immutable ON public.chat_sessions;
+CREATE TRIGGER trg_chat_sessions_ownership_immutable
+  BEFORE UPDATE ON public.chat_sessions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.prevent_chat_session_ownership_mutation();
+
+REVOKE ALL ON FUNCTION public.prevent_chat_session_ownership_mutation() FROM PUBLIC, anon;
+
 CREATE POLICY "chat_sessions_update"
   ON public.chat_sessions
   FOR UPDATE
   TO authenticated
   USING (public.can_write_chat_session(id))
-  WITH CHECK (
-    user_id = auth.uid() OR public.can_write_chat_session(id)
-  );
+  -- Ownership freeze is enforced by trg_chat_sessions_ownership_immutable (OLD vs NEW).
+  -- WITH CHECK only re-validates write access on the resulting row.
+  WITH CHECK (public.can_write_chat_session(id));
 
 CREATE POLICY "chat_sessions_delete"
   ON public.chat_sessions

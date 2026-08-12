@@ -34,6 +34,10 @@ Every generation/edit route must enforce **no cross-brand** and **no wrong-produ
 3. Tighten image + edit/optimize routes.
 4. Add negative tests: foreign `product_id`, foreign `session_id`, image from other brand, viewer role denied writes.
 
+## Session ownership (RLS / S6)
+
+DB layer (migration 062): `chat_sessions.user_id`, `business_id`, and `product_id` are **immutable after create** for `authenticated` via trigger `prevent_chat_session_ownership_mutation`. Team writers who pass `can_write_chat_session` may update title/status/context/funnel fields but cannot steal ownership or re-point the session to another business/product.
+
 ## P-1 stub note
 
 No production route behavior changes ship in P-1. This document is the contract SecureDog / later phases should implement against.

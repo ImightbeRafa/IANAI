@@ -46,6 +46,8 @@ product_id IS NOT NULL OR business_id IS NOT NULL
 
 **Backfill:** do **not** auto-set `business_id` from `products.business_id` in 062. Product reassignment would become constrained once shell FKs exist. See `docs/schema/chat-shell-backfill.md`.
 
+**Ownership immutability (S6):** after insert, authenticated clients cannot change `chat_sessions.user_id`, `business_id`, or `product_id`. Enforced by `BEFORE UPDATE` trigger `trg_chat_sessions_ownership_immutable` (RLS cannot compare OLD/NEW). INSERT still requires `user_id = auth.uid()`. Service role may still mutate for controlled backfills. Safe client updates remain title/status/context/funnel/settings fields only.
+
 ### 2) Funnel definition
 
 Funnel = **primary channel** (required for shell UX later) + **optional awareness**:

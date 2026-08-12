@@ -49,7 +49,42 @@ END $$;
 
 ROLLBACK;
 
--- 4) Manual checklist (run as concrete personas on preview):
+-- 4) S6 — ownership steal must fail (trigger; run as authenticated team writer on preview)
+-- Replace the UUIDs with a real session the team writer can update, then:
+--
+--   BEGIN;
+--   SET LOCAL ROLE authenticated;
+--   SELECT set_config('request.jwt.claim.sub', '<team-writer-user-id>', true);
+--   SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+--   -- Expect exception: chat_sessions.user_id is immutable after create
+--   UPDATE chat_sessions
+--     SET user_id = '<team-writer-user-id>'
+--     WHERE id = '<session-owned-by-someone-else>';
+--   ROLLBACK;
+--
+-- Also expect failure for:
+--   UPDATE chat_sessions SET business_id = '<other-business>' WHERE id = '...';
+--   UPDATE chat_sessions SET product_id  = '<other-product>'  WHERE id = '...';
+--
+-- Control: title-only UPDATE by the same team writer should succeed when can_write_chat_session.
+
+DO $$
+BEGIN
+  ASSERT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'trg_chat_sessions_ownership_immutable'
+      AND tgrelid = 'public.chat_sessions'::regclass
+      AND NOT tgisinternal
+  ), 'ownership immutability trigger missing on chat_sessions';
+  ASSERT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'prevent_chat_session_ownership_mutation'
+  ), 'prevent_chat_session_ownership_mutation missing';
+END $$;
+
+-- 5) Manual checklist (run as concrete personas on preview):
 -- [ ] Legacy product-only insert (business_id NULL, product_id set) succeeds for owner
 -- [ ] Quick business-only insert (product_id NULL, business_id set) succeeds for business owner
 -- [ ] Cross-business offer insert fails (product.business_id <> session.business_id)
@@ -57,6 +92,8 @@ ROLLBACK;
 -- [ ] Viewer collaborator: SELECT session/messages OK; INSERT message/offer denied
 -- [ ] Unrelated user: no SELECT on foreign brand session/offers/artifacts
 -- [ ] message_artifacts identity UPDATE raises
+-- [ ] S6: team writer cannot UPDATE user_id / business_id / product_id (ownership steal)
+-- [ ] S6: team writer can still UPDATE title/status when can_write_chat_session
 -- [ ] Existing unlinked posts/product_images still SELECT/INSERT for owners
 -- [ ] /scripts and /posts UI still open existing sessions against preview DB
 -- [ ] Supabase security advisor: no RLS-disabled new tables
