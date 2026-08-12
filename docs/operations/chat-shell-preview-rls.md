@@ -227,11 +227,13 @@ Document-only nits. **No live DB change** from this tip. Later Preview-only if/w
 2. **SecureDog watch items** — keep alignment reviews on the backlog; non-blocking for shell Guardar while the live AND four remains.
 3. **Future AIIAN cutover** — use the SecureDog prod cutover template below in a reviewed migration only; do not apply that template on Preview tonight.
 
-### Prod cutover template (SecureDog advise — future AIIAN migration; do not apply on Preview tonight)
+### Prod cutover template (SecureDog LOCKED — future AIIAN git migration; do not apply on Preview tonight)
 
-**DOCUMENT ONLY.** Future production AIIAN cutover shape advised by SecureDog. **Do not apply on Preview tonight.** Do not change the live Preview `scripts_*` tight AND four. Do not `DROP` / `CREATE` / re-apply from this section. No Supabase MCP / CLI / SQL apply from this tip.
+**DOCUMENT ONLY.** This is the **SecureDog locked cutover plan** and the **prod git migration shape** for a future AIIAN migration. It ships as a **reviewed git migration**, **not** live-only ops (the DROP-wipe race already proved live-only churn is unsafe).
 
-Live Preview stays the current verified set:
+**Do not apply on Preview tonight.** Do not change the live Preview `scripts_*` tight AND four. Do not `DROP` / `CREATE` / re-apply from this section. No Supabase MCP / CLI / SQL apply from this tip.
+
+Live Preview stays as-is (current verified set):
 
 ```text
 scripts_select / scripts_insert / scripts_update / scripts_delete
@@ -241,10 +243,11 @@ scripts_select / scripts_insert / scripts_update / scripts_delete
 
 No further Preview policy churn unless SecureDog explicitly asks.
 
-**Future AIIAN migration template** (mirrors migration `062` `message_artifacts` spirit + null-session legacy for old `/scripts` rows). **Do NOT copy any OR SELECT/DELETE into AIIAN.**
+**SecureDog LOCKED prod git migration shape** (mirrors migration `062` `message_artifacts` spirit + null-session legacy for old `/scripts` rows). **Do NOT copy any OR SELECT/DELETE into AIIAN.** **Do NOT apply this block on IANAI-preview tonight.**
 
 ```text
--- FUTURE PROD (AIIAN) CUTOVER TEMPLATE — SecureDog advise
+-- SecureDog LOCKED — PROD (AIIAN) GIT MIGRATION SHAPE
+-- Ships only as a reviewed git migration — not live-only ops
 -- DO NOT apply on IANAI-preview tonight
 -- DO NOT DROP-wipe live Preview from this doc
 
@@ -266,7 +269,7 @@ DELETE USING:
   AND (session_id IS NULL OR can_write_chat_session(session_id))
 ```
 
-Intent: product write/read remains required; `session_id IS NULL` preserves legacy `/scripts` rows that never had a chat session; shell inserts still require a writable session. When a real prod cutover migration is authored, it belongs under SecureDog/CoS ownership — not a Preview docs tip.
+Intent: product write/read remains required; `session_id IS NULL` preserves legacy `/scripts` rows that never had a chat session; shell inserts still require a writable session. When the real prod cutover migration is authored, it belongs under SecureDog/CoS ownership as a reviewed git migration — not a Preview docs tip or live-only ops apply.
 
 ## Related docs
 
