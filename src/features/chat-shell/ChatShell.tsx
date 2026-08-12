@@ -5,12 +5,14 @@ import ChatThread from './ChatThread'
 import ChatContextRail, { type RailTab } from './ChatContextRail'
 import ThemeToggle from './ThemeToggle'
 import type { ChatShellTheme } from './chatShellTheme'
+import { useChatShellWorkspace } from './useChatShellWorkspace'
 
 interface ChatShellProps {
   theme: ChatShellTheme
   onToggleTheme: () => void
   displayName: string
   initials: string
+  userId: string
 }
 
 export default function ChatShell({
@@ -18,11 +20,14 @@ export default function ChatShell({
   onToggleTheme,
   displayName,
   initials,
+  userId,
 }: ChatShellProps) {
   const [navOpen, setNavOpen] = useState(false)
-  // Default open so desktop matches the three-column Obsidian mock (push layout)
   const [railOpen, setRailOpen] = useState(true)
-  const [railTab, setRailTab] = useState<RailTab>('images')
+  const [railTab, setRailTab] = useState<RailTab>('context')
+  const workspace = useChatShellWorkspace(userId)
+
+  const createSession = workspace.createSession
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -30,10 +35,16 @@ export default function ChatShell({
         setNavOpen(false)
         setRailOpen(false)
       }
+      if ((e.key === 'n' || e.key === 'N') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const tag = (e.target as HTMLElement | null)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        e.preventDefault()
+        void createSession()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [createSession])
 
   const selectRailTab = (tab: RailTab) => {
     if (railOpen && railTab === tab) {
@@ -50,6 +61,11 @@ export default function ChatShell({
     railOpen ? 'is-rail-open' : '',
   ].filter(Boolean).join(' ')
 
+  const crumbs = [
+    workspace.activeBrand?.name || 'No brand',
+    workspace.activeSession?.title || 'No session',
+  ].join(' / ')
+
   return (
     <div className={shellClass} data-theme={theme}>
       {navOpen && (
@@ -61,7 +77,24 @@ export default function ChatShell({
         />
       )}
 
-      <ChatSidebar displayName={displayName} initials={initials} />
+      <ChatSidebar
+        displayName={displayName}
+        initials={initials}
+        businesses={workspace.businesses}
+        sessions={workspace.sessions}
+        activeBrandId={workspace.activeBrandId}
+        activeSessionId={workspace.activeSessionId}
+        loadingBusinesses={workspace.loadingBusinesses}
+        loadingSessions={workspace.loadingSessions}
+        busy={workspace.busy}
+        error={workspace.error}
+        notice={workspace.notice}
+        onSelectBrand={workspace.selectBrand}
+        onSelectSession={workspace.selectSession}
+        onNewChat={() => void workspace.createSession()}
+        onQuickGenerate={() => void workspace.createQuickSession()}
+        onNewSession={() => void workspace.createSession()}
+      />
 
       <section className="chat-shell__main">
         <header className="chat-shell__topbar">
@@ -76,9 +109,9 @@ export default function ChatShell({
                 <Menu size={16} />
               </button>
             </div>
-            <div className="chat-shell__crumbs">PatchHouse.CR / Scripts + creatives</div>
+            <div className="chat-shell__crumbs">{crumbs}</div>
             <span className="chat-shell__style-tag">
-              Style · C · Obsidian {theme === 'obsidian-dark' ? 'electric' : 'daylight'} · view only
+              Style · C · Obsidian {theme === 'obsidian-dark' ? 'electric' : 'daylight'}
             </span>
           </div>
           <div className="chat-shell__topbar-pills" role="tablist" aria-label="Stage panels">
@@ -96,7 +129,7 @@ export default function ChatShell({
               aria-pressed={railOpen && railTab === 'offers'}
               onClick={() => selectRailTab('offers')}
             >
-              Offers <span className="chat-shell__count">2</span>
+              Offers <span className="chat-shell__count">0</span>
             </button>
             <button
               type="button"
@@ -104,7 +137,7 @@ export default function ChatShell({
               aria-pressed={railOpen && railTab === 'images'}
               onClick={() => selectRailTab('images')}
             >
-              Images <span className="chat-shell__count">3</span>
+              Images <span className="chat-shell__count">0</span>
             </button>
           </div>
           <div className="chat-shell__topbar-actions">
@@ -120,13 +153,15 @@ export default function ChatShell({
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           </div>
         </header>
-        <ChatThread />
+        <ChatThread brand={workspace.activeBrand} session={workspace.activeSession} />
       </section>
 
       <ChatContextRail
         tab={railTab}
         onTabChange={setRailTab}
         onClose={() => setRailOpen(false)}
+        brand={workspace.activeBrand}
+        session={workspace.activeSession}
       />
     </div>
   )

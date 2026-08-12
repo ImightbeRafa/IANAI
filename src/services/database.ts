@@ -474,6 +474,44 @@ export async function updateChatSession(
   if (error) throw error
 }
 
+/**
+ * Chat-shell: create a brand/Quick session (product_id null, business_id required).
+ * Legacy createChatSession(productId, ...) remains for /scripts UI.
+ */
+export async function createBrandChatSession(
+  businessId: string,
+  userId: string,
+  title: string = 'New session',
+  context?: string
+): Promise<ChatSession> {
+  const { data, error } = await supabase
+    .from('chat_sessions')
+    .insert({
+      business_id: businessId,
+      product_id: null,
+      user_id: userId,
+      title,
+      ...(context ? { context } : {}),
+    })
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+/** Chat-shell: list sessions for a brand (includes Quick / product-null rows). */
+export async function getBusinessChatSessions(businessId: string): Promise<ChatSession[]> {
+  const { data, error } = await supabase
+    .from('chat_sessions')
+    .select('*')
+    .eq('business_id', businessId)
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
+}
+
 // =============================================
 // MESSAGE FUNCTIONS
 // =============================================

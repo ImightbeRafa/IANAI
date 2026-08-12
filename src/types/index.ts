@@ -287,7 +287,13 @@ export interface Product {
 
 export interface ChatSession {
   id: string
-  product_id: string
+  /** Legacy product-scoped sessions always set this; Quick/brand shell sessions may be null. */
+  product_id: string | null
+  /** Brand association for chat-shell (required for Quick sessions). */
+  business_id?: string | null
+  brand_kit_id?: string | null
+  primary_channel?: 'messages' | 'website' | 'physical' | null
+  awareness_level?: 'cold' | 'warm' | 'hot' | null
   user_id: string
   title: string
   status: SessionStatus

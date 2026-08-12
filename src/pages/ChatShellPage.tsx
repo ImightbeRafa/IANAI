@@ -74,12 +74,24 @@ export default function ChatShellPage() {
     )
   }
 
+  if (!user) {
+    return (
+      <div className="chat-shell__loading" data-theme={theme} aria-busy="true">
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+          <div className="chat-shell__spinner" />
+          Cargando sesión…
+        </div>
+      </div>
+    )
+  }
+
   return (
     <ChatShell
       theme={theme}
       onToggleTheme={toggleTheme}
       displayName={displayName}
       initials={initials}
+      userId={user.id}
     />
   )
 }

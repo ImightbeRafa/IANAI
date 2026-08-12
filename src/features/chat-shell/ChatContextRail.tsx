@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import type { Business, ChatSession } from '../../types'
 
 export type RailTab = 'context' | 'offers' | 'images'
 
@@ -6,9 +7,17 @@ interface ChatContextRailProps {
   tab: RailTab
   onTabChange: (tab: RailTab) => void
   onClose: () => void
+  brand?: Business | null
+  session?: ChatSession | null
 }
 
-export default function ChatContextRail({ tab, onTabChange, onClose }: ChatContextRailProps) {
+export default function ChatContextRail({
+  tab,
+  onTabChange,
+  onClose,
+  brand = null,
+  session = null,
+}: ChatContextRailProps) {
   return (
     <aside className="chat-shell__rail" aria-label="Context rail">
       <div className="chat-shell__rail-head">
@@ -60,16 +69,34 @@ export default function ChatContextRail({ tab, onTabChange, onClose }: ChatConte
         <div>
           <strong>Session context</strong>
           <p className="chat-shell__rail-note">
-            Funnel and brand context will appear here in a later phase. Foundation layout only.
+            {brand ? (
+              <>
+                Brand · {brand.name}
+                {session ? (
+                  <>
+                    <br />
+                    Session · {session.title || 'Untitled'}
+                    {session.product_id == null ? ' · Quick (no product)' : ''}
+                  </>
+                ) : (
+                  <>
+                    <br />
+                    No session selected
+                  </>
+                )}
+              </>
+            ) : (
+              'Select a brand to see session context. Funnel details arrive in a later phase.'
+            )}
           </p>
         </div>
       )}
 
       {tab === 'offers' && (
         <div className="chat-shell__stack">
-          <div className="chat-shell__nav-item is-active">1 · Sleep patch</div>
-          <div className="chat-shell__nav-item">2 · Melatonin 5mg</div>
-          <p className="chat-shell__rail-hint">Max 5 offers · sequential generation (later)</p>
+          <p className="chat-shell__rail-hint">
+            Multi-offer generation comes later. Max 5 offers · sequential.
+          </p>
         </div>
       )}
 
@@ -79,20 +106,7 @@ export default function ChatContextRail({ tab, onTabChange, onClose }: ChatConte
             <strong>Selected creative</strong>
             <span className="chat-shell__rail-edit">edit</span>
           </div>
-          <div className="chat-shell__preview">Sleep patch preview</div>
-          <div className="chat-shell__stack">
-            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Editar imagen</button>
-            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Restyle</button>
-            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Variaciones</button>
-            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Change product photo</button>
-          </div>
-          <div className="chat-shell__nav-label">Thread images</div>
-          <div className="chat-shell__thumbs">
-            <div className="chat-shell__thumb is-sel">#1</div>
-            <div className="chat-shell__thumb">#2</div>
-            <div className="chat-shell__thumb">var</div>
-            <div className="chat-shell__thumb">+</div>
-          </div>
+          <p className="chat-shell__rail-hint">Image tools are foundation-only for now.</p>
         </>
       )}
     </aside>

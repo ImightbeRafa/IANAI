@@ -1,12 +1,46 @@
 import { Link } from 'react-router-dom'
 import { Settings, Search, Plus, Zap } from 'lucide-react'
+import type { Business, ChatSession } from '../../types'
 
 interface ChatSidebarProps {
   displayName: string
   initials: string
+  businesses: Business[]
+  sessions: ChatSession[]
+  activeBrandId: string | null
+  activeSessionId: string | null
+  loadingBusinesses: boolean
+  loadingSessions: boolean
+  busy: boolean
+  error: string | null
+  notice: string | null
+  onSelectBrand: (brandId: string) => void
+  onSelectSession: (session: ChatSession) => void
+  onNewChat: () => void
+  onQuickGenerate: () => void
+  onNewSession: () => void
 }
 
-export default function ChatSidebar({ displayName, initials }: ChatSidebarProps) {
+export default function ChatSidebar({
+  displayName,
+  initials,
+  businesses,
+  sessions,
+  activeBrandId,
+  activeSessionId,
+  loadingBusinesses,
+  loadingSessions,
+  busy,
+  error,
+  notice,
+  onSelectBrand,
+  onSelectSession,
+  onNewChat,
+  onQuickGenerate,
+  onNewSession,
+}: ChatSidebarProps) {
+  const canCreate = Boolean(activeBrandId) && !busy
+
   return (
     <aside className="chat-shell__sidebar" aria-label="Chat navigation">
       <div className="chat-shell__brand">
@@ -17,7 +51,14 @@ export default function ChatSidebar({ displayName, initials }: ChatSidebarProps)
       </div>
 
       <div className="chat-shell__row-actions">
-        <button type="button" className="chat-shell__row-action" disabled aria-disabled="true">
+        <button
+          type="button"
+          className="chat-shell__row-action"
+          onClick={onNewChat}
+          disabled={!canCreate}
+          aria-disabled={!canCreate}
+          title={activeBrandId ? 'New chat in active brand' : 'Select a brand first'}
+        >
           <Plus size={15} aria-hidden />
           New chat
           <span className="chat-shell__kbd">N</span>
@@ -35,26 +76,89 @@ export default function ChatSidebar({ displayName, initials }: ChatSidebarProps)
         </div>
       </div>
 
+      {(error || notice) && (
+        <div className={`chat-shell__sidebar-alert${error ? ' is-error' : ''}`} role="status">
+          {error || notice}
+        </div>
+      )}
+
       <div className="chat-shell__nav-label">Quick</div>
-      <div className="chat-shell__nav-item">
+      <button
+        type="button"
+        className="chat-shell__nav-item chat-shell__nav-button"
+        onClick={onQuickGenerate}
+        disabled={busy || businesses.length === 0}
+        aria-disabled={busy || businesses.length === 0}
+        title="Quick session with no product (brand still required)"
+      >
         <Zap size={14} aria-hidden />
         Quick generate
-        <span className="chat-shell__btn chat-shell__btn--pill chat-shell__pill-trail">no brand</span>
-      </div>
+        <span className="chat-shell__btn chat-shell__btn--pill chat-shell__pill-trail">no product</span>
+      </button>
 
       <div className="chat-shell__nav-label">Brands</div>
-      <div className="chat-shell__nav-item is-active">PatchHouse.CR</div>
-      <div className="chat-shell__nav-subs">
-        <div className="chat-shell__nav-sub is-selected">
-          <span className="chat-shell__status-dot" aria-hidden />
-          Scripts + creatives
+      {loadingBusinesses && (
+        <div className="chat-shell__nav-item">Loading brands…</div>
+      )}
+      {!loadingBusinesses && businesses.length === 0 && (
+        <div className="chat-shell__nav-item">
+          No brands yet
         </div>
-        <div className="chat-shell__nav-sub">Brand onboarding</div>
-        <div className="chat-shell__nav-sub">+ New session</div>
-      </div>
-      <div className="chat-shell__nav-item">Pura Sonrisa CR</div>
-      <div className="chat-shell__nav-item">DeepClean</div>
-      <div className="chat-shell__nav-item">+ New brand...</div>
+      )}
+      {businesses.map((brand) => {
+        const isActive = brand.id === activeBrandId
+        return (
+          <div key={brand.id}>
+            <button
+              type="button"
+              className={`chat-shell__nav-item chat-shell__nav-button${isActive ? ' is-active' : ''}`}
+              onClick={() => onSelectBrand(brand.id)}
+            >
+              {brand.name}
+            </button>
+            {isActive && (
+              <div className="chat-shell__nav-subs">
+                {loadingSessions && (
+                  <div className="chat-shell__nav-sub">Loading sessions…</div>
+                )}
+                {!loadingSessions && sessions.length === 0 && (
+                  <div className="chat-shell__nav-sub">No sessions yet</div>
+                )}
+                {sessions.map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    className={`chat-shell__nav-sub chat-shell__nav-button${session.id === activeSessionId ? ' is-selected' : ''}`}
+                    onClick={() => onSelectSession(session)}
+                  >
+                    {session.id === activeSessionId && (
+                      <span className="chat-shell__status-dot" aria-hidden />
+                    )}
+                    <span className="chat-shell__session-title">
+                      {session.title || 'Untitled'}
+                      {session.product_id == null ? (
+                        <span className="chat-shell__session-tag">Quick</span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="chat-shell__nav-sub chat-shell__nav-button"
+                  onClick={onNewSession}
+                  disabled={!canCreate}
+                  aria-disabled={!canCreate}
+                >
+                  + New session
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      })}
+      <Link to="/dashboard" className="chat-shell__nav-item chat-shell__nav-link">
+        + New brand…
+      </Link>
 
       <div className="chat-shell__user">
         <div className="chat-shell__avatar" aria-hidden>{initials}</div>
@@ -63,7 +167,7 @@ export default function ChatSidebar({ displayName, initials }: ChatSidebarProps)
             {displayName}
             <span className="chat-shell__badge">Pro</span>
           </div>
-          <div className="chat-shell__user-meta">Pro · usage in preview</div>
+          <div className="chat-shell__user-meta">Chat shell · brands live</div>
         </div>
       </div>
     </aside>
