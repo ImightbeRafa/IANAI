@@ -5,7 +5,6 @@ import {
   ChevronRight,
   MoreHorizontal,
   Plus,
-  Search,
   Settings,
   Zap,
 } from 'lucide-react'
@@ -177,18 +176,6 @@ export default function ChatSidebar({
           <Plus size={14} aria-hidden />
           <span className="chat-shell__row-action-label">New chat</span>
         </button>
-        <div className="chat-shell__search-wrap">
-          <label className="chat-shell__sr-only" htmlFor="chat-shell-search">Search</label>
-          <Search size={13} className="chat-shell__search-icon" aria-hidden />
-          <input
-            id="chat-shell-search"
-            className="chat-shell__search"
-            placeholder="Search — soon"
-            disabled
-            aria-disabled="true"
-            title="Search coming soon"
-          />
-        </div>
       </div>
 
       {(error || notice) && (
@@ -460,9 +447,8 @@ export default function ChatSidebar({
         <div className="chat-shell__user-copy">
           <div className="chat-shell__user-name">
             <span className="chat-shell__user-name-text">{displayName}</span>
-            <span className="chat-shell__badge" title="Chat shell Preview">Preview</span>
           </div>
-          <div className="chat-shell__user-meta">Chat shell · brands live</div>
+          <div className="chat-shell__user-meta">Chat shell · Preview</div>
         </div>
         <Link
           to="/settings"
