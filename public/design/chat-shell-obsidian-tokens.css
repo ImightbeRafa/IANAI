@@ -1,7 +1,7 @@
 /**
  * IANAI chat-shell — Obsidian tokens (light + dark)
  * Reference mock: Scripts + creatives three-column shell (PatchHouse.CR).
- * Static design tokens only — not wired into the Vite app yet.
+ * Loaded by index.html for /chat (canonical runtime tokens).
  */
 
 :root {
