@@ -21,13 +21,26 @@ import {
   sendMessageToGrok,
 } from '../../services/grokApi'
 import type {
+  BrandKit,
   Business,
   ChatSession,
   ChatSessionOffer,
   Message,
   MessageArtifact,
   Product,
+  ScriptGenerationSettings,
 } from '../../types'
+import {
+  resolveBrandKitIdForProduct,
+} from './chatShellGenerationPreferences'
+import {
+  parseChatShellScriptIntent,
+  type ChatShellLanguage,
+} from './chatShellScriptIntent'
+import {
+  assignGlobalScriptOrdinals,
+  splitOfferScriptContent,
+} from './chatShellScriptSplit'
 import {
   addInFlightSession,
   isLiveThread,
@@ -59,18 +72,6 @@ import {
   uploadShellOfferImage,
 } from './chatShellImageApi'
 
-const SHELL_SCRIPT_SETTINGS = {
-  ...DEFAULT_SCRIPT_SETTINGS,
-  variations: 1,
-  generationMode: 'mixed' as const,
-  scriptTypeConfig: {
-    ...DEFAULT_SCRIPT_SETTINGS.scriptTypeConfig,
-    venta_directa: 1,
-    desvalidar_alternativas: 0,
-    mostrar_servicio: 0,
-  },
-}
-
 function buildLegacyProductContext(product: Product, additionalContext?: string) {
   return {
     product_name: product.name,
@@ -101,6 +102,8 @@ export interface FailedOfferBatch {
   productIds: string[]
   names: string[]
   userText: string
+  /** Snapshot from the original request — retries must not re-parse synthetic retry text. */
+  scriptSettings: ScriptGenerationSettings
 }
 
 export function useChatSessionThread(options: {
@@ -108,9 +111,21 @@ export function useChatSessionThread(options: {
   brand: Business | null
   session: ChatSession | null
   onSessionPatched?: (session: ChatSession) => void
+  language?: ChatShellLanguage
+  aiMemoryEnabled?: boolean
+  brandKits?: BrandKit[]
 }) {
-  const { userId, brand, session, onSessionPatched } = options
+  const {
+    userId,
+    brand,
+    session,
+    onSessionPatched,
+    language = 'es',
+    aiMemoryEnabled = true,
+    brandKits = [],
+  } = options
   const sessionId = session?.id ?? null
+  const storage = typeof localStorage !== 'undefined' ? localStorage : null
 
   const [messages, setMessages] = useState<Message[]>([])
   const [offers, setOffers] = useState<ChatSessionOffer[]>([])
@@ -435,7 +450,8 @@ export function useChatSessionThread(options: {
     steps: PlannedOfferStep[],
     originSessionId: string,
     originGen: number,
-    historyForApi: Message[]
+    historyForApi: Message[],
+    scriptSettings: ScriptGenerationSettings
   ) => {
     type OfferResult =
       | { ok: true; step: PlannedOfferStep; content: string; product: Product }
@@ -469,12 +485,13 @@ export function useChatSessionThread(options: {
           : buildApiBusinessContext(product.business)
         const prodCtx = buildApiProductContext(product)
         const channel = session?.primary_channel || undefined
+        const brandKitId = resolveBrandKitIdForProduct(step.productId, brandKits, storage)
 
         const ai = await sendMessageToGrok(
           historyForApi,
           businessDetails,
-          'es',
-          SHELL_SCRIPT_SETTINGS,
+          language,
+          scriptSettings,
           product.type,
           undefined,
           'script',
@@ -483,8 +500,8 @@ export function useChatSessionThread(options: {
           undefined,
           channel || undefined,
           step.productId,
-          true,
-          undefined,
+          aiMemoryEnabled,
+          brandKitId,
           undefined,
           originSessionId
         )
@@ -501,7 +518,7 @@ export function useChatSessionThread(options: {
     }
 
     return { aborted: false as const, results }
-  }, [offers, brandProducts, brand, session])
+  }, [offers, brandProducts, brand, session, language, aiMemoryEnabled, brandKits, storage])
 
   const persistSuccessfulBatch = useCallback(async (options: {
     originSessionId: string
@@ -530,34 +547,52 @@ export function useChatSessionThread(options: {
       return null
     }
 
+    const offerScriptBundles = successes.map((success) => {
+      const offerName = success.step.name || success.product.name || `Script ${success.step.ordinal}`
+      return {
+        success,
+        offerName,
+        scripts: splitOfferScriptContent(success.content, offerName),
+      }
+    })
+    const ranked = assignGlobalScriptOrdinals(offerScriptBundles)
+
     const artifacts: MessageArtifact[] = []
-    for (const success of successes) {
-      const title = success.step.name || success.product.name || `Script ${success.step.ordinal}`
-      const script = await saveScript(
-        originSessionId,
-        success.step.productId,
-        title,
-        success.content,
-        undefined,
-        {
-          edit_source: 'generate',
-          message_id: savedAi.id,
-          script_index: success.step.ordinal,
-        }
-      )
-      const artifact = await insertScriptMessageArtifact({
-        sessionId: originSessionId,
-        messageId: savedAi.id,
-        productId: success.step.productId,
-        scriptId: script.id,
-        ordinal: success.step.ordinal,
-        userId,
-        metadata: {
-          offer_name: title,
-          position: success.step.position,
-        },
-      })
-      artifacts.push(artifact)
+    for (const bundle of ranked) {
+      for (const scriptPart of bundle.scripts) {
+        const title =
+          scriptPart.title
+          && scriptPart.title !== bundle.offerName
+            ? `${bundle.offerName} · ${scriptPart.title}`
+            : bundle.offerName
+        const script = await saveScript(
+          originSessionId,
+          bundle.success.step.productId,
+          title,
+          scriptPart.content,
+          undefined,
+          {
+            edit_source: 'generate',
+            message_id: savedAi.id,
+            script_index: scriptPart.ordinal,
+          }
+        )
+        const artifact = await insertScriptMessageArtifact({
+          sessionId: originSessionId,
+          messageId: savedAi.id,
+          productId: bundle.success.step.productId,
+          scriptId: script.id,
+          ordinal: scriptPart.ordinal,
+          userId,
+          metadata: {
+            offer_name: bundle.offerName,
+            script_title: scriptPart.title,
+            position: bundle.success.step.position,
+            variant_index: scriptPart.index,
+          },
+        })
+        artifacts.push(artifact)
+      }
     }
 
     if (!isLiveThread(
@@ -633,6 +668,9 @@ export function useChatSessionThread(options: {
     setComposer('')
     setMessages((prev) => [...prev, optimisticUser])
 
+    const intent = parseChatShellScriptIntent(text, language, DEFAULT_SCRIPT_SETTINGS)
+    const scriptSettings = intent.settings
+
     try {
       const historyForApi = [...messages, optimisticUser]
       const { aborted, results } = await runOfferWalk(
@@ -640,7 +678,8 @@ export function useChatSessionThread(options: {
         walk,
         originSessionId,
         originGen,
-        historyForApi
+        historyForApi,
+        scriptSettings
       )
 
       if (aborted) return
@@ -704,6 +743,7 @@ export function useChatSessionThread(options: {
           productIds: failures.map((f) => f.step.productId),
           names: failures.map((f) => f.step.name || f.step.productId),
           userText: text,
+          scriptSettings,
         })
         setNotice(
           `Generated ${successes.length}/${walk.length} offers. Failed: ${failures
@@ -734,6 +774,7 @@ export function useChatSessionThread(options: {
     messages,
     inFlightSessions,
     userId,
+    language,
     runOfferWalk,
     persistSuccessfulBatch,
   ])
@@ -765,12 +806,14 @@ export function useChatSessionThread(options: {
 
     try {
       const historyForApi = [...messages, optimisticUser]
+      const scriptSettings = failedBatch.scriptSettings
       const { aborted, results } = await runOfferWalk(
         retryText,
         walk,
         originSessionId,
         originGen,
-        historyForApi
+        historyForApi,
+        scriptSettings
       )
       if (aborted) return
 
@@ -832,6 +875,7 @@ export function useChatSessionThread(options: {
           productIds: failures.map((f) => f.step.productId),
           names: failures.map((f) => f.step.name || f.step.productId),
           userText: failedBatch.userText,
+          scriptSettings,
         })
         setNotice(`Retry partial: ${failures.length} offer(s) still failed.`)
       } else {
@@ -943,14 +987,14 @@ export function useChatSessionThread(options: {
     return editScript(
       originalContent,
       instruction,
-      'es',
+      language,
       bizCtx,
       prodCtx,
       editType,
       session.id,
       productId
     )
-  }, [session, offerProductId, activeProduct, brand])
+  }, [session, offerProductId, activeProduct, brand, language])
 
   const selectImageOffer = useCallback((productId: string) => {
     setImageOfferId(productId)

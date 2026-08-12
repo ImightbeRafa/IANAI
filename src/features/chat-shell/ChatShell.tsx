@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Menu, PanelRight } from 'lucide-react'
-import type { ChatSession } from '../../types'
+import type { BrandKit, ChatSession } from '../../types'
+import { getBrandKits } from '../../services/database'
+import { useLanguage } from '../../contexts/LanguageContext'
 import ChatSidebar from './ChatSidebar'
 import ChatThread from './ChatThread'
 import ChatContextRail, { type RailTab } from './ChatContextRail'
@@ -8,6 +10,7 @@ import ThemeToggle from './ThemeToggle'
 import type { ChatShellTheme } from './chatShellTheme'
 import { useChatShellWorkspace } from './useChatShellWorkspace'
 import { useChatSessionThread } from './useChatSessionThread'
+import { readAiMemoryEnabled } from './chatShellGenerationPreferences'
 
 interface ChatShellProps {
   theme: ChatShellTheme
@@ -27,6 +30,11 @@ export default function ChatShell({
   const [navOpen, setNavOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(true)
   const [railTab, setRailTab] = useState<RailTab>('context')
+  const { language } = useLanguage()
+  const [brandKits, setBrandKits] = useState<BrandKit[]>([])
+  const [aiMemoryEnabled] = useState(() => readAiMemoryEnabled(
+    typeof localStorage !== 'undefined' ? localStorage : null
+  ))
   const workspace = useChatShellWorkspace(userId)
   const patchActiveSession = workspace.patchActiveSession
 
@@ -34,11 +42,29 @@ export default function ChatShell({
     patchActiveSession(session)
   }, [patchActiveSession])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const kits = await getBrandKits(userId)
+        if (!cancelled) setBrandKits(kits.filter((k) => k.is_active !== false))
+      } catch {
+        if (!cancelled) setBrandKits([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
+
   const thread = useChatSessionThread({
     userId,
     brand: workspace.activeBrand,
     session: workspace.activeSession,
     onSessionPatched,
+    language,
+    aiMemoryEnabled,
+    brandKits,
   })
 
   useEffect(() => {
@@ -200,6 +226,7 @@ export default function ChatShell({
           onSaveScript={thread.handleSaveScript}
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
+          language={language}
           onEditOfferImage={(productImageId, imageUrl, instruction, productId) =>
             thread.editOfferImage(productImageId, imageUrl, instruction, productId)
           }

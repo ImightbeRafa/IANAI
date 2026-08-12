@@ -31,6 +31,7 @@ interface ChatThreadProps {
   notice: string | null
   failedBatch: FailedOfferBatch | null
   onRetryFailedOffers: () => void
+  language?: 'en' | 'es'
   onSaveScript: (
     content: string,
     title: string,
@@ -66,6 +67,10 @@ interface ChatThreadProps {
 function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
   const content = artifact.script?.content
   if (!content) return null
+  const scriptTitle =
+    typeof artifact.action_metadata?.script_title === 'string'
+      ? artifact.action_metadata.script_title
+      : null
   const offerName =
     (typeof artifact.action_metadata?.offer_name === 'string'
       ? artifact.action_metadata.offer_name
@@ -73,9 +78,13 @@ function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null 
     || artifact.product?.name
     || artifact.script?.title
     || `Offer ${artifact.ordinal}`
+  const title =
+    scriptTitle && scriptTitle !== offerName
+      ? scriptTitle
+      : (artifact.script?.title || offerName)
   return {
     index: artifact.ordinal,
-    title: offerName,
+    title,
     content,
   }
 }
@@ -99,6 +108,7 @@ export default function ChatThread({
   notice,
   failedBatch,
   onRetryFailedOffers,
+  language = 'es',
   onSaveScript,
   onEditScript,
   onSaveVersion,
@@ -205,7 +215,7 @@ export default function ChatThread({
                         <ChatShellScriptCard
                           key={artifact.id}
                           script={parsed}
-                          language="es"
+                          language={language}
                           productName={productName}
                           productType={product?.type}
                           productId={productId}
@@ -272,7 +282,7 @@ export default function ChatThread({
                       <ChatShellScriptCard
                         key={`${message.id}-script-${script.index}`}
                         script={script}
-                        language="es"
+                        language={language}
                         productName={activeProduct?.name}
                         productType={activeProduct?.type}
                         productId={offerProductId || undefined}
