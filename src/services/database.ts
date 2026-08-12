@@ -550,33 +550,77 @@ export async function countBusinessChatSessions(businessId: string): Promise<num
 /**
  * Hard-delete a chat session (O1). Authz via existing 062 RLS
  * `chat_sessions_delete` → `can_write_chat_session(id)`.
- * Related offers/messages cascade via FKs. No soft-archive path.
  *
- * Prefers `.select('id')` so a silent RLS 0-row delete (parent or CASCADE
- * child policy gap) surfaces as a clear Error instead of a false success.
+ * Ordered cleanup first: clear thread linkage on posts / product_images so
+ * composite FK `(session_id, product_id) → chat_session_offers ON DELETE RESTRICT`
+ * becomes MATCH SIMPLE (null session_id) and offers can CASCADE with the session.
+ * Product ownership (`product_id`) and image/post assets are preserved.
+ *
+ * Fail-closed: `.select('id')` + throw on empty result or server error (incl. 23503).
+ * No soft-archive. Do not use `deleteSessionMessages` as hygiene.
  */
 export function assertChatSessionDeleteResult(
   data: Array<{ id: string }> | null | undefined
 ): void {
   if (!data || data.length === 0) {
     throw new Error(
-      'Session delete failed: no row deleted (RLS blocked or session missing). On Preview, CASCADE children need DELETE/UPDATE policies — see docs/operations/chat-shell-preview-rls.md.'
+      'Session not deleted (RLS or missing). On Preview, CASCADE children need DELETE/UPDATE policies and offer FK blockers must be cleared first — see docs/operations/chat-shell-preview-rls.md.'
     )
   }
+}
+
+export function formatChatSessionDeleteError(err: unknown): Error {
+  if (err instanceof Error && !(err as Error & { code?: string }).code) {
+    // Prefer Postgrest-style shape when present on plain objects
+  }
+  if (err && typeof err === 'object') {
+    const row = err as { message?: string; code?: string; details?: string; hint?: string }
+    if (row.message || row.code) {
+      const code = row.code ? ` [${row.code}]` : ''
+      const details = row.details ? ` ${row.details}` : ''
+      return new Error(`${row.message || 'Session delete failed'}${code}${details}`.trim())
+    }
+  }
+  if (err instanceof Error) return err
+  return new Error(String(err || 'Session delete failed'))
+}
+
+/** Clear session/message thread links so offer RESTRICT FKs do not block session delete. */
+async function clearSessionThreadLinkages(sessionId: string): Promise<void> {
+  const { error: imagesErr } = await supabase
+    .from('product_images')
+    .update({ session_id: null, message_id: null })
+    .eq('session_id', sessionId)
+
+  if (imagesErr) throw formatChatSessionDeleteError(imagesErr)
+
+  const { error: postsErr } = await supabase
+    .from('posts')
+    .update({ session_id: null, message_id: null })
+    .eq('session_id', sessionId)
+
+  if (postsErr) throw formatChatSessionDeleteError(postsErr)
 }
 
 export async function deleteChatSession(sessionId: string): Promise<void> {
   if (!sessionId) {
     throw new Error('Session delete failed: missing session id.')
   }
-  const { data, error } = await supabase
-    .from('chat_sessions')
-    .delete()
-    .eq('id', sessionId)
-    .select('id')
 
-  if (error) throw error
-  assertChatSessionDeleteResult(data)
+  try {
+    await clearSessionThreadLinkages(sessionId)
+
+    const { data, error } = await supabase
+      .from('chat_sessions')
+      .delete()
+      .eq('id', sessionId)
+      .select('id')
+
+    if (error) throw formatChatSessionDeleteError(error)
+    assertChatSessionDeleteResult(data)
+  } catch (err) {
+    throw formatChatSessionDeleteError(err)
+  }
 }
 
 /** First user-message preview per session (for sidebar titles). */

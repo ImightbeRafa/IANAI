@@ -366,21 +366,34 @@ CoS can re-smoke Upload `tiny.png` against Preview even before the tip (storage 
 
 ### Symptom (O1 CoS smoke)
 
-Sidebar Delete called hard `deleteChatSession` but toast showed **Failed to delete session**; reload restored rows. Client `.delete().eq('id')` + 062 `chat_sessions_delete` (`can_write_chat_session(id)`) were correct — failure was **CASCADE / SET NULL child RLS**.
+Sidebar Delete called hard `deleteChatSession` but toast showed **Failed to delete session**; reload restored rows.
 
-### Root cause
+### Root causes (both matter)
 
-Deleting a real QA session (messages + artifacts + session-linked product images) failed because child tables had RLS on without matching DELETE/UPDATE policies:
+#### 1) CASCADE child RLS (supporting; necessary but not sufficient)
+
+Child tables had RLS on without matching DELETE/UPDATE policies:
 
 | Child | Parent FK | Gap |
 | --- | --- | --- |
 | `messages` | ON DELETE CASCADE from `chat_sessions` | no DELETE policy |
 | `message_artifacts` | CASCADE (via message/session) | no DELETE policy |
 | `context_documents` | CASCADE | RLS on, zero policies |
-| `product_images` | ON DELETE SET NULL from `chat_sessions` | no UPDATE policy (SET NULL blocked); offer FK ON DELETE RESTRICT also blocks when images remain offer-bound |
+| `product_images` | ON DELETE SET NULL from `chat_sessions` | no UPDATE policy (SET NULL blocked) |
 | `scripts` | session-linked | DELETE too strict for some session-owned rows |
 
-### Preview fix (ops — already live; do NOT re-apply in tip)
+#### 2) Offer FK **ON DELETE RESTRICT** race (P0 — SecureDog)
+
+062 attaches composite FKs:
+
+```text
+posts (session_id, product_id)          → chat_session_offers ON DELETE RESTRICT
+product_images (session_id, product_id) → chat_session_offers ON DELETE RESTRICT
+```
+
+Session delete → `chat_session_offers` CASCADE is **blocked** while posts/images still point at those offers. Clearing `session_id` alone via parent SET NULL does not clear the composite in time for MATCH SIMPLE.
+
+### Preview supporting policies (ops — already live; do NOT re-apply)
 
 Migration name on IANAI-preview: **`preview_chat_session_delete_cascade_rls`**
 
@@ -390,13 +403,26 @@ Migration name on IANAI-preview: **`preview_chat_session_delete_cascade_rls`**
 - `product_images_update_own` — `FOR UPDATE` so SET NULL can clear `session_id`
 - `scripts_delete` softened — `can_write_chat_session AND (product_id IS NULL OR can_write_product(product_id))`
 
-### Client harden (chat-shell tip)
+These remain required for CASCADE children. **They are not sufficient alone** without ordered client cleanup (below).
 
-`deleteChatSession` uses `.delete().eq('id', sessionId).select('id')` and throws a clear Error if **zero rows** return (silent RLS / missing session). Still **hard delete only** — no soft-archive; do not use `deleteSessionMessages` as hygiene.
+### Client fix (chat-shell tip) — ordered cleanup + fail-closed
+
+`deleteChatSession` (hard delete only; **no soft-archive**):
+
+1. **Before** session delete, clear thread linkage on owned blockers **without** destroying product ownership:
+   - `product_images`: `UPDATE SET session_id = NULL, message_id = NULL WHERE session_id = :id` (keeps `product_id`)
+   - `posts`: same
+2. Hard-delete `chat_sessions` where `id = :id`.
+3. With `session_id` null, MATCH SIMPLE skips offer RESTRICT → offers CASCADE with the session.
+4. Fail-closed: `.delete().eq('id').select('id')` — throw server `message`/`code` (e.g. **23503**) on error; throw clear “Session not deleted (RLS or missing)” on empty `data`.
+5. Do **not** use `deleteSessionMessages` as hygiene. Do **not** CASCADE-delete product_images/posts when offers go away.
 
 ### Cutover must include (not tonight)
 
-Before production cutover GO, prod AIIAN must get **matching** child DELETE/UPDATE policies (same intent as `preview_chat_session_delete_cascade_rls`). Parent `chat_sessions_delete` alone is not enough for real sessions with messages/artifacts/images.
+Before production cutover GO, prod AIIAN must get:
+
+1. Matching child DELETE/UPDATE policies (same intent as `preview_chat_session_delete_cascade_rls`), **and**
+2. The same FK strategy (client ordered cleanup and/or schema change) so offer RESTRICT cannot block session delete.
 
 **Do not apply Preview cascade DELETE/UPDATE policies onto prod from this tip.**
 

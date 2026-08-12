@@ -83,4 +83,18 @@ describe('brand open persistence', () => {
     writeBrandOpen(storage, 'b1', false)
     expect(readBrandOpen(storage, 'b1')).toBe(false)
   })
+
+  it('honors explicit collapse (0) vs null default', () => {
+    const store: Record<string, string> = {
+      'ianai.sidebar.brandOpen.active': '0',
+    }
+    const storage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v
+      },
+    }
+    expect(readBrandOpen(storage, 'active')).toBe(false)
+    expect(readBrandOpen(storage, 'other')).toBeNull()
+  })
 })
