@@ -589,6 +589,7 @@
   color: var(--text-faint);
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   padding: 0;
 }
 
@@ -596,6 +597,7 @@
 .chat-shell__session-row:focus-within .chat-shell__session-more,
 .chat-shell__session-more[aria-expanded='true'] {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-shell__session-more:hover {
@@ -607,13 +609,12 @@
   outline: none;
   box-shadow: var(--focus-ring);
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-shell__session-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 2px);
-  z-index: 5;
+  position: fixed;
+  z-index: 60;
   min-width: 112px;
   padding: 4px;
   border-radius: 8px;
@@ -645,10 +646,8 @@
 }
 
 .chat-shell__session-confirm {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 2px);
-  z-index: 5;
+  position: fixed;
+  z-index: 60;
   display: flex;
   gap: 4px;
   padding: 4px;

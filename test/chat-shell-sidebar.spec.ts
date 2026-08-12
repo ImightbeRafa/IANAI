@@ -3,9 +3,12 @@ import {
   brandOpenStorageKey,
   formatRelativeSessionTime,
   isDefaultSessionTitle,
+  openSessionActionMenu,
+  openSessionDeleteConfirm,
   readBrandOpen,
   resolveBrandOpenMap,
   resolveSessionSidebarTitle,
+  sessionActionAnchorFromRect,
   truncateSidebarTitle,
   writeBrandOpen,
 } from '../src/features/chat-shell/chatShellSidebar'
@@ -178,5 +181,38 @@ describe('brand open persistence', () => {
     })
     expect(back.b1).toBe(false) // stored 0 still wins
     expect(store['ianai.sidebar.brandOpen.b1']).toBe('0') // name/URL path must not write 1 over 0
+  })
+})
+
+describe('session ⋯ action panel', () => {
+  it('anchors menu under the triggering more button', () => {
+    expect(
+      sessionActionAnchorFromRect({ bottom: 120.4, right: 300.2 }, 800)
+    ).toEqual({ top: 122, right: 500 })
+  })
+
+  it('toggles menu and clears prior confirm when opening another row', () => {
+    const a = openSessionActionMenu(null, 's1', { top: 10, right: 10 })
+    expect(a).toEqual({ kind: 'menu', sessionId: 's1', anchor: { top: 10, right: 10 } })
+    expect(openSessionActionMenu(a, 's1', { top: 10, right: 10 })).toBeNull()
+
+    const confirm = openSessionDeleteConfirm('s1', { top: 10, right: 10 })
+    expect(confirm.kind).toBe('confirm')
+    expect(confirm.sessionId).toBe('s1')
+
+    // Opening ⋯ on another row replaces confirm (one panel globally).
+    const other = openSessionActionMenu(confirm, 's2', { top: 40, right: 12 })
+    expect(other).toEqual({ kind: 'menu', sessionId: 's2', anchor: { top: 40, right: 12 } })
+  })
+
+  it('confirm keeps the captured session id (2-step; never instant)', () => {
+    const menu = openSessionActionMenu(null, 'captured', { top: 1, right: 2 })
+    expect(menu?.sessionId).toBe('captured')
+    const confirm = openSessionDeleteConfirm(menu!.sessionId, menu!.anchor)
+    expect(confirm).toEqual({
+      kind: 'confirm',
+      sessionId: 'captured',
+      anchor: { top: 1, right: 2 },
+    })
   })
 })

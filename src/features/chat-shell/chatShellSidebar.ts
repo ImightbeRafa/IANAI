@@ -65,6 +65,41 @@ export function resolveBrandOpenMap(options: {
   return next
 }
 
+/** Fixed-position anchor for session ⋯ menu / confirm (viewport coords). */
+export type SessionActionAnchor = { top: number; right: number }
+
+export type SessionActionPanel =
+  | { kind: 'menu'; sessionId: string; anchor: SessionActionAnchor }
+  | { kind: 'confirm'; sessionId: string; anchor: SessionActionAnchor }
+
+export function sessionActionAnchorFromRect(
+  rect: Pick<DOMRect, 'bottom' | 'right'>,
+  viewportWidth: number
+): SessionActionAnchor {
+  return {
+    top: Math.round(rect.bottom + 2),
+    right: Math.round(Math.max(0, viewportWidth - rect.right)),
+  }
+}
+
+/** Toggle/open menu; clears any prior confirm (one panel globally). */
+export function openSessionActionMenu(
+  current: SessionActionPanel | null,
+  sessionId: string,
+  anchor: SessionActionAnchor
+): SessionActionPanel | null {
+  if (current?.kind === 'menu' && current.sessionId === sessionId) return null
+  return { kind: 'menu', sessionId, anchor }
+}
+
+/** Always 2-step: menu Delete → confirm with captured session id. */
+export function openSessionDeleteConfirm(
+  sessionId: string,
+  anchor: SessionActionAnchor
+): SessionActionPanel {
+  return { kind: 'confirm', sessionId, anchor }
+}
+
 /** Default / spam titles that should not win over first message or relative time. */
 export function isDefaultSessionTitle(title?: string | null): boolean {
   const t = (title || '').trim()

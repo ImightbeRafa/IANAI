@@ -11,10 +11,14 @@ import {
 } from 'lucide-react'
 import type { Business, ChatSession } from '../../types'
 import {
+  openSessionActionMenu,
+  openSessionDeleteConfirm,
   readBrandOpen,
   resolveBrandOpenMap,
   resolveSessionSidebarTitle,
+  sessionActionAnchorFromRect,
   SIDEBAR_SESSION_VISIBLE_CAP,
+  type SessionActionPanel,
   writeBrandOpen,
 } from './chatShellSidebar'
 
@@ -39,6 +43,11 @@ interface ChatSidebarProps {
   onNewSession: () => void
   onNewBrand: () => void
   onDeleteSession: (sessionId: string) => void | Promise<void>
+}
+
+function isolateMorePointer(e: { preventDefault(): void; stopPropagation(): void }) {
+  e.preventDefault()
+  e.stopPropagation()
 }
 
 export default function ChatSidebar({
@@ -67,8 +76,7 @@ export default function ChatSidebar({
   const storage = typeof localStorage !== 'undefined' ? localStorage : null
   const [openByBrand, setOpenByBrand] = useState<Record<string, boolean>>({})
   const [showAllByBrand, setShowAllByBrand] = useState<Record<string, boolean>>({})
-  const [menuSessionId, setMenuSessionId] = useState<string | null>(null)
-  const [confirmSessionId, setConfirmSessionId] = useState<string | null>(null)
+  const [sessionAction, setSessionAction] = useState<SessionActionPanel | null>(null)
 
   // Hydrate from localStorage first. Honor explicit `0`. Never writeBrandOpen from this effect.
   useEffect(() => {
@@ -83,16 +91,25 @@ export default function ChatSidebar({
   }, [businesses, activeBrandId, storage])
 
   useEffect(() => {
-    if (!menuSessionId && !confirmSessionId) return
+    if (!sessionAction) return
     const onDoc = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       if (target?.closest('[data-session-menu]')) return
-      setMenuSessionId(null)
-      setConfirmSessionId(null)
+      setSessionAction(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSessionAction(null)
+      }
     }
     document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [menuSessionId, confirmSessionId])
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [sessionAction])
 
   const sessionsByBrand = useMemo(() => {
     const map = new Map<string, ChatSession[]>()
@@ -120,6 +137,26 @@ export default function ChatSidebar({
   // Name click selects brand only — never writeBrandOpen(true) / force-open (chevron is the only LS writer).
   const selectBrand = (brandId: string) => {
     onSelectBrand(brandId)
+  }
+
+  const openMoreMenu = (sessionId: string, button: HTMLElement) => {
+    const anchor = sessionActionAnchorFromRect(
+      button.getBoundingClientRect(),
+      window.innerWidth
+    )
+    setSessionAction((prev) => openSessionActionMenu(prev, sessionId, anchor))
+  }
+
+  const requestDeleteConfirm = (sessionId: string, anchor: SessionActionPanel['anchor']) => {
+    const capturedSessionId = sessionId
+    setSessionAction(openSessionDeleteConfirm(capturedSessionId, anchor))
+  }
+
+  const confirmDelete = () => {
+    if (!sessionAction || sessionAction.kind !== 'confirm' || busy) return
+    const capturedSessionId = sessionAction.sessionId
+    setSessionAction(null)
+    void onDeleteSession(capturedSessionId)
   }
 
   return (
@@ -262,14 +299,12 @@ export default function ChatSidebar({
                     })
                     const isQuick = session.product_id == null
                     const selected = session.id === activeSessionId
-                    const menuOpen = menuSessionId === session.id
-                    const confirming = confirmSessionId === session.id
+                    const moreExpanded = sessionAction?.sessionId === session.id
 
                     return (
                       <div
                         key={session.id}
                         className={`chat-shell__session-row${selected ? ' is-selected' : ''}`}
-                        data-session-menu={menuOpen || confirming ? '1' : undefined}
                       >
                         <button
                           type="button"
@@ -292,58 +327,17 @@ export default function ChatSidebar({
                             className="chat-shell__session-more"
                             aria-label={`Session actions for ${label}`}
                             aria-haspopup="menu"
-                            aria-expanded={menuOpen}
+                            aria-expanded={moreExpanded}
                             disabled={busy}
+                            data-session-menu={moreExpanded ? '1' : undefined}
+                            onPointerDown={isolateMorePointer}
                             onClick={(e) => {
-                              e.stopPropagation()
-                              setConfirmSessionId(null)
-                              setMenuSessionId((id) => (id === session.id ? null : session.id))
+                              isolateMorePointer(e)
+                              openMoreMenu(session.id, e.currentTarget)
                             }}
                           >
                             <MoreHorizontal size={14} aria-hidden />
                           </button>
-                          {menuOpen && !confirming && (
-                            <div className="chat-shell__session-menu" role="menu">
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="chat-shell__session-menu-item is-danger"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setConfirmSessionId(session.id)
-                                  setMenuSessionId(null)
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                          {confirming && (
-                            <div className="chat-shell__session-confirm" role="group" aria-label="Confirm delete">
-                              <button
-                                type="button"
-                                className="chat-shell__session-confirm-btn"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setConfirmSessionId(null)
-                                }}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                className="chat-shell__session-confirm-btn is-danger"
-                                disabled={busy}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setConfirmSessionId(null)
-                                  void onDeleteSession(session.id)
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
                         </div>
                       </div>
                     )
@@ -396,6 +390,63 @@ export default function ChatSidebar({
           + New brand…
         </button>
       </div>
+
+      {sessionAction?.kind === 'menu' && (
+        <div
+          className="chat-shell__session-menu"
+          role="menu"
+          data-session-menu="1"
+          style={{ top: sessionAction.anchor.top, right: sessionAction.anchor.right }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="chat-shell__session-menu-item is-danger"
+            onPointerDown={isolateMorePointer}
+            onClick={(e) => {
+              isolateMorePointer(e)
+              requestDeleteConfirm(sessionAction.sessionId, sessionAction.anchor)
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+
+      {sessionAction?.kind === 'confirm' && (
+        <div
+          className="chat-shell__session-confirm"
+          role="group"
+          aria-label="Confirm delete"
+          data-session-menu="1"
+          style={{ top: sessionAction.anchor.top, right: sessionAction.anchor.right }}
+        >
+          <button
+            type="button"
+            className="chat-shell__session-confirm-btn"
+            disabled={busy}
+            onPointerDown={isolateMorePointer}
+            onClick={(e) => {
+              isolateMorePointer(e)
+              setSessionAction(null)
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="chat-shell__session-confirm-btn is-danger"
+            disabled={busy}
+            onPointerDown={isolateMorePointer}
+            onClick={(e) => {
+              isolateMorePointer(e)
+              confirmDelete()
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
 
       <div className="chat-shell__user">
         <div className="chat-shell__avatar" aria-hidden>{initials}</div>

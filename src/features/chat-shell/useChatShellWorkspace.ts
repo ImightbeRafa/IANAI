@@ -65,6 +65,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const sessionsRequestIdRef = useRef(0)
   const businessesRequestIdRef = useRef(0)
   const createLockRef = useRef(false)
+  /** Tombstones for optimistic deletes — prevent stale list fetch from restoring rows. */
+  const pendingDeletedRef = useRef<Set<string>>(new Set())
   /** True after initial selection hydrate for the current user (list refresh still works). */
   const didHydrateSelectionRef = useRef(false)
   const hydratedUserIdRef = useRef<string | null>(null)
@@ -236,7 +238,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
     void (async () => {
       try {
-        const list = await getBusinessChatSessions(brandId)
+        const list = (await getBusinessChatSessions(brandId)).filter(
+          (s) => !pendingDeletedRef.current.has(s.id)
+        )
         if (cancelled || requestId !== sessionsRequestIdRef.current) return
         if (activeBrandIdRef.current !== brandId) return
 
@@ -247,10 +251,13 @@ export function useChatShellWorkspace(userId: string | undefined) {
         // live selection (create can race ahead of the server list).
         setSessions((prev) => {
           const optimistic =
-            currentId && !list.some((s) => s.id === currentId)
+            currentId &&
+            !pendingDeletedRef.current.has(currentId) &&
+            !list.some((s) => s.id === currentId)
               ? prev.filter((s) => s.id === currentId)
               : []
-          return optimistic.length === 0 ? list : [...optimistic, ...list]
+          const next = optimistic.length === 0 ? list : [...optimistic, ...list]
+          return next.filter((s) => !pendingDeletedRef.current.has(s.id))
         })
         setSessionCounts((prev) => ({ ...prev, [brandId]: list.length }))
 
@@ -270,7 +277,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
         // Read selection at completion time (never use stale start-of-request preferred).
         const nextSessionId = resolveNextSessionId({
           sessionIds: list.map((s) => s.id),
-          currentId,
+          currentId:
+            currentId && pendingDeletedRef.current.has(currentId) ? null : currentId,
           urlId: readUrlSessionId(),
           preferredId: preferredSessionRef.current,
         })
@@ -444,45 +452,78 @@ export function useChatShellWorkspace(userId: string | undefined) {
   /**
    * Sidebar Delete (O1): hard deleteChatSession via 062 RLS.
    * Soft-archive is not used. deleteSessionMessages is not used as hygiene.
-   * Errors surface via err.message (server / fail-closed cleanup), not a generic-only toast.
+   * Optimistic list removal with rollback; fail-closed server delete unchanged.
    */
   const deleteSession = useCallback(async (sessionId: string) => {
     if (!sessionId || busy) return
+    if (pendingDeletedRef.current.has(sessionId)) return
+
     const brandId = activeBrandIdRef.current
     const wasActive = activeSessionIdRef.current === sessionId
+    const sessionsSnapshot = sessions
     const siblings = sessions.filter((s) => s.id !== sessionId)
+    const prevCount = brandId != null ? sessionCounts[brandId] : undefined
+    const prevPreview = firstUserPreviews[sessionId]
+    const prevActiveId = activeSessionIdRef.current
+
+    pendingDeletedRef.current.add(sessionId)
+    bumpSelectionEpoch()
     setBusy(true)
     setError(null)
+
+    setSessions(siblings)
+    setFirstUserPreviews((prev) => {
+      if (!(sessionId in prev)) return prev
+      const next = { ...prev }
+      delete next[sessionId]
+      return next
+    })
+    if (brandId) {
+      setSessionCounts((prev) => ({
+        ...prev,
+        [brandId]: Math.max(0, (prev[brandId] ?? siblings.length + 1) - 1),
+      }))
+    }
+    if (wasActive) {
+      const fallback = siblings[0] ?? null
+      preferredSessionRef.current = fallback?.id ?? null
+      commitSessionId(fallback?.id ?? null)
+      syncUrlAndStorage(brandId, fallback?.id ?? null)
+    }
+
     try {
       await deleteChatSession(sessionId)
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId))
-      setFirstUserPreviews((prev) => {
-        if (!(sessionId in prev)) return prev
-        const next = { ...prev }
-        delete next[sessionId]
-        return next
-      })
-      if (brandId) {
-        setSessionCounts((prev) => ({
-          ...prev,
-          [brandId]: Math.max(0, (prev[brandId] ?? siblings.length + 1) - 1),
-        }))
-      }
-      if (wasActive) {
-        const fallback = siblings[0] ?? null
-        preferredSessionRef.current = fallback?.id ?? null
-        bumpSelectionEpoch()
-        commitSessionId(fallback?.id ?? null)
-        syncUrlAndStorage(brandId, fallback?.id ?? null)
-      }
       setNotice(null)
+      pendingDeletedRef.current.delete(sessionId)
     } catch (err) {
       console.error(err)
+      pendingDeletedRef.current.delete(sessionId)
+      setSessions(sessionsSnapshot)
+      if (prevPreview !== undefined) {
+        setFirstUserPreviews((prev) => ({ ...prev, [sessionId]: prevPreview }))
+      }
+      if (brandId != null && prevCount !== undefined) {
+        setSessionCounts((prev) => ({ ...prev, [brandId]: prevCount }))
+      }
+      if (wasActive) {
+        preferredSessionRef.current = sessionId
+        bumpSelectionEpoch()
+        commitSessionId(prevActiveId)
+        syncUrlAndStorage(brandId, prevActiveId)
+      }
       setError(err instanceof Error ? err.message : 'Failed to delete session')
     } finally {
       setBusy(false)
     }
-  }, [busy, sessions, bumpSelectionEpoch, commitSessionId, syncUrlAndStorage])
+  }, [
+    busy,
+    sessions,
+    sessionCounts,
+    firstUserPreviews,
+    bumpSelectionEpoch,
+    commitSessionId,
+    syncUrlAndStorage,
+  ])
 
   /** Touch-load single session meta if missing from list (URL deep link). */
   useEffect(() => {
