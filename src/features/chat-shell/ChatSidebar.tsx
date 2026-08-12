@@ -183,9 +183,10 @@ export default function ChatSidebar({
           <input
             id="chat-shell-search"
             className="chat-shell__search"
-            placeholder="Search..."
+            placeholder="Search — soon"
             disabled
             aria-disabled="true"
+            title="Search coming soon"
           />
         </div>
       </div>
@@ -217,14 +218,17 @@ export default function ChatSidebar({
         {!loadingBusinesses && businesses.length === 0 && (
           <div className="chat-shell__nav-empty chat-shell__nav-empty--brands">
             <div className="chat-shell__nav-empty-copy">No brands yet</div>
+            <p className="chat-shell__nav-empty-detail">
+              Create your first brand to start chatting.
+            </p>
             <button
               type="button"
-              className="chat-shell__nav-item chat-shell__nav-button"
+              className="chat-shell__nav-item chat-shell__nav-button chat-shell__nav-empty-cta"
               onClick={onNewBrand}
               disabled={busy || loadingBusinesses}
               aria-disabled={busy || loadingBusinesses}
             >
-              + New brand…
+              New brand
             </button>
           </div>
         )}
@@ -281,14 +285,17 @@ export default function ChatSidebar({
                   {!loadingSessions && brandSessions.length === 0 && (
                     <div className="chat-shell__nav-empty">
                       <div className="chat-shell__nav-empty-copy">No chats yet</div>
+                      <p className="chat-shell__nav-empty-detail">
+                        Start a chat for this brand.
+                      </p>
                       <button
                         type="button"
-                        className="chat-shell__nav-sub chat-shell__nav-button"
+                        className="chat-shell__nav-sub chat-shell__nav-button chat-shell__nav-empty-cta"
                         onClick={onNewSession}
                         disabled={!canCreate}
                         aria-disabled={!canCreate}
                       >
-                        + New chat
+                        New chat
                       </button>
                     </div>
                   )}
@@ -453,7 +460,7 @@ export default function ChatSidebar({
         <div className="chat-shell__user-copy">
           <div className="chat-shell__user-name">
             <span className="chat-shell__user-name-text">{displayName}</span>
-            <span className="chat-shell__badge">Pro</span>
+            <span className="chat-shell__badge" title="Chat shell Preview">Preview</span>
           </div>
           <div className="chat-shell__user-meta">Chat shell · brands live</div>
         </div>
