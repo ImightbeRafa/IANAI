@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   createBrandChatSession,
   countBusinessChatSessions,
+  createBusiness,
   deleteChatSession,
   getBusinessChatSessions,
   getBusinesses,
@@ -18,6 +19,7 @@ import {
   selectionFromSearchParams,
   selectionToSearchParams,
 } from './chatShellPersistence'
+import { buildMinimalBrandFormData, validateBrandCreateName } from './chatShellBrandCreate'
 import { resolveNextSessionId } from './sessionOffer'
 
 function defaultSessionTitle(): string {
@@ -383,6 +385,58 @@ export function useChatShellWorkspace(userId: string | undefined) {
     }
   }, [userId, businesses, busy, bumpSelectionEpoch, syncUrlAndStorage, commitSessionId])
 
+  /**
+   * O3: in-shell New brand — createBusiness + first session, stay on /chat.
+   * Never navigates to /dashboard. Returns true on success.
+   */
+  const createBrand = useCallback(async (name: string): Promise<boolean> => {
+    if (!userId) return false
+    const validation = validateBrandCreateName(name)
+    if (validation) {
+      setError(validation)
+      return false
+    }
+    if (createLockRef.current || busy) return false
+    createLockRef.current = true
+    const epoch = bumpSelectionEpoch()
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const brand = await createBusiness(userId, buildMinimalBrandFormData(name))
+      if (selectionEpochRef.current !== epoch) return false
+
+      setBusinesses((prev) => [brand, ...prev.filter((b) => b.id !== brand.id)])
+      setSessionCounts((prev) => ({ ...prev, [brand.id]: 0 }))
+
+      preferredSessionRef.current = null
+      activeBrandIdRef.current = brand.id
+      setActiveBrandId(brand.id)
+
+      const session = await createBrandChatSession(
+        brand.id,
+        userId,
+        defaultSessionTitle()
+      )
+      if (selectionEpochRef.current !== epoch) return false
+
+      preferredSessionRef.current = session.id
+      setSessions([session])
+      setSessionCounts((prev) => ({ ...prev, [brand.id]: 1 }))
+      commitSessionId(session.id)
+      syncUrlAndStorage(brand.id, session.id)
+      setNotice(null)
+      return true
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : 'Failed to create brand')
+      return false
+    } finally {
+      createLockRef.current = false
+      setBusy(false)
+    }
+  }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, commitSessionId])
+
   const patchActiveSession = useCallback((next: ChatSession) => {
     setSessions((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)))
   }, [])
@@ -483,6 +537,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     selectSession,
     createSession,
     createQuickSession,
+    createBrand,
     deleteSession,
     patchActiveSession,
     refreshBusinesses,

@@ -37,6 +37,7 @@ interface ChatSidebarProps {
   onNewChat: () => void
   onQuickGenerate: () => void
   onNewSession: () => void
+  onNewBrand: () => void
   onDeleteSession: (sessionId: string) => void | Promise<void>
 }
 
@@ -59,6 +60,7 @@ export default function ChatSidebar({
   onNewChat,
   onQuickGenerate,
   onNewSession,
+  onNewBrand,
   onDeleteSession,
 }: ChatSidebarProps) {
   const canCreate = Boolean(activeBrandId) && !busy
@@ -176,7 +178,18 @@ export default function ChatSidebar({
           <div className="chat-shell__nav-item">Loading brands…</div>
         )}
         {!loadingBusinesses && businesses.length === 0 && (
-          <div className="chat-shell__nav-item">No brands yet</div>
+          <div className="chat-shell__nav-empty chat-shell__nav-empty--brands">
+            <div className="chat-shell__nav-empty-copy">No brands yet</div>
+            <button
+              type="button"
+              className="chat-shell__nav-item chat-shell__nav-button"
+              onClick={onNewBrand}
+              disabled={busy}
+              aria-disabled={busy}
+            >
+              + New brand…
+            </button>
+          </div>
         )}
         {businesses.map((brand) => {
           const isActive = brand.id === activeBrandId
@@ -373,9 +386,15 @@ export default function ChatSidebar({
             </div>
           )
         })}
-        <Link to="/dashboard" className="chat-shell__nav-item chat-shell__nav-link">
+        <button
+          type="button"
+          className="chat-shell__nav-item chat-shell__nav-button chat-shell__nav-link"
+          onClick={onNewBrand}
+          disabled={busy}
+          aria-disabled={busy}
+        >
           + New brand…
-        </Link>
+        </button>
       </div>
 
       <div className="chat-shell__user">

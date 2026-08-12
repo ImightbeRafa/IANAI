@@ -4,6 +4,7 @@ import type { BrandKit, ChatSession } from '../../types'
 import { getBrandKits } from '../../services/database'
 import { useLanguage } from '../../contexts/LanguageContext'
 import ChatSidebar from './ChatSidebar'
+import ChatBrandCreateModal from './ChatBrandCreateModal'
 import ChatThread from './ChatThread'
 import ChatContextRail, { type RailTab } from './ChatContextRail'
 import ThemeToggle from './ThemeToggle'
@@ -30,6 +31,7 @@ export default function ChatShell({
   const [navOpen, setNavOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(true)
   const [railTab, setRailTab] = useState<RailTab>('context')
+  const [brandCreateOpen, setBrandCreateOpen] = useState(false)
   const { language } = useLanguage()
   const [brandKits, setBrandKits] = useState<BrandKit[]>([])
   const [aiMemoryEnabled] = useState(() => readAiMemoryEnabled(
@@ -78,13 +80,14 @@ export default function ChatShell({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (brandCreateOpen) return
         setNavOpen(false)
         setRailOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [brandCreateOpen])
 
   // New / empty session → open Context so the setup interview is visible.
   useEffect(() => {
@@ -105,6 +108,20 @@ export default function ChatShell({
     setRailTab(tab)
     setRailOpen(true)
   }
+
+  const openBrandCreate = useCallback(() => {
+    setBrandCreateOpen(true)
+  }, [])
+
+  const closeBrandCreate = useCallback(() => {
+    if (workspace.busy) return
+    setBrandCreateOpen(false)
+  }, [workspace.busy])
+
+  const submitBrandCreate = useCallback(async (name: string) => {
+    const ok = await workspace.createBrand(name)
+    if (ok) setBrandCreateOpen(false)
+  }, [workspace])
 
   const shellClass = [
     'chat-shell',
@@ -155,7 +172,16 @@ export default function ChatShell({
         onNewChat={() => void workspace.createSession()}
         onQuickGenerate={() => void workspace.createQuickSession()}
         onNewSession={() => void workspace.createSession()}
+        onNewBrand={openBrandCreate}
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
+      />
+
+      <ChatBrandCreateModal
+        open={brandCreateOpen}
+        busy={workspace.busy}
+        error={brandCreateOpen ? workspace.error : null}
+        onClose={closeBrandCreate}
+        onSubmit={submitBrandCreate}
       />
 
       <section className="chat-shell__main">
