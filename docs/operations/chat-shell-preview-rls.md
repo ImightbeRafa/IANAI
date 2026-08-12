@@ -144,6 +144,60 @@ Checklist:
 2. Expect assistant reply + script card (not immediate usage block).  
 3. Confirm production AIIAN `plan_limits` / subscriptions were **not** modified.
 
+## `scripts` deny-all / Guardar 403 (Preview)
+
+### Symptom
+
+On Preview `/chat`, generate succeeds and the ScriptCard appears, but **Guardar** fails with UI **"Failed to save script"**. Browser console shows **403** on:
+
+```text
+POST …/rest/v1/scripts?select=*
+```
+
+(or equivalent PostgREST insert with `Prefer: return=representation`).
+
+### Root cause
+
+Same class of gap as earlier `businesses` / `products` deny-all: **`public.scripts` had RLS enabled with zero policies**. With RLS on and no policies, every authenticated client write/read is denied.
+
+Client `saveScript` uses `insert(…).select().single()` (`INSERT … RETURNING`). Both **INSERT** and **SELECT** must pass RLS for the inserting user, or the client gets 403 / no row back even when the UI otherwise works.
+
+### Preview-only policies (already applied by ops)
+
+**Hard rule:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) **ONLY**. **Do not run on production AIIAN** (`lstzfxsdmggkoaxfawny`). Do not mirror these policy names/shapes onto prod from this note.
+
+```sql
+-- IANAI-preview ONLY — do not run on production AIIAN
+CREATE POLICY "Users can view own scripts"
+  ON public.scripts FOR SELECT TO authenticated
+  USING (can_read_product(product_id) OR can_read_chat_session(session_id));
+
+CREATE POLICY "Users can insert own scripts"
+  ON public.scripts FOR INSERT TO authenticated
+  WITH CHECK (can_write_product(product_id) AND can_write_chat_session(session_id));
+
+CREATE POLICY "Users can update own scripts"
+  ON public.scripts FOR UPDATE TO authenticated
+  USING (can_write_product(product_id) OR can_write_chat_session(session_id))
+  WITH CHECK (can_write_product(product_id));
+
+CREATE POLICY "Users can delete own scripts"
+  ON public.scripts FOR DELETE TO authenticated
+  USING (can_write_product(product_id) OR can_write_chat_session(session_id));
+```
+
+Intent: SELECT / INSERT / UPDATE / DELETE for authenticated users who can access the related product and/or chat session via existing helpers. INSERT `WITH CHECK` requires write access to **both** product and session so shell saves stay scoped.
+
+### Verify steps (Preview QA)
+
+Use Preview QA user **`sup.rafa0412`** (see `docs/testing/chat-shell-preview-user.md`) on Preview QA Brand:
+
+1. Open Preview `/chat` → select **Preview QA Brand** → session with an offer attached.  
+2. Generate a script (composer send) so a ScriptCard appears.  
+3. Click **Guardar** on the card.  
+4. Expect: **no 403** on `POST …/rest/v1/scripts?select=*`; UI shows saved state; a `scripts` row is returned to the client (`INSERT … RETURNING`).  
+5. Confirm production AIIAN `scripts` RLS / policies were **not** modified.
+
 ## Related docs
 
 - Environment matrix: `docs/operations/chat-shell-environments.md`
