@@ -3,6 +3,9 @@ import { supabaseAdmin as supabase } from './supabase-admin.js'
 /**
  * Verify the authenticated user owns the product or is an accepted collaborator.
  * Used by service-role endpoints that bypass RLS.
+ *
+ * Chat-shell follow-up: extend with session/offer/business checks before cutover.
+ * See docs/security/chat-shell-api-authorization.md (P-1 plan; routes unchanged here).
  */
 export async function userHasProductAccess(userId: string, productId: string): Promise<boolean> {
   if (!supabase) return false
