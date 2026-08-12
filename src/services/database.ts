@@ -528,10 +528,60 @@ export async function getBusinessChatSessions(businessId: string): Promise<ChatS
     .from('chat_sessions')
     .select('*')
     .eq('business_id', businessId)
+    .neq('status', 'archived')
     .order('updated_at', { ascending: false })
 
   if (error) throw error
   return data || []
+}
+
+/** Lightweight per-brand session count for collapsed sidebar labels. */
+export async function countBusinessChatSessions(businessId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('chat_sessions')
+    .select('id', { count: 'exact', head: true })
+    .eq('business_id', businessId)
+    .neq('status', 'archived')
+
+  if (error) throw error
+  return count ?? 0
+}
+
+/**
+ * Hard-delete a chat session (O1). Authz via existing 062 RLS
+ * `chat_sessions_delete` → `can_write_chat_session(id)`.
+ * Related offers/messages cascade via FKs. No soft-archive path.
+ */
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  const { error } = await supabase
+    .from('chat_sessions')
+    .delete()
+    .eq('id', sessionId)
+
+  if (error) throw error
+}
+
+/** First user-message preview per session (for sidebar titles). */
+export async function getFirstUserMessagePreviews(
+  sessionIds: string[]
+): Promise<Record<string, string>> {
+  if (sessionIds.length === 0) return {}
+  const { data, error } = await supabase
+    .from('messages')
+    .select('session_id, content, created_at')
+    .in('session_id', sessionIds)
+    .eq('role', 'user')
+    .order('created_at', { ascending: true })
+
+  if (error) throw error
+  const out: Record<string, string> = {}
+  for (const row of data || []) {
+    const sid = row.session_id as string
+    if (!sid || out[sid]) continue
+    const content = typeof row.content === 'string' ? row.content.trim() : ''
+    if (content) out[sid] = content
+  }
+  return out
 }
 
 export async function getSessionOffers(sessionId: string): Promise<ChatSessionOffer[]> {

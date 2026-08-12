@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   createBrandChatSession,
+  countBusinessChatSessions,
+  deleteChatSession,
   getBusinessChatSessions,
   getBusinesses,
   getChatSession,
+  getFirstUserMessagePreviews,
 } from '../../services/database'
 import type { Business, ChatSession } from '../../types'
 import { selectionsEqual } from './chatShellAsync'
@@ -18,21 +21,11 @@ import {
 import { resolveNextSessionId } from './sessionOffer'
 
 function defaultSessionTitle(): string {
-  return `Session · ${new Date().toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })}`
+  return 'New chat'
 }
 
 function quickSessionTitle(): string {
-  return `Quick · ${new Date().toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })}`
+  return 'New chat'
 }
 
 function readUrlSelection() {
@@ -58,6 +51,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [sessionCounts, setSessionCounts] = useState<Record<string, number>>({})
+  const [firstUserPreviews, setFirstUserPreviews] = useState<Record<string, string>>({})
 
   /** Hydrate / Quick hint — never trusted over a newer user click. */
   const preferredSessionRef = useRef<string | null>(null)
@@ -158,6 +153,20 @@ export function useChatShellWorkspace(userId: string | undefined) {
       if (requestId !== businessesRequestIdRef.current) return
       setBusinesses(list)
 
+      void Promise.all(
+        list.map(async (brand) => {
+          try {
+            const count = await countBusinessChatSessions(brand.id)
+            if (requestId !== businessesRequestIdRef.current) return
+            setSessionCounts((prev) => (
+              prev[brand.id] === count ? prev : { ...prev, [brand.id]: count }
+            ))
+          } catch {
+            /* counts are best-effort for collapsed labels */
+          }
+        })
+      )
+
       // Always refresh the brand list; only apply selection hydrate once, and
       // never overwrite a newer user click that happened while this awaited.
       if (!needsSelectionHydrate) return
@@ -241,6 +250,15 @@ export function useChatShellWorkspace(userId: string | undefined) {
               : []
           return optimistic.length === 0 ? list : [...optimistic, ...list]
         })
+        setSessionCounts((prev) => ({ ...prev, [brandId]: list.length }))
+
+        void getFirstUserMessagePreviews(list.map((s) => s.id))
+          .then((previews) => {
+            if (cancelled || requestId !== sessionsRequestIdRef.current) return
+            if (activeBrandIdRef.current !== brandId) return
+            setFirstUserPreviews((prev) => ({ ...prev, ...previews }))
+          })
+          .catch(() => { /* title fallbacks still work */ })
 
         // A newer click/create happened while this fetch was in flight — keep list only.
         if (epochStale) {
@@ -369,6 +387,48 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setSessions((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)))
   }, [])
 
+  /**
+   * Sidebar Delete (O1): hard deleteChatSession via 062 RLS.
+   * Soft-archive is not used. deleteSessionMessages is not used as hygiene.
+   */
+  const deleteSession = useCallback(async (sessionId: string) => {
+    if (!sessionId || busy) return
+    const brandId = activeBrandIdRef.current
+    const wasActive = activeSessionIdRef.current === sessionId
+    const siblings = sessions.filter((s) => s.id !== sessionId)
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteChatSession(sessionId)
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+      setFirstUserPreviews((prev) => {
+        if (!(sessionId in prev)) return prev
+        const next = { ...prev }
+        delete next[sessionId]
+        return next
+      })
+      if (brandId) {
+        setSessionCounts((prev) => ({
+          ...prev,
+          [brandId]: Math.max(0, (prev[brandId] ?? siblings.length + 1) - 1),
+        }))
+      }
+      if (wasActive) {
+        const fallback = siblings[0] ?? null
+        preferredSessionRef.current = fallback?.id ?? null
+        bumpSelectionEpoch()
+        commitSessionId(fallback?.id ?? null)
+        syncUrlAndStorage(brandId, fallback?.id ?? null)
+      }
+      setNotice(null)
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : 'Failed to delete session')
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, sessions, bumpSelectionEpoch, commitSessionId, syncUrlAndStorage])
+
   /** Touch-load single session meta if missing from list (URL deep link). */
   useEffect(() => {
     if (!activeSessionId || sessions.some((s) => s.id === activeSessionId)) return
@@ -407,6 +467,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
   return {
     businesses,
     sessions,
+    sessionCounts,
+    firstUserPreviews,
     activeBrand,
     activeBrandId,
     activeSession,
@@ -420,6 +482,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     selectSession,
     createSession,
     createQuickSession,
+    deleteSession,
     patchActiveSession,
     refreshBusinesses,
   }

@@ -141,6 +141,8 @@ export default function ChatShell({
         initials={initials}
         businesses={workspace.businesses}
         sessions={workspace.sessions}
+        sessionCounts={workspace.sessionCounts}
+        firstUserPreviews={workspace.firstUserPreviews}
         activeBrandId={workspace.activeBrandId}
         activeSessionId={workspace.activeSessionId}
         loadingBusinesses={workspace.loadingBusinesses}
@@ -153,6 +155,7 @@ export default function ChatShell({
         onNewChat={() => void workspace.createSession()}
         onQuickGenerate={() => void workspace.createQuickSession()}
         onNewSession={() => void workspace.createSession()}
+        onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
       />
 
       <section className="chat-shell__main">

@@ -1,12 +1,29 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Settings, Search, Plus, Zap } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings,
+  Zap,
+} from 'lucide-react'
 import type { Business, ChatSession } from '../../types'
+import {
+  readBrandOpen,
+  resolveSessionSidebarTitle,
+  SIDEBAR_SESSION_VISIBLE_CAP,
+  writeBrandOpen,
+} from './chatShellSidebar'
 
 interface ChatSidebarProps {
   displayName: string
   initials: string
   businesses: Business[]
   sessions: ChatSession[]
+  sessionCounts: Record<string, number>
+  firstUserPreviews: Record<string, string>
   activeBrandId: string | null
   activeSessionId: string | null
   loadingBusinesses: boolean
@@ -19,6 +36,7 @@ interface ChatSidebarProps {
   onNewChat: () => void
   onQuickGenerate: () => void
   onNewSession: () => void
+  onDeleteSession: (sessionId: string) => void | Promise<void>
 }
 
 export default function ChatSidebar({
@@ -26,6 +44,8 @@ export default function ChatSidebar({
   initials,
   businesses,
   sessions,
+  sessionCounts,
+  firstUserPreviews,
   activeBrandId,
   activeSessionId,
   loadingBusinesses,
@@ -38,8 +58,71 @@ export default function ChatSidebar({
   onNewChat,
   onQuickGenerate,
   onNewSession,
+  onDeleteSession,
 }: ChatSidebarProps) {
   const canCreate = Boolean(activeBrandId) && !busy
+  const storage = typeof localStorage !== 'undefined' ? localStorage : null
+  const [openByBrand, setOpenByBrand] = useState<Record<string, boolean>>({})
+  const [showAllByBrand, setShowAllByBrand] = useState<Record<string, boolean>>({})
+  const [menuSessionId, setMenuSessionId] = useState<string | null>(null)
+  const [confirmSessionId, setConfirmSessionId] = useState<string | null>(null)
+
+  // Hydrate persisted open state + force active brand expanded on load/switch.
+  useEffect(() => {
+    setOpenByBrand((prev) => {
+      const next = { ...prev }
+      for (const brand of businesses) {
+        if (next[brand.id] === undefined) {
+          const stored = readBrandOpen(storage, brand.id)
+          next[brand.id] = stored ?? false
+        }
+      }
+      if (activeBrandId) next[activeBrandId] = true
+      return next
+    })
+    if (activeBrandId) writeBrandOpen(storage, activeBrandId, true)
+  }, [businesses, activeBrandId, storage])
+
+  useEffect(() => {
+    if (!menuSessionId && !confirmSessionId) return
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target?.closest('[data-session-menu]')) return
+      setMenuSessionId(null)
+      setConfirmSessionId(null)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [menuSessionId, confirmSessionId])
+
+  const sessionsByBrand = useMemo(() => {
+    const map = new Map<string, ChatSession[]>()
+    for (const session of sessions) {
+      const bid = session.business_id
+      if (!bid) continue
+      const list = map.get(bid) || []
+      list.push(session)
+      map.set(bid, list)
+    }
+    return map
+  }, [sessions])
+
+  const toggleBrandOpen = (brandId: string) => {
+    setOpenByBrand((prev) => {
+      const nextOpen = !(prev[brandId] ?? false)
+      writeBrandOpen(storage, brandId, nextOpen)
+      return { ...prev, [brandId]: nextOpen }
+    })
+    if (!openByBrand[brandId] && brandId !== activeBrandId) {
+      onSelectBrand(brandId)
+    }
+  }
+
+  const selectBrandAndOpen = (brandId: string) => {
+    writeBrandOpen(storage, brandId, true)
+    setOpenByBrand((prev) => ({ ...prev, [brandId]: true }))
+    onSelectBrand(brandId)
+  }
 
   return (
     <aside className="chat-shell__sidebar" aria-label="Chat navigation">
@@ -92,72 +175,212 @@ export default function ChatSidebar({
       </button>
 
       <div className="chat-shell__nav-label">Brands</div>
-      {loadingBusinesses && (
-        <div className="chat-shell__nav-item">Loading brands…</div>
-      )}
-      {!loadingBusinesses && businesses.length === 0 && (
-        <div className="chat-shell__nav-item">
-          No brands yet
-        </div>
-      )}
-      {businesses.map((brand) => {
-        const isActive = brand.id === activeBrandId
-        const brandSessions = isActive
-          ? sessions.filter((session) => session.business_id === brand.id)
-          : []
-        return (
-          <div key={brand.id}>
-            <button
-              type="button"
-              className={`chat-shell__nav-item chat-shell__nav-button${isActive ? ' is-active' : ''}`}
-              onClick={() => onSelectBrand(brand.id)}
-            >
-              <span className="chat-shell__nav-item-label">{brand.name}</span>
-            </button>
-            {isActive && (
-              <div className="chat-shell__nav-subs">
-                {loadingSessions && (
-                  <div className="chat-shell__nav-loading" aria-live="polite">
-                    Updating sessions…
-                  </div>
-                )}
-                {!loadingSessions && brandSessions.length === 0 && (
-                  <div className="chat-shell__nav-sub">No sessions yet</div>
-                )}
-                {brandSessions.map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={`chat-shell__nav-sub chat-shell__nav-button${session.id === activeSessionId ? ' is-selected' : ''}`}
-                    onClick={() => onSelectSession(session)}
-                  >
-                    <span className="chat-shell__session-title">
-                      <span className="chat-shell__session-title-text">
-                        {session.title || 'Untitled'}
-                      </span>
-                      {session.product_id == null ? (
-                        <span className="chat-shell__session-tag">Quick</span>
-                      ) : null}
-                    </span>
-                  </button>
-                ))}
+      <div className="chat-shell__brands-scroll">
+        {loadingBusinesses && (
+          <div className="chat-shell__nav-item">Loading brands…</div>
+        )}
+        {!loadingBusinesses && businesses.length === 0 && (
+          <div className="chat-shell__nav-item">No brands yet</div>
+        )}
+        {businesses.map((brand) => {
+          const isActive = brand.id === activeBrandId
+          const isOpen = openByBrand[brand.id] ?? false
+          const brandSessions = isActive
+            ? (sessionsByBrand.get(brand.id) || sessions.filter((s) => s.business_id === brand.id))
+            : []
+          const count = isActive
+            ? brandSessions.length
+            : (sessionCounts[brand.id] ?? brandSessions.length)
+          const showAll = showAllByBrand[brand.id] ?? false
+          const visibleSessions = showAll
+            ? brandSessions
+            : brandSessions.slice(0, SIDEBAR_SESSION_VISIBLE_CAP)
+          const olderCount = Math.max(0, brandSessions.length - SIDEBAR_SESSION_VISIBLE_CAP)
+
+          return (
+            <div key={brand.id} className="chat-shell__brand-block">
+              <div className="chat-shell__brand-header">
                 <button
                   type="button"
-                  className="chat-shell__nav-sub chat-shell__nav-button"
-                  onClick={onNewSession}
-                  disabled={!canCreate}
-                  aria-disabled={!canCreate}
+                  className="chat-shell__brand-chevron"
+                  aria-label={isOpen ? `Collapse ${brand.name}` : `Expand ${brand.name}`}
+                  aria-expanded={isOpen}
+                  onClick={() => toggleBrandOpen(brand.id)}
                 >
-                  + New session
+                  {isOpen
+                    ? <ChevronDown size={14} aria-hidden />
+                    : <ChevronRight size={14} aria-hidden />}
+                </button>
+                <button
+                  type="button"
+                  className={`chat-shell__nav-item chat-shell__nav-button chat-shell__brand-name${isActive ? ' is-active' : ''}`}
+                  onClick={() => selectBrandAndOpen(brand.id)}
+                >
+                  <span className="chat-shell__nav-item-label">{brand.name}</span>
+                  {!isOpen && (
+                    <span className="chat-shell__brand-count" aria-label={`${count} chats`}>
+                      {count}
+                    </span>
+                  )}
                 </button>
               </div>
-            )}
-          </div>
-        )
-      })}
-      <Link to="/dashboard" className="chat-shell__nav-item chat-shell__nav-link">
-        + New brand…
-      </Link>
+
+              {isOpen && isActive && (
+                <div className="chat-shell__nav-subs">
+                  {loadingSessions && (
+                    <div className="chat-shell__nav-loading" aria-live="polite">
+                      Updating sessions…
+                    </div>
+                  )}
+                  {!loadingSessions && brandSessions.length === 0 && (
+                    <div className="chat-shell__nav-empty">
+                      <div className="chat-shell__nav-empty-copy">No chats yet</div>
+                      <button
+                        type="button"
+                        className="chat-shell__nav-sub chat-shell__nav-button"
+                        onClick={onNewSession}
+                        disabled={!canCreate}
+                        aria-disabled={!canCreate}
+                      >
+                        + New chat
+                      </button>
+                    </div>
+                  )}
+                  {visibleSessions.map((session) => {
+                    const { label, fullTitle } = resolveSessionSidebarTitle({
+                      session,
+                      firstUserMessage: firstUserPreviews[session.id],
+                    })
+                    const isQuick = session.product_id == null
+                    const selected = session.id === activeSessionId
+                    const menuOpen = menuSessionId === session.id
+                    const confirming = confirmSessionId === session.id
+
+                    return (
+                      <div
+                        key={session.id}
+                        className={`chat-shell__session-row${selected ? ' is-selected' : ''}`}
+                        data-session-menu={menuOpen || confirming ? '1' : undefined}
+                      >
+                        <button
+                          type="button"
+                          className={`chat-shell__nav-sub chat-shell__nav-button chat-shell__session-main${selected ? ' is-selected' : ''}`}
+                          onClick={() => onSelectSession(session)}
+                          title={fullTitle}
+                        >
+                          <span className="chat-shell__session-title">
+                            <span className="chat-shell__session-title-text">{label}</span>
+                            {isQuick ? (
+                              <span className="chat-shell__session-tag" aria-label="Quick session">
+                                QUICK
+                              </span>
+                            ) : null}
+                          </span>
+                        </button>
+                        <div className="chat-shell__session-trail">
+                          <button
+                            type="button"
+                            className="chat-shell__session-more"
+                            aria-label={`Session actions for ${label}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setConfirmSessionId(null)
+                              setMenuSessionId((id) => (id === session.id ? null : session.id))
+                            }}
+                          >
+                            <MoreHorizontal size={14} aria-hidden />
+                          </button>
+                          {menuOpen && !confirming && (
+                            <div className="chat-shell__session-menu" role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="chat-shell__session-menu-item is-danger"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setConfirmSessionId(session.id)
+                                  setMenuSessionId(null)
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                          {confirming && (
+                            <div className="chat-shell__session-confirm" role="group" aria-label="Confirm delete">
+                              <button
+                                type="button"
+                                className="chat-shell__session-confirm-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setConfirmSessionId(null)
+                                }}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-shell__session-confirm-btn is-danger"
+                                disabled={busy}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setConfirmSessionId(null)
+                                  void onDeleteSession(session.id)
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {!showAll && olderCount > 0 && (
+                    <button
+                      type="button"
+                      className="chat-shell__nav-sub chat-shell__nav-button chat-shell__show-older"
+                      onClick={() =>
+                        setShowAllByBrand((prev) => ({ ...prev, [brand.id]: true }))
+                      }
+                    >
+                      {`Show ${olderCount} older`}
+                    </button>
+                  )}
+                  {showAll && brandSessions.length > SIDEBAR_SESSION_VISIBLE_CAP && (
+                    <button
+                      type="button"
+                      className="chat-shell__nav-sub chat-shell__nav-button chat-shell__show-older"
+                      onClick={() =>
+                        setShowAllByBrand((prev) => ({ ...prev, [brand.id]: false }))
+                      }
+                    >
+                      Show less
+                    </button>
+                  )}
+                  {brandSessions.length > 0 && (
+                    <button
+                      type="button"
+                      className="chat-shell__nav-sub chat-shell__nav-button"
+                      onClick={onNewSession}
+                      disabled={!canCreate}
+                      aria-disabled={!canCreate}
+                    >
+                      + New session
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+        <Link to="/dashboard" className="chat-shell__nav-item chat-shell__nav-link">
+          + New brand…
+        </Link>
+      </div>
 
       <div className="chat-shell__user">
         <div className="chat-shell__avatar" aria-hidden>{initials}</div>
