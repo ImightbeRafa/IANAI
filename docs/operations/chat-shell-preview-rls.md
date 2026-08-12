@@ -162,12 +162,24 @@ Same class of gap as earlier `businesses` / `products` deny-all: **`public.scrip
 
 Client `saveScript` uses `insert(…).select().single()` (`INSERT … RETURNING`). Both **INSERT** and **SELECT** must pass RLS for the inserting user, or the client gets 403 / no row back even when the UI otherwise works.
 
-### Preview-only policies (already applied by ops)
+### Preview-only policies (already applied by ops — verified live)
 
 **Hard rule:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) **ONLY**. **Do not run on production AIIAN** (`lstzfxsdmggkoaxfawny`). Do not mirror these policy names/shapes onto prod from this note.
 
+**Verified live on Preview** (do not invent alternate AND-only shapes):
+
+| Policy name | Cmd | Predicate |
+|-------------|-----|-----------|
+| `Users can view own scripts` | SELECT | `USING (can_read_product(product_id) OR can_read_chat_session(session_id))` |
+| `Users can insert own scripts` | INSERT | `WITH CHECK (can_write_product(product_id) AND can_write_chat_session(session_id))` |
+| `Users can update own scripts` | UPDATE | `USING (can_write_product(product_id) OR can_write_chat_session(session_id))` · `WITH CHECK (can_write_product(product_id))` |
+| `Users can delete own scripts` | DELETE | `USING (can_write_product(product_id) OR can_write_chat_session(session_id))` |
+
+Note the **mixed** boolean shapes: SELECT / UPDATE USING / DELETE use **OR**; INSERT uses **AND**; UPDATE `WITH CHECK` is product-write only. Document what is live — do not “normalize” everything to AND.
+
 ```sql
 -- IANAI-preview ONLY — do not run on production AIIAN
+-- Exact live shapes (verified); do not invent AND-only variants.
 CREATE POLICY "Users can view own scripts"
   ON public.scripts FOR SELECT TO authenticated
   USING (can_read_product(product_id) OR can_read_chat_session(session_id));
@@ -186,7 +198,7 @@ CREATE POLICY "Users can delete own scripts"
   USING (can_write_product(product_id) OR can_write_chat_session(session_id));
 ```
 
-Intent: SELECT / INSERT / UPDATE / DELETE for authenticated users who can access the related product and/or chat session via existing helpers. INSERT `WITH CHECK` requires write access to **both** product and session so shell saves stay scoped.
+Client path: `saveScript` → `insert().select().single()` needs **INSERT + SELECT** both to pass for Guardar to return a row.
 
 ### Verify steps (Preview QA)
 
