@@ -471,6 +471,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setBusy(true)
     setError(null)
 
+    // Optimistic remove — non-active deletes must not touch active session / URL.
     setSessions(siblings)
     setFirstUserPreviews((prev) => {
       if (!(sessionId in prev)) return prev
@@ -485,6 +486,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       }))
     }
     if (wasActive) {
+      // Switch main cleanly to a sibling (or null) — avoid blank crash on deleted active.
       const fallback = siblings[0] ?? null
       preferredSessionRef.current = fallback?.id ?? null
       commitSessionId(fallback?.id ?? null)

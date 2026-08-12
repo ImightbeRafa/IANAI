@@ -370,10 +370,29 @@ describe('resolveNextSessionId', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],
-        preferredId: 'gone',
+        preferredId: null,
         currentId: null,
         urlId: null,
       })
     ).toBe('a')
+  })
+
+  it('keeps urlId/preferredId even when missing from list (no [0] fallthrough)', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'x',
+        currentId: null,
+        urlId: 'deep-link',
+      })
+    ).toBe('deep-link')
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'gone',
+        currentId: null,
+        urlId: null,
+      })
+    ).toBe('gone')
   })
 })
