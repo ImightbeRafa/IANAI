@@ -12,8 +12,11 @@ dist
 dist-ssr
 *.local
 *.tsbuildinfo
-supabase/
-supabase/migrations
+# Local Supabase CLI artifacts; keep versioned migrations tracked
+supabase/.branches
+supabase/.temp
+supabase/.env
+supabase/config.toml
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
