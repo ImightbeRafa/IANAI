@@ -4,6 +4,7 @@ import {
   formatRelativeSessionTime,
   isDefaultSessionTitle,
   readBrandOpen,
+  resolveBrandOpenMap,
   resolveSessionSidebarTitle,
   truncateSidebarTitle,
   writeBrandOpen,
@@ -84,7 +85,7 @@ describe('brand open persistence', () => {
     expect(readBrandOpen(storage, 'b1')).toBe(false)
   })
 
-  it('honors explicit collapse (0) vs null default', () => {
+  it('honors explicit collapse (0) across remount; null defaults active only', () => {
     const store: Record<string, string> = {
       'ianai.sidebar.brandOpen.active': '0',
     }
@@ -96,5 +97,31 @@ describe('brand open persistence', () => {
     }
     expect(readBrandOpen(storage, 'active')).toBe(false)
     expect(readBrandOpen(storage, 'other')).toBeNull()
+
+    const map = resolveBrandOpenMap({
+      businessIds: ['active', 'other'],
+      activeBrandId: 'active',
+      readStored: (id) => readBrandOpen(storage, id),
+    })
+    expect(map.active).toBe(false) // stored 0 wins even when active
+    expect(map.other).toBe(false) // null + inactive → collapsed
+
+    // Simulate activeBrandId effect re-run / reload with previous in-memory map:
+    // stored 0 must still win (never treat false as missing).
+    const afterActiveFlip = resolveBrandOpenMap({
+      businessIds: ['active', 'other'],
+      activeBrandId: 'active',
+      readStored: (id) => readBrandOpen(storage, id),
+      previous: { active: true, other: false },
+    })
+    expect(afterActiveFlip.active).toBe(false)
+    expect(Object.keys(store)).toEqual(['ianai.sidebar.brandOpen.active']) // no invented writes
+
+    const fresh = resolveBrandOpenMap({
+      businessIds: ['fresh'],
+      activeBrandId: 'fresh',
+      readStored: () => null,
+    })
+    expect(fresh.fresh).toBe(true) // null + active → default-expand
   })
 })

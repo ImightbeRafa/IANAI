@@ -35,6 +35,35 @@ export function writeBrandOpen(
   }
 }
 
+/**
+ * Resolve sidebar brand open/collapsed map.
+ * - Honor explicit stored true/false (incl. `0` collapse across reload).
+ * - Default-expand active brand only when storage is null/missing.
+ * - Never invent writes — callers must not writeBrandOpen(true) from activeBrandId effects.
+ */
+export function resolveBrandOpenMap(options: {
+  businessIds: string[]
+  activeBrandId: string | null
+  readStored: (businessId: string) => boolean | null
+  previous?: Record<string, boolean>
+}): Record<string, boolean> {
+  const next: Record<string, boolean> = { ...(options.previous || {}) }
+  for (const businessId of options.businessIds) {
+    const stored = options.readStored(businessId)
+    if (stored !== null) {
+      next[businessId] = stored
+      continue
+    }
+    // null/missing: default-expand only the active brand; leave others collapsed unless already set.
+    if (next[businessId] === undefined) {
+      next[businessId] = businessId === options.activeBrandId
+    } else if (businessId === options.activeBrandId) {
+      next[businessId] = true
+    }
+  }
+  return next
+}
+
 /** Default / spam titles that should not win over first message or relative time. */
 export function isDefaultSessionTitle(title?: string | null): boolean {
   const t = (title || '').trim()

@@ -12,6 +12,7 @@ import {
 import type { Business, ChatSession } from '../../types'
 import {
   readBrandOpen,
+  resolveBrandOpenMap,
   resolveSessionSidebarTitle,
   SIDEBAR_SESSION_VISIBLE_CAP,
   writeBrandOpen,
@@ -67,25 +68,16 @@ export default function ChatSidebar({
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null)
   const [confirmSessionId, setConfirmSessionId] = useState<string | null>(null)
 
-  // Hydrate persisted open state. Honor explicit localStorage `0` collapse.
-  // Only default-expand the active brand when its key is null (never overwrite stored collapse).
+  // Hydrate from localStorage first. Honor explicit `0`. Never writeBrandOpen from this effect.
   useEffect(() => {
-    setOpenByBrand((prev) => {
-      const next = { ...prev }
-      for (const brand of businesses) {
-        const stored = readBrandOpen(storage, brand.id)
-        if (stored !== null) {
-          next[brand.id] = stored
-          continue
-        }
-        if (next[brand.id] === undefined) {
-          next[brand.id] = brand.id === activeBrandId
-        } else if (brand.id === activeBrandId) {
-          next[brand.id] = true
-        }
-      }
-      return next
-    })
+    setOpenByBrand((prev) =>
+      resolveBrandOpenMap({
+        businessIds: businesses.map((b) => b.id),
+        activeBrandId,
+        readStored: (id) => readBrandOpen(storage, id),
+        previous: prev,
+      })
+    )
   }, [businesses, activeBrandId, storage])
 
   useEffect(() => {
