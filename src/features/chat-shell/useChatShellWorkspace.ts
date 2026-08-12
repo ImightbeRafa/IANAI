@@ -299,18 +299,19 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setNotice(null)
     try {
       const session = await createBrandChatSession(brandId, userId, quickSessionTitle())
-      if (brandId === activeBrandIdRef.current) {
-        setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
-      }
-      if (selectionEpochRef.current !== epoch) return
-      preferredSessionRef.current = session.id
       if (brandId !== activeBrandIdRef.current) {
+        if (selectionEpochRef.current !== epoch) return
+        preferredSessionRef.current = session.id
         activeBrandIdRef.current = brandId
         setActiveBrandId(brandId)
-        // Brand effect will load list; preferred + epoch keep this session.
+        // Seed the new brand list so the row is visible before fetch returns.
+        setSessions([session])
         commitSessionId(session.id)
         syncUrlAndStorage(brandId, session.id)
       } else {
+        setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+        if (selectionEpochRef.current !== epoch) return
+        preferredSessionRef.current = session.id
         commitSessionId(session.id)
         syncUrlAndStorage(brandId, session.id)
       }
