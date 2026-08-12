@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles } from 'lucide-react'
 import type { ParsedScript } from '../../utils/scriptParser'
 import type { ProductType } from '../../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../../services/database'
+import { parseScriptSections } from './parseScriptSections'
 
 type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
 
@@ -41,22 +42,21 @@ const CONSCIOUSNESS_OPTIONS = [
   { label: 'Caliente', prompt: 'Ajusta el guión a conciencia CALIENTE (listo para comprar). Conserva formato. Devuelve UN solo guión.' },
 ]
 
-function renderScriptBody(text: string) {
-  const marked = text.replace(
-    /\[(GANCHO[S]?|HOOK[S]?|DESARROLLO|DEVELOPMENT|CTA|CIERRE|CLOSE)(?:\s*[AB])?\]/gi,
-    (match) => `{{CHIP:${match}}}`
-  )
-  return marked.split(/(\{\{CHIP:[^}]+\}\})/g).map((part, i) => {
-    const chip = part.match(/\{\{CHIP:(.+)\}\}/)
-    if (chip) {
-      return (
-        <span key={i} className="chat-shell__script-chip">
-          {chip[1]}
-        </span>
-      )
-    }
-    return <span key={i}>{part}</span>
-  })
+function renderScriptSections(text: string) {
+  const sections = parseScriptSections(text)
+  return sections.map((section, i) => (
+    <section
+      key={`${section.kind}-${i}`}
+      className={`chat-shell__script-section${section.label ? '' : ' is-unmarked'}`}
+    >
+      {section.label ? (
+        <h4 className="chat-shell__script-section-label">{section.label}</h4>
+      ) : null}
+      {section.body ? (
+        <p className="chat-shell__script-section-body">{section.body}</p>
+      ) : null}
+    </section>
+  ))
 }
 
 export default function ChatShellScriptCard({
@@ -128,6 +128,11 @@ export default function ChatShellScriptCard({
   const displayContent = editHistory.length > 0
     ? editHistory[editHistory.length - 1].content
     : script.content
+
+  const sectionNodes = useMemo(
+    () => renderScriptSections(displayContent),
+    [displayContent]
+  )
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(displayContent)
@@ -302,7 +307,7 @@ export default function ChatShellScriptCard({
       {editError && <div className="chat-shell__artifact-error">{editError}</div>}
 
       <div className="chat-shell__artifact-body">
-        {renderScriptBody(displayContent)}
+        {sectionNodes}
       </div>
 
       <div className="chat-shell__artifact-actions" ref={menuRef}>

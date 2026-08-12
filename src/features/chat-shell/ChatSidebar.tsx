@@ -44,10 +44,7 @@ export default function ChatSidebar({
   return (
     <aside className="chat-shell__sidebar" aria-label="Chat navigation">
       <div className="chat-shell__brand">
-        <span>Advance AI</span>
-        <Link to="/settings" className="chat-shell__icon-btn" aria-label="Settings" title="Settings">
-          <Settings size={15} />
-        </Link>
+        <span className="chat-shell__wordmark">Advance AI</span>
       </div>
 
       <div className="chat-shell__row-actions">
@@ -59,16 +56,16 @@ export default function ChatSidebar({
           aria-disabled={!canCreate}
           title={activeBrandId ? 'New chat in active brand' : 'Select a brand first'}
         >
-          <Plus size={15} aria-hidden />
-          New chat
+          <Plus size={14} aria-hidden />
+          <span className="chat-shell__row-action-label">New chat</span>
         </button>
         <div className="chat-shell__search-wrap">
           <label className="chat-shell__sr-only" htmlFor="chat-shell-search">Search</label>
-          <Search size={14} className="chat-shell__search-icon" aria-hidden />
+          <Search size={13} className="chat-shell__search-icon" aria-hidden />
           <input
             id="chat-shell-search"
             className="chat-shell__search"
-            placeholder="Search"
+            placeholder="Search..."
             disabled
             aria-disabled="true"
           />
@@ -90,9 +87,8 @@ export default function ChatSidebar({
         aria-disabled={busy || businesses.length === 0}
         title="Quick session with no product (brand still required)"
       >
-        <Zap size={14} aria-hidden />
-        Quick generate
-        <span className="chat-shell__btn chat-shell__btn--pill chat-shell__pill-trail">no product</span>
+        <Zap size={13} aria-hidden />
+        <span className="chat-shell__nav-item-label">Quick generate</span>
       </button>
 
       <div className="chat-shell__nav-label">Brands</div>
@@ -116,7 +112,7 @@ export default function ChatSidebar({
               className={`chat-shell__nav-item chat-shell__nav-button${isActive ? ' is-active' : ''}`}
               onClick={() => onSelectBrand(brand.id)}
             >
-              {brand.name}
+              <span className="chat-shell__nav-item-label">{brand.name}</span>
             </button>
             {isActive && (
               <div className="chat-shell__nav-subs">
@@ -135,11 +131,10 @@ export default function ChatSidebar({
                     className={`chat-shell__nav-sub chat-shell__nav-button${session.id === activeSessionId ? ' is-selected' : ''}`}
                     onClick={() => onSelectSession(session)}
                   >
-                    {session.id === activeSessionId && (
-                      <span className="chat-shell__status-dot" aria-hidden />
-                    )}
                     <span className="chat-shell__session-title">
-                      {session.title || 'Untitled'}
+                      <span className="chat-shell__session-title-text">
+                        {session.title || 'Untitled'}
+                      </span>
                       {session.product_id == null ? (
                         <span className="chat-shell__session-tag">Quick</span>
                       ) : null}
@@ -166,13 +161,21 @@ export default function ChatSidebar({
 
       <div className="chat-shell__user">
         <div className="chat-shell__avatar" aria-hidden>{initials}</div>
-        <div>
-          <div>
-            {displayName}
+        <div className="chat-shell__user-copy">
+          <div className="chat-shell__user-name">
+            <span className="chat-shell__user-name-text">{displayName}</span>
             <span className="chat-shell__badge">Pro</span>
           </div>
           <div className="chat-shell__user-meta">Chat shell · brands live</div>
         </div>
+        <Link
+          to="/settings"
+          className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Settings size={15} aria-hidden />
+        </Link>
       </div>
     </aside>
   )
