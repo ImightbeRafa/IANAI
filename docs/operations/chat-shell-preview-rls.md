@@ -158,38 +158,41 @@ POST …/rest/v1/scripts?select=*
 
 ### Root cause
 
-Same class of gap as earlier `businesses` / `products` deny-all: **`public.scripts` had RLS enabled with zero policies**. With RLS on and no policies, every authenticated client write/read is denied.
+Same class of gap as earlier `businesses` / `products` deny-all: **`public.scripts` had RLS enabled with zero policies** (deny-all). With RLS on and no policies, every authenticated client write/read is denied → Guardar **403** on `scripts?select=*`.
 
 Client `saveScript` uses `insert(…).select().single()` (`INSERT … RETURNING`). Both **INSERT** and **SELECT** must pass RLS for the inserting user, or the client gets 403 / no row back even when the UI otherwise works.
 
-### Preview-only policies (already applied by ops — verified live)
+**No `user_id` on `scripts`.** Ownership is via `product_id` + `session_id` helper functions (`can_read_*` / `can_write_*`), not a direct owner column.
 
-**Hard rule:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) **ONLY**. **Do not run on production AIIAN** (`lstzfxsdmggkoaxfawny`). Do not mirror these policy names/shapes onto prod from this note.
+### Preview-only policies (verified live — DOCUMENT ONLY)
 
-**DOCUMENT ONLY.** Live Preview policies were wiped once already. Do **not** `DROP` / `CREATE` / re-apply from this doc. Do **not** run Supabase MCP `apply_migration` / `execute_sql`, supabase CLI, or any SQL file against Preview or prod from this note. Ops / CoS own Preview DB changes.
+**Hard rule:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) **ONLY**. **Do not run on production AIIAN** (`lstzfxsdmggkoaxfawny`). No master PR from this note.
 
-**Verified live on Preview (tight AND set, CoS re-applied):**
+**DOCUMENT ONLY.** Do **not** `DROP POLICY` / `CREATE POLICY` / re-apply from this doc. Do **not** run Supabase MCP `apply_migration` / `execute_sql`, supabase CLI, or any SQL file against Preview or prod from this tip. Ops / CoS / SecureDog own Preview DB changes.
 
-| Policy (intent) | Cmd | Predicate |
-|-----------------|-----|-----------|
-| scripts SELECT | SELECT | `USING (can_read_chat_session(session_id) AND can_read_product(product_id))` |
-| scripts INSERT | INSERT | `WITH CHECK (can_write_chat_session(session_id) AND can_write_product(product_id))` |
-| scripts UPDATE | UPDATE | `USING` / `WITH CHECK` — same **AND** write pair (`can_write_chat_session` **AND** `can_write_product`) |
-| scripts DELETE | DELETE | `USING (can_write_chat_session(session_id) AND can_write_product(product_id))` |
+**Ops race note:** An earlier OR-named set (`"Users can view/insert/update/delete own scripts"`) was wiped back to **zero policies** once by competing `DROP POLICY` migrations. **Never DROP-wipe live Preview** from a docs tip. Re-apply **only** if `pg_policies` for `public.scripts` is empty **and** SecureDog/CoS explicitly ask.
+
+**Exact live Preview set (verified — 4 policies, `TO authenticated`):**
+
+| Policy name | Cmd | Predicate |
+|-------------|-----|-----------|
+| `scripts_select` | SELECT | `USING (can_read_chat_session(session_id) AND can_read_product(product_id))` |
+| `scripts_insert` | INSERT | `WITH CHECK (can_write_chat_session(session_id) AND can_write_product(product_id))` |
+| `scripts_update` | UPDATE | `USING` + `WITH CHECK`: same write **AND** pair (`can_write_chat_session(session_id) AND can_write_product(product_id)`) |
+| `scripts_delete` | DELETE | `USING (can_write_chat_session(session_id) AND can_write_product(product_id))` |
 
 - Role: **`TO authenticated`**
-- Table grants: **`authenticated`** + **`service_role`** (as applied by CoS on Preview)
+- Table grants: **`authenticated`** + **`service_role`** (as applied on Preview)
 
-Exact live policy *names* may be `scripts_select` / `scripts_insert` / … or the earlier quoted “Users can … scripts” labels — document the **predicate shape** (tight **AND** on session + product). Do not invent looser OR variants when describing what is live now.
-
-```sql
--- REFERENCE ONLY — IANAI-preview already has the live AND set.
--- DO NOT RUN / DROP / CREATE from this doc (Preview was wiped once already).
+```text
+-- REFERENCE ONLY — already live on IANAI-preview. DO NOT RUN / DROP / CREATE from this doc.
 -- DO NOT run on production AIIAN.
 
--- SELECT: can_read_chat_session(session_id) AND can_read_product(product_id)
--- INSERT / UPDATE / DELETE: can_write_chat_session(session_id) AND can_write_product(product_id)
--- TO authenticated; GRANTs: authenticated + service_role
+scripts_select  USING:      can_read_chat_session(session_id) AND can_read_product(product_id)
+scripts_insert  WITH CHECK: can_write_chat_session(session_id) AND can_write_product(product_id)
+scripts_update  USING + WITH CHECK: same write AND pair
+scripts_delete  USING:      same write AND pair
+-- TO authenticated
 ```
 
 Client path: `saveScript` → `insert().select().single()` needs **INSERT + SELECT** both to pass for Guardar to return a row. Chat-shell `saveScript` always sets `session_id`, so the tight AND pair is satisfied on the shell path.
@@ -204,17 +207,12 @@ Use Preview QA user **`sup.rafa0412`** (see `docs/testing/chat-shell-preview-use
 4. Expect: **no 403** on `POST …/rest/v1/scripts?select=*`; UI shows saved state; a `scripts` row is returned to the client (`INSERT … RETURNING`).  
 5. Confirm production AIIAN `scripts` RLS / policies were **not** modified.
 
-### Still-open / later Preview-only (SecureDog / CoS watch — no apply tonight)
+### Still-open / later Preview-only (non-blocking — no apply tonight)
 
-Document-only nits. **No live DB change** from this tip. Preview-only if/when ops chooses to act later; never prod from this note.
+Document-only nits. **No live DB change** from this tip. Later Preview-only if/when SecureDog/CoS ask; never prod from this note.
 
-1. **Legacy `/scripts` with `session_id` null** — tight INSERT **AND** fails when `session_id` is null (`can_write_chat_session(null)` is false). Chat-shell Guardar always sets `session_id` → OK. Later optional Preview-only relax (ops-owned, not this doc):  
-   `(can_write_product(product_id) AND (session_id IS NULL OR can_write_chat_session(session_id)))`  
-   (and the matching read/write variants if needed).
-2. **Earlier looser OR DELETE** (pre–tight-AND era) — noted historically; live set is now AND. Fine for shell scripts whose products ∈ writable offers.
-3. **Queued CoS nits (later Preview-only, no apply tonight):**  
-   - SELECT historically used OR on some tables vs `message_artifacts` AND — keep alignment review on the backlog.  
-   - UPDATE `WITH CHECK` historically missing session write in an older OR-shaped set — live tight AND already pairs session + product; keep as a regression watch if anyone rewrites policies.
+1. **Legacy null-session INSERT AND gap** — tight INSERT fails when `session_id` is null (`can_write_chat_session(null)` is false). Chat-shell Guardar always sets `session_id` → OK. Legacy `/scripts` creates with `session_id` null will 403 until an optional later relax (ops-owned).
+2. **SecureDog watch items** — keep alignment reviews on the backlog (e.g. historical OR vs AND shapes on related tables; regression watch if anyone rewrites `scripts_*` policies). Non-blocking for shell Guardar while the live AND set remains.
 
 ## Related docs
 
