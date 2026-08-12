@@ -532,17 +532,26 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.can_access_business(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.can_read_product(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.can_write_product(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.can_read_chat_session(uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.can_write_chat_session(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.can_access_business(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.can_read_product(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.can_write_product(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.can_read_chat_session(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.can_write_chat_session(uuid) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.prevent_message_artifact_identity_mutation() FROM PUBLIC, anon;
 
 GRANT EXECUTE ON FUNCTION public.can_access_business(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.can_read_product(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.can_write_product(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.can_read_chat_session(uuid) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.can_write_chat_session(uuid) TO authenticated, service_role;
+
+-- Explicit table grants (Supabase default ACLs usually cover this; keep idempotent)
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.chat_session_offers TO authenticated, service_role;
+GRANT SELECT, INSERT ON public.message_artifacts TO authenticated, service_role;
+GRANT SELECT ON public.app_feature_flags TO authenticated, service_role;
+GRANT ALL ON public.chat_session_offers TO service_role;
+GRANT ALL ON public.message_artifacts TO service_role;
+GRANT ALL ON public.app_feature_flags TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 8) RLS policies — extend carefully; no cross-brand leaks
