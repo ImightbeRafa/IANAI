@@ -15,14 +15,14 @@ describe('stripLeadingColon', () => {
 })
 
 describe('classifySectionMarker', () => {
-  it('maps CIERRE to label Cierre (never CTA)', () => {
+  it('maps CTA / CIERRE / CLOSE (bare or bracketed) to label Cierre', () => {
+    expect(classifySectionMarker('CTA')).toEqual({ kind: 'cierre', label: 'Cierre' })
+    expect(classifySectionMarker('[CTA]')).toEqual({ kind: 'cierre', label: 'Cierre' })
+    expect(classifySectionMarker('cta')).toEqual({ kind: 'cierre', label: 'Cierre' })
     expect(classifySectionMarker('CIERRE')).toEqual({ kind: 'cierre', label: 'Cierre' })
-    expect(classifySectionMarker('Cierre')).toEqual({ kind: 'cierre', label: 'Cierre' })
+    expect(classifySectionMarker('[CIERRE]')).toEqual({ kind: 'cierre', label: 'Cierre' })
     expect(classifySectionMarker('CLOSE')).toEqual({ kind: 'cierre', label: 'Cierre' })
-  })
-
-  it('keeps CTA distinct from Cierre', () => {
-    expect(classifySectionMarker('CTA')).toEqual({ kind: 'cta', label: 'CTA' })
+    expect(classifySectionMarker('[CLOSE]')).toEqual({ kind: 'cierre', label: 'Cierre' })
   })
 
   it('strips Gancho A/B style suffixes from labels', () => {
@@ -33,19 +33,19 @@ describe('classifySectionMarker', () => {
 })
 
 describe('parseScriptSections', () => {
-  it('parses ordered GANCHO / DESARROLLO / CTA blocks', () => {
+  it('parses ordered GANCHO / DESARROLLO / CTA with Cierre display label', () => {
     const sections = parseScriptSections(
       '[GANCHO]\nHook line\n\n[DESARROLLO]\nBody line\n\n[CTA]\nComment LISTO'
     )
-    expect(sections.map((s) => s.kind)).toEqual(['gancho', 'desarrollo', 'cta'])
+    expect(sections.map((s) => s.kind)).toEqual(['gancho', 'desarrollo', 'cierre'])
     expect(sections[0]).toMatchObject({ label: 'Gancho', body: 'Hook line' })
     expect(sections[1]).toMatchObject({ label: 'Desarrollo', body: 'Body line' })
-    expect(sections[2]).toMatchObject({ label: 'CTA', body: 'Comment LISTO' })
+    expect(sections[2]).toMatchObject({ label: 'Cierre', body: 'Comment LISTO' })
   })
 
   it('strips leading colons from bodies after markers', () => {
     const sections = parseScriptSections(
-      '[GANCHO]: ¿Sigues perdiendo ventas?\n[DESARROLLO]: Con un guion claro…\n[CIERRE]: Comenta LISTO'
+      '[GANCHO]: ¿Sigues perdiendo ventas?\n[DESARROLLO]: Con un guion claro…\n[CTA]: Comenta LISTO'
     )
     expect(sections.map((s) => s.label)).toEqual(['Gancho', 'Desarrollo', 'Cierre'])
     expect(sections[0].body).toBe('¿Sigues perdiendo ventas?')
@@ -53,18 +53,16 @@ describe('parseScriptSections', () => {
     expect(sections[2].body).toBe('Comenta LISTO')
   })
 
-  it('maps CIERRE to Cierre and CLOSE alias; never CTA', () => {
-    const cierre = parseScriptSections('[CIERRE]\nEnd line')
-    expect(cierre[0]).toMatchObject({ kind: 'cierre', label: 'Cierre', body: 'End line' })
-
-    const close = parseScriptSections('[CLOSE]\nBye')
-    expect(close[0]).toMatchObject({ kind: 'cierre', label: 'Cierre', body: 'Bye' })
-
-    const cta = parseScriptSections('[CTA]\nAct')
-    expect(cta[0]).toMatchObject({ kind: 'cta', label: 'CTA', body: 'Act' })
+  it('maps CTA marker to Cierre for stored and fresh cards (re-parse)', () => {
+    const stored = '[GANCHO]: Hook\n[DESARROLLO]: Body\n[CTA]: End'
+    const fresh = parseScriptSections(stored)
+    const again = parseScriptSections(stored)
+    expect(fresh.map((s) => s.label)).toEqual(['Gancho', 'Desarrollo', 'Cierre'])
+    expect(again.map((s) => s.label)).toEqual(['Gancho', 'Desarrollo', 'Cierre'])
+    expect(fresh[2]).toMatchObject({ kind: 'cierre', label: 'Cierre', body: 'End' })
   })
 
-  it('maps English aliases HOOK / DEVELOPMENT without renaming CLOSE to CTA', () => {
+  it('maps English aliases HOOK / DEVELOPMENT / CLOSE to display labels', () => {
     const sections = parseScriptSections(
       '[HOOK]\nH\n[DEVELOPMENT]\nD\n[CLOSE]\nC'
     )
@@ -97,8 +95,8 @@ describe('parseScriptSections', () => {
 
   it('handles missing middle sections and empty bodies', () => {
     const sections = parseScriptSections('[GANCHO]\nOnly hook\n[CTA]\n')
-    expect(sections.map((s) => s.kind)).toEqual(['gancho', 'cta'])
+    expect(sections.map((s) => s.kind)).toEqual(['gancho', 'cierre'])
     expect(sections[0].body).toBe('Only hook')
-    expect(sections[1].body).toBe('')
+    expect(sections[1]).toMatchObject({ label: 'Cierre', body: '' })
   })
 })

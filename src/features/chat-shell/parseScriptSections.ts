@@ -1,4 +1,4 @@
-export type ScriptSectionKind = 'gancho' | 'desarrollo' | 'cta' | 'cierre' | 'other'
+export type ScriptSectionKind = 'gancho' | 'desarrollo' | 'cierre' | 'other'
 
 export interface ScriptSection {
   kind: ScriptSectionKind
@@ -16,9 +16,8 @@ export function normalizeSectionLabel(kind: ScriptSectionKind, rawInner: string)
       return 'Gancho'
     case 'desarrollo':
       return 'Desarrollo'
-    case 'cta':
-      return 'CTA'
     case 'cierre':
+      // Product language: CTA / CIERRE / CLOSE all display as "Cierre"
       return 'Cierre'
     case 'other': {
       const cleaned = rawInner
@@ -38,19 +37,23 @@ export function classifySectionMarker(rawInner: string): {
   kind: ScriptSectionKind
   label: string
 } {
-  const key = rawInner.trim().toUpperCase().replace(/\s+[AB]$/, '')
+  // Accept bracketed or bare markers from callers.
+  const key = rawInner
+    .trim()
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+[AB]$/, '')
   if (key.startsWith('GANCHO') || key.startsWith('HOOK')) {
     return { kind: 'gancho', label: normalizeSectionLabel('gancho', rawInner) }
   }
   if (key.startsWith('DESARROLLO') || key.startsWith('DEVELOPMENT')) {
     return { kind: 'desarrollo', label: normalizeSectionLabel('desarrollo', rawInner) }
   }
-  // CIERRE / CLOSE must never display as "CTA"
-  if (key.startsWith('CIERRE') || key.startsWith('CLOSE')) {
+  // CTA / CIERRE / CLOSE → displayed section header "Cierre" (raw copy text unchanged).
+  if (key === 'CTA' || key.startsWith('CIERRE') || key.startsWith('CLOSE')) {
     return { kind: 'cierre', label: normalizeSectionLabel('cierre', rawInner) }
-  }
-  if (key === 'CTA') {
-    return { kind: 'cta', label: normalizeSectionLabel('cta', rawInner) }
   }
   return { kind: 'other', label: normalizeSectionLabel('other', rawInner) }
 }
