@@ -4,8 +4,10 @@ import {
   CHAT_SHELL_MAX_OFFERS,
   normalizeOfferPositions,
   pickSafeChatSessionUpdates,
+  planKeptOfferPositionUpdates,
   resolveNextSessionId,
   resolveSessionOfferProductId,
+  type OfferLike,
 } from '../src/features/chat-shell/sessionOffer'
 import {
   planOfferGenerationWalk,
@@ -13,6 +15,44 @@ import {
   planRetryOfferWalk,
 } from '../src/features/chat-shell/chatShellGeneration'
 import { authorizeSessionOfferProduct } from '../api/lib/session-offer-auth'
+
+/** Simulate sequential UPDATEs; assert uniqueness + CHECK after every move. */
+function simulateMoves(
+  kept: OfferLike[],
+  moves: Array<{ product_id: string; position: number }>,
+  pivotDeleteId: string | null
+) {
+  const board = new Map<string, number>()
+  for (const row of kept) {
+    board.set(row.product_id, row.position)
+  }
+  if (pivotDeleteId) {
+    expect(board.has(pivotDeleteId)).toBe(true)
+    board.delete(pivotDeleteId)
+  }
+
+  const assertBoard = () => {
+    const positions = [...board.values()]
+    for (const p of positions) {
+      expect(p).toBeGreaterThanOrEqual(1)
+      expect(p).toBeLessThanOrEqual(CHAT_SHELL_MAX_OFFERS)
+    }
+    expect(new Set(positions).size).toBe(positions.length)
+  }
+
+  assertBoard()
+  for (const move of moves) {
+    expect(move.position).toBeGreaterThanOrEqual(1)
+    expect(move.position).toBeLessThanOrEqual(CHAT_SHELL_MAX_OFFERS)
+    expect(board.has(move.product_id)).toBe(true)
+    expect(
+      [...board.entries()].some(([id, p]) => id !== move.product_id && p === move.position)
+    ).toBe(false)
+    board.set(move.product_id, move.position)
+    assertBoard()
+  }
+  return board
+}
 
 describe('normalizeOfferPositions / cap', () => {
   it('rewrites gap-free positions 1..n and caps at 5', () => {
@@ -31,6 +71,105 @@ describe('normalizeOfferPositions / cap', () => {
     expect(canAddSessionOffer(0)).toBe(true)
     expect(canAddSessionOffer(CHAT_SHELL_MAX_OFFERS - 1)).toBe(true)
     expect(canAddSessionOffer(CHAT_SHELL_MAX_OFFERS)).toBe(false)
+  })
+})
+
+describe('planKeptOfferPositionUpdates (temp positions ∈ [1,5])', () => {
+  it('n=1 identity needs no moves', () => {
+    const plan = planKeptOfferPositionUpdates(
+      [{ product_id: 'a', position: 1 }],
+      { a: 1 }
+    )
+    expect(plan.moves).toEqual([])
+    expect(plan.pivotDeleteId).toBeNull()
+  })
+
+  it('n=2 swap uses a free hole (no 100+i)', () => {
+    const kept = [
+      { product_id: 'a', position: 1 },
+      { product_id: 'b', position: 2 },
+    ]
+    const plan = planKeptOfferPositionUpdates(kept, { a: 2, b: 1 })
+    expect(plan.pivotDeleteId).toBeNull()
+    for (const move of plan.moves) {
+      expect(move.position).toBeGreaterThanOrEqual(1)
+      expect(move.position).toBeLessThanOrEqual(5)
+      expect(move.position).not.toBeGreaterThan(5)
+    }
+    const board = simulateMoves(kept, plan.moves, plan.pivotDeleteId)
+    expect(board.get('a')).toBe(2)
+    expect(board.get('b')).toBe(1)
+  })
+
+  it('n=3 cycle parks only in free 1..5 slots', () => {
+    const kept = [
+      { product_id: 'a', position: 1 },
+      { product_id: 'b', position: 2 },
+      { product_id: 'c', position: 3 },
+    ]
+    const plan = planKeptOfferPositionUpdates(kept, { a: 2, b: 3, c: 1 })
+    expect(plan.pivotDeleteId).toBeNull()
+    expect(plan.moves.every((m) => m.position >= 1 && m.position <= 5)).toBe(true)
+    const board = simulateMoves(kept, plan.moves, null)
+    expect(Object.fromEntries(board)).toEqual({ a: 2, b: 3, c: 1 })
+  })
+
+  it('n=4 reorder never emits position > 5', () => {
+    const kept = [
+      { product_id: 'a', position: 1 },
+      { product_id: 'b', position: 2 },
+      { product_id: 'c', position: 3 },
+      { product_id: 'd', position: 4 },
+    ]
+    const plan = planKeptOfferPositionUpdates(kept, { a: 4, b: 3, c: 2, d: 1 })
+    expect(plan.pivotDeleteId).toBeNull()
+    expect(plan.moves.some((m) => m.position >= 100)).toBe(false)
+    const board = simulateMoves(kept, plan.moves, null)
+    expect(Object.fromEntries(board)).toEqual({ a: 4, b: 3, c: 2, d: 1 })
+  })
+
+  it('n=5 full permute requests pivot and keeps temps in 1..5 after hole opens', () => {
+    const kept = [
+      { product_id: 'a', position: 1 },
+      { product_id: 'b', position: 2 },
+      { product_id: 'c', position: 3 },
+      { product_id: 'd', position: 4 },
+      { product_id: 'e', position: 5 },
+    ]
+    const targets: Record<string, number> = { a: 2, b: 3, c: 4, d: 5, e: 1 }
+    const plan = planKeptOfferPositionUpdates(kept, targets)
+    expect(plan.pivotDeleteId).toBeTruthy()
+    expect(plan.moves.every((m) => m.position >= 1 && m.position <= 5)).toBe(true)
+
+    // Mirror replaceSessionOffers: delete pivot, re-plan remainder, apply.
+    const pivot = plan.pivotDeleteId!
+    const remainder = kept.filter((row) => row.product_id !== pivot)
+    const replan = planKeptOfferPositionUpdates(
+      remainder,
+      Object.fromEntries(remainder.map((row) => [row.product_id, targets[row.product_id]]))
+    )
+    expect(replan.pivotDeleteId).toBeNull()
+    const board = simulateMoves(kept, replan.moves, pivot)
+    for (const row of remainder) {
+      expect(board.get(row.product_id)).toBe(targets[row.product_id])
+    }
+    // Pivot target must be free for reinsert
+    expect([...board.values()].includes(targets[pivot])).toBe(false)
+  })
+
+  it('n=5 identity needs no pivot', () => {
+    const kept = [
+      { product_id: 'a', position: 1 },
+      { product_id: 'b', position: 2 },
+      { product_id: 'c', position: 3 },
+      { product_id: 'd', position: 4 },
+      { product_id: 'e', position: 5 },
+    ]
+    const plan = planKeptOfferPositionUpdates(kept, {
+      a: 1, b: 2, c: 3, d: 4, e: 5,
+    })
+    expect(plan.moves).toEqual([])
+    expect(plan.pivotDeleteId).toBeNull()
   })
 })
 

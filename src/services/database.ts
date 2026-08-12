@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase'
 import {
   CHAT_SHELL_MAX_OFFERS,
   normalizeOfferPositions,
+  planKeptOfferPositionUpdates,
 } from '../features/chat-shell/sessionOffer'
 import type { 
   Profile, 
@@ -563,6 +564,7 @@ export async function setSessionPrimaryOffer(
 /**
  * Replace session offers with an ordered product list (max 5, gap-free positions).
  * Does not delete offers that already have message_artifacts (cascade would wipe cards).
+ * Position rewrite stays inside CHECK (position ∈ [1,5]) — never parks at 100+i.
  */
 export async function replaceSessionOffers(
   sessionId: string,
@@ -579,6 +581,10 @@ export async function replaceSessionOffers(
   }
   const nextRows = normalizeOfferPositions(productIds)
   const nextIds = new Set(nextRows.map((r) => r.product_id))
+  const targetsByProductId: Record<string, number> = {}
+  for (const row of nextRows) {
+    targetsByProductId[row.product_id] = row.position
+  }
 
   const current = await getSessionOffers(sessionId)
   const toRemove = current.filter((row) => !nextIds.has(row.product_id))
@@ -604,38 +610,102 @@ export async function replaceSessionOffers(
     if (delError) throw delError
   }
 
-  // Two-phase position rewrite to satisfy UNIQUE (session_id, position).
   const kept = current.filter((row) => nextIds.has(row.product_id))
-  if (kept.length > 0) {
-    for (let i = 0; i < kept.length; i++) {
-      const { error } = await supabase
-        .from('chat_session_offers')
-        .update({ position: 100 + i })
-        .eq('session_id', sessionId)
-        .eq('product_id', kept[i].product_id)
-      if (error) throw error
+  const keptIds = new Set(kept.map((row) => row.product_id))
+
+  const hasArtifactsForProduct = async (productId: string): Promise<boolean> => {
+    const { count, error } = await supabase
+      .from('message_artifacts')
+      .select('id', { count: 'exact', head: true })
+      .eq('session_id', sessionId)
+      .eq('product_id', productId)
+    if (error) throw error
+    return (count ?? 0) > 0
+  }
+
+  let plan = planKeptOfferPositionUpdates(
+    kept.map((row) => ({ product_id: row.product_id, position: row.position })),
+    Object.fromEntries(
+      kept.map((row) => [row.product_id, targetsByProductId[row.product_id]])
+    )
+  )
+
+  let pivotRow: (typeof kept)[number] | null = null
+  if (plan.pivotDeleteId) {
+    const pivotCandidates = [
+      plan.pivotDeleteId,
+      ...kept.map((row) => row.product_id).filter((id) => id !== plan.pivotDeleteId),
+    ]
+    let pivotId: string | null = null
+    for (const candidateId of pivotCandidates) {
+      if (!(await hasArtifactsForProduct(candidateId))) {
+        pivotId = candidateId
+        break
+      }
+    }
+    if (!pivotId) {
+      throw new Error(
+        'Cannot reorder five offers when every offer already has scripts (no free 1..5 slot or artifact-free pivot).'
+      )
+    }
+    pivotRow = kept.find((row) => row.product_id === pivotId) || null
+    if (!pivotRow) {
+      throw new Error('Offer reorder pivot missing from kept rows')
+    }
+
+    // Open a 1..5 hole by temp-deleting the pivot, then re-plan on the remainder.
+    const { error: pivotDelErr } = await supabase
+      .from('chat_session_offers')
+      .delete()
+      .eq('session_id', sessionId)
+      .eq('product_id', pivotRow.product_id)
+    if (pivotDelErr) throw pivotDelErr
+
+    const remainder = kept.filter((row) => row.product_id !== pivotRow!.product_id)
+    plan = planKeptOfferPositionUpdates(
+      remainder.map((row) => ({ product_id: row.product_id, position: row.position })),
+      Object.fromEntries(
+        remainder.map((row) => [row.product_id, targetsByProductId[row.product_id]])
+      )
+    )
+    if (plan.pivotDeleteId) {
+      throw new Error('Offer position planner still needs a pivot after opening a hole')
     }
   }
 
+  for (const move of plan.moves) {
+    const { error } = await supabase
+      .from('chat_session_offers')
+      .update({ position: move.position })
+      .eq('session_id', sessionId)
+      .eq('product_id', move.product_id)
+    if (error) throw error
+  }
+
   for (const row of nextRows) {
-    const existing = current.find((c) => c.product_id === row.product_id)
-    if (existing) {
-      const { error } = await supabase
-        .from('chat_session_offers')
-        .update({ position: row.position })
-        .eq('session_id', sessionId)
-        .eq('product_id', row.product_id)
-      if (error) throw error
-    } else {
+    if (pivotRow && row.product_id === pivotRow.product_id) {
       const { error } = await supabase.from('chat_session_offers').insert({
         session_id: sessionId,
         business_id: businessId,
         product_id: row.product_id,
         position: row.position,
-        created_by: userId,
+        created_by: pivotRow.created_by || userId,
       })
       if (error) throw error
+      continue
     }
+    if (keptIds.has(row.product_id)) {
+      // Kept rows already at final positions via planner moves (or were unchanged).
+      continue
+    }
+    const { error } = await supabase.from('chat_session_offers').insert({
+      session_id: sessionId,
+      business_id: businessId,
+      product_id: row.product_id,
+      position: row.position,
+      created_by: userId,
+    })
+    if (error) throw error
   }
 
   return getSessionOffers(sessionId)
