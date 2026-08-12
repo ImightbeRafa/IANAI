@@ -131,6 +131,23 @@ export function useChatShellWorkspace(userId: string | undefined) {
     [bumpSelectionEpoch, commitSessionId, syncUrlAndStorage]
   )
 
+  /**
+   * Pin the active session after Skip (or similar).
+   * Bumps selection epoch so a late createSession/Quick cannot steal ?session=
+   * to a newer incomplete row (A→B snap).
+   */
+  const keepSessionSelected = useCallback(
+    (sessionId: string) => {
+      if (!sessionId) return
+      bumpSelectionEpoch()
+      preferredSessionRef.current = sessionId
+      commitSessionId(sessionId)
+      const brandId = activeBrandIdRef.current
+      syncUrlAndStorage(brandId, sessionId)
+    },
+    [bumpSelectionEpoch, commitSessionId, syncUrlAndStorage]
+  )
+
   const refreshBusinesses = useCallback(async () => {
     if (!userId) {
       setBusinesses([])
@@ -353,7 +370,10 @@ export function useChatShellWorkspace(userId: string | undefined) {
       )
       // Never mutate another brand's list (contamination). Same-brand can surface the row.
       if (activeBrandIdRef.current !== brandId) return
+      // Always surface the created row in the list…
       setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+      // …but only select it if this create is still the live user action.
+      // Skip/pin bumps epoch so a deferred create cannot rewrite ?session= A→B.
       if (selectionEpochRef.current !== epoch) return
       preferredSessionRef.current = session.id
       commitSessionId(session.id)
@@ -551,11 +571,6 @@ export function useChatShellWorkspace(userId: string | undefined) {
     let cancelled = false
     const sid = activeSessionId
     const epoch = selectionEpochRef.current
-    const urlIdAtStart = readUrlSessionId()
-    const preferredAtStart = preferredSessionRef.current
-    /** Authoritative deep-link / preferred — never mint or fall back while set. */
-    const authoritative =
-      sid === urlIdAtStart || sid === preferredAtStart || Boolean(urlIdAtStart && urlIdAtStart === sid)
 
     void (async () => {
       const row = await getChatSession(sid)
@@ -563,19 +578,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
       if (activeSessionIdRef.current !== sid) return
       if (selectionEpochRef.current !== epoch) return
       if (!row) {
-        // Transient miss or deleted: while URL/preferred still points here, keep the id
-        // (do not rewrite to brand-newest and never create a replacement session).
-        if (authoritative || readUrlSessionId() === sid || preferredSessionRef.current === sid) {
-          preferredSessionRef.current = sid
-          return
-        }
-        preferredSessionRef.current = null
-        const brandId = activeBrandIdRef.current
-        const fallback =
-          sessions.find((s) => s.id !== sid && (!s.business_id || s.business_id === brandId))?.id ??
-          null
-        commitSessionId(fallback)
-        syncUrlAndStorage(brandId, fallback)
+        // Transient miss or deleted: keep the id — never rewrite to a sibling
+        // (A→B snap). Explicit deleteSession owns fallback selection.
+        preferredSessionRef.current = sid
         return
       }
       if (row.business_id && row.business_id !== activeBrandIdRef.current) {
@@ -612,6 +617,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     notice,
     selectBrand,
     selectSession,
+    keepSessionSelected,
     createSession,
     createQuickSession,
     createBrand,

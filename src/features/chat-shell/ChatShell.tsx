@@ -294,6 +294,7 @@ export default function ChatShell({
         activeProduct={thread.activeProduct}
         offerBusy={thread.sending}
         onPatchSession={(updates) => void thread.patchSession(updates)}
+        onKeepSessionSelected={workspace.keepSessionSelected}
         onAddOffer={(productId) => void thread.addOffer(productId)}
         onRemoveOffer={(productId) => void thread.removeOffer(productId)}
         onMoveOffer={(productId, direction) => void thread.moveOffer(productId, direction)}

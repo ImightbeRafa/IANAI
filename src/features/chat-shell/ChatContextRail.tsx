@@ -31,6 +31,8 @@ interface ChatContextRailProps {
   activeProduct?: Product | null
   offerBusy?: boolean
   onPatchSession?: (updates: ChatSessionSafeUpdates) => void
+  /** Pin URL/active session after Skip so late create cannot snap A→B. */
+  onKeepSessionSelected?: (sessionId: string) => void
   onAddOffer?: (productId: string) => void | Promise<void>
   onRemoveOffer?: (productId: string) => void | Promise<void>
   onMoveOffer?: (productId: string, direction: -1 | 1) => void | Promise<void>
@@ -56,6 +58,7 @@ export default function ChatContextRail({
   activeProduct = null,
   offerBusy = false,
   onPatchSession,
+  onKeepSessionSelected,
   onAddOffer,
   onRemoveOffer,
   onMoveOffer,
@@ -129,6 +132,8 @@ export default function ChatContextRail({
     }
     setSkipPersistError(null)
     setForceSetup(false)
+    // Pin A in URL/workspace so a deferred createSession cannot snap ?session= to B.
+    onKeepSessionSelected?.(sessionId)
   }
 
   const clearSkipped = (sessionId: string, clearReason: 'save' | 'reopen') => {

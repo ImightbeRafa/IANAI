@@ -72,12 +72,14 @@ describe('ChatContextRail Skip remount', () => {
   it('Skip → unmount/remount keeps interview closed and LS key for same session', async () => {
     const user = userEvent.setup()
     const session = incompleteSession(sessionId)
+    const keepSelected = vi.fn()
     const railProps = {
       tab: 'context' as const,
       onTabChange: () => {},
       onClose: () => {},
       session,
       language: 'en' as const,
+      onKeepSessionSelected: keepSelected,
     }
 
     const first = render(<ChatContextRail {...railProps} />)
@@ -87,13 +89,14 @@ describe('ChatContextRail Skip remount', () => {
     expect(readSetupSkipped(storage, sessionId)).toBe(true)
     expect(store[setupSkippedStorageKey(sessionId)]).toBe('1')
     expect(store[setupSkippedStorageKey(olderId)]).toBe('1')
+    expect(keepSelected).toHaveBeenCalledWith(sessionId)
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Resume setup' })).toBeTruthy()
 
     first.unmount()
 
     // Remount with same session id — hydrate must only READ, never clear.
-    render(<ChatContextRail {...railProps} />)
+    render(<ChatContextRail {...railProps} onKeepSessionSelected={keepSelected} />)
     expect(readSetupSkipped(storage, sessionId)).toBe(true)
     expect(store[setupSkippedStorageKey(sessionId)]).toBe('1')
     expect(store[setupSkippedStorageKey(olderId)]).toBe('1')

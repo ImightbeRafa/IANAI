@@ -369,7 +369,7 @@ describe('resolveNextSessionId', () => {
     ).toBe('new-optimistic')
   })
 
-  it('falls back to current in list then first when nothing authoritative', () => {
+  it('falls back to current then first when nothing authoritative in URL/preferred', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],
@@ -388,7 +388,18 @@ describe('resolveNextSessionId', () => {
     ).toBe('a')
   })
 
-  it('never rewrites urlId/preferredId to sessionIds[0]', () => {
+  it('keeps currentId even when missing from list (no newest fallthrough)', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['b-newest', 'c'],
+        preferredId: null,
+        currentId: '1088a18d-skipped',
+        urlId: null,
+      })
+    ).toBe('1088a18d-skipped')
+  })
+
+  it('never rewrites urlId/preferredId/currentId to sessionIds[0]', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],
@@ -405,5 +416,13 @@ describe('resolveNextSessionId', () => {
         urlId: null,
       })
     ).toBe('gone')
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a89b72e3-newest'],
+        preferredId: null,
+        currentId: '1088a18d-a',
+        urlId: null,
+      })
+    ).toBe('1088a18d-a')
   })
 })
