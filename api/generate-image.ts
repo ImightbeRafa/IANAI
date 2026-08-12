@@ -2,7 +2,11 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage, isAdminUser } from './lib/auth.js'
 import { userHasProductAccess } from './lib/product-access.js'
 import { resolveAuthorizedSessionImage, isUuid } from './lib/session-access.js'
-import { authorizeShellImagePoll } from './lib/image-access.js'
+import {
+  authorizeShellImagePoll,
+  authorizeProductImageForSession,
+  normalizeProductImageIdList,
+} from './lib/image-access.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
@@ -14,6 +18,7 @@ import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
+import { fetchPublicUrl } from './lib/url-safety.js'
 
 const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations'
@@ -83,6 +88,140 @@ function isTransientGeminiError(error: unknown): boolean {
     || message.includes('429')
     || message.includes('500')
     || message.includes('503')
+}
+
+async function fetchImageUrlAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const imgResp = await fetchPublicUrl(url, { timeoutMs: 15000, maxRedirects: 3 })
+    if (!imgResp.ok) return null
+    const contentType = imgResp.headers.get('content-type') || 'image/webp'
+    if (!contentType.startsWith('image/')) return null
+    const buffer = await imgResp.arrayBuffer()
+    if (buffer.byteLength > 8_000_000) return null
+    const base64 = Buffer.from(buffer).toString('base64')
+    return `data:${contentType.split(';')[0]};base64,${base64}`
+  } catch (err) {
+    console.error('fetchImageUrlAsDataUrl failed', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+/**
+ * Fill input_image* from authorized product_images rows (chat-shell Producto mode).
+ * Does not trust client URLs — loads image_url server-side after offer/session authz.
+ */
+async function hydrateInputImagesFromProductImages(
+  imageParams: Record<string, unknown>,
+  options: {
+    sessionId: string | null
+    productId: string | null
+  }
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const inputKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4'] as const
+  const alreadyFilled = inputKeys.filter(
+    (k) => typeof imageParams[k] === 'string' && (imageParams[k] as string).length > 0
+  ).length
+  if (alreadyFilled > 0) return { ok: true }
+
+  if (!options.productId || !imgMemSupabase) return { ok: true }
+
+  let ids = normalizeProductImageIdList(imageParams.productImageIds)
+  // Also accept singular productImageId when array omitted
+  if (
+    ids.length === 0
+    && typeof imageParams.productImageId === 'string'
+    && imageParams.productImageId
+  ) {
+    ids = [imageParams.productImageId]
+  }
+
+  type ImageRow = {
+    id: string
+    product_id: string
+    user_id: string | null
+    session_id: string | null
+    image_url: string | null
+    kind: string | null
+    created_at: string | null
+  }
+
+  let rows: ImageRow[] = []
+
+  if (ids.length > 0) {
+    for (const id of ids) {
+      if (!isUuid(id)) {
+        return { ok: false, status: 400, error: 'Invalid productImageId' }
+      }
+    }
+    const { data, error } = await imgMemSupabase
+      .from('product_images')
+      .select('id, product_id, user_id, session_id, image_url, kind, created_at')
+      .in('id', ids)
+    if (error) {
+      console.error('hydrate product_images load error', error)
+      return { ok: false, status: 500, error: 'Failed to load product images' }
+    }
+    const byId = new Map((data || []).map((row) => [row.id as string, row as ImageRow]))
+    for (const id of ids) {
+      const row = byId.get(id)
+      if (!row) {
+        return { ok: false, status: 404, error: 'Product image not found' }
+      }
+      if (options.sessionId) {
+        const auth = authorizeProductImageForSession({
+          image: row,
+          sessionId: options.sessionId,
+          productId: options.productId,
+        })
+        if (!auth.ok) return auth
+      } else if (row.product_id !== options.productId) {
+        return { ok: false, status: 403, error: 'product_image_id does not belong to this product' }
+      }
+      rows.push(row)
+    }
+  } else if (options.sessionId) {
+    // Auto-load offer-scoped refs when client omitted IDs (same source as Images tab).
+    const { data, error } = await imgMemSupabase
+      .from('product_images')
+      .select('id, product_id, user_id, session_id, image_url, kind, created_at')
+      .eq('product_id', options.productId)
+      .or(`session_id.is.null,session_id.eq.${options.sessionId}`)
+      .neq('kind', 'generated')
+      .order('created_at', { ascending: false })
+      .limit(4)
+    if (error) {
+      console.error('hydrate auto product_images error', error)
+      return { ok: false, status: 500, error: 'Failed to load product images' }
+    }
+    rows = (data || []) as ImageRow[]
+  }
+
+  if (rows.length === 0) return { ok: true }
+
+  // Prefer product kind ordering
+  rows.sort((a, b) => {
+    const ap = a.kind === 'product' || !a.kind ? 0 : 1
+    const bp = b.kind === 'product' || !b.kind ? 0 : 1
+    if (ap !== bp) return ap - bp
+    return 0
+  })
+
+  let slot = 0
+  for (const row of rows.slice(0, 4)) {
+    if (!row.image_url) continue
+    const dataUrl = await fetchImageUrlAsDataUrl(row.image_url)
+    if (!dataUrl) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Could not load product reference image. Re-upload and try again.',
+      }
+    }
+    imageParams[inputKeys[slot]] = dataUrl
+    slot += 1
+  }
+
+  return { ok: true }
 }
 
 function normalizePostTextDensity(value: unknown): PostTextDensity {
@@ -1055,6 +1194,21 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const isPostMode = imageParams.mode === 'post'
     const isProductMode = isPostMode && (imageParams.postStyle || '') === 'product'
     const isLogoMode = isPostMode && (imageParams.postStyle || '') === 'logo'
+
+    // Producto / shell: hydrate input_image* from authorized offer product_images
+    // (uploads write product_images — do not require a separate legacy source).
+    if (isProductMode || rawSessionId) {
+      const hydrate = await hydrateInputImagesFromProductImages(imageParams, {
+        sessionId: rawSessionId || null,
+        productId:
+          (typeof imageParams.productId === 'string' ? imageParams.productId : null)
+          || authoritativeProductId
+          || null,
+      })
+      if (!hydrate.ok) {
+        return res.status(hydrate.status).json({ error: hydrate.error })
+      }
+    }
     
     let enhancedPrompt: string
 

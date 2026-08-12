@@ -49,6 +49,7 @@ import {
   filterImagesForOffer,
   latestImageByProductId,
   resolveActiveImageOfferId,
+  selectProductReferenceImageIds,
 } from './chatShellImages'
 import {
   editShellOfferImage,
@@ -1004,6 +1005,11 @@ export function useChatSessionThread(options: {
     if (!session || !activeImageOfferId || imageBusy) return
     const originSessionId = session.id
     const originGen = sessionGenRef.current
+    const productImageIds = selectProductReferenceImageIds(filteredOfferImages)
+    if (productImageIds.length === 0) {
+      setError('Upload at least one product reference image for this offer before Generate.')
+      return
+    }
     setImageBusy(true)
     setError(null)
     setNotice(null)
@@ -1013,6 +1019,7 @@ export function useChatSessionThread(options: {
         sessionId: originSessionId,
         productId: activeImageOfferId,
         prompt: session.context || 'Product hero image for ad',
+        productImageIds,
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -1042,7 +1049,14 @@ export function useChatSessionThread(options: {
     } finally {
       setImageBusy(false)
     }
-  }, [session, activeImageOfferId, imageBusy, userId, refreshOfferImages])
+  }, [
+    session,
+    activeImageOfferId,
+    imageBusy,
+    userId,
+    filteredOfferImages,
+    refreshOfferImages,
+  ])
 
   const editOfferImage = useCallback(async (
     productImageId: string,

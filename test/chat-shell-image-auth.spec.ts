@@ -3,6 +3,7 @@ import {
   authorizeProductImageForSession,
   authorizeSessionImageProduct,
   authorizeShellImagePoll,
+  normalizeProductImageIdList,
 } from '../api/lib/image-access'
 import {
   buildOptimizeForPostPrompt,
@@ -11,6 +12,7 @@ import {
   latestImageByProductId,
   normalizePostTextDensity,
   resolveActiveImageOfferId,
+  selectProductReferenceImageIds,
   sortArtifactsByOrdinal,
 } from '../src/features/chat-shell/chatShellImages'
 
@@ -139,5 +141,26 @@ describe('chatShellImages helpers', () => {
         { ordinal: 2 },
       ]).map((a) => a.ordinal)
     ).toEqual([1, 2, 3])
+  })
+
+  it('selectProductReferenceImageIds prefers product refs and skips generated', () => {
+    expect(
+      selectProductReferenceImageIds([
+        { id: 'g1', kind: 'generated', created_at: '2025-01-03T00:00:00Z' },
+        { id: 'c1', kind: 'context', created_at: '2025-01-02T00:00:00Z' },
+        { id: 'p1', kind: 'product', created_at: '2025-01-01T00:00:00Z' },
+        { id: 'p2', kind: 'product', created_at: '2025-01-04T00:00:00Z' },
+      ])
+    ).toEqual(['p2', 'p1', 'c1'])
+  })
+
+  it('normalizeProductImageIdList caps and dedupes', () => {
+    expect(normalizeProductImageIdList(['a', 'a', 'b', 'c', 'd', 'e', 1, null])).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+    ])
+    expect(normalizeProductImageIdList(null)).toEqual([])
   })
 })

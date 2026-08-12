@@ -104,17 +104,28 @@ export async function generateShellOfferImage(options: {
   sessionId: string
   productId: string
   prompt: string
+  /** Offer-scoped product_images ids (refs) — required for Producto mode. */
+  productImageIds: string[]
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
   sessionGen: number
 }): Promise<{ userMessage: Message; assistantMessage: Message; image: ProductImage } | null> {
+  if (!options.productImageIds.length) {
+    throw new Error(
+      'Upload at least one product reference image for this offer before Generate.'
+    )
+  }
+
   const sample = await callGenerateImage({
     mode: 'post',
     postStyle: 'product',
     productSubStyle: 'studio-hero',
     productId: options.productId,
     sessionId: options.sessionId,
+    productImageIds: options.productImageIds,
+    // First id also as productImageId for single-image authz paths
+    productImageId: options.productImageIds[0],
     prompt: options.prompt || 'Product hero image for ad',
     aspectRatio: '1:1',
     width: 1080,

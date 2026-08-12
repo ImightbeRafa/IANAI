@@ -105,6 +105,22 @@ export function canShowImageActionsForOffer(options: {
   return options.latestByProduct.has(options.productId)
 }
 
+/** Prefer product refs over context; exclude generated outputs. Max 4 IDs. */
+export function selectProductReferenceImageIds(
+  images: Array<{ id: string; kind?: string | null; created_at?: string }>,
+  max = 4
+): string[] {
+  const refs = images.filter((img) => img.kind !== 'generated')
+  const byRecency = [...refs].sort((a, b) => {
+    const ta = a.created_at ? Date.parse(a.created_at) : 0
+    const tb = b.created_at ? Date.parse(b.created_at) : 0
+    return tb - ta
+  })
+  const products = byRecency.filter((img) => !img.kind || img.kind === 'product')
+  const contexts = byRecency.filter((img) => img.kind === 'context')
+  return [...products, ...contexts].slice(0, max).map((img) => img.id)
+}
+
 /** Order mixed artifacts by ordinal ascending. */
 export function sortArtifactsByOrdinal<T extends { ordinal: number }>(artifacts: T[]): T[] {
   return [...artifacts].sort((a, b) => a.ordinal - b.ordinal)

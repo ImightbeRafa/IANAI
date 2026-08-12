@@ -73,3 +73,18 @@ export function authorizeShellImagePoll(options: {
   }
   return { ok: true }
 }
+
+/** Normalize client productImageIds (max 4 UUIDs). */
+export function normalizeProductImageIdList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of raw) {
+    if (typeof value !== 'string' || !value) continue
+    if (seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+    if (out.length >= 4) break
+  }
+  return out
+}
