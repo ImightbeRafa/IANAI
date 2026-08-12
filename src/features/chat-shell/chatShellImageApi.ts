@@ -10,6 +10,11 @@ import {
 import type { Message, MessageArtifact } from '../../types'
 import { buildOptimizeForPostPrompt, type PostTextDensity } from './chatShellImages'
 import { isLiveThread } from './chatShellAsync'
+import {
+  buildShellImageGenerateBody,
+  formatImageAssumptions,
+  type ShellImagePreferences,
+} from './chatShellImageIntent'
 
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
@@ -104,35 +109,43 @@ export async function generateShellOfferImage(options: {
   sessionId: string
   productId: string
   prompt: string
+  preferences: ShellImagePreferences
   /** Offer-scoped product_images ids (refs) — required for Producto mode. */
   productImageIds: string[]
+  brandKitId?: string
+  language?: 'en' | 'es'
+  scriptText?: string
+  userText?: string
+  source?: string
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
   sessionGen: number
 }): Promise<{ userMessage: Message; assistantMessage: Message; image: ProductImage } | null> {
-  if (!options.productImageIds.length) {
+  const language = options.language || 'es'
+  const prefs = options.preferences
+  if (!prefs.style) {
+    throw new Error('Choose an image style before Generate.')
+  }
+
+  if (prefs.style.kind === 'product' && !options.productImageIds.length) {
     throw new Error(
       'Upload at least one product reference image for this offer before Generate.'
     )
   }
 
-  const sample = await callGenerateImage({
-    mode: 'post',
-    postStyle: 'product',
-    productSubStyle: 'studio-hero',
+  const body = buildShellImageGenerateBody({
+    preferences: prefs,
     productId: options.productId,
     sessionId: options.sessionId,
+    prompt: options.prompt || options.scriptText || 'Ad image',
+    language,
+    brandKitId: options.brandKitId,
     productImageIds: options.productImageIds,
-    // First id also as productImageId for single-image authz paths
-    productImageId: options.productImageIds[0],
-    prompt: options.prompt || 'Product hero image for ad',
-    aspectRatio: '1:1',
-    width: 1080,
-    height: 1080,
-    model: 'nano-banana',
-    language: 'es',
+    scriptText: options.scriptText,
   })
+
+  const sample = await callGenerateImage(body)
 
   if (!isLiveThread(
     options.activeThreadSessionId,
@@ -143,15 +156,24 @@ export async function generateShellOfferImage(options: {
     return null
   }
 
+  const assumptions = formatImageAssumptions(prefs, language)
   return persistShellGeneratedImage({
     userId: options.userId,
     sessionId: options.sessionId,
     productId: options.productId,
     imageSource: sample,
-    label: 'Generated',
+    label: assumptions,
     actionType: 'generate',
-    userText: 'Generate image for offer',
-    metadata: { source: 'shell_generate' },
+    userText: options.userText || 'Generate image for offer',
+    metadata: {
+      source: options.source || 'shell_generate',
+      assumptions,
+      style: prefs.style,
+      aspectRatio: prefs.aspectRatio,
+      model: prefs.model,
+      density: prefs.density,
+      brandKitId: options.brandKitId || null,
+    },
   })
 }
 

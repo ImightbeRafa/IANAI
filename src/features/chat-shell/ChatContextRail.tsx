@@ -5,6 +5,13 @@ import type { ChatSessionSafeUpdates, ProductImage } from '../../services/databa
 import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
 import { isSessionSetupComplete } from './chatContextSetup'
 import ChatContextSetupCard from './ChatContextSetupCard'
+import {
+  formatImageAssumptions,
+  type ShellImageAspect,
+  type ShellImageDensity,
+  type ShellImagePreferences,
+} from './chatShellImageIntent'
+import type { ImageModel } from '../../types'
 
 export type RailTab = 'context' | 'offers' | 'images'
 
@@ -28,6 +35,9 @@ interface ChatContextRailProps {
   onSelectImageOffer?: (productId: string) => void
   onUploadOfferImage?: (file: File) => void | Promise<void>
   onGenerateOfferImage?: () => void | Promise<void>
+  imagePrefs?: ShellImagePreferences
+  onPatchImagePreferences?: (patch: Partial<ShellImagePreferences>) => void
+  language?: 'en' | 'es'
 }
 
 export default function ChatContextRail({
@@ -50,6 +60,9 @@ export default function ChatContextRail({
   onSelectImageOffer,
   onUploadOfferImage,
   onGenerateOfferImage,
+  imagePrefs,
+  onPatchImagePreferences,
+  language = 'es',
 }: ChatContextRailProps) {
   const [title, setTitle] = useState(session?.title || '')
   const [context, setContext] = useState(session?.context || '')
@@ -382,6 +395,61 @@ export default function ChatContextRail({
                     </button>
                   )
                 })}
+              </div>
+
+              <div className="chat-shell__image-knobs" aria-label="Image settings">
+                <p className="chat-shell__rail-hint">
+                  {imagePrefs
+                    ? formatImageAssumptions(imagePrefs, language)
+                    : '9:16 · Nano Banana Pro · Medium'}
+                </p>
+                <div className="chat-shell__clarify-chips">
+                  {(['9:16', '3:4', '1:1'] as ShellImageAspect[]).map((ar) => (
+                    <button
+                      key={ar}
+                      type="button"
+                      className={`chat-shell__btn chat-shell__btn--pill${imagePrefs?.aspectRatio === ar ? ' is-on' : ''}`}
+                      disabled={imageBusy}
+                      onClick={() => onPatchImagePreferences?.({ aspectRatio: ar })}
+                    >
+                      {ar}
+                    </button>
+                  ))}
+                </div>
+                <div className="chat-shell__clarify-chips">
+                  {([
+                    { id: 'nano-banana-pro' as ImageModel, label: 'Pro' },
+                    { id: 'nano-banana' as ImageModel, label: 'Fast' },
+                    { id: 'grok-imagine' as ImageModel, label: 'Grok' },
+                  ]).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={`chat-shell__btn chat-shell__btn--pill${imagePrefs?.model === m.id ? ' is-on' : ''}`}
+                      disabled={imageBusy}
+                      onClick={() => onPatchImagePreferences?.({ model: m.id })}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="chat-shell__clarify-chips">
+                  {([
+                    { id: 'hard' as ShellImageDensity, label: 'Hard' },
+                    { id: 'medium' as ShellImageDensity, label: 'Medium' },
+                    { id: 'standard' as ShellImageDensity, label: 'Standard' },
+                  ]).map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      className={`chat-shell__btn chat-shell__btn--pill${imagePrefs?.density === d.id ? ' is-on' : ''}`}
+                      disabled={imageBusy}
+                      onClick={() => onPatchImagePreferences?.({ density: d.id })}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="chat-shell__image-actions">

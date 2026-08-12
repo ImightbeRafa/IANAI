@@ -9,8 +9,12 @@ import type {
   Product,
 } from '../../types'
 import { isScriptContent, parseScripts, type ParsedScript } from '../../utils/scriptParser'
-import type { FailedOfferBatch } from './useChatSessionThread'
+import type { FailedOfferBatch, ImageClarifyState } from './useChatSessionThread'
 import { sortArtifactsByOrdinal, type ShellImageLike } from './chatShellImages'
+import {
+  anuncioStyleChoices,
+  productStyleChoices,
+} from './chatShellImageIntent'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -32,6 +36,10 @@ interface ChatThreadProps {
   failedBatch: FailedOfferBatch | null
   onRetryFailedOffers: () => void
   language?: 'en' | 'es'
+  imageClarify?: ImageClarifyState | null
+  onAnswerImageClarify?: (answer: { mode?: 'anuncio' | 'product'; styleId?: string }) => void
+  onCancelImageClarify?: () => void
+  onGenerateImageFromScript?: (scriptText: string, productId?: string | null) => void | Promise<void>
   onSaveScript: (
     content: string,
     title: string,
@@ -109,6 +117,10 @@ export default function ChatThread({
   failedBatch,
   onRetryFailedOffers,
   language = 'es',
+  imageClarify = null,
+  onAnswerImageClarify,
+  onCancelImageClarify,
+  onGenerateImageFromScript,
   onSaveScript,
   onEditScript,
   onSaveVersion,
@@ -239,6 +251,11 @@ export default function ChatThread({
                           onSaveVersion={(parentId, content, editSource, editLabel) =>
                             onSaveVersion(parentId, content, editSource, editLabel, productId)
                           }
+                          onGenerateImage={
+                            onGenerateImageFromScript
+                              ? (scriptText) => void onGenerateImageFromScript(scriptText, productId)
+                              : undefined
+                          }
                           onEditOfferImage={
                             offerImage
                               ? (instruction) =>
@@ -292,6 +309,11 @@ export default function ChatThread({
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}
+                        onGenerateImage={
+                          onGenerateImageFromScript && offerProductId
+                            ? (scriptText) => void onGenerateImageFromScript(scriptText, offerProductId)
+                            : undefined
+                        }
                       />
                     ))}
                   </div>
@@ -315,6 +337,55 @@ export default function ChatThread({
             {error || notice}
           </div>
         )}
+        {imageClarify ? (
+          <div className="chat-shell__clarify" role="group" aria-label="Image options">
+            <div className="chat-shell__clarify-chips">
+              {imageClarify.step === 'mode' ? (
+                <>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => onAnswerImageClarify?.({ mode: 'anuncio' })}
+                  >
+                    {language === 'es' ? 'Anuncio' : 'Ad'}
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => onAnswerImageClarify?.({ mode: 'product' })}
+                  >
+                    {language === 'es' ? 'Producto' : 'Product'}
+                  </button>
+                </>
+              ) : (
+                (imageClarify.mode === 'product'
+                  ? productStyleChoices(language)
+                  : anuncioStyleChoices(language)
+                ).map((choice) => (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => onAnswerImageClarify?.({ styleId: choice.id })}
+                  >
+                    {choice.label}
+                  </button>
+                ))
+              )}
+              <button
+                type="button"
+                className="chat-shell__btn chat-shell__btn--ghost"
+                disabled={imageBusy}
+                onClick={() => onCancelImageClarify?.()}
+              >
+                {language === 'es' ? 'Cancelar' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {failedBatch && failedBatch.productIds.length > 0 ? (
           <div className="chat-shell__retry-bar" role="status">
             <span>

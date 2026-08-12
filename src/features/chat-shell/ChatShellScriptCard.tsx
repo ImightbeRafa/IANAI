@@ -30,6 +30,7 @@ interface ChatShellScriptCardProps {
   onSaveVersion?: (parentId: string, content: string, editSource: string, editLabel?: string) => Promise<string | null>
   onEditOfferImage?: (instruction: string) => Promise<void>
   onOptimizeOfferImage?: () => Promise<void>
+  onGenerateImage?: (scriptText: string) => void | Promise<void>
 }
 
 const ENHANCE_PROMPT =
@@ -80,6 +81,7 @@ export default function ChatShellScriptCard({
   onSaveVersion,
   onEditOfferImage,
   onOptimizeOfferImage,
+  onGenerateImage,
 }: ChatShellScriptCardProps) {
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -399,6 +401,17 @@ export default function ChatShellScriptCard({
             </div>
           )}
         </div>
+        {onGenerateImage ? (
+          <button
+            type="button"
+            className="chat-shell__artifact-action"
+            disabled={busy || imageBusy}
+            onClick={() => void onGenerateImage(displayContent)}
+          >
+            {imageBusy ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
+            {es ? 'Crear imagen' : 'Create image'}
+          </button>
+        ) : null}
         {offerImageId && offerImageUrl && onOptimizeOfferImage ? (
           <button
             type="button"

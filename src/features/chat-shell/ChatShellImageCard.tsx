@@ -24,6 +24,11 @@ export default function ChatShellImageCard({
   const [localBusy, setLocalBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const assumptions =
+    typeof artifact.action_metadata?.assumptions === 'string'
+      ? artifact.action_metadata.assumptions
+      : null
+
   if (!url || !image) {
     return (
       <article className="chat-shell__artifact chat-shell__artifact--image">
@@ -72,7 +77,7 @@ export default function ChatShellImageCard({
       <header className="chat-shell__artifact-head">
         <div className="chat-shell__artifact-title-row">
           <strong className="chat-shell__artifact-title">
-            {image.label || 'Image'}
+            {assumptions || image.label || 'Image'}
           </strong>
           {productName ? (
             <span className="chat-shell__artifact-offer">{productName}</span>

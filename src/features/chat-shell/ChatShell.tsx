@@ -227,6 +227,12 @@ export default function ChatShell({
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
           language={language}
+          imageClarify={thread.imageClarify}
+          onAnswerImageClarify={(answer) => void thread.answerImageClarify(answer)}
+          onCancelImageClarify={() => thread.cancelImageClarify()}
+          onGenerateImageFromScript={(scriptText, productId) =>
+            void thread.generateImageFromScript(scriptText, productId)
+          }
           onEditOfferImage={(productImageId, imageUrl, instruction, productId) =>
             thread.editOfferImage(productImageId, imageUrl, instruction, productId)
           }
@@ -256,6 +262,9 @@ export default function ChatShell({
         onSelectImageOffer={thread.selectImageOffer}
         onUploadOfferImage={(file) => void thread.uploadOfferImage(file)}
         onGenerateOfferImage={() => void thread.generateOfferImage()}
+        imagePrefs={thread.imagePrefs}
+        onPatchImagePreferences={thread.patchImagePreferences}
+        language={language}
       />
     </div>
   )

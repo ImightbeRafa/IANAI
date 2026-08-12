@@ -1221,7 +1221,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
-      // Determine aspect ratio from request (default 9:16 for backward compat)
+      // Determine aspect ratio from request (default 9:16 for backward compat).
+      // Chat-shell sessions may request true 1:1 for presets/anuncios (Preview).
+      const shellSquare =
+        Boolean(rawSessionId)
+        && imageParams.aspectRatio === '1:1'
+        && !isLogoMode
       const postAspectRatio: PostAspectRatio = imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
       const postStyle: string = imageParams.postStyle || 'venta-directa'
 
@@ -1229,7 +1234,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Force 1:1 for logos regardless of incoming aspectRatio
         imageParams.width = 1024
         imageParams.height = 1024
-      } else if (imageParams.aspectRatio === '1:1' && isProductMode) {
+      } else if (imageParams.aspectRatio === '1:1' && (isProductMode || shellSquare)) {
         imageParams.width = 1080
         imageParams.height = 1080
       } else if (postAspectRatio === '9:16') {
@@ -1241,7 +1246,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       }
 
       // Explicit aspect ratio enforcement prefix
-      const arLabel = postAspectRatio === '9:16' ? '9:16 vertical (1080×1920)' : '3:4 vertical (1080×1440)'
+      const arLabel = shellSquare || (imageParams.aspectRatio === '1:1' && isProductMode)
+        ? '1:1 cuadrado (1080×1080)'
+        : postAspectRatio === '9:16'
+          ? '9:16 vertical (1080×1920)'
+          : '3:4 vertical (1080×1440)'
       const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
       const productReferenceStrategyPrefix = buildProductReferenceStrategyPrefix(postLanguage, productReferenceCount, isProductMode)
 

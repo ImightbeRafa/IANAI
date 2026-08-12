@@ -1119,6 +1119,29 @@
   flex-wrap: wrap;
 }
 
+.chat-shell__clarify {
+  margin-bottom: 8px;
+}
+
+.chat-shell__clarify-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-shell__btn--pill.is-on {
+  border-color: var(--accent, #5b8def);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent, #5b8def) 16%, transparent);
+}
+
+.chat-shell__image-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .chat-shell__composer textarea {
   resize: none;
   min-height: 40px;

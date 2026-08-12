@@ -65,12 +65,35 @@ import {
   selectProductReferenceImageIds,
 } from './chatShellImages'
 import {
+  formatImageAssumptions,
+  parseChatShellImageIntent,
+  planImageClarifications,
+  readImagePreferences,
+  requiresProductReferences,
+  resolveImagePreferences,
+  writeImagePreferences,
+  type ImageClarifyStep,
+  type ShellImagePreferences,
+  type ShellImageStyle,
+} from './chatShellImageIntent'
+import {
   editShellOfferImage,
   generateShellOfferImage,
   getSessionOfferImages,
   optimizeShellOfferImage,
   uploadShellOfferImage,
 } from './chatShellImageApi'
+
+export type ImageClarifyState = {
+  sessionId: string
+  step: ImageClarifyStep
+  mode?: 'anuncio' | 'product'
+  originText: string
+  productId: string
+  scriptText?: string
+  source: 'composer' | 'rail' | 'script_card'
+  partial: Partial<ShellImagePreferences>
+}
 
 function buildLegacyProductContext(product: Product, additionalContext?: string) {
   return {
@@ -141,6 +164,19 @@ export function useChatSessionThread(options: {
   const [offerImages, setOfferImages] = useState<ProductImage[]>([])
   const [imageOfferId, setImageOfferId] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
+  const [imagePrefs, setImagePrefs] = useState<ShellImagePreferences>(() =>
+    resolveImagePreferences({}, {})
+  )
+  const [imageClarify, setImageClarify] = useState<ImageClarifyState | null>(null)
+
+  const beginImageFlowRef = useRef<(options: {
+    productId?: string | null
+    prompt?: string
+    userText?: string
+    scriptText?: string
+    source: 'composer' | 'rail' | 'script_card'
+    explicit?: Partial<ShellImagePreferences>
+  }) => Promise<void>>(async () => {})
 
   const loadRequestRef = useRef(0)
   const offerRequestRef = useRef(0)
@@ -253,6 +289,8 @@ export function useChatSessionThread(options: {
       setFailedBatch(null)
       setOfferImages([])
       setImageOfferId(null)
+      setImageClarify(null)
+      setImagePrefs(resolveImagePreferences({}, {}))
       setLoadingMessages(false)
       return
     }
@@ -263,6 +301,8 @@ export function useChatSessionThread(options: {
     setFailedBatch(null)
     setOfferImages([])
     setImageOfferId(null)
+    setImageClarify(null)
+    setImagePrefs(resolveImagePreferences({}, readImagePreferences(storage, sessionId)))
     setLoadingMessages(true)
     setError(null)
     setNotice(null)
@@ -613,6 +653,22 @@ export function useChatSessionThread(options: {
     if (!text || !session) return
     if (inFlightSessions.has(session.id)) return
 
+    const imageIntent = parseChatShellImageIntent(text, language)
+    if (imageIntent.matched && imageIntent.wantsImage) {
+      setComposer('')
+      setError(null)
+      setFailedBatch(null)
+      // Deferred: beginImageFlow is declared below; call via ref assigned after definition.
+      await beginImageFlowRef.current({
+        productId: activeImageOfferId || offerProductId,
+        prompt: text,
+        userText: text,
+        source: 'composer',
+        explicit: imageIntent.preferences,
+      })
+      return
+    }
+
     let liveOffers = offers
     let walk = planOfferGenerationWalk(liveOffers)
 
@@ -775,6 +831,8 @@ export function useChatSessionThread(options: {
     inFlightSessions,
     userId,
     language,
+    activeImageOfferId,
+    offerProductId,
     runOfferWalk,
     persistSuccessfulBatch,
   ])
@@ -1045,25 +1103,68 @@ export function useChatSessionThread(options: {
     }
   }, [session, activeImageOfferId, imageBusy, userId, refreshOfferImages])
 
-  const generateOfferImage = useCallback(async () => {
-    if (!session || !activeImageOfferId || imageBusy) return
+  const patchImagePreferences = useCallback((patch: Partial<ShellImagePreferences>) => {
+    setImagePrefs((prev) => {
+      const next = resolveImagePreferences(patch, prev)
+      if (sessionId) writeImagePreferences(storage, sessionId, next)
+      return next
+    })
+  }, [sessionId, storage])
+
+  const runImageGenerate = useCallback(async (options: {
+    productId: string
+    preferences: ShellImagePreferences
+    prompt: string
+    userText: string
+    scriptText?: string
+    source: string
+  }) => {
+    if (!session || imageBusy) return
     const originSessionId = session.id
     const originGen = sessionGenRef.current
-    const productImageIds = selectProductReferenceImageIds(filteredOfferImages)
-    if (productImageIds.length === 0) {
-      setError('Upload at least one product reference image for this offer before Generate.')
+    const prefs = options.preferences
+    if (!prefs.style) {
+      setError(language === 'es' ? 'Elige un estilo de imagen.' : 'Choose an image style.')
       return
     }
+
     setImageBusy(true)
     setError(null)
-    setNotice(null)
+    setNotice(formatImageAssumptions(prefs, language))
     try {
+      const images = await getSessionOfferImages(options.productId, originSessionId)
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      setOfferImages(images)
+      const productImageIds = selectProductReferenceImageIds(images)
+      if (requiresProductReferences(prefs.style) && productImageIds.length === 0) {
+        setError(
+          language === 'es'
+            ? 'Sube al menos una imagen de referencia del producto para este estilo.'
+            : 'Upload at least one product reference image for this style.'
+        )
+        return
+      }
+
+      const brandKitId = resolveBrandKitIdForProduct(options.productId, brandKits, storage)
       const result = await generateShellOfferImage({
         userId,
         sessionId: originSessionId,
-        productId: activeImageOfferId,
-        prompt: session.context || 'Product hero image for ad',
+        productId: options.productId,
+        prompt: options.prompt,
+        preferences: prefs,
         productImageIds,
+        brandKitId,
+        language,
+        scriptText: options.scriptText,
+        userText: options.userText,
+        source: options.source,
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -1078,8 +1179,11 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
+      writeImagePreferences(storage, originSessionId, prefs)
+      setImagePrefs(prefs)
+      setImageClarify(null)
       setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
-      await refreshOfferImages(originSessionId, activeImageOfferId, loadRequestRef.current)
+      await refreshOfferImages(originSessionId, options.productId, loadRequestRef.current)
     } catch (err) {
       console.error(err)
       if (isLiveThread(
@@ -1095,12 +1199,148 @@ export function useChatSessionThread(options: {
     }
   }, [
     session,
-    activeImageOfferId,
     imageBusy,
+    language,
+    brandKits,
+    storage,
     userId,
-    filteredOfferImages,
     refreshOfferImages,
   ])
+
+  const beginImageFlow = useCallback(async (options: {
+    productId?: string | null
+    prompt?: string
+    userText?: string
+    scriptText?: string
+    source: 'composer' | 'rail' | 'script_card'
+    explicit?: Partial<ShellImagePreferences>
+  }) => {
+    if (!session) return
+    const productId = options.productId || activeImageOfferId || offerProductId
+    if (!productId) {
+      setNotice(
+        language === 'es'
+          ? 'Elige una oferta en el rail antes de generar imagen.'
+          : 'Choose an offer in the rail before generating an image.'
+      )
+      return
+    }
+    if (!offers.some((o) => o.product_id === productId) && session.product_id !== productId) {
+      setError(
+        language === 'es'
+          ? 'Esa oferta ya no está en la sesión.'
+          : 'That offer is no longer on this session.'
+      )
+      return
+    }
+
+    const sticky = readImagePreferences(storage, session.id)
+    const resolved = resolveImagePreferences(
+      { ...options.explicit },
+      resolveImagePreferences(sticky, imagePrefs)
+    )
+    const plan = planImageClarifications(resolved)
+    if (plan.needed && plan.step === 'mode') {
+      setImagePrefs(resolved)
+      setImageClarify({
+        sessionId: session.id,
+        step: 'mode',
+        originText: options.userText || options.prompt || 'Generate image',
+        productId,
+        scriptText: options.scriptText,
+        source: options.source,
+        partial: options.explicit || {},
+      })
+      setNotice(
+        language === 'es'
+          ? '¿Anuncio con texto o foto de producto?'
+          : 'Ad with text, or product photo?'
+      )
+      return
+    }
+
+    await runImageGenerate({
+      productId,
+      preferences: resolved,
+      prompt: options.prompt || options.scriptText || session.context || 'Ad image',
+      userText: options.userText || options.prompt || 'Generate image for offer',
+      scriptText: options.scriptText,
+      source: options.source,
+    })
+  }, [
+    session,
+    activeImageOfferId,
+    offerProductId,
+    offers,
+    language,
+    storage,
+    imagePrefs,
+    runImageGenerate,
+  ])
+
+  beginImageFlowRef.current = beginImageFlow
+
+  const answerImageClarify = useCallback(async (
+    answer: { mode?: 'anuncio' | 'product'; styleId?: string }
+  ) => {
+    if (!imageClarify || !session || imageClarify.sessionId !== session.id) return
+
+    if (imageClarify.step === 'mode' && answer.mode) {
+      setImageClarify({
+        ...imageClarify,
+        step: 'style',
+        mode: answer.mode,
+      })
+      setNotice(
+        answer.mode === 'product'
+          ? (language === 'es' ? 'Elige estilo de producto:' : 'Pick a product style:')
+          : (language === 'es' ? 'Elige estilo de anuncio:' : 'Pick an ad style:')
+      )
+      return
+    }
+
+    if (imageClarify.step === 'style' && answer.styleId) {
+      const style: ShellImageStyle =
+        imageClarify.mode === 'product'
+          ? { kind: 'product', productSubStyle: answer.styleId }
+          : { kind: 'preset', presetId: answer.styleId }
+      const resolved = resolveImagePreferences(
+        { ...imageClarify.partial, style },
+        resolveImagePreferences(readImagePreferences(storage, session.id), imagePrefs)
+      )
+      await runImageGenerate({
+        productId: imageClarify.productId,
+        preferences: resolved,
+        prompt: imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
+        userText: imageClarify.originText,
+        scriptText: imageClarify.scriptText,
+        source: imageClarify.source,
+      })
+    }
+  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate])
+
+  const generateOfferImage = useCallback(async () => {
+    await beginImageFlow({
+      productId: activeImageOfferId,
+      prompt: session?.context || 'Product hero image for ad',
+      userText: 'Generate image for offer',
+      source: 'rail',
+      explicit: imagePrefs.style ? { style: imagePrefs.style } : undefined,
+    })
+  }, [beginImageFlow, activeImageOfferId, session, imagePrefs.style])
+
+  const generateImageFromScript = useCallback(async (
+    scriptText: string,
+    productId?: string | null
+  ) => {
+    await beginImageFlow({
+      productId: productId || activeImageOfferId || offerProductId,
+      prompt: scriptText,
+      userText: language === 'es' ? 'Crear imagen desde guión' : 'Create image from script',
+      scriptText,
+      source: 'script_card',
+    })
+  }, [beginImageFlow, activeImageOfferId, offerProductId, language])
 
   const editOfferImage = useCallback(async (
     productImageId: string,
@@ -1243,7 +1483,13 @@ export function useChatSessionThread(options: {
     selectImageOffer,
     uploadOfferImage,
     generateOfferImage,
+    generateImageFromScript,
     editOfferImage,
     optimizeOfferImage,
+    imagePrefs,
+    patchImagePreferences,
+    imageClarify,
+    answerImageClarify,
+    cancelImageClarify: () => setImageClarify(null),
   }
 }
