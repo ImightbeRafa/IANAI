@@ -7,6 +7,7 @@ import {
   getChatSession,
 } from '../../services/database'
 import type { Business, ChatSession } from '../../types'
+import { selectionsEqual } from './chatShellAsync'
 import {
   persistSelection,
   readStoredSelection,
@@ -34,16 +35,20 @@ function quickSessionTitle(): string {
   })}`
 }
 
-function readUrlSessionId(): string | null {
+function readUrlSelection() {
   try {
-    return selectionFromSearchParams(new URLSearchParams(window.location.search)).sessionId
+    return selectionFromSearchParams(new URLSearchParams(window.location.search))
   } catch {
-    return null
+    return { brandId: null, sessionId: null }
   }
 }
 
+function readUrlSessionId(): string | null {
+  return readUrlSelection().sessionId
+}
+
 export function useChatShellWorkspace(userId: string | undefined) {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [, setSearchParams] = useSearchParams()
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeBrandId, setActiveBrandId] = useState<string | null>(null)
@@ -61,8 +66,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
   /** Bumped on every user-driven selection/create so stale fetches cannot overwrite. */
   const selectionEpochRef = useRef(0)
   const sessionsRequestIdRef = useRef(0)
+  const businessesRequestIdRef = useRef(0)
   const createLockRef = useRef(false)
-  const hydratedUserRef = useRef<string | null>(null)
+  /** True after initial selection hydrate for the current user (list refresh still works). */
+  const didHydrateSelectionRef = useRef(false)
+  const hydratedUserIdRef = useRef<string | null>(null)
 
   const activeBrand = useMemo(
     () => businesses.find((b) => b.id === activeBrandId) ?? null,
@@ -86,8 +94,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const syncUrlAndStorage = useCallback(
     (brandId: string | null, sessionId: string | null) => {
       persistSelection({ brandId, sessionId })
-      const next = selectionToSearchParams({ brandId, sessionId })
-      setSearchParams(next, { replace: true })
+      const nextSelection = { brandId, sessionId }
+      if (selectionsEqual(readUrlSelection(), nextSelection)) return
+      setSearchParams(selectionToSearchParams(nextSelection), { replace: true })
     },
     [setSearchParams]
   )
@@ -127,19 +136,38 @@ export function useChatShellWorkspace(userId: string | undefined) {
     if (!userId) {
       setBusinesses([])
       setLoadingBusinesses(false)
+      hydratedUserIdRef.current = null
+      didHydrateSelectionRef.current = false
       return
     }
-    if (hydratedUserRef.current === userId) return
-    hydratedUserRef.current = userId
+
+    // Reset hydrate bookkeeping when the signed-in user changes.
+    if (hydratedUserIdRef.current !== userId) {
+      hydratedUserIdRef.current = userId
+      didHydrateSelectionRef.current = false
+    }
+
+    const requestId = ++businessesRequestIdRef.current
+    const epochAtStart = selectionEpochRef.current
+    const needsSelectionHydrate = !didHydrateSelectionRef.current
 
     setLoadingBusinesses(true)
     setError(null)
     try {
       const list = await getBusinesses(userId)
+      if (requestId !== businessesRequestIdRef.current) return
       setBusinesses(list)
 
+      // Always refresh the brand list; only apply selection hydrate once, and
+      // never overwrite a newer user click that happened while this awaited.
+      if (!needsSelectionHydrate) return
+      if (selectionEpochRef.current !== epochAtStart) {
+        didHydrateSelectionRef.current = true
+        return
+      }
+
       const initial = resolveInitialSelection(
-        selectionFromSearchParams(searchParams),
+        readUrlSelection(),
         readStoredSelection()
       )
       const brandStillValid = Boolean(
@@ -150,21 +178,31 @@ export function useChatShellWorkspace(userId: string | undefined) {
         : (list[0]?.id ?? null)
       const nextSessionId = brandStillValid ? initial.sessionId : null
 
+      if (selectionEpochRef.current !== epochAtStart) {
+        didHydrateSelectionRef.current = true
+        return
+      }
+
       preferredSessionRef.current = nextSessionId
       activeBrandIdRef.current = nextBrandId
       setActiveBrandId(nextBrandId)
-      // Commit hydrate session immediately — do not clear to null (race window).
       commitSessionId(nextSessionId)
       syncUrlAndStorage(nextBrandId, nextSessionId)
+      didHydrateSelectionRef.current = true
     } catch (err) {
+      if (requestId !== businessesRequestIdRef.current) return
       console.error(err)
-      hydratedUserRef.current = null
+      if (needsSelectionHydrate) {
+        didHydrateSelectionRef.current = false
+        hydratedUserIdRef.current = null
+      }
       setError(err instanceof Error ? err.message : 'Failed to load brands')
     } finally {
-      setLoadingBusinesses(false)
+      if (requestId === businessesRequestIdRef.current) {
+        setLoadingBusinesses(false)
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once per user
-  }, [userId])
+  }, [userId, commitSessionId, syncUrlAndStorage])
 
   useEffect(() => {
     void refreshBusinesses()
@@ -267,7 +305,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
         userId,
         title || defaultSessionTitle()
       )
-      // Always surface the created row; only skip selecting it if the user moved on.
+      // Never mutate another brand's list (contamination). Same-brand can surface the row.
+      if (activeBrandIdRef.current !== brandId) return
       setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
       if (selectionEpochRef.current !== epoch) return
       preferredSessionRef.current = session.id
@@ -299,22 +338,24 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setNotice(null)
     try {
       const session = await createBrandChatSession(brandId, userId, quickSessionTitle())
+      if (selectionEpochRef.current !== epoch) return
+
       if (brandId !== activeBrandIdRef.current) {
-        if (selectionEpochRef.current !== epoch) return
+        // Cross-brand Quick: seed only while this create is still the live action.
         preferredSessionRef.current = session.id
         activeBrandIdRef.current = brandId
         setActiveBrandId(brandId)
-        // Seed the new brand list so the row is visible before fetch returns.
         setSessions([session])
         commitSessionId(session.id)
         syncUrlAndStorage(brandId, session.id)
-      } else {
-        setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
-        if (selectionEpochRef.current !== epoch) return
-        preferredSessionRef.current = session.id
-        commitSessionId(session.id)
-        syncUrlAndStorage(brandId, session.id)
+        return
       }
+
+      if (activeBrandIdRef.current !== brandId) return
+      setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+      preferredSessionRef.current = session.id
+      commitSessionId(session.id)
+      syncUrlAndStorage(brandId, session.id)
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to create Quick session')

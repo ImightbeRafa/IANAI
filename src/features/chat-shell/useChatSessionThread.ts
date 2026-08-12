@@ -19,6 +19,12 @@ import {
   sendMessageToGrok,
 } from '../../services/grokApi'
 import type { Business, ChatSession, ChatSessionOffer, Message, Product } from '../../types'
+import {
+  addInFlightSession,
+  isLiveThread,
+  isSessionSending,
+  removeInFlightSession,
+} from './chatShellAsync'
 import { resolveSessionOfferProductId } from './sessionOffer'
 
 const SHELL_SCRIPT_SETTINGS = {
@@ -73,14 +79,22 @@ export function useChatSessionThread(options: {
   const [brandProducts, setBrandProducts] = useState<Product[]>([])
   const [activeProduct, setActiveProduct] = useState<Product | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
-  const [sending, setSending] = useState(false)
+  const [inFlightSessions, setInFlightSessions] = useState<Set<string>>(() => new Set())
   const [savingScript, setSavingScript] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [composer, setComposer] = useState('')
 
   const loadRequestRef = useRef(0)
-  const sendLockRef = useRef(false)
+  const offerRequestRef = useRef(0)
+  /** Bumped on every session change including null. */
+  const sessionGenRef = useRef(0)
+  const activeThreadSessionIdRef = useRef<string | null>(null)
+
+  // Keep live session id readable synchronously during event handlers / awaits.
+  activeThreadSessionIdRef.current = sessionId
+
+  const sending = isSessionSending(inFlightSessions, sessionId)
 
   const offerProductId = useMemo(
     () => resolveSessionOfferProductId(session, offers),
@@ -96,6 +110,7 @@ export function useChatSessionThread(options: {
   ) => {
     const list = await getSessionOffers(sid)
     if (requestId !== loadRequestRef.current) return list
+    if (activeThreadSessionIdRef.current !== sid) return list
     setOffers(list)
     const pid = resolveSessionOfferProductId(sessionRow, list)
     if (!pid) {
@@ -104,6 +119,7 @@ export function useChatSessionThread(options: {
     }
     const product = list.find((o) => o.product_id === pid)?.product || (await getProduct(pid))
     if (requestId !== loadRequestRef.current) return list
+    if (activeThreadSessionIdRef.current !== sid) return list
     setActiveProduct(product)
     return list
   }, [])
@@ -129,6 +145,10 @@ export function useChatSessionThread(options: {
   }, [brand?.id])
 
   useEffect(() => {
+    // Invalidate every in-flight load/send commit target, including null clears.
+    sessionGenRef.current += 1
+    const requestId = ++loadRequestRef.current
+
     if (!sessionId) {
       setMessages([])
       setOffers([])
@@ -140,7 +160,6 @@ export function useChatSessionThread(options: {
       return
     }
 
-    const requestId = ++loadRequestRef.current
     // Clear stale transcript immediately so highlight and thread stay in lockstep.
     setMessages([])
     setOffers([])
@@ -156,14 +175,21 @@ export function useChatSessionThread(options: {
           refreshOffersAndProduct(sessionId, session, requestId),
         ])
         if (requestId !== loadRequestRef.current) return
+        if (activeThreadSessionIdRef.current !== sessionId) return
         setMessages(msgs)
       } catch (err) {
         if (requestId !== loadRequestRef.current) return
+        if (activeThreadSessionIdRef.current !== sessionId) return
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load messages')
         setMessages([])
       } finally {
-        if (requestId === loadRequestRef.current) setLoadingMessages(false)
+        if (
+          requestId === loadRequestRef.current &&
+          activeThreadSessionIdRef.current === sessionId
+        ) {
+          setLoadingMessages(false)
+        }
       }
     })()
   // Only remount thread data when the selected session id changes
@@ -175,14 +201,49 @@ export function useChatSessionThread(options: {
       setNotice('Session needs a brand (business_id) before attaching an offer.')
       return
     }
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    const requestId = ++offerRequestRef.current
     setError(null)
     setNotice(null)
     try {
-      const offer = await setSessionPrimaryOffer(session.id, session.business_id, productId, userId)
-      setOffers([offer])
+      const offer = await setSessionPrimaryOffer(
+        originSessionId,
+        session.business_id,
+        productId,
+        userId
+      )
+      if (requestId !== offerRequestRef.current) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
       const product = offer.product || (await getProduct(productId))
+      if (requestId !== offerRequestRef.current) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      setOffers([offer])
       setActiveProduct(product)
     } catch (err) {
+      if (requestId !== offerRequestRef.current) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to set offer')
     }
@@ -190,10 +251,28 @@ export function useChatSessionThread(options: {
 
   const patchSession = useCallback(async (updates: ChatSessionSafeUpdates) => {
     if (!session) return
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
     try {
-      const next = await updateChatSession(session.id, updates)
+      const next = await updateChatSession(originSessionId, updates)
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
       onSessionPatched?.(next)
     } catch (err) {
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to update session')
     }
@@ -201,7 +280,8 @@ export function useChatSessionThread(options: {
 
   const send = useCallback(async () => {
     const text = composer.trim()
-    if (!text || !session || sendLockRef.current) return
+    if (!text || !session) return
+    if (inFlightSessions.has(session.id)) return
 
     if (!offerProductId || !activeProduct) {
       setNotice('Choose an offer (product) in the Context rail before generating scripts.')
@@ -209,6 +289,7 @@ export function useChatSessionThread(options: {
     }
 
     const originSessionId = session.id
+    const originGen = sessionGenRef.current
     const optimisticId = `optimistic-user-${Date.now()}`
     const optimisticUser: Message = {
       id: optimisticId,
@@ -218,8 +299,7 @@ export function useChatSessionThread(options: {
       created_at: new Date().toISOString(),
     }
 
-    sendLockRef.current = true
-    setSending(true)
+    setInFlightSessions((prev) => addInFlightSession(prev, originSessionId))
     setError(null)
     setNotice(null)
     setComposer('')
@@ -255,25 +335,36 @@ export function useChatSessionThread(options: {
       const savedUser = await addMessage(originSessionId, 'user', text)
       const savedAi = await addMessage(originSessionId, 'assistant', ai.content, ai._debug?.systemPrompt)
 
-      if (originSessionId === sessionId && loadRequestRef.current) {
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== optimisticId),
-          savedUser,
-          savedAi,
-        ])
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
       }
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== optimisticId),
+        savedUser,
+        savedAi,
+      ])
     } catch (err) {
       console.error(err)
       const msg = err instanceof Error ? err.message : 'Failed to send'
-      // Roll back optimistic user bubble; restore composer for retry.
-      if (originSessionId === sessionId) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
-        setComposer(text)
-        setError(msg)
+      // Roll back optimistic user bubble; restore composer for retry — only on live origin.
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
       }
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
+      setComposer(text)
+      setError(msg)
     } finally {
-      sendLockRef.current = false
-      setSending(false)
+      setInFlightSessions((prev) => removeInFlightSession(prev, originSessionId))
     }
   }, [
     composer,
@@ -282,7 +373,7 @@ export function useChatSessionThread(options: {
     activeProduct,
     messages,
     brand,
-    sessionId,
+    inFlightSessions,
   ])
 
   const handleSaveScript = useCallback(async (
@@ -291,13 +382,30 @@ export function useChatSessionThread(options: {
     opts?: { edit_source?: string; message_id?: string; script_index?: number }
   ): Promise<string | null> => {
     if (!session || !offerProductId || savingScript) return null
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
     setSavingScript(true)
     try {
       const script = await saveScript(session.id, offerProductId, title, content, undefined, opts)
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return script.id
+      }
       return script.id
     } catch (err) {
       console.error(err)
-      setError(err instanceof Error ? err.message : 'Failed to save script')
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Failed to save script')
+      }
       return null
     } finally {
       setSavingScript(false)
