@@ -21,6 +21,24 @@ describe('parseChatShellScriptIntent', () => {
     expect(intent.orderedTypes).toEqual(['venta_directa'])
   })
 
+  it('treats script/guion words as noise so count still resolves to 2', () => {
+    const phrases = [
+      'generame 2 de venta',
+      'generame 2 script de venta',
+      'generame 2 scripts de venta',
+      'generame 2 guiones de venta',
+      'generame 2 guión de venta',
+      'generame 2 guion de venta',
+    ]
+    for (const text of phrases) {
+      const intent = parseChatShellScriptIntent(text, 'es', DEFAULT_SCRIPT_SETTINGS)
+      expect(intent.settings.generationMode, text).toBe('by_type')
+      expect(intent.settings.scriptTypeConfig.venta_directa, text).toBe(2)
+      expect(intent.settings.variations, text).toBe(2)
+      expect(intent.expectedCount, text).toBe(2)
+    }
+  })
+
   it('parses English "generate 2 sales scripts"', () => {
     const intent = parseChatShellScriptIntent(
       'generate 2 sales scripts',

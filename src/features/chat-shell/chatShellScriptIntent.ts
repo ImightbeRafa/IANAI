@@ -130,6 +130,10 @@ const TYPE_ALIASES: Array<{ key: ScriptFramework; patterns: RegExp[] }> = [
 const GENERATION_HINT =
   /\b(?:genera(?:me|r)?|generate|dame|quiero|necesito|haz(?:me)?|create|make|script|scripts|gui[oó]n(?:es)?|guion(?:es)?)\b/i
 
+/** Count/type glue words — must not block "2 script de venta" → count 2. */
+const SCRIPT_NOISE_TOKEN =
+  /\b(?:scripts?|guiones?|guion)\b/gi
+
 function stripDiacritics(value: string): string {
   return value.normalize('NFD').replace(/\p{M}/gu, '')
 }
@@ -138,6 +142,17 @@ function normalizeText(text: string): string {
   return stripDiacritics(text)
     .toLowerCase()
     .replace(/[¡!¿?.,;:"'`´]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Remove script/guion filler so numeric count stays adjacent to type words.
+ * "generame 2 script de venta" → "generame 2 de venta"
+ */
+export function stripScriptNoiseTokens(normalized: string): string {
+  return normalized
+    .replace(SCRIPT_NOISE_TOKEN, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -235,7 +250,8 @@ function findTypeMentions(normalized: string): Array<{ key: ScriptFramework; ind
 }
 
 function localCountBefore(normalized: string, typeIndex: number): number | null {
-  const before = normalized.slice(0, typeIndex).trimEnd()
+  // Allow filler between count and type: "2 script de" / "2 guiones de"
+  const before = stripScriptNoiseTokens(normalized.slice(0, typeIndex)).trimEnd()
   const m = before.match(
     /(?:^|\s)(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)(?:\s+(?:de|of))?$/i
   )
@@ -317,10 +333,10 @@ export function parseChatShellScriptIntent(
   defaults: Readonly<ScriptGenerationSettings>
 ): ChatShellScriptIntent {
   const warnings: string[] = []
-  const normalized = normalizeText(text || '')
+  const normalizedRaw = normalizeText(text || '')
   const base = cloneSettings(defaults)
 
-  if (!normalized) {
+  if (!normalizedRaw) {
     return {
       settings: base,
       orderedTypes: [],
@@ -329,6 +345,10 @@ export function parseChatShellScriptIntent(
       warnings,
     }
   }
+
+  // Strip script/guion filler so "2 script de venta" parses like "2 de venta".
+  const generationHint = GENERATION_HINT.test(normalizedRaw)
+  const normalized = stripScriptNoiseTokens(normalizedRaw)
 
   const mentions = findTypeMentions(normalized)
   const orderedTypes = mentions.map((m) => m.key)
@@ -340,13 +360,13 @@ export function parseChatShellScriptIntent(
 
   const rawGlobalCount = extractGlobalCount(normalized)
   const localCounts = mentions.map((m) => localCountBefore(normalized, m.index))
-  const ctaExplicit = parseCtaStrength(normalized)
-  const fresh = wantsFreshAngles(normalized)
+  const ctaExplicit = parseCtaStrength(normalizedRaw)
+  const fresh = wantsFreshAngles(normalizedRaw)
   const globalCount =
     rawGlobalCount != null ? clampCount(rawGlobalCount, warnings) : null
 
   const generationCue =
-    GENERATION_HINT.test(normalized)
+    generationHint
     || uniqueOrdered.length > 0
     || rawGlobalCount != null
     || ctaExplicit != null
