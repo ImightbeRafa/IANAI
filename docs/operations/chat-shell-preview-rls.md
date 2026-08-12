@@ -1,9 +1,9 @@
-# Chat-shell Preview RLS bootstrap notes
+# Chat-shell Preview bootstrap notes (RLS + plan limits)
 
 **Scope:** IANAI-preview (`adrwkzibhfdpwuycnzaa`) only.  
-**Do not run these policies on production AIIAN** (`lstzfxsdmggkoaxfawny`). Do not enable production `chat_shell`. Do not apply migration `062` to production from this note.
+**Do not run these policies or seeds on production AIIAN** (`lstzfxsdmggkoaxfawny`). Do not enable production `chat_shell`. Do not apply migration `062` to production from this note.
 
-Ops already applied the Preview-only fixes below. This doc records symptoms, root causes, policy shapes, and verify steps so future Preview QA does not rediscover the same gaps.
+Ops already applied the Preview-only fixes below. This doc records symptoms, root causes, policy/seed shapes, and verify steps so future Preview QA does not rediscover the same gaps.
 
 ## Symptoms (before Preview fix)
 
@@ -80,9 +80,72 @@ Use a non-admin Preview QA user (`docs/testing/chat-shell-preview-user.md`) with
 3. **UI smoke**  
    `/chat` on Preview (`ianai-git-chat-shell-*.vercel.app`): Brands populated → **New chat** / **+ New session** / **Quick generate** create and select a session; reload keeps `?brand=&session=` when persisted.
 
+## Empty `plan_limits` (blocks generate)
+
+### Symptom
+
+Authenticated Preview user can open `/chat`, pick brand/session/offer, and type in the composer, but **send/generate fails immediately** with a usage-limit style error (or “limit reached” / remaining 0) even though the account is otherwise valid. Server logs may show:
+
+```text
+Usage limit check: missing plan_limits row for plan …
+```
+
+### Root cause
+
+`checkUsageLimit` in `api/lib/auth.ts` is **fail-closed**: if there is no `plan_limits` row for the user’s plan (defaulting to `free` when no subscription), it returns `{ allowed: false, remaining: 0, limit: 0 }`.
+
+On a fresh IANAI-preview project, `plan_limits` can be **empty**. Script generation via `/api/chat` then always denies.
+
+### Preview-only seed (already applied by ops)
+
+**Do not run these seeds on production AIIAN.** Exact numeric quotas are **not** committed as a seed SQL file in this repo — do not invent production numbers here.
+
+**Required plan keys** (must exist as `plan_limits.plan` values the app resolves):
+
+- `free`
+- `pro`
+- `starter`
+- `enterprise`
+
+**Column shape expected by the app** (see `checkUsageLimit` in `api/lib/auth.ts` and `src/hooks/useUsageLimits.ts`):
+
+| Column | Used for |
+|--------|----------|
+| `plan` | Plan key (`free` / `pro` / `starter` / `enterprise`) |
+| `scripts_per_month` | `/api/chat` script generation |
+| `images_per_month` | Image / enhance budget |
+| `descriptions_per_month` | Description feature (optional; may be null-ish) |
+| `replies_per_month` | Reply feature (optional; code defaults if missing) |
+
+`-1` means unlimited for a given meter (handled in `checkUsageLimit`).
+
+**How to populate Preview without inventing prod numbers:**
+
+1. Read-only inventory of production AIIAN `plan_limits` (or another known-good environment), **or**
+2. Align with known app/plan expectations used by billing UI,
+
+then `INSERT`/`UPSERT` the four plan rows on **IANAI-preview only**.
+
+### QA subscription must match a seeded plan
+
+Seeding `plan_limits` alone is not enough if the Preview QA user has no usable subscription row. Ops set the Preview QA user’s `subscriptions` plan to **`pro`** (status `active` or `trialing`) so `checkUsageLimit` resolves `plan = 'pro'` and finds the seeded row.
+
+Checklist:
+
+1. `plan_limits` contains at least `free`, `pro`, `starter`, `enterprise`.
+2. QA user has `subscriptions` row: `plan` ∈ seeded keys (e.g. `pro`), `status` ∈ (`active`, `trialing`).
+3. Retry generate on Preview `/chat` with an offer attached.
+
+### Verify generate after seed
+
+1. As Preview QA user with `pro` (or another seeded plan): select brand → session → offer → send.  
+2. Expect assistant reply + script card (not immediate usage block).  
+3. Confirm production AIIAN `plan_limits` / subscriptions were **not** modified.
+
 ## Related docs
 
 - Environment matrix: `docs/operations/chat-shell-environments.md`
 - P0 `/chat` flag + blank-screen env notes: `docs/operations/chat-shell-p0.md`
 - Preview QA user seed: `docs/testing/chat-shell-preview-user.md`
 - Schema / RLS design (migration 062): `docs/adr/0001-chat-shell-foundation.md`
+- Usage gate implementation: `api/lib/auth.ts` → `checkUsageLimit`

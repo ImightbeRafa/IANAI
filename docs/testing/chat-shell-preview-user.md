@@ -30,6 +30,13 @@ Then ensure `profiles.is_admin = false` (and no privileged `role` / `account_typ
 
 If the QA user owns businesses but Brands stays empty, or Quick/New chat insert does not return a row, Preview RLS may still be incomplete — see `docs/operations/chat-shell-preview-rls.md` (do **not** apply those fixes on production AIIAN).
 
+If send/generate is blocked immediately (usage limit 0) despite auth, Preview may be missing `plan_limits` rows or the QA user may lack an `active`/`trialing` subscription matching a seeded plan (ops used `pro`). Same bootstrap doc; **do not** seed `plan_limits` on production AIIAN.
+
+Also ensure:
+
+- `plan_limits` has `free` / `pro` / `starter` / `enterprise` (column shape from `checkUsageLimit` in `api/lib/auth.ts` — copy numeric quotas from a known-good inventory; do not invent prod numbers in git).
+- QA user `subscriptions.plan` matches one of those keys (e.g. `pro`).
+
 ## Authorization matrix to execute
 
 | Actor | Action | Expected |
