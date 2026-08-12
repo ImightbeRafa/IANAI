@@ -437,9 +437,10 @@ Migration name on IANAI-preview: **`preview_session_offer_fks_set_null`** (Secur
 - `product_images_update_own` — initially added `FOR UPDATE` so SET NULL / client clear can null `session_id` (see tighten below)
 - `scripts_delete` softened — `can_write_chat_session AND (product_id IS NULL OR can_write_product(product_id))`
 
-#### B) Posts thread clear — migration **`preview_posts_update_for_session_delete`**
+#### B) Posts thread clear — migrations **`preview_posts_update_for_session_delete`** + **`preview_posts_update_thread_clear_with_check`**
 
-- **`posts_update_thread_clear` exists** (live) — `FOR UPDATE` authorized via `created_by` so client (or FK SET NULL paths) can clear `session_id` / `message_id` without wiping the post row
+- **`posts_update_thread_clear` exists** (live via `preview_posts_update_for_session_delete`) — `FOR UPDATE` so client (or FK SET NULL paths) can clear `session_id` / `message_id` without wiping the post row
+- **WITH CHECK follow-up (ops — already live; do NOT re-apply):** migration **`preview_posts_update_thread_clear_with_check`** — posts UPDATE **WITH CHECK** now allows `session_id IS NULL` after USING, so the **session owner** can clear thread links even when `created_by ≠ auth.uid()` (USING can still authorize via session write; WITH CHECK must accept the cleared row)
 
 #### C) SecureDog soft concern — `product_images_update_own` tighten (ops — already live; do NOT re-apply)
 
@@ -467,7 +468,7 @@ Verified live on IANAI-preview (`adrwkzibhfdpwuycnzaa`) — **do not re-apply**:
 | Item | Status |
 | --- | --- |
 | Offer FKs `posts_session_offer_fkey` / `product_images_session_offer_fkey` | **ON DELETE SET NULL** (verified live) |
-| `posts_update_thread_clear` | **exists** (via `preview_posts_update_for_session_delete`) |
+| `posts_update_thread_clear` | **exists** (`preview_posts_update_for_session_delete`) + **WITH CHECK** allows `session_id IS NULL` for session-owner clear when `created_by ≠ auth.uid()` (`preview_posts_update_thread_clear_with_check`) |
 | `product_images_update_own` | **tightened** to always `user_id = auth.uid()` (`preview_tighten_product_images_update_own`) |
 | `preview_product_images_null_message_with_session` | **live** — null `message_id` when `session_id` becomes NULL (product_images + posts) |
 
@@ -488,7 +489,7 @@ Verified live on IANAI-preview (`adrwkzibhfdpwuycnzaa`) — **do not re-apply**:
 
 Before production cutover GO, prod AIIAN must get a **reviewed git migration** carrying:
 
-1. Matching child DELETE/UPDATE policies (same intent as `preview_chat_session_delete_cascade_rls` + `preview_posts_update_for_session_delete` + owner-tight `product_images_update_own` / `preview_tighten_product_images_update_own`), **and**
+1. Matching child DELETE/UPDATE policies (same intent as `preview_chat_session_delete_cascade_rls` + `preview_posts_update_for_session_delete` + `preview_posts_update_thread_clear_with_check` + owner-tight `product_images_update_own` / `preview_tighten_product_images_update_own`), **and**
 2. Offer FK alter to **ON DELETE SET NULL** on `posts_session_offer_fkey` / `product_images_session_offer_fkey` (same intent as `preview_session_offer_fks_set_null` — retain posts/images; do not CASCADE-delete them), **and**
 3. Companion trigger/policy intent of **`preview_product_images_null_message_with_session`** (null `message_id` when `session_id` becomes NULL on product_images + posts; owner WITH CHECK for cleared state), **and**
 4. Client ordered cleanup + remaining-row verify remains as defense-in-depth across staged envs.
