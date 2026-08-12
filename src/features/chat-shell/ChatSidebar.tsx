@@ -106,6 +106,9 @@ export default function ChatSidebar({
       )}
       {businesses.map((brand) => {
         const isActive = brand.id === activeBrandId
+        const brandSessions = isActive
+          ? sessions.filter((session) => session.business_id === brand.id)
+          : []
         return (
           <div key={brand.id}>
             <button
@@ -118,12 +121,14 @@ export default function ChatSidebar({
             {isActive && (
               <div className="chat-shell__nav-subs">
                 {loadingSessions && (
-                  <div className="chat-shell__nav-sub">Loading sessions…</div>
+                  <div className="chat-shell__nav-loading" aria-live="polite">
+                    Updating sessions…
+                  </div>
                 )}
-                {!loadingSessions && sessions.length === 0 && (
+                {!loadingSessions && brandSessions.length === 0 && (
                   <div className="chat-shell__nav-sub">No sessions yet</div>
                 )}
-                {sessions.map((session) => (
+                {brandSessions.map((session) => (
                   <button
                     key={session.id}
                     type="button"

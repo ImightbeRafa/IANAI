@@ -56,32 +56,65 @@ describe('pickSafeChatSessionUpdates', () => {
 })
 
 describe('resolveNextSessionId', () => {
-  it('prefers explicit preferred over current and first', () => {
+  it('prefers live current selection over hydrate preferred', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b', 'c'],
-        preferredId: 'b',
-        currentId: 'a',
+        preferredId: 'a',
+        currentId: 'b',
+        urlId: 'a',
       })
     ).toBe('b')
   })
 
-  it('keeps current when preferred missing', () => {
+  it('keeps optimistic current even when missing from list', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'a',
+        currentId: 'new-optimistic',
+        urlId: 'new-optimistic',
+      })
+    ).toBe('new-optimistic')
+  })
+
+  it('drops stale current that is neither in list nor URL/preferred', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'b',
+        currentId: 'deleted',
+        urlId: null,
+      })
+    ).toBe('b')
+  })
+
+  it('prefers URL when current is missing', () => {
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b', 'c'],
-        preferredId: null,
-        currentId: 'c',
+        preferredId: 'a',
+        currentId: null,
+        urlId: 'c',
       })
     ).toBe('c')
   })
 
-  it('falls back to first when neither preferred nor current is valid', () => {
+  it('falls back to preferred then first when nothing selected', () => {
+    expect(
+      resolveNextSessionId({
+        sessionIds: ['a', 'b'],
+        preferredId: 'b',
+        currentId: null,
+        urlId: null,
+      })
+    ).toBe('b')
     expect(
       resolveNextSessionId({
         sessionIds: ['a', 'b'],
         preferredId: 'gone',
-        currentId: 'also-gone',
+        currentId: null,
+        urlId: null,
       })
     ).toBe('a')
   })

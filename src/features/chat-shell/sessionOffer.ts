@@ -46,14 +46,23 @@ export function pickSafeChatSessionUpdates(
   return out
 }
 
-/** Prefer explicit preferred (hydrate/click/Quick), else keep current, else first. */
+/**
+ * Prefer live selection, then URL, then hydrate preferred, else first.
+ *
+ * currentId wins when still in the list, or when it matches URL/preferred
+ * (intentional click/create — list may lag). A stale hydrated id that is no
+ * longer in the list and no longer in the URL falls through to recovery.
+ */
 export function resolveNextSessionId(options: {
   sessionIds: string[]
   preferredId?: string | null
   currentId?: string | null
+  urlId?: string | null
 }): string | null {
-  const { sessionIds, preferredId, currentId } = options
-  if (preferredId && sessionIds.includes(preferredId)) return preferredId
+  const { sessionIds, preferredId, currentId, urlId } = options
   if (currentId && sessionIds.includes(currentId)) return currentId
+  if (currentId && (currentId === urlId || currentId === preferredId)) return currentId
+  if (urlId && sessionIds.includes(urlId)) return urlId
+  if (preferredId && sessionIds.includes(preferredId)) return preferredId
   return sessionIds[0] ?? null
 }
