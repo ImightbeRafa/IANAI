@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="obsidian-dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IANAI · Obsidian dark · chat-shell stub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./chat-shell-obsidian-tokens.css" />
+  <style>
+    body.obsidian-shell { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; min-height: 100vh; }
+    * { box-sizing: border-box; }
+    button, input { font: inherit; }
+    .sidebar, .rail { background: var(--sidebar); border-right: 1px solid var(--border); padding: 16px; }
+    .rail { border-right: 0; border-left: 1px solid var(--border); background: var(--rail); }
+    .brand { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.02em; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .btn { border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); border-radius: var(--radius-sm); padding: 8px 12px; cursor: default; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-pill { border-radius: 999px; padding: 6px 10px; font-size: 0.8rem; background: var(--bg-soft); }
+    .btn-pill.active { background: var(--accent-soft); color: var(--accent-muted); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+    .search { width: 100%; margin: 10px 0 18px; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+    .nav-label { color: var(--text-faint); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin: 14px 0 8px; }
+    .nav-item { padding: 8px 10px; border-radius: var(--radius-sm); color: var(--text-muted); margin-bottom: 4px; }
+    .nav-item.active { background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); }
+    .nav-sub { margin-left: 12px; font-size: 0.88rem; color: var(--text-muted); padding: 6px 8px; border-radius: var(--radius-sm); }
+    .nav-sub.selected { color: var(--accent-muted); background: var(--accent-soft); }
+    .user { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); font-size: 0.9rem; }
+    .main { display: flex; flex-direction: column; min-width: 0; }
+    .topbar { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--bg-elevated) 80%, transparent); backdrop-filter: blur(8px); }
+    .crumbs { color: var(--text-muted); font-size: 0.9rem; }
+    .style-tag { justify-self: center; color: var(--text-faint); font-size: 0.78rem; }
+    .thread { flex: 1; overflow: auto; padding: 20px 22px 120px; display: flex; flex-direction: column; gap: 14px; }
+    .msg { max-width: 720px; animation: rise var(--dur-med) var(--ease-out) both; }
+    .msg.user { align-self: flex-end; background: var(--bubble-user); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; }
+    .msg.ai { align-self: flex-start; color: var(--text-muted); }
+    .card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px; box-shadow: var(--shadow); max-width: 720px; }
+    .card h3 { margin: 0 0 10px; font-size: 0.98rem; display: flex; gap: 8px; align-items: center; }
+    .tag { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-muted); }
+    .script body, .script p, .script { font-size: 0.92rem; line-height: 1.45; color: var(--text); white-space: pre-wrap; font-family: var(--font-mono); }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .composer-wrap { position: sticky; bottom: 0; padding: 12px 18px 16px; background: linear-gradient(180deg, transparent, var(--bg) 30%); }
+    .composer { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: end; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; }
+    .composer textarea { resize: none; min-height: 44px; border: 0; background: transparent; color: var(--text); outline: none; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .send { width: 40px; height: 40px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; }
+    .tabs { display: flex; gap: 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+    .tabs span { padding: 8px 0; color: var(--text-faint); font-size: 0.88rem; }
+    .tabs .on { color: var(--text); border-bottom: 2px solid var(--accent); }
+    .preview { aspect-ratio: 1; border-radius: var(--radius-md); border: 1px solid var(--border); background: linear-gradient(145deg, #152038, #0b1020); display: grid; place-items: center; color: var(--text-muted); margin-bottom: 10px; }
+    .stack { display: grid; gap: 8px; margin-bottom: 18px; }
+    .thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .thumb { aspect-ratio: 1; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-soft); display: grid; place-items: center; color: var(--text-faint); font-size: 0.8rem; }
+    .thumb.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .note { grid-column: 1 / -1; padding: 10px 16px; color: var(--text-faint); font-size: 0.8rem; border-top: 1px solid var(--border); }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    @media (max-width: 960px) {
+      body.obsidian-shell { grid-template-columns: 1fr; }
+      .sidebar, .rail { display: none; }
+    }
+  </style>
+</head>
+<body class="obsidian-shell" data-theme="obsidian-dark">
+  <aside class="sidebar">
+    <div class="brand">Advance AI <span class="btn btn-pill" title="settings">⚙</span></div>
+    <button class="btn btn-primary" style="width:100%">New chat</button>
+    <input class="search" placeholder="Search" disabled />
+    <div class="nav-label">Quick</div>
+    <div class="nav-item">Quick generate <span class="btn-pill" style="margin-left:6px">no brand</span></div>
+    <div class="nav-label">Brands</div>
+    <div class="nav-item active">PatchHouse.CR</div>
+    <div class="nav-sub selected">Scripts + creatives</div>
+    <div class="nav-sub">Brand onboarding</div>
+    <div class="nav-sub">+ New session</div>
+    <div class="nav-item">Pura Sonrisa CR</div>
+    <div class="nav-item">DeepClean</div>
+    <div class="nav-item">+ New brand...</div>
+    <div class="user">Rafa García · Pro<br /><span style="color:var(--text-faint);font-size:0.78rem">Preview stub · not live data</span></div>
+  </aside>
+
+  <section class="main">
+    <header class="topbar">
+      <div class="crumbs">PatchHouse.CR / Scripts + creatives</div>
+      <div class="style-tag">Style option · Obsidian electric · view only</div>
+      <div></div>
+    </header>
+    <div class="thread">
+      <div class="msg user">3 guiones for Sleep patch + Melatonin 5mg, then image for #1.</div>
+      <div class="msg ai">Using 2 offers. Scripts in-thread; Images rail open for the creative.</div>
+      <article class="card">
+        <h3>Venta Directa <span class="tag">Sleep patch</span> #1</h3>
+        <div class="script">[GANCHO]
+Si dormís mal, el parche no es “relax” — es dosis.
+
+[CTA]
+Escribí SLEEP y te armamos el pack.</div>
+        <div class="actions">
+          <span class="btn btn-pill">Copiar</span>
+          <span class="btn btn-pill">Guardar</span>
+          <span class="btn btn-pill active">Editar</span>
+          <span class="btn btn-pill">Mejorar</span>
+          <span class="btn btn-pill">+ Hooks</span>
+          <span class="btn btn-pill">→ Imagen</span>
+        </div>
+      </article>
+      <article class="card">
+        <h3>Imagen · guion #1 <span class="tag">Sleep patch</span></h3>
+        <div style="display:flex;gap:12px;align-items:center">
+          <div class="thumb" style="width:72px">thumb</div>
+          <div style="color:var(--text-muted);font-size:0.9rem">Ad creative — opens the right rail for editing.</div>
+        </div>
+        <div class="actions">
+          <span class="btn btn-pill">Descargar</span>
+          <span class="btn btn-pill active">Open in panel</span>
+          <span class="btn btn-pill">Usar en post</span>
+        </div>
+      </article>
+    </div>
+    <div class="composer-wrap">
+      <div class="chips">
+        <span class="btn btn-pill">2 offers</span>
+        <span class="btn btn-pill">Mensajes</span>
+        <span class="btn btn-pill">Pipeline</span>
+      </div>
+      <div class="composer">
+        <button class="btn" type="button">+</button>
+        <textarea placeholder="Ask for scripts, posts, images..." disabled></textarea>
+        <button class="send" type="button" aria-label="Send">↑</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="rail">
+    <div class="tabs">
+      <span>Context</span>
+      <span>Offers (2)</span>
+      <span class="on">Images (3)</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+      <strong>Selected creative</strong>
+      <span style="color:var(--accent-muted);font-size:0.8rem">edit</span>
+    </div>
+    <div class="preview">Sleep patch preview</div>
+    <div class="stack">
+      <button class="btn" type="button">Editar imagen</button>
+      <button class="btn" type="button">Restyle</button>
+      <button class="btn" type="button">Variaciones</button>
+      <button class="btn" type="button">Change product photo</button>
+    </div>
+    <div class="nav-label">Thread images</div>
+    <div class="thumbs">
+      <div class="thumb sel">#1</div>
+      <div class="thumb">#2</div>
+      <div class="thumb">var</div>
+      <div class="thumb">+</div>
+    </div>
+  </aside>
+  <p class="note">Static design stub for P-1. Tokens: <code>chat-shell-obsidian-tokens.css</code>. Light twin: <code>chat-shell-obsidian-light.html</code>. Not wired to React routes.</p>
+</body>
+</html>
