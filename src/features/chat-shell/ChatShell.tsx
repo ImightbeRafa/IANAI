@@ -52,6 +52,17 @@ export default function ChatShell({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // New / empty session → open Context so the setup interview is visible.
+  useEffect(() => {
+    const session = workspace.activeSession
+    if (!session) return
+    const empty = !(session.context || '').trim() || !session.primary_channel
+    if (empty) {
+      setRailTab('context')
+      setRailOpen(true)
+    }
+  }, [workspace.activeSession?.id])
+
   const selectRailTab = (tab: RailTab) => {
     if (railOpen && railTab === tab) {
       setRailOpen(false)

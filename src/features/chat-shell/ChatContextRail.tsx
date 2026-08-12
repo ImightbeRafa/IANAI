@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 import type { Business, ChatSession, ChatSessionOffer, Product } from '../../types'
 import type { ChatSessionSafeUpdates } from '../../services/database'
 import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
+import { isSessionSetupComplete } from './chatContextSetup'
+import ChatContextSetupCard from './ChatContextSetupCard'
 
 export type RailTab = 'context' | 'offers' | 'images'
 
@@ -41,6 +43,8 @@ export default function ChatContextRail({
   const [context, setContext] = useState(session?.context || '')
   const [channel, setChannel] = useState(session?.primary_channel || '')
   const [awareness, setAwareness] = useState(session?.awareness_level || '')
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => new Set())
+  const [forceSetup, setForceSetup] = useState(false)
 
   useEffect(() => {
     setTitle(session?.title || '')
@@ -48,6 +52,10 @@ export default function ChatContextRail({
     setChannel(session?.primary_channel || '')
     setAwareness(session?.awareness_level || '')
   }, [session?.id, session?.title, session?.context, session?.primary_channel, session?.awareness_level])
+
+  useEffect(() => {
+    setForceSetup(false)
+  }, [session?.id])
 
   const saveField = (updates: ChatSessionSafeUpdates) => {
     if (!session || !onPatchSession) return
@@ -57,6 +65,12 @@ export default function ChatContextRail({
   const orderedOffers = sortOffersByPosition(offers)
   const attachedIds = new Set(orderedOffers.map((o) => o.product_id))
   const availableProducts = brandProducts.filter((p) => !attachedIds.has(p.id))
+  const setupComplete = isSessionSetupComplete(session)
+  const sessionSkipped = Boolean(session && skippedIds.has(session.id))
+  const interviewOpen = Boolean(
+    session &&
+    (forceSetup || (!setupComplete && !sessionSkipped))
+  )
 
   return (
     <aside className="chat-shell__rail" aria-label="Context rail">
@@ -115,6 +129,50 @@ export default function ChatContextRail({
             </p>
           ) : (
             <>
+              <ChatContextSetupCard
+                session={session}
+                skipped={sessionSkipped}
+                forceOpen={forceSetup}
+                onSkipped={() => {
+                  setSkippedIds((prev) => new Set(prev).add(session.id))
+                  setForceSetup(false)
+                }}
+                onSaved={async (updates) => {
+                  await onPatchSession?.(updates)
+                  setSkippedIds((prev) => {
+                    const next = new Set(prev)
+                    next.delete(session.id)
+                    return next
+                  })
+                  setForceSetup(false)
+                  if (typeof updates.title === 'string') setTitle(updates.title)
+                  if (typeof updates.context === 'string') setContext(updates.context)
+                  if (updates.primary_channel !== undefined) {
+                    setChannel(updates.primary_channel || '')
+                  }
+                  if (updates.awareness_level !== undefined) {
+                    setAwareness(updates.awareness_level || '')
+                  }
+                }}
+              />
+
+              {(setupComplete || sessionSkipped) && !forceSetup ? (
+                <div className="chat-shell__setup-reopen">
+                  <button
+                    type="button"
+                    className="chat-shell__setup-btn"
+                    onClick={() => setForceSetup(true)}
+                  >
+                    Setup
+                  </button>
+                  <span className="chat-shell__rail-hint">
+                    {setupComplete ? 'Setup saved.' : 'Setup skipped — composer still works.'}
+                  </span>
+                </div>
+              ) : null}
+
+              {!interviewOpen ? (
+                <>
               <label className="chat-shell__field">
                 <span>Title</span>
                 <input
@@ -178,6 +236,12 @@ export default function ChatContextRail({
                 {activeProduct ? ` · Offer ${activeProduct.name}` : ' · No offer'}
                 . Ownership fields are immutable.
               </p>
+                </>
+              ) : (
+                <p className="chat-shell__rail-hint">
+                  Brand · {brand?.name || '—'}. Save setup or Skip to edit fields manually.
+                </p>
+              )}
             </>
           )}
         </div>

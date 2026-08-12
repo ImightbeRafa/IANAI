@@ -6,7 +6,14 @@ import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 
 const MAX_CONTENT_LENGTH = 15_000
 
-type FormType = 'business' | 'service' | 'indumentaria' | 'restaurant' | 'product' | 'real_estate'
+type FormType =
+  | 'business'
+  | 'service'
+  | 'indumentaria'
+  | 'restaurant'
+  | 'product'
+  | 'real_estate'
+  | 'session_context'
 
 const FORM_PROMPTS: Record<FormType, string> = {
   business: `Eres un asistente experto en negocios y marketing. Tu tarea es analizar la información proporcionada sobre un negocio y extraer TODOS los datos posibles para completar un formulario.
@@ -163,6 +170,25 @@ CAMPOS REQUERIDOS:
   "re_highlights": "características destacadas (piscina, jardín, vista, etc.)",
   "re_location_reference": "punto de referencia de la ubicación",
   "re_cta": "llamado a acción (ej: Agenda tu visita, Escríbenos)"
+}`,
+
+  session_context: `Eres un asistente de briefing para generación de guiones publicitarios.
+Analiza la información del negocio/marca y produce un resumen de sesión listo para guardar.
+
+INSTRUCCIONES:
+- Responde ÚNICAMENTE con JSON válido, sin markdown ni texto extra.
+- context debe ser un brief útil (2–6 párrafos cortos): qué vende, a quién, dolor, diferencial, oferta/CTA si aparecen.
+- primary_channel: el canal principal más probable entre messages | website | physical.
+- awareness_level: cold | warm | hot según qué tan listo parece el público.
+- title: título corto de sesión (máx ~60 caracteres).
+- NO inventes productos nuevos ni IDs. Solo briefing de sesión.
+
+CAMPOS:
+{
+  "title": "título corto de la sesión",
+  "context": "brief de sesión para guiones",
+  "primary_channel": "messages" | "website" | "physical",
+  "awareness_level": "cold" | "warm" | "hot"
 }`,
 }
 

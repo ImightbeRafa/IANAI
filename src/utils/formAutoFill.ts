@@ -46,7 +46,14 @@ async function scrapeUrl(token: string, url: string): Promise<{ content: string;
   return { content: data.content.slice(0, 12000), title: data.title || url }
 }
 
-export type FormType = 'business' | 'service' | 'indumentaria' | 'restaurant' | 'product' | 'real_estate'
+export type FormType =
+  | 'business'
+  | 'service'
+  | 'indumentaria'
+  | 'restaurant'
+  | 'product'
+  | 'real_estate'
+  | 'session_context'
 
 export async function autoFillFromUrl(
   url: string,

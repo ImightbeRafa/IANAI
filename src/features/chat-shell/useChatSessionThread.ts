@@ -538,6 +538,8 @@ export function useChatSessionThread(options: {
       return
     }
 
+    const emptyContext = !(session.context || '').trim()
+
     const originSessionId = session.id
     const originGen = sessionGenRef.current
     const optimisticId = `optimistic-user-${Date.now()}`
@@ -551,7 +553,11 @@ export function useChatSessionThread(options: {
 
     setInFlightSessions((prev) => addInFlightSession(prev, originSessionId))
     setError(null)
-    setNotice(null)
+    setNotice(
+      emptyContext
+        ? 'Generating without session context — results may be generic. Add context in Setup anytime.'
+        : null
+    )
     setFailedBatch(null)
     setComposer('')
     setMessages((prev) => [...prev, optimisticUser])
