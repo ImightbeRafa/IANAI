@@ -1,10 +1,11 @@
-import { useState } from 'react'
+export type RailTab = 'context' | 'offers' | 'images'
 
-type RailTab = 'context' | 'offers' | 'images'
+interface ChatContextRailProps {
+  tab: RailTab
+  onTabChange: (tab: RailTab) => void
+}
 
-export default function ChatContextRail() {
-  const [tab, setTab] = useState<RailTab>('images')
-
+export default function ChatContextRail({ tab, onTabChange }: ChatContextRailProps) {
   return (
     <aside className="chat-shell__rail" aria-label="Context rail">
       <div className="chat-shell__tabs" role="tablist" aria-label="Rail sections">
@@ -13,7 +14,7 @@ export default function ChatContextRail() {
           role="tab"
           aria-selected={tab === 'context'}
           className={`chat-shell__tab${tab === 'context' ? ' is-on' : ''}`}
-          onClick={() => setTab('context')}
+          onClick={() => onTabChange('context')}
         >
           Context
         </button>
@@ -22,26 +23,26 @@ export default function ChatContextRail() {
           role="tab"
           aria-selected={tab === 'offers'}
           className={`chat-shell__tab${tab === 'offers' ? ' is-on' : ''}`}
-          onClick={() => setTab('offers')}
+          onClick={() => onTabChange('offers')}
         >
-          Offers (2)
+          Offers
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={tab === 'images'}
           className={`chat-shell__tab${tab === 'images' ? ' is-on' : ''}`}
-          onClick={() => setTab('images')}
+          onClick={() => onTabChange('images')}
         >
-          Images (3)
+          Images
         </button>
       </div>
 
       {tab === 'context' && (
         <div>
           <strong>Session context</strong>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
-            Funnel and brand context will appear here in a later phase. P0 shows layout only.
+          <p className="chat-shell__rail-note">
+            Funnel and brand context will appear here in a later phase. Foundation layout only.
           </p>
         </div>
       )}
@@ -50,24 +51,22 @@ export default function ChatContextRail() {
         <div className="chat-shell__stack">
           <div className="chat-shell__nav-item is-active">1 · Sleep patch</div>
           <div className="chat-shell__nav-item">2 · Melatonin 5mg</div>
-          <p style={{ color: 'var(--text-faint)', fontSize: '0.8rem' }}>
-            Max 5 offers · sequential generation (later phase)
-          </p>
+          <p className="chat-shell__rail-hint">Max 5 offers · sequential generation (later)</p>
         </div>
       )}
 
       {tab === 'images' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+          <div className="chat-shell__rail-head">
             <strong>Selected creative</strong>
-            <span style={{ color: 'var(--accent-muted)', fontSize: '0.8rem' }}>edit</span>
+            <span className="chat-shell__rail-edit">edit</span>
           </div>
           <div className="chat-shell__preview">Sleep patch preview</div>
           <div className="chat-shell__stack">
-            <button type="button" className="chat-shell__btn" disabled>Editar imagen</button>
-            <button type="button" className="chat-shell__btn" disabled>Restyle</button>
-            <button type="button" className="chat-shell__btn" disabled>Variaciones</button>
-            <button type="button" className="chat-shell__btn" disabled>Change product photo</button>
+            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Editar imagen</button>
+            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Restyle</button>
+            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Variaciones</button>
+            <button type="button" className="chat-shell__btn" disabled aria-disabled="true">Change product photo</button>
           </div>
           <div className="chat-shell__nav-label">Thread images</div>
           <div className="chat-shell__thumbs">

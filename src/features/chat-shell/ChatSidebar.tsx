@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Settings, Search } from 'lucide-react'
+import { Settings, Search, Plus, Zap } from 'lucide-react'
 
 interface ChatSidebarProps {
   displayName: string
@@ -12,40 +12,46 @@ export default function ChatSidebar({ displayName, initials }: ChatSidebarProps)
       <div className="chat-shell__brand">
         <span>Advance AI</span>
         <Link to="/settings" className="chat-shell__icon-btn" aria-label="Settings" title="Settings">
-          <Settings size={16} />
+          <Settings size={15} />
         </Link>
       </div>
 
-      <button type="button" className="chat-shell__btn chat-shell__btn--primary" disabled>
-        + New chat
-      </button>
-
-      <label className="chat-shell__sr-only" htmlFor="chat-shell-search">Search</label>
-      <div style={{ position: 'relative' }}>
-        <Search
-          size={14}
-          style={{ position: 'absolute', left: 10, top: 20, color: 'var(--text-faint)', pointerEvents: 'none' }}
-        />
-        <input
-          id="chat-shell-search"
-          className="chat-shell__search"
-          style={{ paddingLeft: 30 }}
-          placeholder="Search"
-          disabled
-        />
+      <div className="chat-shell__row-actions">
+        <button type="button" className="chat-shell__row-action" disabled aria-disabled="true">
+          <Plus size={15} aria-hidden />
+          New chat
+          <span className="chat-shell__kbd">N</span>
+        </button>
+        <div className="chat-shell__search-wrap">
+          <label className="chat-shell__sr-only" htmlFor="chat-shell-search">Search</label>
+          <Search size={14} className="chat-shell__search-icon" aria-hidden />
+          <input
+            id="chat-shell-search"
+            className="chat-shell__search"
+            placeholder="Search"
+            disabled
+            aria-disabled="true"
+          />
+        </div>
       </div>
 
       <div className="chat-shell__nav-label">Quick</div>
       <div className="chat-shell__nav-item">
+        <Zap size={14} aria-hidden />
         Quick generate
-        <span className="chat-shell__btn chat-shell__btn--pill" style={{ marginLeft: 'auto' }}>no brand</span>
+        <span className="chat-shell__btn chat-shell__btn--pill chat-shell__pill-trail">no brand</span>
       </div>
 
       <div className="chat-shell__nav-label">Brands</div>
       <div className="chat-shell__nav-item is-active">PatchHouse.CR</div>
-      <div className="chat-shell__nav-sub is-selected">Scripts + creatives</div>
-      <div className="chat-shell__nav-sub">Brand onboarding</div>
-      <div className="chat-shell__nav-sub">+ New session</div>
+      <div className="chat-shell__nav-subs">
+        <div className="chat-shell__nav-sub is-selected">
+          <span className="chat-shell__status-dot" aria-hidden />
+          Scripts + creatives
+        </div>
+        <div className="chat-shell__nav-sub">Brand onboarding</div>
+        <div className="chat-shell__nav-sub">+ New session</div>
+      </div>
       <div className="chat-shell__nav-item">Pura Sonrisa CR</div>
       <div className="chat-shell__nav-item">DeepClean</div>
       <div className="chat-shell__nav-item">+ New brand...</div>
@@ -57,9 +63,7 @@ export default function ChatSidebar({ displayName, initials }: ChatSidebarProps)
             {displayName}
             <span className="chat-shell__badge">Pro</span>
           </div>
-          <div style={{ color: 'var(--text-faint)', fontSize: '0.78rem' }}>
-            Chat shell · preview foundation
-          </div>
+          <div className="chat-shell__user-meta">Pro · usage in preview</div>
         </div>
       </div>
     </aside>

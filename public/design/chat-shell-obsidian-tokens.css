@@ -1,29 +1,36 @@
 /**
- * IANAI chat-shell — Obsidian tokens (light + dark)
- * Reference mock: Scripts + creatives three-column shell (PatchHouse.CR).
+ * IANAI chat-shell — Obsidian electric tokens (light + dark)
+ * Locked mock: Obsidian electric Scripts + creatives three-column shell.
  * Loaded by index.html for /chat (canonical runtime tokens).
+ * Keep IBM Plex for now (P2 may switch to system).
  */
 
 :root {
   /* Typography */
   --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", "ui-monospace", monospace;
+  --font-size-body: 13.5px;
 
   /* Radii */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
 
-  /* Accents (shared) */
-  --accent: #2563eb;
-  --accent-muted: #3b82f6;
+  /* Accents — Obsidian electric (no #2563eb) */
+  --accent: #4f8cff;
+  --accent-muted: #6aa4ff;
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 40%, transparent);
+  --accent-active: color-mix(in srgb, var(--accent) 28%, transparent);
+  --send-from: #6aa4ff;
+  --send-to: #3b7af0;
+  --send-glow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent);
   --danger: #dc2626;
   --success: #059669;
   --warning: #d97706;
 
   /* Artifact type tints */
-  --artifact-script: #2563eb;
+  --artifact-script: #4f8cff;
   --artifact-post: #0d9488;
   --artifact-image: #7c3aed;
 
@@ -41,17 +48,20 @@
   --bg: #0b0e14;
   --bg-elevated: #151921;
   --bg-soft: #1a2030;
+  --bg-stage: #0f131b;
+  --tools-bg: #121722;
   --border: #2a3142;
   --border-strong: #3b455c;
   --text: #f3f4f6;
   --text-muted: #9aa3b5;
   --text-faint: #6b7385;
-  --bubble-user: #1c2433;
+  --bubble-user: #15233d;
+  --bubble-user-border: rgba(79, 140, 255, 0.35);
   --bubble-ai: #151921;
   --sidebar: #0e121a;
   --rail: #10151f;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  --grid-line: rgba(37, 99, 235, 0.08);
+  --shadow: none;
+  --grid-line: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 /* Light — same geometry, daylight surfaces */
@@ -59,23 +69,27 @@
   --bg: #f4f6fb;
   --bg-elevated: #ffffff;
   --bg-soft: #e8edf7;
+  --bg-stage: #eef2f9;
+  --tools-bg: #eef2f8;
   --border: #d5dbe8;
   --border-strong: #b7c0d4;
   --text: #0f172a;
   --text-muted: #5b657a;
   --text-faint: #8b93a7;
   --bubble-user: #e8eefc;
+  --bubble-user-border: rgba(79, 140, 255, 0.35);
   --bubble-ai: #ffffff;
   --sidebar: #eef2f9;
   --rail: #f8fafc;
-  --shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-  --grid-line: rgba(37, 99, 235, 0.06);
+  --shadow: none;
+  --grid-line: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 body.obsidian-shell {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-sans);
+  font-size: var(--font-size-body);
   background:
     radial-gradient(1200px 600px at 10% -10%, var(--grid-line), transparent 55%),
     linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 88%, #000) 100%);

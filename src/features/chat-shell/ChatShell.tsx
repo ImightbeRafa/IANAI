@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Menu, PanelRight } from 'lucide-react'
 import ChatSidebar from './ChatSidebar'
 import ChatThread from './ChatThread'
-import ChatContextRail from './ChatContextRail'
+import ChatContextRail, { type RailTab } from './ChatContextRail'
 import ThemeToggle from './ThemeToggle'
 import type { ChatShellTheme } from './chatShellTheme'
 
@@ -21,6 +21,7 @@ export default function ChatShell({
 }: ChatShellProps) {
   const [navOpen, setNavOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(false)
+  const [railTab, setRailTab] = useState<RailTab>('images')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,6 +33,11 @@ export default function ChatShell({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  const openRailTab = (tab: RailTab) => {
+    setRailTab(tab)
+    setRailOpen(true)
+  }
 
   const shellClass = [
     'chat-shell',
@@ -57,21 +63,46 @@ export default function ChatShell({
 
       <section className="chat-shell__main">
         <header className="chat-shell__topbar">
-          <div className="chat-shell__mobile-bar">
+          <div className="chat-shell__topbar-left">
+            <div className="chat-shell__mobile-bar">
+              <button
+                type="button"
+                className="chat-shell__icon-btn"
+                aria-label="Open navigation"
+                onClick={() => setNavOpen(true)}
+              >
+                <Menu size={16} />
+              </button>
+            </div>
+            <div className="chat-shell__crumbs">PatchHouse.CR / Scripts + creatives</div>
+            <span className="chat-shell__style-tag">
+              Style · C · Obsidian {theme === 'obsidian-dark' ? 'electric' : 'daylight'} · view only
+            </span>
+          </div>
+          <div className="chat-shell__topbar-pills" role="tablist" aria-label="Stage panels">
             <button
               type="button"
-              className="chat-shell__icon-btn"
-              aria-label="Open navigation"
-              onClick={() => setNavOpen(true)}
+              className={`chat-shell__top-pill${railTab === 'context' ? ' is-on' : ''}`}
+              onClick={() => openRailTab('context')}
             >
-              <Menu size={16} />
+              Context
+            </button>
+            <button
+              type="button"
+              className={`chat-shell__top-pill${railTab === 'offers' ? ' is-on' : ''}`}
+              onClick={() => openRailTab('offers')}
+            >
+              Offers <span className="chat-shell__count">2</span>
+            </button>
+            <button
+              type="button"
+              className={`chat-shell__top-pill${railTab === 'images' ? ' is-on' : ''}`}
+              onClick={() => openRailTab('images')}
+            >
+              Images <span className="chat-shell__count">3</span>
             </button>
           </div>
-          <div className="chat-shell__crumbs">PatchHouse.CR / Scripts + creatives</div>
-          <div className="chat-shell__style-tag">
-            Style · Obsidian {theme === 'obsidian-dark' ? 'electric' : 'daylight'} · foundation
-          </div>
-          <div style={{ display: 'flex', gap: 8, justifySelf: 'end', alignItems: 'center' }}>
+          <div className="chat-shell__topbar-actions">
             <button
               type="button"
               className="chat-shell__icon-btn chat-shell__rail-toggle"
@@ -86,7 +117,7 @@ export default function ChatShell({
         <ChatThread />
       </section>
 
-      <ChatContextRail />
+      <ChatContextRail tab={railTab} onTabChange={setRailTab} />
     </div>
   )
 }
