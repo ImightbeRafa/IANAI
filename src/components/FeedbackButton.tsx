@@ -266,9 +266,9 @@ export default function FeedbackButton() {
       } catch { /* ignore */ }
 
       // Extract product ID from URL if on a product page
-      const pathMatch = location.pathname.match(/\/products\/([^/]+)/)
-      if (pathMatch) {
-        productId = pathMatch[1]
+      const productMatch = location.pathname.match(/\/product\/([^/]+)/)
+      if (productMatch) {
+        productId = productMatch[1]
         try {
           const { data: prodData } = await supabase
             .from('products')
@@ -286,7 +286,7 @@ export default function FeedbackButton() {
         description: description.trim(),
         category,
         priority,
-        page_url: location.pathname,
+        page_url: `${location.pathname}${location.search}`,
         browser_info: navigator.userAgent,
         screen_size: `${window.innerWidth}x${window.innerHeight}`,
         console_errors: consoleErrors.slice(-10),
@@ -317,6 +317,8 @@ export default function FeedbackButton() {
     }
   }
 
+  const onChat = /^\/chat(?:\/|$)/.test(location.pathname)
+
   if (!user) return null
 
   return (
@@ -325,7 +327,11 @@ export default function FeedbackButton() {
       <button
         onClick={() => setOpen(true)}
         data-onboarding="feedback"
-        className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group"
+        className={
+          onChat
+            ? 'chat-shell-feedback-fab'
+            : 'fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group'
+        }
         title={t.title}
       >
         <MessageSquarePlus className="w-5 h-5 group-hover:scale-110 transition-transform" />

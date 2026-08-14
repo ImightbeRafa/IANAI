@@ -1,0 +1,17 @@
+---
+description: React frontend conventions for Advance AI
+globs: src/**
+alwaysApply: false
+---
+
+# Frontend Rules
+
+- Path alias: `@/` → `src/`
+- New pages: lazy-load in `App.tsx`, wrap with `ProtectedRoute`
+- Admin pages: `ProtectedRoute requireAdmin`
+- No direct Supabase queries in components — use `src/services/database.ts`
+- API calls: `src/services/grokApi.ts`, `carouselApi.ts`, or `utils/apiFetch.ts`
+- Types: add to `src/types/index.ts` before using in services/components
+- Styling: Tailwind utilities, brand color `primary-600` (#0284c7), Lucide icons
+- Forms per product type: `*Form.tsx` in `src/components/`
+- User-facing changelog: `src/data/changelog.ts` (non-technical, bilingual)

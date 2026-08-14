@@ -93,7 +93,7 @@ function getSystemPrompt(
 
   const baseRules = `You are a senior copywriter adapting long advertising scripts into short, punchy post copy.
 
-YOUR JOB: The input is a full advertising script, typically 150 to 500+ words of persuasion copy. Your job is to extract its CORE IDEA and ADAPT it into concise copy that fits on a social media post. You are NOT summarizing the script, NOT rewriting it sentence by sentence, and NOT preserving its structure. You are distilling its essence into something much shorter and punchier.
+YOUR JOB: The input is a full advertising script, typically 150 to 500+ words of persuasion copy. Your job is to extract its CORE IDEA and ADAPT it into concise post copy that still keeps the script's three-beat structure: GANCHO (hook) → DESARROLLO (1-2 proof lines) → CIERRE (CTA). You are NOT copying the script sentence by sentence. You ARE keeping that structure with far fewer words.
 
 SIZE CONTRACT (HARD LIMIT):
 - TEXT DENSITY MODE: ${density.label}.
@@ -102,6 +102,7 @@ SIZE CONTRACT (HARD LIMIT):
 - The input is a SCRIPT (spoken/read at length). The output is POST COPY (scanned in 2 seconds).
 - ${density.lineRule}
 - ${density.detailRule}
+- Delete unresolved placeholders such as [TIEMPO DE ENTREGA], [PRECIO], or any [BRACKET TOKEN]. Omit unknown facts. Never invent them. Never leave brackets in the output.
 
 TONE PRESERVATION (CRITICAL):
 - Match the script's voice and register EXACTLY. If the script is casual, stay casual. If it is urgent, stay urgent. If it is witty, stay witty. If it is warm, stay warm. If it is direct/aggressive, stay direct/aggressive. If it is educational, stay educational.
@@ -254,7 +255,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const data = await response.json()
-    const streamlined = data.choices?.[0]?.message?.content?.trim() || ''
+    const rawStreamlined = data.choices?.[0]?.message?.content?.trim() || ''
+    const streamlined = rawStreamlined
+      .replace(/\[[^\]\n]{2,80}\]/g, '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
 
     if (!streamlined) {
       return res.status(500).json({ error: 'Empty response from AI' })

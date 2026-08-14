@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff, Gift } from 'lucide-react'
+import AdvanceLogo from '../components/AdvanceLogo'
 
 // Password validation
 function validatePassword(password: string): { valid: boolean; errors: string[] } {
@@ -94,7 +95,7 @@ export default function Signup() {
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-3 mb-4">
-              <img src="/logo.png" alt="Advance AI" className="w-12 h-12 object-contain rounded-xl" />
+              <AdvanceLogo size={48} />
               <span className="text-2xl font-bold text-dark-900">Advance AI</span>
             </div>
           </div>
@@ -133,7 +134,7 @@ export default function Signup() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-4">
-            <img src="/logo.png" alt="Advance AI" className="w-12 h-12 object-contain rounded-xl" />
+            <AdvanceLogo size={48} />
             <span className="text-2xl font-bold text-dark-900">Advance AI</span>
           </div>
           <p className="text-dark-500">Crea tu cuenta para comenzar</p>

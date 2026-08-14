@@ -154,6 +154,29 @@ describe('chatShellImages helpers', () => {
     ).toEqual(['p2', 'p1', 'c1'])
   })
 
+  it('treats message-linked rows as generated even if kind is missing', () => {
+    expect(
+      selectProductReferenceImageIds([
+        { id: 'g1', kind: null, message_id: 'm1', created_at: '2025-01-05T00:00:00Z' },
+        { id: 'p1', kind: 'product', created_at: '2025-01-01T00:00:00Z' },
+      ])
+    ).toEqual(['p1'])
+  })
+
+  it('can omit leftover style/context refs for an independent new post', () => {
+    expect(
+      selectProductReferenceImageIds(
+        [
+          { id: 'c1', kind: 'context', created_at: '2025-01-02T00:00:00Z' },
+          { id: 'g1', kind: 'generated', created_at: '2025-01-03T00:00:00Z' },
+          { id: 'p1', kind: 'product', created_at: '2025-01-01T00:00:00Z' },
+        ],
+        4,
+        { includeContext: false }
+      )
+    ).toEqual(['p1'])
+  })
+
   it('normalizeProductImageIdList caps and dedupes', () => {
     expect(normalizeProductImageIdList(['a', 'a', 'b', 'c', 'd', 'e', 1, null])).toEqual([
       'a',

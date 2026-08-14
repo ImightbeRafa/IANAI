@@ -6,19 +6,22 @@ import type { ImageModel, OrganicSingleSubtype } from '../../types'
 import type { PostTextDensity } from './chatShellImages'
 import { normalizePostTextDensity } from './chatShellImages'
 
-export type ShellImageAspect = '9:16' | '3:4' | '1:1'
+export type ShellImageAspect = '9:16' | '3:4' | '4:5' | '1:1'
 export type ShellImageDensity = PostTextDensity
 
 export type ShellImageStyle =
   | { kind: 'preset'; presetId: string }
   | { kind: 'product'; productSubStyle: string }
   | { kind: 'organic'; organicSubtype: OrganicSingleSubtype }
+  | { kind: 'logo'; archetype?: string }
 
 export interface ShellImagePreferences {
   style?: ShellImageStyle
   aspectRatio: ShellImageAspect
   model: ImageModel
   density: ShellImageDensity
+  logoMode?: 'generate' | 'enhance'
+  logoBackground?: 'transparent' | 'white' | 'dark'
 }
 
 export interface ShellImageIntent {
@@ -27,7 +30,7 @@ export interface ShellImageIntent {
   wantsImage: boolean
 }
 
-export type ImageClarifyStep = 'mode' | 'style' | 'refs'
+export type ImageClarifyStep = 'script' | 'mode' | 'style' | 'aspect' | 'density' | 'styleRef' | 'refs'
 export type ImageClarifyMode = 'anuncio' | 'product' | 'organic'
 
 export interface ImageClarifyPlan {
@@ -44,15 +47,37 @@ export interface StorageLike {
 
 export const SHELL_ASPECT_SIZES: Record<ShellImageAspect, { width: number; height: number }> = {
   '9:16': { width: 1080, height: 1920 },
+  '4:5': { width: 1080, height: 1350 },
   '3:4': { width: 1080, height: 1440 },
   '1:1': { width: 1080, height: 1080 },
 }
+
+export const IMAGE_ASPECT_CHOICES: Array<{
+  id: ShellImageAspect
+  labelEs: string
+  labelEn: string
+  hint: string
+}> = [
+  { id: '9:16', labelEs: 'Reel', labelEn: 'Reel', hint: '9:16' },
+  { id: '1:1', labelEs: 'Post cuadrado', labelEn: 'Square post', hint: '1:1' },
+  { id: '4:5', labelEs: 'Post vertical', labelEn: 'Vertical post', hint: '4:5' },
+]
+
+export const IMAGE_DENSITY_CHOICES: Array<{
+  id: ShellImageDensity
+  labelEs: string
+  labelEn: string
+  hint: string
+}> = [
+  { id: 'hard', labelEs: 'Poco texto', labelEn: 'Short copy', hint: '1–2 líneas' },
+  { id: 'medium', labelEs: 'Texto medio', labelEn: 'Medium copy', hint: '2–3 puntos' },
+]
 
 /** Workplace-aligned shell defaults (style unresolved until sticky/clarify). */
 export const DEFAULT_IMAGE_PREFERENCES: ShellImagePreferences = {
   aspectRatio: '9:16',
   model: 'nano-banana-pro',
-  density: 'medium',
+  density: 'hard',
 }
 
 /** Workplace organic-single subtypes (no carousel). */
@@ -70,7 +95,7 @@ const ORGANIC_SUB_IDS = new Set<string>(ORGANIC_SINGLE_SUBTYPES)
 /** Extra anuncio-family ids (not in IMAGE_PRESETS catalog). */
 const ANUNCIO_STYLE_IDS = new Set(['venta-directa', 'anuncio-conversion'])
 
-const VALID_ASPECTS = new Set<ShellImageAspect>(['9:16', '3:4', '1:1'])
+const VALID_ASPECTS = new Set<ShellImageAspect>(['9:16', '3:4', '4:5', '1:1'])
 const VALID_MODELS = new Set<ImageModel>([
   'nano-banana',
   'nano-banana-pro',
@@ -97,6 +122,7 @@ function isValidStyle(style: ShellImageStyle | undefined): style is ShellImageSt
   if (style.kind === 'preset') {
     return ANUNCIO_STYLE_IDS.has(style.presetId) || PRESET_IDS.has(style.presetId)
   }
+  if (style.kind === 'logo') return true
   const _exhaustive: never = style
   return _exhaustive
 }
@@ -250,11 +276,51 @@ function matchAspect(normalized: string): ShellImageAspect | null {
   if (/\b9\s*[:/x]\s*16\b/.test(normalized) || /\bstories?\b/.test(normalized) || /\breels?\b/.test(normalized)) {
     return '9:16'
   }
+  if (/\b4\s*[:/x]\s*5\b/.test(normalized) || /\bpost\s+vertical\b/.test(normalized)) return '4:5'
   if (/\b3\s*[:/x]\s*4\b/.test(normalized)) return '3:4'
-  if (/\b1\s*[:/x]\s*1\b/.test(normalized) || /\bcadrad[oa]\b/.test(normalized) || /\bsquare\b/.test(normalized)) {
+  if (/\b1\s*[:/x]\s*1\b/.test(normalized) || /\bcuadrad[oa]\b/.test(normalized) || /\bsquare\b/.test(normalized)) {
     return '1:1'
   }
   return null
+}
+
+export function aspectRatioFromDimensions(width: number, height: number): ShellImageAspect {
+  if (!(width > 0) || !(height > 0)) return '1:1'
+  const ratio = width / height
+  const candidates: Array<[ShellImageAspect, number]> = [
+    ['1:1', 1],
+    ['4:5', 4 / 5],
+    ['3:4', 3 / 4],
+    ['9:16', 9 / 16],
+  ]
+  let best: ShellImageAspect = '1:1'
+  let bestDiff = Number.POSITIVE_INFINITY
+  for (const [id, target] of candidates) {
+    const diff = Math.abs(ratio - target)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = id
+    }
+  }
+  return best
+}
+
+export function readImageDimensions(url: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = () => reject(new Error('Could not read image size'))
+    img.src = url
+  })
+}
+
+export async function aspectRatioFromImageUrl(url: string): Promise<ShellImageAspect | null> {
+  try {
+    const size = await readImageDimensions(url)
+    return aspectRatioFromDimensions(size.width, size.height)
+  } catch {
+    return null
+  }
 }
 
 function matchModel(normalized: string): ImageModel | null {
@@ -280,7 +346,7 @@ function matchDensity(normalized: string): ShellImageDensity | null {
 }
 
 const IMAGE_HINT =
-  /\b(?:imagen(?:es)?|image(?:s)?|foto(?:s)?|photo(?:s)?|visual(?:es)?|haz(?:me)?\s+una\s+imagen|genera(?:me)?\s+(?:una\s+)?(?:imagen|foto)|crear?\s+imagen|crea(?:me)?\s+(?:una\s+)?imagen)\b/
+  /\b(?:imagen(?:es)?|image(?:s)?|foto(?:s)?|photo(?:s)?|visual(?:es)?|logo(?:s)?|posts?|publicaci[oó]n(?:es)?|haz(?:me)?\s+una\s+imagen|genera(?:me)?\s+(?:una\s+)?(?:imagen|foto|logo|post)|crear?\s+(?:imagen|post)|crea(?:me)?\s+(?:una\s+)?(?:imagen|post))\b/
 
 const SCRIPT_HINT =
   /\b(?:gui[oó]n(?:es)?|guion(?:es)?|script(?:s)?|venta(?:s)?(?:\s+directa)?|desvalidar|educativo|storytelling)\b/
@@ -304,10 +370,12 @@ export function parseChatShellImageIntent(
   }
 
   const productSub = matchProductSubStyle(normalized)
-  // Organic aliases need image/post wording so bare "cita"/"quote" text asks are not stolen.
   const organicSub = imageCue ? matchOrganicSubtype(normalized) : null
   const presetId = matchPresetAlias(normalized)
-  if (productSub) {
+  const wantsLogo = /\blogo(?:s)?\b/.test(normalized)
+  if (wantsLogo) {
+    preferences.style = { kind: 'logo', archetype: 'auto' }
+  } else if (productSub) {
     preferences.style = { kind: 'product', productSubStyle: productSub }
   } else if (organicSub) {
     // Prefer organic-single over colliding anuncio presets (e.g. product-showcase).
@@ -336,7 +404,7 @@ export function parseChatShellImageIntent(
 
 export function planImageClarifications(
   resolved: ShellImagePreferences,
-  options?: { maxQuestions?: number }
+  options?: { maxQuestions?: number; aspectUnset?: boolean; densityUnset?: boolean }
 ): ImageClarifyPlan {
   const maxQuestions = options?.maxQuestions ?? 2
   const assumptions: string[] = []
@@ -353,11 +421,19 @@ export function planImageClarifications(
     assumptions.push(`Orgánico · ${resolved.style.organicSubtype}`)
   } else if (resolved.style.kind === 'preset') {
     assumptions.push(`Anuncio · ${resolved.style.presetId}`)
+  } else if (resolved.style.kind === 'logo') {
+    assumptions.push(`Logo · ${resolved.style.archetype || 'auto'}`)
   } else {
     const _exhaustive: never = resolved.style
     void _exhaustive
   }
+  if (options?.aspectUnset) {
+    return { needed: maxQuestions > 0, step: 'aspect', assumptions }
+  }
   assumptions.push(resolved.aspectRatio)
+  if (options?.densityUnset) {
+    return { needed: maxQuestions > 0, step: 'density', assumptions }
+  }
   assumptions.push(resolved.model)
   assumptions.push(`density:${resolved.density}`)
   return { needed: false, step: null, assumptions }
@@ -388,6 +464,8 @@ export function formatImageAssumptions(
           : (IMAGE_PRESETS.find((p) => p.id === style.presetId)?.[
               language === 'es' ? 'nameEs' : 'name'
             ] || style.presetId)
+  } else if (style?.kind === 'logo') {
+    styleLabel = language === 'es' ? 'Logo' : 'Logo'
   }
 
   const modelLabel =
@@ -416,6 +494,9 @@ export function buildShellImageGenerateBody(options: {
   brandKitId?: string
   productImageIds?: string[]
   scriptText?: string
+  businessContext?: string
+  customColors?: string[]
+  brandLogoUrl?: string
 }): Record<string, unknown> {
   const prefs = options.preferences
   if (!prefs.style) {
@@ -437,9 +518,21 @@ export function buildShellImageGenerateBody(options: {
   }
   if (options.brandKitId) body.brandKitId = options.brandKitId
   if (options.scriptText) body.scriptContext = options.scriptText
-  if (productImageIds.length > 0) {
-    body.productImageIds = productImageIds
-    body.productImageId = productImageIds[0]
+  if (options.businessContext) body.businessContext = options.businessContext
+  if (options.customColors?.length) body.customColors = options.customColors.slice(0, 3)
+  if (options.brandLogoUrl) body.brandLogoUrl = options.brandLogoUrl
+  body.productImageIds = productImageIds
+  if (productImageIds[0]) body.productImageId = productImageIds[0]
+
+  if (prefs.style.kind === 'logo') {
+    body.postStyle = 'logo'
+    body.logoArchetype = prefs.style.archetype || 'auto'
+    body.logoMode = prefs.logoMode || 'generate'
+    body.logoBackground = prefs.logoBackground || 'transparent'
+    body.aspectRatio = '1:1'
+    body.width = 1024
+    body.height = 1024
+    return body
   }
 
   if (prefs.style.kind === 'product') {

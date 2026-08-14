@@ -1,0 +1,18 @@
+---
+description: Core conventions for Advance AI (copywrite-ai) — always apply in this repo
+alwaysApply: true
+---
+
+# Advance AI Core Rules
+
+- Product is **Advance AI**; repo/package is `copywrite-ai`
+- Read `AGENTS.md` before non-trivial changes
+- Minimal diffs — match existing patterns; no drive-by refactors
+- Spanish domain terms stay in code: `guiones`, `negocio`, `venta_directa`
+- Bilingual UI via inline `labels.es` / `labels.en` — no i18n framework
+- All Supabase CRUD goes through `src/services/database.ts`
+- Plan/usage enforcement is server-side only (`api/lib/auth.ts`)
+- `supabase/` is gitignored — infer schema from `database.ts` + `types/index.ts`
+- Ignore stale docs: README (5-question chat), PROGRESS.md (B-Roll/video), fal.ai references
+- Update `docs/agent/CHANGELOG.md` for meaningful dev changes
+- Dev full-stack: `npm run dev` + `npm run dev:vercel` (API on :3000)

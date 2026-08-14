@@ -12,8 +12,11 @@ import {
   BarChart3,
   AlignLeft,
   LayoutDashboard,
-  MessageCircle
+  MessageCircle,
+  Sparkles
 } from 'lucide-react'
+import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
+import AdvanceLogo from './AdvanceLogo'
 
 interface LayoutProps {
   children: ReactNode
@@ -25,6 +28,9 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [switchBusy, setSwitchBusy] = useState(false)
+  const rollout = useChatShellRollout()
+  const homePath = rollout.effectiveHome === 'chat' ? '/chat' : '/dashboard'
 
   const handleSignOut = async () => {
     await signOut()
@@ -34,23 +40,29 @@ export default function Layout({ children }: LayoutProps) {
   const labels = {
     es: {
       dashboard: 'Inicio',
+      chat: 'Chat',
       scripts: 'Guiones',
       descriptions: 'Descripciones',
       posts: 'Posts',
       respuestas: 'Respuestas',
       settings: 'Configuración',
       signOut: 'Cerrar Sesión',
-      admin: 'Admin'
+      admin: 'Admin',
+      useChatHome: 'Usar Chat como inicio',
+      useClassicHome: 'Volver al panel clásico',
     },
     en: {
       dashboard: 'Dashboard',
+      chat: 'Chat',
       scripts: 'Scripts',
       descriptions: 'Descriptions',
       posts: 'Posts',
       respuestas: 'Replies',
       settings: 'Settings',
       signOut: 'Sign Out',
-      admin: 'Admin'
+      admin: 'Admin',
+      useChatHome: 'Make Chat home',
+      useClassicHome: 'Return to classic',
     }
   }
 
@@ -58,6 +70,9 @@ export default function Layout({ children }: LayoutProps) {
 
   const allNavItems = [
     { path: '/dashboard', label: t.dashboard, icon: LayoutDashboard, beta: false, adminOnly: false },
+    ...(rollout.showSwitch
+      ? [{ path: '/chat', label: t.chat, icon: Sparkles, beta: true, adminOnly: false }]
+      : []),
     { path: '/scripts', label: t.scripts, icon: FileText, beta: true, adminOnly: false },
     { path: '/descriptions', label: t.descriptions, icon: AlignLeft, beta: true, adminOnly: false },
     { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: false },
@@ -88,8 +103,8 @@ export default function Layout({ children }: LayoutProps) {
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="p-6 border-b border-dark-100">
-            <Link to="/dashboard" className="flex items-center justify-center gap-3">
-              <img src="/logo.png" alt="Advance AI" className="w-10 h-10 rounded-lg object-cover" />
+            <Link to={homePath} className="flex items-center justify-center gap-3">
+              <AdvanceLogo size={40} />
               <span className="text-xl font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
             </Link>
           </div>
@@ -133,6 +148,29 @@ export default function Layout({ children }: LayoutProps) {
                 <p className="text-xs text-dark-500 truncate">{user?.email}</p>
               </div>
             </div>
+            {rollout.showSwitch && (
+              <button
+                type="button"
+                disabled={switchBusy}
+                onClick={() => {
+                  if (switchBusy) return
+                  const next = rollout.preferredUi === 'chat' ? 'classic' : 'chat'
+                  setSwitchBusy(true)
+                  void rollout.setPreferredUi(next).then((ok) => {
+                    setSwitchBusy(false)
+                    if (!ok) return
+                    navigate(next === 'chat' ? '/chat' : '/dashboard')
+                    setSidebarOpen(false)
+                  })
+                }}
+                className="flex items-center gap-3 px-4 py-3 w-full text-dark-500 hover:bg-dark-200 hover:text-dark-900 rounded-lg transition-colors"
+              >
+                <Sparkles className="w-5 h-5" />
+                <span className="font-medium">
+                  {rollout.preferredUi === 'chat' ? t.useClassicHome : t.useChatHome}
+                </span>
+              </button>
+            )}
             <button
               onClick={handleSignOut}
               className="flex items-center gap-3 px-4 py-3 w-full text-dark-500 hover:bg-dark-200 hover:text-dark-900 rounded-lg transition-colors mt-2"
@@ -155,7 +193,7 @@ export default function Layout({ children }: LayoutProps) {
             <Menu className="w-6 h-6" />
           </button>
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="Advance AI" className="w-6 h-6 rounded object-cover" />
+            <AdvanceLogo size={24} />
             <span className="text-xl font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.03em' }}>Advance AI</span>
           </div>
           <div className="w-10" />

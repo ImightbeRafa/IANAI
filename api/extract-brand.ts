@@ -254,6 +254,7 @@ ${bodyText}`
     const usage = result.usageMetadata
     const inputTokens = usage?.promptTokenCount || 0
     const outputTokens = usage?.candidatesTokenCount || 0
+    const thinkingTokens = usage?.thoughtsTokenCount || 0
 
     await logApiUsage({
       userId: user.id,
@@ -262,6 +263,7 @@ ${bodyText}`
       model: 'gemini-2.5-flash',
       inputTokens,
       outputTokens,
+      thinkingTokens,
       success: true,
       metadata: { action: 'extract_brand', url: parsedUrl.hostname }
     })
@@ -271,6 +273,7 @@ ${bodyText}`
       brand: {
         ...brandData,
         logo_url: logos[0] || meta.ogImage || null,
+        css_colors: colors.slice(0, 10),
         source_url: url
       }
     })

@@ -12,6 +12,7 @@ import {
   Image,
   Layers
 } from 'lucide-react'
+import AdvanceLogo from '../components/AdvanceLogo'
 
 export default function Home() {
   const { language } = useLanguage()
@@ -312,7 +313,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-3">
-              <img src="/logo.png" alt="Advance AI" className="w-10 h-10 object-contain rounded-xl" />
+              <AdvanceLogo size={40} />
               <span className="text-xl font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
             </div>
             <div className="hidden md:flex items-center gap-8">
@@ -723,7 +724,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <img src="/logo.png" alt="Advance AI" className="w-8 h-8 object-contain rounded-lg" />
+              <AdvanceLogo size={32} />
               <span className="font-extrabold" style={{ fontFamily: 'Montserrat, sans-serif', color: '#0284c7', letterSpacing: '-0.02em' }}>Advance AI</span>
               <span className="text-dark-400 text-sm">• {labels.footer.tagline}</span>
             </div>

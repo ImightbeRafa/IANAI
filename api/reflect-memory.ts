@@ -3,7 +3,7 @@ import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { supabaseAdmin as supabase } from './lib/supabase-admin.js'
-import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { GROK_API_URL, GROK_TEXT_MODEL_EFFICIENT } from './lib/grok-models.js'
 import { userHasProductAccess } from './lib/product-access.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -277,7 +277,7 @@ ${ratedPostsText}` : ''}`
         'Authorization': `Bearer ${grokApiKey}`
       },
       body: JSON.stringify({
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         messages: [
           { role: 'system', content: SYNTHESIS_SYSTEM },
           { role: 'user', content: userContent }
@@ -296,7 +296,7 @@ ${ratedPostsText}` : ''}`
         userId,
         userEmail: user.email,
         feature: 'memory_reflection',
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         inputTokens: estimateTokens(SYNTHESIS_SYSTEM + userContent),
         outputTokens: 0,
         success: false,
@@ -471,7 +471,7 @@ ${ratedPostsText}` : ''}`
       userId,
       userEmail: user.email,
       feature: 'memory_reflection',
-      model: GROK_TEXT_MODEL,
+      model: GROK_TEXT_MODEL_EFFICIENT,
       inputTokens: usage.prompt_tokens || estimateTokens(SYNTHESIS_SYSTEM + userContent),
       outputTokens: usage.completion_tokens || estimateTokens(rawContent),
       success: true,

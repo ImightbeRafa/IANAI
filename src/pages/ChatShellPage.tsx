@@ -9,7 +9,7 @@ import {
   persistChatShellTheme,
   type ChatShellTheme,
 } from '../features/chat-shell/chatShellTheme'
-import { useChatShellFlag } from '../features/chat-shell/useChatShellFlag'
+import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
 import '../features/chat-shell/chat-shell.css'
 
 function displayNameFromUser(email?: string | null, fullName?: string | null): string {
@@ -27,7 +27,7 @@ function initialsFromName(name: string): string {
 
 export default function ChatShellPage() {
   const { user } = useAuth()
-  const { state, refresh } = useChatShellFlag()
+  const { loading, canAccessChat, killSwitch, refresh } = useChatShellRollout()
   const [theme, setTheme] = useState<ChatShellTheme>(() => getInitialChatShellTheme())
 
   useLayoutEffect(() => {
@@ -37,13 +37,14 @@ export default function ChatShellPage() {
     }
   }, [theme])
 
+  const applyTheme = (next: ChatShellTheme) => {
+    persistChatShellTheme(next)
+    applyChatShellTheme(next)
+    setTheme(next)
+  }
+
   const toggleTheme = () => {
-    setTheme((prev) => {
-      const next: ChatShellTheme = prev === 'obsidian-dark' ? 'obsidian-light' : 'obsidian-dark'
-      persistChatShellTheme(next)
-      applyChatShellTheme(next)
-      return next
-    })
+    applyTheme(theme === 'obsidian-dark' ? 'obsidian-light' : 'obsidian-dark')
   }
 
   const metaName =
@@ -53,7 +54,7 @@ export default function ChatShellPage() {
   const displayName = displayNameFromUser(user?.email, metaName)
   const initials = initialsFromName(displayName)
 
-  if (state === 'loading') {
+  if (loading) {
     return (
       <div className="chat-shell__loading" data-theme={theme} aria-busy="true">
         <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -64,12 +65,19 @@ export default function ChatShellPage() {
     )
   }
 
-  if (state === 'disabled') {
+  if (!canAccessChat) {
+    const reason =
+      killSwitch === 'unreadable'
+        ? 'unreadable'
+        : killSwitch === 'enabled'
+          ? 'invite'
+          : 'disabled'
     return (
       <ChatShellGate
         onRetry={refresh}
         theme={theme}
         onToggleTheme={toggleTheme}
+        reason={reason}
       />
     )
   }
@@ -88,7 +96,7 @@ export default function ChatShellPage() {
   return (
     <ChatShell
       theme={theme}
-      onToggleTheme={toggleTheme}
+      onThemeChange={applyTheme}
       displayName={displayName}
       initials={initials}
       userId={user.id}

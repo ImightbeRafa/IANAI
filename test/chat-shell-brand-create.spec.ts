@@ -14,7 +14,7 @@ describe('chatShellBrandCreate', () => {
   it('builds minimal BusinessFormData defaults', () => {
     expect(buildMinimalBrandFormData('  Acme Studio  ')).toEqual({
       name: 'Acme Studio',
-      sales_channels: ['messages'],
+      sales_channels: [],
       does_shipping: false,
       target_audiences: [],
     })

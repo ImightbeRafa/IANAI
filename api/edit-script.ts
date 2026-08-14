@@ -4,6 +4,7 @@ import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 import { isUuid, resolveAuthorizedSessionProduct } from './lib/session-access.js'
 import { userHasProductAccess } from './lib/product-access.js'
+import { requireChatShellAccess } from './lib/chat-shell-access.js'
 
 type Language = 'en' | 'es'
 type EditType = 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
@@ -69,6 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Chat-shell: optional session binding — reject foreign productId on the session.
     if (sessionId != null && sessionId !== '') {
+      if (!(await requireChatShellAccess(res, user.id))) return
       if (!isUuid(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' })
       const access = await resolveAuthorizedSessionProduct(
         user.id,
@@ -118,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await logApiUsage({
       userId: user.id,
       userEmail: user.email,
-      feature: 'script',
+      feature: safeEditType,
       model: GROK_TEXT_MODEL,
       inputTokens: data.usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
       outputTokens: data.usage?.completion_tokens || estimateTokens(content),

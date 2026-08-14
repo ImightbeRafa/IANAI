@@ -29,10 +29,11 @@ Backend (Vercel functions):
 
 ## Feature flag design
 
-- Source of truth: `public.app_feature_flags` row `key = 'chat_shell'`.
-- Server reads flag on shell-aware routes; client may read for nav cutover.
+- Source of truth: `public.app_feature_flags` row `key = 'chat_shell'` (kill switch).
+- Per-user invite: `profiles.chat_beta_access` (default false). Clients cannot self-grant.
+- Home preference: `profiles.preferred_ui` (`classic` | `chat`). Does not grant access.
+- Enabling the kill switch must **not** redirect everyone to `/chat`. See `docs/operations/chat-shell-production-transition.md`.
 - Do **not** bake cutover solely into `VITE_CHAT_SHELL` — build-time flags drift across previews.
-- Optional later: `config` jsonb for percentage rollout / allowlist emails.
 
 ## Rafael actions
 

@@ -7,6 +7,7 @@ import {
   planKeptOfferPositionUpdates,
   resolveNextSessionId,
   resolveSessionOfferProductId,
+  displaySessionOffers,
   shouldCommitCreatedSession,
   type OfferLike,
 } from '../src/features/chat-shell/sessionOffer'
@@ -194,6 +195,30 @@ describe('resolveSessionOfferProductId', () => {
   })
 })
 
+describe('displaySessionOffers', () => {
+  it('uses attached offers when present', () => {
+    expect(
+      displaySessionOffers(
+        [
+          { product_id: 'p2', position: 2 },
+          { product_id: 'p1', position: 1 },
+        ],
+        'p-session'
+      )
+    ).toEqual([
+      { product_id: 'p1', position: 1 },
+      { product_id: 'p2', position: 2 },
+    ])
+  })
+
+  it('falls back to session.product_id so the panel matches the Ofertas count', () => {
+    expect(displaySessionOffers([], 'p-session')).toEqual([
+      { product_id: 'p-session', position: 1 },
+    ])
+    expect(displaySessionOffers([], null)).toEqual([])
+  })
+})
+
 describe('planOfferGenerationWalk', () => {
   it('walks ALL offers by position ascending — not primary only', () => {
     const walk = planOfferGenerationWalk([
@@ -311,6 +336,15 @@ describe('pickSafeChatSessionUpdates', () => {
       primary_channel: 'messages',
       awareness_level: 'warm',
     })
+  })
+
+  it('allows brand_kit_id', () => {
+    expect(
+      pickSafeChatSessionUpdates({
+        brand_kit_id: 'kit-1',
+        user_id: 'stolen',
+      })
+    ).toEqual({ brand_kit_id: 'kit-1' })
   })
 })
 

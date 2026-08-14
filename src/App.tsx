@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { LanguageProvider } from './contexts/LanguageContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -8,6 +8,7 @@ import FeedbackButton from './components/FeedbackButton'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import { ChatShellRolloutProvider, useChatShellRollout } from './features/chat-shell/ChatShellRolloutContext'
 
 // Lazy-loaded pages (code-split for smaller initial bundle)
 const OverviewDashboard = lazy(() => import('./pages/OverviewDashboard'))
@@ -50,9 +51,14 @@ function LazyFallback() {
 }
 
 function AppFeedback() {
-  const { pathname } = useLocation()
-  if (/^\/chat(?:\/|$)/.test(pathname)) return null
   return <FeedbackButton />
+}
+
+function DashboardHome() {
+  const { loading, effectiveHome } = useChatShellRollout()
+  if (loading) return <LazyFallback />
+  if (effectiveHome === 'chat') return <Navigate to="/chat" replace />
+  return <OverviewDashboard />
 }
 
 export default function App() {
@@ -61,6 +67,7 @@ export default function App() {
     <BrowserRouter>
       <LanguageProvider>
         <AuthProvider>
+          <ChatShellRolloutProvider>
           <Suspense fallback={<LazyFallback />}>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -71,7 +78,7 @@ export default function App() {
               path="/dashboard"
               element={
                 <ProtectedRoute>
-                  <OverviewDashboard />
+                  <DashboardHome />
                 </ProtectedRoute>
               }
             />
@@ -191,6 +198,7 @@ export default function App() {
           </Routes>
           <AppFeedback />
           </Suspense>
+          </ChatShellRolloutProvider>
         </AuthProvider>
       </LanguageProvider>
     </BrowserRouter>

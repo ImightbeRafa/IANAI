@@ -112,8 +112,8 @@ export function buildBrandVoicePrompt(kit: BrandKitRow, language: 'en' | 'es'): 
 
   if (kit.forbidden_phrases.length > 0) {
     parts.push(language === 'es'
-      ? `FRASES PROHIBIDAS (NUNCA usar): ${kit.forbidden_phrases.join(' | ')}`
-      : `FORBIDDEN PHRASES (NEVER use): ${kit.forbidden_phrases.join(' | ')}`)
+      ? `REGLAS PERMANENTES Y FRASES PROHIBIDAS (NO NEGOCIABLES; interpreta cada entrada como instrucción): ${kit.forbidden_phrases.join(' | ')}`
+      : `PERMANENT RULES AND FORBIDDEN PHRASES (NON-NEGOTIABLE; interpret every entry as an instruction): ${kit.forbidden_phrases.join(' | ')}`)
   }
 
   // Only return block if there's actual content beyond the header
@@ -126,9 +126,17 @@ export function buildBrandVoicePrompt(kit: BrandKitRow, language: 'en' | 'es'): 
  * Returns null if no brand colors are set.
  */
 export function buildBrandColorOverride(kit: BrandKitRow): string | null {
-  const colors = [kit.primary_color, kit.secondary_color, kit.accent_color].filter(Boolean)
+  const primary = kit.primary_color?.trim()
+  const secondary = kit.secondary_color?.trim()
+  const accent = kit.accent_color?.trim()
+  const colors = [primary, secondary, accent].filter(Boolean)
   if (colors.length === 0) return null
-  return `USA SOLO ESTOS COLORES DE MARCA: ${colors.join(', ')}. Estos son los colores oficiales de la marca — NO uses ningún otro color fuera de esta paleta. Ignora cualquier otro color mencionado en las instrucciones siguientes.`
+  const roles = [
+    primary ? `PRIMARIO (fondos, bloques, marca): ${primary}` : null,
+    secondary ? `SECUNDARIO (apoyo, paneles): ${secondary}` : null,
+    accent ? `ACENTO / CTA (botones, pips): ${accent}` : null,
+  ].filter(Boolean).join('. ')
+  return `USA SOLO ESTOS COLORES DE MARCA: ${colors.join(', ')}. ${roles}. Estos son los colores oficiales — NO uses ningún otro color fuera de esta paleta. PROHIBIDO azul genérico (#0000FF, #0066FF, #1877F2, Facebook/Instagram blue) salvo que esté en esta paleta. Ignora cualquier otro color mencionado en las instrucciones siguientes.`
 }
 
 /**
@@ -209,21 +217,22 @@ function inferMimeFromUrl(url: string): string | null {
  * (e.g. .ico, .svg, .gif, .bmp). In those cases the caller will generate without the logo
  * rather than failing the whole image generation.
  */
-export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeType: string; data: string } | null> {
-  if (!kit.logo_url) return null
+export async function fetchBrandImageAsBase64(
+  url: string,
+  label = 'brand image'
+): Promise<{ mimeType: string; data: string } | null> {
+  if (!url) return null
   try {
-    const resp = await fetch(kit.logo_url)
+    const resp = await fetch(url)
     if (!resp.ok) {
-      console.warn('Failed to fetch brand logo:', resp.status, kit.logo_url)
+      console.warn('Failed to fetch', label, resp.status, url)
       return null
     }
-    // Strip parameters (e.g. "image/png; charset=utf-8") and lowercase.
     const rawContentType = (resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
 
-    // Resolve an effective MIME: prefer server header if supported, else infer from URL extension.
     let effectiveMime: string | null = GEMINI_SUPPORTED_IMAGE_MIMES.has(rawContentType) ? rawContentType : null
     if (!effectiveMime) {
-      const inferred = inferMimeFromUrl(kit.logo_url)
+      const inferred = inferMimeFromUrl(url)
       if (inferred && GEMINI_SUPPORTED_IMAGE_MIMES.has(inferred)) {
         effectiveMime = inferred
       }
@@ -231,20 +240,79 @@ export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeTy
 
     if (!effectiveMime) {
       console.warn(
-        `Brand logo MIME type not supported by Gemini (got "${rawContentType || 'unknown'}" for kit "${kit.name}"). ` +
-        `Supported: PNG, JPEG, WEBP, HEIC, HEIF. Skipping logo injection — please re-upload the logo as PNG or JPEG.`
+        `${label} MIME type not supported by Gemini (got "${rawContentType || 'unknown'}"). Skipping.`
       )
       return null
     }
 
-    // Normalize legacy "image/jpg" to the canonical "image/jpeg".
     if (effectiveMime === 'image/jpg') effectiveMime = 'image/jpeg'
 
     const buffer = await resp.arrayBuffer()
     const base64 = Buffer.from(buffer).toString('base64')
     return { mimeType: effectiveMime, data: base64 }
   } catch (err) {
-    console.warn('Error fetching brand logo for inline injection:', err)
+    console.warn('Error fetching', label, err)
     return null
   }
+}
+
+export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeType: string; data: string } | null> {
+  if (!kit.logo_url) return null
+  return fetchBrandImageAsBase64(kit.logo_url, `brand logo "${kit.name}"`)
+}
+
+const BRAND_LOGO_BUCKET = 'post-images'
+
+function isAlreadyHostedBrandLogo(url: string): boolean {
+  return /\/storage\/v1\/object\/public\/post-images\//i.test(url) && /\/brand-kit\//i.test(url)
+}
+
+function logoSkipReason(url: string): 'svg' | null {
+  const clean = url.split('?')[0].split('#')[0].toLowerCase()
+  if (clean.endsWith('.svg') || clean.endsWith('.ico') || clean.endsWith('.gif')) return 'svg'
+  return null
+}
+
+/**
+ * Copy a remote raster logo into `post-images` so Gemini can fetch it later.
+ * SVGs are not converted — caller should keep the original URL and warn.
+ */
+export async function rehostBrandLogo(
+  userId: string,
+  sourceUrl: string
+): Promise<{ url: string; skipped?: 'svg' | 'fetch' } | null> {
+  const url = sourceUrl.trim()
+  if (!url || !userId || !supabase) return null
+  if (isAlreadyHostedBrandLogo(url)) return { url }
+  if (logoSkipReason(url) === 'svg') return { url, skipped: 'svg' }
+
+  const img = await fetchBrandImageAsBase64(url, 'brand logo rehost')
+  if (!img) return { url, skipped: 'fetch' }
+
+  const ext = img.mimeType === 'image/png' ? 'png' : img.mimeType === 'image/webp' ? 'webp' : 'jpg'
+  const path = `${userId}/brand-kit/logo-${Date.now()}.${ext}`
+  const bytes = Buffer.from(img.data, 'base64')
+  const { error } = await supabase.storage.from(BRAND_LOGO_BUCKET).upload(path, bytes, {
+    contentType: img.mimeType,
+    upsert: false,
+  })
+  if (error) {
+    console.warn('rehost brand logo failed', error.message)
+    return { url, skipped: 'fetch' }
+  }
+  const { data } = supabase.storage.from(BRAND_LOGO_BUCKET).getPublicUrl(path)
+  return data.publicUrl ? { url: data.publicUrl } : { url, skipped: 'fetch' }
+}
+
+export async function fetchBrandStyleReferencesAsBase64(
+  kit: BrandKitRow,
+  limit = 2
+): Promise<Array<{ mimeType: string; data: string }>> {
+  const urls = (kit.reference_images || []).filter(Boolean).slice(0, limit)
+  const out: Array<{ mimeType: string; data: string }> = []
+  for (const url of urls) {
+    const img = await fetchBrandImageAsBase64(url, `brand style ref "${kit.name}"`)
+    if (img) out.push(img)
+  }
+  return out
 }

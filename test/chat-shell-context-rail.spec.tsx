@@ -2,37 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import ChatContextRail from '../src/features/chat-shell/ChatContextRail'
-import {
-  readSetupSkipped,
-  setupSkippedStorageKey,
-} from '../src/features/chat-shell/chatContextSetup'
-import type { ChatSession } from '../src/types'
-
-function memoryLocalStorage() {
-  const store: Record<string, string> = {}
-  const storage: Storage = {
-    get length() {
-      return Object.keys(store).length
-    },
-    clear() {
-      for (const key of Object.keys(store)) delete store[key]
-    },
-    getItem(key: string) {
-      return store[key] ?? null
-    },
-    key(index: number) {
-      return Object.keys(store)[index] ?? null
-    },
-    removeItem(key: string) {
-      delete store[key]
-    },
-    setItem(key: string, value: string) {
-      store[key] = String(value)
-    },
-  }
-  return { store, storage }
-}
+import type { Business, ChatSession, Product } from '../src/types'
 
 function incompleteSession(id: string): ChatSession {
   return {
@@ -41,8 +13,8 @@ function incompleteSession(id: string): ChatSession {
     business_id: 'b1',
     product_id: null,
     title: 'New chat',
-    context: '',
-    primary_channel: null,
+    context: 'Oferta: Arnés ForgeCR\nTipo: indumentaria',
+    primary_channel: 'messages',
     awareness_level: null,
     status: 'active',
     framework: 'venta_directa',
@@ -51,83 +23,170 @@ function incompleteSession(id: string): ChatSession {
   }
 }
 
-describe('ChatContextRail Skip remount', () => {
-  const sessionId = 'f18b984d-active'
-  const olderId = '54a4b83f-older'
-  let store: Record<string, string>
-  let storage: Storage
+const brand: Business = {
+  id: 'b1',
+  owner_id: 'u1',
+  name: 'ForgeCostaRica',
+  sales_channels: ['messages', 'website'],
+  does_shipping: false,
+  icp_description: 'Athletes and office workers',
+  created_at: '2026-01-01T00:00:00.000Z',
+  updated_at: '2026-01-01T00:00:00.000Z',
+}
 
-  beforeEach(() => {
-    ;({ store, storage } = memoryLocalStorage())
-    vi.stubGlobal('localStorage', storage)
-    // Seed an older skipped session — remount must not touch it.
-    storage.setItem(setupSkippedStorageKey(olderId), '1')
-  })
+const offer: Product = {
+  id: 'p1',
+  name: 'Arnés ForgeCR',
+  type: 'indumentaria',
+}
 
+describe('ChatContextRail inspector', () => {
   afterEach(() => {
     cleanup()
+  })
+
+  beforeEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('Skip → unmount/remount keeps interview closed and LS key for same session', async () => {
-    const user = userEvent.setup()
-    const session = incompleteSession(sessionId)
-    const keepSelected = vi.fn()
-    const railProps = {
-      tab: 'context' as const,
-      onTabChange: () => {},
-      onClose: () => {},
-      session,
-      language: 'en' as const,
-      onKeepSessionSelected: keepSelected,
-    }
-
-    const first = render(<ChatContextRail {...railProps} />)
-    expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy()
-
-    await user.click(screen.getByRole('button', { name: 'Skip' }))
-    expect(readSetupSkipped(storage, sessionId)).toBe(true)
-    expect(store[setupSkippedStorageKey(sessionId)]).toBe('1')
-    expect(store[setupSkippedStorageKey(olderId)]).toBe('1')
-    expect(keepSelected).toHaveBeenCalledWith(sessionId)
-    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Resume setup' })).toBeTruthy()
-
-    first.unmount()
-
-    // Remount with same session id — hydrate must only READ, never clear.
-    render(<ChatContextRail {...railProps} onKeepSessionSelected={keepSelected} />)
-    expect(readSetupSkipped(storage, sessionId)).toBe(true)
-    expect(store[setupSkippedStorageKey(sessionId)]).toBe('1')
-    expect(store[setupSkippedStorageKey(olderId)]).toBe('1')
+  it('shows folder facts instead of the old session notes form', () => {
+    render(
+      <MemoryRouter>
+        <ChatContextRail
+          tab="context"
+          pane="detail"
+          onTabChange={() => {}}
+          onClose={() => {}}
+          brand={brand}
+          session={incompleteSession('s1')}
+          activeProduct={offer}
+          language="en"
+        />
+      </MemoryRouter>
+    )
     expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
     expect(screen.queryByLabelText('Session setup')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Resume setup' })).toBeTruthy()
+    expect(screen.queryByPlaceholderText('Session notes…')).toBeNull()
+    expect(screen.getAllByText('ForgeCostaRica').length).toBeGreaterThan(0)
+    expect(screen.getByText('Athletes and office workers')).toBeTruthy()
+    expect(screen.getAllByText(/Arnés ForgeCR/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/source of truth used by AI/i)).toBeTruthy()
   })
 
-  it('Resume setup clears skip LS and reopens interview', async () => {
+  it('saves chat name on blur', async () => {
     const user = userEvent.setup()
-    const session = incompleteSession(sessionId)
-    storage.setItem(setupSkippedStorageKey(sessionId), '1')
-
+    const onPatchSession = vi.fn()
     render(
-      <ChatContextRail
-        tab="context"
-        onTabChange={() => {}}
-        onClose={() => {}}
-        session={session}
-        language="en"
-      />
+      <MemoryRouter>
+        <ChatContextRail
+          tab="context"
+          pane="detail"
+          onTabChange={() => {}}
+          onClose={() => {}}
+          session={incompleteSession('s1')}
+          language="en"
+          onPatchSession={onPatchSession}
+        />
+      </MemoryRouter>
     )
+    const input = screen.getByDisplayValue('New chat')
+    await user.clear(input)
+    await user.type(input, 'Forge brief')
+    input.blur()
+    expect(onPatchSession).toHaveBeenCalledWith({ title: 'Forge brief' })
+  })
 
-    expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Resume setup' }))
+  it('shows a compact widget of thread items and options', async () => {
+    const user = userEvent.setup()
+    const onTabChange = vi.fn()
+    render(
+      <MemoryRouter>
+        <ChatContextRail
+          tab="context"
+          pane="index"
+          onTabChange={onTabChange}
+          onClose={() => {}}
+          brand={brand}
+          session={incompleteSession('s1')}
+          activeProduct={offer}
+          language="en"
+        />
+      </MemoryRouter>
+    )
+    expect(screen.queryByText('This chat')).toBeNull()
+    expect(screen.getByText('Options')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Arnés ForgeCR/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Context' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Offers/ })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: /Offers/ }))
+    expect(onTabChange).toHaveBeenCalledWith('offers')
+  })
 
-    expect(readSetupSkipped(storage, sessionId)).toBe(false)
-    expect(store[setupSkippedStorageKey(sessionId)]).toBeUndefined()
-    // Older key untouched.
-    expect(store[setupSkippedStorageKey(olderId)]).toBe('1')
-    expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy()
-    expect(screen.getByLabelText('Session setup')).toBeTruthy()
+  it('still shows options when the thread has no pieces yet', () => {
+    render(
+      <MemoryRouter>
+        <ChatContextRail
+          tab="context"
+          pane="index"
+          onTabChange={() => {}}
+          onClose={() => {}}
+          language="en"
+        />
+      </MemoryRouter>
+    )
+    expect(screen.queryByText('Nothing in this chat yet.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Context' })).toBeTruthy()
+  })
+
+  it('lets you delete leftover unassigned products from Offers', async () => {
+    const user = userEvent.setup()
+    const onDeleteUnassignedProduct = vi.fn()
+    const onClearUnassignedProducts = vi.fn()
+    const leftover: Product = { id: 'orphan-1', name: 'Arnés ForgeCR', type: 'indumentaria' }
+    const leftoverTwo: Product = { id: 'orphan-2', name: 'Arnés ForgeCR', type: 'indumentaria' }
+    render(
+      <MemoryRouter>
+        <ChatContextRail
+          tab="offers"
+          pane="detail"
+          onTabChange={() => {}}
+          onClose={() => {}}
+          brand={brand}
+          session={incompleteSession('s1')}
+          unassignedProducts={[leftover, leftoverTwo]}
+          onDeleteUnassignedProduct={onDeleteUnassignedProduct}
+          onClearUnassignedProducts={onClearUnassignedProducts}
+          language="en"
+        />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('Unassigned products')).toBeTruthy()
+    const deleteButtons = screen.getAllByRole('button', { name: /Delete unassigned product/ })
+    await user.click(deleteButtons[0]!)
+    expect(onDeleteUnassignedProduct).toHaveBeenCalledWith('orphan-1')
+    vi.stubGlobal('confirm', () => true)
+    await user.click(screen.getByRole('button', { name: 'Remove all unassigned' }))
+    expect(onClearUnassignedProducts).toHaveBeenCalled()
+  })
+
+  it('shows the active offer in Offers even when the attached list is empty', () => {
+    render(
+      <MemoryRouter>
+        <ChatContextRail
+          tab="offers"
+          pane="detail"
+          onTabChange={() => {}}
+          onClose={() => {}}
+          brand={brand}
+          session={{ ...incompleteSession('s1'), product_id: offer.id }}
+          offers={[]}
+          activeProduct={offer}
+          language="en"
+        />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('Arnés ForgeCR')).toBeTruthy()
+    expect(screen.getByText('Primary')).toBeTruthy()
+    expect(screen.queryByText('No offers attached yet.')).toBeNull()
   })
 })

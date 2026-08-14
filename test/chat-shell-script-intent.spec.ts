@@ -4,9 +4,25 @@ import { parseChatShellScriptIntent } from '../src/features/chat-shell/chatShell
 import {
   readAiMemoryEnabled,
   resolveBrandKitIdForProduct,
+  resolveBrandKitIdForSession,
 } from '../src/features/chat-shell/chatShellGenerationPreferences'
 
 describe('parseChatShellScriptIntent', () => {
+  it('reports which required generation decisions were explicitly provided', () => {
+    const vague = parseChatShellScriptIntent('quiero guiones', 'es', DEFAULT_SCRIPT_SETTINGS)
+    expect(vague.hasExplicitType).toBe(false)
+    expect(vague.hasExplicitCount).toBe(false)
+    expect(vague.hasExplicitCta).toBe(false)
+
+    const complete = parseChatShellScriptIntent(
+      'generame 3 guiones de venta con CTA de venta por WhatsApp',
+      'es',
+      DEFAULT_SCRIPT_SETTINGS
+    )
+    expect(complete.hasExplicitType).toBe(true)
+    expect(complete.hasExplicitCount).toBe(true)
+    expect(complete.hasExplicitCta).toBe(true)
+  })
   it('parses "generame 2 de venta" as by_type venta_directa×2', () => {
     const intent = parseChatShellScriptIntent(
       'generame 2 de venta',
@@ -230,5 +246,23 @@ describe('chatShellGenerationPreferences', () => {
     expect(resolveBrandKitIdForProduct('p1', [], storage)).toBeUndefined()
     storage.store.bk_p1 = 'stale'
     expect(resolveBrandKitIdForProduct('p1', kits, storage)).toBe('b')
+  })
+
+  it('prefers the session Brand Kit over product storage and the default kit', () => {
+    const kits = [
+      { id: 'a', is_default: false, is_active: true },
+      { id: 'b', is_default: true, is_active: true },
+      { id: 'session-kit', is_default: false, is_active: true },
+    ]
+    const storage = {
+      store: { bk_p1: 'a' } as Record<string, string>,
+      getItem(key: string) {
+        return this.store[key] ?? null
+      },
+    }
+    expect(resolveBrandKitIdForSession('session-kit', 'p1', kits, storage)).toBe('session-kit')
+    expect(resolveBrandKitIdForSession('gone', 'p1', kits, storage)).toBe('a')
+    expect(resolveBrandKitIdForSession(null, 'p2', kits, storage)).toBe('b')
+    expect(resolveBrandKitIdForSession('session-kit', 'p1', [], storage)).toBe('session-kit')
   })
 })

@@ -57,12 +57,14 @@ export function isOrganicFramework(f: ScriptFramework): boolean {
  * - sales: full sales CTA — message us, click ad, visit store, etc. (sales default)
  */
 export type CTAStrength = 'none' | 'soft' | 'brand_mention' | 'sales'
-export type AIModel = 'grok' | 'gemini'
+export type AIModel = 'grok' | 'gemini' | 'best' | 'efficient'
 export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine' | 'gpt-image-2'
 
 // =============================================
 // Core Entities
 // =============================================
+export type PreferredUi = 'classic' | 'chat'
+
 export interface Profile {
   id: string
   email: string
@@ -70,6 +72,8 @@ export interface Profile {
   avatar_url?: string
   account_type: AccountType
   is_admin: boolean
+  chat_beta_access?: boolean
+  preferred_ui?: PreferredUi
   created_at: string
   updated_at: string
 }
@@ -900,6 +904,7 @@ export interface BrandKitFormData {
   is_active?: boolean
   is_default?: boolean
   client_id?: string | null
+  business_id?: string | null
 }
 
 // =============================================

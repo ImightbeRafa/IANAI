@@ -31,7 +31,11 @@ import {
   Zap
 } from 'lucide-react'
 
-export default function AdminTickets() {
+export default function AdminTickets({
+  embedded = false,
+}: {
+  embedded?: boolean
+} = {}) {
   const { isAdmin } = useAuth()
   const { language } = useLanguage()
   const [tickets, setTickets] = useState<FeedbackTicket[]>([])
@@ -171,6 +175,7 @@ export default function AdminTickets() {
   }
 
   if (!isAdmin) {
+    if (embedded) return null
     return (
       <Layout>
         <div className="flex items-center justify-center h-full">
@@ -222,12 +227,12 @@ export default function AdminTickets() {
     }
   }
 
-  return (
-    <Layout>
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+  const body = (
+      <div className={embedded ? 'px-4 sm:px-6 py-4' : 'max-w-5xl mx-auto px-4 sm:px-6 py-8'}>
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
+            {!embedded && (
             <Link
               to="/admin"
               className="inline-flex items-center gap-1.5 text-dark-400 hover:text-dark-600 text-xs font-medium tracking-wide uppercase transition-colors mb-2"
@@ -235,6 +240,7 @@ export default function AdminTickets() {
               <ArrowLeft className="w-3.5 h-3.5" />
               {t.back}
             </Link>
+            )}
             <h1 className="text-xl sm:text-2xl font-bold text-dark-900 flex items-center gap-3">
               <MessageSquarePlus className="w-6 sm:w-7 h-6 sm:h-7 text-primary-500" />
               {t.title}
@@ -316,6 +322,11 @@ export default function AdminTickets() {
                         {ticket.product_name && (
                           <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-900/20 text-blue-400">
                             <Package className="w-2.5 h-2.5" /> {ticket.product_name}
+                          </span>
+                        )}
+                        {ticket.page_url?.startsWith('/chat') && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-900/20 text-sky-400">
+                            Chat
                           </span>
                         )}
                       </div>
@@ -546,6 +557,8 @@ export default function AdminTickets() {
           </div>
         )}
       </div>
-    </Layout>
   )
+
+  if (embedded) return body
+  return <Layout>{body}</Layout>
 }

@@ -16,8 +16,9 @@ import { buildOrganicSinglePrompt, type OrganicSingleSubtype, type OrganicAspect
 import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { resolveBrandKit, buildBrandColorOverride, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64 } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
 import { resolvePostModeAspect } from './lib/post-aspect.js'
+import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicUrl } from './lib/url-safety.js'
 
@@ -116,6 +117,7 @@ async function hydrateInputImagesFromProductImages(
   options: {
     sessionId: string | null
     productId: string | null
+    autoLoadOfferRefs?: boolean
   }
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const inputKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4'] as const
@@ -143,6 +145,7 @@ async function hydrateInputImagesFromProductImages(
     session_id: string | null
     image_url: string | null
     kind: string | null
+    message_id?: string | null
     created_at: string | null
   }
 
@@ -156,7 +159,7 @@ async function hydrateInputImagesFromProductImages(
     }
     const { data, error } = await imgMemSupabase
       .from('product_images')
-      .select('id, product_id, user_id, session_id, image_url, kind, created_at')
+      .select('id, product_id, user_id, session_id, image_url, kind, message_id, created_at')
       .in('id', ids)
     if (error) {
       console.error('hydrate product_images load error', error)
@@ -167,6 +170,9 @@ async function hydrateInputImagesFromProductImages(
       const row = byId.get(id)
       if (!row) {
         return { ok: false, status: 404, error: 'Product image not found' }
+      }
+      if (row.kind === 'generated' || row.message_id) {
+        continue
       }
       if (options.sessionId) {
         const auth = authorizeProductImageForSession({
@@ -180,21 +186,20 @@ async function hydrateInputImagesFromProductImages(
       }
       rows.push(row)
     }
-  } else if (options.sessionId) {
-    // Auto-load offer-scoped refs when client omitted IDs (same source as Images tab).
+  } else if (options.autoLoadOfferRefs && options.sessionId) {
     const { data, error } = await imgMemSupabase
       .from('product_images')
-      .select('id, product_id, user_id, session_id, image_url, kind, created_at')
+      .select('id, product_id, user_id, session_id, image_url, kind, message_id, created_at')
       .eq('product_id', options.productId)
       .or(`session_id.is.null,session_id.eq.${options.sessionId}`)
-      .neq('kind', 'generated')
+      .eq('kind', 'product')
       .order('created_at', { ascending: false })
       .limit(4)
     if (error) {
       console.error('hydrate auto product_images error', error)
       return { ok: false, status: 500, error: 'Failed to load product images' }
     }
-    rows = (data || []) as ImageRow[]
+    rows = ((data || []) as ImageRow[]).filter((row) => row.kind !== 'generated' && !row.message_id)
   }
 
   if (rows.length === 0) return { ok: true }
@@ -208,6 +213,7 @@ async function hydrateInputImagesFromProductImages(
   })
 
   let slot = 0
+  imageParams.referenceImageKinds = rows.slice(0, 4).map((row) => row.kind === 'context' ? 'context' : 'product')
   for (const row of rows.slice(0, 4)) {
     if (!row.image_url) continue
     const dataUrl = await fetchImageUrlAsDataUrl(row.image_url)
@@ -233,22 +239,30 @@ function buildPostTextDensityPrefix(language: string, density: PostTextDensity):
   const isEs = language === 'es'
   const copyRules = {
     hard: isEs
-      ? 'MODO TEXTO HARD: usar la menor cantidad de texto posible. Maximo 1 headline corto, 1-2 micro-puntos y 1 CTA corto. No parrafos. No agregar beneficios extra.'
-      : 'TEXT MODE HARD: use the least text possible. Maximum 1 short headline, 1-2 micro-points, and 1 short CTA. No paragraphs. Do not add extra benefits.',
+      ? 'MODO TEXTO HARD: usar la menor cantidad de texto posible. Maximo 1 headline corto (gancho), 1-2 micro-puntos (desarrollo) y 1 CTA corto (cierre). No parrafos. No agregar beneficios extra. No restaurar bullets omitidos del guion.'
+      : 'TEXT MODE HARD: use the least text possible. Maximum 1 short headline (hook), 1-2 micro-points (development), and 1 short CTA (close). No paragraphs. Do not add extra benefits. Do not restore omitted script bullets.',
     medium: isEs
-      ? 'MODO TEXTO MEDIO: post directo y escaneable. Maximo 1 headline, 2-3 puntos cortos y 1 CTA. Priorizar aire visual sobre explicar de mas.'
-      : 'TEXT MODE MEDIUM: direct, scannable post. Maximum 1 headline, 2-3 short points, and 1 CTA. Prioritize visual breathing room over extra explanation.',
+      ? 'MODO TEXTO MEDIO: post directo y escaneable. Maximo 1 headline (gancho), 2-3 puntos cortos (desarrollo) y 1 CTA (cierre). Priorizar aire visual sobre explicar de mas.'
+      : 'TEXT MODE MEDIUM: direct, scannable post. Maximum 1 headline (hook), 2-3 short points (development), and 1 CTA (close). Prioritize visual breathing room over extra explanation.',
     standard: isEs
       ? 'MODO TEXTO ESTANDAR: puedes usar el nivel actual de detalle, pero mantenlo limpio. Maximo 1 headline, 3-5 puntos y 1 CTA. No parrafos largos.'
       : 'TEXT MODE STANDARD: you may use the current fuller detail level, but keep it clean. Maximum 1 headline, 3-5 points, and 1 CTA. No long paragraphs.'
   }[density]
 
-  return `INSTRUCCION DE DENSIDAD DE TEXTO (NO RENDERIZAR ESTA INSTRUCCION): ${copyRules}\n\n`
+  return `INSTRUCCION DE DENSIDAD DE TEXTO (NO RENDERIZAR ESTA INSTRUCCION): ${copyRules} El unico texto visible es el copy condensado del usuario. PROHIBIDO copiar el contexto de negocio, placeholders tipo [TIEMPO DE ENTREGA], o el guion completo.\n\n`
 }
 
-function buildProductReferenceStrategyPrefix(language: string, refCount: number, isProductMode: boolean): string {
+function buildProductReferenceStrategyPrefix(
+  language: string,
+  refCount: number,
+  isProductMode: boolean,
+  referenceKinds: unknown
+): string {
   if (refCount <= 0) return ''
   const isEs = language === 'es'
+  const kinds = Array.isArray(referenceKinds) ? referenceKinds : []
+  const contextCount = kinds.filter((kind) => kind === 'context').length
+  const productCount = Math.max(0, refCount - contextCount)
   const modeRule = isProductMode
     ? (isEs
       ? 'Como estas en modo fotografia de producto, prioriza una representacion limpia del producto vendible. Si varias imagenes son vistas del mismo item, usalas para fidelidad; si son items distintos, no los mezcles.'
@@ -258,6 +272,11 @@ function buildProductReferenceStrategyPrefix(language: string, refCount: number,
       : 'Because this is a post/ad, use secondary references as proof, context, or composition support without competing with the hero product.')
 
   if (refCount === 1) {
+    if (contextCount === 1) {
+      return isEs
+        ? 'ESTRATEGIA DE REFERENCIA DE ESTILO (NO RENDERIZAR): Se adjunta 1 post de referencia. Copiá SOLO el tipo de diseño: layout, jerarquía, tipografía, densidad y composición. NO copies el producto, marca, logo, precios ni textos de esa referencia. El producto, colores y copy salen del guion y las fotos reales del usuario.\n\n'
+        : 'STYLE REFERENCE STRATEGY (DO NOT RENDER): 1 social-post reference is attached. Copy ONLY the design type: layout, hierarchy, typography, density, and composition. Do NOT copy that reference’s product, branding, logo, prices, or text. Product, colors, and copy come from the user’s script and real product photos.\n\n'
+    }
     return isEs
       ? `ESTRATEGIA DE REFERENCIA VISUAL (NO RENDERIZAR): Se adjunta 1 imagen de referencia del producto/oferta real. Usala como fuente visual principal. Copia su forma, color, textura, proporcion y detalles sin inventar otro producto.\n\n`
       : `VISUAL REFERENCE STRATEGY (DO NOT RENDER): 1 reference image of the real product/offer is attached. Use it as the main visual source. Copy its shape, color, texture, proportions, and details without inventing another product.\n\n`
@@ -265,7 +284,7 @@ function buildProductReferenceStrategyPrefix(language: string, refCount: number,
 
   return isEs
     ? `ESTRATEGIA DE REFERENCIAS MULTIPLES (NO RENDERIZAR, MAXIMA PRIORIDAD):
-Recibiras ${refCount} imagenes relacionadas con el producto/oferta. NO asumas automaticamente que todas son el mismo objeto ni las fusiones en un hibrido.
+Recibiras ${refCount} imagenes relacionadas con el producto/oferta (${productCount} de producto y ${contextCount} de contexto). NO asumas automaticamente que todas son el mismo objeto ni las fusiones en un hibrido.
 
 Antes de disenar, clasifica mentalmente cada imagen en uno de estos roles:
 - PRODUCTO HEROE: el objeto vendible real, empaque, botella, prenda, plato, dispositivo o set que debe protagonizar.
@@ -277,7 +296,7 @@ ${modeRule}
 
 Regla de composicion: el resultado final debe tener UNA idea visual coherente. Elige un producto heroe claro y usa las demas referencias solo en su rol correcto. Prohibido amalgamar fotos distintas en un solo objeto raro. Prohibido poner una foto de resultado dentro del producto salvo que el empaque real ya la tenga. Prohibido ignorar referencias relevantes: si no son producto heroe, deben influir como prueba, detalle, contexto o estilo.\n\n`
     : `MULTI-REFERENCE STRATEGY (DO NOT RENDER, HIGHEST PRIORITY):
-You will receive ${refCount} images related to the product/offer. Do NOT automatically assume they are all the same object, and do NOT fuse them into a hybrid.
+You will receive ${refCount} images related to the product/offer (${productCount} product and ${contextCount} context). Do NOT automatically assume they are all the same object, and do NOT fuse them into a hybrid.
 
 Before designing, silently classify each image into one of these roles:
 - HERO PRODUCT: the real sellable object, package, bottle, garment, dish, device, or set that should lead the ad.
@@ -302,6 +321,12 @@ function getAspectRatio(width: number, height: number): string {
   if (Math.abs(ratio - 3/2) < 0.01) return '3:2'
   if (Math.abs(ratio - 2/3) < 0.01) return '2:3'
   return '1:1'
+}
+
+const GEMINI_IMAGE_ASPECTS = new Set(['1:1', '3:4', '4:5', '9:16', '16:9', '4:3', '3:2', '2:3'])
+
+function normalizeGeminiAspect(raw: unknown, fallback = '9:16'): string {
+  return typeof raw === 'string' && GEMINI_IMAGE_ASPECTS.has(raw) ? raw : fallback
 }
 
 function parseDataUrlImage(value: unknown, label: string): InlineImageRef | null {
@@ -410,7 +435,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // No legacy empty-offers fallback for images. Ignore spoofed brand fields for authz.
     const rawSessionId = typeof imageParams.sessionId === 'string' ? imageParams.sessionId : undefined
     let authoritativeProductId: string | undefined
+    let authoritativeSessionContext = ''
     if (rawSessionId) {
+      if (!(await requireChatShellAccess(res, user.id))) return
       if (!isUuid(rawSessionId)) {
         return res.status(400).json({ error: 'Invalid sessionId' })
       }
@@ -432,7 +459,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(access.status).json({ error: access.error })
       }
       authoritativeProductId = access.productId
+      authoritativeSessionContext = access.session.context?.trim() || ''
       imageParams.productId = access.productId
+      if (authoritativeSessionContext) imageParams.businessContext = authoritativeSessionContext
     }
 
     // Service-role product lookups later bypass RLS — enforce ownership up front
@@ -501,6 +530,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // Brand Kit: resolve before edit + enhance + generation so colors/logo apply to every path
+    const brandKitIdParam = imageParams.brandKitId as string | undefined
+    let brandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
+    try {
+      brandKit = await resolveBrandKit(user.id, brandKitIdParam)
+    } catch { /* ignore */ }
+
+    const logoFallbackUrl = typeof imageParams.brandLogoUrl === 'string' ? imageParams.brandLogoUrl.trim() : ''
+    const clientColors = Array.isArray(imageParams.customColors)
+      ? (imageParams.customColors as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : []
+    if (typeof brandKitIdParam === 'string' && brandKitIdParam.trim() && !brandKit && clientColors.length === 0 && !logoFallbackUrl) {
+      return res.status(400).json({
+        error: (imageParams.language === 'en')
+          ? 'Brand Kit could not be loaded. Relink the kit and try again.'
+          : 'No pude cargar el Brand Kit. Volvé a vincularlo e intentá de nuevo.'
+      })
+    }
+
+    const resolveInlineLogo = async () => {
+      if (brandKit) {
+        const fromKit = await fetchBrandLogoAsBase64(brandKit)
+        if (fromKit) return fromKit
+      }
+      if (logoFallbackUrl) return fetchBrandImageAsBase64(logoFallbackUrl, 'brand logo fallback')
+      return null
+    }
+
     // =============================================
     // IMAGE EDIT MODE
     // Send existing image + edit instruction → get edited image back
@@ -515,12 +572,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const editRefImages: string[] = Array.isArray(imageParams.editReferenceImages) ? imageParams.editReferenceImages : []
       const hasRefs = editRefImages.length > 0
-      const editAR = imageParams.aspectRatio === '1:1' ? '1:1' : imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+      const editAR = normalizeGeminiAspect(imageParams.aspectRatio, '9:16')
+      const brandEditRules = [
+        brandKit ? buildBrandColorOverride(brandKit) : null,
+        brandKit ? buildBrandVisualPrompt(brandKit) : null,
+        brandKit ? buildBrandLogoPrompt(brandKit) : null,
+      ].filter(Boolean).join('\n\n')
 
       const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images - use them as visual guidance for the requested change.' : ''}
 Your task: Apply ONLY the requested change to the image while preserving everything else exactly as-is.
 Keep the same composition, layout, colors, style, typography, and overall look.
 Make the minimum change necessary to fulfill the user's request.${hasRefs ? '\nUse the reference images to understand what the user wants - match their style, colors, elements, or content as needed.' : ''}
+${brandEditRules ? `\nBRAND KIT (non-negotiable unless the edit instruction explicitly overrides a specific element):\n${brandEditRules}\n` : ''}
+
+TEXT LOCK (non-negotiable):
+- Copy every visible word, accent, currency symbol (including ₡), price, and CTA exactly unless the edit instruction explicitly replaces that specific string.
+- Do not translate, paraphrase, invent, duplicate, autocorrect, or "fix" copy by guessing.
+- If a glyph is unreadable, leave that region unchanged rather than regenerating nearby text.
+- Never add extra headlines, bullets, or watermarks.
+
 Return the edited image.
 
 Edit instruction: ${editPrompt}`
@@ -671,6 +741,18 @@ Edit instruction: ${editPrompt}`
           if (refMatch) promptParts.push({ inlineData: { mimeType: refMatch[1], data: refMatch[2] } })
         }
 
+        if (brandKit?.logo_url || logoFallbackUrl) {
+          try {
+            const logoData = await resolveInlineLogo()
+            if (logoData) {
+              promptParts.push({ text: `Official brand logo for "${brandKit?.name || 'brand'}". Reproduce it faithfully if the edit keeps or adds branding.` })
+              promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
+            }
+          } catch (logoErr) {
+            console.warn('Failed to inject brand logo in edit:', logoErr)
+          }
+        }
+
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
         try {
           response = await withTimeout(ai.models.generateContent({
@@ -746,14 +828,6 @@ Edit instruction: ${editPrompt}`
         })
       }
     }
-    // Brand Kit: resolve by explicit ID or fallback to user default
-    // Hoisted before enhance + generation so logo is available in both paths
-    const brandKitIdParam = imageParams.brandKitId as string | undefined
-    let brandKit: Awaited<ReturnType<typeof resolveBrandKit>> = null
-    try {
-      brandKit = await resolveBrandKit(user.id, brandKitIdParam)
-    } catch { /* ignore */ }
-
     // =============================================
     // MAGIC WAND ENHANCE MODE (Gemini only)
     // Sends existing image + creative-director mega-prompt → upgraded design
@@ -805,11 +879,11 @@ Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
 REGLA #1 — TEXTO Y LENGUAJE (NO NEGOCIABLE)
 ═══════════════════════════════════════════════
 - El idioma de TODA la imagen es: ${langLabel}.
-- COPIA EXACTAMENTE cada palabra, frase, título, subtítulo, CTA y texto que aparezca en la imagen original.
+- COPIA EXACTAMENTE cada palabra, frase, título, subtítulo, CTA, precio y símbolo (incluido ₡) que aparezca en la imagen original.
 - NO traduzcas NADA. NO cambies el idioma de NINGÚN texto.
-- NO parafrasees, NO resumas, NO abrevies, NO inventes texto nuevo.
+- NO parafrasees, NO resumas, NO abrevies, NO inventes texto nuevo, NO dupliques líneas.
 - PROHIBIDO usar texto placeholder: "Lorem ipsum", "dolor sit amet", "consectetur" o cualquier texto genérico.
-- Si no puedes leer un texto claramente, MANTENLO tal como está — NO lo reemplaces.
+- Si no puedes leer un texto claramente, MANTENLO tal como está — NO lo reemplaces ni lo completes de memoria.
 - Cada palabra visible en la imagen original DEBE aparecer idéntica en la imagen mejorada.
 - VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
 ═══════════════════════════════════════════════
@@ -914,8 +988,13 @@ OBJETIVO: Una campaña real de marca grande. Algo que alguien guardaría en Pint
 
       const TIER_BODY = enhanceTier === 'polish' ? POLISH_BODY : enhanceTier === 'rebuild' ? REBUILD_BODY : MODERNIZE_BODY
 
+      const brandEnhancePrefix = [
+        brandKit ? buildBrandColorOverride(brandKit) : null,
+        brandKit ? buildBrandVisualPrompt(brandKit) : null,
+      ].filter(Boolean).join('\n\n')
+
       const ENHANCE_SYSTEM_PROMPT = `${HARD_CONSTRAINTS}
-${TIER_BODY}
+${brandEnhancePrefix ? `${brandEnhancePrefix}\n\n` : ''}${TIER_BODY}
 
 GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`
 
@@ -934,10 +1013,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             if (ref) references.push(ref)
           })
         }
-        if (brandKit && brandKit.logo_url) {
+        if (brandKit?.logo_url || logoFallbackUrl) {
           try {
-            const logoData = await fetchBrandLogoAsBase64(brandKit)
-            if (logoData) references.push({ label: `Official brand logo for "${brandKit.name}". Copy exactly if needed.`, mimeType: logoData.mimeType, data: logoData.data })
+            const logoData = await resolveInlineLogo()
+            if (logoData) references.push({ label: `Official brand logo for "${brandKit?.name || 'brand'}". Copy exactly if needed.`, mimeType: logoData.mimeType, data: logoData.data })
           } catch (logoErr) { console.warn('Failed to inject brand logo for OpenAI enhance:', logoErr) }
         }
         if (Array.isArray(imageParams.contextReferenceImages)) {
@@ -1029,13 +1108,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         // Brand Kit: inject logo so it is preserved/reinforced during enhancement
-        if (brandKit && brandKit.logo_url) {
+        if (brandKit?.logo_url || logoFallbackUrl) {
           try {
-            const logoData = await fetchBrandLogoAsBase64(brandKit)
+            const logoData = await resolveInlineLogo()
             if (logoData) {
-              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit.name}" (NO NEGOCIABLE) ══\nEste es el logo REAL y OFICIAL del usuario. Reglas absolutas:\n1. Si el logo aparece en la imagen original, REEMPLÁZALO con esta versión oficial, COPIÁNDOLA PÍXEL POR PÍXEL.\n2. Si el logo NO aparece en la imagen original, AGRÉGALO en una posición prominente (esquina superior), COPIÁNDOLO PÍXEL POR PÍXEL desde esta referencia.\n3. PROHIBIDO redibujar, estilizar, reinterpretar, rediseñar, recolorear, rotar, deformar o modificar el logo de CUALQUIER forma.\n4. PROHIBIDO cambiar el tipo de letra, la forma, el color, las proporciones o el espaciado del logo.\n5. El logo debe aparecer IDÉNTICO a la referencia adjunta — como si lo hubieras pegado directamente desde la imagen de referencia.` })
+              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit?.name || 'marca'}" (NO NEGOCIABLE) ══\nEste es el logo REAL y OFICIAL del usuario. Reglas absolutas:\n1. Si el logo aparece en la imagen original, REEMPLÁZALO con esta versión oficial, COPIÁNDOLA PÍXEL POR PÍXEL.\n2. Si el logo NO aparece en la imagen original, AGRÉGALO en una posición prominente (esquina superior), COPIÁNDOLO PÍXEL POR PÍXEL desde esta referencia.\n3. PROHIBIDO redibujar, estilizar, reinterpretar, rediseñar, recolorear, rotar, deformar o modificar el logo de CUALQUIER forma.\n4. PROHIBIDO cambiar el tipo de letra, la forma, el color, las proporciones o el espaciado del logo.\n5. El logo debe aparecer IDÉNTICO a la referencia adjunta — como si lo hubieras pegado directamente desde la imagen de referencia.` })
               promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
-              console.log(`Brand logo injected in enhance for "${brandKit.name}"`)
+              console.log(`Brand logo injected in enhance for "${brandKit?.name || 'marca'}"`)
             }
           } catch (logoErr) {
             console.warn('Failed to inject brand logo in enhance:', logoErr)
@@ -1081,7 +1160,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         // Map request aspect ratio to Gemini-compatible string (default 9:16)
-        const enhanceAR = imageParams.aspectRatio === '1:1' ? '1:1' : imageParams.aspectRatio === '3:4' ? '3:4' : '9:16'
+        const enhanceAR = normalizeGeminiAspect(imageParams.aspectRatio, '9:16')
 
         // Retry once on transient 503 errors
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
@@ -1199,12 +1278,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     // Producto / shell: hydrate input_image* from authorized offer product_images
     // (uploads write product_images — do not require a separate legacy source).
     if (isProductMode || rawSessionId) {
+      const hasExplicitRefList = Array.isArray(imageParams.productImageIds)
+        || (typeof imageParams.productImageId === 'string' && Boolean(imageParams.productImageId))
       const hydrate = await hydrateInputImagesFromProductImages(imageParams, {
         sessionId: rawSessionId || null,
         productId:
           (typeof imageParams.productId === 'string' ? imageParams.productId : null)
           || authoritativeProductId
           || null,
+        autoLoadOfferRefs: isProductMode && !hasExplicitRefList,
       })
       if (!hydrate.ok) {
         return res.status(hydrate.status).json({ error: hydrate.error })
@@ -1243,6 +1325,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       } else if (aspectResolved.canvas === '9:16') {
         imageParams.width = 1080
         imageParams.height = 1920
+      } else if (aspectResolved.canvas === '4:5') {
+        imageParams.width = 1080
+        imageParams.height = 1350
       } else {
         imageParams.width = 1080
         imageParams.height = 1440
@@ -1253,9 +1338,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         ? '1:1 cuadrado (1080×1080)'
         : aspectResolved.canvas === '9:16'
           ? '9:16 vertical (1080×1920)'
-          : '3:4 vertical (1080×1440)'
+          : aspectResolved.canvas === '4:5'
+            ? '4:5 post vertical (1080×1350)'
+            : '3:4 vertical (1080×1440)'
       const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
-      const productReferenceStrategyPrefix = buildProductReferenceStrategyPrefix(postLanguage, productReferenceCount, isProductMode)
+      const productReferenceStrategyPrefix = buildProductReferenceStrategyPrefix(
+        postLanguage,
+        productReferenceCount,
+        isProductMode,
+        imageParams.referenceImageKinds
+      )
 
       // Resolve color palette override (if any)
       // Priority: custom colors > predefined palette > brand kit colors > none
@@ -1287,16 +1379,30 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         if (bvp) brandVisualPrefix = bvp + '\n\n'
       }
 
+      // Brand Kit: voice, audience, required language, and permanent behavior rules.
+      let brandVoicePrefix = ''
+      if (brandKit) {
+        const voice = buildBrandVoicePrompt(brandKit, postLanguage === 'en' ? 'en' : 'es')
+        if (voice) brandVoicePrefix = voice + '\n\n'
+      }
+      if (typeof imageParams.businessContext === 'string' && imageParams.businessContext.trim()) {
+        brandVoicePrefix += postLanguage === 'en'
+          ? `=== VERIFIED BUSINESS AND OFFER CONTEXT (DO NOT RENDER THIS BLOCK) ===\n${imageParams.businessContext.trim()}\nUse this only for factual accuracy, audience fit, and offer consistency. Never invent a conflicting product, price, promise, or brand.\n\n`
+          : `=== CONTEXTO VERIFICADO DEL NEGOCIO Y LA OFERTA (NO RENDERIZAR ESTE BLOQUE) ===\n${imageParams.businessContext.trim()}\nUsalo solo para precisión factual, afinidad con el público y coherencia de la oferta. Nunca inventes un producto, precio, promesa o marca que lo contradiga.\n\n`
+      }
+
       // Brand Kit: inject logo prompt for image generation
       let brandLogoPrefix = ''
       if (brandKit) {
         const blp = buildBrandLogoPrompt(brandKit)
         if (blp) brandLogoPrefix = blp + '\n\n'
+      } else if (logoFallbackUrl) {
+        brandLogoPrefix = `REGLA — LOGO DE MARCA: se adjunta el logotipo oficial. Incluyelo fielmente, visible, sin redibujarlo.\n\n`
       }
 
       // Language enforcement prefix for preset mode (presets lack built-in language rules)
       const langLabel = postLanguage === 'es' ? 'ESPAÑOL' : 'ENGLISH'
-      const presetLangPrefix = `REGLA DE IDIOMA (NO NEGOCIABLE): TODOS los textos visibles en la imagen DEBEN estar en ${langLabel}. COPIA el texto del guión TAL CUAL — NO traduzcas, NO cambies el idioma. PROHIBIDO mezclar idiomas.\n\n`
+      const presetLangPrefix = `REGLA DE IDIOMA (NO NEGOCIABLE): TODOS los textos visibles en la imagen DEBEN estar en ${langLabel}. Conserva el idioma del copy condensado. NO traduzcas. NO mezcles idiomas. NO copies el guion completo ni el contexto de negocio: usa SOLO el copy condensado que se entrega como prompt del usuario.\n\n`
       const presetProductPrefix = hasProductImages
         ? 'REGLA DE PRODUCTO (NO NEGOCIABLE): Se adjuntan fotos del PRODUCTO REAL del usuario. El producto DEBE verse EXACTAMENTE como en las fotos de referencia. NO inventes ni reimagines el producto. Usa las referencias como fuente de verdad.\n\n'
         : ''
@@ -1454,7 +1560,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
           || buildProductPrompt('studio-hero', productAR, postLanguage, productOpts)!
 
-        enhancedPrompt = productFormatPrefix + productReferenceStrategyPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
+        enhancedPrompt = productFormatPrefix + productReferenceStrategyPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
       } else if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
         // CUSTOM POST TYPE MODE: load master prompt from DB
         try {
@@ -1467,13 +1573,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
-            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
           }
         } catch {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'anuncio-conversion') {
         // ANUNCIO DE CONVERSIÓN MODE: high-conversion Instagram ad with niche-adaptive prompt
@@ -1497,14 +1603,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
           : aspectRatioPrefix
         const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
-        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
+        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
         const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
         if (presetPrompt) {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'organic-single' && imageParams.organicSubtype) {
         // ORGANIC SINGLE IMAGE MODE — top-of-funnel aesthetic post (quote, infographic, showcase, aesthetic).
@@ -1544,15 +1650,23 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         // Organic builds its own language / aspect-ratio rules internally; skip the sales aspectRatioPrefix.
-        enhancedPrompt = productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
+        enhancedPrompt = productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
       enhancedPrompt = GEMINI_PROMPT_PREFIX + userPrompt
     }
+
+    const paletteList = clientColors.length
+      ? clientColors.slice(0, 3).join(', ')
+      : [brandKit?.primary_color, brandKit?.secondary_color, brandKit?.accent_color].filter(Boolean).join(', ')
+    enhancedPrompt += `\n\nCONTRATO FINAL (NO RENDERIZAR ESTE BLOQUE):
+- COLORES: ${paletteList || 'usar solo la paleta de marca si existe'}. PROHIBIDO azul genérico de redes salvo que esté en esa paleta.
+- TEXTO VISIBLE: únicamente el copy condensado del usuario. Estructura gancho → desarrollo (1-2 puntos) → CTA. PROHIBIDO volcar el guion, el contexto de negocio o placeholders como [TIEMPO DE ENTREGA].
+- LOGO: si hay una imagen de logo adjunta, debe aparecer fielmente y visible.\n`
 
     // =============================================
     // OPENAI GPT IMAGE GENERATION (admin only)
@@ -1566,18 +1680,33 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       const providerModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
       const references: InlineImageRef[] = []
 
-      if (brandKit && brandKit.logo_url && isPostMode && !isProductMode && !isLogoMode) {
+      if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
         try {
-          const logoData = await fetchBrandLogoAsBase64(brandKit)
+          const logoData = await resolveInlineLogo()
           if (logoData) {
             references.push({
-              label: `Official brand logo for "${brandKit.name}". Copy exactly if a logo is needed; do not redraw or restyle it.`,
+              label: `Official brand logo for "${brandKit?.name || 'brand'}". Copy exactly if a logo is needed; do not redraw or restyle it.`,
               mimeType: logoData.mimeType,
               data: logoData.data
             })
           }
         } catch (logoErr) {
           console.warn('Failed to inject brand logo for OpenAI image generation:', logoErr)
+        }
+      }
+
+      if (brandKit && isPostMode && !isProductMode && !isLogoMode) {
+        try {
+          const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
+          styleRefs.forEach((img, idx) => {
+            references.push({
+              label: `Brand style reference ${idx + 1}. Use for mood, lighting, photography, and surfaces only — do not copy products from it.`,
+              mimeType: img.mimeType,
+              data: img.data,
+            })
+          })
+        } catch (refErr) {
+          console.warn('Failed to inject brand style references:', refErr)
         }
       }
 
@@ -1788,18 +1917,33 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         // Brand Kit: inject logo as FIRST inline image (highest visual priority for Gemini)
         // Skip in product/logo modes — product uses its own refs; logo mode IS the logo design
-        if (brandKit && brandKit.logo_url && isPostMode && !isProductMode && !isLogoMode) {
+        if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
           try {
-            const logoData = await fetchBrandLogoAsBase64(brandKit)
+            const logoData = await resolveInlineLogo()
             if (logoData) {
-              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit.name}" (NO NEGOCIABLE) ══\nDEBES incluir este logo EXACTO en el diseño, COPIÁNDOLO PÍXEL POR PÍXEL desde la referencia adjunta. Reglas absolutas:\n1. Ubícalo en una posición prominente (esquina superior o centrado arriba).\n2. PROHIBIDO redibujar, estilizar, reinterpretar, rediseñar, recolorear, rotar o deformar el logo.\n3. PROHIBIDO cambiar el tipo de letra, la forma, el color, las proporciones o el espaciado del logo.\n4. El logo debe aparecer IDÉNTICO a la referencia — como si lo hubieras pegado directamente.` })
+              promptParts.push({ text: `══ LOGO OFICIAL DE LA MARCA "${brandKit?.name || 'marca'}" (NO NEGOCIABLE) ══\nDEBES incluir este logo EXACTO en el diseño, COPIÁNDOLO PÍXEL POR PÍXEL desde la referencia adjunta. Reglas absolutas:\n1. Ubícalo en una posición prominente (esquina superior o centrado arriba).\n2. PROHIBIDO redibujar, estilizar, reinterpretar, rediseñar, recolorear, rotar o deformar el logo.\n3. PROHIBIDO cambiar el tipo de letra, la forma, el color, las proporciones o el espaciado del logo.\n4. El logo debe aparecer IDÉNTICO a la referencia — como si lo hubieras pegado directamente.` })
               promptParts.push({ inlineData: { mimeType: logoData.mimeType, data: logoData.data } })
-              console.log(`Brand logo injected inline for "${brandKit.name}" (${logoData.mimeType}, ${Math.round(logoData.data.length / 1024)}KB)`)
+              console.log(`Brand logo injected inline for "${brandKit?.name || 'marca'}" (${logoData.mimeType}, ${Math.round(logoData.data.length / 1024)}KB)`)
             } else {
-              console.warn(`Brand logo fetch returned null for kit "${brandKit.name}" (url: ${brandKit.logo_url})`)
+              console.warn(`Brand logo fetch returned null (url: ${brandKit?.logo_url || logoFallbackUrl})`)
             }
           } catch (logoErr) {
             console.warn('Failed to inject brand logo inline:', logoErr)
+          }
+        }
+
+        if (brandKit && isPostMode && !isProductMode && !isLogoMode) {
+          try {
+            const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
+            if (styleRefs.length > 0) {
+              promptParts.push({ text: `BRAND STYLE REFERENCES (${styleRefs.length}) — mood, lighting, photography, surfaces, and art direction only. Do NOT copy products or packaging from these images.` })
+              styleRefs.forEach((img, idx) => {
+                promptParts.push({ text: `Brand style reference ${idx + 1} of ${styleRefs.length}.` })
+                promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+              })
+            }
+          } catch (refErr) {
+            console.warn('Failed to inject brand style references inline:', refErr)
           }
         }
 

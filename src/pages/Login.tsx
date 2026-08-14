@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
+import AdvanceLogo from '../components/AdvanceLogo'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -58,7 +59,7 @@ export default function Login() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-4">
-            <img src="/logo.png" alt="Advance AI" className="w-12 h-12 object-contain rounded-xl" />
+            <AdvanceLogo size={48} />
             <span className="text-2xl font-bold text-dark-900">Advance AI</span>
           </div>
           <p className="text-dark-500">Sign in to create winning ad scripts</p>

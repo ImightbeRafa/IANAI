@@ -29,6 +29,7 @@ import {
   deleteScriptTemplate
 } from '../services/database'
 import { sendMessageToGrok, previewPrompt, editScript, DEFAULT_SCRIPT_SETTINGS, buildApiBusinessContext, buildApiProductContext } from '../services/grokApi'
+import { getTextModelPreference } from '../features/chat-shell/textModelPreference'
 import type { Product, ChatSession, Message, ScriptGenerationSettings, ContextDocument, SalesChannel, UserAiMemory, ProductAiMemory, AiMemory, ScriptTemplate } from '../types'
 import { getSuccessCases } from '../services/database'
 import { supabase } from '../lib/supabase'
@@ -109,7 +110,10 @@ export default function ProductWorkspace() {
   const [editingProduct, setEditingProduct] = useState(false)
   const [editedProduct, setEditedProduct] = useState<Partial<Product>>({})
   const [savingScript, setSavingScript] = useState(false)
-  const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(DEFAULT_SCRIPT_SETTINGS)
+  const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(() => ({
+    ...DEFAULT_SCRIPT_SETTINGS,
+    model: getTextModelPreference(),
+  }))
   const [showMobileConfig, setShowMobileConfig] = useState(false)
   const [contextDocs, setContextDocs] = useState<ContextDocument[]>([])
   const [showAddLink, setShowAddLink] = useState(false)

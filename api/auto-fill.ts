@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
-import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { GROK_API_URL, GROK_TEXT_MODEL_EFFICIENT } from './lib/grok-models.js'
 
 const MAX_CONTENT_LENGTH = 15_000
 
@@ -14,6 +14,7 @@ type FormType =
   | 'product'
   | 'real_estate'
   | 'session_context'
+  | 'brand_context'
 
 const FORM_PROMPTS: Record<FormType, string> = {
   business: `Eres un asistente experto en negocios y marketing. Tu tarea es analizar la información proporcionada sobre un negocio y extraer TODOS los datos posibles para completar un formulario.
@@ -190,9 +191,52 @@ CAMPOS:
   "primary_channel": "messages" | "website" | "physical",
   "awareness_level": "cold" | "warm" | "hot"
 }`,
+
+  brand_context: `Eres un editor preciso de contexto de marca. Recibirás el contexto actual y una corrección del usuario.
+
+INSTRUCCIONES:
+- Devuelve ÚNICAMENTE JSON válido.
+- Incluye solamente campos que el usuario pidió cambiar o que están explícitos en su corrección.
+- No reemplaces datos existentes que el usuario no mencionó.
+- Para colores usa hexadecimal #RRGGBB cuando sea posible.
+- salesChannels solo puede contener website, messages o physical.
+
+CAMPOS DISPONIBLES:
+{
+  "businessName": "nombre del negocio",
+  "salesChannels": ["website", "messages", "physical"],
+  "location": "ubicación",
+  "doesShipping": true,
+  "shippingMethod": "método de envío",
+  "icp": "cliente ideal o audiencia",
+  "offerName": "nombre de la oferta",
+  "product_description": "qué es o qué vende",
+  "utility": "para qué sirve",
+  "result": "resultado prometido",
+  "main_problem": "problema que resuelve",
+  "expected_result": "resultado concreto",
+  "differentiation": "diferenciador",
+  "key_objection": "objeción principal",
+  "current_alternatives": "alternativas actuales",
+  "brand_voice": "descripción de la voz",
+  "tone_keywords": ["palabras de tono"],
+  "must_use_phrases": ["frases que sí usa"],
+  "forbidden_phrases": ["frases que evita"],
+  "brand_visual": "dirección visual y fotografía",
+  "primary_color": "#RRGGBB",
+  "secondary_color": "#RRGGBB",
+  "accent_color": "#RRGGBB",
+  "tagline": "tagline",
+  "font_primary": "tipografía principal"
+}`,
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  if (req.method === 'OPTIONS') return res.status(200).end()
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -211,7 +255,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { formType, content, language = 'es' } = req.body || {}
+    const { formType, content, language = 'es', strictUnknowns = false } = req.body || {}
 
     if (!formType || !FORM_PROMPTS[formType as FormType]) {
       return res.status(400).json({
@@ -246,7 +290,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       truncated = true
     }
 
-    const systemPrompt = FORM_PROMPTS[formType as FormType]
+    const basePrompt = FORM_PROMPTS[formType as FormType]
+    const systemPrompt = strictUnknowns
+      ? `${basePrompt}
+
+MODO ESTRICTO (obligatorio):
+- NO inventes ni infieras hechos que no estén explícitos en la información.
+- Si un campo no está respaldado por el texto, usa null, "" o [].
+- Booleanos desconocidos: null.
+- Nunca adivines ubicación, precios, horarios, demografía o garantías.`
+      : basePrompt
     const userMessage = `INFORMACIÓN A ANALIZAR:\n${processedContent}`
 
     const response = await fetch(GROK_API_URL, {
@@ -256,7 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Authorization': `Bearer ${grokApiKey}`,
       },
       body: JSON.stringify({
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
@@ -274,7 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         success: false,
         errorMessage: `Grok ${response.status}: ${errorText.slice(0, 200)}`,
         metadata: { formType },
@@ -303,7 +356,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         success: false,
         errorMessage: 'Empty AI response',
         metadata: { formType },
@@ -325,7 +378,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         success: false,
         errorMessage: 'No JSON in response',
         metadata: { formType, responsePreview: aiContent.slice(0, 200) },
@@ -348,7 +401,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: user.id,
         userEmail: user.email,
         feature: 'paste_organize',
-        model: GROK_TEXT_MODEL,
+        model: GROK_TEXT_MODEL_EFFICIENT,
         success: false,
         errorMessage: 'JSON parse failed',
         metadata: { formType },
@@ -367,7 +420,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'paste_organize',
-      model: GROK_TEXT_MODEL,
+      model: GROK_TEXT_MODEL_EFFICIENT,
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + userMessage),
       outputTokens: usage.completion_tokens || estimateTokens(aiContent),
       success: true,
@@ -385,7 +438,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'paste_organize',
-      model: GROK_TEXT_MODEL,
+      model: GROK_TEXT_MODEL_EFFICIENT,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error',
     })

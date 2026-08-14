@@ -47,4 +47,15 @@ describe('resolvePostModeAspect', () => {
       })
     ).toEqual({ canvas: '3:4', layout: '3:4', shellSquare: false })
   })
+
+  it('honors 4:5 as vertical feed canvas without 9:16 layout', () => {
+    expect(
+      resolvePostModeAspect({
+        aspectRatio: '4:5',
+        isProductMode: false,
+        isLogoMode: false,
+        hasSessionId: true,
+      })
+    ).toEqual({ canvas: '4:5', layout: '3:4', shellSquare: false })
+  })
 })

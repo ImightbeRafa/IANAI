@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import {
   ChevronDown,
   ChevronRight,
   MoreHorizontal,
-  Plus,
   Settings,
-  Zap,
+  Trash2,
+  X,
 } from 'lucide-react'
 import type { Business, ChatSession } from '../../types'
+import { useLanguage } from '../../contexts/LanguageContext'
+import { useUsageLimits } from '../../hooks/useUsageLimits'
+import { AdvanceWordmark, IconPlus, IconQuick } from './ChatShellIcons'
+import { shellT } from './chatShellLabels'
 import {
+  openBrandDeleteConfirm,
   openSessionActionMenu,
   openSessionDeleteConfirm,
   readBrandOpen,
@@ -17,6 +21,7 @@ import {
   resolveSessionSidebarTitle,
   sessionActionAnchorFromRect,
   SIDEBAR_SESSION_VISIBLE_CAP,
+  type BrandActionPanel,
   type SessionActionPanel,
   writeBrandOpen,
 } from './chatShellSidebar'
@@ -26,6 +31,9 @@ interface ChatSidebarProps {
   initials: string
   businesses: Business[]
   sessions: ChatSession[]
+  sessionsByBrand?: Record<string, ChatSession[]>
+  pendingBrandId?: string | null
+  loadingByBrand?: Record<string, boolean>
   sessionCounts: Record<string, number>
   firstUserPreviews: Record<string, string>
   activeBrandId: string | null
@@ -36,16 +44,19 @@ interface ChatSidebarProps {
   error: string | null
   notice: string | null
   onSelectBrand: (brandId: string) => void
+  onPrefetchBrandSessions?: (brandId: string) => void
   onSelectSession: (session: ChatSession) => void
   onNewChat: () => void
   onQuickGenerate: () => void
   onNewSession: () => void
   onNewBrand: () => void
   onDeleteSession: (sessionId: string) => void | Promise<void>
+  onDeleteBrand: (brandId: string) => void | Promise<void>
+  onOpenSettings: () => void
+  onSwitchToClassic?: () => void
 }
 
-function isolateMorePointer(e: { preventDefault(): void; stopPropagation(): void }) {
-  e.preventDefault()
+function isolateMorePointer(e: { stopPropagation(): void }) {
   e.stopPropagation()
 }
 
@@ -54,6 +65,9 @@ export default function ChatSidebar({
   initials,
   businesses,
   sessions,
+  sessionsByBrand,
+  pendingBrandId = null,
+  loadingByBrand = {},
   sessionCounts,
   firstUserPreviews,
   activeBrandId,
@@ -64,18 +78,26 @@ export default function ChatSidebar({
   error,
   notice,
   onSelectBrand,
+  onPrefetchBrandSessions,
   onSelectSession,
   onNewChat,
   onQuickGenerate,
   onNewSession,
   onNewBrand,
   onDeleteSession,
+  onDeleteBrand,
+  onOpenSettings,
+  onSwitchToClassic,
 }: ChatSidebarProps) {
+  const { language } = useLanguage()
+  const t = shellT(language)
+  const usage = useUsageLimits()
   const canCreate = Boolean(activeBrandId) && !busy
   const storage = typeof localStorage !== 'undefined' ? localStorage : null
   const [openByBrand, setOpenByBrand] = useState<Record<string, boolean>>({})
   const [showAllByBrand, setShowAllByBrand] = useState<Record<string, boolean>>({})
   const [sessionAction, setSessionAction] = useState<SessionActionPanel | null>(null)
+  const [brandAction, setBrandAction] = useState<BrandActionPanel | null>(null)
 
   // Hydrate from localStorage first. Honor explicit `0`. Never writeBrandOpen from this effect.
   useEffect(() => {
@@ -90,16 +112,18 @@ export default function ChatSidebar({
   }, [businesses, activeBrandId, storage])
 
   useEffect(() => {
-    if (!sessionAction) return
+    if (!sessionAction && !brandAction) return
     const onDoc = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null
       if (target?.closest('[data-session-menu]')) return
       setSessionAction(null)
+      setBrandAction(null)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
         setSessionAction(null)
+        setBrandAction(null)
       }
     }
     document.addEventListener('mousedown', onDoc)
@@ -108,19 +132,7 @@ export default function ChatSidebar({
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
     }
-  }, [sessionAction])
-
-  const sessionsByBrand = useMemo(() => {
-    const map = new Map<string, ChatSession[]>()
-    for (const session of sessions) {
-      const bid = session.business_id
-      if (!bid) continue
-      const list = map.get(bid) || []
-      list.push(session)
-      map.set(bid, list)
-    }
-    return map
-  }, [sessions])
+  }, [sessionAction, brandAction])
 
   const toggleBrandOpen = (brandId: string) => {
     setOpenByBrand((prev) => {
@@ -128,8 +140,8 @@ export default function ChatSidebar({
       writeBrandOpen(storage, brandId, nextOpen)
       return { ...prev, [brandId]: nextOpen }
     })
-    if (!openByBrand[brandId] && brandId !== activeBrandId) {
-      onSelectBrand(brandId)
+    if (!openByBrand[brandId]) {
+      onPrefetchBrandSessions?.(brandId)
     }
   }
 
@@ -143,12 +155,18 @@ export default function ChatSidebar({
       button.getBoundingClientRect(),
       window.innerWidth
     )
+    setBrandAction(null)
     setSessionAction((prev) => openSessionActionMenu(prev, sessionId, anchor))
   }
 
   const requestDeleteConfirm = (sessionId: string, anchor: SessionActionPanel['anchor']) => {
     const capturedSessionId = sessionId
     setSessionAction(openSessionDeleteConfirm(capturedSessionId, anchor))
+  }
+
+  const requestBrandDeleteConfirm = (brandId: string, brandName: string) => {
+    setSessionAction(null)
+    setBrandAction(openBrandDeleteConfirm(brandId, brandName, { top: 0, right: 0 }))
   }
 
   const confirmDelete = () => {
@@ -158,23 +176,30 @@ export default function ChatSidebar({
     void onDeleteSession(capturedSessionId)
   }
 
+  const confirmBrandDelete = () => {
+    if (!brandAction || brandAction.kind !== 'confirm' || busy) return
+    const capturedBrandId = brandAction.brandId
+    setBrandAction(null)
+    void onDeleteBrand(capturedBrandId)
+  }
+
   return (
     <aside className="chat-shell__sidebar" aria-label="Chat navigation">
       <div className="chat-shell__brand">
-        <span className="chat-shell__wordmark">Advance AI</span>
+        <AdvanceWordmark size={22} />
       </div>
 
       <div className="chat-shell__row-actions">
         <button
           type="button"
-          className="chat-shell__row-action"
+          className="chat-shell__row-action chat-shell__row-action--primary"
           onClick={onNewChat}
           disabled={!canCreate}
           aria-disabled={!canCreate}
-          title={activeBrandId ? 'New chat in active brand' : 'Select a brand first'}
+          title={activeBrandId ? t.newChat : t.noBrand}
         >
-          <Plus size={14} aria-hidden />
-          <span className="chat-shell__row-action-label">New chat</span>
+          <IconPlus size={14} />
+          <span className="chat-shell__row-action-label">{t.newChat}</span>
         </button>
       </div>
 
@@ -184,29 +209,45 @@ export default function ChatSidebar({
         </div>
       )}
 
-      <div className="chat-shell__nav-label">Quick</div>
+      <div className="chat-shell__nav-label">{t.chat}</div>
       <button
         type="button"
         className="chat-shell__nav-item chat-shell__nav-button"
         onClick={onQuickGenerate}
         disabled={busy || businesses.length === 0}
         aria-disabled={busy || businesses.length === 0}
-        title="Quick session with no product (brand still required)"
+        title={t.quickGenerate}
       >
-        <Zap size={13} aria-hidden />
-        <span className="chat-shell__nav-item-label">Quick generate</span>
+        <IconQuick size={13} />
+        <span className="chat-shell__nav-item-label">{t.quickGenerate}</span>
       </button>
 
-      <div className="chat-shell__nav-label">Brands</div>
-      <div className="chat-shell__brands-scroll">
+      <div className="chat-shell__brands">
+        <div className="chat-shell__nav-label">{t.brands}</div>
+        {(loadingBusinesses || businesses.length > 0) && (
+          <button
+            type="button"
+            className="chat-shell__nav-item chat-shell__nav-button chat-shell__nav-new-brand"
+            onClick={onNewBrand}
+            disabled={busy || loadingBusinesses}
+            aria-disabled={busy || loadingBusinesses}
+          >
+            + {t.newBrand}…
+          </button>
+        )}
+        <div className="chat-shell__brands-scroll">
         {loadingBusinesses && (
-          <div className="chat-shell__nav-item">Loading brands…</div>
+          <div className="chat-shell__skeleton-stack" aria-busy="true" aria-label={t.loadingBrands}>
+            <div className="chat-shell__skeleton" />
+            <div className="chat-shell__skeleton" />
+            <div className="chat-shell__skeleton" />
+          </div>
         )}
         {!loadingBusinesses && businesses.length === 0 && (
           <div className="chat-shell__nav-empty chat-shell__nav-empty--brands">
-            <div className="chat-shell__nav-empty-copy">No brands yet</div>
+            <div className="chat-shell__nav-empty-copy">{t.noBrands}</div>
             <p className="chat-shell__nav-empty-detail">
-              Create your first brand to start chatting.
+              {t.noBrandsDetail}
             </p>
             <button
               type="button"
@@ -215,19 +256,20 @@ export default function ChatSidebar({
               disabled={busy || loadingBusinesses}
               aria-disabled={busy || loadingBusinesses}
             >
-              New brand
+              {t.newBrandCta}
             </button>
           </div>
         )}
         {businesses.map((brand) => {
           const isActive = brand.id === activeBrandId
+          const isPending = brand.id === pendingBrandId
           const isOpen = openByBrand[brand.id] ?? false
-          const brandSessions = isActive
-            ? (sessionsByBrand.get(brand.id) || sessions.filter((s) => s.business_id === brand.id))
-            : []
-          const count = isActive
-            ? brandSessions.length
-            : (sessionCounts[brand.id] ?? brandSessions.length)
+          const cached = sessionsByBrand?.[brand.id]
+          const brandSessions = cached
+            ?? (isActive ? sessions.filter((s) => s.business_id === brand.id) : [])
+          const count = sessionCounts[brand.id] ?? brandSessions.length
+          const brandLoading = Boolean(loadingByBrand[brand.id] && cached === undefined)
+            || (isActive && loadingSessions && cached === undefined)
           const showAll = showAllByBrand[brand.id] ?? false
           const visibleSessions = showAll
             ? brandSessions
@@ -250,7 +292,7 @@ export default function ChatSidebar({
                 </button>
                 <button
                   type="button"
-                  className={`chat-shell__nav-item chat-shell__nav-button chat-shell__brand-name${isActive ? ' is-active' : ''}`}
+                  className={`chat-shell__nav-item chat-shell__nav-button chat-shell__brand-name${isActive ? ' is-active' : ''}${isPending ? ' is-pending' : ''}`}
                   onClick={() => selectBrand(brand.id)}
                 >
                   <span className="chat-shell__nav-item-label">{brand.name}</span>
@@ -260,29 +302,81 @@ export default function ChatSidebar({
                     </span>
                   )}
                 </button>
+                {brandAction?.kind === 'confirm' && brandAction.brandId === brand.id ? (
+                  <div className="chat-shell__brand-trail" data-session-menu="1">
+                    <button
+                      type="button"
+                      className="chat-shell__session-more chat-shell__brand-more"
+                      aria-label={t.cancel}
+                      disabled={busy}
+                      onPointerDown={isolateMorePointer}
+                      onClick={(e) => {
+                        isolateMorePointer(e)
+                        setBrandAction(null)
+                      }}
+                    >
+                      <X size={13} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-shell__session-more chat-shell__brand-more is-danger"
+                      aria-label={`${t.confirmDeleteFolder} ${brand.name}`}
+                      title={t.confirmDeleteFolder}
+                      disabled={busy}
+                      onPointerDown={isolateMorePointer}
+                      onClick={(e) => {
+                        isolateMorePointer(e)
+                        confirmBrandDelete()
+                      }}
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="chat-shell__session-more chat-shell__brand-more"
+                    aria-label={`${t.deleteFolder} ${brand.name}`}
+                    disabled={busy}
+                    data-session-menu="1"
+                    onPointerDown={isolateMorePointer}
+                    onClick={(e) => {
+                      isolateMorePointer(e)
+                      requestBrandDeleteConfirm(brand.id, brand.name)
+                    }}
+                  >
+                    <Trash2 size={13} aria-hidden />
+                  </button>
+                )}
               </div>
 
-              {isOpen && isActive && (
+              {isOpen && (
                 <div className="chat-shell__nav-subs">
-                  {loadingSessions && (
+                  {brandLoading && (
                     <div className="chat-shell__nav-loading" aria-live="polite">
-                      Updating sessions…
+                      {t.loadingSessions}
                     </div>
                   )}
-                  {!loadingSessions && brandSessions.length === 0 && (
+                  {!brandLoading && brandSessions.length === 0 && (
                     <div className="chat-shell__nav-empty">
-                      <div className="chat-shell__nav-empty-copy">No chats yet</div>
+                      <div className="chat-shell__nav-empty-copy">{t.noChats}</div>
                       <p className="chat-shell__nav-empty-detail">
-                        Start a chat for this brand.
+                        {t.noChatsDetail}
                       </p>
                       <button
                         type="button"
                         className="chat-shell__nav-sub chat-shell__nav-button chat-shell__nav-empty-cta"
-                        onClick={onNewSession}
-                        disabled={!canCreate}
-                        aria-disabled={!canCreate}
+                        onClick={() => {
+                          if (!isActive) {
+                            selectBrand(brand.id)
+                            return
+                          }
+                          onNewSession()
+                        }}
+                        disabled={busy || loadingBusinesses}
+                        aria-disabled={busy || loadingBusinesses}
                       >
-                        New chat
+                        {t.newChat}
                       </button>
                     </div>
                   )}
@@ -355,18 +449,21 @@ export default function ChatSidebar({
                         setShowAllByBrand((prev) => ({ ...prev, [brand.id]: false }))
                       }
                     >
-                      Show less
+                      {t.showLess}
                     </button>
                   )}
                   {brandSessions.length > 0 && (
                     <button
                       type="button"
                       className="chat-shell__nav-sub chat-shell__nav-button"
-                      onClick={onNewSession}
+                      onClick={() => {
+                        if (!isActive) selectBrand(brand.id)
+                        onNewSession()
+                      }}
                       disabled={!canCreate}
                       aria-disabled={!canCreate}
                     >
-                      + New session
+                      + {t.newSession}
                     </button>
                   )}
                 </div>
@@ -374,15 +471,7 @@ export default function ChatSidebar({
             </div>
           )
         })}
-        <button
-          type="button"
-          className="chat-shell__nav-item chat-shell__nav-button chat-shell__nav-new-brand"
-          onClick={onNewBrand}
-          disabled={busy || loadingBusinesses}
-          aria-disabled={busy || loadingBusinesses}
-        >
-          + New brand…
-        </button>
+        </div>
       </div>
 
       {sessionAction?.kind === 'menu' && (
@@ -402,7 +491,7 @@ export default function ChatSidebar({
               requestDeleteConfirm(sessionAction.sessionId, sessionAction.anchor)
             }}
           >
-            Delete
+            {t.delete}
           </button>
         </div>
       )}
@@ -411,7 +500,7 @@ export default function ChatSidebar({
         <div
           className="chat-shell__session-confirm"
           role="group"
-          aria-label="Confirm delete"
+          aria-label={t.delete}
           data-session-menu="1"
           style={{ top: sessionAction.anchor.top, right: sessionAction.anchor.right }}
         >
@@ -425,7 +514,7 @@ export default function ChatSidebar({
               setSessionAction(null)
             }}
           >
-            Cancel
+            {t.cancel}
           </button>
           <button
             type="button"
@@ -437,7 +526,7 @@ export default function ChatSidebar({
               confirmDelete()
             }}
           >
-            Delete
+            {t.delete}
           </button>
         </div>
       )}
@@ -448,16 +537,32 @@ export default function ChatSidebar({
           <div className="chat-shell__user-name">
             <span className="chat-shell__user-name-text">{displayName}</span>
           </div>
-          <div className="chat-shell__user-meta">Chat shell · Preview</div>
+          <div className="chat-shell__user-meta">
+            {usage.loading
+              ? ''
+              : `${t.scriptsUsed} ${usage.scriptsUsed}/${usage.scriptsLimit === -1 ? '∞' : usage.scriptsLimit} · ${t.imagesUsed} ${usage.imagesUsed}/${usage.imagesLimit === -1 ? '∞' : usage.imagesLimit}`}
+          </div>
         </div>
-        <Link
-          to="/settings"
+        {onSwitchToClassic && (
+          <button
+            type="button"
+            className="chat-shell__classic-btn"
+            aria-label={t.useClassic}
+            title={t.useClassic}
+            onClick={onSwitchToClassic}
+          >
+            {t.classicShort}
+          </button>
+        )}
+        <button
+          type="button"
           className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
-          aria-label="Settings"
-          title="Settings"
+          aria-label={t.settings}
+          title={t.settings}
+          onClick={onOpenSettings}
         >
           <Settings size={15} aria-hidden />
-        </Link>
+        </button>
       </div>
     </aside>
   )

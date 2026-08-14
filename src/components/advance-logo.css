@@ -1,0 +1,59 @@
+.advance-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: inherit;
+  line-height: 0;
+}
+
+.advance-logo__mark {
+  position: relative;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+}
+
+.advance-logo__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+html[data-theme="obsidian-dark"] .advance-logo__img,
+.chat-shell[data-theme="obsidian-dark"] .advance-logo__img {
+  filter: drop-shadow(0 1px 8px rgba(56, 189, 248, 0.22));
+}
+
+.advance-logo__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Montserrat, Inter, system-ui, sans-serif;
+  font-size: 1.08rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #0284c7;
+}
+
+.advance-logo__text em {
+  font-style: normal;
+  font-weight: 700;
+}
+
+.chat-shell .advance-logo__text {
+  font-family: inherit;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chat-shell .advance-logo__text em {
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}

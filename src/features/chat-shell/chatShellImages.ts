@@ -105,19 +105,40 @@ export function canShowImageActionsForOffer(options: {
   return options.latestByProduct.has(options.productId)
 }
 
+/** Generated posts must not be reused as refs for a later independent generate. */
+export function isGeneratedOfferImage(img: {
+  kind?: string | null
+  message_id?: string | null
+}): boolean {
+  if (img.kind === 'generated') return true
+  if (img.kind === 'product' || img.kind === 'context') return false
+  return Boolean(img.message_id)
+}
+
 /** Prefer product refs over context; exclude generated outputs. Max 4 IDs. */
 export function selectProductReferenceImageIds(
-  images: Array<{ id: string; kind?: string | null; created_at?: string }>,
-  max = 4
+  images: Array<{
+    id: string
+    kind?: string | null
+    created_at?: string
+    message_id?: string | null
+  }>,
+  max = 4,
+  options?: { includeContext?: boolean }
 ): string[] {
-  const refs = images.filter((img) => img.kind !== 'generated')
+  const includeContext = options?.includeContext !== false
+  const refs = images.filter((img) => {
+    if (isGeneratedOfferImage(img)) return false
+    if (!includeContext && img.kind === 'context') return false
+    return true
+  })
   const byRecency = [...refs].sort((a, b) => {
     const ta = a.created_at ? Date.parse(a.created_at) : 0
     const tb = b.created_at ? Date.parse(b.created_at) : 0
     return tb - ta
   })
   const products = byRecency.filter((img) => !img.kind || img.kind === 'product')
-  const contexts = byRecency.filter((img) => img.kind === 'context')
+  const contexts = includeContext ? byRecency.filter((img) => img.kind === 'context') : []
   return [...products, ...contexts].slice(0, max).map((img) => img.id)
 }
 

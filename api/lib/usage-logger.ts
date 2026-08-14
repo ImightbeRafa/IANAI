@@ -1,11 +1,18 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
-import { GROK_TEXT_MODEL } from './grok-models.js'
+import {
+  GROK_TEXT_MODEL,
+  GROK_TEXT_MODEL_BEST,
+  GROK_TEXT_MODEL_EFFICIENT,
+} from './grok-models.js'
 
 // Cost per 1M tokens (in USD) - update these based on actual pricing.
 const MODEL_COSTS = {
   // Script generation models
   'grok': { input: 3.00, output: 15.00 },
-  [GROK_TEXT_MODEL]: { input: 2.00, output: 10.00 },
+  'grok-4.3': { input: 2.00, output: 6.00 },
+  [GROK_TEXT_MODEL]: { input: 2.00, output: 6.00 },
+  [GROK_TEXT_MODEL_BEST]: { input: 2.00, output: 6.00 },
+  [GROK_TEXT_MODEL_EFFICIENT]: { input: 2.00, output: 6.00 },
   'gemini': { input: 0.15, output: 0.60 },
   'gemini-2.5-flash': { input: 0.15, output: 0.60, thinking: 3.50 },
 
@@ -37,6 +44,10 @@ export type FeatureType =
   | 'reply'
   | 'ocr'
   | 'logo'
+  | 'script_edit'
+  | 'script_enhance'
+  | 'script_hook'
+  | 'script_consciousness'
 
 interface UsageLogParams {
   userId?: string

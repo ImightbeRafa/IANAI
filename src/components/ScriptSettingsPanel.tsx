@@ -9,6 +9,7 @@ import {
   Leaf
 } from 'lucide-react'
 import type { ScriptGenerationSettings, ScriptFramework, ScriptTypeConfig, CTAStrength } from '../types'
+import { setTextModelPreference, type TextModelProfile } from '../features/chat-shell/textModelPreference'
 
 interface ScriptSettingsPanelProps {
   settings: ScriptGenerationSettings
@@ -25,7 +26,9 @@ const LABELS = {
     variationsDesc: 'Select how many script variations to generate',
     generate: 'Generate Scripts',
     model: 'AI Model',
-    modelDesc: 'Select which AI model to use',
+    modelDesc: 'Grok 4.6 Best or 4.5 Efficient',
+    best: 'Grok 4.6 · Best',
+    efficient: 'Grok 4.5 · Efficient',
     mode: 'Generation Mode',
     mixed: 'Mixed',
     mixedDesc: 'AI picks the best types',
@@ -41,7 +44,9 @@ const LABELS = {
     variationsDesc: 'Selecciona cuántas variaciones de guiones generar',
     generate: 'Generar Guiones',
     model: 'Modelo IA',
-    modelDesc: 'Selecciona qué modelo de IA usar',
+    modelDesc: 'Grok 4.6 Mejor o 4.5 Eficiente',
+    best: 'Grok 4.6 · Mejor',
+    efficient: 'Grok 4.5 · Eficiente',
     mode: 'Modo de Generación',
     mixed: 'Mixto',
     mixedDesc: 'La IA elige los tipos',
@@ -93,6 +98,11 @@ export default function ScriptSettingsPanel({
 }: ScriptSettingsPanelProps) {
   const t = LABELS[language]
 
+  const updateModel = (model: TextModelProfile) => {
+    setTextModelPreference(model)
+    onChange({ ...settings, model })
+  }
+
   const updateVariations = (value: number) => {
     onChange({ ...settings, variations: value })
   }
@@ -131,6 +141,7 @@ export default function ScriptSettingsPanel({
 
   const totalByType = getTotalByType(settings.scriptTypeConfig)
   const effectiveCTA: CTAStrength = settings.ctaStrength ?? 'sales'
+  const activeTextModel: TextModelProfile = settings.model === 'efficient' ? 'efficient' : 'best'
 
   // Compact mode - just a simple selector
   if (compact) {
@@ -166,6 +177,29 @@ export default function ScriptSettingsPanel({
 
   return (
     <div className="space-y-4">
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">
+          <Sparkles className="w-4 h-4 text-primary-500" />
+          {t.model}
+        </label>
+        <p className="text-xs text-dark-400 mb-2">{t.modelDesc}</p>
+        <div className="flex gap-2">
+          {(['best', 'efficient'] as const).map((profile) => (
+            <button
+              key={profile}
+              type="button"
+              onClick={() => updateModel(profile)}
+              className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                activeTextModel === profile
+                  ? 'bg-primary-500 text-white shadow-lg shadow-primary-900/30'
+                  : 'bg-dark-200 text-dark-600 hover:bg-dark-300 border border-dark-300'
+              }`}
+            >
+              {profile === 'best' ? t.best : t.efficient}
+            </button>
+          ))}
+        </div>
+      </div>
       {/* Generation Mode */}
       <div>
         <label className="flex items-center gap-2 text-sm font-medium text-dark-700 mb-2">

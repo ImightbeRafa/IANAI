@@ -1,34 +1,62 @@
-import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { ChevronLeft, MoreHorizontal, Trash2, X } from 'lucide-react'
 import type { Business, ChatSession, ChatSessionOffer, Product } from '../../types'
 import type { ChatSessionSafeUpdates, ProductImage } from '../../services/database'
-import { CHAT_SHELL_MAX_OFFERS, sortOffersByPosition } from './sessionOffer'
-import {
-  isSessionSetupComplete,
-  isSessionSetupSkipped,
-  writeSetupSkipped,
-} from './chatContextSetup'
-import ChatContextSetupCard from './ChatContextSetupCard'
-import {
-  formatImageAssumptions,
-  type ShellImageAspect,
-  type ShellImageDensity,
-  type ShellImagePreferences,
-} from './chatShellImageIntent'
-import type { ImageModel } from '../../types'
+import { CHAT_SHELL_MAX_OFFERS, displaySessionOffers, sortOffersByPosition } from './sessionOffer'
+import { Link } from 'react-router-dom'
+import { LOGO_ARCHETYPES } from '../../data/image-presets'
+import type { BrandKit, ScriptGenerationSettings } from '../../types'
+import { shellT } from './chatShellLabels'
+import ChatScriptPanel from './ChatScriptPanel'
+import ChatImageSettingsPanel from './ChatImageSettingsPanel'
+import type { ShellImagePreferences } from './chatShellImageIntent'
+import { IconDoc, IconImage, IconOffer, IconVisual, IconWeb } from './ChatShellIcons'
 
-export type RailTab = 'context' | 'offers' | 'images'
+export type RailTab = 'context' | 'offers' | 'images' | 'scripts' | 'brand' | 'more'
+export type RailPane = 'index' | 'detail'
+
+const OPTION_TABS: RailTab[] = ['context', 'offers', 'images', 'scripts', 'brand', 'more']
+
+function optionIcon(tab: RailTab) {
+  switch (tab) {
+    case 'context':
+      return <IconWeb size={14} />
+    case 'offers':
+      return <IconOffer size={14} />
+    case 'images':
+      return <IconImage size={14} />
+    case 'scripts':
+      return <IconDoc size={14} />
+    case 'brand':
+      return <IconVisual size={14} />
+    case 'more':
+      return <MoreHorizontal size={14} />
+    default: {
+      const _never: never = tab
+      return _never
+    }
+  }
+}
 
 interface ChatContextRailProps {
   tab: RailTab
+  pane?: RailPane
   onTabChange: (tab: RailTab) => void
+  onBackToIndex?: () => void
   onClose: () => void
   brand?: Business | null
   session?: ChatSession | null
   offers?: ChatSessionOffer[]
   brandProducts?: Product[]
+  unassignedProducts?: Product[]
+  onAssignUnassignedProduct?: (productId: string) => void | Promise<void>
+  onDeleteUnassignedProduct?: (productId: string) => void | Promise<void>
+  onClearUnassignedProducts?: () => void | Promise<void>
   activeProduct?: Product | null
   offerBusy?: boolean
+  linkedOfferIds?: Set<string>
+  brandKits?: BrandKit[]
+  onSelectBrandKit?: (kitId: string) => void
   onPatchSession?: (updates: ChatSessionSafeUpdates) => void
   /** Pin URL/active session after Skip so late create cannot snap A→B. */
   onKeepSessionSelected?: (sessionId: string) => void
@@ -39,25 +67,46 @@ interface ChatContextRailProps {
   offerImages?: ProductImage[]
   imageBusy?: boolean
   onSelectImageOffer?: (productId: string) => void
-  onUploadOfferImage?: (file: File) => void | Promise<void>
+  onUploadOfferImage?: (file: File, kind?: 'product' | 'context') => void | Promise<void>
+  onRemoveOfferImage?: (imageId: string) => void | Promise<void>
   onGenerateOfferImage?: () => void | Promise<void>
+  onOpenOfferImage?: (image: ProductImage) => void
+  onRequestImageEdit?: (image: ProductImage) => void
   imagePrefs?: ShellImagePreferences
   onPatchImagePreferences?: (patch: Partial<ShellImagePreferences>) => void
+  onStartLogo?: (archetype?: string) => void
+  scriptSettings?: ScriptGenerationSettings
+  onScriptSettingsChange?: (settings: ScriptGenerationSettings) => void
+  onGenerateScripts?: () => void
+  sending?: boolean
   language?: 'en' | 'es'
+  onOpenSettings?: () => void
+  onImproveSetup?: () => void
+  contextEditor?: ReactNode
+  onAskChatContext?: () => void
+  threadScripts?: { id: string; label: string }[]
 }
 
 export default function ChatContextRail({
   tab,
+  pane = 'index',
   onTabChange,
+  onBackToIndex,
   onClose,
   brand = null,
   session = null,
   offers = [],
   brandProducts = [],
+  unassignedProducts = [],
+  onAssignUnassignedProduct,
+  onDeleteUnassignedProduct,
+  onClearUnassignedProducts,
   activeProduct = null,
   offerBusy = false,
+  linkedOfferIds,
+  brandKits = [],
+  onSelectBrandKit,
   onPatchSession,
-  onKeepSessionSelected,
   onAddOffer,
   onRemoveOffer,
   onMoveOffer,
@@ -66,72 +115,32 @@ export default function ChatContextRail({
   imageBusy = false,
   onSelectImageOffer,
   onUploadOfferImage,
+  onRemoveOfferImage,
   onGenerateOfferImage,
+  onOpenOfferImage,
+  onRequestImageEdit,
   imagePrefs,
   onPatchImagePreferences,
+  onStartLogo,
+  scriptSettings,
+  onScriptSettingsChange,
+  onGenerateScripts,
+  sending = false,
   language = 'es',
+  onOpenSettings,
+  onImproveSetup,
+  contextEditor,
+  onAskChatContext,
+  threadScripts = [],
 }: ChatContextRailProps) {
-  const storage = typeof localStorage !== 'undefined' ? localStorage : null
+  const t = shellT(language)
   const [title, setTitle] = useState(session?.title || '')
   const [context, setContext] = useState(session?.context || '')
-  const [channel, setChannel] = useState(session?.primary_channel || '')
-  const [awareness, setAwareness] = useState(session?.awareness_level || '')
-  /** Bumps so Skip/clear re-reads LS (source of truth) without a drifting Set. */
-  const [skipTick, setSkipTick] = useState(0)
-  const [forceSetup, setForceSetup] = useState(false)
-  const [skipPersistError, setSkipPersistError] = useState<string | null>(null)
 
   useEffect(() => {
     setTitle(session?.title || '')
     setContext(session?.context || '')
-    setChannel(session?.primary_channel || '')
-    setAwareness(session?.awareness_level || '')
-  }, [session?.id, session?.title, session?.context, session?.primary_channel, session?.awareness_level])
-
-  useEffect(() => {
-    setForceSetup(false)
-    setSkipPersistError(null)
   }, [session?.id])
-
-  const markSkipped = (sessionId: string) => {
-    // sessionId must be captured at Skip click — do not re-read session?.id here.
-    if (!sessionId) return
-
-    // Write Skip only for the click-captured session (not URL/stored siblings).
-    // Escape / backdrop / hydrate must never call this.
-    const result = writeSetupSkipped(storage, sessionId, true)
-    setSkipTick((n) => n + 1)
-    if (!result.ok) {
-      setSkipPersistError(
-        result.reason === 'missing_storage' || result.reason === 'storage_threw'
-          ? 'Could not save Skip (storage unavailable). Try again.'
-          : 'Could not save Skip for this session. Try again.'
-      )
-      return
-    }
-    setSkipPersistError(null)
-    setForceSetup(false)
-    // Pin A in URL/workspace so a deferred createSession cannot snap ?session= to B.
-    onKeepSessionSelected?.(sessionId)
-  }
-
-  const clearSkipped = (sessionId: string, clearReason: 'save' | 'reopen') => {
-    // Only Save / explicit Setup reopen may clear — never hydrate/remount/Escape.
-    if (!sessionId) return
-    const result = writeSetupSkipped(storage, sessionId, false, { clearReason })
-    setSkipTick((n) => n + 1)
-    if (!result.ok) {
-      setSkipPersistError('Could not clear Skip for this session.')
-      return
-    }
-    setSkipPersistError(null)
-  }
-
-  const reopenSetup = () => {
-    if (!session?.id) return
-    clearSkipped(session.id, 'reopen')
-    setForceSetup(true)
-  }
 
   const saveField = (updates: ChatSessionSafeUpdates) => {
     if (!session || !onPatchSession) return
@@ -139,64 +148,121 @@ export default function ChatContextRail({
   }
 
   const orderedOffers = sortOffersByPosition(offers)
-  const attachedIds = new Set(orderedOffers.map((o) => o.product_id))
+  const displayOffers = displaySessionOffers(orderedOffers, activeProduct?.id || session?.product_id)
+  const attachedIds = new Set(displayOffers.map((o) => o.product_id))
   const availableProducts = brandProducts.filter((p) => !attachedIds.has(p.id))
-  const setupComplete = isSessionSetupComplete(session)
-  // LS is authoritative for the current session id (skipTick forces re-read after write).
-  void skipTick
-  const sessionSkipped = Boolean(
-    session?.id && isSessionSetupSkipped(storage, session.id)
-  )
-  const interviewOpen = Boolean(
-    session &&
-    (forceSetup || (!setupComplete && !sessionSkipped))
-  )
+  const channelText = (brand?.sales_channels || []).join(', ') || '—'
+  const offerCount = displayOffers.length
+  const imageCount = offerImages.length
+  const optionLabel = (id: RailTab) => {
+    switch (id) {
+      case 'context':
+        return t.context
+      case 'offers':
+        return t.offers
+      case 'images':
+        return t.images
+      case 'scripts':
+        return t.scripts
+      case 'brand':
+        return t.brand
+      case 'more':
+        return t.more
+      default: {
+        const _never: never = id
+        return _never
+      }
+    }
+  }
+  const optionCount = (id: RailTab) => {
+    if (id === 'offers') return offerCount
+    if (id === 'images') return imageCount
+    if (id === 'scripts') return threadScripts.length
+    return null
+  }
 
-  return (
-    <aside className="chat-shell__rail" aria-label="Context rail">
-      <div className="chat-shell__rail-head">
-        <div className="chat-shell__rail-head-title">
-          <strong>Rail</strong>
-          <span className="chat-shell__rail-edit">edit</span>
-        </div>
+  if (pane === 'index') {
+    const threadRows = [
+      ...(activeProduct
+        ? [{ id: `offer:${activeProduct.id}`, tab: 'offers' as const, icon: <IconOffer size={14} />, label: activeProduct.name }]
+        : []),
+      ...offerImages.slice(0, 5).map((image, index) => ({
+        id: image.id,
+        tab: 'images' as const,
+        icon: <IconImage size={14} />,
+        label: image.label || `${t.images} ${index + 1}`,
+      })),
+      ...threadScripts.slice(0, 5).map((script) => ({
+        id: script.id,
+        tab: 'scripts' as const,
+        icon: <IconDoc size={14} />,
+        label: script.label,
+      })),
+    ]
+
+    return (
+      <aside className="chat-shell__rail" aria-label={t.workspace}>
         <button
           type="button"
-          className="chat-shell__icon-btn chat-shell__rail-close"
-          aria-label="Close rail"
+          className="chat-shell__icon-btn chat-shell__rail-close chat-shell__rail-close--mobile"
+          aria-label={t.closeRail}
           onClick={onClose}
         >
           <X size={15} />
         </button>
-      </div>
+        {threadRows.length > 0 ? (
+          <div className="chat-shell__widget-list">
+            {threadRows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                className="chat-shell__widget-row"
+                onClick={() => onTabChange(row.tab)}
+              >
+                {row.icon}
+                <span>{row.label}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <p className="chat-shell__widget-kicker">{t.options}</p>
+        <div className="chat-shell__widget-list">
+          {OPTION_TABS.map((id) => {
+            const count = optionCount(id)
+            return (
+              <button
+                key={id}
+                type="button"
+                className="chat-shell__widget-row"
+                onClick={() => onTabChange(id)}
+              >
+                {optionIcon(id)}
+                <span>{optionLabel(id)}</span>
+                {count != null ? <em className="chat-shell__widget-count">{count}</em> : null}
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+    )
+  }
 
-      <div className="chat-shell__tabs" role="tablist" aria-label="Rail sections">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'context'}
-          className={`chat-shell__tab${tab === 'context' ? ' is-on' : ''}`}
-          onClick={() => onTabChange('context')}
-        >
-          Context
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'offers'}
-          className={`chat-shell__tab${tab === 'offers' ? ' is-on' : ''}`}
-          onClick={() => onTabChange('offers')}
-        >
-          Offers
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'images'}
-          className={`chat-shell__tab${tab === 'images' ? ' is-on' : ''}`}
-          onClick={() => onTabChange('images')}
-        >
-          Images
-        </button>
+  return (
+    <aside className="chat-shell__rail" aria-label={t.workspace}>
+      <div className="chat-shell__rail-head">
+        <div className="chat-shell__rail-head-title">
+          {onBackToIndex ? (
+            <button
+              type="button"
+              className="chat-shell__icon-btn"
+              aria-label={t.backToWidget}
+              onClick={onBackToIndex}
+            >
+              <ChevronLeft size={15} />
+            </button>
+          ) : null}
+          <strong>{optionLabel(tab)}</strong>
+        </div>
       </div>
 
       {tab === 'context' && (
@@ -204,62 +270,47 @@ export default function ChatContextRail({
           {!session ? (
             <p className="chat-shell__rail-note">
               {brand
-                ? `Brand · ${brand.name}. Select a session to edit title and context.`
-                : 'Select a brand and session to edit context.'}
+                ? language === 'es'
+                  ? `Marca · ${brand.name}. Elegí una sesión para editar el contexto.`
+                  : `Brand · ${brand.name}. Select a session to edit context.`
+                : language === 'es'
+                  ? 'Elegí una marca y una sesión para editar el contexto.'
+                  : 'Select a brand and session to edit context.'}
             </p>
           ) : (
             <>
-              <ChatContextSetupCard
-                key={session.id}
-                session={session}
-                skipped={sessionSkipped}
-                forceOpen={forceSetup}
-                language={language}
-                onSkipped={markSkipped}
-                onSaved={async (updates, savedSessionId) => {
-                  await onPatchSession?.(updates)
-                  // Clear only the session that was Saved — never a snap-back id.
-                  clearSkipped(savedSessionId, 'save')
-                  setForceSetup(false)
-                  if (typeof updates.title === 'string') setTitle(updates.title)
-                  if (typeof updates.context === 'string') setContext(updates.context)
-                  if (updates.primary_channel !== undefined) {
-                    setChannel(updates.primary_channel || '')
-                  }
-                  if (updates.awareness_level !== undefined) {
-                    setAwareness(updates.awareness_level || '')
-                  }
-                }}
-              />
-
-              {skipPersistError ? (
-                <p className="chat-shell__setup-status is-error" role="alert">
-                  {skipPersistError}
-                </p>
+              <p className="chat-shell__inspector-kicker">{brand?.name || t.noBrand}</p>
+              <p className="chat-shell__inspector-copy">
+                {language === 'es'
+                  ? 'Esta es la fuente de verdad que usa la IA. Podés editarla manualmente o pedir el cambio en el chat; ambas opciones guardan el mismo contexto.'
+                  : 'This is the source of truth used by AI. Edit it manually or request a change in chat; both save the same context.'}
+              </p>
+              {onAskChatContext ? (
+                <button type="button" className="chat-shell__setup-btn is-primary" onClick={onAskChatContext}>
+                  {language === 'es' ? 'Pedir un cambio en el chat' : 'Request a change in chat'}
+                </button>
               ) : null}
-
-              {(setupComplete || sessionSkipped) && !forceSetup ? (
-                <div className="chat-shell__setup-reopen">
-                  <button
-                    type="button"
-                    className="chat-shell__setup-btn"
-                    data-action="setup-reopen"
-                    onClick={reopenSetup}
-                  >
-                    Resume setup
-                  </button>
-                  <span className="chat-shell__rail-hint">
-                    {setupComplete
-                      ? 'Setup saved.'
-                      : 'Setup incomplete — add context and a primary channel for stronger generations. Composer still works.'}
-                  </span>
+              {contextEditor || <dl className="chat-shell__inspector-facts">
+                <div>
+                  <dt>{language === 'es' ? 'Negocio' : 'Business'}</dt>
+                  <dd>{brand?.name || '—'}</dd>
                 </div>
-              ) : null}
-
-              {!interviewOpen ? (
-                <>
+                <div>
+                  <dt>{language === 'es' ? 'Canales' : 'Channels'}</dt>
+                  <dd>{channelText}</dd>
+                </div>
+                <div>
+                  <dt>{language === 'es' ? 'Público' : 'Audience'}</dt>
+                  <dd>{brand?.icp_description?.trim() || '—'}</dd>
+                </div>
+                <div>
+                  <dt>{language === 'es' ? 'Oferta' : 'Offer'}</dt>
+                  <dd>{activeProduct?.name || (language === 'es' ? 'Sin oferta aún' : 'No offer yet')}</dd>
+                </div>
+              </dl>}
+              <p className="chat-shell__inspector-kicker">{language === 'es' ? 'Preferencias de este chat' : 'This chat’s preferences'}</p>
               <label className="chat-shell__field">
-                <span>Title</span>
+                <span>{language === 'es' ? 'Nombre del chat' : 'Chat name'}</span>
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -271,9 +322,9 @@ export default function ChatContextRail({
                 />
               </label>
               <label className="chat-shell__field">
-                <span>Context</span>
+                <span>{language === 'es' ? 'Lo que usa el chat' : 'What chat uses'}</span>
                 <textarea
-                  rows={4}
+                  rows={6}
                   value={context}
                   onChange={(e) => setContext(e.target.value)}
                   onBlur={() => {
@@ -281,52 +332,23 @@ export default function ChatContextRail({
                       saveField({ context })
                     }
                   }}
-                  placeholder="Session notes for generation…"
+                  placeholder={language === 'es' ? 'Se llena al confirmar el setup…' : 'Filled when you confirm setup…'}
                 />
               </label>
-              <label className="chat-shell__field">
-                <span>Primary channel</span>
-                <select
-                  value={channel || ''}
-                  onChange={(e) => {
-                    const value = e.target.value as '' | 'messages' | 'website' | 'physical'
-                    setChannel(value)
-                    saveField({ primary_channel: value || null })
-                  }}
+              {onImproveSetup && (
+                <button
+                  type="button"
+                  className="chat-shell__setup-btn"
+                  onClick={onImproveSetup}
                 >
-                  <option value="">—</option>
-                  <option value="messages">Messages</option>
-                  <option value="website">Website</option>
-                  <option value="physical">Physical</option>
-                </select>
-              </label>
-              <label className="chat-shell__field">
-                <span>Awareness</span>
-                <select
-                  value={awareness || ''}
-                  onChange={(e) => {
-                    const value = e.target.value as '' | 'cold' | 'warm' | 'hot'
-                    setAwareness(value)
-                    saveField({ awareness_level: value || null })
-                  }}
-                >
-                  <option value="">—</option>
-                  <option value="cold">Cold</option>
-                  <option value="warm">Warm</option>
-                  <option value="hot">Hot</option>
-                </select>
-              </label>
-              <p className="chat-shell__rail-hint">
-                Brand · {brand?.name || '—'}
-                {activeProduct ? ` · Offer ${activeProduct.name}` : ' · No offer'}
-                . Ownership fields are immutable.
-              </p>
-                </>
-              ) : (
-                <p className="chat-shell__rail-hint">
-                  Brand · {brand?.name || '—'}. Save setup or Skip to edit fields manually.
-                </p>
+                  {t.improveSetup}
+                </button>
               )}
+              <p className="chat-shell__rail-hint">
+                {activeProduct
+                  ? `${language === 'es' ? 'Oferta' : 'Offer'} · ${activeProduct.name}`
+                  : language === 'es' ? 'Sin oferta' : 'No offer'}
+              </p>
             </>
           )}
         </div>
@@ -338,18 +360,22 @@ export default function ChatContextRail({
             <p className="chat-shell__rail-hint">Select a session to attach product offers.</p>
           ) : !session.business_id ? (
             <p className="chat-shell__rail-hint">This session has no business_id — cannot attach offers.</p>
-          ) : brandProducts.length === 0 ? (
-            <p className="chat-shell__rail-hint">No products on this brand yet. Create one from Dashboard.</p>
+          ) : displayOffers.length === 0 && brandProducts.length === 0 && unassignedProducts.length === 0 ? (
+            <p className="chat-shell__rail-hint">
+              {language === 'es'
+                ? 'Esta marca no tiene productos. Creá uno en el panel clásico o asigná uno suelto abajo.'
+                : 'This brand has no products yet. Create one in classic or assign an unassigned product below.'}
+            </p>
           ) : (
             <>
               <p className="chat-shell__rail-hint">
                 Select up to {CHAT_SHELL_MAX_OFFERS} products. Position 1 is primary. Generate walks all offers in order.
               </p>
-              {orderedOffers.length > 0 ? (
+              {displayOffers.length > 0 ? (
                 <ol className="chat-shell__offer-list">
-                  {orderedOffers.map((offer, index) => {
+                  {displayOffers.map((offer, index) => {
                     const product =
-                      offer.product
+                      ('product' in offer ? offer.product : undefined)
                       || brandProducts.find((p) => p.id === offer.product_id)
                       || (activeProduct?.id === offer.product_id ? activeProduct : null)
                     const label = product?.name ?? offer.product_id.slice(0, 8)
@@ -375,7 +401,7 @@ export default function ChatContextRail({
                           <button
                             type="button"
                             className="chat-shell__offer-btn"
-                            disabled={offerBusy || index === orderedOffers.length - 1}
+                            disabled={offerBusy || index === displayOffers.length - 1}
                             onClick={() => void onMoveOffer?.(offer.product_id, 1)}
                             aria-label={`Move ${label} down`}
                           >
@@ -384,7 +410,8 @@ export default function ChatContextRail({
                           <button
                             type="button"
                             className="chat-shell__offer-btn"
-                            disabled={offerBusy}
+                            disabled={offerBusy || Boolean(linkedOfferIds?.has(offer.product_id))}
+                            title={linkedOfferIds?.has(offer.product_id) ? t.linkedOffer : undefined}
                             onClick={() => void onRemoveOffer?.(offer.product_id)}
                             aria-label={`Remove ${label}`}
                           >
@@ -399,7 +426,7 @@ export default function ChatContextRail({
                 <p className="chat-shell__rail-hint">No offers attached yet.</p>
               )}
 
-              {orderedOffers.length >= CHAT_SHELL_MAX_OFFERS ? (
+              {displayOffers.length >= CHAT_SHELL_MAX_OFFERS ? (
                 <p className="chat-shell__rail-hint">Maximum {CHAT_SHELL_MAX_OFFERS} offers reached.</p>
               ) : (
                 <div className="chat-shell__offer-add">
@@ -416,6 +443,51 @@ export default function ChatContextRail({
                   ))}
                 </div>
               )}
+
+              {unassignedProducts.length > 0 && (
+                <div className="chat-shell__offer-add">
+                  <p className="chat-shell__rail-hint">{t.unassignedOffers}</p>
+                  {unassignedProducts.map((product) => (
+                    <div key={product.id} className="chat-shell__unassigned-row">
+                      <div className="chat-shell__unassigned-actions">
+                        <button
+                          type="button"
+                          className="chat-shell__nav-item chat-shell__nav-button"
+                          disabled={offerBusy}
+                          onClick={() => void onAssignUnassignedProduct?.(product.id)}
+                        >
+                          {t.assignToBrand} · {product.name}
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-shell__session-more is-danger"
+                          aria-label={`${t.deleteUnassigned} ${product.name}`}
+                          disabled={offerBusy}
+                          onClick={() => void onDeleteUnassignedProduct?.(product.id)}
+                        >
+                          <Trash2 size={13} aria-hidden />
+                        </button>
+                      </div>
+                      <Link to={`/product/${product.id}`} className="chat-shell__rail-hint">
+                        {t.openClassicHistory}
+                      </Link>
+                    </div>
+                  ))}
+                  {unassignedProducts.length > 1 && (
+                    <button
+                      type="button"
+                      className="chat-shell__nav-item chat-shell__nav-button"
+                      disabled={offerBusy}
+                      onClick={() => {
+                        if (!window.confirm(t.confirmClearUnassigned)) return
+                        void onClearUnassignedProducts?.()
+                      }}
+                    >
+                      {t.clearUnassigned}
+                    </button>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -425,20 +497,29 @@ export default function ChatContextRail({
         <div className="chat-shell__stack">
           {!session ? (
             <p className="chat-shell__rail-hint">Select a session to manage offer images.</p>
-          ) : orderedOffers.length === 0 ? (
+          ) : displayOffers.length === 0 ? (
             <p className="chat-shell__rail-hint">
-              Attach at least one offer before uploading or generating images.
+              {language === 'es'
+                ? 'Adjuntá al menos una oferta para ver imágenes.'
+                : 'Attach at least one offer to view images.'}
             </p>
           ) : (
             <>
-              <p className="chat-shell__rail-hint">
-                Images are scoped to the selected offer. No carousel or video in shell.
-              </p>
+              <ChatImageSettingsPanel
+                language={language}
+                preferences={imagePrefs}
+                onChange={onPatchImagePreferences}
+                onGenerate={onGenerateOfferImage}
+                busy={imageBusy}
+                hasOffer={displayOffers.length > 0}
+              />
+              <p className="chat-shell__rail-hint">{t.imagesHint}</p>
               <div className="chat-shell__image-offer-chips" role="tablist" aria-label="Image offer">
-                {orderedOffers.map((offer) => {
+                {displayOffers.map((offer) => {
                   const product =
-                    offer.product
+                    ('product' in offer ? offer.product : undefined)
                     || brandProducts.find((p) => p.id === offer.product_id)
+                    || (activeProduct?.id === offer.product_id ? activeProduct : null)
                   const label = product?.name ?? offer.product_id.slice(0, 8)
                   const selected = activeImageOfferId === offer.product_id
                   return (
@@ -457,64 +538,9 @@ export default function ChatContextRail({
                 })}
               </div>
 
-              <div className="chat-shell__image-knobs" aria-label="Image settings">
-                <p className="chat-shell__rail-hint">
-                  {imagePrefs
-                    ? formatImageAssumptions(imagePrefs, language)
-                    : '9:16 · Nano Banana Pro · Medium'}
-                </p>
-                <div className="chat-shell__clarify-chips">
-                  {(['9:16', '3:4', '1:1'] as ShellImageAspect[]).map((ar) => (
-                    <button
-                      key={ar}
-                      type="button"
-                      className={`chat-shell__btn chat-shell__btn--pill${imagePrefs?.aspectRatio === ar ? ' is-on' : ''}`}
-                      disabled={imageBusy}
-                      onClick={() => onPatchImagePreferences?.({ aspectRatio: ar })}
-                    >
-                      {ar}
-                    </button>
-                  ))}
-                </div>
-                <div className="chat-shell__clarify-chips">
-                  {([
-                    { id: 'nano-banana-pro' as ImageModel, label: 'Pro' },
-                    { id: 'nano-banana' as ImageModel, label: 'Fast' },
-                    { id: 'grok-imagine' as ImageModel, label: 'Grok' },
-                  ]).map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className={`chat-shell__btn chat-shell__btn--pill${imagePrefs?.model === m.id ? ' is-on' : ''}`}
-                      disabled={imageBusy}
-                      onClick={() => onPatchImagePreferences?.({ model: m.id })}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="chat-shell__clarify-chips">
-                  {([
-                    { id: 'hard' as ShellImageDensity, label: 'Hard' },
-                    { id: 'medium' as ShellImageDensity, label: 'Medium' },
-                    { id: 'standard' as ShellImageDensity, label: 'Standard' },
-                  ]).map((d) => (
-                    <button
-                      key={d.id}
-                      type="button"
-                      className={`chat-shell__btn chat-shell__btn--pill${imagePrefs?.density === d.id ? ' is-on' : ''}`}
-                      disabled={imageBusy}
-                      onClick={() => onPatchImagePreferences?.({ density: d.id })}
-                    >
-                      {d.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="chat-shell__image-actions">
                 <label className="chat-shell__setup-btn">
-                  Upload
+                  {language === 'es' ? 'Subir producto' : 'Upload product'}
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -523,36 +549,190 @@ export default function ChatContextRail({
                     onChange={(e) => {
                       const file = e.target.files?.[0]
                       e.target.value = ''
-                      if (file) void onUploadOfferImage?.(file)
+                      if (file) void onUploadOfferImage?.(file, 'product')
                     }}
                   />
                 </label>
-                <button
-                  type="button"
-                  className="chat-shell__setup-btn is-primary"
-                  disabled={imageBusy || !activeImageOfferId}
-                  onClick={() => void onGenerateOfferImage?.()}
-                >
-                  {imageBusy ? 'Working…' : 'Generate'}
-                </button>
+                <label className="chat-shell__setup-btn">
+                  {language === 'es' ? 'Subir contexto' : 'Upload context'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    disabled={imageBusy || !activeImageOfferId}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (file) void onUploadOfferImage?.(file, 'context')
+                    }}
+                  />
+                </label>
               </div>
 
               {offerImages.length === 0 ? (
-                <p className="chat-shell__rail-hint">No images for this offer yet.</p>
+                <p className="chat-shell__rail-hint">{t.noImagesYet}</p>
               ) : (
-                <div className="chat-shell__image-grid">
-                  {offerImages.map((img) => (
+                <div className="chat-shell__image-library" aria-label={language === 'es' ? 'Imagenes de mas nuevas a mas antiguas' : 'Images newest to oldest'}>
+                  {[
+                    {
+                      key: 'generated',
+                      label: language === 'es' ? 'Versiones generadas' : 'Generated versions',
+                      images: offerImages.filter((image) => image.kind === 'generated'),
+                    },
+                    {
+                      key: 'references',
+                      label: language === 'es' ? 'Producto y contexto' : 'Product and context',
+                      images: offerImages.filter((image) => image.kind !== 'generated'),
+                    },
+                  ].map((section) => section.images.length ? (
+                    <section key={section.key} className="chat-shell__image-library-section">
+                      <h4>{section.label}</h4>
+                      <div className="chat-shell__image-grid">
+                  {[...section.images].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).map((img) => (
                     <figure key={img.id} className="chat-shell__image-thumb">
-                      <img src={img.image_url} alt={img.label || 'Offer image'} />
+                      <button
+                        type="button"
+                        className="chat-shell__image-thumb-open"
+                        onClick={() => onOpenOfferImage?.(img)}
+                        aria-label={t.viewImage}
+                      >
+                        <img src={img.image_url} alt={img.label || 'Offer image'} />
+                      </button>
                       <figcaption>
-                        {img.kind === 'generated' ? 'Generated' : img.kind === 'context' ? 'Context' : 'Ref'}
+                        <span>
+                          {img.kind === 'generated' ? 'Generated' : img.kind === 'context' ? 'Context' : 'Ref'}
+                        </span>
+                        <button
+                          type="button"
+                          className="chat-shell__image-thumb-edit"
+                          onClick={() => onRequestImageEdit?.(img)}
+                        >
+                          {t.requestEdit}
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-shell__image-thumb-edit is-danger"
+                          disabled={imageBusy}
+                          aria-label={language === 'es' ? 'Eliminar imagen' : 'Delete image'}
+                          onClick={() => void onRemoveOfferImage?.(img.id)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </figcaption>
                     </figure>
                   ))}
+                      </div>
+                    </section>
+                  ) : null)}
                 </div>
               )}
             </>
           )}
+        </div>
+      )}
+
+      {tab === 'scripts' && scriptSettings && onScriptSettingsChange && onGenerateScripts ? (
+        <ChatScriptPanel
+          language={language}
+          settings={scriptSettings}
+          onChange={onScriptSettingsChange}
+          onGenerate={onGenerateScripts}
+          sending={sending}
+        />
+      ) : null}
+
+      {tab === 'brand' && (
+        <div className="chat-shell__rail-form">
+          <p className="chat-shell__rail-hint">
+            {language === 'es' ? 'Kit de marca para esta sesión. Colores, voz y logo entran a guiones e imágenes.' : 'Brand kit for this session. Colors, voice, and logo feed scripts and images.'}
+          </p>
+          {brandKits.length === 0 ? (
+            <p className="chat-shell__rail-note">
+              {language === 'es' ? 'No hay kits. Creá uno en Configuración.' : 'No kits yet. Create one in Settings.'}
+            </p>
+          ) : (
+            <div className="chat-shell__offer-list">
+              {brandKits.map((kit) => {
+                const selected = session?.brand_kit_id === kit.id || (!session?.brand_kit_id && kit.is_default)
+                return (
+                  <button
+                    key={kit.id}
+                    type="button"
+                    className={`chat-shell__offer-row${selected ? ' is-on' : ''}`}
+                    onClick={() => onSelectBrandKit?.(kit.id)}
+                  >
+                    <span>{kit.name}{kit.is_default ? ' · default' : ''}</span>
+                    <span className="chat-shell__swatches" aria-hidden>
+                      {kit.primary_color ? <span className="chat-shell__swatch" style={{ background: kit.primary_color }} /> : null}
+                      {kit.secondary_color ? <span className="chat-shell__swatch" style={{ background: kit.secondary_color }} /> : null}
+                      {kit.accent_color ? <span className="chat-shell__swatch" style={{ background: kit.accent_color }} /> : null}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {(() => {
+            const selected = brandKits.find((k) => k.id === session?.brand_kit_id) || brandKits.find((k) => k.is_default)
+            if (!selected) return null
+            return (
+              <p className="chat-shell__rail-note">
+                {selected.tagline || selected.brand_voice || selected.industry || selected.name}
+              </p>
+            )
+          })()}
+          <div className="chat-shell__row-actions">
+            {onOpenSettings ? (
+              <button type="button" className="chat-shell__setup-btn" onClick={onOpenSettings}>
+                {t.settings}
+              </button>
+            ) : (
+              <Link to="/settings" className="chat-shell__setup-btn">
+                {t.settings}
+              </Link>
+            )}
+            <button
+              type="button"
+              className="chat-shell__setup-btn"
+              onClick={() => onStartLogo?.('auto')}
+            >
+              {t.logo}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'more' && (
+        <div className="chat-shell__rail-form">
+          <p className="chat-shell__rail-hint">
+            {language === 'es'
+              ? 'Herramientas del panel clásico. Guiones viejos, descripciones y respuestas viven ahí.'
+              : 'Classic tools. Older scripts, descriptions, and replies live there.'}
+          </p>
+          <div className="chat-shell__row-actions">
+            <Link to="/scripts" className="chat-shell__row-action">{t.scripts}</Link>
+            <Link to="/posts" className="chat-shell__row-action">{t.posts}</Link>
+            <Link to="/descriptions" className="chat-shell__row-action">{t.descriptions}</Link>
+            <Link to="/respuestas" className="chat-shell__row-action">{t.replies}</Link>
+          </div>
+          <p className="chat-shell__rail-hint">{t.logo}</p>
+          <div className="chat-shell__chip-row">
+            {LOGO_ARCHETYPES.slice(0, 6).map((arch) => (
+              <button
+                key={arch.id}
+                type="button"
+                className="chat-shell__btn chat-shell__btn--pill"
+                onClick={() => onStartLogo?.(arch.id)}
+              >
+                {language === 'es' ? arch.nameEs : arch.name}
+              </button>
+            ))}
+          </div>
+          <p className="chat-shell__rail-note">
+            {language === 'es'
+              ? 'Pedí “logo wordmark” o usá /logo. Fotos de producto: /producto o modo Producto en Crear.'
+              : 'Ask “logo wordmark” or use /logo. Product photos: /producto or Product mode in Create.'}
+          </p>
         </div>
       )}
     </aside>

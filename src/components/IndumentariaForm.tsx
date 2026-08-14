@@ -142,10 +142,10 @@ export default function IndumentariaForm({ onSubmit, onCancel, businessId, initi
       for (const file of filesToUpload) {
         const ext = file.name.split('.').pop()?.toLowerCase()
         if (!['jpg', 'jpeg', 'png', 'webp'].includes(ext || '')) continue
-        const path = `product-images/${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { error } = await supabase.storage.from('product-images').upload(path, file)
+        const path = `${session.user.id}/indumentaria/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error } = await supabase.storage.from('post-images').upload(path, file)
         if (!error) {
-          const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(path)
+          const { data: urlData } = supabase.storage.from('post-images').getPublicUrl(path)
           if (urlData?.publicUrl) newUrls.push(urlData.publicUrl)
         }
       }

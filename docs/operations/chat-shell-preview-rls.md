@@ -10,6 +10,7 @@ Ops already applied the Preview-only fixes below. This doc records symptoms, roo
 1. **Empty Brands** in `/chat` for a signed-in user who owns businesses — `getBusinesses` returned `[]` even though rows existed.
 2. **New chat / Quick session insert failed or returned null** — client `insert(…).select().single()` (PostgREST `INSERT … RETURNING`) did not return the new `chat_sessions` row to the inserting user.
 3. Downstream: sidebar stayed mock-empty; thread chrome never got a real session title.
+4. **No Admin nav / Chat invite gate** while SQL shows `is_admin` and `chat_beta_access` true — authenticated `profiles` SELECT returned `[]` after 061 dropped the global dump policy and Preview had no own-row replacement. Fix: `068_profiles_select_own.sql` (Preview now; AIIAN only after human review).
 
 ## Root causes
 
@@ -143,6 +144,34 @@ Checklist:
 1. As Preview QA user with `pro` (or another seeded plan): select brand → session → offer → send.  
 2. Expect assistant reply + script card (not immediate usage block).  
 3. Confirm production AIIAN `plan_limits` / subscriptions were **not** modified.
+
+## `brand_kits` owner RLS missing (Preview 403 + Setup failed)
+
+### Symptom
+
+Pasting a site URL in `/chat` setup shows **Setup failed** / “No pude terminar de leer eso” even though the site was read. Console:
+
+```text
+POST …/rest/v1/brand_kits?select=*  403
+new row violates row-level security policy for table "brand_kits"
+```
+
+`GET …/rest/v1/rpc/get_usage_limits` may 404 on the same Preview project if `061` was never applied.
+
+### Root cause
+
+Preview `brand_kits` had RLS on without **owner** INSERT/SELECT (`user_id = auth.uid()`). Migration `062` only added team SELECT for `business_id IS NOT NULL`. Chat setup inserts a user-owned kit with no `business_id` → deny-all INSERT. `INSERT … RETURNING` also needs owner SELECT.
+
+`get_usage_limits` 404 is a missing RPC (061 not applied), not a setup blocker. The client falls back to `subscriptions` / `usage` / `plan_limits` tables.
+
+### Fix
+
+1. App: setup continues if kit persist is denied; palette save surfaces a clear error. Usage RPC 404 is tried once, then table fallback.
+2. SQL: `supabase/migrations/065_brand_kits_owner_rls.sql` (owner CRUD + GRANT on `get_usage_limits` if it exists).
+
+**IANAI-preview (`adrwkzibhfdpwuycnzaa`) needs 065 applied by ops.** Do not apply to production AIIAN if owner policies already exist (the migration is additive `DROP IF EXISTS` + recreate of the *Users can … own brand kits* names only).
+
+---
 
 ## `scripts` deny-all / Guardar 403 (Preview)
 

@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { getProduct, getScripts, getChatSessions, createChatSession, getMessages, addMessage, deleteSessionMessages } from '../services/database'
 import { sendMessageToGrok, DEFAULT_SCRIPT_SETTINGS } from '../services/grokApi'
+import { getTextModelPreference } from '../features/chat-shell/textModelPreference'
 import type { Product, Script, Message, ScriptGenerationSettings, ChatSession } from '../types'
 import Layout from '../components/Layout'
 import ThinkingAnimation from '../components/ThinkingAnimation'
@@ -163,7 +164,8 @@ export default function DescriptionsWorkspace() {
 
       const settings: ScriptGenerationSettings = {
         ...DEFAULT_SCRIPT_SETTINGS,
-        variations: 4
+        variations: 4,
+        model: getTextModelPreference(),
       }
 
       const aiResponse = await sendMessageToGrok(

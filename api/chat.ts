@@ -15,9 +15,10 @@ import {
 } from './data/organic-script-prompts.js'
 import { buildWinningScriptDnaPrompt } from './data/winning-script-dna.js'
 import { runGuionesStructuredPipeline } from './lib/guiones/script-pipeline.js'
-import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { GROK_TEXT_MODEL, grokChatComplete, resolveGrokTextModel } from './lib/grok-models.js'
 import { resolveAuthorizedSessionProduct, isUuid } from './lib/session-access.js'
 import { userHasProductAccess } from './lib/product-access.js'
+import { requireChatShellAccess } from './lib/chat-shell-access.js'
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
@@ -276,7 +277,7 @@ interface ChatMessage {
   content: string
 }
 
-type AIModel = 'grok'
+type AIModel = 'grok' | 'gemini' | 'best' | 'efficient'
 
 interface ScriptTypeConfig {
   venta_directa: number
@@ -1621,12 +1622,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
   }
 
+  let chatModel = GROK_TEXT_MODEL
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Request body is required' })
     }
 
     const { messages, businessDetails, businessContext, productContext, language = 'en', scriptSettings, contextDocuments, activeSalesChannel } = req.body as RequestBody
+    chatModel = resolveGrokTextModel(scriptSettings?.model)
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'Messages array is required' })
@@ -1641,7 +1644,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Legacy /scripts callers omit sessionId and keep prior behavior.
     const rawSessionId = (req.body as { sessionId?: unknown }).sessionId
     let authoritativeProductId: string | undefined
+    let authoritativeSessionContext = ''
     if (rawSessionId != null && rawSessionId !== '') {
+      if (!(await requireChatShellAccess(res, user.id))) return
       if (!isUuid(rawSessionId)) {
         return res.status(400).json({ error: 'Invalid sessionId' })
       }
@@ -1662,6 +1667,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // Authoritative product from server-side session+offers — ignore spoofed brand fields for authz.
       authoritativeProductId = access.productId
+      authoritativeSessionContext = access.session.context?.trim() || ''
     } else {
       // Legacy path: if productId provided, require product access (cheap hardening).
       const legacyProductId = (req.body as { productId?: unknown }).productId
@@ -1842,7 +1848,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
 
     const legacyBriefPrompt = feature === 'description' ? '' : LEGACY_SCRIPT_BRIEF_BLOCK[language]
-    const systemPrompt = basePrompt + legacyBriefPrompt + structuredContextPrompt + legacyContextPrompt + businessRulesPrompt + productRulesPrompt + winningScriptDnaPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt
+    const verifiedSessionPrompt = authoritativeSessionContext
+      ? (language === 'es'
+        ? `\n\n=== CONTEXTO VERIFICADO Y GUARDADO DE ESTA SESION ===\n${authoritativeSessionContext}\nUsa todos estos datos como fuente de verdad. No contradigas reglas, producto, audiencia, oferta ni identidad visual.`
+        : `\n\n=== VERIFIED SAVED SESSION CONTEXT ===\n${authoritativeSessionContext}\nUse every field as source of truth. Do not contradict its rules, product, audience, offer, or visual identity.`)
+      : ''
+    const systemPrompt = basePrompt + legacyBriefPrompt + structuredContextPrompt + legacyContextPrompt + businessRulesPrompt + productRulesPrompt + verifiedSessionPrompt + winningScriptDnaPrompt + styleMemoryPrompt + brandVoicePrompt + scriptTemplatesPrompt + organicRulesPrompt + ctaStrengthPrompt + settingsPrompt + contextDocsPrompt
 
     // Preview mode: return the prompt without calling the AI
     if (req.body.previewOnly) {
@@ -1867,7 +1878,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           userId: user.id,
           userEmail: user.email,
           feature: usageAction,
-          model: GROK_TEXT_MODEL,
+          model: chatModel,
           inputTokens: estimateTokens(JSON.stringify(structured.contextProfile) + structured.promptPreview),
           outputTokens: estimateTokens(structured.content),
           success: true,
@@ -1884,7 +1895,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({
           content: structured.content,
           remaining: remaining - 1,
-          model: GROK_TEXT_MODEL,
+          model: chatModel,
           _debug: {
             systemPrompt: structured.promptPreview,
             contextProfile: structured.contextProfile,
@@ -1909,35 +1920,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }))
     ]
 
-    const chatModel = GROK_TEXT_MODEL
-
-    const response = await fetch(GROK_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${grokApiKey}`
-      },
-      body: JSON.stringify({
-        model: chatModel,
-        messages: grokMessages,
-        temperature: 0.8,
-        max_tokens: 4096
-      })
+    const grok = await grokChatComplete({
+      apiKey: grokApiKey,
+      model: chatModel,
+      messages: grokMessages,
+      temperature: 0.8,
+      maxTokens: 4096,
     })
+    const content = grok.content || 'No response generated'
+    const usage = grok.usage
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Grok API error:', response.status, errorText)
-      return res.status(response.status).json({ 
-        error: `Grok API error: ${response.status}` 
-      })
-    }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content || 'No response generated'
-
-    // Log Grok usage (use actual token counts from response if available)
-    const usage = data.usage || {}
     await logApiUsage({
       userId: user.id,
       userEmail: user.email,
@@ -1946,7 +1938,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
-      metadata: { productType, variations: scriptSettings?.variations, brandKitId: resolvedBrandKit?.id, brandKitName: resolvedBrandKit?.name }
+      metadata: {
+        productType,
+        variations: scriptSettings?.variations,
+        brandKitId: resolvedBrandKit?.id,
+        brandKitName: resolvedBrandKit?.name,
+        grokEndpoint: grok.endpoint,
+      }
     })
 
     // Increment usage counter after successful generation
@@ -1960,7 +1958,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: usageAction,
-      model: GROK_TEXT_MODEL,
+      model: chatModel,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

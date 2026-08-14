@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
+  countBusinessChatSessionsBulk,
   createBrandChatSession,
-  countBusinessChatSessions,
   createBusiness,
+  deleteBusinessWithContents,
   deleteChatSession,
   getBusinessChatSessions,
   getBusinesses,
   getChatSession,
   getFirstUserMessagePreviews,
+  addMessage,
+  insertImageMessageArtifact,
+  replaceSessionOffers,
 } from '../../services/database'
 import type { Business, ChatSession } from '../../types'
 import { selectionsEqual } from './chatShellAsync'
@@ -20,7 +24,10 @@ import {
   selectionToSearchParams,
 } from './chatShellPersistence'
 import { buildMinimalBrandFormData, validateBrandCreateName } from './chatShellBrandCreate'
+import { resolveBusinessBrandKitId } from './chatShellBrandSetup'
+import { isDefaultSessionTitle } from './chatShellSidebar'
 import { resolveNextSessionId, shouldCommitCreatedSession } from './sessionOffer'
+import { invalidateDashboardCache } from '../../hooks/useDashboardData'
 
 function defaultSessionTitle(): string {
   return 'New chat'
@@ -56,11 +63,12 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const boot = bootRef.current
 
   const [businesses, setBusinesses] = useState<Business[]>([])
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [sessionsByBrand, setSessionsByBrand] = useState<Record<string, ChatSession[]>>({})
   const [activeBrandId, setActiveBrandId] = useState<string | null>(() => boot.brandId)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() => boot.sessionId)
+  const [pendingBrandId, setPendingBrandId] = useState<string | null>(null)
   const [loadingBusinesses, setLoadingBusinesses] = useState(true)
-  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [loadingByBrand, setLoadingByBrand] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -78,22 +86,39 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const activeBrandIdRef = useRef<string | null>(boot.brandId)
   /** Bumped on every user-driven selection/create so stale fetches cannot overwrite. */
   const selectionEpochRef = useRef(0)
-  const sessionsRequestIdRef = useRef(0)
+  const sessionsRequestByBrandRef = useRef<Record<string, number>>({})
   const businessesRequestIdRef = useRef(0)
   const createLockRef = useRef(false)
   /** Tombstones for optimistic deletes — prevent stale list fetch from restoring rows. */
   const pendingDeletedRef = useRef<Set<string>>(new Set())
+  const pendingDeletedBrandRef = useRef<Set<string>>(new Set())
   /** True after initial selection hydrate for the current user (list refresh still works). */
   const didHydrateSelectionRef = useRef(false)
   const hydratedUserIdRef = useRef<string | null>(null)
+
+  const sessionsByBrandRef = useRef(sessionsByBrand)
+  sessionsByBrandRef.current = sessionsByBrand
+
+  const sessions = useMemo(
+    () => (activeBrandId ? sessionsByBrand[activeBrandId] || [] : []),
+    [sessionsByBrand, activeBrandId]
+  )
+  const loadingSessions = Boolean(activeBrandId && loadingByBrand[activeBrandId] && sessionsByBrand[activeBrandId] === undefined)
 
   const activeBrand = useMemo(
     () => businesses.find((b) => b.id === activeBrandId) ?? null,
     [businesses, activeBrandId]
   )
   const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeSessionId) ?? null,
-    [sessions, activeSessionId]
+    () => {
+      if (!activeSessionId) return null
+      for (const list of Object.values(sessionsByBrand)) {
+        const found = list.find((s) => s.id === activeSessionId)
+        if (found) return found
+      }
+      return null
+    },
+    [sessionsByBrand, activeSessionId]
   )
 
   const commitSessionId = useCallback((sessionId: string | null) => {
@@ -101,14 +126,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setActiveSessionId(sessionId)
   }, [])
 
-  const bumpSelectionEpoch = useCallback(() => {
-    selectionEpochRef.current += 1
-    return selectionEpochRef.current
-  }, [])
-
   const syncUrlAndStorage = useCallback(
     (brandId: string | null, sessionId: string | null) => {
-      // Never let hydrate/sync rewrite away from authoritative deep-link / Skip pin.
       const auth = authoritativeSessionRef.current
       let nextSessionId = sessionId
       if (auth) {
@@ -124,6 +143,128 @@ export function useChatShellWorkspace(userId: string | undefined) {
     [setSearchParams]
   )
 
+  const bumpSelectionEpoch = useCallback(() => {
+    selectionEpochRef.current += 1
+    return selectionEpochRef.current
+  }, [])
+
+  const writeBrandSessions = useCallback((brandId: string, list: ChatSession[]) => {
+    setSessionsByBrand((prev) => ({ ...prev, [brandId]: list }))
+  }, [])
+
+  const patchBrandSessions = useCallback((
+    brandId: string,
+    updater: (prev: ChatSession[]) => ChatSession[]
+  ) => {
+    setSessionsByBrand((prev) => ({
+      ...prev,
+      [brandId]: updater(prev[brandId] || []),
+    }))
+  }, [])
+
+  const mapCachedSessions = useCallback((updater: (session: ChatSession) => ChatSession) => {
+    setSessionsByBrand((prev) => {
+      const next: Record<string, ChatSession[]> = {}
+      for (const [id, list] of Object.entries(prev)) {
+        next[id] = list.map(updater)
+      }
+      return next
+    })
+  }, [])
+
+  const loadBrandSessions = useCallback(async (
+    brandId: string,
+    mode: 'hydrate' | 'prefetch'
+  ) => {
+    const requestId = (sessionsRequestByBrandRef.current[brandId] || 0) + 1
+    sessionsRequestByBrandRef.current[brandId] = requestId
+    const epochAtStart = selectionEpochRef.current
+    const cached = sessionsByBrandRef.current[brandId]
+    const silent = cached !== undefined
+
+    if (!silent) {
+      setLoadingByBrand((prev) => ({ ...prev, [brandId]: true }))
+    }
+    if (mode === 'hydrate') setError(null)
+
+    try {
+      const list = (await getBusinessChatSessions(brandId)).filter(
+        (s) => !pendingDeletedRef.current.has(s.id)
+      )
+      if (sessionsRequestByBrandRef.current[brandId] !== requestId) return list
+      if (pendingDeletedBrandRef.current.has(brandId)) return list
+
+      const currentId = activeSessionIdRef.current
+      const optimistic =
+        currentId &&
+        !pendingDeletedRef.current.has(currentId) &&
+        !list.some((s) => s.id === currentId)
+          ? (sessionsByBrandRef.current[brandId] || []).filter((s) => s.id === currentId)
+          : []
+      const next = optimistic.length === 0 ? list : [...optimistic, ...list]
+      writeBrandSessions(brandId, next.filter((s) => !pendingDeletedRef.current.has(s.id)))
+      setSessionCounts((prev) => ({ ...prev, [brandId]: list.length }))
+
+      const previewIds = list.filter((s) => isDefaultSessionTitle(s.title)).map((s) => s.id)
+      if (previewIds.length > 0) {
+        void getFirstUserMessagePreviews(previewIds)
+          .then((previews) => {
+            if (sessionsRequestByBrandRef.current[brandId] !== requestId) return
+            setFirstUserPreviews((prev) => ({ ...prev, ...previews }))
+          })
+          .catch(() => { /* title fallbacks still work */ })
+      }
+
+      if (mode !== 'hydrate') return list
+      if (activeBrandIdRef.current !== brandId) return list
+      if (selectionEpochRef.current !== epochAtStart) return list
+
+      const liveSessionId = activeSessionIdRef.current
+      const authId = authoritativeSessionRef.current
+      const urlId = readUrlSessionId() || authId
+      const preferredId = preferredSessionRef.current || authId
+      const nextSessionId = resolveNextSessionId({
+        sessionIds: list.map((s) => s.id),
+        currentId:
+          liveSessionId && pendingDeletedRef.current.has(liveSessionId) ? null : liveSessionId,
+        urlId,
+        preferredId,
+      })
+
+      if (selectionEpochRef.current !== epochAtStart) return list
+
+      const pinned =
+        authId
+        || urlId
+        || preferredId
+        || (liveSessionId && !pendingDeletedRef.current.has(liveSessionId) ? liveSessionId : null)
+      const stickId =
+        pinned && nextSessionId && nextSessionId !== pinned && !pendingDeletedRef.current.has(pinned)
+          ? pinned
+          : nextSessionId
+
+      if (stickId !== activeSessionIdRef.current) {
+        commitSessionId(stickId)
+      }
+      if (stickId) {
+        preferredSessionRef.current = preferredSessionRef.current || stickId
+      }
+      syncUrlAndStorage(brandId, stickId ?? pinned)
+      return list
+    } catch (err) {
+      if (sessionsRequestByBrandRef.current[brandId] !== requestId) return []
+      if (mode === 'hydrate' && selectionEpochRef.current === epochAtStart) {
+        console.error(err)
+        setError(err instanceof Error ? err.message : 'Failed to load sessions')
+      }
+      return sessionsByBrandRef.current[brandId] || []
+    } finally {
+      if (sessionsRequestByBrandRef.current[brandId] === requestId) {
+        setLoadingByBrand((prev) => ({ ...prev, [brandId]: false }))
+      }
+    }
+  }, [commitSessionId, syncUrlAndStorage, writeBrandSessions])
+
   const setAuthoritativeSession = useCallback(
     (sessionId: string | null) => {
       authoritativeSessionRef.current = sessionId
@@ -135,19 +276,37 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
   const selectBrand = useCallback(
     (brandId: string) => {
-      if (brandId === activeBrandIdRef.current) return
-      bumpSelectionEpoch()
-      preferredSessionRef.current = null
-      authoritativeSessionRef.current = null
-      activeBrandIdRef.current = brandId
-      setActiveBrandId(brandId)
-      commitSessionId(null)
-      // Keep prior sessions visible until the new brand list arrives (no layout thrash).
+      if (brandId === activeBrandIdRef.current) {
+        setPendingBrandId(null)
+        return
+      }
+      const epoch = bumpSelectionEpoch()
+      setPendingBrandId(brandId)
       setNotice(null)
-      syncUrlAndStorage(brandId, null)
+      void (async () => {
+        const list = await loadBrandSessions(brandId, 'prefetch')
+        if (selectionEpochRef.current !== epoch) return
+        const nextSessionId = list[0]?.id ?? null
+        activeBrandIdRef.current = brandId
+        setActiveBrandId(brandId)
+        setPendingBrandId(null)
+        if (nextSessionId) {
+          setAuthoritativeSession(nextSessionId)
+        } else {
+          authoritativeSessionRef.current = null
+          preferredSessionRef.current = null
+          commitSessionId(null)
+        }
+        syncUrlAndStorage(brandId, nextSessionId)
+      })()
     },
-    [bumpSelectionEpoch, commitSessionId, syncUrlAndStorage]
+    [bumpSelectionEpoch, commitSessionId, loadBrandSessions, setAuthoritativeSession, syncUrlAndStorage]
   )
+
+  const prefetchBrandSessions = useCallback((brandId: string) => {
+    if (!brandId) return
+    void loadBrandSessions(brandId, 'prefetch')
+  }, [loadBrandSessions])
 
   const selectSession = useCallback(
     (session: ChatSession) => {
@@ -204,21 +363,14 @@ export function useChatShellWorkspace(userId: string | undefined) {
     try {
       const list = await getBusinesses(userId)
       if (requestId !== businessesRequestIdRef.current) return
-      setBusinesses(list)
+      setBusinesses(list.filter((b) => !pendingDeletedBrandRef.current.has(b.id)))
 
-      void Promise.all(
-        list.map(async (brand) => {
-          try {
-            const count = await countBusinessChatSessions(brand.id)
-            if (requestId !== businessesRequestIdRef.current) return
-            setSessionCounts((prev) => (
-              prev[brand.id] === count ? prev : { ...prev, [brand.id]: count }
-            ))
-          } catch {
-            /* counts are best-effort for collapsed labels */
-          }
+      void countBusinessChatSessionsBulk(list.map((b) => b.id))
+        .then((counts) => {
+          if (requestId !== businessesRequestIdRef.current) return
+          setSessionCounts((prev) => ({ ...prev, ...counts }))
         })
-      )
+        .catch(() => { /* counts are best-effort */ })
 
       // Always refresh the brand list; only apply selection hydrate once, and
       // never overwrite a newer user click that happened while this awaited.
@@ -281,114 +433,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
   }, [refreshBusinesses])
 
   useEffect(() => {
-    if (!activeBrandId) {
-      setSessions([])
-      setLoadingSessions(false)
-      return
-    }
-
-    const brandId = activeBrandId
-    const requestId = ++sessionsRequestIdRef.current
-    const epochAtStart = selectionEpochRef.current
-
-    let cancelled = false
-    setLoadingSessions(true)
-    setError(null)
-
-    void (async () => {
-      try {
-        const list = (await getBusinessChatSessions(brandId)).filter(
-          (s) => !pendingDeletedRef.current.has(s.id)
-        )
-        if (cancelled || requestId !== sessionsRequestIdRef.current) return
-        if (activeBrandIdRef.current !== brandId) return
-
-        const epochStale = selectionEpochRef.current !== epochAtStart
-        const currentId = activeSessionIdRef.current
-
-        // Always refresh the list, but never drop an optimistic row for the
-        // live selection (create can race ahead of the server list).
-        setSessions((prev) => {
-          const optimistic =
-            currentId &&
-            !pendingDeletedRef.current.has(currentId) &&
-            !list.some((s) => s.id === currentId)
-              ? prev.filter((s) => s.id === currentId)
-              : []
-          const next = optimistic.length === 0 ? list : [...optimistic, ...list]
-          return next.filter((s) => !pendingDeletedRef.current.has(s.id))
-        })
-        setSessionCounts((prev) => ({ ...prev, [brandId]: list.length }))
-
-        void getFirstUserMessagePreviews(list.map((s) => s.id))
-          .then((previews) => {
-            if (cancelled || requestId !== sessionsRequestIdRef.current) return
-            if (activeBrandIdRef.current !== brandId) return
-            setFirstUserPreviews((prev) => ({ ...prev, ...previews }))
-          })
-          .catch(() => { /* title fallbacks still work */ })
-
-        // A newer click/create happened while this fetch was in flight — keep list only.
-        if (epochStale) {
-          return
-        }
-
-        // Read selection at completion time — authoritative deep-link / Skip pin
-        // beats mutable window.location (which syncUrl may have raced).
-        const authId = authoritativeSessionRef.current
-        const urlId = readUrlSessionId() || authId
-        const preferredId = preferredSessionRef.current || authId
-        const nextSessionId = resolveNextSessionId({
-          sessionIds: list.map((s) => s.id),
-          currentId:
-            currentId && pendingDeletedRef.current.has(currentId) ? null : currentId,
-          urlId,
-          preferredId,
-        })
-
-        if (selectionEpochRef.current !== epochAtStart) return
-
-        // Stick to authoritative / url / preferred — never brand-newest rewrite.
-        const pinned =
-          authId
-          || urlId
-          || preferredId
-          || (currentId && !pendingDeletedRef.current.has(currentId) ? currentId : null)
-        const stickId =
-          pinned && nextSessionId && nextSessionId !== pinned && !pendingDeletedRef.current.has(pinned)
-            ? pinned
-            : nextSessionId
-
-        if (stickId !== activeSessionIdRef.current) {
-          commitSessionId(stickId)
-        }
-        if (stickId) {
-          preferredSessionRef.current = preferredSessionRef.current || stickId
-        }
-        syncUrlAndStorage(brandId, stickId ?? pinned)
-      } catch (err) {
-        if (cancelled || requestId !== sessionsRequestIdRef.current) return
-        if (selectionEpochRef.current !== epochAtStart) return
-        console.error(err)
-        setError(err instanceof Error ? err.message : 'Failed to load sessions')
-        // Preserve active session + URL on list fetch failure — do not rewrite to null/newest.
-        setSessions((prev) => {
-          const keepId = activeSessionIdRef.current
-          if (!keepId) return []
-          return prev.filter((s) => s.id === keepId)
-        })
-      } finally {
-        if (!cancelled && requestId === sessionsRequestIdRef.current) {
-          setLoadingSessions(false)
-        }
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeBrandId])
+    if (!activeBrandId) return
+    void loadBrandSessions(activeBrandId, 'hydrate')
+  }, [activeBrandId, loadBrandSessions])
 
   const createSession = useCallback(async (title?: string) => {
     if (!userId) return
@@ -407,12 +454,14 @@ export function useChatShellWorkspace(userId: string | undefined) {
       const session = await createBrandChatSession(
         brandId,
         userId,
-        title || defaultSessionTitle()
+        title || defaultSessionTitle(),
+        undefined,
+        resolveBusinessBrandKitId(sessions)
       )
       // Never mutate another brand's list (contamination). Same-brand can surface the row.
       if (activeBrandIdRef.current !== brandId) return
       // Always surface the created row in the list…
-      setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+      patchBrandSessions(brandId, (prev) => [session, ...prev.filter((s) => s.id !== session.id)])
       // …but only select it if this create is still the live user action.
       // Skip/pin bumps epoch so a deferred create cannot rewrite ?session= A→B.
       if (!shouldCommitCreatedSession(epoch, selectionEpochRef.current)) return
@@ -425,7 +474,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
+  }, [userId, busy, sessions, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   const createQuickSession = useCallback(async () => {
     if (!userId) return
@@ -443,7 +492,15 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setError(null)
     setNotice(null)
     try {
-      const session = await createBrandChatSession(brandId, userId, quickSessionTitle())
+      const session = await createBrandChatSession(
+        brandId,
+        userId,
+        quickSessionTitle(),
+        undefined,
+        resolveBusinessBrandKitId(
+          brandId === activeBrandIdRef.current ? sessions : []
+        )
+      )
       const epochLive = shouldCommitCreatedSession(epoch, selectionEpochRef.current)
 
       if (brandId !== activeBrandIdRef.current) {
@@ -451,7 +508,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
         if (!epochLive) return
         activeBrandIdRef.current = brandId
         setActiveBrandId(brandId)
-        setSessions([session])
+        writeBrandSessions(brandId, [session])
         setAuthoritativeSession(session.id)
         syncUrlAndStorage(brandId, session.id)
         return
@@ -459,7 +516,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
       if (activeBrandIdRef.current !== brandId) return
       // Surface row even if Skip/pin made this create stale — never steal ?session=.
-      setSessions((prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+      patchBrandSessions(brandId, (prev) => [session, ...prev.filter((s) => s.id !== session.id)])
       if (!epochLive) return
       setAuthoritativeSession(session.id)
       syncUrlAndStorage(brandId, session.id)
@@ -470,7 +527,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
       createLockRef.current = false
       setBusy(false)
     }
-  }, [userId, businesses, busy, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
+  }, [userId, businesses, busy, sessions, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   /**
    * O3: in-shell New brand — createBusiness + first session, stay on /chat.
@@ -508,11 +565,12 @@ export function useChatShellWorkspace(userId: string | undefined) {
       )
       if (selectionEpochRef.current !== epoch) return false
 
-      setSessions([session])
+      writeBrandSessions(brand.id, [session])
       setSessionCounts((prev) => ({ ...prev, [brand.id]: 1 }))
       setAuthoritativeSession(session.id)
       syncUrlAndStorage(brand.id, session.id)
       setNotice(null)
+      invalidateDashboardCache()
       return true
     } catch (err) {
       console.error(err)
@@ -525,7 +583,12 @@ export function useChatShellWorkspace(userId: string | undefined) {
   }, [userId, busy, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   const patchActiveSession = useCallback((next: ChatSession) => {
-    setSessions((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)))
+    mapCachedSessions((s) => (s.id === next.id ? { ...s, ...next } : s))
+  }, [mapCachedSessions])
+
+  const patchBrand = useCallback((next: Business) => {
+    setBusinesses((prev) => prev.map((row) => (row.id === next.id ? { ...row, ...next } : row)))
+    invalidateDashboardCache()
   }, [])
 
   /**
@@ -551,7 +614,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setError(null)
 
     // Optimistic remove — non-active deletes must not touch active session / URL.
-    setSessions(siblings)
+    if (brandId) writeBrandSessions(brandId, siblings)
     setFirstUserPreviews((prev) => {
       if (!(sessionId in prev)) return prev
       const next = { ...prev }
@@ -578,7 +641,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     } catch (err) {
       console.error(err)
       pendingDeletedRef.current.delete(sessionId)
-      setSessions(sessionsSnapshot)
+      if (brandId) writeBrandSessions(brandId, sessionsSnapshot)
       if (prevPreview !== undefined) {
         setFirstUserPreviews((prev) => ({ ...prev, [sessionId]: prevPreview }))
       }
@@ -604,9 +667,138 @@ export function useChatShellWorkspace(userId: string | undefined) {
     syncUrlAndStorage,
   ])
 
+  const deleteBrand = useCallback(async (brandId: string) => {
+    if (!brandId || busy) return
+    if (pendingDeletedBrandRef.current.has(brandId)) return
+
+    const businessesSnapshot = businesses
+    const sessionsSnapshot = sessionsByBrand
+    const countsSnapshot = sessionCounts
+    const wasActive = activeBrandIdRef.current === brandId
+    const remaining = businesses.filter((b) => b.id !== brandId)
+    const fallback = remaining[0] ?? null
+    const prevBrandId = activeBrandIdRef.current
+    const prevSessionId = activeSessionIdRef.current
+
+    pendingDeletedBrandRef.current.add(brandId)
+    bumpSelectionEpoch()
+    setBusy(true)
+    setError(null)
+    setBusinesses(remaining)
+    setSessionCounts((prev) => {
+      const next = { ...prev }
+      delete next[brandId]
+      return next
+    })
+    if (wasActive) {
+      setSessionsByBrand((prev) => {
+        const next = { ...prev }
+        delete next[brandId]
+        return next
+      })
+      activeBrandIdRef.current = fallback?.id ?? null
+      setActiveBrandId(fallback?.id ?? null)
+      setAuthoritativeSession(null)
+      syncUrlAndStorage(fallback?.id ?? null, null)
+    }
+
+    try {
+      await deleteBusinessWithContents(brandId)
+      pendingDeletedBrandRef.current.delete(brandId)
+      invalidateDashboardCache()
+      setNotice(null)
+    } catch (err) {
+      console.error(err)
+      pendingDeletedBrandRef.current.delete(brandId)
+      try {
+        await refreshBusinesses()
+      } catch {
+        setBusinesses(businessesSnapshot)
+        setSessionsByBrand(sessionsSnapshot)
+        setSessionCounts(countsSnapshot)
+      }
+      if (wasActive) {
+        bumpSelectionEpoch()
+        activeBrandIdRef.current = prevBrandId
+        setActiveBrandId(prevBrandId)
+        setAuthoritativeSession(prevSessionId)
+        syncUrlAndStorage(prevBrandId, prevSessionId)
+      }
+      setError(err instanceof Error ? err.message : 'Failed to delete folder')
+    } finally {
+      setBusy(false)
+    }
+  }, [
+    busy,
+    businesses,
+    sessions,
+    sessionCounts,
+    bumpSelectionEpoch,
+    setAuthoritativeSession,
+    syncUrlAndStorage,
+    refreshBusinesses,
+  ])
+
+  const createImageEditSession = useCallback(async (options: {
+    title: string
+    productId: string
+    productImageId: string
+    userText: string
+    assistantText: string
+  }) => {
+    if (!userId) return null
+    const brandId = activeBrandIdRef.current
+    if (!brandId) {
+      setNotice('Pick a brand first to edit an image.')
+      return null
+    }
+    if (createLockRef.current || busy) return null
+    createLockRef.current = true
+    const epoch = bumpSelectionEpoch()
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const session = await createBrandChatSession(
+        brandId,
+        userId,
+        options.title,
+        undefined,
+        resolveBusinessBrandKitId(sessions)
+      )
+      await replaceSessionOffers(session.id, brandId, [options.productId], userId)
+      await addMessage(session.id, 'user', options.userText)
+      const assistant = await addMessage(session.id, 'assistant', options.assistantText)
+      await insertImageMessageArtifact({
+        sessionId: session.id,
+        messageId: assistant.id,
+        productId: options.productId,
+        productImageId: options.productImageId,
+        ordinal: 1,
+        userId,
+        actionType: 'edit',
+        metadata: { source: 'request_edit' },
+      })
+      if (activeBrandIdRef.current !== brandId) return session
+      patchBrandSessions(brandId, (prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+      if (!shouldCommitCreatedSession(epoch, selectionEpochRef.current)) return session
+      setAuthoritativeSession(session.id)
+      syncUrlAndStorage(brandId, session.id)
+      return session
+    } catch (err) {
+      console.error(err)
+      setError(err instanceof Error ? err.message : 'Failed to open image edit chat')
+      return null
+    } finally {
+      createLockRef.current = false
+      setBusy(false)
+    }
+  }, [userId, busy, sessions, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
+
   /** Touch-load single session meta if missing from list (URL deep link). */
   useEffect(() => {
-    if (!activeSessionId || sessions.some((s) => s.id === activeSessionId)) return
+    const cached = Object.values(sessionsByBrand).flat()
+    if (!activeSessionId || cached.some((s) => s.id === activeSessionId)) return
     let cancelled = false
     const sid = activeSessionId
     const epoch = selectionEpochRef.current
@@ -617,34 +809,39 @@ export function useChatShellWorkspace(userId: string | undefined) {
       if (activeSessionIdRef.current !== sid) return
       if (selectionEpochRef.current !== epoch) return
       if (!row) {
-        // Transient miss or deleted: keep the id — never rewrite to a sibling
-        // (A→B snap). Explicit deleteSession owns fallback selection.
         preferredSessionRef.current = sid
         return
       }
-      if (row.business_id && row.business_id !== activeBrandIdRef.current) {
+      const rowBrandId = row.business_id
+      if (rowBrandId && rowBrandId !== activeBrandIdRef.current) {
         authoritativeSessionRef.current = row.id
         preferredSessionRef.current = row.id
-        activeBrandIdRef.current = row.business_id
-        setActiveBrandId(row.business_id)
+        activeBrandIdRef.current = rowBrandId
+        setActiveBrandId(rowBrandId)
         commitSessionId(row.id)
-        syncUrlAndStorage(row.business_id, row.id)
-        setSessions((prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
+        syncUrlAndStorage(rowBrandId, row.id)
+        patchBrandSessions(rowBrandId, (prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
         return
       }
       authoritativeSessionRef.current = row.id
       preferredSessionRef.current = row.id
-      setSessions((prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
+      const brandId = rowBrandId || activeBrandIdRef.current
+      if (brandId) {
+        patchBrandSessions(brandId, (prev) => (prev.some((s) => s.id === row.id) ? prev : [row, ...prev]))
+      }
       syncUrlAndStorage(activeBrandIdRef.current, row.id)
     })()
     return () => {
       cancelled = true
     }
-  }, [activeSessionId, sessions, commitSessionId, syncUrlAndStorage])
+  }, [activeSessionId, sessionsByBrand, commitSessionId, syncUrlAndStorage, patchBrandSessions])
 
   return {
     businesses,
     sessions,
+    sessionsByBrand,
+    pendingBrandId,
+    loadingByBrand,
     sessionCounts,
     firstUserPreviews,
     activeBrand,
@@ -657,13 +854,17 @@ export function useChatShellWorkspace(userId: string | undefined) {
     error,
     notice,
     selectBrand,
+    prefetchBrandSessions,
     selectSession,
     keepSessionSelected,
     createSession,
     createQuickSession,
     createBrand,
     deleteSession,
+    deleteBrand,
+    createImageEditSession,
     patchActiveSession,
+    patchBrand,
     refreshBusinesses,
   }
 }

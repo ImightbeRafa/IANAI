@@ -4,6 +4,11 @@ import {
   normalizeOfferPositions,
   planKeptOfferPositionUpdates,
 } from '../features/chat-shell/sessionOffer'
+import {
+  assertProductDeleteResult,
+  planBusinessContentDeletion,
+  runBusinessContentDeletion,
+} from './businessDelete'
 import type { 
   Profile, 
   Team, 
@@ -33,6 +38,55 @@ import type {
   BrandKitFormData,
   ScriptTemplate
 } from '../types'
+
+export function isMissingRpcError(error: { code?: string; message?: string; details?: string; hint?: string } | null | undefined): boolean {
+  if (!error) return false
+  const blob = `${error.code || ''} ${error.message || ''} ${error.details || ''} ${error.hint || ''}`
+  return (
+    error.code === 'PGRST202'
+    || error.code === '42883'
+    || error.code === '404'
+    || /could not find the function/i.test(blob)
+    || /does not exist/i.test(blob)
+    || /not find.*get_usage_limits/i.test(blob)
+  )
+}
+
+export function isMissingRowError(error: { code?: string; message?: string; details?: string } | null | undefined): boolean {
+  if (!error) return false
+  const blob = `${error.code || ''} ${error.message || ''} ${error.details || ''}`
+  return (
+    error.code === 'PGRST116'
+    || /0 rows/i.test(blob)
+    || /Cannot coerce the result to a single JSON object/i.test(blob)
+  )
+}
+
+export function isBrandKitFkError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false
+  const blob = `${error.code || ''} ${error.message || ''}`
+  return (
+    error.code === '23503'
+    || error.code === '409'
+    || /chat_sessions_brand_kit/i.test(blob)
+    || /brand_kits/i.test(blob) && /foreign key/i.test(blob)
+  )
+}
+
+export function isRlsDeniedError(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false
+  const blob = `${error.code || ''} ${error.message || ''}`
+  return (
+    error.code === '42501'
+    || error.code === 'PGRST301'
+    || /row-level security/i.test(blob)
+    || /permission denied/i.test(blob)
+  )
+}
+
+function throwDbError(error: { message?: string } | null | undefined, fallback: string): never {
+  throw new Error(error?.message || fallback)
+}
 
 // =============================================
 // PROFILE FUNCTIONS
@@ -182,6 +236,68 @@ export async function createBusiness(
   return business
 }
 
+const BUSINESS_UPDATE_COLUMNS = new Set([
+  'name',
+  'sales_channels',
+  'location',
+  'does_shipping',
+  'shipping_method',
+  'icp_description',
+])
+
+export async function updateBusiness(
+  businessId: string,
+  data: Partial<BusinessFormData>
+): Promise<Business> {
+  const allowed: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (!BUSINESS_UPDATE_COLUMNS.has(key) || value === undefined) continue
+    allowed[key] = value
+  }
+
+  if (Object.keys(allowed).length > 0) {
+    const { error } = await supabase
+      .from('businesses')
+      .update(allowed)
+      .eq('id', businessId)
+    if (error) throw error
+  }
+
+  if (data.target_audiences) {
+    const { error: deleteError } = await supabase
+      .from('business_target_audiences')
+      .delete()
+      .eq('business_id', businessId)
+    if (deleteError) throw deleteError
+
+    if (data.target_audiences.length > 0) {
+      const audienceInserts = data.target_audiences.map((a) => ({
+        business_id: businessId,
+        sex: a.sex,
+        age_min: a.age_min,
+        age_max: a.age_max,
+        geographic_scope: a.geographic_scope,
+        geographic_scope_custom: a.geographic_scope_custom || null,
+        has_specific_profession: a.has_specific_profession,
+        profession_description: a.profession_description || null,
+      }))
+      const { error: audError } = await supabase
+        .from('business_target_audiences')
+        .insert(audienceInserts)
+      if (audError) throw audError
+    }
+  }
+
+  const { data: business, error: fetchError } = await supabase
+    .from('businesses')
+    .select('*, target_audiences:business_target_audiences(*)')
+    .eq('id', businessId)
+    .single()
+
+  if (fetchError) throw fetchError
+  return business
+}
+
 export async function getBusinesses(userId: string): Promise<Business[]> {
   const { data, error } = await supabase
     .from('businesses')
@@ -194,12 +310,20 @@ export async function getBusinesses(userId: string): Promise<Business[]> {
 }
 
 export async function deleteBusiness(businessId: string): Promise<void> {
-  const { error } = await supabase
+  if (!businessId) {
+    throw new Error('Folder delete failed: missing folder id.')
+  }
+
+  const { data, error } = await supabase
     .from('businesses')
     .delete()
     .eq('id', businessId)
+    .select('id')
 
   if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Folder was not deleted. Refresh and try again.')
+  }
 }
 
 // =============================================
@@ -371,6 +495,16 @@ export async function getBusinessProducts(businessId: string): Promise<Product[]
   return data || []
 }
 
+export async function getBusinessProductIds(businessId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('products')
+    .select('id')
+    .eq('business_id', businessId)
+
+  if (error) throw error
+  return (data || []).map((row) => row.id as string).filter(Boolean)
+}
+
 export async function getProduct(productId: string): Promise<Product | null> {
   const { data, error } = await supabase
     .from('products')
@@ -395,15 +529,24 @@ export async function updateProduct(productId: string, updates: Partial<Product>
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
-  const { error } = await supabase
+  if (!productId) {
+    throw new Error('Product delete failed: missing product id.')
+  }
+  const { data, error } = await supabase
     .from('products')
     .delete()
     .eq('id', productId)
+    .select('id')
 
   if (error) throw error
+  assertProductDeleteResult(data)
 }
 
 export const QUICK_POST_PRODUCT_NAME = 'Quick Use Image Studio'
+
+export function isQuickPostSentinel(product: { name?: string | null }): boolean {
+  return product.name === QUICK_POST_PRODUCT_NAME
+}
 
 export async function getOrCreateQuickPostProduct(userId: string): Promise<Product> {
   const { data: existing, error: lookupError } = await supabase
@@ -471,7 +614,7 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
 
 /** Safe client updates — never includes user_id / business_id / product_id (immutable after insert). */
 export type ChatSessionSafeUpdates = Partial<
-  Pick<ChatSession, 'title' | 'status' | 'context' | 'primary_channel' | 'awareness_level'>
+  Pick<ChatSession, 'title' | 'status' | 'context' | 'primary_channel' | 'awareness_level' | 'brand_kit_id'>
 >
 
 export async function updateChatSession(
@@ -484,6 +627,7 @@ export async function updateChatSession(
   if (updates.context !== undefined) allowed.context = updates.context
   if (updates.primary_channel !== undefined) allowed.primary_channel = updates.primary_channel
   if (updates.awareness_level !== undefined) allowed.awareness_level = updates.awareness_level
+  if (updates.brand_kit_id !== undefined) allowed.brand_kit_id = updates.brand_kit_id
 
   const { data, error } = await supabase
     .from('chat_sessions')
@@ -492,8 +636,25 @@ export async function updateChatSession(
     .select('*')
     .single()
 
+  if (!error && data) return data
+  if (error && allowed.brand_kit_id && isBrandKitFkError(error)) {
+    console.warn('Session brand kit link skipped:', error.message)
+    const { brand_kit_id: _drop, ...rest } = allowed
+    if (Object.keys(rest).length === 0) {
+      const current = await getChatSession(sessionId)
+      if (current) return current
+    } else {
+      const retry = await supabase
+        .from('chat_sessions')
+        .update(rest)
+        .eq('id', sessionId)
+        .select('*')
+        .single()
+      if (!retry.error && retry.data) return retry.data
+    }
+  }
   if (error) throw error
-  return data
+  throw new Error('Failed to update session')
 }
 
 /**
@@ -504,7 +665,8 @@ export async function createBrandChatSession(
   businessId: string,
   userId: string,
   title: string = 'New session',
-  context?: string
+  context?: string,
+  brandKitId?: string | null
 ): Promise<ChatSession> {
   const { data, error } = await supabase
     .from('chat_sessions')
@@ -514,6 +676,7 @@ export async function createBrandChatSession(
       user_id: userId,
       title,
       ...(context ? { context } : {}),
+      ...(brandKitId ? { brand_kit_id: brandKitId } : {}),
     })
     .select('*')
     .single()
@@ -535,6 +698,35 @@ export async function getBusinessChatSessions(businessId: string): Promise<ChatS
   return data || []
 }
 
+/** Every session id for a brand, including archived — required before folder delete. */
+export async function getAllBusinessChatSessionIds(businessId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('chat_sessions')
+    .select('id')
+    .eq('business_id', businessId)
+
+  if (error) throw error
+  return (data || []).map((row) => row.id as string).filter(Boolean)
+}
+
+/** Delete chats, then offers/products, then the folder. Fail-closed if any product remains. */
+export async function deleteBusinessWithContents(businessId: string): Promise<void> {
+  if (!businessId) {
+    throw new Error('Folder delete failed: missing folder id.')
+  }
+  const [sessionIds, productIds] = await Promise.all([
+    getAllBusinessChatSessionIds(businessId),
+    getBusinessProductIds(businessId),
+  ])
+  const steps = planBusinessContentDeletion({ businessId, sessionIds, productIds })
+  await runBusinessContentDeletion(steps, {
+    deleteSession: deleteChatSession,
+    deleteProduct,
+    getRemainingProductIds: () => getBusinessProductIds(businessId),
+    deleteBusinessRow: deleteBusiness,
+  })
+}
+
 /** Lightweight per-brand session count for collapsed sidebar labels. */
 export async function countBusinessChatSessions(businessId: string): Promise<number> {
   const { count, error } = await supabase
@@ -545,6 +737,207 @@ export async function countBusinessChatSessions(businessId: string): Promise<num
 
   if (error) throw error
   return count ?? 0
+}
+
+/** One query for all brand session counts (avoids N+1 on hydrate). */
+export async function countBusinessChatSessionsBulk(
+  businessIds: string[]
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {}
+  for (const id of businessIds) out[id] = 0
+  if (businessIds.length === 0) return out
+  const { data, error } = await supabase
+    .from('chat_sessions')
+    .select('business_id')
+    .in('business_id', businessIds)
+    .neq('status', 'archived')
+  if (error) throw error
+  for (const row of data || []) {
+    const id = row.business_id as string | null
+    if (!id) continue
+    out[id] = (out[id] || 0) + 1
+  }
+  return out
+}
+
+export type AppFeatureFlagState = 'enabled' | 'disabled' | 'unreadable'
+
+export interface ChatShellRolloutRow {
+  killSwitch: AppFeatureFlagState
+  betaAccess: boolean | null
+  preferredUi: 'classic' | 'chat' | null
+}
+
+export async function getChatShellRollout(userId: string | null | undefined): Promise<ChatShellRolloutRow> {
+  const killSwitch = await getAppFeatureFlag('chat_shell')
+  if (!userId) {
+    return { killSwitch, betaAccess: null, preferredUi: null }
+  }
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('chat_beta_access, preferred_ui')
+      .eq('id', userId)
+      .maybeSingle()
+    if (error || !data) {
+      return { killSwitch, betaAccess: null, preferredUi: null }
+    }
+    const preferred = data.preferred_ui === 'chat' || data.preferred_ui === 'classic'
+      ? data.preferred_ui
+      : null
+    return {
+      killSwitch,
+      betaAccess: data.chat_beta_access === true ? true : data.chat_beta_access === false ? false : null,
+      preferredUi: preferred,
+    }
+  } catch {
+    return { killSwitch, betaAccess: null, preferredUi: null }
+  }
+}
+
+export async function updatePreferredUi(
+  userId: string,
+  preferredUi: 'classic' | 'chat'
+): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ preferred_ui: preferredUi })
+    .eq('id', userId)
+  if (error) throw error
+}
+
+export async function assignUnassignedProductToBusiness(
+  userId: string,
+  productId: string,
+  businessId: string
+): Promise<Product> {
+  const { data, error } = await supabase
+    .from('products')
+    .update({ business_id: businessId })
+    .eq('id', productId)
+    .eq('owner_id', userId)
+    .is('business_id', null)
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  if (!data) {
+    throw new Error('Product is already assigned or was not found')
+  }
+  return data as Product
+}
+
+export async function getAppFeatureFlag(key: string): Promise<AppFeatureFlagState> {
+  try {
+    const { data, error } = await supabase
+      .from('app_feature_flags')
+      .select('enabled')
+      .eq('key', key)
+      .maybeSingle()
+    if (error) return 'unreadable'
+    if (!data) return 'disabled'
+    return data.enabled === true ? 'enabled' : 'disabled'
+  } catch {
+    return 'unreadable'
+  }
+}
+
+export interface UsageLimitsRow {
+  plan: string
+  scriptsUsed: number
+  scriptsLimit: number
+  imagesUsed: number
+  imagesLimit: number
+  bonusImages: number
+  descriptionsUsed: number
+  descriptionsLimit: number
+  repliesUsed: number
+  repliesLimit: number
+}
+
+/** Plan + monthly usage. Prefer RPC `get_usage_limits`; fall back to table reads. */
+let usageRpcMissing = false
+let usageLimitsInflight: Promise<UsageLimitsRow> | null = null
+
+export async function getUsageLimits(userId: string): Promise<UsageLimitsRow> {
+  if (usageLimitsInflight) return usageLimitsInflight
+  const pending = loadUsageLimits(userId)
+  usageLimitsInflight = pending
+  try {
+    return await pending
+  } finally {
+    if (usageLimitsInflight === pending) usageLimitsInflight = null
+  }
+}
+
+async function loadUsageLimits(userId: string): Promise<UsageLimitsRow> {
+  if (!usageRpcMissing) {
+    try {
+      const { data, error } = await supabase.rpc('get_usage_limits', { p_user_id: userId })
+      if (!error && data) {
+        return {
+          plan: data.plan || 'free',
+          scriptsUsed: data.scriptsUsed || 0,
+          scriptsLimit: data.scriptsLimit ?? 10,
+          imagesUsed: data.imagesUsed || 0,
+          imagesLimit: data.imagesLimit ?? 1,
+          bonusImages: data.bonusImages || 0,
+          descriptionsUsed: data.descriptionsUsed || 0,
+          descriptionsLimit: data.descriptionsLimit ?? 10,
+          repliesUsed: data.repliesUsed || 0,
+          repliesLimit: data.repliesLimit ?? 10,
+        }
+      }
+      if (isMissingRpcError(error)) usageRpcMissing = true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (isMissingRpcError({ message }) || /\b404\b/.test(message)) usageRpcMissing = true
+    }
+  }
+
+  const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
+  const [subRes, usageRes, profileRes] = await Promise.all([
+    supabase
+      .from('subscriptions')
+      .select('plan, status')
+      .eq('user_id', userId)
+      .in('status', ['active', 'trialing'])
+      .maybeSingle(),
+    supabase
+      .from('usage')
+      .select('scripts_generated, images_generated, descriptions_generated, enhances_generated, replies_generated')
+      .eq('user_id', userId)
+      .eq('period_start', currentMonth)
+      .maybeSingle(),
+    supabase
+      .from('profiles')
+      .select('bonus_images')
+      .eq('id', userId)
+      .maybeSingle(),
+  ])
+
+  const plan = subRes.data?.plan || 'free'
+  const { data: limits } = await supabase
+    .from('plan_limits')
+    .select('scripts_per_month, images_per_month, descriptions_per_month, replies_per_month')
+    .eq('plan', plan)
+    .maybeSingle()
+
+  const usage = usageRes.data
+  const bonus = profileRes.data?.bonus_images || 0
+  const baseImageLimit = limits?.images_per_month ?? 1
+
+  return {
+    plan,
+    scriptsUsed: usage?.scripts_generated || 0,
+    scriptsLimit: limits?.scripts_per_month ?? 10,
+    imagesUsed: (usage?.images_generated || 0) + Math.floor((usage?.enhances_generated || 0) / 2),
+    imagesLimit: baseImageLimit === -1 ? -1 : baseImageLimit + bonus,
+    bonusImages: bonus,
+    descriptionsUsed: usage?.descriptions_generated || 0,
+    descriptionsLimit: limits?.descriptions_per_month ?? 10,
+    repliesUsed: usage?.replies_generated || 0,
+    repliesLimit: limits?.replies_per_month ?? 10,
+  }
 }
 
 /**
@@ -674,6 +1067,7 @@ export async function getFirstUserMessagePreviews(
     .in('session_id', sessionIds)
     .eq('role', 'user')
     .order('created_at', { ascending: true })
+    .limit(Math.min(sessionIds.length * 4, 200))
 
   if (error) throw error
   const out: Record<string, string> = {}
@@ -1482,6 +1876,24 @@ export async function createProductImage(
 }
 
 export async function deleteProductImage(imageId: string): Promise<void> {
+  const { data: image, error: loadError } = await supabase
+    .from('product_images')
+    .select('id, image_url, user_id')
+    .eq('id', imageId)
+    .single()
+
+  if (loadError) throw loadError
+
+  const marker = '/storage/v1/object/public/post-images/'
+  const markerIndex = image.image_url.indexOf(marker)
+  if (markerIndex >= 0) {
+    const objectPath = decodeURIComponent(image.image_url.slice(markerIndex + marker.length).split('?')[0])
+    if (objectPath.startsWith(`${image.user_id}/`)) {
+      const { error: storageError } = await supabase.storage.from('post-images').remove([objectPath])
+      if (storageError && !/not found/i.test(storageError.message || '')) throw storageError
+    }
+  }
+
   const { error } = await supabase
     .from('product_images')
     .delete()
@@ -2139,6 +2551,36 @@ export async function deleteReplyContextSource(id: string): Promise<void> {
 // =============================================
 // BRAND KIT (Multi-Kit V3)
 // =============================================
+function brandKitApiUrl(): string {
+  return import.meta.env.PROD ? '/api/brand-kit' : 'http://localhost:3000/api/brand-kit'
+}
+
+async function brandKitAuthHeader(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) throw new Error('Not authenticated')
+  return { Authorization: `Bearer ${session.access_token}` }
+}
+
+async function listBrandKitsViaApi(): Promise<BrandKit[]> {
+  const headers = await brandKitAuthHeader()
+  const response = await fetch(brandKitApiUrl(), { headers })
+  const json = await response.json().catch(() => ({})) as { kits?: BrandKit[]; error?: string }
+  if (!response.ok) throw new Error(json.error || 'Could not load brand kits')
+  return json.kits || []
+}
+
+async function saveBrandKitViaApi(kit: Record<string, unknown>): Promise<BrandKit> {
+  const headers = await brandKitAuthHeader()
+  const response = await fetch(brandKitApiUrl(), {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(kit),
+  })
+  const json = await response.json().catch(() => ({})) as { kit?: BrandKit; error?: string }
+  if (!response.ok || !json.kit) throw new Error(json.error || 'Could not save brand kit')
+  return json.kit
+}
+
 export async function getBrandKits(userId: string): Promise<BrandKit[]> {
   const { data, error } = await supabase
     .from('brand_kits')
@@ -2146,8 +2588,17 @@ export async function getBrandKits(userId: string): Promise<BrandKit[]> {
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
 
-  if (error) throw error
-  // Sort defaults first client-side (is_default column may not exist yet)
+  if (error) {
+    if (isRlsDeniedError(error)) {
+      try {
+        return (await listBrandKitsViaApi()).sort((a, b) => Number(Boolean(b.is_default)) - Number(Boolean(a.is_default)))
+      } catch (apiErr) {
+        console.warn('Brand kits API fallback failed:', apiErr)
+        return []
+      }
+    }
+    throwDbError(error, 'Failed to load brand kits')
+  }
   return (data || []).sort((a, b) => {
     if (a.is_default && !b.is_default) return -1
     if (!a.is_default && b.is_default) return 1
@@ -2162,42 +2613,49 @@ export async function createBrandKit(userId: string, kit: BrandKitFormData): Pro
   const existing = await getBrandKits(userId)
   const isFirst = existing.length === 0
 
+  const payload = {
+    ...safeKit,
+    user_id: userId,
+    is_default: isFirst ? true : (safeKit.is_default || false),
+    is_active: safeKit.is_active ?? true
+  }
+
   const { data, error } = await supabase
     .from('brand_kits')
+    .insert(payload)
+    .select()
+    .single()
+
+  if (!error && data) return data
+
+  if (isRlsDeniedError(error)) {
+    return saveBrandKitViaApi(payload)
+  }
+
+  // Fallback: migrations 051/052 may not be applied yet — insert core columns only
+  console.warn('brand_kits insert failed, trying core columns only:', error?.message)
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from('brand_kits')
     .insert({
-      ...safeKit,
       user_id: userId,
-      is_default: isFirst ? true : (safeKit.is_default || false),
-      is_active: safeKit.is_active ?? true
+      name: safeKit.name,
+      logo_url: safeKit.logo_url || null,
+      primary_color: safeKit.primary_color || null,
+      secondary_color: safeKit.secondary_color || null,
+      accent_color: safeKit.accent_color || null,
+      brand_voice: safeKit.brand_voice || null,
+      tone_keywords: safeKit.tone_keywords || [],
+      must_use_phrases: safeKit.must_use_phrases || [],
+      forbidden_phrases: safeKit.forbidden_phrases || [],
+      is_active: true
     })
     .select()
     .single()
 
-  if (error) {
-    // Fallback: migrations 051/052 may not be applied yet — insert core columns only
-    console.warn('brand_kits insert failed, trying core columns only:', error.message)
-    const { data: fallbackData, error: fallbackError } = await supabase
-      .from('brand_kits')
-      .insert({
-        user_id: userId,
-        name: safeKit.name,
-        logo_url: safeKit.logo_url || null,
-        primary_color: safeKit.primary_color || null,
-        secondary_color: safeKit.secondary_color || null,
-        accent_color: safeKit.accent_color || null,
-        brand_voice: safeKit.brand_voice || null,
-        tone_keywords: safeKit.tone_keywords || [],
-        must_use_phrases: safeKit.must_use_phrases || [],
-        forbidden_phrases: safeKit.forbidden_phrases || [],
-        is_active: true
-      })
-      .select()
-      .single()
-
-    if (fallbackError) throw fallbackError
-    return fallbackData
+  if (fallbackError || !fallbackData) {
+    throwDbError(fallbackError, 'Brand kit could not be saved.')
   }
-  return data
+  return fallbackData
 }
 
 export async function updateBrandKit(kitId: string, kit: BrandKitFormData): Promise<BrandKit> {
@@ -2212,8 +2670,19 @@ export async function updateBrandKit(kitId: string, kit: BrandKitFormData): Prom
     .select()
     .single()
 
+  if (!error && data) return data
+  if (isMissingRowError(error) || isRlsDeniedError(error)) {
+    if (isRlsDeniedError(error) && !isMissingRowError(error)) {
+      try {
+        return await saveBrandKitViaApi({ id: kitId, ...safeKit })
+      } catch (apiErr) {
+        console.warn('Brand kit update via API failed, creating a new kit:', apiErr)
+      }
+    }
+    return saveBrandKitViaApi(safeKit)
+  }
   if (error) throw error
-  return data
+  throw new Error('Brand kit could not be updated.')
 }
 
 export async function deleteBrandKit(kitId: string): Promise<void> {

@@ -4,7 +4,7 @@ import type { BusinessFormData } from '../../types'
 export function buildMinimalBrandFormData(name: string): BusinessFormData {
   return {
     name: name.trim(),
-    sales_channels: ['messages'],
+    sales_channels: [],
     does_shipping: false,
     target_audiences: [],
   }

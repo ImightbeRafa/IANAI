@@ -174,12 +174,24 @@ export function resolveSessionOfferProductId(
   return session?.product_id ?? null
 }
 
+/** Panel + badge must use the same rows generation already walks. */
+export function displaySessionOffers<T extends OfferLike>(
+  offers: T[] | null | undefined,
+  fallbackProductId: string | null | undefined
+): Array<T | { product_id: string; position: number }> {
+  const ordered = sortOffersByPosition(offers || [])
+  if (ordered.length > 0) return ordered
+  if (fallbackProductId) return [{ product_id: fallbackProductId, position: 1 }]
+  return []
+}
+
 export const CHAT_SESSION_SAFE_UPDATE_KEYS = [
   'title',
   'status',
   'context',
   'primary_channel',
   'awareness_level',
+  'brand_kit_id',
 ] as const
 
 export type ChatSessionSafeUpdateKey = (typeof CHAT_SESSION_SAFE_UPDATE_KEYS)[number]

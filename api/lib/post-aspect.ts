@@ -4,7 +4,7 @@
  */
 
 export type PostLayoutAspect = '9:16' | '3:4'
-export type PostCanvasAspect = '9:16' | '3:4' | '1:1'
+export type PostCanvasAspect = '9:16' | '3:4' | '1:1' | '4:5'
 
 export function resolvePostModeAspect(options: {
   aspectRatio?: string | null
@@ -35,6 +35,10 @@ export function resolvePostModeAspect(options: {
 
   if (raw === '3:4') {
     return { canvas: '3:4', layout: '3:4', shellSquare: false }
+  }
+
+  if (raw === '4:5') {
+    return { canvas: '4:5', layout: '3:4', shellSquare: false }
   }
 
   return { canvas: '9:16', layout: '9:16', shellSquare: false }

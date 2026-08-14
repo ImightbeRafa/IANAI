@@ -14,6 +14,9 @@ export interface ChatShellScriptIntent {
   expectedCount: number
   matched: boolean
   warnings: string[]
+  hasExplicitType: boolean
+  hasExplicitCount: boolean
+  hasExplicitCta: boolean
 }
 
 const MAX_SCRIPTS = 10
@@ -343,6 +346,9 @@ export function parseChatShellScriptIntent(
       expectedCount: sumConfig(base.scriptTypeConfig) || base.variations,
       matched: false,
       warnings,
+      hasExplicitType: false,
+      hasExplicitCount: false,
+      hasExplicitCta: false,
     }
   }
 
@@ -379,6 +385,9 @@ export function parseChatShellScriptIntent(
       expectedCount: sumConfig(base.scriptTypeConfig) || base.variations,
       matched: false,
       warnings,
+      hasExplicitType: false,
+      hasExplicitCount: false,
+      hasExplicitCta: false,
     }
   }
 
@@ -468,5 +477,8 @@ export function parseChatShellScriptIntent(
     expectedCount,
     matched: true,
     warnings,
+    hasExplicitType: uniqueOrdered.length > 0,
+    hasExplicitCount: rawGlobalCount != null || localCounts.some((count) => count != null),
+    hasExplicitCta: ctaExplicit != null,
   }
 }

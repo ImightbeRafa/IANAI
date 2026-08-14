@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { IMAGE_PRESETS, PRODUCT_SUB_STYLES } from '../src/data/image-presets'
 import {
+  aspectRatioFromDimensions,
   buildShellImageGenerateBody,
   DEFAULT_IMAGE_PREFERENCES,
   formatImageAssumptions,
@@ -14,12 +15,18 @@ import {
   resolveScriptPostPreferences,
   writeImagePreferences,
 } from '../src/features/chat-shell/chatShellImageIntent'
+import {
+  collectBrandGenerateVisual,
+  looksLikeCondensedPostCopy,
+  stripUnresolvedPlaceholders,
+} from '../src/features/chat-shell/chatShellGenerationPreferences'
 
 describe('parseChatShellImageIntent', () => {
   it('detects image asks without stealing script requests', () => {
     expect(parseChatShellImageIntent('generame 2 de venta', 'es').matched).toBe(false)
     expect(parseChatShellImageIntent('hazme una imagen', 'es').matched).toBe(true)
     expect(parseChatShellImageIntent('generame una foto 9:16', 'es').wantsImage).toBe(true)
+    expect(parseChatShellImageIntent('Quiero crear un post', 'es').wantsImage).toBe(true)
   })
 
   it('resolves preset and product sub-style aliases', () => {
@@ -55,11 +62,11 @@ describe('parseChatShellImageIntent', () => {
 })
 
 describe('resolveImagePreferences / clarifications / stickies', () => {
-  it('defaults to 9:16, Pro, Medium', () => {
+  it('defaults to 9:16, Pro, Hard', () => {
     const resolved = resolveImagePreferences({}, {})
     expect(resolved.aspectRatio).toBe('9:16')
     expect(resolved.model).toBe('nano-banana-pro')
-    expect(resolved.density).toBe('medium')
+    expect(resolved.density).toBe('hard')
     expect(resolved.style).toBeUndefined()
     expect(DEFAULT_IMAGE_PREFERENCES.aspectRatio).toBe('9:16')
   })
@@ -93,6 +100,53 @@ describe('resolveImagePreferences / clarifications / stickies', () => {
     )
     expect(ready.needed).toBe(false)
     expect(ready.step).toBeNull()
+  })
+
+  it('asks size on first generate when aspect was never chosen', () => {
+    const withStyle = resolveImagePreferences(
+      {},
+      { style: { kind: 'preset', presetId: 'venta-directa' } }
+    )
+    const plan = planImageClarifications(withStyle, { aspectUnset: true })
+    expect(plan.needed).toBe(true)
+    expect(plan.step).toBe('aspect')
+  })
+
+  it('asks copy density after size when generating from a script', () => {
+    const withStyle = resolveImagePreferences(
+      {},
+      { style: { kind: 'preset', presetId: 'venta-directa' }, aspectRatio: '9:16' }
+    )
+    const plan = planImageClarifications(withStyle, { densityUnset: true })
+    expect(plan.needed).toBe(true)
+    expect(plan.step).toBe('density')
+  })
+
+  it('still asks size and density even when sticky already has them', () => {
+    const stickyComplete = resolveImagePreferences(
+      {},
+      {
+        style: { kind: 'preset', presetId: 'venta-directa' },
+        aspectRatio: '1:1',
+        density: 'hard',
+      }
+    )
+    expect(planImageClarifications(stickyComplete).needed).toBe(false)
+    expect(planImageClarifications(stickyComplete, { aspectUnset: true }).step).toBe('aspect')
+    expect(planImageClarifications(stickyComplete, { densityUnset: true }).step).toBe('density')
+  })
+
+  it('parses reel / square / vertical post sizes', () => {
+    expect(parseChatShellImageIntent('haz imagen reel', 'es').preferences.aspectRatio).toBe('9:16')
+    expect(parseChatShellImageIntent('haz imagen post cuadrado', 'es').preferences.aspectRatio).toBe('1:1')
+    expect(parseChatShellImageIntent('haz imagen 4:5', 'es').preferences.aspectRatio).toBe('4:5')
+  })
+
+  it('maps pixel size to the nearest shell aspect', () => {
+    expect(aspectRatioFromDimensions(1080, 1920)).toBe('9:16')
+    expect(aspectRatioFromDimensions(1080, 1080)).toBe('1:1')
+    expect(aspectRatioFromDimensions(1080, 1350)).toBe('4:5')
+    expect(aspectRatioFromDimensions(1080, 1440)).toBe('3:4')
   })
 
   it('normalizes invalid/stale storage', () => {
@@ -157,6 +211,44 @@ describe('buildShellImageGenerateBody', () => {
       scriptContext: 'GUIÓN 1',
     })
     expect(requiresProductReferences({ kind: 'preset', presetId: 'comparison' })).toBe(false)
+  })
+
+  it('sends brand palette and logo url on generate', () => {
+    const body = buildShellImageGenerateBody({
+      preferences: {
+        style: { kind: 'preset', presetId: 'venta-directa' },
+        aspectRatio: '9:16',
+        model: 'nano-banana-pro',
+        density: 'hard',
+      },
+      productId: 'p1',
+      sessionId: 's1',
+      prompt: 'Gancho corto',
+      language: 'es',
+      brandKitId: 'bk1',
+      customColors: ['#111111', '#C4A35A', '#F2E6D8'],
+      brandLogoUrl: 'https://cdn.example/logo.webp',
+    })
+    expect(body.customColors).toEqual(['#111111', '#C4A35A', '#F2E6D8'])
+    expect(body.brandLogoUrl).toBe('https://cdn.example/logo.webp')
+    expect(body.brandKitId).toBe('bk1')
+  })
+
+  it('always sends productImageIds so the server does not reuse a previous generated post', () => {
+    const body = buildShellImageGenerateBody({
+      preferences: {
+        style: { kind: 'preset', presetId: 'venta-directa' },
+        aspectRatio: '1:1',
+        model: 'nano-banana-pro',
+        density: 'hard',
+      },
+      productId: 'p1',
+      sessionId: 's1',
+      prompt: 'Otro guion',
+      language: 'es',
+    })
+    expect(body.productImageIds).toEqual([])
+    expect(body.productImageId).toBeUndefined()
   })
 
   it('requires refs for product mode and maps venta-directa', () => {
@@ -330,12 +422,14 @@ describe('S4 organic-single + anuncio-conversion', () => {
       prompt: 'QUOTE TEXT',
       language: 'es',
       scriptText: 'QUOTE TEXT',
+      businessContext: 'Marca Forge · corrector postural',
     })
     expect(body).toMatchObject({
       postStyle: 'organic-single',
       organicSubtype: 'quote-motivational',
       organicQuote: 'QUOTE TEXT',
       scriptContext: 'QUOTE TEXT',
+      businessContext: 'Marca Forge · corrector postural',
       ctaStrength: 'soft',
     })
     expect(body.width).toBe(1080)
@@ -390,5 +484,24 @@ describe('S4 organic-single + anuncio-conversion', () => {
       sticky: { style: { kind: 'product', productSubStyle: 'studio-hero' } },
     })
     expect(productSticky.style).toEqual({ kind: 'preset', presetId: 'venta-directa' })
+  })
+})
+
+describe('brand visual + condensed post copy', () => {
+  it('prefers kit colors and falls back to setup facts', () => {
+    expect(collectBrandGenerateVisual(
+      { primary_color: '#111111', logo_url: 'https://cdn.example/logo.webp' },
+      { primary_color: '#FF0000', secondary_color: '#C4A35A', accent_color: '#F2E6D8' }
+    )).toEqual({
+      customColors: ['#111111', '#C4A35A', '#F2E6D8'],
+      brandLogoUrl: 'https://cdn.example/logo.webp',
+    })
+  })
+
+  it('strips unresolved placeholders and treats short copy as condensed', () => {
+    const raw = 'Arnés ForgeCR\nCompresión médica\nEnvío [TIEMPO DE ENTREGA]\nEscribinos'
+    expect(stripUnresolvedPlaceholders(raw)).toBe('Arnés ForgeCR\nCompresión médica\nEnvío\nEscribinos')
+    expect(looksLikeCondensedPostCopy('Gancho corto\nPrueba\nCTA')).toBe(true)
+    expect(looksLikeCondensedPostCopy(raw)).toBe(false)
   })
 })

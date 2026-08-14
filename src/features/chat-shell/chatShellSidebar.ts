@@ -100,6 +100,28 @@ export function openSessionDeleteConfirm(
   return { kind: 'confirm', sessionId, anchor }
 }
 
+export type BrandActionPanel =
+  | { kind: 'menu'; brandId: string; brandName: string; anchor: SessionActionAnchor }
+  | { kind: 'confirm'; brandId: string; brandName: string; anchor: SessionActionAnchor }
+
+export function openBrandActionMenu(
+  current: BrandActionPanel | null,
+  brandId: string,
+  brandName: string,
+  anchor: SessionActionAnchor
+): BrandActionPanel | null {
+  if (current?.kind === 'menu' && current.brandId === brandId) return null
+  return { kind: 'menu', brandId, brandName, anchor }
+}
+
+export function openBrandDeleteConfirm(
+  brandId: string,
+  brandName: string,
+  anchor: SessionActionAnchor
+): BrandActionPanel {
+  return { kind: 'confirm', brandId, brandName, anchor }
+}
+
 /** Default / spam titles that should not win over first message or relative time. */
 export function isDefaultSessionTitle(title?: string | null): boolean {
   const t = (title || '').trim()

@@ -30,6 +30,11 @@ interface CacheEntry {
 }
 let _cache: CacheEntry | null = null
 
+/** Drop the shared dashboard cache so classic Guiones/Posts refetch after chat mutations. */
+export function invalidateDashboardCache(): void {
+  _cache = null
+}
+
 async function fetchDashboardData(userId: string): Promise<Omit<CacheEntry, 'userId' | 'ts'>> {
   const [profileData, shared, bizData, productsData] = await Promise.all([
     getProfile(userId),

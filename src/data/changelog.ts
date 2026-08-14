@@ -91,6 +91,268 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.7',
+    date: '2026-08-14',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'Si te invitan a probar el chat nuevo, podés usarlo y volver al panel clásico cuando quieras. El resto de la app no cambia.',
+          en: 'If you are invited to try the new chat, you can use it and return to the classic dashboard whenever you want. Everyone else stays on the current app.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Cambiar de carpeta de marca ya no vacía el chat a medias. El hilo actual se queda hasta que la otra marca está lista, y el panel de contexto ya no empuja toda la pantalla.',
+          en: 'Switching brand folders no longer empties the chat halfway. The current thread stays until the other brand is ready, and the context panel no longer shoves the whole screen.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'La app ya no se recarga al volver de otra pestaña o al cambiar de ventana.',
+          en: 'The app no longer reloads when you come back from another tab or window.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Al borrar una carpeta de marca también se borran sus chats y ofertas. Ya no quedan productos sueltos en Ofertas.',
+          en: 'Deleting a brand folder now also deletes its chats and offers. Unassigned leftovers no longer pile up in Offers.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Si Ofertas dice que hay una oferta, ahora también la ves en el panel. El tema claro/oscuro está en Configuración → General.',
+          en: 'If Offers says there is one offer, it now also shows in the panel. Light/dark theme lives in Settings → General.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Crear post ahora te pide elegir el guion, después revisar el texto, y recién ahí el tipo de post.',
+          en: 'Create post now asks you to pick the script, then review the copy, and only then choose the post type.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El listado de la derecha flota sobre el mismo fondo del chat, sin caja ni “En este chat”. Tocá una opción y se abre esa sección.',
+          en: 'The right-hand list floats on the same chat background, with no box and no “in this chat” header. Tap an option to open that section.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El chat se desplaza sin barras de scroll a la vista, el logo se ve bien en claro y oscuro, y el cambio de tema ya no está en la barra de arriba ni en Configuración → General.',
+          en: 'Chat scrolls without visible scrollbars, the logo reads on light and dark, and theme switching is no longer in the top bar or Settings → General.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Podés asignar a una marca los productos que todavía no tenían carpeta, y abrir el historial clásico de ese producto.',
+          en: 'You can assign products that still have no folder to a brand, and open that product’s classic history.',
+        },
+      },
+    ],
+  },
+  {
+    version: '0.1.6',
+    date: '2026-08-14',
+    items: [
+      {
+        category: 'fix',
+        text: {
+          es: 'El saludo de bienvenida solo aparece en un chat nuevo. Recargar o reiniciar el servidor ya no lo vuelve a mandar en un hilo que ya tenía mensajes.',
+          en: 'The welcome greeting only appears on a new chat. Reloading or restarting the server no longer resends it in a thread that already has messages.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Crear post y foto de producto ya no dejan el menú de guiones pegado. El post usa la versión editada del guion y mientras se edita ves para qué se está generando.',
+          en: 'Create post and product photo no longer leave the script menu stuck. The post uses the edited script version, and while it generates you can see what is being edited.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Mientras piensa, el chat describe lo que está haciendo de verdad: leer el sitio, escribir venta directa, o generar el post. Subir el logo a mano sigue siendo la forma de asegurar calidad en los posts.',
+          en: 'While thinking, chat describes what it is actually doing: reading the site, writing a direct-sale script, or generating the post. Uploading the logo yourself is still the way to keep post quality high.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Un post nuevo en el mismo chat ya no copia la primera imagen. Solo las ediciones y mejoras de esa imagen la usan de referencia.',
+          en: 'A new post in the same chat no longer copies the first image. Only edits and enhancements of that image use it as a reference.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Guardar el kit de marca ya no rompe el chat con “Failed to update session” cuando el kit anterior no existía en la base.',
+          en: 'Saving the brand kit no longer breaks chat with “Failed to update session” when the previous kit id was missing from the database.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'En el menú, Nueva marca queda arriba de las carpetas y la lista de marcas llena el espacio hasta tu perfil.',
+          en: 'In the menu, New brand sits above the folders and the brand list fills the space down to your profile.',
+        },
+      },
+    ],
+  },
+  {
+    version: '0.1.5',
+    date: '2026-08-14',
+    items: [
+      {
+        category: 'improvement',
+        text: {
+          es: 'El chat vuelve a sentirse negro y azul: superficies en capas, bordes finos, y un azul apagado con un toque violeta. El logo Advance es más grande y centrado. Generar post tiene un degradé suave en movimiento.',
+          en: 'Chat feels black and blue again: layered surfaces, hairline borders, and a muted navy with a hint of violet. The Advance mark is larger and centered. Generating a post has a slow moving gradient.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Los posts usan los colores y el logo del Brand Kit. El guion se compacta (gancho, prueba, CTA) para no llenar el post de texto. Subir logo (incluido SVG) ya no se traga el error.',
+          en: 'Posts use Brand Kit colors and logo. The script is tightened (hook, proof, CTA) so the post is not overloaded with text. Uploading a logo (including SVG) no longer fails silently.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'La tarjeta de guion es más compacta: Copiar, Guardar, Editar y Crear post quedan a mano; Mejorar, Hooks y el resto van en Más.',
+          en: 'The script card is more compact: Copy, Save, Edit, and Create post stay in reach; Improve, Hooks, and the rest live under More.',
+        },
+      },
+    ],
+  },
+  {
+    version: '0.1.4',
+    date: '2026-08-13',
+    items: [
+      {
+        category: 'fix',
+        text: {
+          es: 'Crear guiones ya no se corta con el error “chatModel is not defined”. Después de editar un guion podés volver a versiones anteriores, igual que con las imágenes.',
+          en: 'Create scripts no longer dies with “chatModel is not defined”. After editing a script you can go back to earlier versions, same as images.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Si no se puede guardar la paleta todavía, el chat igual termina de leer el sitio y muestra el resumen. Ya no aparece “Setup failed” por eso.',
+          en: 'If the palette can’t be saved yet, chat still finishes reading the site and shows the summary. You no longer get “Setup failed” from that.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Pegá la URL y extraemos negocio y paleta juntos. Ajustá los colores en el chat y guardalos. Podés subir logo o referencias para los posts.',
+          en: 'Paste the URL and we extract business and palette together. Tune the colors in chat and save them. You can upload a logo or references for posts.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Borrar carpeta es un basurero chico: X para cancelar, basurero otra vez para confirmar. Ahora sí se elimina.',
+          en: 'Deleting a folder is a small trash icon: X to cancel, trash again to confirm. It actually deletes now.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'El setup fijado se queda arriba del chat al scrollear. Desaparece cuando está completo.',
+          en: 'The pinned setup bar stays at the top of chat while you scroll. It hides when setup is complete.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Podés borrar una carpeta de marca desde el menú, igual que un chat.',
+          en: 'You can delete a brand folder from the menu, the same way you delete a chat.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Las imágenes del chat quedan al costado, del tamaño del post, sin el recuadro negro ancho. Clic para verlas grandes; pedir edición abre un chat nuevo.',
+          en: 'Chat images sit to the side at the post’s own size, without the wide black frame. Click to view large; requesting an edit opens a new chat.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El panel de Imágenes es para ver y pedir cambios. Generar posts sigue en Crear o en el chat.',
+          en: 'The Images panel is for viewing and requesting changes. Generating posts stays in Create or chat.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'El progreso del negocio queda fijado arriba del chat. Tocá un paso para completarlo; cuando esté todo, la barra desaparece.',
+          en: 'Business setup stays pinned at the top of chat. Tap a step to complete it; when everything is done, the bar disappears.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Si creás un post desde un guión, primero se compacta el texto para que la imagen no quede llena de copy.',
+          en: 'If you create a post from a script, the copy is tightened first so the image isn’t packed with text.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Al confirmar el setup, la oferta queda lista para generar. Si hay una sola, se usa sola; si hay varias, el chat pregunta cuál. Ya no hace falta elegirla en el panel.',
+          en: 'After you confirm setup, the offer is ready to generate. If there’s only one, it’s used automatically; if there are several, chat asks which. You don’t have to pick it in the panel.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Al pegar la URL o un texto de tu negocio, el chat arma un resumen para confirmar. Ya no te pregunta de a una cosa lo que ya estaba en el contexto.',
+          en: 'When you paste a URL or a block of business text, chat drafts a summary to confirm. It no longer asks one-by-one for facts already in that context.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Mientras lee un sitio, escribe un guion o genera una imagen, el chat muestra pasos de progreso para que sepas que está trabajando.',
+          en: 'While it reads a site, writes a script, or generates an image, chat shows progress steps so you can tell it is working.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El chat cambió de sistema visual: tipografía más grande, menos azul eléctrico, y el panel derecho sirve para editar contexto — el setup sigue en la conversación.',
+          en: 'Chat switched visual systems: larger type, less electric blue, and the right panel is for editing context — setup still happens in the conversation.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Al crear una marca nueva, el chat te guía con una lista visual (negocio, canales, oferta, marca). Podés saltarla y completar después.',
+          en: 'When you create a new brand, chat walks you through a visual checklist (business, channels, offer, brand). You can skip and finish later.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'El engranaje abre Configuración en una ventana: plan, uso, facturación, idioma y Brand Kits, sin salir del chat.',
+          en: 'The gear opens Settings in a window: plan, usage, billing, language, and Brand Kits, without leaving chat.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.3',
     date: '2026-03-06',
     items: [

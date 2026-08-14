@@ -8,7 +8,7 @@ import {
   deleteProduct,
   getSubscription,
   getBusinessProducts,
-  deleteBusiness
+  deleteBusinessWithContents
 } from '../services/database'
 import type { Product, DashboardStats, RestaurantFormData, Business, ProductType, NewProductFormData, NewServiceFormData, IndumentariaFormData, RealEstateFormData } from '../types'
 import Layout from '../components/Layout'
@@ -181,7 +181,7 @@ export default function Dashboard() {
       : `Delete "${business.name}" and all its products, scripts, and data? This cannot be undone.`
     if (!confirm(confirmMsg)) return
     try {
-      await deleteBusiness(business.id)
+      await deleteBusinessWithContents(business.id)
       dashData.refresh()
       if (selectedBusiness?.id === business.id) {
         setSelectedBusiness(null)
