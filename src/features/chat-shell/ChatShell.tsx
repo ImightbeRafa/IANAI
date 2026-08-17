@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Menu, PanelRight } from 'lucide-react'
-import type { BrandKit, ChatSession } from '../../types'
-import { getBrandKits } from '../../services/database'
+import type { BrandKit, ChatSession, ProductType } from '../../types'
+import { getBrandKits, createProduct } from '../../services/database'
 import { useLanguage } from '../../contexts/LanguageContext'
 import ChatSidebar from './ChatSidebar'
 import ChatBrandCreateModal from './ChatBrandCreateModal'
@@ -294,6 +294,34 @@ export default function ChatShell({
     if (ok) setBrandCreateOpen(false)
   }, [workspace])
 
+  const handleCreateOffer = useCallback(async (name: string, type: ProductType) => {
+    const brand = workspace.activeBrand
+    if (!brand || thread.offerMutating) return false
+    try {
+      const product = await createProduct(
+        { name, type, business_id: brand.id },
+        userId
+      )
+      await thread.refreshBrandProducts()
+      await thread.addOffer(product.id)
+      setRailTab('offers')
+      setRailPane('detail')
+      setRailOpen(true)
+      return true
+    } catch (err) {
+      console.error(err)
+      return false
+    }
+  }, [thread, userId, workspace.activeBrand])
+
+  const handleSwitchToClassic = useCallback(() => {
+    if (!rollout.showSwitch) return
+    if (!window.confirm(t.classicConfirm)) return
+    void rollout.setPreferredUi('classic').then((ok) => {
+      if (ok) navigate('/dashboard')
+    })
+  }, [navigate, rollout, t.classicConfirm])
+
   const shellClass = [
     'chat-shell',
     navOpen ? 'is-nav-open' : '',
@@ -371,21 +399,12 @@ export default function ChatShell({
         onPrefetchBrandSessions={workspace.prefetchBrandSessions}
         onSelectSession={workspace.selectSession}
         onNewChat={() => void workspace.createSession()}
-        onQuickGenerate={() => void workspace.createQuickSession()}
         onNewSession={() => void workspace.createSession()}
         onNewBrand={openBrandCreate}
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
         onDeleteBrand={(brandId) => void workspace.deleteBrand(brandId)}
         onOpenSettings={() => setSettingsOpen(true)}
-        onSwitchToClassic={
-          rollout.showSwitch
-            ? () => {
-                void rollout.setPreferredUi('classic').then((ok) => {
-                  if (ok) navigate('/dashboard')
-                })
-              }
-            : undefined
-        }
+        onSwitchToClassic={rollout.showSwitch ? handleSwitchToClassic : undefined}
       />
 
       <ChatSettingsDialog
@@ -399,6 +418,7 @@ export default function ChatShell({
         open={brandCreateOpen}
         busy={workspace.busy}
         error={brandCreateOpen ? workspace.error : null}
+        language={language}
         onClose={closeBrandCreate}
         onSubmit={submitBrandCreate}
       />
@@ -561,6 +581,7 @@ export default function ChatShell({
         onPatchSession={(updates) => void thread.patchSession(updates)}
         onKeepSessionSelected={workspace.keepSessionSelected}
         onAddOffer={(productId) => void thread.addOffer(productId)}
+        onCreateOffer={handleCreateOffer}
         onRemoveOffer={(productId) => void thread.removeOffer(productId)}
         onMoveOffer={(productId, direction) => void thread.moveOffer(productId, direction)}
         activeImageOfferId={thread.activeImageOfferId}

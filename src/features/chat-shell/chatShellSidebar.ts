@@ -128,6 +128,7 @@ export function isDefaultSessionTitle(title?: string | null): boolean {
   if (!t) return true
   if (/^untitled$/i.test(t)) return true
   if (/^new\s+(chat|session)$/i.test(t)) return true
+  if (/^chat\s+nuevo$/i.test(t)) return true
   if (/^session\s*[·•.\-–—]/i.test(t)) return true
   if (/^quick\s*[·•.\-–—]/i.test(t)) return true
   return false

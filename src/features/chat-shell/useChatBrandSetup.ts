@@ -27,6 +27,7 @@ import {
   shouldShowBrandSetup,
   shouldShowSetupTracker,
   stepComplete,
+  withSetupSkippedContext,
   writeBrandSetupSkipped,
   type BrandSetupStepId,
 } from './chatShellBrandSetup'
@@ -75,6 +76,16 @@ const EMPTY_AUDIENCE: TargetAudienceFormData = {
   age_max: 65,
   geographic_scope: 'country',
   has_specific_profession: false,
+}
+
+function sanitizeSetupError(message: string, language: 'en' | 'es'): string | null {
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
+    return language === 'es'
+      ? 'No pudimos conectar con el servidor. Pegá el texto directamente o probá más tarde.'
+      : 'We could not reach the server. Paste the text directly or try again later.'
+  }
+  if (/setup failed/i.test(message)) return null
+  return message
 }
 
 function completeCopy(language: 'en' | 'es'): string {
@@ -249,8 +260,8 @@ export function useChatBrandSetup(options: {
   activeSessionIdRef.current = session?.id || null
 
   const skipped = useMemo(
-    () => readBrandSetupSkipped(storage, userId, business?.id),
-    [storage, userId, business?.id, skipTick]
+    () => readBrandSetupSkipped(storage, userId, business?.id, session?.context),
+    [storage, userId, business?.id, session?.context, skipTick]
   )
 
   const snapshot = useMemo(
@@ -332,14 +343,20 @@ export function useChatBrandSetup(options: {
   const skip = useCallback(() => {
     if (!business) return
     writeBrandSetupSkipped(storage, userId, business.id, true)
+    if (session) {
+      void onPatchSession({ context: withSetupSkippedContext(session.context, true) })
+    }
     setForceOpen(false)
     setFlow((prev) => ({ ...prev, phase: 'paused' }))
     setSkipTick((n) => n + 1)
-  }, [business, storage, userId])
+  }, [business, onPatchSession, session, storage, userId])
 
   const reopen = useCallback(() => {
     if (!business) return
     writeBrandSetupSkipped(storage, userId, business.id, false)
+    if (session) {
+      void onPatchSession({ context: withSetupSkippedContext(session.context, false) })
+    }
     setForceOpen(true)
     setProfileVisible(true)
     setSkipTick((n) => n + 1)
@@ -347,7 +364,7 @@ export function useChatBrandSetup(options: {
       if (prev.turns.length > 0 && prev.phase !== 'paused' && prev.phase !== 'complete') return { ...prev, phase: 'asking' }
       return createInitialFlow(language, business.name)
     })
-  }, [business, storage, userId, language])
+  }, [business, language, onPatchSession, session, storage, userId])
 
   const persistBusiness = useCallback(async (facts: SetupFlowState['facts']) => {
     if (!business) return
@@ -676,16 +693,22 @@ export function useChatBrandSetup(options: {
               facts = mergeAutofillIntoFacts(facts, pickDefinedAutofill(typedFill.data))
               facts.sourceUrl = url
             } else {
-              const fail = ingestError || (language === 'es'
-                ? 'No pude leer ese sitio. Probá con otra URL o pegá el contenido.'
-                : 'I could not read that website. Try another URL or paste the content.')
-              await onPersistTurn('assistant', fail)
+              const fail = sanitizeSetupError(ingestError || '', language)
+                || (language === 'es'
+                  ? 'No pude leer ese sitio. Probá con otra URL o pegá el contenido.'
+                  : 'I could not read that website. Try another URL or paste the content.')
+              const lastTurn = current.turns[current.turns.length - 1]
+              if (lastTurn?.role !== 'assistant' || lastTurn.content !== fail) {
+                await onPersistTurn('assistant', fail)
+              }
               setFlow({
                 ...current,
-                phase: 'intro',
-                pendingQuestion: 'source',
-                turns: [...current.turns, setupTurn('assistant', fail)],
+                phase: facts.sourceText?.trim() ? 'confirm_offer' : 'intro',
+                pendingQuestion: facts.sourceText?.trim() ? null : 'source',
+                confirmOffered: Boolean(facts.sourceText?.trim()),
+                turns: lastTurn?.content === fail ? current.turns : [...current.turns, setupTurn('assistant', fail)],
               })
+              if (facts.sourceText?.trim()) setProfileVisible(true)
               return
             }
           }
@@ -805,21 +828,28 @@ export function useChatBrandSetup(options: {
       setFlow(current)
       if (current.phase === 'confirm_offer' || current.phase === 'complete') setProfileVisible(true)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Setup failed'
-      setError(message)
-      setFlow((prev) => {
-        if (prev.phase !== 'analyzing') return prev
-        const fail = language === 'es'
-          ? 'No pude terminar de leer eso. Pegá de nuevo la URL o el texto.'
-          : 'I could not finish reading that. Paste the URL or text again.'
+      const rawMessage = err instanceof Error ? err.message : 'Setup failed'
+      const friendly = sanitizeSetupError(rawMessage, language)
+      setError(friendly)
+      if (flow.phase !== 'analyzing') return
+      const fail = language === 'es'
+        ? 'No pude terminar de leer eso. Usé lo que pegaste — revisá la tarjeta y confirmá.'
+        : 'I could not finish reading that. I kept what you pasted — review the card and confirm.'
+      const hasPasted = Boolean(flow.facts.sourceText?.trim() || flow.facts.sourceUrl?.trim())
+      const lastTurn = flow.turns[flow.turns.length - 1]
+      if (lastTurn?.role !== 'assistant' || !(lastTurn.content.includes('No pude') || lastTurn.content.includes('could not'))) {
         void onPersistTurn('assistant', fail)
-        return {
-          ...prev,
-          phase: 'intro',
-          pendingQuestion: 'source',
-          turns: [...prev.turns, setupTurn('assistant', fail)],
-        }
-      })
+      }
+      setFlow((prev) => ({
+        ...prev,
+        phase: hasPasted ? 'confirm_offer' : 'intro',
+        pendingQuestion: hasPasted ? null : 'source',
+        confirmOffered: hasPasted,
+        turns: lastTurn?.content === fail
+          ? prev.turns
+          : [...prev.turns, setupTurn('assistant', fail)],
+      }))
+      if (hasPasted) setProfileVisible(true)
     } finally {
       if (activeSessionIdRef.current === originSessionId) {
         setBusy(false)

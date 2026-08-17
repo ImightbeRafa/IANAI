@@ -29,12 +29,12 @@ import { isDefaultSessionTitle } from './chatShellSidebar'
 import { resolveNextSessionId, shouldCommitCreatedSession } from './sessionOffer'
 import { invalidateDashboardCache } from '../../hooks/useDashboardData'
 
-function defaultSessionTitle(): string {
-  return 'New chat'
+function defaultSessionTitle(language: 'en' | 'es' = 'es'): string {
+  return language === 'es' ? 'Chat nuevo' : 'New chat'
 }
 
-function quickSessionTitle(): string {
-  return 'New chat'
+function quickSessionTitle(language: 'en' | 'es' = 'es'): string {
+  return defaultSessionTitle(language)
 }
 
 function readUrlSelection() {

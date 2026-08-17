@@ -377,14 +377,14 @@ export default memo(function ChatThread({
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">
               {brand
-                ? `Select or create a session under ${brand.name}.`
-                : 'Select a brand in the sidebar (or create one from Dashboard) to start.'}
+                ? t.emptyNoSession.replace('{brand}', brand.name)
+                : t.emptyNoBrand}
             </div>
           </div>
         ) : loadingMessages ? (
           <div className="chat-shell__msg chat-shell__msg--ai">
             <span className="chat-shell__who">Advance AI</span>
-            <div className="chat-shell__status-box">Loading conversation…</div>
+            <div className="chat-shell__status-box">{t.emptyLoading}</div>
           </div>
         ) : (
           <>
@@ -393,8 +393,13 @@ export default memo(function ChatThread({
                 <span className="chat-shell__who">Advance AI</span>
                 <div className="chat-shell__status-box">
                   {offerProductId && activeProduct
-                    ? `Session ready · ${offerCount > 1 ? `${offerCount} offers` : `offer ${activeProduct.name}`}. Ask for a script to generate.`
-                    : 'Session ready · Quick / no offer yet. Choose products in the Offers rail before generating.'}
+                    ? t.emptyReadyWithOffer.replace(
+                      '{detail}',
+                      offerCount > 1
+                        ? (language === 'es' ? `${offerCount} ofertas` : `${offerCount} offers`)
+                        : (language === 'es' ? `oferta ${activeProduct.name}` : `offer ${activeProduct.name}`)
+                    )
+                    : t.emptyReadyNoOffer}
                 </div>
               </div>
             ) : null}
@@ -674,7 +679,7 @@ export default memo(function ChatThread({
             {error || voice.error || threadNotice}
           </div>
         )}
-        {scriptClarify && !(imageClarify && !imageBusy) ? (
+        {scriptClarify && offerCount > 0 && !(imageClarify && !imageBusy) ? (
           <div className="chat-shell__clarify" role="group" aria-label="Script options">
             <p className="chat-shell__clarify-question">
               {scriptClarify.step === 'type'

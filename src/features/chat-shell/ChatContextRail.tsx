@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronLeft, MoreHorizontal, Trash2, X } from 'lucide-react'
-import type { Business, ChatSession, ChatSessionOffer, Product } from '../../types'
+import type { Business, ChatSession, ChatSessionOffer, Product, ProductType } from '../../types'
 import type { ChatSessionSafeUpdates, ProductImage } from '../../services/database'
 import { CHAT_SHELL_MAX_OFFERS, displaySessionOffers, sortOffersByPosition } from './sessionOffer'
 import { Link } from 'react-router-dom'
@@ -9,6 +9,7 @@ import type { BrandKit, ScriptGenerationSettings } from '../../types'
 import { shellT } from './chatShellLabels'
 import ChatScriptPanel from './ChatScriptPanel'
 import ChatImageSettingsPanel from './ChatImageSettingsPanel'
+import ChatOfferCreateForm from './ChatOfferCreateForm'
 import type { ShellImagePreferences } from './chatShellImageIntent'
 import { IconDoc, IconImage, IconOffer, IconVisual, IconWeb } from './ChatShellIcons'
 
@@ -61,6 +62,7 @@ interface ChatContextRailProps {
   /** Pin URL/active session after Skip so late create cannot snap A→B. */
   onKeepSessionSelected?: (sessionId: string) => void
   onAddOffer?: (productId: string) => void | Promise<void>
+  onCreateOffer?: (name: string, type: ProductType) => void | Promise<boolean | void>
   onRemoveOffer?: (productId: string) => void | Promise<void>
   onMoveOffer?: (productId: string, direction: -1 | 1) => void | Promise<void>
   activeImageOfferId?: string | null
@@ -108,6 +110,7 @@ export default function ChatContextRail({
   onSelectBrandKit,
   onPatchSession,
   onAddOffer,
+  onCreateOffer,
   onRemoveOffer,
   onMoveOffer,
   activeImageOfferId = null,
@@ -357,19 +360,25 @@ export default function ChatContextRail({
       {tab === 'offers' && (
         <div className="chat-shell__stack">
           {!session ? (
-            <p className="chat-shell__rail-hint">Select a session to attach product offers.</p>
+            <p className="chat-shell__rail-hint">{t.selectSessionOffers}</p>
           ) : !session.business_id ? (
-            <p className="chat-shell__rail-hint">This session has no business_id — cannot attach offers.</p>
-          ) : displayOffers.length === 0 && brandProducts.length === 0 && unassignedProducts.length === 0 ? (
-            <p className="chat-shell__rail-hint">
-              {language === 'es'
-                ? 'Esta marca no tiene productos. Creá uno en el panel clásico o asigná uno suelto abajo.'
-                : 'This brand has no products yet. Create one in classic or assign an unassigned product below.'}
-            </p>
+            <p className="chat-shell__rail-hint">{t.sessionNoBusiness}</p>
           ) : (
             <>
+              {onCreateOffer && displayOffers.length < CHAT_SHELL_MAX_OFFERS ? (
+                <ChatOfferCreateForm
+                  language={language}
+                  busy={offerBusy}
+                  onCreate={onCreateOffer}
+                />
+              ) : null}
+              {displayOffers.length === 0 && brandProducts.length === 0 && unassignedProducts.length === 0 ? (
+                <p className="chat-shell__rail-hint">{t.noBrandProducts}</p>
+              ) : null}
+              {(displayOffers.length > 0 || brandProducts.length > 0 || unassignedProducts.length > 0) ? (
+            <>
               <p className="chat-shell__rail-hint">
-                Select up to {CHAT_SHELL_MAX_OFFERS} products. Position 1 is primary. Generate walks all offers in order.
+                {t.offersAttachHint.replace('{max}', String(CHAT_SHELL_MAX_OFFERS))}
               </p>
               {displayOffers.length > 0 ? (
                 <ol className="chat-shell__offer-list">
@@ -385,7 +394,7 @@ export default function ChatContextRail({
                           <span className="chat-shell__offer-pos">{offer.position}</span>
                           <span className="chat-shell__offer-name">{label}</span>
                           {offer.position === 1 ? (
-                            <span className="chat-shell__offer-primary">Primary</span>
+                            <span className="chat-shell__offer-primary">{t.offersPrimary}</span>
                           ) : null}
                         </div>
                         <div className="chat-shell__offer-actions">
@@ -423,11 +432,13 @@ export default function ChatContextRail({
                   })}
                 </ol>
               ) : (
-                <p className="chat-shell__rail-hint">No offers attached yet.</p>
+                <p className="chat-shell__rail-hint">{t.offersNoneAttached}</p>
               )}
 
               {displayOffers.length >= CHAT_SHELL_MAX_OFFERS ? (
-                <p className="chat-shell__rail-hint">Maximum {CHAT_SHELL_MAX_OFFERS} offers reached.</p>
+                <p className="chat-shell__rail-hint">
+                  {t.offersMaxReached.replace('{max}', String(CHAT_SHELL_MAX_OFFERS))}
+                </p>
               ) : (
                 <div className="chat-shell__offer-add">
                   {availableProducts.map((product) => (
@@ -488,6 +499,8 @@ export default function ChatContextRail({
                   )}
                 </div>
               )}
+            </>
+              ) : null}
             </>
           )}
         </div>

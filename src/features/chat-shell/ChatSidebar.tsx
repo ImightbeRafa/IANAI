@@ -10,7 +10,7 @@ import {
 import type { Business, ChatSession } from '../../types'
 import { useLanguage } from '../../contexts/LanguageContext'
 import { useUsageLimits } from '../../hooks/useUsageLimits'
-import { AdvanceWordmark, IconPlus, IconQuick } from './ChatShellIcons'
+import { AdvanceWordmark, IconPlus } from './ChatShellIcons'
 import { shellT } from './chatShellLabels'
 import {
   openBrandDeleteConfirm,
@@ -47,7 +47,6 @@ interface ChatSidebarProps {
   onPrefetchBrandSessions?: (brandId: string) => void
   onSelectSession: (session: ChatSession) => void
   onNewChat: () => void
-  onQuickGenerate: () => void
   onNewSession: () => void
   onNewBrand: () => void
   onDeleteSession: (sessionId: string) => void | Promise<void>
@@ -81,7 +80,6 @@ export default function ChatSidebar({
   onPrefetchBrandSessions,
   onSelectSession,
   onNewChat,
-  onQuickGenerate,
   onNewSession,
   onNewBrand,
   onDeleteSession,
@@ -208,19 +206,6 @@ export default function ChatSidebar({
           {error || notice}
         </div>
       )}
-
-      <div className="chat-shell__nav-label">{t.chat}</div>
-      <button
-        type="button"
-        className="chat-shell__nav-item chat-shell__nav-button"
-        onClick={onQuickGenerate}
-        disabled={busy || businesses.length === 0}
-        aria-disabled={busy || businesses.length === 0}
-        title={t.quickGenerate}
-      >
-        <IconQuick size={13} />
-        <span className="chat-shell__nav-item-label">{t.quickGenerate}</span>
-      </button>
 
       <div className="chat-shell__brands">
         <div className="chat-shell__nav-label">{t.brands}</div>
@@ -403,8 +388,8 @@ export default function ChatSidebar({
                           <span className="chat-shell__session-title">
                             <span className="chat-shell__session-title-text">{label}</span>
                             {isQuick ? (
-                              <span className="chat-shell__session-tag" aria-label="Quick session">
-                                QUICK
+                              <span className="chat-shell__session-tag" aria-label={t.quickSessionTag}>
+                                {t.quickSessionTag}
                               </span>
                             ) : null}
                           </span>
@@ -438,7 +423,7 @@ export default function ChatSidebar({
                         setShowAllByBrand((prev) => ({ ...prev, [brand.id]: true }))
                       }
                     >
-                      {`Show ${olderCount} older`}
+                      {t.showOlder.replace('{count}', String(olderCount))}
                     </button>
                   )}
                   {showAll && brandSessions.length > SIDEBAR_SESSION_VISIBLE_CAP && (

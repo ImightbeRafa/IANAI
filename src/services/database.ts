@@ -901,7 +901,8 @@ async function loadUsageLimits(userId: string): Promise<UsageLimitsRow> {
       .select('plan, status')
       .eq('user_id', userId)
       .in('status', ['active', 'trialing'])
-      .maybeSingle(),
+      .order('created_at', { ascending: false })
+      .limit(1),
     supabase
       .from('usage')
       .select('scripts_generated, images_generated, descriptions_generated, enhances_generated, replies_generated')
@@ -915,7 +916,7 @@ async function loadUsageLimits(userId: string): Promise<UsageLimitsRow> {
       .maybeSingle(),
   ])
 
-  const plan = subRes.data?.plan || 'free'
+  const plan = subRes.data?.[0]?.plan || 'free'
   const { data: limits } = await supabase
     .from('plan_limits')
     .select('scripts_per_month, images_per_month, descriptions_per_month, replies_per_month')

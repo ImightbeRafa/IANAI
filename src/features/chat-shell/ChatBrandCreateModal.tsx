@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { validateBrandCreateName } from './chatShellBrandCreate'
+import { shellT, type ChatShellLanguage } from './chatShellLabels'
 
 interface ChatBrandCreateModalProps {
   open: boolean
   busy: boolean
   error: string | null
+  language?: ChatShellLanguage
   onClose: () => void
   onSubmit: (name: string) => void | Promise<void>
 }
@@ -13,9 +15,11 @@ export default function ChatBrandCreateModal({
   open,
   busy,
   error,
+  language = 'es',
   onClose,
   onSubmit,
 }: ChatBrandCreateModalProps) {
+  const t = shellT(language)
   const titleId = useId()
   const inputRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
@@ -25,8 +29,8 @@ export default function ChatBrandCreateModal({
     if (!open) return
     setName('')
     setLocalError(null)
-    const t = window.setTimeout(() => inputRef.current?.focus(), 0)
-    return () => window.clearTimeout(t)
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0)
+    return () => window.clearTimeout(timer)
   }, [open])
 
   useEffect(() => {
@@ -59,7 +63,7 @@ export default function ChatBrandCreateModal({
       <button
         type="button"
         className="chat-shell__modal-backdrop"
-        aria-label="Close create brand"
+        aria-label={t.newBrandModalClose}
         disabled={busy}
         onClick={() => {
           if (!busy) onClose()
@@ -72,13 +76,13 @@ export default function ChatBrandCreateModal({
         aria-labelledby={titleId}
       >
         <h2 id={titleId} className="chat-shell__modal-title">
-          New brand
+          {t.brandModalTitle}
         </h2>
         <p className="chat-shell__modal-copy">
-          Create a brand and start a chat session without leaving the shell.
+          {t.brandModalCopy}
         </p>
         <label className="chat-shell__modal-label" htmlFor="chat-shell-brand-name">
-          Brand name
+          {t.brandModalName}
         </label>
         <input
           ref={inputRef}
@@ -87,7 +91,7 @@ export default function ChatBrandCreateModal({
           value={name}
           disabled={busy}
           autoComplete="organization"
-          placeholder="e.g. Acme Studio"
+          placeholder={t.brandModalPlaceholder}
           onChange={(e) => {
             setName(e.target.value)
             if (localError) setLocalError(null)
@@ -111,7 +115,7 @@ export default function ChatBrandCreateModal({
             disabled={busy}
             onClick={onClose}
           >
-            Cancel
+            {t.brandModalCancel}
           </button>
           <button
             type="button"
@@ -119,7 +123,7 @@ export default function ChatBrandCreateModal({
             disabled={busy}
             onClick={submit}
           >
-            {busy ? 'Creating…' : 'Create brand'}
+            {busy ? t.brandModalCreating : t.brandModalCreate}
           </button>
         </div>
       </div>

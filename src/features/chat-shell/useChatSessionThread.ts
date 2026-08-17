@@ -1026,6 +1026,18 @@ export function useChatSessionThread(options: {
       model: getTextModelPreference(),
     })
     if (!options?.forceSettings && !options?.bypassScriptClarify && parsedScriptIntent.matched) {
+      const hasOffer =
+        planOfferGenerationWalk(offers).length > 0
+        || Boolean(session.product_id)
+        || brandProducts.some((product) => product.name !== 'Quick Use Image Studio')
+      if (!hasOffer) {
+        setScriptClarify(null)
+        setImageClarify(null)
+        setNotice(language === 'es'
+          ? 'Primero necesitás una oferta. Creala en el panel Ofertas o confirmá el setup.'
+          : 'You need an offer first. Create one in Offers or confirm setup.')
+        return { needOffers: true }
+      }
       const ctaChannel = explicitCtaChannel(text)
       const missing: Array<'type' | 'count' | 'cta'> = []
       if (!parsedScriptIntent.hasExplicitType) missing.push('type')

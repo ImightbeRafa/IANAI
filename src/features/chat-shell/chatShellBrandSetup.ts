@@ -73,11 +73,24 @@ export function brandSetupSkipStorageKey(userId: string, businessId: string): st
   return `ianai.chat-shell.brandSetup.skipped.${userId}.${businessId}`
 }
 
+export const SETUP_SKIP_CONTEXT_MARKER = '\n<!-- ianai:setup-skipped -->'
+
+export function readSetupSkippedFromSession(context?: string | null): boolean {
+  return Boolean(context?.includes('<!-- ianai:setup-skipped -->'))
+}
+
+export function withSetupSkippedContext(context: string | undefined | null, skipped: boolean): string {
+  const base = (context || '').replace(SETUP_SKIP_CONTEXT_MARKER, '').trimEnd()
+  return skipped ? `${base}${SETUP_SKIP_CONTEXT_MARKER}` : base
+}
+
 export function readBrandSetupSkipped(
   storage: { getItem(key: string): string | null } | null | undefined,
   userId: string | null | undefined,
-  businessId: string | null | undefined
+  businessId: string | null | undefined,
+  sessionContext?: string | null
 ): boolean {
+  if (readSetupSkippedFromSession(sessionContext)) return true
   if (!storage || !userId || !businessId) return false
   try {
     const raw = storage.getItem(brandSetupSkipStorageKey(userId, businessId))
