@@ -1935,6 +1935,68 @@ html.chat-shell-route *::-webkit-scrollbar {
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+.chat-shell__slash-palette {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 12;
+  display: grid;
+  gap: 2px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+
+.chat-shell__slash-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-shell__slash-option.is-active,
+.chat-shell__slash-option:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.chat-shell__slash-token {
+  flex: 0 0 auto;
+  min-width: 92px;
+  color: var(--accent, #5b8def);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-shell__slash-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.chat-shell__slash-copy strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.chat-shell__slash-copy small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .chat-shell__rail-form {
   display: grid;
   gap: 14px;
@@ -2089,12 +2151,14 @@ html.chat-shell-route *::-webkit-scrollbar {
 
 /* ---- Composer ---- */
 .chat-shell__composer-wrap {
+  position: relative;
   flex-shrink: 0;
   padding: 8px 16px 14px;
   background: linear-gradient(180deg, transparent, var(--bg-stage) 36%);
 }
 
 .chat-shell__composer {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 8px;

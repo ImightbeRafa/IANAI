@@ -1,8 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { ArrowUp, Loader2, Mic, Paperclip, Square } from 'lucide-react'
 import ChatShellProgress, { type ChatShellProgressKind } from './ChatShellProgress'
 import ChatShellScriptCard from './ChatShellScriptCard'
 import ChatShellImageCard from './ChatShellImageCard'
+import ChatSlashCommandPalette from './ChatSlashCommandPalette'
+import { matchSlashCommands, type ShellCommandOption } from './chatShellCommands'
 import { shellT } from './chatShellLabels'
 import {
   appendComposerTranscript,
@@ -235,6 +237,19 @@ export default memo(function ChatThread({
   const sessionKey = session?.id || ''
   const composer = sessionKey ? (drafts[sessionKey] || '') : ''
   const composerEnabled = Boolean(session)
+  const slashListId = useId()
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [slashDismissed, setSlashDismissed] = useState(false)
+  const slashCommands = useMemo(
+    () => (slashDismissed ? [] : matchSlashCommands(composer)),
+    [composer, slashDismissed]
+  )
+  const insertSlashCommand = useCallback((command: ShellCommandOption) => {
+    if (!sessionKey) return
+    setDrafts((prev) => ({ ...prev, [sessionKey]: command.insert }))
+    setSlashDismissed(true)
+    setSlashIndex(0)
+  }, [sessionKey])
   const t = shellT(language)
   const visibleMessages = useMemo(() => dedupeLegacySetupSummaries(messages), [messages])
   const imageVersionsByOffer = useMemo(() => {
@@ -362,6 +377,29 @@ export default memo(function ChatThread({
   }, [messages.length, setupTurns.length, progressKind, inlineSetupCard, sending, setupBusy, imageBusy])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashIndex((i) => (i + 1) % slashCommands.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashIndex((i) => (i - 1 + slashCommands.length) % slashCommands.length)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashDismissed(true)
+        return
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault()
+        const selected = slashCommands[slashIndex] || slashCommands[0]
+        if (selected) insertSlashCommand(selected)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (!voiceBusy) submit()
@@ -951,11 +989,22 @@ export default memo(function ChatThread({
           </div>
         ) : null}
         <div className={`chat-shell__composer${voice.isRecording ? ' is-listening' : ''}`}>
+          {slashCommands.length > 0 ? (
+            <ChatSlashCommandPalette
+              commands={slashCommands}
+              activeIndex={Math.min(slashIndex, slashCommands.length - 1)}
+              language={language}
+              listId={slashListId}
+              onHover={setSlashIndex}
+              onSelect={insertSlashCommand}
+            />
+          ) : null}
           <textarea
             value={composer}
             onChange={(e) => {
               if (!sessionKey) return
               const value = e.target.value
+              setSlashDismissed(false)
               setDrafts((prev) => ({ ...prev, [sessionKey]: value }))
             }}
             onKeyDown={handleKeyDown}
@@ -980,6 +1029,15 @@ export default memo(function ChatThread({
             aria-disabled={!composerEnabled || voiceBusy}
             rows={2}
             aria-label={t.composer}
+            role={slashCommands.length > 0 ? 'combobox' : undefined}
+            aria-expanded={slashCommands.length > 0}
+            aria-controls={slashCommands.length > 0 ? slashListId : undefined}
+            aria-activedescendant={
+              slashCommands.length > 0
+                ? `${slashListId}-${slashCommands[slashIndex]?.id || slashCommands[0]?.id}`
+                : undefined
+            }
+            aria-autocomplete={slashCommands.length > 0 ? 'list' : undefined}
           />
           <div className="chat-shell__composer-tools">
             {onUploadBrandAsset || onUploadSetupDocument ? (
