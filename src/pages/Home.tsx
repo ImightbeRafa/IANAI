@@ -13,6 +13,7 @@ import {
   Layers
 } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import LandingPresetImg from './LandingPresetImg'
 
 export default function Home() {
   const { language } = useLanguage()
@@ -354,7 +355,7 @@ export default function Home() {
               style={{ opacity: 0.35 }}
             >
               <div className="w-[110px] rounded-2xl overflow-hidden shadow-2xl border border-dark-100 bg-dark-100">
-                <img src={post.img} alt={post.label} className="w-full h-[140px] object-cover" />
+                <LandingPresetImg src={post.img} alt={post.label} className="w-full h-[140px] object-cover" sizes="110px" />
                 <div className="px-2 py-1.5 text-center">
                   <span className="text-[9px] text-dark-500 font-semibold">{post.label}</span>
                 </div>
@@ -509,7 +510,7 @@ export default function Home() {
                   { img: '/presets/08_Testimonial/013_Access_147.png', name: language === 'es' ? 'Testimonio' : 'Testimonial' },
                 ].map((item, i) => (
                   <div key={i} className="relative group overflow-hidden rounded-2xl shadow-lg border border-dark-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-                    <img src={item.img} alt={item.name} className="w-full aspect-[3/4] object-cover" />
+                    <LandingPresetImg src={item.img} alt={item.name} className="w-full aspect-[3/4] object-cover" sizes="(min-width: 1024px) 280px, 45vw" />
                     <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-3">
                       <span className="text-white text-xs font-semibold">{item.name}</span>
                     </div>
@@ -549,7 +550,7 @@ export default function Home() {
               { img: '/presets/08_Testimonial/013_Access_147.png', name: language === 'es' ? 'Testimonio' : 'Testimonial', count: 49 },
             ].map((preset, i) => (
               <div key={i} className="group relative overflow-hidden rounded-2xl shadow-md border border-dark-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-default">
-                <img src={preset.img} alt={preset.name} className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-transform duration-500" />
+                <LandingPresetImg src={preset.img} alt={preset.name} className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition-transform duration-500" sizes="(min-width: 640px) 25vw, 45vw" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
                 <div className="absolute bottom-0 inset-x-0 p-3">
                   <span className="text-white text-xs sm:text-sm font-bold block leading-tight">{preset.name}</span>
