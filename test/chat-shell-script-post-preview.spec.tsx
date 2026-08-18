@@ -102,17 +102,50 @@ describe('ChatShellScriptCard post preview', () => {
     expect(onPreparePost).toHaveBeenCalledWith('Guión original largo', 'medium')
     expect(onSaveVersion).not.toHaveBeenCalled()
 
+    fireEvent.click(screen.getByRole('radio', { name: /poco texto/i }))
+    expect((editor as HTMLTextAreaElement).value).toBe('Poco texto condensado')
+    expect(onPreparePost.mock.calls.filter((call) => call[1] === 'hard')).toHaveLength(1)
+
     fireEvent.click(screen.getByRole('button', { name: /continuar al tipo de post/i }))
     await waitFor(() => expect(onSaveVersion).toHaveBeenCalledWith(
       'parent-1',
-      'Texto medio condensado',
+      'Poco texto condensado',
       'post_optimize',
-      'Post · Texto medio'
+      'Post · Poco texto'
     ))
     await waitFor(() => expect(onGenerateImage).toHaveBeenCalledWith(
-      'Texto medio condensado',
-      { density: 'medium', alreadyOptimized: true, referenceImageIds: [] }
+      'Poco texto condensado',
+      { density: 'hard', alreadyOptimized: true, referenceImageIds: [] }
     ))
+  })
+
+  it('keeps the editor mounted and the selected density instant while the other copy loads', async () => {
+    let resolveMedium: (value: string) => void = () => {}
+    const onPreparePost = vi.fn(async (_script: string, density?: 'hard' | 'medium') => {
+      if (density === 'medium') {
+        return new Promise<string>((resolve) => { resolveMedium = resolve })
+      }
+      return 'Poco texto condensado'
+    })
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
+        language="es"
+        savedScriptId="parent-1"
+        onPreparePost={onPreparePost}
+        onGenerateImage={vi.fn()}
+        onSaveVersion={vi.fn(async () => 'v-post')}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
+    const editor = await screen.findByLabelText('Vista previa editable del post')
+    fireEvent.click(screen.getByRole('radio', { name: /texto medio/i }))
+    expect(screen.getByRole('radio', { name: /texto medio/i }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByText('Optimizando el texto…')).toBeNull()
+    expect((editor as HTMLTextAreaElement).value).toBe('Poco texto condensado')
+    resolveMedium('Texto medio condensado')
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe('Texto medio condensado'))
   })
 
   it('opens the same editable post draft when asked from an image optimize signal', async () => {

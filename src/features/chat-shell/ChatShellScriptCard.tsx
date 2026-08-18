@@ -193,7 +193,7 @@ export default function ChatShellScriptCard({
   const [activeAction, setActiveAction] = useState<'edit' | null>(null)
   const [operation, setOperation] = useState<{ kind: ScriptOpSource; label?: string } | null>(null)
   const [postPreviewOpen, setPostPreviewOpen] = useState(false)
-  const [postDraft, setPostDraft] = useState('')
+  const [postDrafts, setPostDrafts] = useState<Partial<Record<'hard' | 'medium', string>>>({})
   const [postDensity, setPostDensity] = useState<'hard' | 'medium'>('hard')
   const [preparingPost, setPreparingPost] = useState(false)
   const [savingPost, setSavingPost] = useState(false)
@@ -203,6 +203,7 @@ export default function ChatShellScriptCard({
   const menuRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLElement>(null)
   const initLoadedRef = useRef(false)
+  const prepareSeqRef = useRef(0)
 
   useEffect(() => {
     if (initLoadedRef.current) return
@@ -402,21 +403,45 @@ export default function ChatShellScriptCard({
     }
   }
 
-  const openPostPreview = async (density: 'hard' | 'medium' = postDensity) => {
-    if (!onGenerateImage || preparingPost || operation) return
-    onOpenPostPreview?.()
+  const loadDensityDraft = async (density: 'hard' | 'medium') => {
+    const seq = ++prepareSeqRef.current
     setPreparingPost(true)
     setEditError(null)
     try {
       const optimized = onPreparePost ? await onPreparePost(displayContent, density) : displayContent
+      if (seq !== prepareSeqRef.current) return
+      setPostDrafts((prev) => ({ ...prev, [density]: optimized }))
+    } catch (err) {
+      if (seq !== prepareSeqRef.current) return
+      setEditError(err instanceof Error ? err.message : 'Could not prepare post')
+    } finally {
+      if (seq === prepareSeqRef.current) setPreparingPost(false)
+    }
+  }
+
+  const openPostPreview = async (density: 'hard' | 'medium' = postDensity) => {
+    if (!onGenerateImage || operation) return
+    onOpenPostPreview?.()
+    if (postPreviewOpen) {
       setPostDensity(density)
-      setPostDraft(optimized)
+      if (!postDrafts[density]) await loadDensityDraft(density)
+      return
+    }
+    const seq = ++prepareSeqRef.current
+    setPreparingPost(true)
+    setEditError(null)
+    try {
+      const optimized = onPreparePost ? await onPreparePost(displayContent, density) : displayContent
+      if (seq !== prepareSeqRef.current) return
+      setPostDensity(density)
+      setPostDrafts({ [density]: optimized })
       setPostPreviewOpen(true)
       cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     } catch (err) {
+      if (seq !== prepareSeqRef.current) return
       setEditError(err instanceof Error ? err.message : 'Could not prepare post')
     } finally {
-      setPreparingPost(false)
+      if (seq === prepareSeqRef.current) setPreparingPost(false)
     }
   }
 
@@ -427,10 +452,14 @@ export default function ChatShellScriptCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openPostPreviewNonce, versionsReady])
 
-  const applyPostDensity = async (density: 'hard' | 'medium') => {
-    if (density === postDensity && postDraft) return
-    await openPostPreview(density)
+  const applyPostDensity = (density: 'hard' | 'medium') => {
+    if (density === postDensity) return
+    setPostDensity(density)
+    if (!postDrafts[density]) void loadDensityDraft(density)
   }
+
+  const postDraft = postDrafts[postDensity] ?? ''
+  const visibleDraft = postDraft || postDrafts.hard || postDrafts.medium || ''
 
   const persistApprovedPostCopy = async (draft: string, density: 'hard' | 'medium') => {
     const label = postOptimizeVersionLabel(density, language)
@@ -462,7 +491,7 @@ export default function ChatShellScriptCard({
 
   const continueToPostType = async () => {
     const draft = postDraft.trim()
-    if (!draft || imageBusy || preparingPost || savingPost) return
+    if (!draft || imageBusy || savingPost) return
     setSavingPost(true)
     setEditError(null)
     try {
@@ -496,7 +525,7 @@ export default function ChatShellScriptCard({
     return (
       <article
         ref={cardRef}
-        className={`chat-shell__artifact chat-shell__artifact--post${preparingPost || savingPost ? ' is-busy' : ''}`}
+        className={`chat-shell__artifact chat-shell__artifact--post${savingPost ? ' is-busy' : ''}`}
         aria-busy={preparingPost || savingPost}
       >
         <header className="chat-shell__post-preview-head">
@@ -521,12 +550,6 @@ export default function ChatShellScriptCard({
             <X size={16} />
           </button>
         </header>
-        {preparingPost ? (
-          <div className="chat-shell__artifact-status" role="status" aria-live="polite">
-            <Loader2 size={14} className="chat-shell__spin" />
-            {es ? 'Optimizando el texto…' : 'Refining the copy…'}
-          </div>
-        ) : null}
         {savingPost ? (
           <div className="chat-shell__artifact-status" role="status" aria-live="polite">
             <Loader2 size={14} className="chat-shell__spin" />
@@ -534,13 +557,24 @@ export default function ChatShellScriptCard({
           </div>
         ) : null}
         {editError ? <div className="chat-shell__artifact-error">{editError}</div> : null}
-        <textarea
-          value={postDraft}
-          onChange={(event) => setPostDraft(event.target.value)}
-          rows={5}
-          disabled={imageBusy || preparingPost || savingPost}
-          aria-label={es ? 'Vista previa editable del post' : 'Editable post preview'}
-        />
+        <div className="chat-shell__post-preview-editor">
+          <textarea
+            value={visibleDraft}
+            onChange={(event) => {
+              const value = event.target.value
+              setPostDrafts((prev) => ({ ...prev, [postDensity]: value }))
+            }}
+            rows={5}
+            disabled={imageBusy || savingPost || (preparingPost && !postDraft)}
+            aria-label={es ? 'Vista previa editable del post' : 'Editable post preview'}
+          />
+          {preparingPost && !postDraft ? (
+            <div className="chat-shell__post-preview-editor-busy" role="status" aria-live="polite">
+              <Loader2 size={14} className="chat-shell__spin" />
+              <span>{es ? 'Ajustando el texto…' : 'Adjusting the copy…'}</span>
+            </div>
+          ) : null}
+        </div>
         <div className="chat-shell__post-preview-toolbar">
           <div className="chat-shell__post-preview-density" role="radiogroup" aria-label={es ? 'Cantidad de texto' : 'How much text'}>
             {IMAGE_DENSITY_CHOICES.map((choice) => {
@@ -552,9 +586,9 @@ export default function ChatShellScriptCard({
                   role="radio"
                   aria-checked={selected}
                   className={selected ? 'is-on' : ''}
-                  disabled={preparingPost || imageBusy || (choice.id !== 'hard' && choice.id !== 'medium')}
+                  disabled={imageBusy || (choice.id !== 'hard' && choice.id !== 'medium')}
                   onClick={() => {
-                    if (choice.id === 'hard' || choice.id === 'medium') void applyPostDensity(choice.id)
+                    if (choice.id === 'hard' || choice.id === 'medium') applyPostDensity(choice.id)
                   }}
                 >
                   {es ? choice.labelEs : choice.labelEn}
@@ -568,7 +602,7 @@ export default function ChatShellScriptCard({
                 images={previewRefs}
                 currentProductId={productId}
                 language={language}
-                busy={Boolean(imageBusy || preparingPost || savingPost)}
+                busy={Boolean(imageBusy || savingPost)}
                 compact
                 onToggle={(id) => setPreviewRefs((prev) => toggleReferenceSelection(prev, id))}
                 onUpload={onUploadPostReference}
@@ -578,10 +612,10 @@ export default function ChatShellScriptCard({
           <button
             type="button"
             className="chat-shell__post-preview-continue"
-            disabled={!postDraft.trim() || imageBusy || preparingPost || savingPost}
+            disabled={!postDraft.trim() || imageBusy || savingPost}
             onClick={() => void continueToPostType()}
           >
-            {imageBusy || preparingPost || savingPost ? <Loader2 size={15} className="chat-shell__spin" /> : null}
+            {savingPost ? <Loader2 size={15} className="chat-shell__spin" /> : null}
             {es ? 'Continuar al tipo de post' : 'Continue to post type'}
           </button>
         </div>

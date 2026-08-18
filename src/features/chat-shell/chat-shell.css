@@ -2942,9 +2942,13 @@ html.chat-shell-route *::-webkit-scrollbar {
   background: var(--bg-hover, var(--bg-soft));
 }
 
+.chat-shell__post-preview-editor {
+  position: relative;
+}
+
 .chat-shell__artifact--post textarea {
   width: 100%;
-  min-height: 112px;
+  min-height: 132px;
   resize: vertical;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2954,6 +2958,22 @@ html.chat-shell-route *::-webkit-scrollbar {
   font: inherit;
   font-size: 0.88rem;
   line-height: 1.5;
+  transition: opacity 160ms ease;
+}
+
+.chat-shell__post-preview-editor-busy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-stage) 88%, transparent);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  pointer-events: none;
 }
 
 .chat-shell__artifact--post textarea:focus {
@@ -2963,8 +2983,8 @@ html.chat-shell-route *::-webkit-scrollbar {
 }
 
 .chat-shell__post-preview-toolbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
 }
@@ -2990,6 +3010,7 @@ html.chat-shell-route *::-webkit-scrollbar {
   font-size: 0.74rem;
   font-weight: 550;
   cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 .chat-shell__post-preview-density > button.is-on {
@@ -2998,8 +3019,8 @@ html.chat-shell-route *::-webkit-scrollbar {
 }
 
 .chat-shell__post-preview-refs {
+  grid-column: 1 / -1;
   display: flex;
-  flex: 1 1 100%;
   min-width: 0;
   gap: 4px;
 }
@@ -3110,6 +3131,7 @@ html.chat-shell-route *::-webkit-scrollbar {
   height: 44px;
 }
 
+.chat-shell__ref-picker.is-compact .chat-shell__ref-picker-lead,
 .chat-shell__ref-picker.is-compact .chat-shell__ref-picker-tile > span,
 .chat-shell__ref-picker.is-compact .chat-shell__ref-picker-tile > small {
   display: none;
@@ -3162,8 +3184,9 @@ html.chat-shell-route *::-webkit-scrollbar {
 }
 
 .chat-shell__post-preview-continue {
+  grid-column: 2;
   min-height: 36px;
-  margin-left: auto;
+  margin-left: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
