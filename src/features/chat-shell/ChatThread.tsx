@@ -27,6 +27,8 @@ import {
   type ScriptClarifyState,
   type ScriptCtaChannel,
 } from './useChatSessionThread'
+import ChatShellReferencePicker from './ChatShellReferencePicker'
+import { catalogOfferReferences } from './chatShellReferenceSelection'
 import { sortArtifactsByOrdinal, type ShellImageLike } from './chatShellImages'
 import {
   anuncioStyleChoices,
@@ -87,14 +89,19 @@ interface ChatThreadProps {
   }) => void
   onCancelScriptClarify?: () => void
   onOpenImagesRail?: () => void
-  onUploadOfferReference?: (file: File, kind: 'product' | 'context') => void | Promise<void>
+  onUploadOfferReference?: (file: File, kind: 'product' | 'context', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
+  offerProductNames?: Record<string, string>
   onPreparePostFromScript?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
   onGenerateImageFromScript?: (
     scriptText: string,
     productId?: string | null,
     scriptTitle?: string | null,
-    options?: { density?: 'hard' | 'medium' }
+    options?: {
+      density?: 'hard' | 'medium'
+      referenceImageIds?: string[]
+      alreadyOptimized?: boolean
+    }
   ) => void | Promise<void>
   onSaveScript: (
     content: string,
@@ -215,6 +222,7 @@ export default memo(function ChatThread({
   onOpenImagesRail,
   onUploadOfferReference,
   onRemoveOfferReference,
+  offerProductNames = {},
   onPreparePostFromScript,
   onGenerateImageFromScript,
   onSaveScript,
@@ -265,6 +273,10 @@ export default memo(function ChatThread({
     }
     return grouped
   }, [offerImages])
+  const libraryReferenceImages = useMemo(
+    () => catalogOfferReferences(offerImages, offerProductNames),
+    [offerImages, offerProductNames]
+  )
   const latestScriptIdByProduct = useMemo(() => {
     const map = new Map<string, string>()
     for (const message of visibleMessages) {
@@ -538,9 +550,7 @@ export default memo(function ChatThread({
                           savingScript={savingScript}
                           offerImageId={offerImage?.id}
                           offerImageUrl={offerImage?.image_url}
-                          referenceImageUrls={offerImages
-                            .filter((image) => image.product_id === productId && image.kind !== 'generated' && image.image_url)
-                            .map((image) => image.image_url as string)}
+                          referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
@@ -568,6 +578,7 @@ export default memo(function ChatThread({
                               : undefined
                           }
                           onPreparePost={onPreparePostFromScript}
+                          onUploadPostReference={(file, kind) => void onUploadOfferReference?.(file, kind, productId)}
                           onOpenPostPreview={() => onCancelScriptClarify?.()}
                           onLatestVersionChange={onLatestVersionChange}
                           snapshotKey={artifact.id}
@@ -615,9 +626,7 @@ export default memo(function ChatThread({
                         messageId={message.id}
                         scriptIndex={script.index}
                         savingScript={savingScript}
-                        referenceImageUrls={offerImages
-                          .filter((image) => image.product_id === offerProductId && image.kind !== 'generated' && image.image_url)
-                          .map((image) => image.image_url as string)}
+                        referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
@@ -634,6 +643,7 @@ export default memo(function ChatThread({
                             : undefined
                         }
                         onPreparePost={onPreparePostFromScript}
+                        onUploadPostReference={(file, kind) => void onUploadOfferReference?.(file, kind, offerProductId || undefined)}
                         onOpenPostPreview={() => onCancelScriptClarify?.()}
                         onLatestVersionChange={onLatestVersionChange}
                         snapshotKey={`${message.id}:${script.index}`}
@@ -773,26 +783,16 @@ export default memo(function ChatThread({
                 <span>{imageClarify.scriptTitle}</span>
               </div>
             ) : null}
-            {imageClarify.step === 'refs' && imageClarify.referenceImages?.length ? (
-              <div className="chat-shell__clarify-references">
-                {imageClarify.referenceImages.map((reference) => (
-                  <div key={reference.id} className="chat-shell__clarify-reference-wrap">
-                    <button
-                      type="button"
-                      className={`chat-shell__clarify-reference${reference.selected === false ? '' : ' is-selected'}`}
-                      disabled={imageBusy}
-                      onClick={() => onAnswerImageClarify?.({ toggleReferenceId: reference.id })}
-                    >
-                      <img src={reference.url} alt={reference.label || reference.kind} />
-                      <span>{reference.kind === 'context'
-                        ? (language === 'es' ? 'Estilo' : 'Style')
-                        : (language === 'es' ? 'Producto' : 'Product')}</span>
-                      <small>{reference.selected === false ? (language === 'es' ? 'No usar' : 'Excluded') : (language === 'es' ? 'Usar' : 'Use')}</small>
-                    </button>
-                    <button type="button" className="chat-shell__clarify-reference-remove" disabled={imageBusy} onClick={() => void onRemoveOfferReference?.(reference.id)} aria-label={language === 'es' ? 'Eliminar referencia' : 'Remove reference'}>×</button>
-                  </div>
-                ))}
-              </div>
+            {imageClarify.step === 'refs' ? (
+              <ChatShellReferencePicker
+                images={imageClarify.referenceImages || []}
+                currentProductId={imageClarify.productId}
+                language={language}
+                busy={imageBusy}
+                onToggle={(id) => onAnswerImageClarify?.({ toggleReferenceId: id })}
+                onUpload={(file, kind) => void onUploadOfferReference?.(file, kind, imageClarify.productId)}
+                onRemove={onRemoveOfferReference}
+              />
             ) : null}
             <div className="chat-shell__clarify-chips">
               {imageClarify.step === 'script' ? (
@@ -896,17 +896,21 @@ export default memo(function ChatThread({
                 </>
               ) : imageClarify.step === 'refs' ? (
                 <>
-                  {(imageClarify.availableReferenceCount || 0) > 0 ? (
-                    <button
-                      type="button"
-                      className="chat-shell__btn chat-shell__btn--pill"
-                      disabled={imageBusy}
-                      onClick={() => onAnswerImageClarify?.({ useReferences: true })}
-                    >
-                      {language === 'es' ? 'Continuar con las seleccionadas' : 'Continue with selected'}
-                    </button>
-                  ) : null}
-                  {(imageClarify.availableReferenceCount || 0) > 0 && !imageClarify.referencesRequired ? (
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={
+                      imageBusy
+                      || (
+                        Boolean(imageClarify.referencesRequired)
+                        && !(imageClarify.referenceImages || []).some((image) => image.selected === true && image.kind !== 'context')
+                      )
+                    }
+                    onClick={() => onAnswerImageClarify?.({ useReferences: true })}
+                  >
+                    {language === 'es' ? 'Continuar con las seleccionadas' : 'Continue with selected'}
+                  </button>
+                  {!imageClarify.referencesRequired ? (
                     <button
                       type="button"
                       className="chat-shell__btn chat-shell__btn--pill"
@@ -916,22 +920,6 @@ export default memo(function ChatThread({
                       {language === 'es' ? 'Crear sin referencias' : 'Create without references'}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => offerProductRefInputRef.current?.click()}
-                  >
-                    {language === 'es' ? 'Subir producto' : 'Upload product'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => offerContextRefInputRef.current?.click()}
-                  >
-                    {language === 'es' ? 'Subir estilo de post' : 'Upload post style'}
-                  </button>
                   <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onOpenImagesRail?.()}>
                     {language === 'es' ? 'Administrar biblioteca' : 'Manage library'}
                   </button>

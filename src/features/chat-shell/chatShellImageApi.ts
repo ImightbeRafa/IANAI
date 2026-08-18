@@ -4,6 +4,7 @@ import {
   addMessage,
   createProductImage,
   getSessionOfferImages,
+  getSessionOffersImages,
   insertImageMessageArtifact,
   type ProductImage,
 } from '../../services/database'
@@ -217,6 +218,7 @@ export async function editShellOfferImage(options: {
   density?: PostTextDensity
   brandKitId?: string
   aspectRatio?: ShellImageAspect
+  editReferenceImages?: string[]
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
@@ -225,6 +227,11 @@ export async function editShellOfferImage(options: {
   const base64 = await compressBase64ForApi(await urlToBase64(options.imageUrl))
   const inferredAspect = options.aspectRatio || await aspectRatioFromImageUrl(options.imageUrl) || undefined
   const isEnhance = options.actionType === 'enhance'
+  const compressedRefs = options.editReferenceImages?.length
+    ? (await Promise.all(
+      options.editReferenceImages.slice(0, 4).map((image) => compressBase64ForApi(image))
+    )).filter(Boolean)
+    : []
   const sample = await callGenerateImage(
     isEnhance
       ? {
@@ -246,6 +253,7 @@ export async function editShellOfferImage(options: {
           productImageId: options.productImageId,
           editPrompt: options.editPrompt,
           editImage: base64,
+          ...(compressedRefs.length ? { editReferenceImages: compressedRefs } : {}),
           ...(inferredAspect ? { aspectRatio: inferredAspect } : {}),
           ...(options.brandKitId ? { brandKitId: options.brandKitId } : {}),
         }
@@ -331,4 +339,30 @@ export async function uploadShellOfferImage(options: {
   )
 }
 
-export { getSessionOfferImages }
+export async function copyShellOfferImageToProduct(options: {
+  userId: string
+  source: {
+    id: string
+    image_url: string
+    label?: string | null
+    kind: 'product' | 'context'
+  }
+  targetProductId: string
+}): Promise<ProductImage> {
+  const dataUrl = await compressBase64ForApi(await urlToBase64(options.source.image_url))
+  const publicUrl = await uploadProductImage(
+    options.userId,
+    options.targetProductId,
+    dataUrl,
+    `${options.source.id}.webp`
+  )
+  return createProductImage(
+    options.targetProductId,
+    options.userId,
+    publicUrl,
+    options.source.label || 'Reference',
+    options.source.kind
+  )
+}
+
+export { getSessionOfferImages, getSessionOffersImages }

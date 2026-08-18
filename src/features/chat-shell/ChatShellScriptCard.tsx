@@ -5,8 +5,21 @@ import type { ProductType } from '../../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../../services/database'
 import { parseScriptSections } from './parseScriptSections'
 import { IMAGE_DENSITY_CHOICES } from './chatShellImageIntent'
+import ChatShellReferencePicker from './ChatShellReferencePicker'
+import {
+  confirmedReferenceImageIds,
+  postOptimizeVersionLabel,
+  shouldPersistPostOptimizeVersion,
+  toggleReferenceSelection,
+  withPreselectedReferences,
+  type OfferReferenceImage,
+} from './chatShellReferenceSelection'
 
-type EditSource = 'manual' | 'enhance' | 'hook' | 'consciousness' | null
+const EMPTY_REFERENCE_IMAGES: OfferReferenceImage[] = []
+const EMPTY_REFERENCE_URLS: string[] = []
+
+type ScriptOpSource = 'manual' | 'enhance' | 'hook' | 'consciousness'
+type EditSource = ScriptOpSource | 'post_optimize' | null
 
 interface EditHistoryEntry {
   content: string
@@ -16,7 +29,13 @@ interface EditHistoryEntry {
 }
 
 function asEditSource(value: unknown): EditSource {
-  if (value === 'enhance' || value === 'hook' || value === 'consciousness' || value === 'manual') return value
+  if (
+    value === 'enhance'
+    || value === 'hook'
+    || value === 'consciousness'
+    || value === 'manual'
+    || value === 'post_optimize'
+  ) return value
   return 'manual'
 }
 
@@ -31,6 +50,8 @@ function sourceLabel(source: EditSource, language: 'en' | 'es'): string {
       return es ? 'Conciencia' : 'Awareness'
     case 'manual':
       return es ? 'Edición' : 'Edit'
+    case 'post_optimize':
+      return es ? 'Post' : 'Post'
     case null:
       return es ? 'Original' : 'Original'
     default: {
@@ -54,13 +75,19 @@ interface ChatShellScriptCardProps {
   offerImageId?: string
   offerImageUrl?: string
   referenceImageUrls?: string[]
+  referenceImages?: OfferReferenceImage[]
   imageBusy?: boolean
   onSave?: (content: string, title: string, opts?: { edit_source?: string; message_id?: string; script_index?: number }) => Promise<string | null>
   onEdit?: (originalContent: string, instruction: string, editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness') => Promise<string>
   onSaveVersion?: (parentId: string, content: string, editSource: string, editLabel?: string) => Promise<string | null>
   onEditOfferImage?: (instruction: string) => Promise<void>
   onPreparePost?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
-  onGenerateImage?: (scriptText: string, options?: { density?: 'hard' | 'medium' }) => void | Promise<void>
+  onGenerateImage?: (scriptText: string, options?: {
+    density?: 'hard' | 'medium'
+    referenceImageIds?: string[]
+    alreadyOptimized?: boolean
+  }) => void | Promise<void>
+  onUploadPostReference?: (file: File, kind: 'product' | 'context') => void | Promise<void>
   onOpenPostPreview?: () => void
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
   snapshotKey?: string
@@ -83,7 +110,7 @@ const CONSCIOUSNESS_OPTIONS = [
 ]
 
 function operationCopy(
-  op: { kind: Exclude<EditSource, null>; label?: string },
+  op: { kind: ScriptOpSource; label?: string },
   language: 'en' | 'es',
   instruction?: string
 ): string {
@@ -136,7 +163,8 @@ export default function ChatShellScriptCard({
   savingScript,
   offerImageId,
   offerImageUrl,
-  referenceImageUrls = [],
+  referenceImageUrls = EMPTY_REFERENCE_URLS,
+  referenceImages = EMPTY_REFERENCE_IMAGES,
   imageBusy,
   onSave,
   onEdit,
@@ -144,6 +172,7 @@ export default function ChatShellScriptCard({
   onEditOfferImage,
   onPreparePost,
   onGenerateImage,
+  onUploadPostReference,
   onOpenPostPreview,
   onLatestVersionChange,
   snapshotKey,
@@ -162,11 +191,13 @@ export default function ChatShellScriptCard({
   const [editError, setEditError] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [activeAction, setActiveAction] = useState<'edit' | null>(null)
-  const [operation, setOperation] = useState<{ kind: Exclude<EditSource, null>; label?: string } | null>(null)
+  const [operation, setOperation] = useState<{ kind: ScriptOpSource; label?: string } | null>(null)
   const [postPreviewOpen, setPostPreviewOpen] = useState(false)
   const [postDraft, setPostDraft] = useState('')
   const [postDensity, setPostDensity] = useState<'hard' | 'medium'>('hard')
   const [preparingPost, setPreparingPost] = useState(false)
+  const [savingPost, setSavingPost] = useState(false)
+  const [previewRefs, setPreviewRefs] = useState<OfferReferenceImage[]>([])
   const [versionsReady, setVersionsReady] = useState(!messageId && !savedScriptId)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -229,6 +260,30 @@ export default function ChatShellScriptCard({
     if (!snapshotKey || !latestContent.trim()) return
     onLatestVersionChange?.(snapshotKey, latestContent)
   }, [snapshotKey, latestContent, onLatestVersionChange])
+
+  const catalogFromProps = useMemo<OfferReferenceImage[]>(() => {
+    if (referenceImages.length) return referenceImages
+    return referenceImageUrls.map((url, index) => ({
+      id: `url-${index}`,
+      url,
+      kind: 'product' as const,
+      productId: productId || '',
+      selected: index < 4,
+    }))
+  }, [referenceImages, referenceImageUrls, productId])
+
+  useEffect(() => {
+    if (!postPreviewOpen) return
+    setPreviewRefs((prev) => {
+      if (!catalogFromProps.length) return []
+      if (!prev.length) return withPreselectedReferences(catalogFromProps, productId || '')
+      const selected = new Set(prev.filter((img) => img.selected === true).map((img) => img.id))
+      for (const img of catalogFromProps) {
+        if (!prev.some((item) => item.id === img.id)) selected.add(img.id)
+      }
+      return catalogFromProps.map((img) => ({ ...img, selected: selected.has(img.id) }))
+    })
+  }, [postPreviewOpen, catalogFromProps, productId])
 
   const sectionNodes = useMemo(
     () => renderScriptSections(displayContent),
@@ -377,7 +432,56 @@ export default function ChatShellScriptCard({
     await openPostPreview(density)
   }
 
-  const busy = Boolean(operation) || saving || Boolean(savingScript)
+  const persistApprovedPostCopy = async (draft: string, density: 'hard' | 'medium') => {
+    const label = postOptimizeVersionLabel(density, language)
+    const latest = versions[latestIndex]
+    if (!shouldPersistPostOptimizeVersion({ latestContent: latest?.content, draft })) {
+      return true
+    }
+    if (!onSaveVersion) {
+      throw new Error(language === 'es'
+        ? 'No pude guardar el texto del post. Reintentá.'
+        : 'Could not save the post copy. Try again.')
+    }
+    const parentId = await ensureOriginalSaved()
+    if (!parentId) {
+      throw new Error(language === 'es'
+        ? 'No pude guardar el texto del post. Reintentá.'
+        : 'Could not save the post copy. Try again.')
+    }
+    const versionId = await onSaveVersion(parentId, draft, 'post_optimize', label)
+    if (!versionId) {
+      throw new Error(language === 'es'
+        ? 'No pude guardar el texto del post. Reintentá.'
+        : 'Could not save the post copy. Try again.')
+    }
+    setEditHistory((prev) => [...prev, { content: draft, source: 'post_optimize', label }])
+    setViewIndex(null)
+    return true
+  }
+
+  const continueToPostType = async () => {
+    const draft = postDraft.trim()
+    if (!draft || imageBusy || preparingPost || savingPost) return
+    setSavingPost(true)
+    setEditError(null)
+    try {
+      await persistApprovedPostCopy(draft, postDensity)
+      const referenceImageIds = confirmedReferenceImageIds(previewRefs)
+        .filter((id) => !id.startsWith('url-'))
+      await onGenerateImage?.(draft, {
+        density: postDensity,
+        referenceImageIds,
+        alreadyOptimized: true,
+      })
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : (language === 'es' ? 'No pude guardar el texto del post.' : 'Could not save the post copy.'))
+    } finally {
+      setSavingPost(false)
+    }
+  }
+
+  const busy = Boolean(operation) || saving || Boolean(savingScript) || savingPost
   const locked = readOnly
   const es = language === 'es'
   const previewVersionLabel = (() => {
@@ -392,8 +496,8 @@ export default function ChatShellScriptCard({
     return (
       <article
         ref={cardRef}
-        className={`chat-shell__artifact chat-shell__artifact--post${preparingPost ? ' is-busy' : ''}`}
-        aria-busy={preparingPost}
+        className={`chat-shell__artifact chat-shell__artifact--post${preparingPost || savingPost ? ' is-busy' : ''}`}
+        aria-busy={preparingPost || savingPost}
       >
         <header className="chat-shell__post-preview-head">
           <div>
@@ -402,7 +506,9 @@ export default function ChatShellScriptCard({
             </span>
             <strong>{es ? 'Optimizar texto' : 'Refine the copy'}</strong>
             <p>
-              {es ? 'Revisá el texto y seguí al tipo de post.' : 'Review the copy, then choose the post type.'}
+              {es
+                ? 'Revisá gancho, desarrollo y CTA. Confirmá las fotos y seguí al tipo de post.'
+                : 'Review hook, development, and CTA. Confirm the photos, then choose the post type.'}
             </p>
           </div>
           <button
@@ -421,12 +527,18 @@ export default function ChatShellScriptCard({
             {es ? 'Optimizando el texto…' : 'Refining the copy…'}
           </div>
         ) : null}
+        {savingPost ? (
+          <div className="chat-shell__artifact-status" role="status" aria-live="polite">
+            <Loader2 size={14} className="chat-shell__spin" />
+            {es ? 'Guardando el texto del post…' : 'Saving the post copy…'}
+          </div>
+        ) : null}
         {editError ? <div className="chat-shell__artifact-error">{editError}</div> : null}
         <textarea
           value={postDraft}
           onChange={(event) => setPostDraft(event.target.value)}
           rows={5}
-          disabled={imageBusy || preparingPost}
+          disabled={imageBusy || preparingPost || savingPost}
           aria-label={es ? 'Vista previa editable del post' : 'Editable post preview'}
         />
         <div className="chat-shell__post-preview-toolbar">
@@ -450,20 +562,26 @@ export default function ChatShellScriptCard({
               )
             })}
           </div>
-          {referenceImageUrls.length > 0 ? (
+          {previewRefs.length > 0 || onUploadPostReference ? (
             <div className="chat-shell__post-preview-refs">
-              {referenceImageUrls.slice(0, 3).map((url, index) => (
-                <img key={`${url}-${index}`} src={url} alt={`${es ? 'Referencia' : 'Reference'} ${index + 1}`} />
-              ))}
+              <ChatShellReferencePicker
+                images={previewRefs}
+                currentProductId={productId}
+                language={language}
+                busy={Boolean(imageBusy || preparingPost || savingPost)}
+                compact
+                onToggle={(id) => setPreviewRefs((prev) => toggleReferenceSelection(prev, id))}
+                onUpload={onUploadPostReference}
+              />
             </div>
           ) : null}
           <button
             type="button"
             className="chat-shell__post-preview-continue"
-            disabled={!postDraft.trim() || imageBusy || preparingPost}
-            onClick={() => void onGenerateImage?.(postDraft.trim(), { density: postDensity })}
+            disabled={!postDraft.trim() || imageBusy || preparingPost || savingPost}
+            onClick={() => void continueToPostType()}
           >
-            {imageBusy || preparingPost ? <Loader2 size={15} className="chat-shell__spin" /> : null}
+            {imageBusy || preparingPost || savingPost ? <Loader2 size={15} className="chat-shell__spin" /> : null}
             {es ? 'Continuar al tipo de post' : 'Continue to post type'}
           </button>
         </div>

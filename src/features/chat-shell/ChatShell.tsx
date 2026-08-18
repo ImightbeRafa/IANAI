@@ -11,7 +11,7 @@ import ChatBrandSetupCard from './ChatBrandSetupCard'
 import ChatBrandProfileCard from './ChatBrandProfileCard'
 import ChatThread from './ChatThread'
 import ChatContextRail, { type RailPane, type RailTab } from './ChatContextRail'
-import ChatShellImageLightbox from './ChatShellImageLightbox'
+import ChatShellImageLightbox, { type ImageEditAttachment } from './ChatShellImageLightbox'
 import type { ChatShellTheme } from './chatShellTheme'
 import { useChatShellWorkspace } from './useChatShellWorkspace'
 import { useChatSessionThread } from './useChatSessionThread'
@@ -245,27 +245,18 @@ export default function ChatShell({
     })
   }, [openLightbox, thread.brandProducts])
 
-  const requestImageEdit = useCallback(async (reason: string) => {
+  const requestImageEdit = useCallback(async (reason: string, attachments?: ImageEditAttachment[]) => {
     if (!lightbox) return
-    await thread.editOfferImage(lightbox.productImageId, lightbox.url, reason, lightbox.productId)
+    await thread.editOfferImage(
+      lightbox.productImageId,
+      lightbox.url,
+      reason,
+      lightbox.productId,
+      'edit',
+      attachments
+    )
     setLightbox(null)
-    return
-    if (!lightbox) return
-    const offerName = lightbox?.productName || 'Image'
-    const title = language === 'es' ? `Edición · ${offerName}` : `Edit · ${offerName}`
-    const userText = language === 'es'
-      ? `Editar esta imagen: ${reason}`
-      : `Edit this image: ${reason}`
-    const assistantText = t.editSessionSeed
-    const created = await workspace.createImageEditSession({
-      title,
-      productId: lightbox?.productId || '',
-      productImageId: lightbox?.productImageId || '',
-      userText,
-      assistantText,
-    })
-    if (created) setLightbox(null)
-  }, [language, lightbox, t.editSessionSeed, thread, workspace])
+  }, [lightbox, thread])
 
   const quickEnhanceImage = useCallback(async (mode: 'magic' | 'rebuild') => {
     if (!lightbox) return
@@ -491,8 +482,9 @@ export default function ChatShell({
           onAnswerScriptClarify={(answer) => void thread.answerScriptClarify(answer)}
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
           onOpenImagesRail={() => selectRailTab('images')}
-          onUploadOfferReference={(file, kind) => thread.uploadOfferImage(file, undefined, kind)}
+          onUploadOfferReference={(file, kind, productId) => thread.uploadOfferImage(file, productId, kind)}
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
+          offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
           onPreparePostFromScript={(scriptText, density) => thread.prepareScriptForPost(scriptText, density)}
           onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) =>
             void thread.generateImageFromScript(scriptText, productId, scriptTitle, options)
@@ -634,9 +626,9 @@ export default function ChatShell({
         alt={lightbox?.alt}
         productName={lightbox?.productName}
         language={language}
-        busy={workspace.busy}
+        busy={thread.imageBusy || workspace.busy}
         onClose={() => setLightbox(null)}
-        onRequestEdit={(reason) => void requestImageEdit(reason)}
+        onRequestEdit={(reason, attachments) => void requestImageEdit(reason, attachments)}
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
     </div>

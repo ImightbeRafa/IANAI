@@ -129,7 +129,7 @@ describe('chatShellImages helpers', () => {
 
   it('normalize density + optimize prompt', () => {
     expect(normalizePostTextDensity('nope')).toBe('medium')
-    expect(buildOptimizeForPostPrompt({ scriptText: 'Hook…', density: 'hard' })).toContain('HARD')
+    expect(buildOptimizeForPostPrompt({ scriptText: 'Hook…', density: 'hard' })).toContain('CORTA')
     expect(buildOptimizeForPostPrompt({ scriptText: 'Hook…', density: 'hard' })).toContain('Hook')
   })
 

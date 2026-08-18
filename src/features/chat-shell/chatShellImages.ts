@@ -77,11 +77,11 @@ export function buildOptimizeForPostPrompt(options: {
   const es = options.language !== 'en'
   const densityLine = {
     hard: es
-      ? 'Densidad HARD: minimo texto (1 headline corto, 1-2 micro-puntos, 1 CTA).'
-      : 'HARD density: minimal text (1 short headline, 1-2 micro-points, 1 CTA).',
+      ? 'Densidad CORTA: 4 frases legibles — gancho, beneficio o problema, prueba concreta, CTA.'
+      : 'SHORT density: 4 readable beats — hook, benefit or problem, specific proof, CTA.',
     medium: es
-      ? 'Densidad MEDIA: 1 headline, 2-3 puntos, 1 CTA. Prioriza aire visual.'
-      : 'MEDIUM density: 1 headline, 2-3 points, 1 CTA. Prioritize breathing room.',
+      ? 'Densidad MEDIA: gancho, 2-3 líneas de desarrollo, CTA. Sin párrafos extra.'
+      : 'MEDIUM density: hook, 2-3 development lines, CTA. No extra paragraphs.',
     standard: es
       ? 'Densidad ESTANDAR: 1 headline, 3-5 puntos, 1 CTA. Sin parrafos largos.'
       : 'STANDARD density: 1 headline, 3-5 points, 1 CTA. No long paragraphs.',

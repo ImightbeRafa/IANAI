@@ -1814,10 +1814,20 @@ export async function getSessionOfferImages(
   productId: string,
   sessionId: string
 ): Promise<ProductImage[]> {
+  return getSessionOffersImages([productId], sessionId)
+}
+
+/** Session-aware library for several offers (product/context + this session's generated). */
+export async function getSessionOffersImages(
+  productIds: string[],
+  sessionId: string
+): Promise<ProductImage[]> {
+  const ids = [...new Set(productIds.filter(Boolean))]
+  if (!ids.length) return []
   const { data, error } = await supabase
     .from('product_images')
     .select('*')
-    .eq('product_id', productId)
+    .in('product_id', ids)
     .or(`session_id.is.null,session_id.eq.${sessionId}`)
     .order('created_at', { ascending: false })
 

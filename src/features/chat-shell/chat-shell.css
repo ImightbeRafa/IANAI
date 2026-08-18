@@ -2999,6 +2999,8 @@ html.chat-shell-route *::-webkit-scrollbar {
 
 .chat-shell__post-preview-refs {
   display: flex;
+  flex: 1 1 100%;
+  min-width: 0;
   gap: 4px;
 }
 
@@ -3008,6 +3010,155 @@ html.chat-shell-route *::-webkit-scrollbar {
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--border);
+}
+
+.chat-shell__ref-picker {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+}
+
+.chat-shell__ref-picker-lead,
+.chat-shell__ref-picker-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.chat-shell__ref-picker-group h4 {
+  margin: 0 0 6px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-shell__ref-picker-grid,
+.chat-shell__ref-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-shell__ref-picker-wrap {
+  position: relative;
+}
+
+.chat-shell__ref-picker-tile {
+  position: relative;
+  width: 72px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--bg-soft);
+  color: var(--text);
+  cursor: pointer;
+  opacity: 0.62;
+}
+
+.chat-shell__ref-picker-tile.is-selected {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.chat-shell__ref-picker-tile img {
+  display: block;
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+}
+
+.chat-shell__ref-picker-tile > span,
+.chat-shell__ref-picker-tile > small,
+.chat-shell__ref-picker-tile > em {
+  display: block;
+  padding: 3px 5px 0;
+  font-size: 0.62rem;
+  line-height: 1.2;
+}
+
+.chat-shell__ref-picker-tile > em {
+  padding-bottom: 4px;
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.chat-shell__ref-picker-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-stage);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chat-shell__ref-picker.is-compact .chat-shell__ref-picker-tile,
+.chat-shell__ref-picker.is-compact .chat-shell__ref-picker-tile img {
+  width: 44px;
+  height: 44px;
+}
+
+.chat-shell__ref-picker.is-compact .chat-shell__ref-picker-tile > span,
+.chat-shell__ref-picker.is-compact .chat-shell__ref-picker-tile > small {
+  display: none;
+}
+
+.chat-shell__lightbox-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.chat-shell__lightbox-attachment {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  width: 72px;
+}
+
+.chat-shell__lightbox-attachment img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.chat-shell__lightbox-attachment select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.68rem;
+}
+
+.chat-shell__lightbox-attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-stage);
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
 .chat-shell__post-preview-continue {
