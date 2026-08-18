@@ -34,12 +34,12 @@ export default function ChatSettingsDialog({
   theme,
   onThemeChange,
 }: ChatSettingsDialogProps) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, adminResolved } = useAuth()
   const { language } = useLanguage()
   const titleId = useId()
   const closeRef = useRef<HTMLButtonElement>(null)
   const [category, setCategory] = useState<SettingsCategoryId>(defaultSettingsCategory())
-  const categories = settingsCategories(isAdmin)
+  const categories = settingsCategories(isAdmin, adminResolved)
 
   useEffect(() => {
     if (!open) return

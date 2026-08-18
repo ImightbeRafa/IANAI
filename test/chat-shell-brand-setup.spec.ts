@@ -323,6 +323,9 @@ describe('settings categories', () => {
     ])
     expect(settingsCategories(true).some((c) => c.id === 'admin')).toBe(true)
     expect(settingsCategories(true).some((c) => c.id === 'tickets')).toBe(true)
+    expect(settingsCategories(true, false).map((c) => c.id)).toEqual([
+      'general', 'ai', 'brand', 'billing', 'updates',
+    ])
   })
 })
 

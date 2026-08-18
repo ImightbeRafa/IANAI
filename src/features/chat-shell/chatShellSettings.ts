@@ -28,8 +28,8 @@ const ADMIN_CATEGORIES: SettingsCategory[] = [
   { id: 'tickets', group: 'admin', label: { es: 'Tickets', en: 'Tickets' } },
 ]
 
-export function settingsCategories(isAdmin: boolean): SettingsCategory[] {
-  return isAdmin ? [...USER_CATEGORIES, ...ADMIN_CATEGORIES] : USER_CATEGORIES
+export function settingsCategories(isAdmin: boolean, adminResolved = true): SettingsCategory[] {
+  return isAdmin && adminResolved ? [...USER_CATEGORIES, ...ADMIN_CATEGORIES] : USER_CATEGORIES
 }
 
 export function defaultSettingsCategory(): SettingsCategoryId {

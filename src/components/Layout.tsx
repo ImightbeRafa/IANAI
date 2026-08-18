@@ -23,7 +23,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, signOut, isAdmin } = useAuth()
+  const { user, signOut, isAdmin, adminResolved } = useAuth()
   const { language } = useLanguage()
   const location = useLocation()
   const navigate = useNavigate()
@@ -78,7 +78,7 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/posts', label: t.posts, icon: ImageIcon, beta: true, adminOnly: false },
     { path: '/respuestas', label: t.respuestas, icon: MessageCircle, beta: true, adminOnly: false },
     { path: '/settings', label: t.settings, icon: Settings, beta: false, adminOnly: false },
-    ...(isAdmin ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false, adminOnly: false }] : []),
+    ...(isAdmin && adminResolved ? [{ path: '/admin', label: t.admin, icon: BarChart3, beta: false, adminOnly: false }] : []),
   ]
 
   const navItems = allNavItems.filter(item => !item.adminOnly || isAdmin)
