@@ -28,4 +28,22 @@ describe('ChatShellImageLightbox edit attachments', () => {
     fireEvent.click(screen.getByRole('button', { name: /pedir edición/i }))
     expect(onRequestEdit).toHaveBeenCalledWith('Poné el arnés de frente', [])
   })
+
+  it('exposes magic enhance and rebuild actions', () => {
+    const onQuickEnhance = vi.fn()
+    render(
+      <ChatShellImageLightbox
+        open
+        url="https://example.com/post.webp"
+        language="es"
+        onClose={() => {}}
+        onQuickEnhance={onQuickEnhance}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /mejora mágica/i }))
+    fireEvent.click(screen.getByRole('button', { name: /reconstruir/i }))
+    expect(onQuickEnhance).toHaveBeenNthCalledWith(1, 'magic')
+    expect(onQuickEnhance).toHaveBeenNthCalledWith(2, 'rebuild')
+  })
 })

@@ -20,6 +20,7 @@ import { shellT } from './chatShellLabels'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
+import { mapEnhanceModeToTier } from './chatShellImageEnhance'
 import { isBrandContextEditRequest, isBrandRuleRequest, isExplicitGenerationRequest, SETUP_COMPOSER_PLACEHOLDER } from './chatShellBrandSetupFlow'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import type { ProductImage } from '../../services/database'
@@ -267,7 +268,15 @@ export default function ChatShell({
       : (language === 'es'
         ? 'Mejora la composición, iluminación, tipografía y acabado profesional sin cambiar el producto, la marca, el mensaje ni las reglas guardadas.'
         : 'Improve composition, lighting, typography, and professional finish without changing the product, brand, message, or saved rules.')
-    await thread.editOfferImage(lightbox.productImageId, lightbox.url, instruction, lightbox.productId, 'enhance')
+    await thread.editOfferImage(
+      lightbox.productImageId,
+      lightbox.url,
+      instruction,
+      lightbox.productId,
+      'enhance',
+      undefined,
+      mapEnhanceModeToTier(mode)
+    )
     setLightbox(null)
   }, [language, lightbox, thread])
 

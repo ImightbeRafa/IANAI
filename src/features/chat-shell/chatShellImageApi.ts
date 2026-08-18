@@ -18,6 +18,10 @@ import {
   type ShellImageAspect,
   type ShellImagePreferences,
 } from './chatShellImageIntent'
+import {
+  buildShellImageEnhanceBody,
+  type ShellEnhanceTier,
+} from './chatShellImageEnhance'
 
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
@@ -205,6 +209,20 @@ export async function generateShellOfferImage(options: {
   })
 }
 
+async function compressReferenceUrls(urls: string[] | undefined): Promise<string[]> {
+  if (!urls?.length) return []
+  const compressed: string[] = []
+  for (const url of urls.slice(0, 4)) {
+    try {
+      const data = await compressBase64ForApi(await urlToBase64(url))
+      if (data) compressed.push(data)
+    } catch {
+      // Skip unreadable product/context refs; the source image still enhances.
+    }
+  }
+  return compressed
+}
+
 export async function editShellOfferImage(options: {
   userId: string
   sessionId: string
@@ -217,8 +235,14 @@ export async function editShellOfferImage(options: {
   scriptText?: string
   density?: PostTextDensity
   brandKitId?: string
+  brandLogoUrl?: string
+  customColors?: string[]
   aspectRatio?: ShellImageAspect
+  language?: 'en' | 'es'
+  enhanceTier?: ShellEnhanceTier
   editReferenceImages?: string[]
+  productReferenceUrls?: string[]
+  contextReferenceUrls?: string[]
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
@@ -232,19 +256,28 @@ export async function editShellOfferImage(options: {
       options.editReferenceImages.slice(0, 4).map((image) => compressBase64ForApi(image))
     )).filter(Boolean)
     : []
+  const productReferenceImages = isEnhance
+    ? await compressReferenceUrls(options.productReferenceUrls)
+    : []
+  const contextReferenceImages = isEnhance
+    ? await compressReferenceUrls(options.contextReferenceUrls)
+    : []
   const sample = await callGenerateImage(
     isEnhance
-      ? {
-          action: 'enhance',
-          model: 'nano-banana-pro',
+      ? buildShellImageEnhanceBody({
           productId: options.productId,
           sessionId: options.sessionId,
           enhanceImage: base64,
-          enhanceTier: 'modernize',
-          language: 'es',
-          ...(inferredAspect ? { aspectRatio: inferredAspect } : {}),
-          ...(options.brandKitId ? { brandKitId: options.brandKitId } : {}),
-        }
+          enhanceTier: options.enhanceTier || 'modernize',
+          language: options.language || 'es',
+          editPrompt: options.editPrompt,
+          brandKitId: options.brandKitId,
+          brandLogoUrl: options.brandLogoUrl,
+          customColors: options.customColors,
+          productReferenceImages,
+          contextReferenceImages,
+          aspectRatio: inferredAspect,
+        })
       : {
           action: 'edit',
           model: 'nano-banana-pro',
@@ -256,6 +289,7 @@ export async function editShellOfferImage(options: {
           ...(compressedRefs.length ? { editReferenceImages: compressedRefs } : {}),
           ...(inferredAspect ? { aspectRatio: inferredAspect } : {}),
           ...(options.brandKitId ? { brandKitId: options.brandKitId } : {}),
+          ...(options.brandLogoUrl ? { brandLogoUrl: options.brandLogoUrl } : {}),
         }
   )
 
@@ -281,6 +315,8 @@ export async function editShellOfferImage(options: {
       source_product_image_id: options.productImageId,
       density: options.density,
       brandKitId: options.brandKitId || null,
+      brandLogoUrl: options.brandLogoUrl || null,
+      enhanceTier: isEnhance ? (options.enhanceTier || 'modernize') : null,
       aspectRatio: inferredAspect || null,
     },
   })

@@ -18,6 +18,11 @@ import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
 import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
 import { resolvePostModeAspect } from './lib/post-aspect.js'
+import {
+  appendEnhanceUserDirection,
+  buildEnhanceColorOverride,
+  resolveEnhanceUserDirection,
+} from './lib/image-enhance.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicUrl } from './lib/url-safety.js'
@@ -989,14 +994,17 @@ OBJETIVO: Una campaña real de marca grande. Algo que alguien guardaría en Pint
       const TIER_BODY = enhanceTier === 'polish' ? POLISH_BODY : enhanceTier === 'rebuild' ? REBUILD_BODY : MODERNIZE_BODY
 
       const brandEnhancePrefix = [
-        brandKit ? buildBrandColorOverride(brandKit) : null,
+        buildEnhanceColorOverride(clientColors, brandKit ? buildBrandColorOverride(brandKit) : null),
         brandKit ? buildBrandVisualPrompt(brandKit) : null,
       ].filter(Boolean).join('\n\n')
 
-      const ENHANCE_SYSTEM_PROMPT = `${HARD_CONSTRAINTS}
+      const ENHANCE_SYSTEM_PROMPT = appendEnhanceUserDirection(
+        `${HARD_CONSTRAINTS}
 ${brandEnhancePrefix ? `${brandEnhancePrefix}\n\n` : ''}${TIER_BODY}
 
-GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`
+GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.`,
+        resolveEnhanceUserDirection(imageParams.editPrompt, imageParams.originalPrompt)
+      )
 
       if (selectedModel === 'gpt-image-2') {
         const openAiApiKey = process.env.OPENAI_API_KEY

@@ -131,6 +131,7 @@ import {
   withPreselectedReferences,
   type OfferReferenceImage,
 } from './chatShellReferenceSelection'
+import { collectOfferEnhanceReferences, type ShellEnhanceTier } from './chatShellImageEnhance'
 
 export type ImageClarifyState = {
   sessionId: string
@@ -2427,7 +2428,8 @@ export function useChatSessionThread(options: {
     instruction: string,
     productId?: string,
     actionType: 'edit' | 'enhance' = 'edit',
-    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>
+    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
+    enhanceTier?: ShellEnhanceTier
   ) => {
     if (!session || imageBusy) return
     const pid = productId || activeImageOfferId
@@ -2443,6 +2445,17 @@ export function useChatSessionThread(options: {
       const editPrompt = roleNotes
         ? `${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
         : instruction
+      const brandKitId = resolveBrandKitIdForSession(
+        session.brand_kit_id,
+        pid,
+        brandKits,
+        storage
+      )
+      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
+      const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
+      const offerRefs = actionType === 'enhance'
+        ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
+        : { productUrls: [], contextUrls: [] }
       const result = await editShellOfferImage({
         userId,
         sessionId: originSessionId,
@@ -2452,15 +2465,16 @@ export function useChatSessionThread(options: {
         editPrompt,
         actionType,
         userText: `${actionType === 'enhance' ? 'Enhance' : 'Edit'} image: ${instruction}`,
+        language,
+        enhanceTier: actionType === 'enhance' ? (enhanceTier || 'modernize') : undefined,
         editReferenceImages: actionType === 'edit'
           ? (attachments || []).map((item) => item.dataUrl)
           : undefined,
-        brandKitId: resolveBrandKitIdForSession(
-          session.brand_kit_id,
-          pid,
-          brandKits,
-          storage
-        ),
+        productReferenceUrls: offerRefs.productUrls,
+        contextReferenceUrls: offerRefs.contextUrls,
+        brandKitId,
+        brandLogoUrl: brandVisual.brandLogoUrl,
+        customColors: brandVisual.customColors,
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -2491,7 +2505,7 @@ export function useChatSessionThread(options: {
     } finally {
       setImageBusy(false)
     }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage])
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language])
 
   const optimizeOfferImage = useCallback(async (
     productImageId: string,
