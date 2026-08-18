@@ -6,6 +6,7 @@ import {
   getSessionOfferImages,
   getSessionOffersImages,
   insertImageMessageArtifact,
+  nextMessageArtifactOrdinal,
   type ProductImage,
 } from '../../services/database'
 import type { Message, MessageArtifact } from '../../types'
@@ -68,13 +69,52 @@ export async function persistShellGeneratedImage(options: {
   actionType: MessageArtifact['action_type']
   metadata?: Record<string, unknown>
   userText: string
-}): Promise<{ userMessage: Message; assistantMessage: Message; image: ProductImage; artifact: MessageArtifact }> {
+  workspaceMessageId?: string
+}): Promise<{
+  userMessage: Message | null
+  assistantMessage: Message | null
+  image: ProductImage
+  artifact: MessageArtifact
+  attachedToExisting: boolean
+  workspaceMessageId?: string
+}> {
   const publicUrl = await uploadProductImage(
     options.userId,
     options.productId,
     options.imageSource,
     `${Date.now()}.webp`
   )
+
+  const workspaceMessageId = options.workspaceMessageId?.trim() || ''
+  if (workspaceMessageId) {
+    const ordinal = await nextMessageArtifactOrdinal(workspaceMessageId)
+    const image = await createProductImage(
+      options.productId,
+      options.userId,
+      publicUrl,
+      options.label,
+      'generated',
+      { sessionId: options.sessionId, messageId: workspaceMessageId }
+    )
+    const artifact = await insertImageMessageArtifact({
+      sessionId: options.sessionId,
+      messageId: workspaceMessageId,
+      productId: options.productId,
+      productImageId: image.id,
+      ordinal,
+      userId: options.userId,
+      actionType: options.actionType,
+      metadata: options.metadata || {},
+    })
+    return {
+      userMessage: null,
+      assistantMessage: null,
+      image,
+      artifact,
+      attachedToExisting: true,
+      workspaceMessageId,
+    }
+  }
 
   const userMessage = await addMessage(options.sessionId, 'user', options.userText)
   const assistantMessage = await addMessage(
@@ -108,6 +148,8 @@ export async function persistShellGeneratedImage(options: {
     assistantMessage: { ...assistantMessage, artifacts: [artifact] },
     image,
     artifact,
+    attachedToExisting: false,
+    workspaceMessageId: assistantMessage.id,
   }
 }
 
@@ -189,7 +231,7 @@ export async function generateShellOfferImage(options: {
 
   const actualPreferences = actualModel === prefs.model ? prefs : { ...prefs, model: actualModel }
   const assumptions = formatImageAssumptions(actualPreferences, language)
-  return persistShellGeneratedImage({
+  const persisted = await persistShellGeneratedImage({
     userId: options.userId,
     sessionId: options.sessionId,
     productId: options.productId,
@@ -207,6 +249,12 @@ export async function generateShellOfferImage(options: {
       brandKitId: options.brandKitId || null,
     },
   })
+  if (!persisted.userMessage || !persisted.assistantMessage) return null
+  return {
+    userMessage: persisted.userMessage,
+    assistantMessage: persisted.assistantMessage,
+    image: persisted.image,
+  }
 }
 
 async function compressReferenceUrls(urls: string[] | undefined): Promise<string[]> {
@@ -247,7 +295,15 @@ export async function editShellOfferImage(options: {
   originGen: number
   activeThreadSessionId: string | null
   sessionGen: number
-}): Promise<{ userMessage: Message; assistantMessage: Message; image: ProductImage } | null> {
+  workspaceMessageId?: string
+}): Promise<{
+  userMessage: Message | null
+  assistantMessage: Message | null
+  image: ProductImage
+  artifact: MessageArtifact
+  attachedToExisting: boolean
+  workspaceMessageId?: string
+} | null> {
   const base64 = await compressBase64ForApi(await urlToBase64(options.imageUrl))
   const inferredAspect = options.aspectRatio || await aspectRatioFromImageUrl(options.imageUrl) || undefined
   const isEnhance = options.actionType === 'enhance'
@@ -319,6 +375,7 @@ export async function editShellOfferImage(options: {
       enhanceTier: isEnhance ? (options.enhanceTier || 'modernize') : null,
       aspectRatio: inferredAspect || null,
     },
+    workspaceMessageId: options.workspaceMessageId,
   })
 }
 
@@ -335,6 +392,7 @@ export async function optimizeShellOfferImage(options: {
   originGen: number
   activeThreadSessionId: string | null
   sessionGen: number
+  workspaceMessageId?: string
 }) {
   const editPrompt = buildOptimizeForPostPrompt({
     scriptText: options.scriptText,

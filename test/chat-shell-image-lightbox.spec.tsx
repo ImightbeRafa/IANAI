@@ -45,5 +45,6 @@ describe('ChatShellImageLightbox edit attachments', () => {
     fireEvent.click(screen.getByRole('button', { name: /reconstruir/i }))
     expect(onQuickEnhance).toHaveBeenNthCalledWith(1, 'magic')
     expect(onQuickEnhance).toHaveBeenNthCalledWith(2, 'rebuild')
+    expect(screen.getByRole('button', { name: /descargar/i })).toBeTruthy()
   })
 })

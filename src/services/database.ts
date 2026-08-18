@@ -1913,6 +1913,21 @@ export async function deleteProductImage(imageId: string): Promise<void> {
   if (error) throw error
 }
 
+export async function nextMessageArtifactOrdinal(messageId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('message_artifacts')
+    .select('ordinal')
+    .eq('message_id', messageId)
+    .order('ordinal', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+  const latest = Array.isArray(data) && data[0] && typeof data[0].ordinal === 'number'
+    ? data[0].ordinal
+    : 0
+  return latest + 1
+}
+
 export async function insertImageMessageArtifact(options: {
   sessionId: string
   messageId: string

@@ -148,6 +148,14 @@ export function postOptimizeVersionLabel(
   return density === 'hard' ? 'Post · Short copy' : 'Post · Medium copy'
 }
 
+export function postOptimizeDensityFromLabel(label?: string | null): 'hard' | 'medium' | null {
+  const value = (label || '').trim().toLowerCase()
+  if (!value) return null
+  if (value.includes('poco texto') || value.includes('short copy')) return 'hard'
+  if (value.includes('texto medio') || value.includes('medium copy')) return 'medium'
+  return null
+}
+
 export function shouldPersistPostOptimizeVersion(options: {
   latestContent?: string | null
   draft: string

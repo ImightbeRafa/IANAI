@@ -8,6 +8,7 @@ import { IMAGE_DENSITY_CHOICES } from './chatShellImageIntent'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import {
   confirmedReferenceImageIds,
+  postOptimizeDensityFromLabel,
   postOptimizeVersionLabel,
   shouldPersistPostOptimizeVersion,
   toggleReferenceSelection,
@@ -405,10 +406,17 @@ export default function ChatShellScriptCard({
 
   const loadDensityDraft = async (density: 'hard' | 'medium') => {
     const seq = ++prepareSeqRef.current
+    const saved = versions.find((entry) => (
+      entry.source === 'post_optimize' && entry.label === postOptimizeVersionLabel(density, language)
+    ))?.content
+    const sourceText = versions[activeIndex]?.source === 'post_optimize'
+      ? (versions[0]?.content || displayContent)
+      : displayContent
     setPreparingPost(true)
     setEditError(null)
     try {
-      const optimized = onPreparePost ? await onPreparePost(displayContent, density) : displayContent
+      const optimized = saved
+        || (onPreparePost ? await onPreparePost(sourceText, density) : sourceText)
       if (seq !== prepareSeqRef.current) return
       setPostDrafts((prev) => ({ ...prev, [density]: optimized }))
     } catch (err) {
@@ -422,19 +430,31 @@ export default function ChatShellScriptCard({
   const openPostPreview = async (density: 'hard' | 'medium' = postDensity) => {
     if (!onGenerateImage || operation) return
     onOpenPostPreview?.()
+    const active = versions[activeIndex]
+    const activeDensity = active?.source === 'post_optimize'
+      ? postOptimizeDensityFromLabel(active.label)
+      : null
+    const startDensity = activeDensity || density
     if (postPreviewOpen) {
-      setPostDensity(density)
-      if (!postDrafts[density]) await loadDensityDraft(density)
+      setPostDensity(startDensity)
+      if (!postDrafts[startDensity]) await loadDensityDraft(startDensity)
       return
     }
     const seq = ++prepareSeqRef.current
+    const saved = versions.find((entry) => (
+      entry.source === 'post_optimize' && entry.label === postOptimizeVersionLabel(startDensity, language)
+    ))?.content
+    const sourceText = active?.source === 'post_optimize'
+      ? (versions[0]?.content || displayContent)
+      : displayContent
     setPreparingPost(true)
     setEditError(null)
     try {
-      const optimized = onPreparePost ? await onPreparePost(displayContent, density) : displayContent
+      const optimized = saved
+        || (onPreparePost ? await onPreparePost(sourceText, startDensity) : sourceText)
       if (seq !== prepareSeqRef.current) return
-      setPostDensity(density)
-      setPostDrafts({ [density]: optimized })
+      setPostDensity(startDensity)
+      setPostDrafts({ [startDensity]: optimized })
       setPostPreviewOpen(true)
       cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     } catch (err) {

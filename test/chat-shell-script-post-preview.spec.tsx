@@ -119,6 +119,38 @@ describe('ChatShellScriptCard post preview', () => {
     ))
   })
 
+  it('reuses a saved post_optimize version instead of optimizing again', async () => {
+    vi.mocked(getScriptVersions).mockResolvedValue([{
+      id: 'v2',
+      session_id: 's1',
+      product_id: 'p1',
+      title: 'Venta directa (v2)',
+      content: 'Gancho ahorrado\nCTA ahorrado',
+      version: 2,
+      parent_script_id: 'parent-1',
+      edit_source: 'post_optimize',
+      edit_label: 'Post · Poco texto',
+      created_at: '2026-01-02T00:00:00.000Z',
+    } as never])
+    const onPreparePost = vi.fn(async () => 'NO DEBERIA LLAMARSE')
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo para no parecer condensado todavía' }}
+        language="es"
+        savedScriptId="parent-1"
+        onPreparePost={onPreparePost}
+        onGenerateImage={vi.fn()}
+        onSaveVersion={vi.fn(async () => 'v3')}
+      />
+    )
+
+    await screen.findByRole('button', { name: /última/i })
+    fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
+    const editor = await screen.findByLabelText('Vista previa editable del post')
+    expect((editor as HTMLTextAreaElement).value).toBe('Gancho ahorrado\nCTA ahorrado')
+    expect(onPreparePost).not.toHaveBeenCalled()
+  })
+
   it('keeps the editor mounted and the selected density instant while the other copy loads', async () => {
     let resolveMedium: (value: string) => void = () => {}
     const onPreparePost = vi.fn(async (_script: string, density?: 'hard' | 'medium') => {

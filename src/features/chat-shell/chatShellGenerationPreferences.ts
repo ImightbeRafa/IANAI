@@ -101,7 +101,9 @@ export function looksLikeCondensedPostCopy(text: string): boolean {
 export function shouldSkipPostCondense(options: {
   scriptText?: string | null
   alreadyOptimized?: boolean
+  editSource?: string | null
 }): boolean {
   if (options.alreadyOptimized) return true
+  if (options.editSource === 'post_optimize') return true
   return Boolean(options.scriptText && looksLikeCondensedPostCopy(options.scriptText))
 }

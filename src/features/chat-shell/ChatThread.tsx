@@ -29,7 +29,13 @@ import {
 } from './useChatSessionThread'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import { catalogOfferReferences } from './chatShellReferenceSelection'
-import { sortArtifactsByOrdinal, type ShellImageLike } from './chatShellImages'
+import {
+  buildImageWorkspaces,
+  isImageWorkspaceAnchor,
+  sortArtifactsByOrdinal,
+  workspaceForImage,
+  type ShellImageLike,
+} from './chatShellImages'
 import {
   anuncioStyleChoices,
   IMAGE_ASPECT_CHOICES,
@@ -260,45 +266,19 @@ export default memo(function ChatThread({
   }, [sessionKey])
   const t = shellT(language)
   const visibleMessages = useMemo(() => dedupeLegacySetupSummaries(messages), [messages])
-  const imageVersionsByOffer = useMemo(() => {
-    const grouped = new Map<string, ShellImageLike[]>()
-    for (const image of offerImages) {
-      if (image.kind !== 'generated' || !image.image_url) continue
-      const current = grouped.get(image.product_id) || []
-      current.push(image)
-      grouped.set(image.product_id, current)
-    }
-    for (const [productId, versions] of grouped) {
-      grouped.set(productId, versions.sort((a, b) => Date.parse(b.created_at || '') - Date.parse(a.created_at || '')))
-    }
-    return grouped
-  }, [offerImages])
+  const imageWorkspaces = useMemo(() => {
+    const artifacts = visibleMessages.flatMap((message) =>
+      (message.artifacts || []).map((artifact) => ({
+        ...artifact,
+        message_id: message.id,
+      }))
+    )
+    return buildImageWorkspaces(offerImages, artifacts)
+  }, [offerImages, visibleMessages])
   const libraryReferenceImages = useMemo(
     () => catalogOfferReferences(offerImages, offerProductNames),
     [offerImages, offerProductNames]
   )
-  const latestScriptIdByProduct = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const message of visibleMessages) {
-      for (const artifact of sortArtifactsByOrdinal(message.artifacts || [])) {
-        if (artifact.artifact_type === 'script' && artifact.product_id && artifactToParsedScript(artifact)) {
-          map.set(artifact.product_id, artifact.id)
-        }
-      }
-    }
-    return map
-  }, [visibleMessages])
-  const lastLegacyScriptKey = useMemo(() => {
-    let key: string | null = null
-    for (const message of visibleMessages) {
-      if (message.artifacts?.length) continue
-      if (!isScriptContent(message.content)) continue
-      const parsed = parseScripts(message.content)
-      if (!parsed.length) continue
-      key = `${message.id}:${parsed[parsed.length - 1].index}`
-    }
-    return key
-  }, [visibleMessages])
   const threadRef = useRef<HTMLDivElement>(null)
   const logoInputRef = useRef<HTMLInputElement>(null)
   const referenceInputRef = useRef<HTMLInputElement>(null)
@@ -374,12 +354,6 @@ export default memo(function ChatThread({
     onCancelScriptClarify?.()
     setPostPreviewScriptKey(scriptKey)
     setPostPreviewNonce((n) => n + 1)
-  }
-
-  const openLatestScriptPostPreview = (productId: string) => {
-    const artifactKey = latestScriptIdByProduct.get(productId)
-    const legacyKey = offerProductId === productId ? lastLegacyScriptKey : null
-    openScriptPostPreview(artifactKey || legacyKey || '')
   }
 
   useEffect(() => {
@@ -469,8 +443,7 @@ export default memo(function ChatThread({
                 (a.artifact_type === 'script' && a.script?.content)
                 || (a.artifact_type === 'image'
                   && a.product_image?.image_url
-                  && (!imageVersionsByOffer.get(a.product_id)?.length
-                    || imageVersionsByOffer.get(a.product_id)?.[0]?.id === a.product_image.id))
+                  && isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces))
             )
 
             if (artifacts.length > 0) {
@@ -480,6 +453,17 @@ export default memo(function ChatThread({
                   <div className="chat-shell__script-stack">
                     {artifacts.map((artifact) => {
                       if (artifact.artifact_type === 'image') {
+                        const workspace = workspaceForImage(imageWorkspaces, artifact.product_image?.id)
+                        const openImage = (img: ShellImageLike) => {
+                          if (!img.image_url) return
+                          onOpenOfferImage({
+                            url: img.image_url,
+                            alt: img.label || artifact.product?.name || 'Image',
+                            productName: artifact.product?.name,
+                            productId: img.product_id || artifact.product_id,
+                            productImageId: img.id,
+                          })
+                        }
                         return (
                           <ChatShellImageCard
                             key={artifact.id}
@@ -487,40 +471,9 @@ export default memo(function ChatThread({
                             productName={artifact.product?.name}
                             busy={imageBusy}
                             language={language}
-                            onOpen={() => {
-                              const img = artifact.product_image
-                              if (!img?.image_url) return
-                              onOpenOfferImage({
-                                url: img.image_url,
-                                alt: img.label || artifact.product?.name || 'Image',
-                                productName: artifact.product?.name,
-                                productId: artifact.product_id,
-                                productImageId: img.id,
-                              })
-                            }}
-                            onRequestEdit={() => {
-                              const img = artifact.product_image
-                              if (!img?.image_url) return
-                              onOpenOfferImage({
-                                url: img.image_url,
-                                alt: img.label || artifact.product?.name || 'Image',
-                                productName: artifact.product?.name,
-                                productId: artifact.product_id,
-                                productImageId: img.id,
-                              })
-                            }}
-                            onOptimizeForPost={() => openLatestScriptPostPreview(artifact.product_id)}
-                            versions={imageVersionsByOffer.get(artifact.product_id) || []}
-                            onOpenVersion={(version) => {
-                              if (!version.image_url) return
-                              onOpenOfferImage({
-                                url: version.image_url,
-                                alt: version.label || artifact.product?.name || 'Image',
-                                productName: artifact.product?.name,
-                                productId: version.product_id,
-                                productImageId: version.id,
-                              })
-                            }}
+                            versions={workspace?.versions || []}
+                            onOpen={openImage}
+                            onRequestEdit={openImage}
                           />
                         )
                       }

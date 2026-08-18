@@ -92,9 +92,11 @@ import {
   resolveSendOffer,
 } from './chatShellOfferResolve'
 import {
+  buildImageWorkspaces,
   filterImagesForOffer,
   latestImageByProductId,
   resolveActiveImageOfferId,
+  workspaceForImage,
 } from './chatShellImages'
 import {
   formatImageAssumptions,
@@ -2379,6 +2381,9 @@ export function useChatSessionThread(options: {
   ): Promise<string> => {
     const product = activeProduct
     try {
+      if (shouldSkipPostCondense({ scriptText })) {
+        return stripUnresolvedPlaceholders(scriptText)
+      }
       return await streamlineScriptForPost({
         script: scriptText,
         language,
@@ -2456,6 +2461,16 @@ export function useChatSessionThread(options: {
       const offerRefs = actionType === 'enhance'
         ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
         : { productUrls: [], contextUrls: [] }
+      const workspaces = buildImageWorkspaces(
+        offerImages,
+        messages.flatMap((message) => (message.artifacts || []).map((artifact) => ({
+          ...artifact,
+          message_id: message.id,
+        })))
+      )
+      const workspaceMessageId = workspaceForImage(workspaces, productImageId)?.messageId
+        || offerImages.find((image) => image.id === productImageId)?.message_id
+        || undefined
       const result = await editShellOfferImage({
         userId,
         sessionId: originSessionId,
@@ -2475,6 +2490,7 @@ export function useChatSessionThread(options: {
         brandKitId,
         brandLogoUrl: brandVisual.brandLogoUrl,
         customColors: brandVisual.customColors,
+        workspaceMessageId,
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -2489,7 +2505,17 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
-      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      if (result.attachedToExisting && result.workspaceMessageId) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === result.workspaceMessageId
+            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
+            : message
+        )))
+      } else if (result.userMessage && result.assistantMessage) {
+        const userMessage = result.userMessage
+        const assistantMessage = result.assistantMessage
+        setMessages((prev) => [...prev, userMessage, assistantMessage])
+      }
       await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
     } catch (err) {
       console.error(err)
@@ -2505,7 +2531,7 @@ export function useChatSessionThread(options: {
     } finally {
       setImageBusy(false)
     }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language])
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language, messages])
 
   const optimizeOfferImage = useCallback(async (
     productImageId: string,
@@ -2521,6 +2547,16 @@ export function useChatSessionThread(options: {
     setImageBusy(true)
     setError(null)
     try {
+      const workspaces = buildImageWorkspaces(
+        offerImages,
+        messages.flatMap((message) => (message.artifacts || []).map((artifact) => ({
+          ...artifact,
+          message_id: message.id,
+        })))
+      )
+      const workspaceMessageId = workspaceForImage(workspaces, productImageId)?.messageId
+        || offerImages.find((image) => image.id === productImageId)?.message_id
+        || undefined
       const result = await optimizeShellOfferImage({
         userId,
         sessionId: originSessionId,
@@ -2539,6 +2575,7 @@ export function useChatSessionThread(options: {
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
         sessionGen: sessionGenRef.current,
+        workspaceMessageId,
       })
       if (!result) return
       if (!isLiveThread(
@@ -2549,7 +2586,17 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
-      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      if (result.attachedToExisting && result.workspaceMessageId) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === result.workspaceMessageId
+            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
+            : message
+        )))
+      } else if (result.userMessage && result.assistantMessage) {
+        const userMessage = result.userMessage
+        const assistantMessage = result.assistantMessage
+        setMessages((prev) => [...prev, userMessage, assistantMessage])
+      }
       await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
     } catch (err) {
       console.error(err)
@@ -2565,7 +2612,7 @@ export function useChatSessionThread(options: {
     } finally {
       setImageBusy(false)
     }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage])
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, offerImages, messages])
 
   const linkedOfferIds = useMemo(() => {
     const ids = new Set<string>()

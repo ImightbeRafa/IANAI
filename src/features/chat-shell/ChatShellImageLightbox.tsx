@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Download, ImagePlus, RotateCw, Send, Wand2, X } from 'lucide-react'
+import { Download, ImagePlus, Loader2, RotateCw, Send, Wand2, X } from 'lucide-react'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
+import { downloadShellImage, filenameForShellImage } from './chatShellDownload'
 
 export interface ImageEditAttachment {
   dataUrl: string
@@ -37,12 +38,14 @@ export default function ChatShellImageLightbox({
   const es = language === 'es'
   const [reason, setReason] = useState('')
   const [attachments, setAttachments] = useState<ImageEditAttachment[]>([])
+  const [downloading, setDownloading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) {
       setReason('')
       setAttachments([])
+      setDownloading(false)
       return
     }
     const onKey = (e: KeyboardEvent) => {
@@ -92,18 +95,31 @@ export default function ChatShellImageLightbox({
       <div className="chat-shell__lightbox-panel">
         <header className="chat-shell__lightbox-head">
           <strong>{productName || alt || t.viewImage}</strong>
-          <button type="button" className="chat-shell__lightbox-close" onClick={onClose} aria-label={t.closeRail}>
-            <X size={16} />
-          </button>
+          <div className="chat-shell__lightbox-head-actions">
+            <button
+              type="button"
+              className="chat-shell__artifact-action"
+              disabled={downloading || !url}
+              onClick={() => {
+                setDownloading(true)
+                void downloadShellImage(
+                  url,
+                  filenameForShellImage({ productName, label: alt, url })
+                ).finally(() => setDownloading(false))
+              }}
+            >
+              {downloading ? <Loader2 size={13} className="chat-shell__spin" /> : <Download size={13} />}
+              {t.downloadImage}
+            </button>
+            <button type="button" className="chat-shell__lightbox-close" onClick={onClose} aria-label={t.closeRail}>
+              <X size={16} />
+            </button>
+          </div>
         </header>
         <div className="chat-shell__lightbox-stage">
           <img src={url} alt={alt || productName || t.viewImage} />
         </div>
         <footer className="chat-shell__lightbox-foot">
-          <a className="chat-shell__artifact-action" href={url} download target="_blank" rel="noreferrer">
-            <Download size={13} />
-            Download
-          </a>
           {onRequestEdit ? (
             <div className="chat-shell__lightbox-edit">
               <input

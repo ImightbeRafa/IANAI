@@ -9,6 +9,7 @@ export interface ShellImageLike {
   id: string
   product_id: string
   session_id?: string | null
+  message_id?: string | null
   kind?: string | null
   created_at?: string
   image_url?: string
@@ -113,6 +114,149 @@ export function isGeneratedOfferImage(img: {
   if (img.kind === 'generated') return true
   if (img.kind === 'product' || img.kind === 'context') return false
   return Boolean(img.message_id)
+}
+
+export interface ImageWorkspaceArtifactLike {
+  id?: string
+  artifact_type?: string | null
+  product_image_id?: string | null
+  product_id?: string | null
+  message_id?: string | null
+  action_type?: string | null
+  action_metadata?: Record<string, unknown> | null
+  product_image?: ShellImageLike | null
+}
+
+export interface ImageWorkspace {
+  rootImageId: string
+  productId: string
+  messageId: string | null
+  versions: ShellImageLike[]
+}
+
+export function sourceProductImageId(meta: unknown): string | null {
+  if (!meta || typeof meta !== 'object') return null
+  const value = (meta as Record<string, unknown>).source_product_image_id
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function createdAtMs(image: ShellImageLike): number {
+  return image.created_at ? Date.parse(image.created_at) : 0
+}
+
+/**
+ * One workspace per independent generate. Edits/enhances join the parent
+ * generate via source_product_image_id or a shared message_id.
+ * Never group unrelated generates by product/offer.
+ */
+export function buildImageWorkspaces(
+  images: ShellImageLike[],
+  artifacts: ImageWorkspaceArtifactLike[] = []
+): ImageWorkspace[] {
+  const extra = artifacts
+    .map((artifact) => artifact.product_image)
+    .filter((image): image is ShellImageLike => Boolean(image?.id && image.image_url))
+  const byId = new Map<string, ShellImageLike>()
+  for (const image of [...images, ...extra]) {
+    if (!image.id || !image.image_url || !isGeneratedOfferImage(image)) continue
+    const previous = byId.get(image.id)
+    if (!previous || createdAtMs(image) >= createdAtMs(previous)) byId.set(image.id, image)
+  }
+
+  const parent = new Map<string, string>()
+  const setParent = (childId: string, parentId: string) => {
+    if (!childId || !parentId || childId === parentId) return
+    if (!byId.has(childId) || !byId.has(parentId)) return
+    parent.set(childId, parentId)
+  }
+
+  for (const artifact of artifacts) {
+    if (artifact.artifact_type && artifact.artifact_type !== 'image') continue
+    const childId = artifact.product_image_id || artifact.product_image?.id
+    const sourceId = sourceProductImageId(artifact.action_metadata)
+    if (childId && sourceId) setParent(childId, sourceId)
+  }
+
+  const byMessage = new Map<string, string[]>()
+  for (const image of byId.values()) {
+    if (!image.message_id) continue
+    const group = byMessage.get(image.message_id) || []
+    group.push(image.id)
+    byMessage.set(image.message_id, group)
+  }
+  for (const group of byMessage.values()) {
+    if (group.length < 2) continue
+    const oldest = [...group].sort((a, b) => {
+      const delta = createdAtMs(byId.get(a)!) - createdAtMs(byId.get(b)!)
+      return delta !== 0 ? delta : a.localeCompare(b)
+    })[0]
+    for (const id of group) setParent(id, oldest)
+  }
+
+  const findRoot = (id: string): string => {
+    let current = id
+    const seen: string[] = []
+    while (parent.has(current) && !seen.includes(current)) {
+      seen.push(current)
+      current = parent.get(current)!
+    }
+    if (parent.has(current) && seen.includes(current)) {
+      const cycleStart = seen.indexOf(current)
+      const cycle = [...new Set(seen.slice(cycleStart))]
+      return cycle.sort((a, b) => {
+        const delta = createdAtMs(byId.get(a)!) - createdAtMs(byId.get(b)!)
+        return delta !== 0 ? delta : a.localeCompare(b)
+      })[0]
+    }
+    return current
+  }
+
+  const grouped = new Map<string, ShellImageLike[]>()
+  for (const image of byId.values()) {
+    const rootId = findRoot(image.id)
+    const list = grouped.get(rootId) || []
+    list.push(image)
+    grouped.set(rootId, list)
+  }
+
+  return [...grouped.entries()].map(([rootImageId, versions]) => {
+    const ordered = [...versions].sort((a, b) => {
+      const delta = createdAtMs(a) - createdAtMs(b)
+      return delta !== 0 ? delta : a.id.localeCompare(b.id)
+    })
+    const root = byId.get(rootImageId) || ordered[0]
+    return {
+      rootImageId: root.id,
+      productId: root.product_id,
+      messageId: root.message_id || ordered.find((version) => version.message_id)?.message_id || null,
+      versions: ordered,
+    }
+  })
+}
+
+export function workspaceForImage(
+  workspaces: ImageWorkspace[],
+  imageId: string | null | undefined
+): ImageWorkspace | undefined {
+  if (!imageId) return undefined
+  return workspaces.find((workspace) => workspace.versions.some((version) => version.id === imageId))
+}
+
+export function isImageWorkspaceAnchor(
+  imageId: string | null | undefined,
+  workspaces: ImageWorkspace[]
+): boolean {
+  if (!imageId) return false
+  const workspace = workspaceForImage(workspaces, imageId)
+  if (!workspace) return true
+  return workspace.rootImageId === imageId
+}
+
+export function latestGeneratedPerWorkspace(workspaces: ImageWorkspace[]): ShellImageLike[] {
+  return workspaces
+    .map((workspace) => workspace.versions[workspace.versions.length - 1])
+    .filter((image): image is ShellImageLike => Boolean(image))
+    .sort((a, b) => createdAtMs(b) - createdAtMs(a))
 }
 
 /** Prefer product refs over context; exclude generated outputs. Max 4 IDs. */
