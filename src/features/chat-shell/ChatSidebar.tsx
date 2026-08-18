@@ -21,6 +21,7 @@ import {
   resolveSessionSidebarTitle,
   sessionActionAnchorFromRect,
   SIDEBAR_SESSION_VISIBLE_CAP,
+  uniquifySidebarLabels,
   type BrandActionPanel,
   type SessionActionPanel,
   writeBrandOpen,
@@ -260,6 +261,17 @@ export default function ChatSidebar({
             ? brandSessions
             : brandSessions.slice(0, SIDEBAR_SESSION_VISIBLE_CAP)
           const olderCount = Math.max(0, brandSessions.length - SIDEBAR_SESSION_VISIBLE_CAP)
+          const titledSessions = visibleSessions.map((session) => {
+            const resolved = resolveSessionSidebarTitle({
+              session,
+              firstUserMessage: firstUserPreviews[session.id],
+              language,
+            })
+            return { session, ...resolved }
+          })
+          const uniqueLabels = uniquifySidebarLabels(
+            titledSessions.map((row) => ({ id: row.session.id, label: row.label }))
+          )
 
           return (
             <div key={brand.id} className="chat-shell__brand-block">
@@ -365,11 +377,8 @@ export default function ChatSidebar({
                       </button>
                     </div>
                   )}
-                  {visibleSessions.map((session) => {
-                    const { label, fullTitle } = resolveSessionSidebarTitle({
-                      session,
-                      firstUserMessage: firstUserPreviews[session.id],
-                    })
+                  {titledSessions.map(({ session, fullTitle }) => {
+                    const label = uniqueLabels[session.id] || fullTitle
                     const isQuick = session.product_id == null
                     const selected = session.id === activeSessionId
                     const moreExpanded = sessionAction?.sessionId === session.id

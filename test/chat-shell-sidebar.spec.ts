@@ -10,6 +10,7 @@ import {
   resolveSessionSidebarTitle,
   sessionActionAnchorFromRect,
   truncateSidebarTitle,
+  uniquifySidebarLabels,
   writeBrandOpen,
 } from '../src/features/chat-shell/chatShellSidebar'
 
@@ -61,6 +62,25 @@ describe('chatShellSidebar titles', () => {
     expect(formatRelativeSessionTime('2026-08-12T15:27:00.000Z', now)).toMatch(/^Today /)
     expect(formatRelativeSessionTime('2026-08-11T15:27:00.000Z', now)).toBe('Yesterday')
     expect(formatRelativeSessionTime('2026-08-10T15:27:00.000Z', now)).toMatch(/Aug/)
+  })
+
+  it('formats Hoy / Ayer in Spanish', () => {
+    const now = Date.parse('2026-08-12T18:00:00.000Z')
+    expect(formatRelativeSessionTime('2026-08-12T15:27:00.000Z', now, 'es')).toMatch(/^Hoy /)
+    expect(formatRelativeSessionTime('2026-08-11T15:27:00.000Z', now, 'es')).toBe('Ayer')
+    expect(formatRelativeSessionTime('2026-08-10T15:27:00.000Z', now, 'es')).not.toMatch(/Today|Yesterday/)
+  })
+
+  it('numbers duplicate sidebar labels in list order', () => {
+    expect(uniquifySidebarLabels([
+      { id: 'a', label: 'Hoy 6:11 p. m.' },
+      { id: 'b', label: 'Launch' },
+      { id: 'c', label: 'Hoy 6:11 p. m.' },
+    ])).toEqual({
+      a: 'Hoy 6:11 p. m. · 1',
+      b: 'Launch',
+      c: 'Hoy 6:11 p. m. · 2',
+    })
   })
 
   it('truncates around 36–42 chars without Session spam', () => {

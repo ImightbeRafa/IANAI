@@ -147,7 +147,8 @@ export function truncateSidebarTitle(
 
 export function formatRelativeSessionTime(
   iso: string | null | undefined,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  language: 'es' | 'en' = 'en'
 ): string {
   if (!iso) return 'Chat'
   const then = new Date(iso)
@@ -159,14 +160,16 @@ export function formatRelativeSessionTime(
   const dayDiff = Math.round(
     (startOfToday.getTime() - startOfThat.getTime()) / (24 * 60 * 60 * 1000)
   )
+  const locale = language === 'es' ? 'es' : 'en'
   if (dayDiff === 0) {
-    return `Today ${then.toLocaleTimeString(undefined, {
+    const time = then.toLocaleTimeString(locale, {
       hour: 'numeric',
       minute: '2-digit',
-    })}`
+    })
+    return language === 'es' ? `Hoy ${time}` : `Today ${time}`
   }
-  if (dayDiff === 1) return 'Yesterday'
-  return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  if (dayDiff === 1) return language === 'es' ? 'Ayer' : 'Yesterday'
+  return then.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }
 
 /**
@@ -177,8 +180,9 @@ export function resolveSessionSidebarTitle(options: {
   session: Pick<ChatSession, 'title' | 'updated_at' | 'created_at'>
   firstUserMessage?: string | null
   nowMs?: number
+  language?: 'es' | 'en'
 }): { label: string; fullTitle: string } {
-  const { session, firstUserMessage, nowMs } = options
+  const { session, firstUserMessage, nowMs, language = 'en' } = options
   const stored = (session.title || '').trim()
   if (!isDefaultSessionTitle(stored)) {
     return {
@@ -193,7 +197,31 @@ export function resolveSessionSidebarTitle(options: {
   }
   const when = formatRelativeSessionTime(
     session.updated_at || session.created_at,
-    nowMs
+    nowMs,
+    language
   )
   return { label: when, fullTitle: when }
+}
+
+/** Number duplicate labels in list order (`Hoy 6:11 p. m. · 2`). */
+export function uniquifySidebarLabels(
+  items: Array<{ id: string; label: string }>
+): Record<string, string> {
+  const totals = new Map<string, number>()
+  for (const item of items) {
+    totals.set(item.label, (totals.get(item.label) || 0) + 1)
+  }
+  const seen = new Map<string, number>()
+  const out: Record<string, string> = {}
+  for (const item of items) {
+    const total = totals.get(item.label) || 1
+    if (total === 1) {
+      out[item.id] = item.label
+      continue
+    }
+    const n = (seen.get(item.label) || 0) + 1
+    seen.set(item.label, n)
+    out[item.id] = `${item.label} · ${n}`
+  }
+  return out
 }
