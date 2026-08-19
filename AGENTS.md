@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Product knowledge
+
+Chat-shell work starts at `.cursor/skills/advance-ai/reference/chat-shell.md` (what exists, what is missing, what is next). Production cutover is `docs/operations/chat-shell-production-transition.md`. Agent changelog: `docs/agent/CHANGELOG.md`.
+
 ## Cursor Cloud specific instructions
 
 Product: **Advance AI / CopywriteAI** — a Vite + React + TypeScript SPA that generates ad scripts, images, and posts, backed by Supabase (auth/Postgres) and several AI providers (Grok/xAI, Gemini, etc.).

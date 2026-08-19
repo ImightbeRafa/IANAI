@@ -1,3 +1,15 @@
+## 2026-08-19 — Folder switch, create widget, live blue, agent map
+
+**Area:** chat-shell / docs
+**Files:** `ChatThread.tsx`, `useChatSessionThread.ts`, `chatShellThreadCache.ts`, `useChatCreateWidgetVisibility.ts`, `ChatBrandProfileCard.tsx`, `chat-shell-obsidian-tokens.css`, `chat-shell.css`, `.cursor/skills/advance-ai/reference/chat-shell.md`
+
+- Switching marcas no longer remounts/blanks the thread. Cache hits swap; cache misses keep the previous transcript under a veil and replace it in one paint. Composer/mic/attachments lock while loading.
+- Create scripts/posts widget is independent of setup. Hidden state is `ianai.chat-shell.createWidget.hidden.${userId}.${businessId}`. Topbar **Mostrar crear** brings it back without reopening setup.
+- Dark stage is a faint blue-black (`#0b0f14`); accents are live blue (`#4f8cff` / classic `#0284c7`). Mobile: 44px targets, truncated crumbs, sticky rail close, one-column create actions at 480px.
+- Agent map: `reference/chat-shell.md`. Production checklist added to `docs/operations/chat-shell-production-transition.md`.
+
+---
+
 ## 2026-08-14 — Feedback FAB in the Opciones corner
 
 **Area:** chat-shell / frontend

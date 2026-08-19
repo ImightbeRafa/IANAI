@@ -9,11 +9,13 @@ AGENTS.md                          ← Start here (root entry point)
 .cursor/
   skills/advance-ai/
     SKILL.md                       ← Task routing + workflows
-    reference/                     ← Deep dives (architecture, API, DB, pipeline)
+    reference/                     ← Deep dives (architecture, API, DB, pipeline, chat-shell)
   rules/                           ← Auto-applied Cursor rules
 docs/agent/
   CHANGELOG.md                     ← Technical dev changelog (this folder)
   README.md                        ← This file
+docs/operations/
+  chat-shell-production-transition.md  ← Rollout + production checklist
 src/data/changelog.ts              ← User-facing changelog (in-app)
 ```
 
@@ -22,6 +24,7 @@ src/data/changelog.ts              ← User-facing changelog (in-app)
 1. Read `AGENTS.md` at session start
 2. Follow `.cursor/skills/advance-ai/SKILL.md` for task-specific workflows
 3. Pull reference docs only when needed (progressive disclosure)
+   - Chat-shell: `.cursor/skills/advance-ai/reference/chat-shell.md`
 4. After meaningful changes, append to `CHANGELOG.md` in this folder
 5. For user-visible releases, also update `src/data/changelog.ts`
 
@@ -32,6 +35,7 @@ src/data/changelog.ts              ← User-facing changelog (in-app)
 | `AGENTS.md` | High — maintained for agents |
 | `docs/agent/CHANGELOG.md` | High — maintained for agents |
 | `.cursor/skills/advance-ai/` | High |
+| `docs/operations/chat-shell-production-transition.md` | High — preview vs AIIAN cutover |
 | `GUIONES_PIPELINE_REVIEW.md` | High for pipeline analysis |
 | `CODEBASE_STATUS.md` | Medium — good schema, Feb 2025 |
 | `SECURITY_AUDIT.md` | Medium — Feb 2026, some fixes since |

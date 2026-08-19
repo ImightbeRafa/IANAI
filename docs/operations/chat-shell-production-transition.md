@@ -75,6 +75,42 @@ WHERE key = 'chat_shell';
 
 No data rollback. Preference rows can stay.
 
+## Production readiness checklist
+
+Do **not** merge to `master` or enable the kill switch until a human signs this list.
+
+### Schema / security (AIIAN)
+
+- [ ] Inventory production tables vs ADR 0001 (`chat_sessions.product_id` nullability, `business_id`, `chat_session_offers`, `message_artifacts`, `app_feature_flags`).
+- [ ] Apply only production-reviewed migrations. Do not copy Preview deny-all / plan_limits seeds.
+- [ ] Confirm owner RLS on businesses, brand kits, sessions, offers, artifacts, product images / storage.
+- [ ] Offer FK `ON DELETE SET NULL` (or equivalent) and child delete/update policies reviewed.
+- [ ] Null-link / ownership-immutability triggers present.
+- [ ] `edit-script` and `streamline-script` authorization coverage + foreign session/product/image negative tests.
+
+### Rollout controls
+
+- [ ] `app_feature_flags.chat_shell` is **false** on AIIAN until canary approval.
+- [ ] Invite path: `profiles.chat_beta_access` + `preferred_ui` (classic default).
+- [ ] Enabling the flag alone does not redirect anyone.
+
+### Preview gates (this branch)
+
+- [ ] `npm test` and `npm run build` green.
+- [ ] Preview env vars all target IANAI-preview (never mix frontend URL with a production service role).
+- [ ] Invited account can open `/chat`; uninvited stays classic and 403s `/chat`.
+- [ ] Smoke: scripts, posts, image generate/edit, save, usage increment, folder delete, classic dashboard still loads.
+- [ ] Desktop + mobile (390×844 and 768×1024), dark + light.
+- [ ] Folder switch does not blank/jump the thread (cached and uncached).
+- [ ] Create widget survives reload; hide persists; topbar restores it without setup.
+- [ ] Error-log scan after smoke. Rollback = set `chat_shell` false.
+
+### Known blockers
+
+- Production AIIAN schema/RLS inventory is not complete from this agent.
+- Production cutover SQL is human-applied only.
+- No Playwright `/chat` smoke in CI yet.
+
 ## Do not
 
 - Dump Preview RLS / plan_limits seeds onto AIIAN

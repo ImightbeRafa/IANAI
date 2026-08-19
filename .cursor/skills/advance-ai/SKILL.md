@@ -17,7 +17,10 @@ Read [AGENTS.md](../../AGENTS.md) first for orientation. Use this skill for task
 | User intent | Start here | Then |
 |-------------|-----------|------|
 | Script generation / guiones quality | `api/lib/guiones/script-pipeline.ts` | [guiones-pipeline.md](reference/guiones-pipeline.md) |
-| Script UI / settings | `src/pages/ProductWorkspace.tsx` | `ScriptSettingsPanel.tsx`, `grokApi.ts` |
+| Chat-shell UX / folders / widget / theme | `src/features/chat-shell/ChatShell.tsx` | [chat-shell.md](reference/chat-shell.md) |
+| Chat-shell generation (scripts/images/posts) | `useChatSessionThread.ts` | [chat-shell.md](reference/chat-shell.md), `api/chat.ts` |
+| Chat-shell rollout / production readiness | `docs/operations/chat-shell-production-transition.md` | [chat-shell.md](reference/chat-shell.md) |
+| Script UI / settings (classic) | `src/pages/ProductWorkspace.tsx` | `ScriptSettingsPanel.tsx`, `grokApi.ts` |
 | New API endpoint | `api/lib/auth.ts` pattern | [api-routes.md](reference/api-routes.md) |
 | Database CRUD | `src/services/database.ts` | [database.md](reference/database.md) |
 | New page/route | `src/App.tsx` | Lazy-load pattern, `ProtectedRoute` |
@@ -107,6 +110,7 @@ src/
 ## Reference docs
 
 - [architecture.md](reference/architecture.md)
+- [chat-shell.md](reference/chat-shell.md)
 - [api-routes.md](reference/api-routes.md)
 - [database.md](reference/database.md)
 - [guiones-pipeline.md](reference/guiones-pipeline.md)
