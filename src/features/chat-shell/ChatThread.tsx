@@ -142,6 +142,7 @@ interface ChatThreadProps {
     productId?: string
   ) => Promise<void>
   setupCard?: ReactNode
+  createDock?: ReactNode
   inlineSetupCard?: ReactNode
   setupTurns?: Array<{ id: string; role: 'user' | 'assistant'; content: string }>
   setupPlaceholder?: string
@@ -238,6 +239,7 @@ export default memo(function ChatThread({
   onOpenOfferImage,
   onEditOfferImage,
   setupCard,
+  createDock,
   inlineSetupCard,
   setupTurns = [],
   setupPlaceholder,
@@ -664,12 +666,6 @@ export default memo(function ChatThread({
               }}
             />
           ) : null}
-          {inlineSetupCard && !progressKind ? (
-            <div className="chat-shell__msg chat-shell__msg--ai">
-              <span className="chat-shell__who">Advance AI</span>
-              {inlineSetupCard}
-            </div>
-          ) : null}
           {keepMountedTranscript ? (
             <div className="chat-shell__thread-veil" role="status">
               {t.emptyLoading}
@@ -957,6 +953,7 @@ export default memo(function ChatThread({
           </div>
         ) : null}
         <div className={`chat-shell__composer${voice.isRecording ? ' is-listening' : ''}`}>
+          {createDock}
           {slashCommands.length > 0 ? (
             <ChatSlashCommandPalette
               commands={slashCommands}

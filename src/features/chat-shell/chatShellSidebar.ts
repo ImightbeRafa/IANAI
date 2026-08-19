@@ -48,19 +48,19 @@ export function resolveBrandOpenMap(options: {
   readStored: (businessId: string) => boolean | null
   previous?: Record<string, boolean>
 }): Record<string, boolean> {
-  const next: Record<string, boolean> = { ...(options.previous || {}) }
+  const previous = options.previous || {}
+  const next: Record<string, boolean> = { ...previous }
+  const coldStart = Object.keys(previous).length === 0
   for (const businessId of options.businessIds) {
     const stored = options.readStored(businessId)
     if (stored !== null) {
       next[businessId] = stored
       continue
     }
-    // null/missing: set only once. Wait for activeBrandId before defaulting so a
-    // first paint with active=null does not lock previous=false and block expand.
-    if (next[businessId] === undefined) {
-      if (options.activeBrandId == null) continue
-      next[businessId] = businessId === options.activeBrandId
-    }
+    if (next[businessId] !== undefined) continue
+    if (options.activeBrandId == null) continue
+    // Cold start may open the active folder. Switching marcas must not accordion-jump.
+    next[businessId] = coldStart && businessId === options.activeBrandId
   }
   return next
 }

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronDown,
+  EyeOff,
   Pencil,
-  X,
 } from 'lucide-react'
 import type { ProductType, SalesChannel } from '../../types'
 import type { SetupFacts } from './chatShellBrandSetupFlow'
@@ -299,13 +299,13 @@ export default function ChatBrandProfileCard({
         {onHide && showCreateActions ? (
           <button
             type="button"
-            className="chat-shell__brand-profile-edit"
+            className="chat-shell__brand-profile-hide"
             disabled={busy}
             onClick={onHide}
             aria-label={t.hideWidget}
             title={t.hideWidget}
           >
-            <X size={13} /> {t.hideWidget}
+            <EyeOff size={14} />
           </button>
         ) : null}
         </div>

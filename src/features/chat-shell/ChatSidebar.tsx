@@ -293,11 +293,9 @@ export default function ChatSidebar({
                   onClick={() => selectBrand(brand.id)}
                 >
                   <span className="chat-shell__nav-item-label">{brand.name}</span>
-                  {!isOpen && (
-                    <span className="chat-shell__brand-count" aria-label={`${count} chats`}>
-                      {count}
-                    </span>
-                  )}
+                  <span className="chat-shell__brand-count" aria-label={`${count} chats`}>
+                    {count}
+                  </span>
                 </button>
                 {brandAction?.kind === 'confirm' && brandAction.brandId === brand.id ? (
                   <div className="chat-shell__brand-trail" data-session-menu="1">
@@ -348,8 +346,8 @@ export default function ChatSidebar({
               </div>
 
               {isOpen && (
-                <div className="chat-shell__nav-subs">
-                  {brandLoading && (
+                <div className="chat-shell__nav-subs" aria-busy={brandLoading}>
+                  {brandLoading && brandSessions.length === 0 && (
                     <div className="chat-shell__nav-loading" aria-live="polite">
                       {t.loadingSessions}
                     </div>

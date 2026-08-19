@@ -1,3 +1,13 @@
+## 2026-08-19 — Composer create dock, quieter folders
+
+**Area:** chat-shell
+**Files:** `ChatComposerCreateDock.tsx`, `ChatThread.tsx`, `ChatShell.tsx`, `ChatSidebar.tsx`, `chatShellSidebar.ts`, `chat-shell.css`
+
+- Create kit is a popover from the left of the composer (Advance mark + eye-off hide). It no longer occupies the transcript. Hidden state still uses the per-business key; restore is the same slot.
+- Clicking another marca does not accordion-open that folder. Session counts stay in a reserved column so the list does not jump.
+
+---
+
 ## 2026-08-19 — Folder switch: no foreign offers, no reload animation
 
 **Area:** chat-shell

@@ -22,7 +22,7 @@ Invariants:
 - Never merge messages from session A into session B (`mergeFetchedMessagesForOwner`).
 - Never hydrate setup/create-widget facts from another folder’s products (`productsOwnedByBusiness` + per-brand product cache). Clearing live products without a cache restore makes the tracker flash.
 - Generation is 1 offer per API call, 1 usage increment, artifacts bound to `product_id`.
-- Setup skip is per user+business. Create-widget hidden is a separate key. Showing the widget must not reopen setup or write a chat turn.
+- Create-widget hidden is a separate key. The create panel lives on the **left of the composer** (mark + hide icon). It must not sit in the transcript. Showing it must not reopen setup.
 
 ## Persistence keys
 

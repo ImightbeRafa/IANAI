@@ -506,6 +506,7 @@ html.chat-shell-route *::-webkit-scrollbar {
 
 .chat-shell__brand-block {
   min-width: 0;
+  contain: layout;
 }
 
 .chat-shell__brand-header {
@@ -583,10 +584,13 @@ html.chat-shell-route *::-webkit-scrollbar {
 .chat-shell__brand-count {
   flex-shrink: 0;
   margin-left: auto;
+  min-width: 1.4em;
   font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
   color: var(--text-faint);
   letter-spacing: 0.02em;
   padding-left: 6px;
+  text-align: right;
 }
 
 .chat-shell__nav-item {
@@ -2172,9 +2176,71 @@ html.chat-shell-route *::-webkit-scrollbar {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 8px 8px 8px 14px;
+  padding: 8px 8px 8px 8px;
   box-shadow: none;
   transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.chat-shell__composer-lead {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 72px;
+  min-width: 72px;
+  flex-shrink: 0;
+  padding-bottom: 2px;
+}
+
+.chat-shell__composer-create,
+.chat-shell__composer-hide,
+.chat-shell__brand-profile-hide {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--accent);
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.chat-shell__composer-create.is-open {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.chat-shell__composer-create.is-muted,
+.chat-shell__composer-hide {
+  color: var(--text-muted);
+}
+
+.chat-shell__composer-create:hover,
+.chat-shell__composer-hide:hover,
+.chat-shell__brand-profile-hide:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chat-shell__create-popover {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 8;
+  max-height: min(52vh, 440px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.28));
+}
+
+.chat-shell__create-popover .chat-shell__brand-profile {
+  width: 100%;
+  max-width: none;
 }
 
 .chat-shell__composer:focus-within {
@@ -3854,11 +3920,18 @@ html.chat-shell-route *::-webkit-scrollbar {
 
   .chat-shell__icon-btn,
   .chat-shell__send,
-  .chat-shell__mic {
+  .chat-shell__mic,
+  .chat-shell__composer-create,
+  .chat-shell__composer-hide {
     min-width: 44px;
     min-height: 44px;
     width: 44px;
     height: 44px;
+  }
+
+  .chat-shell__composer-lead {
+    width: 88px;
+    min-width: 88px;
   }
 
   .chat-shell__create-toggle {

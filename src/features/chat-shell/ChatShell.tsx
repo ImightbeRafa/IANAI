@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Menu, PanelRight, Sparkles } from 'lucide-react'
+import { Menu, PanelRight } from 'lucide-react'
 import type { BrandKit, ChatSession, ProductType } from '../../types'
 import { getBrandKits, createProduct } from '../../services/database'
 import { useLanguage } from '../../contexts/LanguageContext'
@@ -9,6 +9,7 @@ import ChatBrandCreateModal from './ChatBrandCreateModal'
 import ChatSettingsDialog from './ChatSettingsDialog'
 import ChatBrandSetupCard from './ChatBrandSetupCard'
 import ChatBrandProfileCard from './ChatBrandProfileCard'
+import ChatComposerCreateDock from './ChatComposerCreateDock'
 import ChatThread from './ChatThread'
 import ChatContextRail, { type RailPane, type RailTab } from './ChatContextRail'
 import ChatShellImageLightbox, { type ImageEditAttachment } from './ChatShellImageLightbox'
@@ -455,16 +456,6 @@ export default function ChatShell({
             </span>
           </div>
           <div className="chat-shell__topbar-actions">
-            {createWidget.available && createWidget.hidden ? (
-              <button
-                type="button"
-                className="chat-shell__btn chat-shell__btn--pill chat-shell__create-toggle"
-                onClick={createWidget.show}
-              >
-                <Sparkles size={14} aria-hidden />
-                {t.showCreateWidget}
-              </button>
-            ) : null}
             <button
               type="button"
               className="chat-shell__icon-btn chat-shell__rail-toggle"
@@ -531,10 +522,17 @@ export default function ChatShell({
               setup={brandSetup}
             />
           ) : null}
-          inlineSetupCard={
-            createWidget.visible
+          createDock={
+            createWidget.available
             && (brandSetup.facts.businessName || brandSetup.facts.offerName)
               ? (
+            <ChatComposerCreateDock
+              language={language}
+              available={createWidget.available}
+              hidden={createWidget.hidden}
+              onHide={createWidget.hide}
+              onShow={createWidget.show}
+              panel={(
             <ChatBrandProfileCard
               key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
@@ -544,7 +542,6 @@ export default function ChatShell({
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
               activeCreateAction={activeCreateAction}
-              onHide={createWidget.hide}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
@@ -565,6 +562,8 @@ export default function ChatShell({
                 language === 'es'
                   ? '¿Qué querés crear? Podés pedirme un guion, post, foto de producto, logo u otra pieza y te voy guiando.'
                   : 'What would you like to create? Ask for a script, post, product photo, logo, or another asset and I’ll guide you.'
+              )}
+            />
               )}
             />
           ) : null}

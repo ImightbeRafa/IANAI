@@ -202,6 +202,25 @@ describe('brand open persistence', () => {
     expect(back.b1).toBe(false) // stored 0 still wins
     expect(store['ianai.sidebar.brandOpen.b1']).toBe('0') // name/URL path must not write 1 over 0
   })
+
+  it('does not accordion-open a collapsed folder when the active brand changes', () => {
+    const first = resolveBrandOpenMap({
+      businessIds: ['bloom', 'luna'],
+      activeBrandId: 'bloom',
+      readStored: () => null,
+    })
+    expect(first.bloom).toBe(true)
+    expect(first.luna).toBe(false)
+
+    const switched = resolveBrandOpenMap({
+      businessIds: ['bloom', 'luna'],
+      activeBrandId: 'luna',
+      readStored: () => null,
+      previous: first,
+    })
+    expect(switched.bloom).toBe(true)
+    expect(switched.luna).toBe(false)
+  })
 })
 
 describe('session ⋯ action panel', () => {
