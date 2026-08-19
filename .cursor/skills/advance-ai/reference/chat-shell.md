@@ -18,8 +18,9 @@ ChatShell
 
 Invariants:
 
-- Do not remount `ChatThread` on brand/session change. Cache hits swap immediately; cache misses keep the previous transcript mounted under a veil and replace it in one paint.
+- Do not remount `ChatThread` on brand/session change. Cached folders switch instantly (`planBrandSwitch`). Cache misses keep the previous transcript mounted under a veil and replace it in one paint. Do not animate the stage or create widget on folder change.
 - Never merge messages from session A into session B (`mergeFetchedMessagesForOwner`).
+- Never hydrate setup/create-widget facts from another folder’s products (`productsOwnedByBusiness` + per-brand product cache). Clearing live products without a cache restore makes the tracker flash.
 - Generation is 1 offer per API call, 1 usage increment, artifacts bound to `product_id`.
 - Setup skip is per user+business. Create-widget hidden is a separate key. Showing the widget must not reopen setup or write a chat turn.
 

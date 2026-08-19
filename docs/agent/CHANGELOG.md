@@ -1,3 +1,14 @@
+## 2026-08-19 — Folder switch: no foreign offers, no reload animation
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `useChatBrandSetup.ts`, `useChatShellWorkspace.ts`, `ChatThread.tsx`, `chat-shell.css`
+
+- Cached marcas switch in the same paint (`planBrandSwitch`). Products restore from a per-brand cache and are filtered with `productsOwnedByBusiness`, so Café Luna cannot show Bloom’s offer.
+- Setup/create-widget facts reset during render for the new folder. Stage and profile enter-animations removed; thread does not autoscroll while the destination is loading.
+- Create widget remains hide/show via `ianai.chat-shell.createWidget.hidden.*` (unchanged).
+
+---
+
 ## 2026-08-19 — Folder switch, create widget, live blue, agent map
 
 **Area:** chat-shell / docs

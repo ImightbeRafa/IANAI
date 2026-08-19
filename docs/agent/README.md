@@ -42,6 +42,18 @@ src/data/changelog.ts              ← User-facing changelog (in-app)
 | `PROGRESS.md` | Low — contains removed B-Roll/video features |
 | `README.md` | Low — describes deprecated chat interview flow |
 
+## For other projects
+
+Copy this shape; do not invent a second changelog or a parallel wiki.
+
+1. Root `AGENTS.md` — how to run, env, and a pointer to the skill + surface map.
+2. `.cursor/skills/<product>/SKILL.md` — task routing table (intent → start file → reference).
+3. `.cursor/skills/<product>/reference/<surface>.md` — **Now / Architecture / Invariants / Persistence / File map / Test map / Next**.
+4. `docs/agent/CHANGELOG.md` — agent notes after each meaningful PR.
+5. One operations runbook if there is a production cutover.
+
+Keep **Now / Next** current on every PR that changes the surface. That is the knowledge base. Future agents should update those sections instead of appending ad-hoc notes in chat.
+
 ## Changelog protocol
 
 See `.cursor/skills/advance-ai/reference/changelog-protocol.md`

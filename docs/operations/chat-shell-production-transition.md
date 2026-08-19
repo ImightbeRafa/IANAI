@@ -101,7 +101,7 @@ Do **not** merge to `master` or enable the kill switch until a human signs this 
 - [ ] Invited account can open `/chat`; uninvited stays classic and 403s `/chat`.
 - [ ] Smoke: scripts, posts, image generate/edit, save, usage increment, folder delete, classic dashboard still loads.
 - [ ] Desktop + mobile (390×844 and 768×1024), dark + light.
-- [ ] Folder switch does not blank/jump the thread (cached and uncached).
+- [ ] Folder switch does not blank/jump the thread (cached and uncached). Create widget shows the **current** folder’s offer, never the previous brand.
 - [ ] Create widget survives reload; hide persists; topbar restores it without setup.
 - [ ] Error-log scan after smoke. Rollback = set `chat_shell` false.
 
