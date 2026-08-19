@@ -116,13 +116,9 @@ export default function ChatComposerCreateDock({
           >
             <IconAdvanceMark size={16} />
           </button>
-          <button
-            type="button"
-            className="chat-shell__composer-kit-title"
-            onClick={() => setReviewOpen((value) => !value)}
-          >
+          <p className="chat-shell__composer-kit-title">
             <strong>{title}</strong>
-          </button>
+          </p>
           <button
             type="button"
             className="chat-shell__composer-hide"

@@ -2260,12 +2260,9 @@ html.chat-shell-route *::-webkit-scrollbar {
 .chat-shell__composer-kit-title {
   flex: 1;
   min-width: 0;
-  border: 0;
-  background: transparent;
+  margin: 0;
   color: var(--text);
   text-align: left;
-  font: inherit;
-  cursor: pointer;
   padding: 0 2px;
 }
 
