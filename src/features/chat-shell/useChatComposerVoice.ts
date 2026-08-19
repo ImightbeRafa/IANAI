@@ -53,12 +53,29 @@ export function useChatComposerVoice({
     streamRef.current = null
   }, [])
 
-  useEffect(() => () => {
-    if (recorderRef.current?.state === 'recording') {
-      recorderRef.current.stop()
+  const discard = useCallback(() => {
+    const recorder = recorderRef.current
+    if (recorder) {
+      recorder.ondataavailable = null
+      recorder.onstop = null
+      if (recorder.state === 'recording' || recorder.state === 'paused') {
+        try {
+          recorder.stop()
+        } catch {
+          /* already stopped */
+        }
+      }
     }
+    recorderRef.current = null
+    chunksRef.current = []
     stopTracks()
+    setIsRecording(false)
+    setIsTranscribing(false)
   }, [stopTracks])
+
+  useEffect(() => () => {
+    discard()
+  }, [discard])
 
   const toggle = useCallback(async () => {
     if (!enabled) return
@@ -157,5 +174,6 @@ export function useChatComposerVoice({
     error,
     supported: isComposerVoiceSupported(),
     toggle,
+    discard,
   }
 }

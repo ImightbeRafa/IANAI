@@ -50,18 +50,6 @@ html.chat-shell-route *::-webkit-scrollbar {
 }
 
 /* Light: cooler navy-gray hierarchy vs dark black/navy */
-.chat-shell[data-theme="obsidian-light"] {
-  --sidebar: #e4eaf1;
-  --bg-stage: #f3f6fa;
-  --rail: #eef2f6;
-  --bg-elevated: #ffffff;
-  --bg-soft: #e4eaf1;
-  --border: rgba(20, 32, 52, 0.1);
-  --accent: #3d5a80;
-  --send-from: #3a5f96;
-  --send-to: #4a5a8c;
-}
-
 .chat-shell[data-theme="obsidian-light"] .chat-shell__sidebar {
   border-right-color: rgba(20, 32, 52, 0.1);
   box-shadow: none;
@@ -115,11 +103,6 @@ html.chat-shell-route *::-webkit-scrollbar {
 .chat-shell__settings-root {
   grid-column: 1 / -1;
   grid-row: 1;
-}
-
-.chat-shell.is-switching .chat-shell__main {
-  opacity: 0.72;
-  transition: opacity 160ms var(--ease-out);
 }
 
 .chat-shell__brand-name.is-pending {
@@ -1211,15 +1194,42 @@ html.chat-shell-route *::-webkit-scrollbar {
   align-items: center;
 }
 
+.chat-shell__create-toggle {
+  min-height: 28px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 /* ---- Thread ---- */
 .chat-shell__thread {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-x: hidden;
   padding: 16px 20px 12px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  position: relative;
+}
+
+.chat-shell__thread.is-busy .chat-shell__msg {
+  pointer-events: none;
+}
+
+.chat-shell__thread-veil {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-self: center;
+  margin-top: auto;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  pointer-events: none;
 }
 
 .chat-shell__msg {
@@ -3807,11 +3817,10 @@ html.chat-shell-route *::-webkit-scrollbar {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .chat-shell__rail,
   .chat-shell__msg,
   .chat-shell__card,
-  .chat-shell__mic.is-recording,
-  .chat-shell__rail,
-  .chat-shell.is-switching .chat-shell__main {
+  .chat-shell__mic.is-recording {
     animation: none;
     transition: none;
   }
@@ -3846,6 +3855,42 @@ html.chat-shell-route *::-webkit-scrollbar {
     left: auto;
     right: 16px;
     bottom: 88px;
+  }
+
+  .chat-shell__icon-btn,
+  .chat-shell__send,
+  .chat-shell__mic {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-shell__create-toggle {
+    min-height: 44px;
+    padding: 0 12px;
+  }
+
+  .chat-shell__topbar {
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+  }
+
+  .chat-shell__crumbs {
+    max-width: min(52vw, 220px);
+  }
+
+  .chat-shell__thread,
+  .chat-shell__brand-profile,
+  .chat-shell__card,
+  .chat-shell__bubble {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .chat-shell__sidebar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .chat-shell__composer-wrap {
@@ -3898,6 +3943,7 @@ html.chat-shell-route *::-webkit-scrollbar {
     grid-column: 1;
     visibility: visible;
     pointer-events: auto;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   }
 
   .chat-shell:not(.is-rail-open) .chat-shell__rail {
@@ -3908,8 +3954,12 @@ html.chat-shell-route *::-webkit-scrollbar {
 
   .chat-shell__rail-close--mobile {
     display: grid;
+    position: sticky;
+    top: 0;
+    z-index: 2;
     align-self: flex-end;
     margin: 0 4px 4px auto;
+    background: var(--rail);
   }
 
   .chat-shell__sidebar {
@@ -4481,6 +4531,14 @@ html.chat-shell-route .chat-shell-feedback-fab:hover {
   align-items: start;
   gap: 10px;
   padding: 14px 16px 10px;
+}
+
+.chat-shell__brand-profile-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .chat-shell__brand-profile-mark {
@@ -5087,6 +5145,28 @@ html.chat-shell-route .chat-shell-feedback-fab:hover {
 
   .chat-shell__brand-profile-create {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chat-shell__brand-profile-create button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-shell__brand-profile-create {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-shell__msg,
+  .chat-shell__card,
+  .chat-shell__brand-profile {
+    width: 100%;
+  }
+
+  .chat-shell__composer-tools .chat-shell__icon-btn,
+  .chat-shell__send {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 

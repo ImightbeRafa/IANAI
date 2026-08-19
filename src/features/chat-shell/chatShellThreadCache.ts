@@ -78,3 +78,18 @@ export function mergeFetchedMessages(local: Message[], fetched: Message[]): Mess
   const extras = local.filter((row) => !fetchedIds.has(row.id))
   return [...fetched.map((row) => byId.get(row.id) || row), ...extras]
 }
+
+/** Never fold another session’s transcript into the destination fetch. */
+export function mergeFetchedMessagesForOwner(
+  local: Message[],
+  fetched: Message[],
+  localOwnerId: string | null,
+  fetchedOwnerId: string
+): Message[] {
+  if (!localOwnerId || localOwnerId !== fetchedOwnerId) return fetched
+  return mergeFetchedMessages(local, fetched)
+}
+
+export function shouldKeepMountedTranscript(loading: boolean, messageCount: number): boolean {
+  return loading && messageCount > 0
+}

@@ -36,6 +36,7 @@ import {
   workspaceForImage,
   type ShellImageLike,
 } from './chatShellImages'
+import { shouldKeepMountedTranscript } from './chatShellThreadCache'
 import {
   anuncioStyleChoices,
   IMAGE_ASPECT_CHOICES,
@@ -294,13 +295,24 @@ export default memo(function ChatThread({
   }, [sessionKey])
   const voice = useChatComposerVoice({
     language,
-    enabled: composerEnabled,
+    enabled: composerEnabled && !loadingMessages,
     onTranscript: insertTranscript,
   })
+  const voiceDiscard = voice.discard
+
+  useEffect(() => {
+    setAttachOpen(false)
+    setSlashDismissed(false)
+    setSlashIndex(0)
+    setPostPreviewNonce(0)
+    setPostPreviewScriptKey(null)
+    setLocalNotice(null)
+    voiceDiscard()
+  }, [sessionKey, voiceDiscard])
 
   const submit = () => {
     const text = composer.trim()
-    if (!text || sending || !session || voice.isRecording || voice.isTranscribing) return
+    if (!text || sending || !session || loadingMessages || voice.isRecording || voice.isTranscribing) return
     const capturedKey = sessionKey
     setDrafts((prev) => ({ ...prev, [capturedKey]: '' }))
     void (async () => {
@@ -330,7 +342,10 @@ export default memo(function ChatThread({
   }
 
   const voiceBusy = voice.isRecording || voice.isTranscribing
-  const canSend = Boolean(session) && !sending && !voiceBusy && Boolean(composer.trim())
+  const controlsLocked = loadingMessages || voiceBusy
+  const canSend = Boolean(session) && !sending && !controlsLocked && Boolean(composer.trim())
+  const keepMountedTranscript = shouldKeepMountedTranscript(loadingMessages, visibleMessages.length)
+  const showInitialLoader = Boolean(session) && loadingMessages && !keepMountedTranscript && setupTurns.length === 0 && !inlineSetupCard
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -395,7 +410,13 @@ export default memo(function ChatThread({
   return (
     <div className="chat-shell__stage">
       {setupCard}
-      <div className="chat-shell__thread" role="log" aria-label="Conversation" ref={threadRef}>
+      <div
+        className={`chat-shell__thread${loadingMessages ? ' is-busy' : ''}`}
+        role="log"
+        aria-label="Conversation"
+        aria-busy={loadingMessages}
+        ref={threadRef}
+      >
         {!session ? (
           <div className="chat-shell__msg chat-shell__msg--ai">
             <span className="chat-shell__who">Advance AI</span>
@@ -405,7 +426,7 @@ export default memo(function ChatThread({
                 : t.emptyNoBrand}
             </div>
           </div>
-        ) : loadingMessages ? (
+        ) : showInitialLoader ? (
           <div className="chat-shell__msg chat-shell__msg--ai">
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">{t.emptyLoading}</div>
@@ -646,6 +667,11 @@ export default memo(function ChatThread({
             <div className="chat-shell__msg chat-shell__msg--ai">
               <span className="chat-shell__who">Advance AI</span>
               {inlineSetupCard}
+            </div>
+          ) : null}
+          {keepMountedTranscript ? (
+            <div className="chat-shell__thread-veil" role="status">
+              {t.emptyLoading}
             </div>
           ) : null}
           </>
@@ -966,8 +992,8 @@ export default memo(function ChatThread({
                             ? t.askScriptType
                             : t.askScripts
             }
-            disabled={!composerEnabled || voiceBusy}
-            aria-disabled={!composerEnabled || voiceBusy}
+            disabled={!composerEnabled || voiceBusy || loadingMessages}
+            aria-disabled={!composerEnabled || voiceBusy || loadingMessages}
             rows={2}
             aria-label={t.composer}
             role={slashCommands.length > 0 ? 'combobox' : undefined}
@@ -1023,7 +1049,7 @@ export default memo(function ChatThread({
                 <button
                   type="button"
                   className="chat-shell__icon-btn"
-                  disabled={!composerEnabled || sending}
+                  disabled={!composerEnabled || sending || loadingMessages}
                   aria-label={t.attach}
                   title={t.attach}
                   onClick={() => setAttachOpen((open) => !open)}
@@ -1054,8 +1080,8 @@ export default memo(function ChatThread({
             <button
               type="button"
               className={`chat-shell__icon-btn chat-shell__mic${voice.isRecording ? ' is-recording' : ''}`}
-              disabled={!composerEnabled || sending || voice.isTranscribing}
-              aria-disabled={!composerEnabled || sending || voice.isTranscribing}
+              disabled={!composerEnabled || sending || voice.isTranscribing || loadingMessages}
+              aria-disabled={!composerEnabled || sending || voice.isTranscribing || loadingMessages}
               aria-pressed={voice.isRecording}
               aria-label={voice.isRecording ? t.voiceStop : t.voice}
               title={voice.supported ? (voice.isRecording ? t.voiceStop : t.voice) : t.voiceUnsupported}

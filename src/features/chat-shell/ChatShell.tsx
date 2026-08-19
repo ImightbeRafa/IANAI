@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Menu, PanelRight } from 'lucide-react'
+import { Menu, PanelRight, Sparkles } from 'lucide-react'
 import type { BrandKit, ChatSession, ProductType } from '../../types'
 import { getBrandKits, createProduct } from '../../services/database'
 import { useLanguage } from '../../contexts/LanguageContext'
@@ -16,6 +16,7 @@ import type { ChatShellTheme } from './chatShellTheme'
 import { useChatShellWorkspace } from './useChatShellWorkspace'
 import { useChatSessionThread } from './useChatSessionThread'
 import { useChatBrandSetup } from './useChatBrandSetup'
+import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
@@ -117,6 +118,13 @@ export default function ChatShell({
     },
     messageCount: thread.messages.length,
     messagesLoading: thread.loadingMessages,
+  })
+
+  const createWidget = useChatCreateWidgetVisibility({
+    userId,
+    businessId: workspace.activeBrand?.id,
+    sessionId: workspace.activeSession?.id,
+    offerName: brandSetup.facts.offerName || brandSetup.facts.businessName,
   })
 
   brandVisualRef.current = {
@@ -327,7 +335,6 @@ export default function ChatShell({
     navOpen ? 'is-nav-open' : '',
     railOpen ? 'is-rail-open' : '',
     railPane === 'detail' ? 'is-rail-detail' : '',
-    workspace.pendingBrandId ? 'is-switching' : '',
   ].filter(Boolean).join(' ')
 
   const crumbs = [
@@ -395,9 +402,15 @@ export default function ChatShell({
         busy={thread.imageBusy}
         error={workspace.error}
         notice={workspace.notice}
-        onSelectBrand={workspace.selectBrand}
+        onSelectBrand={(brandId) => {
+          workspace.selectBrand(brandId)
+          setNavOpen(false)
+        }}
         onPrefetchBrandSessions={workspace.prefetchBrandSessions}
-        onSelectSession={workspace.selectSession}
+        onSelectSession={(session) => {
+          workspace.selectSession(session)
+          setNavOpen(false)
+        }}
         onNewChat={() => void workspace.createSession()}
         onNewSession={() => void workspace.createSession()}
         onNewBrand={openBrandCreate}
@@ -430,7 +443,7 @@ export default function ChatShell({
               <button
                 type="button"
                 className="chat-shell__icon-btn"
-                aria-label="Open navigation"
+                aria-label={t.openNav}
                 onClick={() => setNavOpen(true)}
               >
                 <Menu size={16} />
@@ -442,6 +455,16 @@ export default function ChatShell({
             </span>
           </div>
           <div className="chat-shell__topbar-actions">
+            {createWidget.available && createWidget.hidden ? (
+              <button
+                type="button"
+                className="chat-shell__btn chat-shell__btn--pill chat-shell__create-toggle"
+                onClick={createWidget.show}
+              >
+                <Sparkles size={14} aria-hidden />
+                {t.showCreateWidget}
+              </button>
+            ) : null}
             <button
               type="button"
               className="chat-shell__icon-btn chat-shell__rail-toggle"
@@ -454,7 +477,6 @@ export default function ChatShell({
           </div>
         </header>
         <ChatThread
-          key={workspace.activeSession?.id || workspace.activeBrand?.id || 'empty'}
           brand={workspace.activeBrand}
           session={workspace.activeSession}
           messages={thread.messages}
@@ -510,19 +532,19 @@ export default function ChatShell({
             />
           ) : null}
           inlineSetupCard={
-            brandSetup.profileVisible
-            && (brandSetup.visible || brandSetup.phase === 'confirm_offer' || brandSetup.phase === 'complete')
+            createWidget.visible
             && (brandSetup.facts.businessName || brandSetup.facts.offerName)
               ? (
             <ChatBrandProfileCard
               key={workspace.activeSession?.id || 'no-session'}
               language={language}
               facts={brandSetup.facts}
-              busy={brandSetup.busy}
-              confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete'}
+              busy={brandSetup.busy || thread.loadingMessages}
+              confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
               activeCreateAction={activeCreateAction}
+              onHide={createWidget.hide}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {

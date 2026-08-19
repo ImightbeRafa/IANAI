@@ -69,7 +69,7 @@ import {
 } from './chatShellGeneration'
 import {
   emptyThreadSnapshot,
-  mergeFetchedMessages,
+  mergeFetchedMessagesForOwner,
   readThreadCache,
   replaceOptimisticMessage,
   upsertMessage,
@@ -580,6 +580,7 @@ export function useChatSessionThread(options: {
     offerImages,
   }
   const prevSessionIdRef = useRef<string | null>(null)
+  const messagesOwnerRef = useRef<string | null>(null)
 
   useEffect(() => {
     sessionGenRef.current += 1
@@ -591,6 +592,7 @@ export function useChatSessionThread(options: {
     prevSessionIdRef.current = sessionId
 
     if (!sessionId) {
+      messagesOwnerRef.current = null
       setMessages([])
       setOffers([])
       setActiveProduct(null)
@@ -610,16 +612,13 @@ export function useChatSessionThread(options: {
 
     const cached = readThreadCache(threadCacheRef.current, sessionId)
     if (cached) {
+      messagesOwnerRef.current = sessionId
       setMessages(cached.messages)
       setOffers(cached.offers)
       setActiveProduct(cached.activeProduct)
       setOfferImages(cached.offerImages)
       setLoadingMessages(false)
     } else {
-      setMessages([])
-      setOffers([])
-      setActiveProduct(null)
-      setOfferImages([])
       setLoadingMessages(true)
     }
     setFailedBatch(null)
@@ -640,17 +639,27 @@ export function useChatSessionThread(options: {
         ])
         if (requestId !== loadRequestRef.current) return
         if (activeThreadSessionIdRef.current !== sessionId) return
-        setMessages((prev) => mergeFetchedMessages(prev, msgs))
+        const nextMessages = mergeFetchedMessagesForOwner(
+          snapshotRef.current.messages,
+          msgs,
+          messagesOwnerRef.current,
+          sessionId
+        )
+        messagesOwnerRef.current = sessionId
+        setMessages(nextMessages)
         writeThreadCache(threadCacheRef.current, sessionId, {
           ...snapshotRef.current,
-          messages: mergeFetchedMessages(snapshotRef.current.messages, msgs),
+          messages: nextMessages,
         })
       } catch (err) {
         if (requestId !== loadRequestRef.current) return
         if (activeThreadSessionIdRef.current !== sessionId) return
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load messages')
-        if (!cached) setMessages([])
+        if (!cached) {
+          messagesOwnerRef.current = sessionId
+          setMessages([])
+        }
       } finally {
         if (
           requestId === loadRequestRef.current &&

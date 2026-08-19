@@ -13,6 +13,7 @@ function renderCard(overrides: Record<string, unknown> = {}, props: Record<strin
   const onSave = vi.fn(async () => true)
   const onCreateScripts = vi.fn()
   const onCreatePost = vi.fn()
+  const onHide = vi.fn()
   const facts = {
     ...emptySetupFacts('Forge'),
     offerName: 'Arnés Forge',
@@ -31,10 +32,11 @@ function renderCard(overrides: Record<string, unknown> = {}, props: Record<strin
       onCreatePost={onCreatePost}
       onCreateProductPhoto={vi.fn()}
       onCreateOther={vi.fn()}
+      onHide={onHide}
       {...props}
     />
   )
-  return { onSave, onCreateScripts, onCreatePost }
+  return { onSave, onCreateScripts, onCreatePost, onHide }
 }
 
 describe('ChatBrandProfileCard', () => {
@@ -119,5 +121,13 @@ describe('ChatBrandProfileCard', () => {
     await user.click(screen.getByRole('button', { name: /Crear guiones/i }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ offerName: 'Arnés Forge' }), true)
     expect(onCreateScripts).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the user hide the create widget without running setup', async () => {
+    const user = userEvent.setup()
+    const { onHide, onCreateScripts } = renderCard()
+    await user.click(screen.getByRole('button', { name: 'Ocultar' }))
+    expect(onHide).toHaveBeenCalledTimes(1)
+    expect(onCreateScripts).not.toHaveBeenCalled()
   })
 })
