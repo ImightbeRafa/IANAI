@@ -70,9 +70,11 @@ import {
 import {
   emptyThreadSnapshot,
   mergeFetchedMessagesForOwner,
+  readBrandProductCache,
   readThreadCache,
   replaceOptimisticMessage,
   upsertMessage,
+  writeBrandProductCache,
   writeThreadCache,
   type CachedThread,
 } from './chatShellThreadCache'
@@ -351,6 +353,9 @@ export function useChatSessionThread(options: {
   const [messages, setMessages] = useState<Message[]>([])
   const [offers, setOffers] = useState<ChatSessionOffer[]>([])
   const [brandProducts, setBrandProducts] = useState<Product[]>([])
+  const [brandProductsReady, setBrandProductsReady] = useState(!brand?.id)
+  const [productsBrandId, setProductsBrandId] = useState<string | null>(brand?.id ?? null)
+  const brandProductCacheRef = useRef<Map<string, Product[]>>(new Map())
   const [unassignedProducts, setUnassignedProducts] = useState<Product[]>([])
   const [activeProduct, setActiveProduct] = useState<Product | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(true)
@@ -412,6 +417,14 @@ export function useChatSessionThread(options: {
   const threadCacheRef = useRef<Map<string, CachedThread>>(new Map())
 
   activeThreadSessionIdRef.current = sessionId
+
+  const liveBrandId = brand?.id ?? null
+  if (liveBrandId !== productsBrandId) {
+    setProductsBrandId(liveBrandId)
+    const cached = readBrandProductCache(brandProductCacheRef.current, liveBrandId)
+    setBrandProducts(cached ?? [])
+    setBrandProductsReady(Boolean(cached) || !liveBrandId)
+  }
 
   const sending = isSessionSending(inFlightSessions, sessionId)
 
@@ -505,7 +518,15 @@ export function useChatSessionThread(options: {
     if (!brand?.id) {
       setBrandProducts([])
       setUnassignedProducts([])
+      setBrandProductsReady(true)
       return
+    }
+    const cached = readBrandProductCache(brandProductCacheRef.current, brand.id)
+    if (cached) {
+      setBrandProducts(cached)
+      setBrandProductsReady(true)
+    } else {
+      setBrandProductsReady(false)
     }
     let cancelled = false
     void (async () => {
@@ -515,14 +536,17 @@ export function useChatSessionThread(options: {
           getUnassignedProducts(userId),
         ])
         if (!cancelled) {
+          writeBrandProductCache(brandProductCacheRef.current, brand.id, products)
           setBrandProducts(products)
           setUnassignedProducts(unassigned.filter((product) => !isQuickPostSentinel(product)))
+          setBrandProductsReady(true)
         }
       } catch (err) {
         console.error(err)
         if (!cancelled) {
           setBrandProducts([])
           setUnassignedProducts([])
+          setBrandProductsReady(true)
         }
       }
     })()
@@ -543,6 +567,7 @@ export function useChatSessionThread(options: {
         getUnassignedProducts(userId),
       ])
       setBrandProducts(products)
+      writeBrandProductCache(brandProductCacheRef.current, brand.id, products)
       setUnassignedProducts(unassigned.filter((product) => !isQuickPostSentinel(product)))
     } catch (err) {
       console.error(err)
@@ -553,7 +578,11 @@ export function useChatSessionThread(options: {
     if (!brand?.id) return
     const assigned = await assignUnassignedProductToBusiness(userId, productId, brand.id)
     setUnassignedProducts((prev) => prev.filter((p) => p.id !== productId))
-    setBrandProducts((prev) => [assigned, ...prev.filter((p) => p.id !== assigned.id)])
+    setBrandProducts((prev) => {
+      const next = [assigned, ...prev.filter((p) => p.id !== assigned.id)]
+      writeBrandProductCache(brandProductCacheRef.current, brand.id, next)
+      return next
+    })
     invalidateDashboardCache()
   }, [brand?.id, userId])
 
@@ -2637,6 +2666,7 @@ export function useChatSessionThread(options: {
     messages,
     offers,
     brandProducts,
+    brandProductsReady,
     unassignedProducts,
     assignUnassignedProduct,
     deleteUnassignedProduct,

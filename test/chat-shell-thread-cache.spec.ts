@@ -3,12 +3,14 @@ import {
   emptyThreadSnapshot,
   mergeFetchedMessages,
   mergeFetchedMessagesForOwner,
+  readBrandProductCache,
   readThreadCache,
   shouldKeepMountedTranscript,
+  writeBrandProductCache,
   writeThreadCache,
   type CachedThread,
 } from '../src/features/chat-shell/chatShellThreadCache'
-import type { Message } from '../src/types'
+import type { Message, Product } from '../src/types'
 
 function msg(id: string, content: string, sessionId = 's1'): Message {
   return {
@@ -71,5 +73,16 @@ describe('chatShellThreadCache', () => {
     expect(shouldKeepMountedTranscript(true, 2)).toBe(true)
     expect(shouldKeepMountedTranscript(true, 0)).toBe(false)
     expect(shouldKeepMountedTranscript(false, 4)).toBe(false)
+  })
+
+  it('restores products for the selected brand without leaking another folder', () => {
+    const cache = new Map<string, Product[]>()
+    const bloom: Product[] = [{ id: 'p-bloom', name: 'Ramo QA', type: 'product', business_id: 'bloom' }]
+    const luna: Product[] = [{ id: 'p-luna', name: 'Café Luna', type: 'product', business_id: 'luna' }]
+    writeBrandProductCache(cache, 'bloom', bloom)
+    writeBrandProductCache(cache, 'luna', luna)
+    expect(readBrandProductCache(cache, 'luna')?.[0]?.name).toBe('Café Luna')
+    expect(readBrandProductCache(cache, 'bloom')?.[0]?.name).toBe('Ramo QA')
+    expect(readBrandProductCache(cache, null)).toBeUndefined()
   })
 })

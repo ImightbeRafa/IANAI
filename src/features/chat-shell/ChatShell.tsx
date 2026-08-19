@@ -106,7 +106,7 @@ export default function ChatShell({
     brandSessions: workspace.sessions,
     products: thread.brandProducts,
     brandKits,
-    loaded: !workspace.loadingBusinesses && !workspace.loadingSessions,
+    loaded: !workspace.loadingBusinesses && !workspace.loadingSessions && thread.brandProductsReady,
     onBusinessPatched: workspace.patchBrand,
     onProductsChanged: () => thread.refreshBrandProducts(),
     onKitCreated: (kit) => setBrandKits((prev) => [kit, ...prev.filter((row) => row.id !== kit.id)]),
@@ -526,7 +526,7 @@ export default function ChatShell({
           }
           setupCard={brandSetup.trackerVisible ? (
             <ChatBrandSetupCard
-              key={workspace.activeSession?.id || 'no-session'}
+              key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
               setup={brandSetup}
             />
@@ -536,7 +536,7 @@ export default function ChatShell({
             && (brandSetup.facts.businessName || brandSetup.facts.offerName)
               ? (
             <ChatBrandProfileCard
-              key={workspace.activeSession?.id || 'no-session'}
+              key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
               facts={brandSetup.facts}
               busy={brandSetup.busy || thread.loadingMessages}
@@ -633,7 +633,7 @@ export default function ChatShell({
         }}
         contextEditor={workspace.activeSession ? (
           <ChatBrandProfileCard
-            key={`rail-${workspace.activeSession.id}`}
+            key={`rail-${workspace.activeBrand?.id || 'no-brand'}`}
             language={language}
             facts={brandSetup.facts}
             busy={brandSetup.busy}

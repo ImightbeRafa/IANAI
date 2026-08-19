@@ -22,6 +22,7 @@ import {
   buildBrandSetupSnapshot,
   formTypeForProductType,
   pickDefinedAutofill,
+  productsOwnedByBusiness,
   readBrandSetupSkipped,
   resolveBusinessBrandKitId,
   shouldShowBrandSetup,
@@ -249,6 +250,11 @@ export function useChatBrandSetup(options: {
   const [paletteDraft, setPaletteDraft] = useState<PaletteDraft | null>(null)
   const [siteEvidence, setSiteEvidence] = useState<Record<string, SiteFieldEvidence>>({})
   const [sitePages, setSitePages] = useState<Array<{ url: string; title: string; ok: boolean }>>([])
+  const [setupScope, setSetupScope] = useState({
+    businessId: business?.id ?? null,
+    sessionId: session?.id ?? null,
+    language,
+  })
   const [flow, setFlow] = useState<SetupFlowState>(() =>
     createInitialFlow(language, business?.name || '')
   )
@@ -258,14 +264,50 @@ export function useChatBrandSetup(options: {
   linkedKitRef.current = linkedKit || linkedKitRef.current
   activeSessionIdRef.current = session?.id || null
 
+  const brandOwnedProducts = useMemo(
+    () => productsOwnedByBusiness(products, business?.id),
+    [products, business?.id]
+  )
+
+  const nextScope = {
+    businessId: business?.id ?? null,
+    sessionId: session?.id ?? null,
+    language,
+  }
+  if (
+    nextScope.businessId !== setupScope.businessId
+    || nextScope.sessionId !== setupScope.sessionId
+    || nextScope.language !== setupScope.language
+  ) {
+    const stored = factsFromExisting(business, brandOwnedProducts, linkedKit)
+    const initial = createInitialFlow(language, business?.name || '')
+    const facts = hydrateMissingFacts(initial.facts, stored, Boolean(linkedKit))
+    setSetupScope(nextScope)
+    setForceOpen(false)
+    setBusy(false)
+    busyRef.current = false
+    setOfferId(brandOwnedProducts.find((p) => p.name !== 'Quick Use Image Studio')?.id || null)
+    setFlow({
+      ...initial,
+      facts,
+      asked: [...new Set([...initial.asked, ...askedFromFacts(facts)])],
+    })
+    setPaletteDraft(null)
+    setSiteEvidence({})
+    setSitePages([])
+    setError(null)
+    lastSetupPromptRef.current = null
+    linkedKitRef.current = linkedKit
+  }
+
   const skipped = useMemo(
     () => readBrandSetupSkipped(storage, userId, business?.id, session?.context),
     [storage, userId, business?.id, session?.context, skipTick]
   )
 
   const snapshot = useMemo(
-    () => buildBrandSetupSnapshot({ business, products, linkedKit }),
-    [business, products, linkedKit]
+    () => buildBrandSetupSnapshot({ business, products: brandOwnedProducts, linkedKit }),
+    [business, brandOwnedProducts, linkedKit]
   )
 
   const visible = shouldShowBrandSetup({
@@ -286,21 +328,11 @@ export function useChatBrandSetup(options: {
   })
 
   useEffect(() => {
-    setForceOpen(false)
-    setBusy(false)
-    busyRef.current = false
-    setOfferId(products.find((p) => p.name !== 'Quick Use Image Studio')?.id || null)
-    setFlow(createInitialFlow(language, business?.name || ''))
-    setPaletteDraft(null)
-    setSiteEvidence({})
-    setSitePages([])
-    setError(null)
-    lastSetupPromptRef.current = null
-    linkedKitRef.current = linkedKit
-  }, [business?.id, session?.id, language])
+    setOfferId(brandOwnedProducts.find((p) => p.name !== 'Quick Use Image Studio')?.id || null)
+  }, [brandOwnedProducts])
 
   useEffect(() => {
-    const stored = factsFromExisting(business, products, linkedKit)
+    const stored = factsFromExisting(business, brandOwnedProducts, linkedKit)
     setFlow((prev) => {
       const facts = hydrateMissingFacts(prev.facts, stored, Boolean(linkedKit))
       return {
@@ -312,7 +344,7 @@ export function useChatBrandSetup(options: {
   }, [
     business?.id,
     business?.updated_at,
-    products,
+    brandOwnedProducts,
     linkedKit?.id,
     linkedKit?.updated_at,
   ])

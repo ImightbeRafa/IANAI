@@ -4,6 +4,7 @@ import {
   createDeferred,
   isLiveThread,
   isSessionSending,
+  planBrandSwitch,
   removeInFlightSession,
   selectionsEqual,
 } from '../src/features/chat-shell/chatShellAsync'
@@ -293,5 +294,14 @@ describe('thread async isolation races', () => {
 
     expect(sessions.map((s) => s.id)).toEqual(['brand2-s'])
     expect(sessions.every((s) => s.business_id === 'brand-2')).toBe(true)
+  })
+
+  it('switches instantly when the destination folder already has a session cache', () => {
+    expect(planBrandSwitch(undefined)).toEqual({ instant: false, sessionId: null })
+    expect(planBrandSwitch([])).toEqual({ instant: true, sessionId: null })
+    expect(planBrandSwitch([{ id: 's-luna' }, { id: 's-old' }])).toEqual({
+      instant: true,
+      sessionId: 's-luna',
+    })
   })
 })

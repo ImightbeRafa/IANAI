@@ -15,7 +15,7 @@ import {
   replaceSessionOffers,
 } from '../../services/database'
 import type { Business, ChatSession } from '../../types'
-import { selectionsEqual } from './chatShellAsync'
+import { planBrandSwitch, selectionsEqual } from './chatShellAsync'
 import {
   persistSelection,
   readStoredSelection,
@@ -281,12 +281,9 @@ export function useChatShellWorkspace(userId: string | undefined) {
         return
       }
       const epoch = bumpSelectionEpoch()
-      setPendingBrandId(brandId)
       setNotice(null)
-      void (async () => {
-        const list = await loadBrandSessions(brandId, 'prefetch')
-        if (selectionEpochRef.current !== epoch) return
-        const nextSessionId = list[0]?.id ?? null
+      const planned = planBrandSwitch(sessionsByBrandRef.current[brandId])
+      const apply = (nextSessionId: string | null) => {
         activeBrandIdRef.current = brandId
         setActiveBrandId(brandId)
         setPendingBrandId(null)
@@ -298,6 +295,16 @@ export function useChatShellWorkspace(userId: string | undefined) {
           commitSessionId(null)
         }
         syncUrlAndStorage(brandId, nextSessionId)
+      }
+      if (planned.instant) {
+        apply(planned.sessionId)
+        return
+      }
+      setPendingBrandId(brandId)
+      void (async () => {
+        const list = await loadBrandSessions(brandId, 'prefetch')
+        if (selectionEpochRef.current !== epoch) return
+        apply(list[0]?.id ?? null)
       })()
     },
     [bumpSelectionEpoch, commitSessionId, loadBrandSessions, setAuthoritativeSession, syncUrlAndStorage]

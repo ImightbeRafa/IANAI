@@ -9,6 +9,29 @@ export interface CachedThread {
 }
 
 const MAX_CACHED_THREADS = 24
+const MAX_CACHED_BRAND_PRODUCTS = 24
+
+export function readBrandProductCache(
+  cache: Map<string, Product[]>,
+  brandId: string | null | undefined
+): Product[] | undefined {
+  if (!brandId) return undefined
+  return cache.get(brandId)
+}
+
+export function writeBrandProductCache(
+  cache: Map<string, Product[]>,
+  brandId: string | null | undefined,
+  products: Product[]
+): void {
+  if (!brandId) return
+  cache.set(brandId, products)
+  while (cache.size > MAX_CACHED_BRAND_PRODUCTS) {
+    const oldest = cache.keys().next().value
+    if (oldest === undefined || oldest === brandId) break
+    cache.delete(oldest)
+  }
+}
 
 export function readThreadCache(
   cache: Map<string, CachedThread>,

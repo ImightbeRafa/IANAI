@@ -372,10 +372,11 @@ export default memo(function ChatThread({
   }
 
   useEffect(() => {
+    if (loadingMessages) return
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [messages.length, setupTurns.length, progressKind, inlineSetupCard, sending, setupBusy, imageBusy])
+  }, [messages.length, setupTurns.length, progressKind, sending, setupBusy, imageBusy, loadingMessages])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashCommands.length > 0) {

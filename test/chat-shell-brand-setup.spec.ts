@@ -4,6 +4,7 @@ import {
   buildBrandSetupSnapshot,
   isFirstBrandSession,
   pickDefinedAutofill,
+  productsOwnedByBusiness,
   readBrandSetupSkipped,
   resolveBusinessBrandKitId,
   shouldShowBrandSetup,
@@ -540,5 +541,14 @@ describe('extracted brand palette', () => {
   it('appends unique brand reference urls', () => {
     expect(appendBrandReferenceImages(['a'], 'a')).toEqual(['a'])
     expect(appendBrandReferenceImages(['a'], 'b')).toEqual(['a', 'b'])
+  })
+
+  it('ignores offers that belong to another business folder', () => {
+    const owned = productsOwnedByBusiness([
+      product({ id: 'bloom', name: 'Ramo QA', type: 'product', business_id: 'bloom' }),
+      product({ id: 'luna', name: 'Café Luna', type: 'product', business_id: 'b1' }),
+    ], 'b1')
+    expect(owned.map((row) => row.name)).toEqual(['Café Luna'])
+    expect(productsOwnedByBusiness(owned, null)).toEqual([])
   })
 })
