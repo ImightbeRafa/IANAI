@@ -1,3 +1,13 @@
+## 2026-08-19 — Composer kit rail + stable folder heights
+
+**Area:** chat-shell
+**Files:** `ChatComposerCreateDock.tsx`, `ChatShell.tsx`, `ChatSidebar.tsx`, `chatShellSidebar.ts`, `chat-shell.css`
+
+- Brand Kit create actions live in a compact rail on the left of the composer. Hide is a circular `PanelLeftClose` control in that same slot; restore is `PanelLeft`. Review is an opt-in popover anchored to the rail, not a full-width card over the thread.
+- Folder session lists are remembered per marca and stay mounted at `0fr`/`1fr`, so switching the active folder does not empty or accordion-jump the MARCAS list.
+
+---
+
 ## 2026-08-19 — Composer create dock, quieter folders
 
 **Area:** chat-shell

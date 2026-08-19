@@ -530,9 +530,47 @@ export default function ChatShell({
               language={language}
               available={createWidget.available}
               hidden={createWidget.hidden}
+              title={
+                (brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore)
+                  ? t.kitReady
+                  : t.kitTitle
+              }
               onHide={createWidget.hide}
               onShow={createWidget.show}
-              panel={(
+              actions={[
+                {
+                  id: 'scripts',
+                  label: t.createScriptsShort,
+                  active: activeCreateAction === 'scripts',
+                  disabled: brandSetup.busy || thread.loadingMessages,
+                  onClick: () => {
+                    thread.cancelImageClarify()
+                    void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                  },
+                },
+                {
+                  id: 'post',
+                  label: t.createPostShort,
+                  active: activeCreateAction === 'post',
+                  disabled: brandSetup.busy || thread.loadingMessages,
+                  onClick: () => {
+                    thread.cancelScriptClarify()
+                    void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                  },
+                },
+                {
+                  id: 'product',
+                  label: t.createProductShort,
+                  active: activeCreateAction === 'product',
+                  disabled: brandSetup.busy || thread.loadingMessages,
+                  onClick: () => {
+                    thread.cancelScriptClarify()
+                    patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
+                    void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                  },
+                },
+              ]}
+              reviewPanel={(
             <ChatBrandProfileCard
               key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
@@ -541,7 +579,7 @@ export default function ChatShell({
               confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
-              activeCreateAction={activeCreateAction}
+              showCreateActions={false}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {

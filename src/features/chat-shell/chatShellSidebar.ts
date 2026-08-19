@@ -65,6 +65,40 @@ export function resolveBrandOpenMap(options: {
   return next
 }
 
+/** Skip re-resolve when every folder already has an in-memory open flag (name-click / activeBrandId must not reshuffle). */
+export function brandOpenMapNeedsHydrate(
+  previous: Record<string, boolean>,
+  businessIds: string[]
+): boolean {
+  if (businessIds.length === 0) return false
+  return businessIds.some((id) => previous[id] === undefined)
+}
+
+/**
+ * Keep each folder's last known sessions when the active brand changes.
+ * Inactive folders must not fall back to `[]` just because `sessions` now belongs to another marca.
+ */
+export function mergeRememberedBrandSessions(options: {
+  previous: Record<string, ChatSession[]>
+  businesses: Array<{ id: string }>
+  sessionsByBrand?: Record<string, ChatSession[]>
+  activeBrandId: string | null
+  activeSessions: ChatSession[]
+}): Record<string, ChatSession[]> {
+  const next: Record<string, ChatSession[]> = { ...options.previous }
+  for (const brand of options.businesses) {
+    const cached = options.sessionsByBrand?.[brand.id]
+    if (cached !== undefined) {
+      next[brand.id] = cached
+      continue
+    }
+    if (brand.id === options.activeBrandId) {
+      next[brand.id] = options.activeSessions.filter((session) => session.business_id === brand.id)
+    }
+  }
+  return next
+}
+
 /** Fixed-position anchor for session ⋯ menu / confirm (viewport coords). */
 export type SessionActionAnchor = { top: number; right: number }
 

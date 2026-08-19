@@ -1,44 +1,73 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { EyeOff, Sparkles } from 'lucide-react'
-import { IconAdvanceMark } from './ChatShellIcons'
+import { PanelLeft, PanelLeftClose } from 'lucide-react'
+import { IconAdvanceMark, IconDoc, IconImage, IconOffer } from './ChatShellIcons'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
+
+export type ComposerCreateActionId = 'scripts' | 'post' | 'product'
+
+export interface ComposerCreateAction {
+  id: ComposerCreateActionId
+  label: string
+  onClick: () => void
+  active?: boolean
+  disabled?: boolean
+}
 
 interface ChatComposerCreateDockProps {
   language: ChatShellLanguage
   available: boolean
   hidden: boolean
-  panel: ReactNode
+  title: string
+  reviewPanel: ReactNode
+  actions: ComposerCreateAction[]
   onHide: () => void
   onShow: () => void
+}
+
+function actionIcon(id: ComposerCreateActionId) {
+  switch (id) {
+    case 'scripts':
+      return <IconDoc size={14} />
+    case 'post':
+      return <IconImage size={14} />
+    case 'product':
+      return <IconOffer size={14} />
+    default: {
+      const _never: never = id
+      return _never
+    }
+  }
 }
 
 export default function ChatComposerCreateDock({
   language,
   available,
   hidden,
-  panel,
+  title,
+  reviewPanel,
+  actions,
   onHide,
   onShow,
 }: ChatComposerCreateDockProps) {
   const t = shellT(language)
   const rootRef = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
 
   useEffect(() => {
-    if (hidden) setOpen(false)
+    if (hidden) setReviewOpen(false)
   }, [hidden])
 
   useEffect(() => {
-    if (!open) return
+    if (!reviewOpen) return
     const onDoc = (event: MouseEvent) => {
       const node = rootRef.current
       if (!node || node.contains(event.target as Node)) return
-      setOpen(false)
+      setReviewOpen(false)
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        setOpen(false)
+        setReviewOpen(false)
       }
     }
     document.addEventListener('mousedown', onDoc)
@@ -47,44 +76,52 @@ export default function ChatComposerCreateDock({
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open])
+  }, [reviewOpen])
 
   if (!available) return null
 
-  const show = () => {
-    onShow()
-    setOpen(true)
+  if (hidden) {
+    return (
+      <div className="chat-shell__composer-lead is-collapsed" ref={rootRef}>
+        <button
+          type="button"
+          className="chat-shell__composer-show"
+          aria-label={t.showCreateWidget}
+          title={t.showCreateWidget}
+          onClick={onShow}
+        >
+          <PanelLeft size={16} strokeWidth={2} aria-hidden />
+        </button>
+      </div>
+    )
   }
 
   return (
-    <div className="chat-shell__composer-lead" ref={rootRef}>
-      {open && !hidden ? (
-        <div className="chat-shell__create-popover" role="dialog" aria-label={t.create}>
-          {panel}
+    <div className="chat-shell__composer-lead is-kit" ref={rootRef}>
+      {reviewOpen ? (
+        <div className="chat-shell__create-popover is-rail" role="dialog" aria-label={t.reviewKit}>
+          {reviewPanel}
         </div>
       ) : null}
-      {hidden ? (
-        <button
-          type="button"
-          className="chat-shell__composer-create is-muted"
-          aria-label={t.showCreateWidget}
-          title={t.showCreateWidget}
-          onClick={show}
-        >
-          <Sparkles size={16} aria-hidden />
-        </button>
-      ) : (
-        <>
+      <div className="chat-shell__composer-kit">
+        <div className="chat-shell__composer-kit-head">
           <button
             type="button"
-            className={`chat-shell__composer-create${open ? ' is-open' : ''}`}
-            aria-label={t.create}
-            title={t.create}
-            aria-expanded={open}
+            className={`chat-shell__composer-create${reviewOpen ? ' is-open' : ''}`}
+            aria-label={t.reviewKit}
+            title={t.reviewKit}
+            aria-expanded={reviewOpen}
             aria-haspopup="dialog"
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => setReviewOpen((value) => !value)}
           >
             <IconAdvanceMark size={16} />
+          </button>
+          <button
+            type="button"
+            className="chat-shell__composer-kit-title"
+            onClick={() => setReviewOpen((value) => !value)}
+          >
+            <strong>{title}</strong>
           </button>
           <button
             type="button"
@@ -92,14 +129,34 @@ export default function ChatComposerCreateDock({
             aria-label={t.hideCreateWidget}
             title={t.hideCreateWidget}
             onClick={() => {
-              setOpen(false)
+              setReviewOpen(false)
               onHide()
             }}
           >
-            <EyeOff size={15} aria-hidden />
+            <PanelLeftClose size={15} strokeWidth={2} aria-hidden />
           </button>
-        </>
-      )}
+        </div>
+        <div className="chat-shell__composer-kit-actions">
+          {actions.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              disabled={action.disabled}
+              className={action.active ? 'is-on' : undefined}
+              aria-pressed={action.active ? true : false}
+              aria-label={action.label}
+              title={action.label}
+              onClick={() => {
+                setReviewOpen(false)
+                action.onClick()
+              }}
+            >
+              {actionIcon(action.id)}
+              <span>{action.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

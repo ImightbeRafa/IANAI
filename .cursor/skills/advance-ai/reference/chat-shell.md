@@ -22,7 +22,7 @@ Invariants:
 - Never merge messages from session A into session B (`mergeFetchedMessagesForOwner`).
 - Never hydrate setup/create-widget facts from another folder’s products (`productsOwnedByBusiness` + per-brand product cache). Clearing live products without a cache restore makes the tracker flash.
 - Generation is 1 offer per API call, 1 usage increment, artifacts bound to `product_id`.
-- Create-widget hidden is a separate key. The create panel lives on the **left of the composer** (mark + hide icon). It must not sit in the transcript. Showing it must not reopen setup.
+- Create-widget hidden is a separate key. The Brand Kit sits on the **left of the composer** (compact rail + hide icon). It must not sit in the transcript or cover the thread. Showing it must not reopen setup.
 
 ## Persistence keys
 
@@ -42,7 +42,7 @@ Invariants:
 | Thread / composer | `ChatThread.tsx`, `useChatSessionThread.ts` |
 | Folder switch cache | `chatShellThreadCache.ts` |
 | Brand setup | `useChatBrandSetup.ts`, `chatShellBrandSetupFlow.ts` |
-| Create widget | `useChatCreateWidgetVisibility.ts`, `ChatBrandProfileCard.tsx` |
+| Create widget | `useChatCreateWidgetVisibility.ts`, `ChatComposerCreateDock.tsx`, `ChatBrandProfileCard.tsx` |
 | Images | `chatShellImages.ts`, `ChatShellImageCard.tsx` |
 | Theme tokens | `public/design/chat-shell-obsidian-tokens.css` (mirror: `docs/design/…`) |
 | Rollout | `ChatShellRolloutContext.tsx`, `docs/operations/chat-shell-production-transition.md` |

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronDown,
   ChevronRight,
   MoreHorizontal,
   Settings,
@@ -13,6 +12,8 @@ import { useUsageLimits } from '../../hooks/useUsageLimits'
 import { AdvanceWordmark, IconPlus } from './ChatShellIcons'
 import { shellT } from './chatShellLabels'
 import {
+  brandOpenMapNeedsHydrate,
+  mergeRememberedBrandSessions,
   openBrandDeleteConfirm,
   openSessionActionMenu,
   openSessionDeleteConfirm,
@@ -97,17 +98,32 @@ export default function ChatSidebar({
   const [showAllByBrand, setShowAllByBrand] = useState<Record<string, boolean>>({})
   const [sessionAction, setSessionAction] = useState<SessionActionPanel | null>(null)
   const [brandAction, setBrandAction] = useState<BrandActionPanel | null>(null)
+  const rememberedSessionsRef = useRef<Record<string, ChatSession[]>>({})
 
-  // Hydrate from localStorage first. Honor explicit `0`. Never writeBrandOpen from this effect.
+  const sessionsByFolder = useMemo(() => {
+    const merged = mergeRememberedBrandSessions({
+      previous: rememberedSessionsRef.current,
+      businesses,
+      sessionsByBrand,
+      activeBrandId,
+      activeSessions: sessions,
+    })
+    rememberedSessionsRef.current = merged
+    return merged
+  }, [businesses, sessionsByBrand, activeBrandId, sessions])
+
+  // Hydrate from localStorage only when a folder is still unset. Never reshuffle on activeBrandId.
   useEffect(() => {
-    setOpenByBrand((prev) =>
-      resolveBrandOpenMap({
-        businessIds: businesses.map((b) => b.id),
+    setOpenByBrand((prev) => {
+      const ids = businesses.map((b) => b.id)
+      if (!brandOpenMapNeedsHydrate(prev, ids)) return prev
+      return resolveBrandOpenMap({
+        businessIds: ids,
         activeBrandId,
         readStored: (id) => readBrandOpen(storage, id),
         previous: prev,
       })
-    )
+    })
   }, [businesses, activeBrandId, storage])
 
   useEffect(() => {
@@ -251,11 +267,11 @@ export default function ChatSidebar({
           const isPending = brand.id === pendingBrandId
           const isOpen = openByBrand[brand.id] ?? false
           const cached = sessionsByBrand?.[brand.id]
-          const brandSessions = cached
-            ?? (isActive ? sessions.filter((s) => s.business_id === brand.id) : [])
+          const brandSessions = sessionsByFolder[brand.id] ?? []
           const count = sessionCounts[brand.id] ?? brandSessions.length
-          const brandLoading = Boolean(loadingByBrand[brand.id] && cached === undefined)
-            || (isActive && loadingSessions && cached === undefined)
+          const brandLoading = (Boolean(loadingByBrand[brand.id] && cached === undefined)
+            || (isActive && loadingSessions && cached === undefined))
+            && brandSessions.length === 0
           const showAll = showAllByBrand[brand.id] ?? false
           const visibleSessions = showAll
             ? brandSessions
@@ -272,6 +288,10 @@ export default function ChatSidebar({
           const uniqueLabels = uniquifySidebarLabels(
             titledSessions.map((row) => ({ id: row.session.id, label: row.label }))
           )
+          const skeletonCount = Math.min(
+            SIDEBAR_SESSION_VISIBLE_CAP,
+            Math.max(1, count || 2)
+          )
 
           return (
             <div key={brand.id} className="chat-shell__brand-block">
@@ -283,9 +303,7 @@ export default function ChatSidebar({
                   aria-expanded={isOpen}
                   onClick={() => toggleBrandOpen(brand.id)}
                 >
-                  {isOpen
-                    ? <ChevronDown size={14} aria-hidden />
-                    : <ChevronRight size={14} aria-hidden />}
+                  <ChevronRight size={14} aria-hidden />
                 </button>
                 <button
                   type="button"
@@ -345,11 +363,14 @@ export default function ChatSidebar({
                 )}
               </div>
 
-              {isOpen && (
-                <div className="chat-shell__nav-subs" aria-busy={brandLoading}>
-                  {brandLoading && brandSessions.length === 0 && (
-                    <div className="chat-shell__nav-loading" aria-live="polite">
-                      {t.loadingSessions}
+              <div className={`chat-shell__nav-subs-wrap${isOpen ? ' is-open' : ''}`}>
+                <div className="chat-shell__nav-subs-clip">
+                <div className="chat-shell__nav-subs" aria-busy={brandLoading} aria-hidden={!isOpen}>
+                  {brandLoading && (
+                    <div className="chat-shell__nav-skeletons" aria-live="polite" aria-label={t.loadingSessions}>
+                      {Array.from({ length: skeletonCount }, (_, index) => (
+                        <div key={index} className="chat-shell__skeleton" />
+                      ))}
                     </div>
                   )}
                   {!brandLoading && brandSessions.length === 0 && (
@@ -459,7 +480,8 @@ export default function ChatSidebar({
                     </button>
                   )}
                 </div>
-              )}
+                </div>
+              </div>
             </div>
           )
         })}
