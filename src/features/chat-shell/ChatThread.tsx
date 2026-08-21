@@ -27,7 +27,16 @@ import {
   type ScriptClarifyState,
   type ScriptCtaChannel,
 } from './useChatSessionThread'
-import { sortArtifactsByOrdinal, type ShellImageLike } from './chatShellImages'
+import ChatShellReferencePicker from './ChatShellReferencePicker'
+import { catalogOfferReferences } from './chatShellReferenceSelection'
+import {
+  buildImageWorkspaces,
+  isImageWorkspaceAnchor,
+  sortArtifactsByOrdinal,
+  workspaceForImage,
+  type ShellImageLike,
+} from './chatShellImages'
+import { shouldKeepMountedTranscript } from './chatShellThreadCache'
 import {
   anuncioStyleChoices,
   IMAGE_ASPECT_CHOICES,
@@ -87,14 +96,19 @@ interface ChatThreadProps {
   }) => void
   onCancelScriptClarify?: () => void
   onOpenImagesRail?: () => void
-  onUploadOfferReference?: (file: File, kind: 'product' | 'context') => void | Promise<void>
+  onUploadOfferReference?: (file: File, kind: 'product' | 'context', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
+  offerProductNames?: Record<string, string>
   onPreparePostFromScript?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
   onGenerateImageFromScript?: (
     scriptText: string,
     productId?: string | null,
     scriptTitle?: string | null,
-    options?: { density?: 'hard' | 'medium' }
+    options?: {
+      density?: 'hard' | 'medium'
+      referenceImageIds?: string[]
+      alreadyOptimized?: boolean
+    }
   ) => void | Promise<void>
   onSaveScript: (
     content: string,
@@ -128,6 +142,7 @@ interface ChatThreadProps {
     productId?: string
   ) => Promise<void>
   setupCard?: ReactNode
+  createDock?: ReactNode
   inlineSetupCard?: ReactNode
   setupTurns?: Array<{ id: string; role: 'user' | 'assistant'; content: string }>
   setupPlaceholder?: string
@@ -215,6 +230,7 @@ export default memo(function ChatThread({
   onOpenImagesRail,
   onUploadOfferReference,
   onRemoveOfferReference,
+  offerProductNames = {},
   onPreparePostFromScript,
   onGenerateImageFromScript,
   onSaveScript,
@@ -223,6 +239,7 @@ export default memo(function ChatThread({
   onOpenOfferImage,
   onEditOfferImage,
   setupCard,
+  createDock,
   inlineSetupCard,
   setupTurns = [],
   setupPlaceholder,
@@ -252,41 +269,19 @@ export default memo(function ChatThread({
   }, [sessionKey])
   const t = shellT(language)
   const visibleMessages = useMemo(() => dedupeLegacySetupSummaries(messages), [messages])
-  const imageVersionsByOffer = useMemo(() => {
-    const grouped = new Map<string, ShellImageLike[]>()
-    for (const image of offerImages) {
-      if (image.kind !== 'generated' || !image.image_url) continue
-      const current = grouped.get(image.product_id) || []
-      current.push(image)
-      grouped.set(image.product_id, current)
-    }
-    for (const [productId, versions] of grouped) {
-      grouped.set(productId, versions.sort((a, b) => Date.parse(b.created_at || '') - Date.parse(a.created_at || '')))
-    }
-    return grouped
-  }, [offerImages])
-  const latestScriptIdByProduct = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const message of visibleMessages) {
-      for (const artifact of sortArtifactsByOrdinal(message.artifacts || [])) {
-        if (artifact.artifact_type === 'script' && artifact.product_id && artifactToParsedScript(artifact)) {
-          map.set(artifact.product_id, artifact.id)
-        }
-      }
-    }
-    return map
-  }, [visibleMessages])
-  const lastLegacyScriptKey = useMemo(() => {
-    let key: string | null = null
-    for (const message of visibleMessages) {
-      if (message.artifacts?.length) continue
-      if (!isScriptContent(message.content)) continue
-      const parsed = parseScripts(message.content)
-      if (!parsed.length) continue
-      key = `${message.id}:${parsed[parsed.length - 1].index}`
-    }
-    return key
-  }, [visibleMessages])
+  const imageWorkspaces = useMemo(() => {
+    const artifacts = visibleMessages.flatMap((message) =>
+      (message.artifacts || []).map((artifact) => ({
+        ...artifact,
+        message_id: message.id,
+      }))
+    )
+    return buildImageWorkspaces(offerImages, artifacts)
+  }, [offerImages, visibleMessages])
+  const libraryReferenceImages = useMemo(
+    () => catalogOfferReferences(offerImages, offerProductNames),
+    [offerImages, offerProductNames]
+  )
   const threadRef = useRef<HTMLDivElement>(null)
   const logoInputRef = useRef<HTMLInputElement>(null)
   const referenceInputRef = useRef<HTMLInputElement>(null)
@@ -302,13 +297,24 @@ export default memo(function ChatThread({
   }, [sessionKey])
   const voice = useChatComposerVoice({
     language,
-    enabled: composerEnabled,
+    enabled: composerEnabled && !loadingMessages,
     onTranscript: insertTranscript,
   })
+  const voiceDiscard = voice.discard
+
+  useEffect(() => {
+    setAttachOpen(false)
+    setSlashDismissed(false)
+    setSlashIndex(0)
+    setPostPreviewNonce(0)
+    setPostPreviewScriptKey(null)
+    setLocalNotice(null)
+    voiceDiscard()
+  }, [sessionKey, voiceDiscard])
 
   const submit = () => {
     const text = composer.trim()
-    if (!text || sending || !session || voice.isRecording || voice.isTranscribing) return
+    if (!text || sending || !session || loadingMessages || voice.isRecording || voice.isTranscribing) return
     const capturedKey = sessionKey
     setDrafts((prev) => ({ ...prev, [capturedKey]: '' }))
     void (async () => {
@@ -338,7 +344,10 @@ export default memo(function ChatThread({
   }
 
   const voiceBusy = voice.isRecording || voice.isTranscribing
-  const canSend = Boolean(session) && !sending && !voiceBusy && Boolean(composer.trim())
+  const controlsLocked = loadingMessages || voiceBusy
+  const canSend = Boolean(session) && !sending && !controlsLocked && Boolean(composer.trim())
+  const keepMountedTranscript = shouldKeepMountedTranscript(loadingMessages, visibleMessages.length)
+  const showInitialLoader = Boolean(session) && loadingMessages && !keepMountedTranscript && setupTurns.length === 0 && !inlineSetupCard
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -364,17 +373,12 @@ export default memo(function ChatThread({
     setPostPreviewNonce((n) => n + 1)
   }
 
-  const openLatestScriptPostPreview = (productId: string) => {
-    const artifactKey = latestScriptIdByProduct.get(productId)
-    const legacyKey = offerProductId === productId ? lastLegacyScriptKey : null
-    openScriptPostPreview(artifactKey || legacyKey || '')
-  }
-
   useEffect(() => {
+    if (loadingMessages) return
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [messages.length, setupTurns.length, progressKind, inlineSetupCard, sending, setupBusy, imageBusy])
+  }, [messages.length, setupTurns.length, progressKind, sending, setupBusy, imageBusy, loadingMessages])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashCommands.length > 0) {
@@ -409,7 +413,13 @@ export default memo(function ChatThread({
   return (
     <div className="chat-shell__stage">
       {setupCard}
-      <div className="chat-shell__thread" role="log" aria-label="Conversation" ref={threadRef}>
+      <div
+        className={`chat-shell__thread${loadingMessages ? ' is-busy' : ''}`}
+        role="log"
+        aria-label="Conversation"
+        aria-busy={loadingMessages}
+        ref={threadRef}
+      >
         {!session ? (
           <div className="chat-shell__msg chat-shell__msg--ai">
             <span className="chat-shell__who">Advance AI</span>
@@ -419,7 +429,7 @@ export default memo(function ChatThread({
                 : t.emptyNoBrand}
             </div>
           </div>
-        ) : loadingMessages ? (
+        ) : showInitialLoader ? (
           <div className="chat-shell__msg chat-shell__msg--ai">
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">{t.emptyLoading}</div>
@@ -457,8 +467,7 @@ export default memo(function ChatThread({
                 (a.artifact_type === 'script' && a.script?.content)
                 || (a.artifact_type === 'image'
                   && a.product_image?.image_url
-                  && (!imageVersionsByOffer.get(a.product_id)?.length
-                    || imageVersionsByOffer.get(a.product_id)?.[0]?.id === a.product_image.id))
+                  && isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces))
             )
 
             if (artifacts.length > 0) {
@@ -468,6 +477,17 @@ export default memo(function ChatThread({
                   <div className="chat-shell__script-stack">
                     {artifacts.map((artifact) => {
                       if (artifact.artifact_type === 'image') {
+                        const workspace = workspaceForImage(imageWorkspaces, artifact.product_image?.id)
+                        const openImage = (img: ShellImageLike) => {
+                          if (!img.image_url) return
+                          onOpenOfferImage({
+                            url: img.image_url,
+                            alt: img.label || artifact.product?.name || 'Image',
+                            productName: artifact.product?.name,
+                            productId: img.product_id || artifact.product_id,
+                            productImageId: img.id,
+                          })
+                        }
                         return (
                           <ChatShellImageCard
                             key={artifact.id}
@@ -475,40 +495,9 @@ export default memo(function ChatThread({
                             productName={artifact.product?.name}
                             busy={imageBusy}
                             language={language}
-                            onOpen={() => {
-                              const img = artifact.product_image
-                              if (!img?.image_url) return
-                              onOpenOfferImage({
-                                url: img.image_url,
-                                alt: img.label || artifact.product?.name || 'Image',
-                                productName: artifact.product?.name,
-                                productId: artifact.product_id,
-                                productImageId: img.id,
-                              })
-                            }}
-                            onRequestEdit={() => {
-                              const img = artifact.product_image
-                              if (!img?.image_url) return
-                              onOpenOfferImage({
-                                url: img.image_url,
-                                alt: img.label || artifact.product?.name || 'Image',
-                                productName: artifact.product?.name,
-                                productId: artifact.product_id,
-                                productImageId: img.id,
-                              })
-                            }}
-                            onOptimizeForPost={() => openLatestScriptPostPreview(artifact.product_id)}
-                            versions={imageVersionsByOffer.get(artifact.product_id) || []}
-                            onOpenVersion={(version) => {
-                              if (!version.image_url) return
-                              onOpenOfferImage({
-                                url: version.image_url,
-                                alt: version.label || artifact.product?.name || 'Image',
-                                productName: artifact.product?.name,
-                                productId: version.product_id,
-                                productImageId: version.id,
-                              })
-                            }}
+                            versions={workspace?.versions || []}
+                            onOpen={openImage}
+                            onRequestEdit={openImage}
                           />
                         )
                       }
@@ -538,9 +527,7 @@ export default memo(function ChatThread({
                           savingScript={savingScript}
                           offerImageId={offerImage?.id}
                           offerImageUrl={offerImage?.image_url}
-                          referenceImageUrls={offerImages
-                            .filter((image) => image.product_id === productId && image.kind !== 'generated' && image.image_url)
-                            .map((image) => image.image_url as string)}
+                          referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
@@ -568,6 +555,7 @@ export default memo(function ChatThread({
                               : undefined
                           }
                           onPreparePost={onPreparePostFromScript}
+                          onUploadPostReference={(file, kind) => void onUploadOfferReference?.(file, kind, productId)}
                           onOpenPostPreview={() => onCancelScriptClarify?.()}
                           onLatestVersionChange={onLatestVersionChange}
                           snapshotKey={artifact.id}
@@ -615,9 +603,7 @@ export default memo(function ChatThread({
                         messageId={message.id}
                         scriptIndex={script.index}
                         savingScript={savingScript}
-                        referenceImageUrls={offerImages
-                          .filter((image) => image.product_id === offerProductId && image.kind !== 'generated' && image.image_url)
-                          .map((image) => image.image_url as string)}
+                        referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
@@ -634,6 +620,7 @@ export default memo(function ChatThread({
                             : undefined
                         }
                         onPreparePost={onPreparePostFromScript}
+                        onUploadPostReference={(file, kind) => void onUploadOfferReference?.(file, kind, offerProductId || undefined)}
                         onOpenPostPreview={() => onCancelScriptClarify?.()}
                         onLatestVersionChange={onLatestVersionChange}
                         snapshotKey={`${message.id}:${script.index}`}
@@ -679,10 +666,9 @@ export default memo(function ChatThread({
               }}
             />
           ) : null}
-          {inlineSetupCard && !progressKind ? (
-            <div className="chat-shell__msg chat-shell__msg--ai">
-              <span className="chat-shell__who">Advance AI</span>
-              {inlineSetupCard}
+          {keepMountedTranscript ? (
+            <div className="chat-shell__thread-veil" role="status">
+              {t.emptyLoading}
             </div>
           ) : null}
           </>
@@ -773,26 +759,16 @@ export default memo(function ChatThread({
                 <span>{imageClarify.scriptTitle}</span>
               </div>
             ) : null}
-            {imageClarify.step === 'refs' && imageClarify.referenceImages?.length ? (
-              <div className="chat-shell__clarify-references">
-                {imageClarify.referenceImages.map((reference) => (
-                  <div key={reference.id} className="chat-shell__clarify-reference-wrap">
-                    <button
-                      type="button"
-                      className={`chat-shell__clarify-reference${reference.selected === false ? '' : ' is-selected'}`}
-                      disabled={imageBusy}
-                      onClick={() => onAnswerImageClarify?.({ toggleReferenceId: reference.id })}
-                    >
-                      <img src={reference.url} alt={reference.label || reference.kind} />
-                      <span>{reference.kind === 'context'
-                        ? (language === 'es' ? 'Estilo' : 'Style')
-                        : (language === 'es' ? 'Producto' : 'Product')}</span>
-                      <small>{reference.selected === false ? (language === 'es' ? 'No usar' : 'Excluded') : (language === 'es' ? 'Usar' : 'Use')}</small>
-                    </button>
-                    <button type="button" className="chat-shell__clarify-reference-remove" disabled={imageBusy} onClick={() => void onRemoveOfferReference?.(reference.id)} aria-label={language === 'es' ? 'Eliminar referencia' : 'Remove reference'}>×</button>
-                  </div>
-                ))}
-              </div>
+            {imageClarify.step === 'refs' ? (
+              <ChatShellReferencePicker
+                images={imageClarify.referenceImages || []}
+                currentProductId={imageClarify.productId}
+                language={language}
+                busy={imageBusy}
+                onToggle={(id) => onAnswerImageClarify?.({ toggleReferenceId: id })}
+                onUpload={(file, kind) => void onUploadOfferReference?.(file, kind, imageClarify.productId)}
+                onRemove={onRemoveOfferReference}
+              />
             ) : null}
             <div className="chat-shell__clarify-chips">
               {imageClarify.step === 'script' ? (
@@ -896,17 +872,21 @@ export default memo(function ChatThread({
                 </>
               ) : imageClarify.step === 'refs' ? (
                 <>
-                  {(imageClarify.availableReferenceCount || 0) > 0 ? (
-                    <button
-                      type="button"
-                      className="chat-shell__btn chat-shell__btn--pill"
-                      disabled={imageBusy}
-                      onClick={() => onAnswerImageClarify?.({ useReferences: true })}
-                    >
-                      {language === 'es' ? 'Continuar con las seleccionadas' : 'Continue with selected'}
-                    </button>
-                  ) : null}
-                  {(imageClarify.availableReferenceCount || 0) > 0 && !imageClarify.referencesRequired ? (
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={
+                      imageBusy
+                      || (
+                        Boolean(imageClarify.referencesRequired)
+                        && !(imageClarify.referenceImages || []).some((image) => image.selected === true && image.kind !== 'context')
+                      )
+                    }
+                    onClick={() => onAnswerImageClarify?.({ useReferences: true })}
+                  >
+                    {language === 'es' ? 'Continuar con las seleccionadas' : 'Continue with selected'}
+                  </button>
+                  {!imageClarify.referencesRequired ? (
                     <button
                       type="button"
                       className="chat-shell__btn chat-shell__btn--pill"
@@ -916,22 +896,6 @@ export default memo(function ChatThread({
                       {language === 'es' ? 'Crear sin referencias' : 'Create without references'}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => offerProductRefInputRef.current?.click()}
-                  >
-                    {language === 'es' ? 'Subir producto' : 'Upload product'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => offerContextRefInputRef.current?.click()}
-                  >
-                    {language === 'es' ? 'Subir estilo de post' : 'Upload post style'}
-                  </button>
                   <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onOpenImagesRail?.()}>
                     {language === 'es' ? 'Administrar biblioteca' : 'Manage library'}
                   </button>
@@ -989,6 +953,7 @@ export default memo(function ChatThread({
           </div>
         ) : null}
         <div className={`chat-shell__composer${voice.isRecording ? ' is-listening' : ''}`}>
+          {createDock}
           {slashCommands.length > 0 ? (
             <ChatSlashCommandPalette
               commands={slashCommands}
@@ -1025,8 +990,8 @@ export default memo(function ChatThread({
                             ? t.askScriptType
                             : t.askScripts
             }
-            disabled={!composerEnabled || voiceBusy}
-            aria-disabled={!composerEnabled || voiceBusy}
+            disabled={!composerEnabled || voiceBusy || loadingMessages}
+            aria-disabled={!composerEnabled || voiceBusy || loadingMessages}
             rows={2}
             aria-label={t.composer}
             role={slashCommands.length > 0 ? 'combobox' : undefined}
@@ -1082,7 +1047,7 @@ export default memo(function ChatThread({
                 <button
                   type="button"
                   className="chat-shell__icon-btn"
-                  disabled={!composerEnabled || sending}
+                  disabled={!composerEnabled || sending || loadingMessages}
                   aria-label={t.attach}
                   title={t.attach}
                   onClick={() => setAttachOpen((open) => !open)}
@@ -1113,8 +1078,8 @@ export default memo(function ChatThread({
             <button
               type="button"
               className={`chat-shell__icon-btn chat-shell__mic${voice.isRecording ? ' is-recording' : ''}`}
-              disabled={!composerEnabled || sending || voice.isTranscribing}
-              aria-disabled={!composerEnabled || sending || voice.isTranscribing}
+              disabled={!composerEnabled || sending || voice.isTranscribing || loadingMessages}
+              aria-disabled={!composerEnabled || sending || voice.isTranscribing || loadingMessages}
               aria-pressed={voice.isRecording}
               aria-label={voice.isRecording ? t.voiceStop : t.voice}
               title={voice.supported ? (voice.isRecording ? t.voiceStop : t.voice) : t.voiceUnsupported}

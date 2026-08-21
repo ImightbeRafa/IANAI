@@ -9,17 +9,20 @@ import ChatBrandCreateModal from './ChatBrandCreateModal'
 import ChatSettingsDialog from './ChatSettingsDialog'
 import ChatBrandSetupCard from './ChatBrandSetupCard'
 import ChatBrandProfileCard from './ChatBrandProfileCard'
+import ChatComposerCreateDock from './ChatComposerCreateDock'
 import ChatThread from './ChatThread'
 import ChatContextRail, { type RailPane, type RailTab } from './ChatContextRail'
-import ChatShellImageLightbox from './ChatShellImageLightbox'
+import ChatShellImageLightbox, { type ImageEditAttachment } from './ChatShellImageLightbox'
 import type { ChatShellTheme } from './chatShellTheme'
 import { useChatShellWorkspace } from './useChatShellWorkspace'
 import { useChatSessionThread } from './useChatSessionThread'
 import { useChatBrandSetup } from './useChatBrandSetup'
+import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
+import { mapEnhanceModeToTier } from './chatShellImageEnhance'
 import { isBrandContextEditRequest, isBrandRuleRequest, isExplicitGenerationRequest, SETUP_COMPOSER_PLACEHOLDER } from './chatShellBrandSetupFlow'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import type { ProductImage } from '../../services/database'
@@ -104,7 +107,7 @@ export default function ChatShell({
     brandSessions: workspace.sessions,
     products: thread.brandProducts,
     brandKits,
-    loaded: !workspace.loadingBusinesses && !workspace.loadingSessions,
+    loaded: !workspace.loadingBusinesses && !workspace.loadingSessions && thread.brandProductsReady,
     onBusinessPatched: workspace.patchBrand,
     onProductsChanged: () => thread.refreshBrandProducts(),
     onKitCreated: (kit) => setBrandKits((prev) => [kit, ...prev.filter((row) => row.id !== kit.id)]),
@@ -116,6 +119,13 @@ export default function ChatShell({
     },
     messageCount: thread.messages.length,
     messagesLoading: thread.loadingMessages,
+  })
+
+  const createWidget = useChatCreateWidgetVisibility({
+    userId,
+    businessId: workspace.activeBrand?.id,
+    sessionId: workspace.activeSession?.id,
+    offerName: brandSetup.facts.offerName || brandSetup.facts.businessName,
   })
 
   brandVisualRef.current = {
@@ -245,27 +255,18 @@ export default function ChatShell({
     })
   }, [openLightbox, thread.brandProducts])
 
-  const requestImageEdit = useCallback(async (reason: string) => {
+  const requestImageEdit = useCallback(async (reason: string, attachments?: ImageEditAttachment[]) => {
     if (!lightbox) return
-    await thread.editOfferImage(lightbox.productImageId, lightbox.url, reason, lightbox.productId)
+    await thread.editOfferImage(
+      lightbox.productImageId,
+      lightbox.url,
+      reason,
+      lightbox.productId,
+      'edit',
+      attachments
+    )
     setLightbox(null)
-    return
-    if (!lightbox) return
-    const offerName = lightbox?.productName || 'Image'
-    const title = language === 'es' ? `Edición · ${offerName}` : `Edit · ${offerName}`
-    const userText = language === 'es'
-      ? `Editar esta imagen: ${reason}`
-      : `Edit this image: ${reason}`
-    const assistantText = t.editSessionSeed
-    const created = await workspace.createImageEditSession({
-      title,
-      productId: lightbox?.productId || '',
-      productImageId: lightbox?.productImageId || '',
-      userText,
-      assistantText,
-    })
-    if (created) setLightbox(null)
-  }, [language, lightbox, t.editSessionSeed, thread, workspace])
+  }, [lightbox, thread])
 
   const quickEnhanceImage = useCallback(async (mode: 'magic' | 'rebuild') => {
     if (!lightbox) return
@@ -276,7 +277,15 @@ export default function ChatShell({
       : (language === 'es'
         ? 'Mejora la composición, iluminación, tipografía y acabado profesional sin cambiar el producto, la marca, el mensaje ni las reglas guardadas.'
         : 'Improve composition, lighting, typography, and professional finish without changing the product, brand, message, or saved rules.')
-    await thread.editOfferImage(lightbox.productImageId, lightbox.url, instruction, lightbox.productId, 'enhance')
+    await thread.editOfferImage(
+      lightbox.productImageId,
+      lightbox.url,
+      instruction,
+      lightbox.productId,
+      'enhance',
+      undefined,
+      mapEnhanceModeToTier(mode)
+    )
     setLightbox(null)
   }, [language, lightbox, thread])
 
@@ -327,7 +336,6 @@ export default function ChatShell({
     navOpen ? 'is-nav-open' : '',
     railOpen ? 'is-rail-open' : '',
     railPane === 'detail' ? 'is-rail-detail' : '',
-    workspace.pendingBrandId ? 'is-switching' : '',
   ].filter(Boolean).join(' ')
 
   const crumbs = [
@@ -395,9 +403,15 @@ export default function ChatShell({
         busy={thread.imageBusy}
         error={workspace.error}
         notice={workspace.notice}
-        onSelectBrand={workspace.selectBrand}
+        onSelectBrand={(brandId) => {
+          workspace.selectBrand(brandId)
+          setNavOpen(false)
+        }}
         onPrefetchBrandSessions={workspace.prefetchBrandSessions}
-        onSelectSession={workspace.selectSession}
+        onSelectSession={(session) => {
+          workspace.selectSession(session)
+          setNavOpen(false)
+        }}
         onNewChat={() => void workspace.createSession()}
         onNewSession={() => void workspace.createSession()}
         onNewBrand={openBrandCreate}
@@ -430,7 +444,7 @@ export default function ChatShell({
               <button
                 type="button"
                 className="chat-shell__icon-btn"
-                aria-label="Open navigation"
+                aria-label={t.openNav}
                 onClick={() => setNavOpen(true)}
               >
                 <Menu size={16} />
@@ -454,7 +468,6 @@ export default function ChatShell({
           </div>
         </header>
         <ChatThread
-          key={workspace.activeSession?.id || workspace.activeBrand?.id || 'empty'}
           brand={workspace.activeBrand}
           session={workspace.activeSession}
           messages={thread.messages}
@@ -491,8 +504,9 @@ export default function ChatShell({
           onAnswerScriptClarify={(answer) => void thread.answerScriptClarify(answer)}
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
           onOpenImagesRail={() => selectRailTab('images')}
-          onUploadOfferReference={(file, kind) => thread.uploadOfferImage(file, undefined, kind)}
+          onUploadOfferReference={(file, kind, productId) => thread.uploadOfferImage(file, productId, kind)}
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
+          offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
           onPreparePostFromScript={(scriptText, density) => thread.prepareScriptForPost(scriptText, density)}
           onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) =>
             void thread.generateImageFromScript(scriptText, productId, scriptTitle, options)
@@ -503,25 +517,69 @@ export default function ChatShell({
           }
           setupCard={brandSetup.trackerVisible ? (
             <ChatBrandSetupCard
-              key={workspace.activeSession?.id || 'no-session'}
+              key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
               setup={brandSetup}
             />
           ) : null}
-          inlineSetupCard={
-            brandSetup.profileVisible
-            && (brandSetup.visible || brandSetup.phase === 'confirm_offer' || brandSetup.phase === 'complete')
+          createDock={
+            createWidget.available
             && (brandSetup.facts.businessName || brandSetup.facts.offerName)
               ? (
+            <ChatComposerCreateDock
+              language={language}
+              available={createWidget.available}
+              hidden={createWidget.hidden}
+              title={
+                (brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore)
+                  ? t.kitReady
+                  : t.kitTitle
+              }
+              onHide={createWidget.hide}
+              onShow={createWidget.show}
+              actions={[
+                {
+                  id: 'scripts',
+                  label: t.createScriptsShort,
+                  active: activeCreateAction === 'scripts',
+                  disabled: brandSetup.busy || thread.loadingMessages,
+                  onClick: () => {
+                    thread.cancelImageClarify()
+                    void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                  },
+                },
+                {
+                  id: 'post',
+                  label: t.createPostShort,
+                  active: activeCreateAction === 'post',
+                  disabled: brandSetup.busy || thread.loadingMessages,
+                  onClick: () => {
+                    thread.cancelScriptClarify()
+                    void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                  },
+                },
+                {
+                  id: 'product',
+                  label: t.createProductShort,
+                  active: activeCreateAction === 'product',
+                  disabled: brandSetup.busy || thread.loadingMessages,
+                  onClick: () => {
+                    thread.cancelScriptClarify()
+                    patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
+                    void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                  },
+                },
+              ]}
+              reviewPanel={(
             <ChatBrandProfileCard
-              key={workspace.activeSession?.id || 'no-session'}
+              key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
               facts={brandSetup.facts}
-              busy={brandSetup.busy}
-              confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete'}
+              busy={brandSetup.busy || thread.loadingMessages}
+              confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
-              activeCreateAction={activeCreateAction}
+              showCreateActions={false}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
@@ -542,6 +600,8 @@ export default function ChatShell({
                 language === 'es'
                   ? '¿Qué querés crear? Podés pedirme un guion, post, foto de producto, logo u otra pieza y te voy guiando.'
                   : 'What would you like to create? Ask for a script, post, product photo, logo, or another asset and I’ll guide you.'
+              )}
+            />
               )}
             />
           ) : null}
@@ -610,7 +670,7 @@ export default function ChatShell({
         }}
         contextEditor={workspace.activeSession ? (
           <ChatBrandProfileCard
-            key={`rail-${workspace.activeSession.id}`}
+            key={`rail-${workspace.activeBrand?.id || 'no-brand'}`}
             language={language}
             facts={brandSetup.facts}
             busy={brandSetup.busy}
@@ -634,9 +694,9 @@ export default function ChatShell({
         alt={lightbox?.alt}
         productName={lightbox?.productName}
         language={language}
-        busy={workspace.busy}
+        busy={thread.imageBusy || workspace.busy}
         onClose={() => setLightbox(null)}
-        onRequestEdit={(reason) => void requestImageEdit(reason)}
+        onRequestEdit={(reason, attachments) => void requestImageEdit(reason, attachments)}
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronDown,
+  EyeOff,
   Pencil,
 } from 'lucide-react'
 import type { ProductType, SalesChannel } from '../../types'
@@ -35,6 +36,7 @@ interface ChatBrandProfileCardProps {
   onCreatePost: () => void
   onCreateProductPhoto: () => void
   onCreateOther: () => void
+  onHide?: () => void
 }
 
 const COPY = {
@@ -86,6 +88,7 @@ const COPY = {
     edit: 'Editar',
     review: 'Revisar',
     collapse: 'Ocultar',
+    hideWidget: 'Ocultar',
     fromWeb: 'De la web',
     inferred: 'Inferido',
     confirmNeeded: 'Por confirmar',
@@ -139,6 +142,7 @@ const COPY = {
     edit: 'Edit',
     review: 'Review',
     collapse: 'Collapse',
+    hideWidget: 'Hide',
     fromWeb: 'From website',
     inferred: 'Inferred',
     confirmNeeded: 'Needs confirmation',
@@ -173,6 +177,7 @@ export default function ChatBrandProfileCard({
   onCreateScripts,
   onCreatePost,
   onCreateProductPhoto,
+  onHide,
 }: ChatBrandProfileCardProps) {
   const t = COPY[language]
   const [local, setLocal] = useState(facts)
@@ -267,6 +272,7 @@ export default function ChatBrandProfileCard({
           <strong>{confirmed ? t.readyTitle : t.title}</strong>
           <p>{confirmed ? t.readyCopy : t.subtitle}</p>
         </div>
+        <div className="chat-shell__brand-profile-head-actions">
         {!expanded ? (
           <button type="button" className="chat-shell__brand-profile-edit" disabled={busy} onClick={() => setExpanded(true)} aria-expanded={false}>
             <ChevronDown size={13} /> {t.review}
@@ -290,6 +296,19 @@ export default function ChatBrandProfileCard({
             <ChevronDown size={13} /> {t.collapse}
           </button>
         )}
+        {onHide && showCreateActions ? (
+          <button
+            type="button"
+            className="chat-shell__brand-profile-hide"
+            disabled={busy}
+            onClick={onHide}
+            aria-label={t.hideWidget}
+            title={t.hideWidget}
+          >
+            <EyeOff size={14} />
+          </button>
+        ) : null}
+        </div>
       </div>
 
       {!expanded ? (
@@ -447,9 +466,9 @@ export default function ChatBrandProfileCard({
       {!editing && showCreateActions ? (
         <div className="chat-shell__brand-profile-create">
           {!confirmed ? <p className="chat-shell__brand-profile-next">{t.nextPrompt}</p> : null}
-          <button type="button" className={activeCreateAction === 'scripts' ? 'is-on' : undefined} aria-pressed={activeCreateAction === 'scripts'} onClick={() => void startCreate(onCreateScripts)}><IconDoc size={15} />{t.scripts}</button>
-          <button type="button" className={activeCreateAction === 'post' ? 'is-on' : undefined} aria-pressed={activeCreateAction === 'post'} onClick={() => void startCreate(onCreatePost)}><IconImage size={15} />{t.post}</button>
-          <button type="button" className={activeCreateAction === 'product' ? 'is-on' : undefined} aria-pressed={activeCreateAction === 'product'} onClick={() => void startCreate(onCreateProductPhoto)}><IconOffer size={15} />{t.productPhoto}</button>
+          <button type="button" disabled={busy} className={activeCreateAction === 'scripts' ? 'is-on' : undefined} aria-pressed={activeCreateAction === 'scripts'} onClick={() => void startCreate(onCreateScripts)}><IconDoc size={15} />{t.scripts}</button>
+          <button type="button" disabled={busy} className={activeCreateAction === 'post' ? 'is-on' : undefined} aria-pressed={activeCreateAction === 'post'} onClick={() => void startCreate(onCreatePost)}><IconImage size={15} />{t.post}</button>
+          <button type="button" disabled={busy} className={activeCreateAction === 'product' ? 'is-on' : undefined} aria-pressed={activeCreateAction === 'product'} onClick={() => void startCreate(onCreateProductPhoto)}><IconOffer size={15} />{t.productPhoto}</button>
         </div>
       ) : null}
     </section>

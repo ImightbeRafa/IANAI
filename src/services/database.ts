@@ -1814,10 +1814,20 @@ export async function getSessionOfferImages(
   productId: string,
   sessionId: string
 ): Promise<ProductImage[]> {
+  return getSessionOffersImages([productId], sessionId)
+}
+
+/** Session-aware library for several offers (product/context + this session's generated). */
+export async function getSessionOffersImages(
+  productIds: string[],
+  sessionId: string
+): Promise<ProductImage[]> {
+  const ids = [...new Set(productIds.filter(Boolean))]
+  if (!ids.length) return []
   const { data, error } = await supabase
     .from('product_images')
     .select('*')
-    .eq('product_id', productId)
+    .in('product_id', ids)
     .or(`session_id.is.null,session_id.eq.${sessionId}`)
     .order('created_at', { ascending: false })
 
@@ -1901,6 +1911,21 @@ export async function deleteProductImage(imageId: string): Promise<void> {
     .eq('id', imageId)
 
   if (error) throw error
+}
+
+export async function nextMessageArtifactOrdinal(messageId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('message_artifacts')
+    .select('ordinal')
+    .eq('message_id', messageId)
+    .order('ordinal', { ascending: false })
+    .limit(1)
+
+  if (error) throw error
+  const latest = Array.isArray(data) && data[0] && typeof data[0].ordinal === 'number'
+    ? data[0].ordinal
+    : 0
+  return latest + 1
 }
 
 export async function insertImageMessageArtifact(options: {

@@ -13,6 +13,15 @@ export function isLiveThread(
   )
 }
 
+/** Cached folder lists switch immediately; a miss waits for the session fetch. */
+export function planBrandSwitch(cachedSessions: { id: string }[] | undefined): {
+  instant: boolean
+  sessionId: string | null
+} {
+  if (cachedSessions === undefined) return { instant: false, sessionId: null }
+  return { instant: true, sessionId: cachedSessions[0]?.id ?? null }
+}
+
 export function selectionsEqual(
   a: ChatShellSelection,
   b: ChatShellSelection

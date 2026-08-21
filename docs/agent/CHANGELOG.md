@@ -1,3 +1,66 @@
+## 2026-08-21 — AIIAN production pack drafted (not applied)
+
+**Area:** chat-shell / ops
+**Files:** `supabase/production/aiian/chat-shell/*`, `docs/operations/chat-shell-aiian-canary.md`, production transition / inventory / environments docs
+
+- Human-only AIIAN pack outside `supabase/migrations/`: preflight, foundation+rollout (`chat_shell=false`), security overlay (incl. offer FK SET NULL + thread-clear), postflight.
+- Canary runbook for classic ↔ chat on real data after apply. No SQL executed against AIIAN.
+
+---
+
+## 2026-08-21 — AIIAN read-only inventory
+
+**Area:** chat-shell / ops
+**Files:** `docs/operations/chat-shell-aiian-inventory.md`, `docs/operations/chat-shell-production-transition.md`, `docs/agent/README.md`, `.cursor/skills/advance-ai/reference/chat-shell.md`
+
+- Read-only gap report for production AIIAN vs chat-shell needs (OpenAPI/REST on AIIAN; MCP SQL on IANAI-preview).
+- Finding: classic data + usage RPCs present; shell foundation tables/columns and rollout controls missing. No SQL applied.
+
+---
+
+## 2026-08-19 — Composer kit rail + stable folder heights
+
+**Area:** chat-shell
+**Files:** `ChatComposerCreateDock.tsx`, `ChatShell.tsx`, `ChatSidebar.tsx`, `chatShellSidebar.ts`, `chat-shell.css`
+
+- Brand Kit create actions live in a compact rail on the left of the composer. Hide is a circular `PanelLeftClose` control in that same slot; restore is `PanelLeft`. Review is an opt-in popover anchored to the rail, not a full-width card over the thread.
+- Folder session lists are remembered per marca and stay mounted at `0fr`/`1fr`, so switching the active folder does not empty or accordion-jump the MARCAS list.
+
+---
+
+## 2026-08-19 — Composer create dock, quieter folders
+
+**Area:** chat-shell
+**Files:** `ChatComposerCreateDock.tsx`, `ChatThread.tsx`, `ChatShell.tsx`, `ChatSidebar.tsx`, `chatShellSidebar.ts`, `chat-shell.css`
+
+- Create kit is a popover from the left of the composer (Advance mark + eye-off hide). It no longer occupies the transcript. Hidden state still uses the per-business key; restore is the same slot.
+- Clicking another marca does not accordion-open that folder. Session counts stay in a reserved column so the list does not jump.
+
+---
+
+## 2026-08-19 — Folder switch: no foreign offers, no reload animation
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `useChatBrandSetup.ts`, `useChatShellWorkspace.ts`, `ChatThread.tsx`, `chat-shell.css`
+
+- Cached marcas switch in the same paint (`planBrandSwitch`). Products restore from a per-brand cache and are filtered with `productsOwnedByBusiness`, so Café Luna cannot show Bloom’s offer.
+- Setup/create-widget facts reset during render for the new folder. Stage and profile enter-animations removed; thread does not autoscroll while the destination is loading.
+- Create widget remains hide/show via `ianai.chat-shell.createWidget.hidden.*` (unchanged).
+
+---
+
+## 2026-08-19 — Folder switch, create widget, live blue, agent map
+
+**Area:** chat-shell / docs
+**Files:** `ChatThread.tsx`, `useChatSessionThread.ts`, `chatShellThreadCache.ts`, `useChatCreateWidgetVisibility.ts`, `ChatBrandProfileCard.tsx`, `chat-shell-obsidian-tokens.css`, `chat-shell.css`, `.cursor/skills/advance-ai/reference/chat-shell.md`
+
+- Switching marcas no longer remounts/blanks the thread. Cache hits swap; cache misses keep the previous transcript under a veil and replace it in one paint. Composer/mic/attachments lock while loading.
+- Create scripts/posts widget is independent of setup. Hidden state is `ianai.chat-shell.createWidget.hidden.${userId}.${businessId}`. Topbar **Mostrar crear** brings it back without reopening setup.
+- Dark stage is a faint blue-black (`#0b0f14`); accents are live blue (`#4f8cff` / classic `#0284c7`). Mobile: 44px targets, truncated crumbs, sticky rail close, one-column create actions at 480px.
+- Agent map: `reference/chat-shell.md`. Production checklist added to `docs/operations/chat-shell-production-transition.md`.
+
+---
+
 ## 2026-08-14 — Feedback FAB in the Opciones corner
 
 **Area:** chat-shell / frontend

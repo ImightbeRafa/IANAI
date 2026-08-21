@@ -11,6 +11,7 @@ import ChatScriptPanel from './ChatScriptPanel'
 import ChatImageSettingsPanel from './ChatImageSettingsPanel'
 import ChatOfferCreateForm from './ChatOfferCreateForm'
 import type { ShellImagePreferences } from './chatShellImageIntent'
+import { buildImageWorkspaces, latestGeneratedPerWorkspace } from './chatShellImages'
 import { IconDoc, IconImage, IconOffer, IconVisual, IconWeb } from './ChatShellIcons'
 
 export type RailTab = 'context' | 'offers' | 'images' | 'scripts' | 'brand' | 'more'
@@ -589,8 +590,13 @@ export default function ChatContextRail({
                   {[
                     {
                       key: 'generated',
-                      label: language === 'es' ? 'Versiones generadas' : 'Generated versions',
-                      images: offerImages.filter((image) => image.kind === 'generated'),
+                      label: language === 'es' ? 'Espacios de imagen' : 'Image workspaces',
+                      images: (() => {
+                        const latestIds = new Set(
+                          latestGeneratedPerWorkspace(buildImageWorkspaces(offerImages)).map((image) => image.id)
+                        )
+                        return offerImages.filter((image) => image.kind === 'generated' && latestIds.has(image.id))
+                      })(),
                     },
                     {
                       key: 'references',

@@ -21,27 +21,36 @@ describe('ChatShellScriptCard post preview', () => {
   })
   it('optimizes first, shows visual references, allows editing, then generates the approved draft', async () => {
     const onGenerateImage = vi.fn()
+    const onSaveVersion = vi.fn(async () => 'v-post')
     render(
       <ChatShellScriptCard
         script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
         language="es"
         productName="ForgeCR"
+        savedScriptId="parent-1"
         referenceImageUrls={['https://example.com/product.webp', 'https://example.com/detail.webp']}
         onPreparePost={async () => 'Headline optimizado\nCTA optimizado'}
         onGenerateImage={onGenerateImage}
+        onSaveVersion={onSaveVersion}
       />
     )
 
     fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
     const editor = await screen.findByLabelText('Vista previa editable del post')
     expect((editor as HTMLTextAreaElement).value).toBe('Headline optimizado\nCTA optimizado')
-    expect(screen.getAllByRole('img', { name: /Referencia/i })).toHaveLength(2)
+    expect(screen.getAllByRole('img')).toHaveLength(2)
 
     fireEvent.change(editor, { target: { value: 'Headline aprobado\nCTA por mensaje' } })
     fireEvent.click(screen.getByRole('button', { name: /continuar al tipo de post/i }))
+    await waitFor(() => expect(onSaveVersion).toHaveBeenCalledWith(
+      'parent-1',
+      'Headline aprobado\nCTA por mensaje',
+      'post_optimize',
+      'Post · Poco texto'
+    ))
     await waitFor(() => expect(onGenerateImage).toHaveBeenCalledWith(
       'Headline aprobado\nCTA por mensaje',
-      { density: 'hard' }
+      { density: 'hard', alreadyOptimized: true, referenceImageIds: [] }
     ))
   })
 
@@ -71,12 +80,15 @@ describe('ChatShellScriptCard post preview', () => {
       density === 'medium' ? 'Texto medio condensado' : 'Poco texto condensado'
     ))
     const onGenerateImage = vi.fn()
+    const onSaveVersion = vi.fn(async () => 'v-post')
     render(
       <ChatShellScriptCard
         script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
         language="es"
+        savedScriptId="parent-1"
         onPreparePost={onPreparePost}
         onGenerateImage={onGenerateImage}
+        onSaveVersion={onSaveVersion}
       />
     )
 
@@ -88,12 +100,84 @@ describe('ChatShellScriptCard post preview', () => {
     fireEvent.click(screen.getByRole('radio', { name: /texto medio/i }))
     await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe('Texto medio condensado'))
     expect(onPreparePost).toHaveBeenCalledWith('Guión original largo', 'medium')
+    expect(onSaveVersion).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('radio', { name: /poco texto/i }))
+    expect((editor as HTMLTextAreaElement).value).toBe('Poco texto condensado')
+    expect(onPreparePost.mock.calls.filter((call) => call[1] === 'hard')).toHaveLength(1)
 
     fireEvent.click(screen.getByRole('button', { name: /continuar al tipo de post/i }))
-    await waitFor(() => expect(onGenerateImage).toHaveBeenCalledWith(
-      'Texto medio condensado',
-      { density: 'medium' }
+    await waitFor(() => expect(onSaveVersion).toHaveBeenCalledWith(
+      'parent-1',
+      'Poco texto condensado',
+      'post_optimize',
+      'Post · Poco texto'
     ))
+    await waitFor(() => expect(onGenerateImage).toHaveBeenCalledWith(
+      'Poco texto condensado',
+      { density: 'hard', alreadyOptimized: true, referenceImageIds: [] }
+    ))
+  })
+
+  it('reuses a saved post_optimize version instead of optimizing again', async () => {
+    vi.mocked(getScriptVersions).mockResolvedValue([{
+      id: 'v2',
+      session_id: 's1',
+      product_id: 'p1',
+      title: 'Venta directa (v2)',
+      content: 'Gancho ahorrado\nCTA ahorrado',
+      version: 2,
+      parent_script_id: 'parent-1',
+      edit_source: 'post_optimize',
+      edit_label: 'Post · Poco texto',
+      created_at: '2026-01-02T00:00:00.000Z',
+    } as never])
+    const onPreparePost = vi.fn(async () => 'NO DEBERIA LLAMARSE')
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo para no parecer condensado todavía' }}
+        language="es"
+        savedScriptId="parent-1"
+        onPreparePost={onPreparePost}
+        onGenerateImage={vi.fn()}
+        onSaveVersion={vi.fn(async () => 'v3')}
+      />
+    )
+
+    await screen.findByRole('button', { name: /última/i })
+    fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
+    const editor = await screen.findByLabelText('Vista previa editable del post')
+    expect((editor as HTMLTextAreaElement).value).toBe('Gancho ahorrado\nCTA ahorrado')
+    expect(onPreparePost).not.toHaveBeenCalled()
+  })
+
+  it('keeps the editor mounted and the selected density instant while the other copy loads', async () => {
+    let resolveMedium: (value: string) => void = () => {}
+    const onPreparePost = vi.fn(async (_script: string, density?: 'hard' | 'medium') => {
+      if (density === 'medium') {
+        return new Promise<string>((resolve) => { resolveMedium = resolve })
+      }
+      return 'Poco texto condensado'
+    })
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
+        language="es"
+        savedScriptId="parent-1"
+        onPreparePost={onPreparePost}
+        onGenerateImage={vi.fn()}
+        onSaveVersion={vi.fn(async () => 'v-post')}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
+    const editor = await screen.findByLabelText('Vista previa editable del post')
+    fireEvent.click(screen.getByRole('radio', { name: /texto medio/i }))
+    expect(screen.getByRole('radio', { name: /texto medio/i }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.queryByText('Optimizando el texto…')).toBeNull()
+    expect((editor as HTMLTextAreaElement).value).toBe('Poco texto condensado')
+    resolveMedium('Texto medio condensado')
+    await waitFor(() => expect((editor as HTMLTextAreaElement).value).toBe('Texto medio condensado'))
   })
 
   it('opens the same editable post draft when asked from an image optimize signal', async () => {
@@ -188,6 +272,27 @@ describe('ChatShellScriptCard post preview', () => {
     expect((editor as HTMLTextAreaElement).value).toBe('Guión editado para el post')
     expect(onPreparePost).toHaveBeenCalledWith('Guión editado para el post', 'hard')
     expect(screen.getByText(/Última · Edición/)).toBeTruthy()
+  })
+
+  it('does not generate the post if the optimized copy cannot be saved', async () => {
+    const onGenerateImage = vi.fn()
+    const onSaveVersion = vi.fn(async () => null)
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
+        language="es"
+        savedScriptId="parent-1"
+        onPreparePost={async () => 'Headline aprobado\nCTA'}
+        onGenerateImage={onGenerateImage}
+        onSaveVersion={onSaveVersion}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
+    await screen.findByLabelText('Vista previa editable del post')
+    fireEvent.click(screen.getByRole('button', { name: /continuar al tipo de post/i }))
+    expect(await screen.findByText(/No pude guardar el texto del post/)).toBeTruthy()
+    expect(onGenerateImage).not.toHaveBeenCalled()
   })
 })
 

@@ -96,3 +96,14 @@ export function looksLikeCondensedPostCopy(text: string): boolean {
   const words = cleaned.split(/\s+/).filter(Boolean)
   return words.length > 0 && words.length <= 48 && !/\[[^\]\n]{2,}\]/.test(text)
 }
+
+/** User-approved post preview copy must not be condensed a second time. */
+export function shouldSkipPostCondense(options: {
+  scriptText?: string | null
+  alreadyOptimized?: boolean
+  editSource?: string | null
+}): boolean {
+  if (options.alreadyOptimized) return true
+  if (options.editSource === 'post_optimize') return true
+  return Boolean(options.scriptText && looksLikeCondensedPostCopy(options.scriptText))
+}

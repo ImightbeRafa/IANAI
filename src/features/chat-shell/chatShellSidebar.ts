@@ -48,18 +48,52 @@ export function resolveBrandOpenMap(options: {
   readStored: (businessId: string) => boolean | null
   previous?: Record<string, boolean>
 }): Record<string, boolean> {
-  const next: Record<string, boolean> = { ...(options.previous || {}) }
+  const previous = options.previous || {}
+  const next: Record<string, boolean> = { ...previous }
+  const coldStart = Object.keys(previous).length === 0
   for (const businessId of options.businessIds) {
     const stored = options.readStored(businessId)
     if (stored !== null) {
       next[businessId] = stored
       continue
     }
-    // null/missing: set only once. Wait for activeBrandId before defaulting so a
-    // first paint with active=null does not lock previous=false and block expand.
-    if (next[businessId] === undefined) {
-      if (options.activeBrandId == null) continue
-      next[businessId] = businessId === options.activeBrandId
+    if (next[businessId] !== undefined) continue
+    if (options.activeBrandId == null) continue
+    // Cold start may open the active folder. Switching marcas must not accordion-jump.
+    next[businessId] = coldStart && businessId === options.activeBrandId
+  }
+  return next
+}
+
+/** Skip re-resolve when every folder already has an in-memory open flag (name-click / activeBrandId must not reshuffle). */
+export function brandOpenMapNeedsHydrate(
+  previous: Record<string, boolean>,
+  businessIds: string[]
+): boolean {
+  if (businessIds.length === 0) return false
+  return businessIds.some((id) => previous[id] === undefined)
+}
+
+/**
+ * Keep each folder's last known sessions when the active brand changes.
+ * Inactive folders must not fall back to `[]` just because `sessions` now belongs to another marca.
+ */
+export function mergeRememberedBrandSessions(options: {
+  previous: Record<string, ChatSession[]>
+  businesses: Array<{ id: string }>
+  sessionsByBrand?: Record<string, ChatSession[]>
+  activeBrandId: string | null
+  activeSessions: ChatSession[]
+}): Record<string, ChatSession[]> {
+  const next: Record<string, ChatSession[]> = { ...options.previous }
+  for (const brand of options.businesses) {
+    const cached = options.sessionsByBrand?.[brand.id]
+    if (cached !== undefined) {
+      next[brand.id] = cached
+      continue
+    }
+    if (brand.id === options.activeBrandId) {
+      next[brand.id] = options.activeSessions.filter((session) => session.business_id === brand.id)
     }
   }
   return next

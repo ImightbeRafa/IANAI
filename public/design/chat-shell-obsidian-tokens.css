@@ -1,6 +1,6 @@
 /**
  * Advance AI chat-shell — Black + navy
- * Layered surfaces, hairline borders, desaturated navy with a faint purple-rose hue.
+ * Layered surfaces, hairline borders, a faint blue-black stage and live blue accents.
  * Loaded by index.html for /chat.
  */
 
@@ -14,20 +14,19 @@
   --radius-md: 10px;
   --radius-lg: 10px;
 
-  /* Desaturated navy; hue leans slightly purple. Rose is only in motion/gradient. */
-  --accent: #4e6d96;
-  --accent-muted: #7d8fb3;
+  --accent: #4f8cff;
+  --accent-muted: #82adff;
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 32%, transparent);
   --accent-active: color-mix(in srgb, var(--accent) 22%, transparent);
-  --send-from: #3d6aa8;
-  --send-to: #4a5f9e;
+  --send-from: #0284c7;
+  --send-to: #5b8def;
   --send-glow: none;
   --danger: #c45c5c;
   --success: #5d9a78;
   --warning: #c4a15a;
 
-  --artifact-script: #4e6d96;
+  --artifact-script: #4f8cff;
   --artifact-post: #6e9a90;
   --artifact-image: #8a7a9c;
 
@@ -39,25 +38,25 @@
 }
 
 [data-theme="obsidian-dark"] {
-  --bg: #0a0a0a;
-  --bg-elevated: #1e1e1e;
-  --bg-soft: #22262e;
-  --bg-stage: #0a0a0a;
-  --tools-bg: #191919;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.1);
-  --text: #e8e8e8;
-  --text-muted: #a3a3a3;
-  --text-faint: #737373;
-  --bubble-user: #1e1e1e;
-  --bubble-user-border: rgba(255, 255, 255, 0.08);
+  --bg: #0b0f14;
+  --bg-elevated: #18212c;
+  --bg-soft: #1e2a37;
+  --bg-stage: #0b0f14;
+  --tools-bg: #151d27;
+  --border: rgba(180, 210, 255, 0.08);
+  --border-strong: rgba(180, 210, 255, 0.12);
+  --text: #e8eef6;
+  --text-muted: #9aabc0;
+  --text-faint: #738396;
+  --bubble-user: #1a2531;
+  --bubble-user-border: rgba(180, 210, 255, 0.1);
   --bubble-ai: transparent;
-  --sidebar: #161616;
-  --rail: #161616;
+  --sidebar: #121922;
+  --rail: #121922;
   --shadow: none;
   --grid-line: transparent;
   --chip-bg: color-mix(in srgb, var(--accent) 14%, transparent);
-  --chip-text: #c8d2e0;
+  --chip-text: #c8d8f0;
   --gen-grad-1: #0c1424;
   --gen-grad-2: #1a1630;
   --gen-grad-3: #2a1c28;
@@ -82,11 +81,11 @@
   --shadow: none;
   --grid-line: transparent;
   --chip-bg: color-mix(in srgb, var(--accent) 12%, transparent);
-  --chip-text: #2f4a6a;
-  --accent: #3d5a80;
-  --accent-muted: #5a7394;
-  --send-from: #3a5f96;
-  --send-to: #4a5a8c;
+  --chip-text: #0f3a66;
+  --accent: #0284c7;
+  --accent-muted: #0369a1;
+  --send-from: #0284c7;
+  --send-to: #4f8cff;
   --gen-grad-1: #d4e0f0;
   --gen-grad-2: #e0d8ec;
   --gen-grad-3: #f0e4e8;

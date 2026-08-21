@@ -22,6 +22,7 @@ import {
   buildBrandSetupSnapshot,
   formTypeForProductType,
   pickDefinedAutofill,
+  productsOwnedByBusiness,
   readBrandSetupSkipped,
   resolveBusinessBrandKitId,
   shouldShowBrandSetup,
@@ -237,7 +238,6 @@ export function useChatBrandSetup(options: {
   const storage = typeof localStorage !== 'undefined' ? localStorage : null
   const [skipTick, setSkipTick] = useState(0)
   const [forceOpen, setForceOpen] = useState(false)
-  const [profileVisible, setProfileVisible] = useState(false)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
@@ -250,6 +250,11 @@ export function useChatBrandSetup(options: {
   const [paletteDraft, setPaletteDraft] = useState<PaletteDraft | null>(null)
   const [siteEvidence, setSiteEvidence] = useState<Record<string, SiteFieldEvidence>>({})
   const [sitePages, setSitePages] = useState<Array<{ url: string; title: string; ok: boolean }>>([])
+  const [setupScope, setSetupScope] = useState({
+    businessId: business?.id ?? null,
+    sessionId: session?.id ?? null,
+    language,
+  })
   const [flow, setFlow] = useState<SetupFlowState>(() =>
     createInitialFlow(language, business?.name || '')
   )
@@ -259,14 +264,50 @@ export function useChatBrandSetup(options: {
   linkedKitRef.current = linkedKit || linkedKitRef.current
   activeSessionIdRef.current = session?.id || null
 
+  const brandOwnedProducts = useMemo(
+    () => productsOwnedByBusiness(products, business?.id),
+    [products, business?.id]
+  )
+
+  const nextScope = {
+    businessId: business?.id ?? null,
+    sessionId: session?.id ?? null,
+    language,
+  }
+  if (
+    nextScope.businessId !== setupScope.businessId
+    || nextScope.sessionId !== setupScope.sessionId
+    || nextScope.language !== setupScope.language
+  ) {
+    const stored = factsFromExisting(business, brandOwnedProducts, linkedKit)
+    const initial = createInitialFlow(language, business?.name || '')
+    const facts = hydrateMissingFacts(initial.facts, stored, Boolean(linkedKit))
+    setSetupScope(nextScope)
+    setForceOpen(false)
+    setBusy(false)
+    busyRef.current = false
+    setOfferId(brandOwnedProducts.find((p) => p.name !== 'Quick Use Image Studio')?.id || null)
+    setFlow({
+      ...initial,
+      facts,
+      asked: [...new Set([...initial.asked, ...askedFromFacts(facts)])],
+    })
+    setPaletteDraft(null)
+    setSiteEvidence({})
+    setSitePages([])
+    setError(null)
+    lastSetupPromptRef.current = null
+    linkedKitRef.current = linkedKit
+  }
+
   const skipped = useMemo(
     () => readBrandSetupSkipped(storage, userId, business?.id, session?.context),
     [storage, userId, business?.id, session?.context, skipTick]
   )
 
   const snapshot = useMemo(
-    () => buildBrandSetupSnapshot({ business, products, linkedKit }),
-    [business, products, linkedKit]
+    () => buildBrandSetupSnapshot({ business, products: brandOwnedProducts, linkedKit }),
+    [business, brandOwnedProducts, linkedKit]
   )
 
   const visible = shouldShowBrandSetup({
@@ -287,22 +328,11 @@ export function useChatBrandSetup(options: {
   })
 
   useEffect(() => {
-    setForceOpen(false)
-    setProfileVisible(false)
-    setBusy(false)
-    busyRef.current = false
-    setOfferId(products.find((p) => p.name !== 'Quick Use Image Studio')?.id || null)
-    setFlow(createInitialFlow(language, business?.name || ''))
-    setPaletteDraft(null)
-    setSiteEvidence({})
-    setSitePages([])
-    setError(null)
-    lastSetupPromptRef.current = null
-    linkedKitRef.current = linkedKit
-  }, [business?.id, session?.id, language])
+    setOfferId(brandOwnedProducts.find((p) => p.name !== 'Quick Use Image Studio')?.id || null)
+  }, [brandOwnedProducts])
 
   useEffect(() => {
-    const stored = factsFromExisting(business, products, linkedKit)
+    const stored = factsFromExisting(business, brandOwnedProducts, linkedKit)
     setFlow((prev) => {
       const facts = hydrateMissingFacts(prev.facts, stored, Boolean(linkedKit))
       return {
@@ -314,7 +344,7 @@ export function useChatBrandSetup(options: {
   }, [
     business?.id,
     business?.updated_at,
-    products,
+    brandOwnedProducts,
     linkedKit?.id,
     linkedKit?.updated_at,
   ])
@@ -358,7 +388,6 @@ export function useChatBrandSetup(options: {
       void onPatchSession({ context: withSetupSkippedContext(session.context, false) })
     }
     setForceOpen(true)
-    setProfileVisible(true)
     setSkipTick((n) => n + 1)
     setFlow((prev) => {
       if (prev.turns.length > 0 && prev.phase !== 'paused' && prev.phase !== 'complete') return { ...prev, phase: 'asking' }
@@ -626,7 +655,6 @@ export function useChatBrandSetup(options: {
           const skippedLast = current.turns[current.turns.length - 1]
           if (skippedLast?.role === 'assistant') await onPersistTurn('assistant', skippedLast.content)
           setFlow(current)
-          if (current.phase === 'confirm_offer' || current.phase === 'complete') setProfileVisible(true)
           return
         }
         current = {
@@ -639,7 +667,6 @@ export function useChatBrandSetup(options: {
         const skippedLast = current.turns[current.turns.length - 1]
         if (skippedLast?.role === 'assistant') await onPersistTurn('assistant', skippedLast.content)
         setFlow(current)
-        if (current.phase === 'confirm_offer' || current.phase === 'complete') setProfileVisible(true)
         return
       }
 
@@ -708,7 +735,6 @@ export function useChatBrandSetup(options: {
                 confirmOffered: Boolean(facts.sourceText?.trim()),
                 turns: lastTurn?.content === fail ? current.turns : [...current.turns, setupTurn('assistant', fail)],
               })
-              if (facts.sourceText?.trim()) setProfileVisible(true)
               return
             }
           }
@@ -760,7 +786,6 @@ export function useChatBrandSetup(options: {
           turns: [...current.turns, setupTurn('assistant', reply)],
         }
         setFlow(current)
-        setProfileVisible(true)
         setPaletteDraft(paletteDraftFromFacts(facts))
         return
       }
@@ -773,7 +798,6 @@ export function useChatBrandSetup(options: {
           const last = current.turns[current.turns.length - 1]
           if (last?.role === 'assistant') await onPersistTurn('assistant', last.content)
           setFlow(current)
-          if (current.phase === 'confirm_offer' || current.phase === 'complete') setProfileVisible(true)
           return
         }
         const patch = await autoFillFromText(
@@ -803,7 +827,6 @@ export function useChatBrandSetup(options: {
           turns: [...current.turns, setupTurn('assistant', summary)],
         }
         setFlow(current)
-        setProfileVisible(true)
         return
       }
 
@@ -818,7 +841,6 @@ export function useChatBrandSetup(options: {
         const last = current.turns[current.turns.length - 1]
         if (last?.role === 'assistant') await onPersistTurn('assistant', last.content)
         setFlow(current)
-        if (current.phase === 'confirm_offer' || current.phase === 'complete') setProfileVisible(true)
         return
       }
 
@@ -826,7 +848,6 @@ export function useChatBrandSetup(options: {
       const last = current.turns[current.turns.length - 1]
       if (last?.role === 'assistant') await onPersistTurn('assistant', last.content)
       setFlow(current)
-      if (current.phase === 'confirm_offer' || current.phase === 'complete') setProfileVisible(true)
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : 'Setup failed'
       const friendly = sanitizeSetupError(rawMessage, language)
@@ -849,7 +870,6 @@ export function useChatBrandSetup(options: {
           ? prev.turns
           : [...prev.turns, setupTurn('assistant', fail)],
       }))
-      if (hasPasted) setProfileVisible(true)
     } finally {
       if (activeSessionIdRef.current === originSessionId) {
         setBusy(false)
@@ -898,7 +918,6 @@ export function useChatBrandSetup(options: {
         facts,
         turns: [...prev.turns, setupTurn('user', raw.trim()), setupTurn('assistant', response)],
       }))
-      setProfileVisible(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save brand rule')
     } finally {
@@ -913,7 +932,6 @@ export function useChatBrandSetup(options: {
     if (!business || !session) return
     writeBrandSetupSkipped(storage, userId, business.id, false)
     setForceOpen(true)
-    setProfileVisible(true)
     setSkipTick((n) => n + 1)
     const prompt = language === 'es'
       ? 'Decime qué querés cambiar del contexto: negocio, oferta, público, voz, colores o cualquier otro dato. Lo actualizo y lo guardo por vos.'
@@ -1090,7 +1108,6 @@ export function useChatBrandSetup(options: {
         confirmOffered: true,
         turns: [...prev.turns, setupTurn('assistant', reply)],
       }))
-      setProfileVisible(true)
       setPaletteDraft(paletteDraftFromFacts(facts))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Document upload failed')
@@ -1122,7 +1139,6 @@ export function useChatBrandSetup(options: {
         confirmOffered: prev.confirmOffered || confirm,
       }))
       setPaletteDraft(null)
-      setProfileVisible(true)
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save brand profile')
@@ -1135,7 +1151,6 @@ export function useChatBrandSetup(options: {
 
   return {
     visible,
-    profileVisible,
     trackerVisible,
     skipped,
     snapshot,

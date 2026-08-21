@@ -18,6 +18,7 @@ import {
 import {
   collectBrandGenerateVisual,
   looksLikeCondensedPostCopy,
+  shouldSkipPostCondense,
   stripUnresolvedPlaceholders,
 } from '../src/features/chat-shell/chatShellGenerationPreferences'
 
@@ -503,5 +504,9 @@ describe('brand visual + condensed post copy', () => {
     expect(stripUnresolvedPlaceholders(raw)).toBe('Arnés ForgeCR\nCompresión médica\nEnvío\nEscribinos')
     expect(looksLikeCondensedPostCopy('Gancho corto\nPrueba\nCTA')).toBe(true)
     expect(looksLikeCondensedPostCopy(raw)).toBe(false)
+    expect(shouldSkipPostCondense({ alreadyOptimized: true, scriptText: raw })).toBe(true)
+    expect(shouldSkipPostCondense({ editSource: 'post_optimize', scriptText: raw })).toBe(true)
+    expect(shouldSkipPostCondense({ scriptText: 'Gancho corto\nPrueba\nCTA' })).toBe(true)
+    expect(shouldSkipPostCondense({ scriptText: raw })).toBe(false)
   })
 })

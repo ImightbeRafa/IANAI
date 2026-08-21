@@ -1,19 +1,18 @@
-import { useState } from 'react'
-import { Loader2, Download, Pencil, Wand2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Loader2, Download, Pencil } from 'lucide-react'
 import type { MessageArtifact } from '../../types'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 import type { ShellImageLike } from './chatShellImages'
+import { downloadShellImage, filenameForShellImage } from './chatShellDownload'
 
 interface ChatShellImageCardProps {
   artifact: MessageArtifact
   productName?: string | null
   busy?: boolean
   language?: ChatShellLanguage
-  onOpen?: () => void
-  onRequestEdit?: () => void
-  onOptimizeForPost?: (productId: string) => void
   versions?: ShellImageLike[]
-  onOpenVersion?: (image: ShellImageLike) => void
+  onOpen?: (image: ShellImageLike) => void
+  onRequestEdit?: (image: ShellImageLike) => void
 }
 
 function aspectFromAssumptions(text: string | null): string | undefined {
@@ -21,22 +20,35 @@ function aspectFromAssumptions(text: string | null): string | undefined {
   return match?.[1]
 }
 
+function versionTitle(index: number, total: number, language: ChatShellLanguage): string {
+  const es = language === 'es'
+  if (index === total - 1) return es ? 'Última' : 'Latest'
+  if (index === 0) return es ? 'Original' : 'Original'
+  return `v${index + 1}`
+}
+
 export default function ChatShellImageCard({
   artifact,
   productName,
   busy = false,
   language = 'es',
+  versions = [],
   onOpen,
   onRequestEdit,
-  onOptimizeForPost,
-  versions = [],
-  onOpenVersion,
 }: ChatShellImageCardProps) {
   const t = shellT(language)
-  const image = artifact.product_image
+  const orderedVersions = useMemo(() => {
+    if (versions.length) return versions
+    return artifact.product_image ? [artifact.product_image] : []
+  }, [artifact.product_image, versions])
+  const latestIndex = Math.max(0, orderedVersions.length - 1)
+  const [viewIndex, setViewIndex] = useState<number | null>(null)
+  const activeIndex = viewIndex == null || viewIndex > latestIndex ? latestIndex : viewIndex
+  const image = orderedVersions[activeIndex] || artifact.product_image
   const url = image?.image_url
   const [error, setError] = useState<string | null>(null)
   const [imageStatus, setImageStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const [downloading, setDownloading] = useState(false)
 
   const assumptions =
     typeof artifact.action_metadata?.assumptions === 'string'
@@ -56,14 +68,8 @@ export default function ChatShellImageCard({
     )
   }
 
-  const runOptimize = () => {
-    if (!onOptimizeForPost) return
-    const productId = artifact.product_id
-    if (!productId) return
-    onOptimizeForPost(productId)
-  }
-
   const isBusy = busy
+  const openSelected = () => onOpen?.(image)
 
   return (
     <article className="chat-shell__artifact chat-shell__artifact--image">
@@ -81,11 +87,31 @@ export default function ChatShellImageCard({
         <span className="chat-shell__artifact-index">#{artifact.ordinal}</span>
       </header>
 
+      {orderedVersions.length > 1 ? (
+        <div className="chat-shell__script-versions" aria-label={language === 'es' ? 'Versiones de la imagen' : 'Image versions'}>
+          {orderedVersions.map((version, index) => {
+            const title = versionTitle(index, orderedVersions.length, language)
+            return (
+              <button
+                key={version.id}
+                type="button"
+                className={index === activeIndex ? 'is-on' : ''}
+                title={version.label || title}
+                aria-label={title}
+                onClick={() => setViewIndex(index === latestIndex ? null : index)}
+              >
+                {title}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+
       <div className="chat-shell__image-version-layout">
         <button
           type="button"
           className="chat-shell__image-shot-wrap"
-          onClick={onOpen}
+          onClick={openSelected}
           aria-label={t.viewImage}
         >
           <img
@@ -105,51 +131,35 @@ export default function ChatShellImageCard({
             <span className="chat-shell__image-loading"><Loader2 size={18} className="chat-shell__spin" /></span>
           ) : null}
         </button>
-        {versions.length > 1 ? (
-          <div className="chat-shell__image-versions" aria-label={language === 'es' ? 'Versiones anteriores' : 'Previous versions'}>
-            {versions.slice(1, 6).map((version, index) => (
-              <button key={version.id} type="button" onClick={() => onOpenVersion?.(version)} title={version.label || `Version ${index + 2}`}>
-                <img src={version.image_url} alt={version.label || `Version ${index + 2}`} />
-                <span>v{versions.length - index - 1}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       {error ? <div className="chat-shell__artifact-error">{error}</div> : null}
 
       <div className="chat-shell__artifact-actions">
-        <a
+        <button
+          type="button"
           className="chat-shell__artifact-action"
-          href={url}
-          download
-          target="_blank"
-          rel="noreferrer"
+          disabled={downloading}
+          onClick={() => {
+            setDownloading(true)
+            void downloadShellImage(
+              url,
+              filenameForShellImage({ productName, label: image.label, url })
+            ).finally(() => setDownloading(false))
+          }}
         >
-          <Download size={13} />
-          Download
-        </a>
+          {downloading ? <Loader2 size={13} className="chat-shell__spin" /> : <Download size={13} />}
+          {t.downloadImage}
+        </button>
         {onRequestEdit ? (
           <button
             type="button"
             className="chat-shell__artifact-action"
             disabled={isBusy}
-            onClick={onRequestEdit}
+            onClick={() => onRequestEdit(image)}
           >
             <Pencil size={13} />
             {t.requestEdit}
-          </button>
-        ) : null}
-        {onOptimizeForPost ? (
-          <button
-            type="button"
-            className="chat-shell__artifact-action"
-            disabled={isBusy}
-            onClick={runOptimize}
-          >
-            <Wand2 size={13} />
-            {t.optimizeForPost}
           </button>
         ) : null}
       </div>

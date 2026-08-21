@@ -91,6 +91,26 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.8',
+    date: '2026-08-19',
+    items: [
+      {
+        category: 'improvement',
+        text: {
+          es: 'El Brand Kit y el botón para ocultarlo viven a la izquierda del campo de texto. Ya no tapan la conversación, y ocultar es un ícono limpio en vez de “× Ocultar”.',
+          en: 'The Brand Kit and its hide control sit on the left of the text field. They no longer cover the conversation, and hide is a clean icon instead of “× Hide”.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Cambiar de carpeta de marca en la barra izquierda ya no hace saltar la lista.',
+          en: 'Switching brand folders in the left bar no longer makes the list jump.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.7',
     date: '2026-08-14',
     items: [

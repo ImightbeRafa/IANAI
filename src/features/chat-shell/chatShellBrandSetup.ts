@@ -65,6 +65,15 @@ export function nonempty(value: unknown): boolean {
   return value != null && value !== false
 }
 
+/** Setup/create-widget must never read another folder’s offers. */
+export function productsOwnedByBusiness(
+  products: Product[],
+  businessId: string | null | undefined
+): Product[] {
+  if (!businessId) return []
+  return products.filter((row) => row.business_id === businessId)
+}
+
 function hasPhysical(channels: SalesChannel[] | null | undefined): boolean {
   return (channels || []).includes('physical')
 }

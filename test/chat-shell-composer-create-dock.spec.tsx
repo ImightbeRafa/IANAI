@@ -1,0 +1,88 @@
+/** @vitest-environment happy-dom */
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import ChatComposerCreateDock, {
+  type ComposerCreateAction,
+} from '../src/features/chat-shell/ChatComposerCreateDock'
+
+afterEach(cleanup)
+
+function makeActions(): ComposerCreateAction[] {
+  return [
+    { id: 'scripts', label: 'Guiones', onClick: vi.fn() },
+    { id: 'post', label: 'Post', onClick: vi.fn() },
+    { id: 'product', label: 'Foto', onClick: vi.fn() },
+  ]
+}
+
+describe('ChatComposerCreateDock', () => {
+  it('keeps the kit and hide control on the composer left, without a transcript card', async () => {
+    const user = userEvent.setup()
+    const onHide = vi.fn()
+    const onShow = vi.fn()
+    const actions = makeActions()
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Brand Kit listo"
+        onHide={onHide}
+        onShow={onShow}
+        actions={actions}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Brand Kit listo')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Guiones' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Post' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Foto' })).toBeTruthy()
+    expect(screen.queryByText('Detalle del kit')).toBeNull()
+    expect(screen.queryByText('× Ocultar')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Ocultar Brand Kit' }))
+    expect(onHide).toHaveBeenCalledTimes(1)
+    expect(onShow).not.toHaveBeenCalled()
+    expect(actions[0].onClick).not.toHaveBeenCalled()
+  })
+
+  it('opens review from the left rail without covering the create actions', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Brand Kit listo"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={makeActions()}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    await user.click(screen.getByRole('button', { name: 'Revisar Brand Kit' }))
+    expect(screen.getByText('Detalle del kit')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Guiones' })).toBeTruthy()
+  })
+
+  it('restores the kit from a single composer-left icon when hidden', async () => {
+    const user = userEvent.setup()
+    const onShow = vi.fn()
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden
+        title="Brand Kit listo"
+        onHide={vi.fn()}
+        onShow={onShow}
+        actions={makeActions()}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.queryByText('Brand Kit listo')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Mostrar Brand Kit' }))
+    expect(onShow).toHaveBeenCalledTimes(1)
+  })
+})

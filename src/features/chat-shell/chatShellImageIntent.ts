@@ -69,8 +69,8 @@ export const IMAGE_DENSITY_CHOICES: Array<{
   labelEn: string
   hint: string
 }> = [
-  { id: 'hard', labelEs: 'Poco texto', labelEn: 'Short copy', hint: '1–2 líneas' },
-  { id: 'medium', labelEs: 'Texto medio', labelEn: 'Medium copy', hint: '2–3 puntos' },
+  { id: 'hard', labelEs: 'Poco texto', labelEn: 'Short copy', hint: 'Gancho + prueba + CTA' },
+  { id: 'medium', labelEs: 'Texto medio', labelEn: 'Medium copy', hint: 'Gancho + desarrollo + CTA' },
 ]
 
 /** Workplace-aligned shell defaults (style unresolved until sticky/clarify). */

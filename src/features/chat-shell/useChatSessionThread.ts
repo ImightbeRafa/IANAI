@@ -42,8 +42,8 @@ import type {
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import {
   collectBrandGenerateVisual,
-  looksLikeCondensedPostCopy,
   resolveBrandKitIdForSession,
+  shouldSkipPostCondense,
   stripUnresolvedPlaceholders,
   type BrandVisualFallback,
 } from './chatShellGenerationPreferences'
@@ -69,10 +69,12 @@ import {
 } from './chatShellGeneration'
 import {
   emptyThreadSnapshot,
-  mergeFetchedMessages,
+  mergeFetchedMessagesForOwner,
+  readBrandProductCache,
   readThreadCache,
   replaceOptimisticMessage,
   upsertMessage,
+  writeBrandProductCache,
   writeThreadCache,
   type CachedThread,
 } from './chatShellThreadCache'
@@ -92,10 +94,11 @@ import {
   resolveSendOffer,
 } from './chatShellOfferResolve'
 import {
+  buildImageWorkspaces,
   filterImagesForOffer,
   latestImageByProductId,
   resolveActiveImageOfferId,
-  selectProductReferenceImageIds,
+  workspaceForImage,
 } from './chatShellImages'
 import {
   formatImageAssumptions,
@@ -115,12 +118,24 @@ import {
   type ShellImageStyle,
 } from './chatShellImageIntent'
 import {
+  copyShellOfferImageToProduct,
   editShellOfferImage,
   generateShellOfferImage,
-  getSessionOfferImages,
+  getSessionOffersImages,
   optimizeShellOfferImage,
   uploadShellOfferImage,
 } from './chatShellImageApi'
+import {
+  catalogOfferReferences,
+  confirmedReferenceImageIds,
+  hasSelectedProductReference,
+  partitionReferenceCopies,
+  shouldPromptImageReferences,
+  toggleReferenceSelection,
+  withPreselectedReferences,
+  type OfferReferenceImage,
+} from './chatShellReferenceSelection'
+import { collectOfferEnhanceReferences, type ShellEnhanceTier } from './chatShellImageEnhance'
 
 export type ImageClarifyState = {
   sessionId: string
@@ -139,13 +154,9 @@ export type ImageClarifyState = {
   scriptChoices?: ImageScriptChoice[]
   availableReferenceCount?: number
   referencesRequired?: boolean
-    referenceImages?: Array<{
-    id: string
-    url: string
-    kind: 'product' | 'context'
-    label?: string | null
-    selected?: boolean
-  }>
+  referenceImages?: OfferReferenceImage[]
+  preferredReferenceIds?: string[]
+  alreadyOptimized?: boolean
   askStyleRef?: boolean
 }
 
@@ -342,6 +353,9 @@ export function useChatSessionThread(options: {
   const [messages, setMessages] = useState<Message[]>([])
   const [offers, setOffers] = useState<ChatSessionOffer[]>([])
   const [brandProducts, setBrandProducts] = useState<Product[]>([])
+  const [brandProductsReady, setBrandProductsReady] = useState(!brand?.id)
+  const [productsBrandId, setProductsBrandId] = useState<string | null>(brand?.id ?? null)
+  const brandProductCacheRef = useRef<Map<string, Product[]>>(new Map())
   const [unassignedProducts, setUnassignedProducts] = useState<Product[]>([])
   const [activeProduct, setActiveProduct] = useState<Product | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(true)
@@ -375,6 +389,8 @@ export function useChatSessionThread(options: {
     scriptTitle?: string | null
     source: 'composer' | 'rail' | 'script_card'
     explicit?: Partial<ShellImagePreferences>
+    alreadyOptimized?: boolean
+    referenceImageIds?: string[]
   }) => Promise<void>>(async () => {})
 
   const runImageGenerateRef = useRef<(options: {
@@ -387,6 +403,9 @@ export function useChatSessionThread(options: {
     source: string
     referenceMode?: 'use' | 'none'
     referenceImageIds?: string[]
+    alreadyOptimized?: boolean
+    askStyleRef?: boolean
+    skipStyleRef?: boolean
   }) => Promise<void>>(async () => {})
 
   const loadRequestRef = useRef(0)
@@ -398,6 +417,14 @@ export function useChatSessionThread(options: {
   const threadCacheRef = useRef<Map<string, CachedThread>>(new Map())
 
   activeThreadSessionIdRef.current = sessionId
+
+  const liveBrandId = brand?.id ?? null
+  if (liveBrandId !== productsBrandId) {
+    setProductsBrandId(liveBrandId)
+    const cached = readBrandProductCache(brandProductCacheRef.current, liveBrandId)
+    setBrandProducts(cached ?? [])
+    setBrandProductsReady(Boolean(cached) || !liveBrandId)
+  }
 
   const sending = isSessionSending(inFlightSessions, sessionId)
 
@@ -440,12 +467,17 @@ export function useChatSessionThread(options: {
     productId: string,
     requestId: number
   ) => {
-    const list = await getSessionOfferImages(productId, sid)
+    const ids = [...new Set([
+      productId,
+      ...offers.map((offer) => offer.product_id),
+      ...brandProducts.map((product) => product.id),
+    ].filter(Boolean))]
+    const list = await getSessionOffersImages(ids, sid)
     if (requestId !== loadRequestRef.current) return list
     if (activeThreadSessionIdRef.current !== sid) return list
     setOfferImages(list)
     return list
-  }, [])
+  }, [brandProducts, offers])
 
   const refreshOffersAndProduct = useCallback(async (
     sid: string,
@@ -486,7 +518,15 @@ export function useChatSessionThread(options: {
     if (!brand?.id) {
       setBrandProducts([])
       setUnassignedProducts([])
+      setBrandProductsReady(true)
       return
+    }
+    const cached = readBrandProductCache(brandProductCacheRef.current, brand.id)
+    if (cached) {
+      setBrandProducts(cached)
+      setBrandProductsReady(true)
+    } else {
+      setBrandProductsReady(false)
     }
     let cancelled = false
     void (async () => {
@@ -496,14 +536,17 @@ export function useChatSessionThread(options: {
           getUnassignedProducts(userId),
         ])
         if (!cancelled) {
+          writeBrandProductCache(brandProductCacheRef.current, brand.id, products)
           setBrandProducts(products)
           setUnassignedProducts(unassigned.filter((product) => !isQuickPostSentinel(product)))
+          setBrandProductsReady(true)
         }
       } catch (err) {
         console.error(err)
         if (!cancelled) {
           setBrandProducts([])
           setUnassignedProducts([])
+          setBrandProductsReady(true)
         }
       }
     })()
@@ -524,6 +567,7 @@ export function useChatSessionThread(options: {
         getUnassignedProducts(userId),
       ])
       setBrandProducts(products)
+      writeBrandProductCache(brandProductCacheRef.current, brand.id, products)
       setUnassignedProducts(unassigned.filter((product) => !isQuickPostSentinel(product)))
     } catch (err) {
       console.error(err)
@@ -534,7 +578,11 @@ export function useChatSessionThread(options: {
     if (!brand?.id) return
     const assigned = await assignUnassignedProductToBusiness(userId, productId, brand.id)
     setUnassignedProducts((prev) => prev.filter((p) => p.id !== productId))
-    setBrandProducts((prev) => [assigned, ...prev.filter((p) => p.id !== assigned.id)])
+    setBrandProducts((prev) => {
+      const next = [assigned, ...prev.filter((p) => p.id !== assigned.id)]
+      writeBrandProductCache(brandProductCacheRef.current, brand.id, next)
+      return next
+    })
     invalidateDashboardCache()
   }, [brand?.id, userId])
 
@@ -561,6 +609,7 @@ export function useChatSessionThread(options: {
     offerImages,
   }
   const prevSessionIdRef = useRef<string | null>(null)
+  const messagesOwnerRef = useRef<string | null>(null)
 
   useEffect(() => {
     sessionGenRef.current += 1
@@ -572,6 +621,7 @@ export function useChatSessionThread(options: {
     prevSessionIdRef.current = sessionId
 
     if (!sessionId) {
+      messagesOwnerRef.current = null
       setMessages([])
       setOffers([])
       setActiveProduct(null)
@@ -591,16 +641,13 @@ export function useChatSessionThread(options: {
 
     const cached = readThreadCache(threadCacheRef.current, sessionId)
     if (cached) {
+      messagesOwnerRef.current = sessionId
       setMessages(cached.messages)
       setOffers(cached.offers)
       setActiveProduct(cached.activeProduct)
       setOfferImages(cached.offerImages)
       setLoadingMessages(false)
     } else {
-      setMessages([])
-      setOffers([])
-      setActiveProduct(null)
-      setOfferImages([])
       setLoadingMessages(true)
     }
     setFailedBatch(null)
@@ -621,17 +668,27 @@ export function useChatSessionThread(options: {
         ])
         if (requestId !== loadRequestRef.current) return
         if (activeThreadSessionIdRef.current !== sessionId) return
-        setMessages((prev) => mergeFetchedMessages(prev, msgs))
+        const nextMessages = mergeFetchedMessagesForOwner(
+          snapshotRef.current.messages,
+          msgs,
+          messagesOwnerRef.current,
+          sessionId
+        )
+        messagesOwnerRef.current = sessionId
+        setMessages(nextMessages)
         writeThreadCache(threadCacheRef.current, sessionId, {
           ...snapshotRef.current,
-          messages: mergeFetchedMessages(snapshotRef.current.messages, msgs),
+          messages: nextMessages,
         })
       } catch (err) {
         if (requestId !== loadRequestRef.current) return
         if (activeThreadSessionIdRef.current !== sessionId) return
         console.error(err)
         setError(err instanceof Error ? err.message : 'Failed to load messages')
-        if (!cached) setMessages([])
+        if (!cached) {
+          messagesOwnerRef.current = sessionId
+          setMessages([])
+        }
       } finally {
         if (
           requestId === loadRequestRef.current &&
@@ -1566,6 +1623,7 @@ export function useChatSessionThread(options: {
               kind,
               label: uploaded.label,
               selected: true,
+              productId: targetProductId,
             },
           ]
           return {
@@ -1625,6 +1683,7 @@ export function useChatSessionThread(options: {
     source: string
     referenceMode?: 'use' | 'none'
     referenceImageIds?: string[]
+    alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
   }) => {
@@ -1646,7 +1705,12 @@ export function useChatSessionThread(options: {
     setNotice(formatImageAssumptions(prefs, language))
     let generating = false
     try {
-      const images = await getSessionOfferImages(options.productId, originSessionId)
+      const libraryIds = [...new Set([
+        options.productId,
+        ...offers.map((offer) => offer.product_id),
+        ...brandProducts.map((product) => product.id),
+      ].filter(Boolean))]
+      const images = await getSessionOffersImages(libraryIds, originSessionId)
       if (!isLiveThread(
         activeThreadSessionIdRef.current,
         sessionGenRef.current,
@@ -1656,59 +1720,17 @@ export function useChatSessionThread(options: {
         return
       }
       setOfferImages(images)
-      const productPhotoIds = selectProductReferenceImageIds(images, 4, { includeContext: false })
-      const thisTurnRefIds = options.referenceImageIds || []
-      const availableProductImageIds = thisTurnRefIds.length > 0
-        ? [...new Set([...thisTurnRefIds, ...productPhotoIds])]
-        : productPhotoIds
-      const referenceImages = availableProductImageIds.flatMap((id) => {
-        const image = images.find((item) => item.id === id)
-        if (!image?.image_url || image.kind === 'generated') return []
-        return [{
-          id: image.id,
-          url: image.image_url,
-          kind: image.kind === 'context' ? 'context' as const : 'product' as const,
-          label: image.label,
-          selected: true,
-        }]
-      })
+      const productNames = new Map(brandProducts.map((product) => [product.id, product.name]))
+      const catalog = withPreselectedReferences(
+        catalogOfferReferences(images, productNames),
+        options.productId,
+        options.referenceImageIds
+      )
       const referencesRequired = requiresProductReferences(prefs.style)
-      const hasContextRef = images.some((item) => item.kind === 'context')
-      const shouldAskStyleRef =
-        Boolean(options.askStyleRef)
-        && !options.skipStyleRef
-        && !options.referenceMode
-        && !hasContextRef
-        && prefs.style.kind !== 'logo'
-      if (
-        shouldAskStyleRef
-        && productPhotoIds.length === 0
-        && !referencesRequired
-      ) {
-        setImageOfferId(options.productId)
-        setImageClarify({
-          sessionId: originSessionId,
-          step: 'styleRef',
-          mode: prefs.style.kind === 'product' ? 'product' : prefs.style.kind === 'organic' ? 'organic' : 'anuncio',
-          originText: options.userText,
-          productId: options.productId,
-          scriptText: options.scriptText,
-          scriptTitle: options.scriptTitle,
-          source: clarifySource,
-          partial: { style: prefs.style, aspectRatio: prefs.aspectRatio },
-          preferences: prefs,
-          prompt: options.prompt,
-          userText: options.userText,
-          availableReferenceCount: 0,
-          referencesRequired: false,
-          askStyleRef: true,
-        })
-        setNotice(language === 'es'
-          ? '¿Tenés un post de referencia? Subilo para copiar el tipo de diseño. El producto y el texto salen de tu marca y guion.'
-          : 'Have a post for style? Upload it so we copy the layout. Product and copy still come from your brand and script.')
-        return
-      }
-      if (referencesRequired && availableProductImageIds.length > 0 && !options.referenceMode && !options.referenceImageIds) {
+      if (shouldPromptImageReferences({
+        styleKind: prefs.style.kind,
+        referenceMode: options.referenceMode,
+      })) {
         setImageOfferId(options.productId)
         setImageClarify({
           sessionId: originSessionId,
@@ -1723,22 +1745,21 @@ export function useChatSessionThread(options: {
           preferences: prefs,
           prompt: options.prompt,
           userText: options.userText,
-          availableReferenceCount: availableProductImageIds.length,
+          availableReferenceCount: catalog.length,
           referencesRequired,
-          referenceImages,
+          referenceImages: catalog,
+          preferredReferenceIds: options.referenceImageIds,
+          alreadyOptimized: options.alreadyOptimized,
         })
         setNotice(language === 'es'
-          ? `Encontré ${availableProductImageIds.length} referencia${availableProductImageIds.length === 1 ? '' : 's'}. Confirma si querés usarlas.`
-          : `I found ${availableProductImageIds.length} reference${availableProductImageIds.length === 1 ? '' : 's'}. Confirm whether to use them.`)
+          ? 'Confirmá producto, contexto y referencias. Hay varios ángulos — elegí los que retratan lo que querés.'
+          : 'Confirm product, context, and references. There are several angles — pick the ones that match what you want.')
         return
       }
       const productImageIds = options.referenceMode === 'none'
         ? []
-        : (options.referenceImageIds?.length
-          ? [...new Set([...options.referenceImageIds, ...productPhotoIds])]
-          : productPhotoIds)
+        : (options.referenceImageIds || [])
       if (referencesRequired && productImageIds.length === 0) {
-        // S3: calm sticky ask once — keep Script→post pending instead of hard-fail.
         setImageOfferId(options.productId)
         setImageClarify({
           sessionId: originSessionId,
@@ -1753,13 +1774,15 @@ export function useChatSessionThread(options: {
           preferences: prefs,
           prompt: options.prompt,
           userText: options.userText,
-          availableReferenceCount: 0,
+          availableReferenceCount: catalog.length,
           referencesRequired: true,
+          referenceImages: catalog,
+          alreadyOptimized: options.alreadyOptimized,
         })
         setNotice(
           language === 'es'
-            ? 'Sube una Ref en Imágenes (o elige Anuncio).'
-            : 'Upload a Ref in Images (or switch to Ad).'
+            ? 'Elegí al menos una foto de producto, o cambiá a Anuncio.'
+            : 'Pick at least one product photo, or switch to Ad.'
         )
         return
       }
@@ -1774,7 +1797,10 @@ export function useChatSessionThread(options: {
       const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
       let prompt = options.prompt
       let scriptText = options.scriptText
-      if (scriptText && !looksLikeCondensedPostCopy(scriptText)) {
+      if (scriptText && !shouldSkipPostCondense({
+        scriptText,
+        alreadyOptimized: options.alreadyOptimized,
+      })) {
         try {
           scriptText = stripUnresolvedPlaceholders(await streamlineScriptForPost({
             script: scriptText,
@@ -1854,6 +1880,8 @@ export function useChatSessionThread(options: {
     storage,
     userId,
     refreshOfferImages,
+    offers,
+    brandProducts,
   ])
 
   runImageGenerateRef.current = runImageGenerate
@@ -1866,6 +1894,8 @@ export function useChatSessionThread(options: {
     scriptTitle?: string | null
     source: 'composer' | 'rail' | 'script_card'
     explicit?: Partial<ShellImagePreferences>
+    alreadyOptimized?: boolean
+    referenceImageIds?: string[]
   }) => {
     if (!session) return
     const productId = options.productId || activeImageOfferId || offerProductId
@@ -1965,6 +1995,8 @@ export function useChatSessionThread(options: {
         source: options.source,
         partial: options.explicit || {},
         askStyleRef,
+        alreadyOptimized: options.alreadyOptimized,
+        preferredReferenceIds: options.referenceImageIds,
       })
       setNotice(
         preferOrganic
@@ -1989,6 +2021,8 @@ export function useChatSessionThread(options: {
         partial: { ...options.explicit, style: resolved.style },
         preferences: resolved,
         askStyleRef,
+        alreadyOptimized: options.alreadyOptimized,
+        preferredReferenceIds: options.referenceImageIds,
       })
       setNotice(language === 'es'
         ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
@@ -2009,10 +2043,12 @@ export function useChatSessionThread(options: {
         partial: { ...options.explicit, style: resolved.style, aspectRatio: resolved.aspectRatio },
         preferences: resolved,
         askStyleRef,
+        alreadyOptimized: options.alreadyOptimized,
+        preferredReferenceIds: options.referenceImageIds,
       })
       setNotice(language === 'es'
-        ? '¿Cuánto texto en el post? Poco texto mantiene gancho, 1 prueba y CTA.'
-        : 'How much copy on the post? Short keeps hook, one proof, and a CTA.')
+        ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
+        : 'How much copy on the post? Keep hook, development, and CTA readable.')
       return
     }
 
@@ -2025,6 +2061,8 @@ export function useChatSessionThread(options: {
       scriptTitle: options.scriptTitle,
       source: options.source,
       askStyleRef,
+      alreadyOptimized: options.alreadyOptimized,
+      referenceImageIds: options.referenceImageIds,
     })
   }, [
     session,
@@ -2080,20 +2118,46 @@ export function useChatSessionThread(options: {
       if (answer.toggleReferenceId) {
         setImageClarify({
           ...imageClarify,
-          referenceImages: (imageClarify.referenceImages || []).map((reference) => (
-            reference.id === answer.toggleReferenceId
-              ? { ...reference, selected: reference.selected === false }
-              : reference
-          )),
+          referenceImages: toggleReferenceSelection(
+            imageClarify.referenceImages || [],
+            answer.toggleReferenceId
+          ),
         })
         return
       }
       if (typeof answer.useReferences === 'boolean' && imageClarify.preferences) {
         if (!answer.useReferences && imageClarify.referencesRequired) return
-        const selectedReferenceIds = (imageClarify.referenceImages || [])
-          .filter((reference) => reference.selected !== false)
-          .map((reference) => reference.id)
-        if (answer.useReferences && imageClarify.referencesRequired && selectedReferenceIds.length === 0) return
+        const selected = (imageClarify.referenceImages || []).filter((reference) => reference.selected === true)
+        if (answer.useReferences && imageClarify.referencesRequired && !hasSelectedProductReference(selected)) {
+          setNotice(language === 'es'
+            ? 'Elegí al menos una foto de producto.'
+            : 'Pick at least one product photo.')
+          return
+        }
+        let referenceImageIds = confirmedReferenceImageIds(imageClarify.referenceImages || [])
+        if (answer.useReferences && selected.length) {
+          const { keepIds, copyIds } = partitionReferenceCopies(selected, imageClarify.productId)
+          const copiedIds: string[] = []
+          for (const id of copyIds) {
+            const source = selected.find((item) => item.id === id)
+            if (!source) continue
+            const copied = await copyShellOfferImageToProduct({
+              userId,
+              source: {
+                id: source.id,
+                image_url: source.url,
+                label: source.label,
+                kind: source.kind,
+              },
+              targetProductId: imageClarify.productId,
+            })
+            copiedIds.push(copied.id)
+          }
+          referenceImageIds = [...keepIds, ...copiedIds]
+          if (copiedIds.length) {
+            await refreshOfferImages(session.id, imageClarify.productId, loadRequestRef.current)
+          }
+        }
         await runImageGenerate({
           productId: imageClarify.productId,
           preferences: imageClarify.preferences,
@@ -2103,7 +2167,8 @@ export function useChatSessionThread(options: {
           scriptTitle: imageClarify.scriptTitle,
           source: imageClarify.source,
           referenceMode: answer.useReferences ? 'use' : 'none',
-          referenceImageIds: answer.useReferences ? selectedReferenceIds : [],
+          referenceImageIds: answer.useReferences ? referenceImageIds : [],
+          alreadyOptimized: imageClarify.alreadyOptimized,
         })
         return
       }
@@ -2148,7 +2213,8 @@ export function useChatSessionThread(options: {
           scriptTitle: imageClarify.scriptTitle,
           source: imageClarify.source,
           skipStyleRef: true,
-          referenceMode: 'none',
+          alreadyOptimized: imageClarify.alreadyOptimized,
+          referenceImageIds: imageClarify.preferredReferenceIds,
         })
       }
       return
@@ -2173,8 +2239,8 @@ export function useChatSessionThread(options: {
           preferences: resolved,
         })
         setNotice(language === 'es'
-          ? '¿Cuánto texto en el post? Poco texto mantiene gancho, 1 prueba y CTA.'
-          : 'How much copy on the post? Short keeps hook, one proof, and a CTA.')
+          ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
+          : 'How much copy on the post? Keep hook, development, and CTA readable.')
         return
       }
       await runImageGenerate({
@@ -2186,6 +2252,8 @@ export function useChatSessionThread(options: {
         scriptTitle: imageClarify.scriptTitle,
         source: imageClarify.source,
         askStyleRef: imageClarify.askStyleRef,
+        alreadyOptimized: imageClarify.alreadyOptimized,
+        referenceImageIds: imageClarify.preferredReferenceIds,
       })
       return
     }
@@ -2204,6 +2272,8 @@ export function useChatSessionThread(options: {
         scriptTitle: imageClarify.scriptTitle,
         source: imageClarify.source,
         askStyleRef: imageClarify.askStyleRef,
+        alreadyOptimized: imageClarify.alreadyOptimized,
+        referenceImageIds: imageClarify.preferredReferenceIds,
       })
       return
     }
@@ -2262,8 +2332,8 @@ export function useChatSessionThread(options: {
           preferences: resolved,
         })
         setNotice(language === 'es'
-          ? '¿Cuánto texto en el post? Poco texto mantiene gancho, 1 prueba y CTA.'
-          : 'How much copy on the post? Short keeps hook, one proof, and a CTA.')
+          ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
+          : 'How much copy on the post? Keep hook, development, and CTA readable.')
         return
       }
       await runImageGenerate({
@@ -2275,9 +2345,11 @@ export function useChatSessionThread(options: {
         scriptTitle: imageClarify.scriptTitle,
         source: imageClarify.source,
         askStyleRef: imageClarify.askStyleRef,
+        alreadyOptimized: imageClarify.alreadyOptimized,
+        referenceImageIds: imageClarify.preferredReferenceIds,
       })
     }
-  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate])
+  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate, userId, refreshOfferImages])
 
   const removeOfferImage = useCallback(async (imageId: string) => {
     if (!session || !activeImageOfferId || imageBusyRef.current) return
@@ -2347,6 +2419,9 @@ export function useChatSessionThread(options: {
   ): Promise<string> => {
     const product = activeProduct
     try {
+      if (shouldSkipPostCondense({ scriptText })) {
+        return stripUnresolvedPlaceholders(scriptText)
+      }
       return await streamlineScriptForPost({
         script: scriptText,
         language,
@@ -2371,7 +2446,11 @@ export function useChatSessionThread(options: {
     scriptText: string,
     productId?: string | null,
     scriptTitle?: string | null,
-    options?: { density?: 'hard' | 'medium' }
+    options?: {
+      density?: 'hard' | 'medium'
+      referenceImageIds?: string[]
+      alreadyOptimized?: boolean
+    }
   ) => {
     await beginImageFlow({
       productId: productId || activeImageOfferId || offerProductId,
@@ -2381,6 +2460,8 @@ export function useChatSessionThread(options: {
       scriptTitle,
       source: 'script_card',
       explicit: options?.density ? { density: options.density } : { density: 'hard' },
+      alreadyOptimized: options?.alreadyOptimized,
+      referenceImageIds: options?.referenceImageIds,
     })
   }, [beginImageFlow, activeImageOfferId, offerProductId, language])
 
@@ -2389,7 +2470,9 @@ export function useChatSessionThread(options: {
     imageUrl: string,
     instruction: string,
     productId?: string,
-    actionType: 'edit' | 'enhance' = 'edit'
+    actionType: 'edit' | 'enhance' = 'edit',
+    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
+    enhanceTier?: ShellEnhanceTier
   ) => {
     if (!session || imageBusy) return
     const pid = productId || activeImageOfferId
@@ -2399,21 +2482,53 @@ export function useChatSessionThread(options: {
     setImageBusy(true)
     setError(null)
     try {
+      const roleNotes = (attachments || [])
+        .map((item, index) => `${index + 1}. ${item.role === 'context' ? 'context/style' : 'product'} reference`)
+        .join('; ')
+      const editPrompt = roleNotes
+        ? `${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
+        : instruction
+      const brandKitId = resolveBrandKitIdForSession(
+        session.brand_kit_id,
+        pid,
+        brandKits,
+        storage
+      )
+      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
+      const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
+      const offerRefs = actionType === 'enhance'
+        ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
+        : { productUrls: [], contextUrls: [] }
+      const workspaces = buildImageWorkspaces(
+        offerImages,
+        messages.flatMap((message) => (message.artifacts || []).map((artifact) => ({
+          ...artifact,
+          message_id: message.id,
+        })))
+      )
+      const workspaceMessageId = workspaceForImage(workspaces, productImageId)?.messageId
+        || offerImages.find((image) => image.id === productImageId)?.message_id
+        || undefined
       const result = await editShellOfferImage({
         userId,
         sessionId: originSessionId,
         productId: pid,
         productImageId,
         imageUrl,
-        editPrompt: instruction,
+        editPrompt,
         actionType,
         userText: `${actionType === 'enhance' ? 'Enhance' : 'Edit'} image: ${instruction}`,
-        brandKitId: resolveBrandKitIdForSession(
-          session.brand_kit_id,
-          pid,
-          brandKits,
-          storage
-        ),
+        language,
+        enhanceTier: actionType === 'enhance' ? (enhanceTier || 'modernize') : undefined,
+        editReferenceImages: actionType === 'edit'
+          ? (attachments || []).map((item) => item.dataUrl)
+          : undefined,
+        productReferenceUrls: offerRefs.productUrls,
+        contextReferenceUrls: offerRefs.contextUrls,
+        brandKitId,
+        brandLogoUrl: brandVisual.brandLogoUrl,
+        customColors: brandVisual.customColors,
+        workspaceMessageId,
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -2428,7 +2543,17 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
-      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      if (result.attachedToExisting && result.workspaceMessageId) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === result.workspaceMessageId
+            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
+            : message
+        )))
+      } else if (result.userMessage && result.assistantMessage) {
+        const userMessage = result.userMessage
+        const assistantMessage = result.assistantMessage
+        setMessages((prev) => [...prev, userMessage, assistantMessage])
+      }
       await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
     } catch (err) {
       console.error(err)
@@ -2444,7 +2569,7 @@ export function useChatSessionThread(options: {
     } finally {
       setImageBusy(false)
     }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage])
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language, messages])
 
   const optimizeOfferImage = useCallback(async (
     productImageId: string,
@@ -2460,6 +2585,16 @@ export function useChatSessionThread(options: {
     setImageBusy(true)
     setError(null)
     try {
+      const workspaces = buildImageWorkspaces(
+        offerImages,
+        messages.flatMap((message) => (message.artifacts || []).map((artifact) => ({
+          ...artifact,
+          message_id: message.id,
+        })))
+      )
+      const workspaceMessageId = workspaceForImage(workspaces, productImageId)?.messageId
+        || offerImages.find((image) => image.id === productImageId)?.message_id
+        || undefined
       const result = await optimizeShellOfferImage({
         userId,
         sessionId: originSessionId,
@@ -2478,6 +2613,7 @@ export function useChatSessionThread(options: {
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
         sessionGen: sessionGenRef.current,
+        workspaceMessageId,
       })
       if (!result) return
       if (!isLiveThread(
@@ -2488,7 +2624,17 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
-      setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
+      if (result.attachedToExisting && result.workspaceMessageId) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === result.workspaceMessageId
+            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
+            : message
+        )))
+      } else if (result.userMessage && result.assistantMessage) {
+        const userMessage = result.userMessage
+        const assistantMessage = result.assistantMessage
+        setMessages((prev) => [...prev, userMessage, assistantMessage])
+      }
       await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
     } catch (err) {
       console.error(err)
@@ -2504,7 +2650,7 @@ export function useChatSessionThread(options: {
     } finally {
       setImageBusy(false)
     }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage])
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, offerImages, messages])
 
   const linkedOfferIds = useMemo(() => {
     const ids = new Set<string>()
@@ -2520,6 +2666,7 @@ export function useChatSessionThread(options: {
     messages,
     offers,
     brandProducts,
+    brandProductsReady,
     unassignedProducts,
     assignUnassignedProduct,
     deleteUnassignedProduct,

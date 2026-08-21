@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  brandOpenMapNeedsHydrate,
   brandOpenStorageKey,
   formatRelativeSessionTime,
   isDefaultSessionTitle,
+  mergeRememberedBrandSessions,
   openSessionActionMenu,
   openSessionDeleteConfirm,
   readBrandOpen,
@@ -201,6 +203,64 @@ describe('brand open persistence', () => {
     })
     expect(back.b1).toBe(false) // stored 0 still wins
     expect(store['ianai.sidebar.brandOpen.b1']).toBe('0') // name/URL path must not write 1 over 0
+  })
+
+  it('does not accordion-open a collapsed folder when the active brand changes', () => {
+    const first = resolveBrandOpenMap({
+      businessIds: ['bloom', 'luna'],
+      activeBrandId: 'bloom',
+      readStored: () => null,
+    })
+    expect(first.bloom).toBe(true)
+    expect(first.luna).toBe(false)
+
+    const switched = resolveBrandOpenMap({
+      businessIds: ['bloom', 'luna'],
+      activeBrandId: 'luna',
+      readStored: () => null,
+      previous: first,
+    })
+    expect(switched.bloom).toBe(true)
+    expect(switched.luna).toBe(false)
+    expect(brandOpenMapNeedsHydrate(switched, ['bloom', 'luna'])).toBe(false)
+  })
+})
+
+describe('remembered brand sessions', () => {
+  const bloom = {
+    id: 's-bloom',
+    business_id: 'bloom',
+    title: 'Ramo QA',
+    updated_at: '2026-08-19T00:00:00.000Z',
+    created_at: '2026-08-19T00:00:00.000Z',
+  }
+  const luna = {
+    id: 's-luna',
+    business_id: 'luna',
+    title: 'Café',
+    updated_at: '2026-08-19T00:00:00.000Z',
+    created_at: '2026-08-19T00:00:00.000Z',
+  }
+
+  it('keeps the open folder’s sessions after switching away from that brand', () => {
+    const afterBloom = mergeRememberedBrandSessions({
+      previous: {},
+      businesses: [{ id: 'bloom' }, { id: 'luna' }],
+      sessionsByBrand: { bloom: [bloom as never] },
+      activeBrandId: 'bloom',
+      activeSessions: [bloom as never],
+    })
+    expect(afterBloom.bloom).toHaveLength(1)
+
+    const afterSwitch = mergeRememberedBrandSessions({
+      previous: afterBloom,
+      businesses: [{ id: 'bloom' }, { id: 'luna' }],
+      sessionsByBrand: { bloom: [bloom as never] },
+      activeBrandId: 'luna',
+      activeSessions: [luna as never],
+    })
+    expect(afterSwitch.bloom.map((session) => session.id)).toEqual(['s-bloom'])
+    expect(afterSwitch.luna.map((session) => session.id)).toEqual(['s-luna'])
   })
 })
 
