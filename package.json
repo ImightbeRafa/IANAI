@@ -1,10 +1,11 @@
 {
   "name": "copywrite-ai",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "npx tsx scripts/dev-api.ts",
     "dev:vercel": "vercel dev",
     "test": "vitest run",
     "build": "tsc -b && vite build",
@@ -27,11 +28,15 @@
     }
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.4",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vercel/node": "^5.5.31",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "happy-dom": "^20.11.2",
     "postcss": "^8.4.45",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.3",

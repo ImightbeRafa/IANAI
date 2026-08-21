@@ -57,12 +57,14 @@ export function isOrganicFramework(f: ScriptFramework): boolean {
  * - sales: full sales CTA — message us, click ad, visit store, etc. (sales default)
  */
 export type CTAStrength = 'none' | 'soft' | 'brand_mention' | 'sales'
-export type AIModel = 'grok' | 'gemini'
+export type AIModel = 'grok' | 'gemini' | 'best' | 'efficient'
 export type ImageModel = 'nano-banana' | 'nano-banana-pro' | 'grok-imagine' | 'gpt-image-2'
 
 // =============================================
 // Core Entities
 // =============================================
+export type PreferredUi = 'classic' | 'chat'
+
 export interface Profile {
   id: string
   email: string
@@ -70,6 +72,8 @@ export interface Profile {
   avatar_url?: string
   account_type: AccountType
   is_admin: boolean
+  chat_beta_access?: boolean
+  preferred_ui?: PreferredUi
   created_at: string
   updated_at: string
 }
@@ -287,7 +291,13 @@ export interface Product {
 
 export interface ChatSession {
   id: string
-  product_id: string
+  /** Legacy product-scoped sessions always set this; Quick/brand shell sessions may be null. */
+  product_id: string | null
+  /** Brand association for chat-shell (required for Quick sessions). */
+  business_id?: string | null
+  brand_kit_id?: string | null
+  primary_channel?: 'messages' | 'website' | 'physical' | null
+  awareness_level?: 'cold' | 'warm' | 'hot' | null
   user_id: string
   title: string
   status: SessionStatus
@@ -304,6 +314,50 @@ export interface ChatSession {
   messages_count?: number
 }
 
+/** Single-offer / multi-offer row for chat-shell sessions (migration 062). */
+export interface ChatSessionOffer {
+  session_id: string
+  business_id: string
+  product_id: string
+  position: number
+  created_by: string
+  created_at: string
+  product?: Product
+}
+
+/** Typed message ↔ script|post|image link (migration 062). */
+export interface MessageArtifact {
+  id: string
+  session_id: string
+  message_id: string
+  product_id: string
+  artifact_type: 'script' | 'post' | 'image'
+  script_id?: string | null
+  post_id?: string | null
+  product_image_id?: string | null
+  ordinal: number
+  action_type: 'generate' | 'regenerate' | 'edit' | 'enhance' | 'optimize'
+  action_metadata: Record<string, unknown>
+  created_by: string
+  created_at: string
+  script?: Script
+  product?: Product
+  product_image?: ProductImageRow
+}
+
+/** product_images row (reference + generated; migration 060/062/063). */
+export interface ProductImageRow {
+  id: string
+  product_id: string
+  user_id: string
+  image_url: string
+  label: string | null
+  kind: 'product' | 'context' | 'generated'
+  session_id?: string | null
+  message_id?: string | null
+  created_at: string
+}
+
 export interface Message {
   id: string
   session_id: string
@@ -311,6 +365,7 @@ export interface Message {
   content: string
   system_prompt?: string
   created_at: string
+  artifacts?: MessageArtifact[]
 }
 
 export interface Script {
@@ -849,6 +904,7 @@ export interface BrandKitFormData {
   is_active?: boolean
   is_default?: boolean
   client_id?: string | null
+  business_id?: string | null
 }
 
 // =============================================

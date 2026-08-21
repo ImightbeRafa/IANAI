@@ -121,7 +121,7 @@ export function buildApiProductContext(product: Product): Record<string, unknown
 export const DEFAULT_SCRIPT_SETTINGS: ScriptGenerationSettings = {
   framework: 'venta_directa',
   variations: 3,
-  model: 'grok',
+  model: 'best',
   generationMode: 'mixed',
   scriptTypeConfig: {
     venta_directa: 1,
@@ -155,7 +155,8 @@ export async function sendMessageToGrok(
   productId?: string,
   aiMemoryEnabled?: boolean,
   brandKitId?: string,
-  scriptTemplateIds?: string[]
+  scriptTemplateIds?: string[],
+  sessionId?: string
 ): Promise<{ content: string; _debug?: { systemPrompt: string; contextProfile?: unknown; angleCandidates?: unknown[]; briefs?: unknown[]; qualityReports?: unknown[] } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -194,7 +195,8 @@ export async function sendMessageToGrok(
       ...(productId ? { productId } : {}),
       ...(aiMemoryEnabled !== undefined ? { aiMemoryEnabled } : {}),
       ...(brandKitId ? { brandKitId } : {}),
-      ...(scriptTemplateIds && scriptTemplateIds.length > 0 ? { scriptTemplateIds } : {})
+      ...(scriptTemplateIds && scriptTemplateIds.length > 0 ? { scriptTemplateIds } : {}),
+      ...(sessionId ? { sessionId } : {})
     })
   })
 
@@ -261,7 +263,9 @@ export async function editScript(
   language: Language = 'es',
   businessCtx?: Record<string, unknown>,
   productCtx?: Record<string, unknown>,
-  editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
+  editType?: 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness',
+  sessionId?: string,
+  productId?: string
 ): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -323,11 +327,55 @@ STRICT RULES:
       ],
       businessDetails: {},
       language,
-      feature: editType || 'script'
+      feature: editType || 'script',
+      ...(sessionId ? { sessionId } : {}),
+      ...(productId ? { productId } : {})
     })
   })
 
   const data = await response.json()
   if (!response.ok) throw new Error(data.error || 'Edit failed')
   return data.content || ''
+}
+
+const STREAMLINE_API_URL = import.meta.env.PROD
+  ? '/api/streamline-script'
+  : 'http://localhost:3000/api/streamline-script'
+
+export async function streamlineScriptForPost(options: {
+  script: string
+  language?: Language
+  textDensity?: 'hard' | 'medium' | 'standard'
+  postStyle?: string
+  productContext?: {
+    name?: string
+    description?: string
+    niche?: string
+    differentiation?: string
+  }
+}): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) throw new Error(options.language === 'en' ? 'Not authenticated.' : 'No estás autenticado.')
+
+  const response = await fetch(STREAMLINE_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      script: options.script,
+      postStyle: options.postStyle || 'venta-directa',
+      textDensity: options.textDensity || 'hard',
+      language: options.language || 'es',
+      productContext: options.productContext,
+    }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(data.error || 'Failed to streamline')
+  const streamlined = typeof data.streamlined === 'string' ? data.streamlined.trim() : ''
+  if (!streamlined) throw new Error(options.language === 'en' ? 'Could not tighten the script for a post.' : 'No pude compactar el guión para el post.')
+  return streamlined
 }

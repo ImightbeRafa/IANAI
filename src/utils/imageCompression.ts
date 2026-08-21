@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { CANONICAL_IMAGE_BUCKET, ensureCanonicalImageBucket, isMissingImageBucketError } from '../services/imageStorage'
 
 /**
  * Compress an image to WebP format with specified quality
@@ -54,6 +55,23 @@ function sanitizePathSegment(segment: string): string {
 }
 
 /**
+ * Unique storage object name for product-refs.
+ * Always timestamp-prefixed so re-uploads INSERT a new object and never
+ * depend on storage UPDATE (upsert overwrite) RLS.
+ */
+export function buildUniqueProductRefFilename(original?: string): string {
+  const ts = Date.now()
+  const raw = (original || '').trim()
+  if (!raw) return `${ts}.webp`
+  const base = raw
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+  return base ? `${ts}-${base}.webp` : `${ts}.webp`
+}
+
+/**
  * Upload an AI-generated image WITHOUT compression.
  * Preserves the original PNG quality from Gemini output.
  * Use this for AI-generated post images to avoid quality loss.
@@ -94,20 +112,24 @@ export async function uploadPostImageOriginal(
 
   const filePath = `${safeUserId}/${safeProductId}/${safeFileName}`
 
-  const { data, error } = await supabase.storage
-    .from('post-images')
-    .upload(filePath, blob, {
+  const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(filePath, blob, {
       contentType: mimeType,
       upsert: true
     })
+  let { data, error } = await upload()
+  if (error && isMissingImageBucketError(error)) {
+    await ensureCanonicalImageBucket()
+    ;({ data, error } = await upload())
+  }
 
   if (error) {
     console.error('Upload error:', error)
     throw error
   }
+  if (!data) throw new Error('Storage upload returned no file')
 
   const { data: { publicUrl } } = supabase.storage
-    .from('post-images')
+    .from(CANONICAL_IMAGE_BUCKET)
     .getPublicUrl(data.path)
 
   return publicUrl
@@ -125,8 +147,8 @@ export async function uploadProductImage(
 ): Promise<string> {
   const compressedBlob = await compressImageToWebP(imageSource, 0.90)
 
-  const timestamp = Date.now()
-  const rawName = filename || `${timestamp}.webp`
+  // Always unique — never reuse file.name (e.g. tiny.png) which forces storage UPDATE via upsert.
+  const rawName = buildUniqueProductRefFilename(filename)
   const safeUserId = sanitizePathSegment(userId)
   const safeProductId = sanitizePathSegment(productId)
   const safeFileName = sanitizePathSegment(rawName)
@@ -137,20 +159,24 @@ export async function uploadProductImage(
 
   const filePath = `${safeUserId}/${safeProductId}/product-refs/${safeFileName}`
 
-  const { data, error } = await supabase.storage
-    .from('post-images')
-    .upload(filePath, compressedBlob, {
+  const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(filePath, compressedBlob, {
       contentType: 'image/webp',
       upsert: true
     })
+  let { data, error } = await upload()
+  if (error && isMissingImageBucketError(error)) {
+    await ensureCanonicalImageBucket()
+    ;({ data, error } = await upload())
+  }
 
   if (error) {
     console.error('Product image upload error:', error)
     throw error
   }
+  if (!data) throw new Error('Storage upload returned no file')
 
   const { data: { publicUrl } } = supabase.storage
-    .from('post-images')
+    .from(CANONICAL_IMAGE_BUCKET)
     .getPublicUrl(data.path)
 
   return publicUrl
@@ -162,42 +188,100 @@ export async function uploadProductImage(
  * - Reference images: max 1024px, WebP 0.80 quality (~80-200KB output)
  * Returns a Blob ready for Supabase Storage upload.
  */
+function isSvgFile(file: File): boolean {
+  return file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
+}
+
+function parseSvgSize(svgText: string, fallback: number): { width: number; height: number } {
+  const viewBox = svgText.match(/viewBox\s*=\s*["']\s*([0-9.+\-eE\s]+)\s*["']/i)
+  if (viewBox) {
+    const parts = viewBox[1].trim().split(/[\s,]+/).map(Number)
+    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+      return { width: parts[2], height: parts[3] }
+    }
+  }
+  const width = Number(svgText.match(/\bwidth\s*=\s*["']?([\d.]+)/i)?.[1])
+  const height = Number(svgText.match(/\bheight\s*=\s*["']?([\d.]+)/i)?.[1])
+  if (width > 0 && height > 0) return { width, height }
+  return { width: fallback, height: fallback }
+}
+
+function canvasToWebp(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('Failed to compress brand image'))
+      },
+      'image/webp',
+      quality
+    )
+  })
+}
+
+function drawScaledImage(img: HTMLImageElement, maxDim: number): HTMLCanvasElement {
+  let { width, height } = img
+  if (!width || !height) {
+    width = maxDim
+    height = maxDim
+  }
+  if (width > maxDim || height > maxDim) {
+    const scale = maxDim / Math.max(width, height)
+    width = Math.round(width * scale)
+    height = Math.round(height * scale)
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, width)
+  canvas.height = Math.max(1, height)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas context failed')
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  return canvas
+}
+
+async function rasterizeSvgFile(file: File, maxDim: number, quality: number): Promise<Blob> {
+  const svgText = await file.text()
+  const sized = parseSvgSize(svgText, maxDim)
+  const blob = new Blob([svgText], { type: 'image/svg+xml' })
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error('Could not read this SVG logo. Export it as PNG or WebP and try again.'))
+      image.src = objectUrl
+    })
+    if (!img.naturalWidth || !img.naturalHeight) {
+      img.width = sized.width
+      img.height = sized.height
+    }
+    return canvasToWebp(drawScaledImage(img, maxDim), quality)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+/**
+ * Compress a brand logo or visual reference for Storage + Gemini.
+ * SVGs are rasterized to transparent WebP so image models can ingest them.
+ */
 export async function compressBrandImage(
   file: File,
   maxDim: number = 512,
   quality: number = 0.85
 ): Promise<Blob> {
+  if (isSvgFile(file)) {
+    return rasterizeSvgFile(file, maxDim, quality)
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
       const img = new Image()
       img.onload = () => {
-        let { width, height } = img
-
-        // Only downscale, never upscale
-        if (width > maxDim || height > maxDim) {
-          const scale = maxDim / Math.max(width, height)
-          width = Math.round(width * scale)
-          height = Math.round(height * scale)
-        }
-
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        if (!ctx) { reject(new Error('Canvas context failed')); return }
-
-        ctx.drawImage(img, 0, 0, width, height)
-        canvas.toBlob(
-          (blob) => {
-            if (blob) resolve(blob)
-            else reject(new Error('Failed to compress brand image'))
-          },
-          'image/webp',
-          quality
-        )
+        canvasToWebp(drawScaledImage(img, maxDim), quality).then(resolve, reject)
       }
-      img.onerror = () => reject(new Error('Failed to load image for compression'))
+      img.onerror = () => reject(new Error('Could not read that image. Use PNG, JPG, WebP, or SVG.'))
       img.src = reader.result as string
     }
     reader.onerror = () => reject(new Error('Failed to read file'))

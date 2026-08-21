@@ -1,0 +1,17 @@
+---
+description: Vercel serverless API conventions for Advance AI
+globs: api/**
+alwaysApply: false
+---
+
+# API Backend Rules
+
+- One file = one route: `api/foo.ts` → `/api/foo`
+- Use `.js` extensions on all local imports (ESM on Vercel)
+- Every protected route: `requireAuth()` → `checkUsageLimit()` → AI call → `logApiUsage()` + `incrementUsage()`
+- AI-heavy routes: add `checkRateLimit()` from `./lib/rate-limit.js`
+- CORS headers on all routes (match existing pattern)
+- Set function timeout in `vercel.json` if route exceeds 30s default
+- Never expose `SUPABASE_SECRET_KEY`, `GROK_API_KEY`, etc. to frontend
+- Supabase admin client: `api/lib/supabase-admin.ts` only
+- Prompt/preset data lives in `api/data/` and `api/lib/guiones/script-prompts/`

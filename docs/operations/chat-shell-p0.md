@@ -53,6 +53,7 @@ WHERE key = 'chat_shell';
 3. Rafael flips flag true on preview only
 4. Reload `/chat` → Obsidian shell; test light/dark + mobile drawers
 5. Confirm production stays on AIIAN with flag off / no 062 apply
+6. If Brands is empty or New chat fails/`RETURNING` is null after flag flip, see Preview RLS bootstrap: `docs/operations/chat-shell-preview-rls.md` (**Preview only — do not run on AIIAN**)
 
 ## Blank Preview screen (missing/invalid Vite env)
 

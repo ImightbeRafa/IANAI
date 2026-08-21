@@ -1,46 +1,15 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { useChatShellRollout } from './ChatShellRolloutContext'
 
-export type ChatShellFlagState = 'loading' | 'enabled' | 'disabled'
+export type ChatShellFlagState = 'loading' | 'enabled' | 'disabled' | 'unreadable'
 
 /**
- * Runtime feature flag from Supabase app_feature_flags.chat_shell.
- * Fail-closed: missing row, missing table, RLS/network errors => disabled.
+ * Kill-switch view of the shared rollout resolver.
+ * Prefer useChatShellRollout when entitlement / home UI matter.
  */
 export function useChatShellFlag(): { state: ChatShellFlagState; refresh: () => void } {
-  const [state, setState] = useState<ChatShellFlagState>('loading')
-  const [tick, setTick] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    setState('loading')
-
-    ;(async () => {
-      try {
-        const { data, error } = await supabase
-          .from('app_feature_flags')
-          .select('enabled')
-          .eq('key', 'chat_shell')
-          .maybeSingle()
-
-        if (cancelled) return
-        if (error || !data || data.enabled !== true) {
-          setState('disabled')
-          return
-        }
-        setState('enabled')
-      } catch {
-        if (!cancelled) setState('disabled')
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [tick])
-
+  const rollout = useChatShellRollout()
   return {
-    state,
-    refresh: () => setTick((n) => n + 1),
+    state: rollout.state,
+    refresh: rollout.refresh,
   }
 }

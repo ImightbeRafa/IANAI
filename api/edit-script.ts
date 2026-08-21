@@ -2,6 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { isUuid, resolveAuthorizedSessionProduct } from './lib/session-access.js'
+import { userHasProductAccess } from './lib/product-access.js'
+import { requireChatShellAccess } from './lib/chat-shell-access.js'
 
 type Language = 'en' | 'es'
 type EditType = 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
@@ -51,10 +54,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return
 
   try {
-    const { originalScript, editInstruction, language = 'es', businessContext, productContext, editType = 'script_edit' } = req.body || {}
+    const {
+      originalScript,
+      editInstruction,
+      language = 'es',
+      businessContext,
+      productContext,
+      editType = 'script_edit',
+      sessionId,
+      productId,
+    } = req.body || {}
     if (!originalScript || typeof originalScript !== 'string') return res.status(400).json({ error: 'originalScript is required' })
     if (!editInstruction || typeof editInstruction !== 'string') return res.status(400).json({ error: 'editInstruction is required' })
     if (!['en', 'es'].includes(language)) return res.status(400).json({ error: 'language must be en or es' })
+
+    // Chat-shell: optional session binding — reject foreign productId on the session.
+    if (sessionId != null && sessionId !== '') {
+      if (!(await requireChatShellAccess(res, user.id))) return
+      if (!isUuid(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' })
+      const access = await resolveAuthorizedSessionProduct(
+        user.id,
+        sessionId,
+        typeof productId === 'string' ? productId : null
+      )
+      if (!access.ok) return res.status(access.status).json({ error: access.error })
+    } else if (typeof productId === 'string' && productId) {
+      if (!isUuid(productId)) return res.status(400).json({ error: 'Invalid productId' })
+      if (!(await userHasProductAccess(user.id, productId))) {
+        return res.status(403).json({ error: 'No access to product' })
+      }
+    }
 
     const grokApiKey = process.env.GROK_API_KEY
     if (!grokApiKey) return res.status(500).json({ error: 'Grok API key not configured' })
@@ -91,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await logApiUsage({
       userId: user.id,
       userEmail: user.email,
-      feature: 'script',
+      feature: safeEditType,
       model: GROK_TEXT_MODEL,
       inputTokens: data.usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
       outputTokens: data.usage?.completion_tokens || estimateTokens(content),

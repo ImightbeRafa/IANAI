@@ -11,7 +11,13 @@ import { useUsageLimits } from '../hooks/useUsageLimits'
 import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments } from '../services/database'
 import type { BrandKit, BrandKitFormData, Subscription, Payment } from '../types'
 import { CHANGELOG, ROADMAP, STATUS_ALERT, type ChangeCategory, type RoadmapStatus } from '../data/changelog'
-import { compressBrandImage } from '../utils/imageCompression'
+import { uploadBrandKitAsset } from '../services/imageStorage'
+import {
+  getTextModelPreference,
+  setTextModelPreference,
+  type TextModelProfile,
+} from '../features/chat-shell/textModelPreference'
+import type { ChatShellTheme } from '../features/chat-shell/chatShellTheme'
 
 type PlanKey = 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
 
@@ -47,8 +53,21 @@ const PLAN_DETAILS = {
   }
 } as const
 
-export default function Settings() {
+export type SettingsSection = 'all' | 'general' | 'ai' | 'brand' | 'billing' | 'updates'
+
+export function SettingsContent({
+  section = 'all',
+  surface = 'page',
+  theme,
+  onThemeChange,
+}: {
+  section?: SettingsSection
+  surface?: 'page' | 'dialog'
+  theme?: ChatShellTheme
+  onThemeChange?: (theme: ChatShellTheme) => void
+}) {
   const { user, updateProfile } = useAuth()
+  const show = (id: SettingsSection) => section === 'all' || section === id
   const { language, setLanguage } = useLanguage()
   const [fullName, setFullName] = useState(user?.user_metadata?.full_name || '')
   const [loading, setLoading] = useState(false)
@@ -56,6 +75,7 @@ export default function Settings() {
   const [profile, setProfile] = useState<Profile | null>(null)
   const usageLimits = useUsageLimits()
   const currentPlan = (usageLimits.plan || 'free') as PlanKey
+  const [textModel, setTextModel] = useState<TextModelProfile>(() => getTextModelPreference())
 
   // Brand Kit state (multi-kit)
   const [brandKits, setBrandKits] = useState<BrandKit[]>([])
@@ -228,13 +248,21 @@ export default function Settings() {
       aiPreferences: 'Preferencias de IA',
       aiLanguage: 'Idioma de IA',
       languageDesc: 'Idioma para conversaciones de IA y scripts generados',
+      textModel: 'Modelo de texto',
+      textModelDesc: 'Grok 4.6 (Mejor) o Grok 4.5 (Eficiente) para guiones y asistente',
+      textModelBest: 'Grok 4.6 · Mejor',
+      textModelEfficient: 'Grok 4.5 · Eficiente',
       account: 'Cuenta',
       accountCreated: 'Cuenta Creada',
       accountType: 'Tipo de Cuenta',
       team: 'Equipo',
       individual: 'Individual',
       teamDesc: 'Colabora con tu equipo y gestiona múltiples clientes',
-      individualDesc: 'Cuenta personal para uso individual'
+      individualDesc: 'Cuenta personal para uso individual',
+      appearance: 'Apariencia',
+      appearanceDesc: 'Tema del chat nuevo',
+      themeDark: 'Oscuro',
+      themeLight: 'Claro',
     },
     en: {
       settings: 'Settings',
@@ -248,13 +276,21 @@ export default function Settings() {
       aiPreferences: 'AI Preferences',
       aiLanguage: 'AI Language',
       languageDesc: 'Language for AI conversations and generated scripts',
+      textModel: 'Text model',
+      textModelDesc: 'Grok 4.6 (Best) or Grok 4.5 (Efficient) for scripts and assistant',
+      textModelBest: 'Grok 4.6 · Best',
+      textModelEfficient: 'Grok 4.5 · Efficient',
       account: 'Account',
       accountCreated: 'Account Created',
       accountType: 'Account Type',
       team: 'Team',
       individual: 'Individual',
       teamDesc: 'Collaborate with your team and manage multiple clients',
-      individualDesc: 'Personal account for individual use'
+      individualDesc: 'Personal account for individual use',
+      appearance: 'Appearance',
+      appearanceDesc: 'Theme for the new chat',
+      themeDark: 'Dark',
+      themeLight: 'Light',
     }
   }
 
@@ -377,13 +413,15 @@ export default function Settings() {
   }
 
   return (
-    <Layout>
-      <div className="p-6 lg:p-8 max-w-2xl mx-auto">
+      <div className={surface === 'dialog' ? 'chat-shell__settings-content' : 'p-6 lg:p-8 max-w-2xl mx-auto'}>
+        {surface === 'page' && (
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-dark-900">{t.settings}</h1>
           <p className="text-dark-500 mt-1">{t.manageAccount}</p>
         </div>
+        )}
 
+        {show('general') && (
         <div className="card">
           <h2 className="text-lg font-semibold text-dark-900 mb-6">{t.profileInfo}</h2>
           
@@ -447,7 +485,40 @@ export default function Settings() {
             </button>
           </form>
         </div>
+        )}
 
+        {show('general') && surface === 'dialog' && theme && onThemeChange && (
+        <div className="card mt-6">
+          <h2 className="text-lg font-semibold text-dark-900 mb-2">{t.appearance}</h2>
+          <p className="text-xs text-dark-400 mb-4">{t.appearanceDesc}</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onThemeChange('obsidian-dark')}
+              className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium ${
+                theme === 'obsidian-dark'
+                  ? 'bg-primary-500 text-white'
+                  : 'bg-dark-200 text-dark-600 border border-dark-300'
+              }`}
+            >
+              {t.themeDark}
+            </button>
+            <button
+              type="button"
+              onClick={() => onThemeChange('obsidian-light')}
+              className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium ${
+                theme === 'obsidian-light'
+                  ? 'bg-primary-500 text-white'
+                  : 'bg-dark-200 text-dark-600 border border-dark-300'
+              }`}
+            >
+              {t.themeLight}
+            </button>
+          </div>
+        </div>
+        )}
+
+        {show('ai') && (
         <div className="card mt-6">
           <h2 className="text-lg font-semibold text-dark-900 mb-6">{t.aiPreferences}</h2>
           <div>
@@ -470,9 +541,48 @@ export default function Settings() {
               {t.languageDesc}
             </p>
           </div>
+          <div className="mt-6">
+            <label className="block text-sm font-medium text-dark-700 mb-1.5">
+              {t.textModel}
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTextModel('best')
+                  setTextModelPreference('best')
+                }}
+                className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium ${
+                  textModel === 'best'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-dark-200 text-dark-600 border border-dark-300'
+                }`}
+              >
+                {t.textModelBest}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTextModel('efficient')
+                  setTextModelPreference('efficient')
+                }}
+                className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium ${
+                  textModel === 'efficient'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-dark-200 text-dark-600 border border-dark-300'
+                }`}
+              >
+                {t.textModelEfficient}
+              </button>
+            </div>
+            <p className="text-xs text-dark-400 mt-1">
+              {t.textModelDesc}
+            </p>
+          </div>
         </div>
+        )}
 
-        {/* Brand Kits (Multi-Kit Manager) */}
+        {show('brand') && (
         <div className="card mt-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
@@ -693,22 +803,15 @@ export default function Settings() {
                           onChange={async (e) => {
                             const file = e.target.files?.[0]
                             if (!file) return
-                            if (file.size > 10 * 1024 * 1024) {
-                              setBkMessage({ type: 'error', text: language === 'es' ? 'Logo muy grande (máx 10MB)' : 'Logo too large (max 10MB)' })
-                              return
-                            }
                             try {
-                              const { data: { session } } = await supabase.auth.getSession()
-                              if (!session) return
-                              // Compress: max 512px, WebP 0.85 quality (~30-80KB)
-                              const compressed = await compressBrandImage(file, 512, 0.85)
-                              const path = `${session.user.id}/logo-${Date.now()}.webp`
-                              const { error: uploadError } = await supabase.storage.from('brand-assets').upload(path, compressed, { contentType: 'image/webp', upsert: true })
-                              if (uploadError) throw uploadError
-                              const { data: urlData } = supabase.storage.from('brand-assets').getPublicUrl(path)
-                              setBkLogoUrl(urlData.publicUrl)
+                              setBkLogoUrl(await uploadBrandKitAsset(file, 'logo'))
                             } catch (err) {
-                              setBkMessage({ type: 'error', text: language === 'es' ? 'Error al subir logo' : 'Failed to upload logo' })
+                              setBkMessage({
+                                type: 'error',
+                                text: err instanceof Error
+                                  ? err.message
+                                  : (language === 'es' ? 'Error al subir logo' : 'Failed to upload logo'),
+                              })
                             }
                             e.target.value = ''
                           }}
@@ -893,20 +996,12 @@ export default function Settings() {
                       <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-dark-200 rounded-lg cursor-pointer hover:border-primary-400 hover:bg-primary-900/5 transition-all">
                         <Plus className="w-5 h-5 text-dark-400 mb-1" />
                         <span className="text-xs text-dark-400">{language === 'es' ? 'Subir imagen' : 'Upload image'}</span>
-                        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => {
+                        <input type="file" accept="image/jpeg,image/png,image/webp,image/svg+xml" className="hidden" onChange={async (e) => {
                           const file = e.target.files?.[0]
                           if (!file) return
-                          if (file.size > 10 * 1024 * 1024) { setBkMessage({ type: 'error', text: language === 'es' ? 'Imagen muy grande (máx 10MB)' : 'Image too large (max 10MB)' }); return }
                           try {
-                            const { data: { session } } = await supabase.auth.getSession()
-                            if (!session) return
-                            // Compress: max 1024px, WebP 0.80 quality (~80-200KB)
-                            const compressed = await compressBrandImage(file, 1024, 0.80)
-                            const path = `${session.user.id}/ref-${Date.now()}-${bkReferenceImages.length}.webp`
-                            const { error: uploadError } = await supabase.storage.from('brand-assets').upload(path, compressed, { contentType: 'image/webp', upsert: true })
-                            if (uploadError) throw uploadError
-                            const { data: urlData } = supabase.storage.from('brand-assets').getPublicUrl(path)
-                            setBkReferenceImages(prev => [...prev, urlData.publicUrl])
+                            const url = await uploadBrandKitAsset(file, 'reference')
+                            setBkReferenceImages(prev => [...prev, url])
                           } catch (err) {
                             setBkMessage({ type: 'error', text: language === 'es' ? 'Error al subir imagen' : 'Failed to upload image' })
                           }
@@ -969,8 +1064,9 @@ export default function Settings() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Billing & Subscription */}
+        {show('billing') && (
         <div className="card mt-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2">
@@ -1372,7 +1468,9 @@ export default function Settings() {
             </div>
           )}
         </div>
+        )}
 
+        {show('general') && (
         <div className="card mt-6">
           <h2 className="text-lg font-semibold text-dark-900 mb-4">{t.account}</h2>
           <div className="space-y-4">
@@ -1441,8 +1539,9 @@ export default function Settings() {
             )}
           </div>
         </div>
+        )}
 
-        {/* From the Developer */}
+        {show('updates') && (
         <div className="card mt-6">
           <div className="flex items-center gap-2 mb-4">
             <Code2 className="w-5 h-5 text-primary-500" />
@@ -1580,7 +1679,15 @@ export default function Settings() {
             </div>
           )}
         </div>
+        )}
       </div>
+  )
+}
+
+export default function Settings() {
+  return (
+    <Layout>
+      <SettingsContent section="all" surface="page" />
     </Layout>
   )
 }

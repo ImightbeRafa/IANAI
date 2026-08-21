@@ -1,0 +1,16 @@
+---
+description: Guiones script generation pipeline conventions
+globs: "{api/lib/guiones/**,api/chat.ts,src/pages/ProductWorkspace.tsx,src/services/grokApi.ts,src/utils/scriptParser.ts,test/**}"
+alwaysApply: false
+---
+
+# Guiones Pipeline Rules
+
+- Structured pipeline entry: `runGuionesStructuredPipeline()` in `api/lib/guiones/script-pipeline.ts`
+- Legacy fallback still exists in `api/chat.ts` — check which path runs before editing prompts
+- Pipeline stages: context profile → angles → briefs → draft → quality gate → repair
+- Types in `api/lib/guiones/types.ts`; tests in `test/*.spec.ts`
+- Run `npm test` after pipeline changes
+- Frontend: `ProductWorkspace.tsx` → `grokApi.ts` → `/api/chat` → `scriptParser.ts`
+- Script taxonomy uses Ian methodology types — see skill reference for full list
+- Do not add more prompt layers to legacy path; extend structured pipeline instead

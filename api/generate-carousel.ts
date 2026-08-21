@@ -25,7 +25,7 @@ import {
   type CarouselSlidePlan,
 } from './data/organic-post-prompts.js'
 import type { CTAStrength } from './data/organic-script-prompts.js'
-import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import { GROK_API_URL, GROK_TEXT_MODEL_EFFICIENT } from './lib/grok-models.js'
 
 const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview'
 const GEMINI_CAROUSEL_SLIDE_TIMEOUT_MS = 120_000
@@ -231,7 +231,7 @@ Slide count: ${slideCount}\n
       'Authorization': `Bearer ${grokApiKey}`,
     },
     body: JSON.stringify({
-      model: GROK_TEXT_MODEL,
+      model: GROK_TEXT_MODEL_EFFICIENT,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt + directionBlock },

@@ -33,6 +33,8 @@ import {
   Zap
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
+import './admin-dashboard.css'
 
 interface UsageSummary {
   model: string
@@ -92,8 +94,13 @@ interface UserUsageStats {
   description_calls: number
   image_calls: number
   voice_calls: number
+  ingest_calls: number
   other_calls: number
   last_active: string
+}
+
+function adminApiUrl(name: string) {
+  return import.meta.env.PROD ? `/api/${name}` : `http://localhost:3000/api/${name}`
 }
 
 interface ReferralCampaign {
@@ -169,8 +176,10 @@ const PLAN_COLORS: Record<string, string> = {
 
 // Model display names and colors
 const MODEL_INFO: Record<string, { name: string; color: string }> = {
-  'grok': { name: 'Grok (xAI)', color: 'bg-purple-500' },
-  'grok-4.3': { name: 'Grok 4.3', color: 'bg-violet-500' },
+  'grok': { name: 'Grok (legacy)', color: 'bg-purple-500' },
+  'grok-4.3': { name: 'Grok 4.3 (legacy)', color: 'bg-violet-500' },
+  'grok-4.5': { name: 'Grok 4.5 Efficient', color: 'bg-indigo-500' },
+  'grok-4.6': { name: 'Grok 4.6 Best', color: 'bg-blue-500' },
   'whisper-1': { name: 'Whisper (OpenAI)', color: 'bg-green-500' },
   'gemini': { name: 'Gemini 3 Pro', color: 'bg-blue-500' },
   'nano-banana': { name: 'Nano Banana', color: 'bg-yellow-500' },
@@ -185,7 +194,9 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
 // Cost per 1M tokens or per image (for reference display)
 const MODEL_PRICING: Record<string, string> = {
   'grok': '$3/1M in, $15/1M out',
-  'grok-4.3': '$2/1M in, $10/1M out',
+  'grok-4.3': '$2/1M in, $6/1M out',
+  'grok-4.5': '$2/1M in, $6/1M out',
+  'grok-4.6': '$2/1M in, $6/1M out',
   'whisper-1': '~$0.006/min',
   'gemini': '$0.15/1M in, $0.60/1M out',
   'nano-banana': '~$0.02/image',
@@ -197,9 +208,37 @@ const MODEL_PRICING: Record<string, string> = {
   'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
 }
 
-export default function AdminDashboard() {
+function ModelChip({ model }: { model: string }) {
+  const info = MODEL_INFO[model]
+  return (
+    <span className="admin-dash__chip" title={model}>
+      <span className={`admin-dash__dot ${info?.color || 'bg-gray-400'}`} />
+      {info?.name || model}
+    </span>
+  )
+}
+
+function formatLogTime(iso: string, language: string) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleString(language === 'es' ? 'es-CR' : 'en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+export default function AdminDashboard({
+  embedded = false,
+  onOpenTickets,
+}: {
+  embedded?: boolean
+  onOpenTickets?: () => void
+} = {}) {
   const { isAdmin } = useAuth()
   const { language } = useLanguage()
+  const rollout = useChatShellRollout()
   
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -217,6 +256,7 @@ export default function AdminDashboard() {
   const [logPage, setLogPage] = useState(0)
   const [hasMoreLogs, setHasMoreLogs] = useState(true)
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
+  const [usageTruncated, setUsageTruncated] = useState(false)
   const [userStatsSearch, setUserStatsSearch] = useState('')
   const [ticketStats, setTicketStats] = useState<{ open: number; urgent: number; in_progress: number; total: number }>({ open: 0, urgent: 0, in_progress: 0, total: 0 })
   const [allSubscriptions, setAllSubscriptions] = useState<AdminSubscription[]>([])
@@ -266,6 +306,9 @@ export default function AdminDashboard() {
       memory_reflection: 'Reflexión de Memoria',
       memory_synthesis: 'Síntesis de Memoria',
       brand_extraction: 'Extracción de Marca',
+      ingest: 'Ingesta',
+      ingestHint: 'URLs, marca, PDF, auto-llenado y OCR',
+      truncated: 'Mostrando las últimas 10,000 llamadas en este rango. Los totales pueden estar incompletos.',
       reply: 'Respuestas a Clientes',
       ocr: 'OCR de Imágenes',
       logo: 'Generador de Logos',
@@ -316,6 +359,9 @@ export default function AdminDashboard() {
       memory_reflection: 'Memory Reflection',
       memory_synthesis: 'Memory Synthesis',
       brand_extraction: 'Brand Extraction',
+      ingest: 'Ingest',
+      ingestHint: 'URLs, brand, PDF, auto-fill, and OCR',
+      truncated: 'Showing the latest 10,000 calls in this range. Totals may be incomplete.',
       reply: 'Client Replies',
       ocr: 'Image OCR',
       logo: 'Logo Generator',
@@ -330,6 +376,49 @@ export default function AdminDashboard() {
 
   const t = labels[language]
 
+  const usageWindow = () => {
+    const days = dateRange === '7d' ? 7 : dateRange === '90d' ? 90 : 30
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - days)
+    return { startDate, startIso: startDate.toISOString(), endIso: new Date().toISOString() }
+  }
+
+  const LOG_PAGE_SIZE = 20
+
+  const fetchUsageFromApi = async (opts?: { search?: string; offset?: number; logsOnly?: boolean }) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error(language === 'es' ? 'Sesión no encontrada' : 'No active session')
+
+    const { startIso, endIso } = usageWindow()
+    const params = new URLSearchParams({
+      start_date: startIso,
+      end_date: endIso,
+      offset: String(opts?.offset || 0),
+      limit: String(LOG_PAGE_SIZE),
+    })
+    if (opts?.search?.trim()) params.set('search', opts.search.trim())
+    if (opts?.logsOnly) params.set('logs_only', '1')
+
+    const resp = await fetch(`${adminApiUrl('admin-usage')}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    const body = await resp.json().catch(() => ({})) as {
+      error?: string
+      summary?: UsageSummary[]
+      daily?: DailyUsage[]
+      userStats?: UserUsageStats[]
+      logs?: RecentLog[]
+      hasMore?: boolean
+      truncated?: boolean
+    }
+    if (!resp.ok) {
+      throw new Error(body.error || (language === 'es'
+        ? 'No se pudo cargar el uso. ¿Está corriendo la API en :3000?'
+        : 'Failed to load usage. Is the API running on :3000?'))
+    }
+    return body
+  }
+
   const fetchData = async () => {
     if (!isAdmin) return
     
@@ -337,53 +426,28 @@ export default function AdminDashboard() {
     setError('')
 
     try {
-      const days = dateRange === '7d' ? 7 : dateRange === '90d' ? 90 : 30
-      const startDate = new Date()
-      startDate.setDate(startDate.getDate() - days)
+      const { startDate } = usageWindow()
 
-      // Fetch usage summary
-      const { data: summaryData, error: summaryError } = await supabase
-        .rpc('get_usage_summary', {
-          start_date: startDate.toISOString(),
-          end_date: new Date().toISOString()
-        })
-
-      if (summaryError) throw summaryError
-      setUsageSummary(summaryData || [])
-
-      // Fetch daily usage
-      const { data: dailyData, error: dailyError } = await supabase
-        .rpc('get_daily_usage', {
-          start_date: startDate.toISOString(),
-          end_date: new Date().toISOString()
-        })
-
-      if (dailyError) throw dailyError
-      setDailyUsage(dailyData || [])
-
-      // Fetch per-user stats
-      const { data: userStatsData, error: userStatsError } = await supabase
-        .rpc('get_user_usage_stats', {
-          start_date: startDate.toISOString(),
-          end_date: new Date().toISOString()
-        })
-
-      if (userStatsError) console.warn('User stats not available yet:', userStatsError.message)
-      else setUserStats(userStatsData || [])
-
-      // Fetch first page of logs
-      setLogPage(0)
-      setLogSearch('')
-      const PAGE_SIZE = 20
-      const { data: logsData, error: logsError } = await supabase
-        .from('api_usage_logs')
-        .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
-        .order('created_at', { ascending: false })
-        .range(0, PAGE_SIZE - 1)
-
-      if (logsError) throw logsError
-      setRecentLogs(logsData || [])
-      setHasMoreLogs((logsData || []).length >= PAGE_SIZE)
+      try {
+        const usageData = await fetchUsageFromApi({ offset: 0 })
+        setUsageSummary(usageData.summary || [])
+        setDailyUsage(usageData.daily || [])
+        setUserStats(usageData.userStats || [])
+        setRecentLogs(usageData.logs || [])
+        setHasMoreLogs(Boolean(usageData.hasMore))
+        setUsageTruncated(Boolean(usageData.truncated))
+        setLogPage(0)
+        setLogSearch('')
+      } catch (usageErr) {
+        console.error('Failed to fetch admin usage:', usageErr)
+        setUsageSummary([])
+        setDailyUsage([])
+        setUserStats([])
+        setRecentLogs([])
+        setHasMoreLogs(false)
+        setUsageTruncated(false)
+        setError(usageErr instanceof Error ? usageErr.message : 'Failed to load usage data')
+      }
 
       // Fetch referral campaigns
       const { data: campaignsData } = await supabase
@@ -504,27 +568,14 @@ export default function AdminDashboard() {
     }
   }, [isAdmin, dateRange])
 
-  const LOG_PAGE_SIZE = 20
-
   const fetchLogs = async (search: string) => {
     setLogSearch(search)
     setLogPage(0)
     setLoadingMoreLogs(true)
     try {
-      let query = supabase
-        .from('api_usage_logs')
-        .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
-        .order('created_at', { ascending: false })
-        .range(0, LOG_PAGE_SIZE - 1)
-
-      if (search.trim()) {
-        query = query.ilike('user_email', `%${search.trim()}%`)
-      }
-
-      const { data, error: err } = await query
-      if (err) throw err
-      setRecentLogs(data || [])
-      setHasMoreLogs((data || []).length >= LOG_PAGE_SIZE)
+      const usageData = await fetchUsageFromApi({ search, offset: 0, logsOnly: true })
+      setRecentLogs(usageData.logs || [])
+      setHasMoreLogs(Boolean(usageData.hasMore))
     } catch (err) {
       console.error('Failed to search logs:', err)
     } finally {
@@ -536,23 +587,13 @@ export default function AdminDashboard() {
     const nextPage = logPage + 1
     setLoadingMoreLogs(true)
     try {
-      const from = nextPage * LOG_PAGE_SIZE
-      const to = from + LOG_PAGE_SIZE - 1
-
-      let query = supabase
-        .from('api_usage_logs')
-        .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
-        .order('created_at', { ascending: false })
-        .range(from, to)
-
-      if (logSearch.trim()) {
-        query = query.ilike('user_email', `%${logSearch.trim()}%`)
-      }
-
-      const { data, error: err } = await query
-      if (err) throw err
-      setRecentLogs(prev => [...prev, ...(data || [])])
-      setHasMoreLogs((data || []).length >= LOG_PAGE_SIZE)
+      const usageData = await fetchUsageFromApi({
+        search: logSearch,
+        offset: nextPage * LOG_PAGE_SIZE,
+        logsOnly: true,
+      })
+      setRecentLogs(prev => [...prev, ...(usageData.logs || [])])
+      setHasMoreLogs(Boolean(usageData.hasMore))
       setLogPage(nextPage)
     } catch (err) {
       console.error('Failed to load more logs:', err)
@@ -620,6 +661,7 @@ export default function AdminDashboard() {
     : allSubscriptions
 
   if (!isAdmin) {
+    if (embedded) return null
     return (
       <Layout>
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -632,14 +674,27 @@ export default function AdminDashboard() {
     )
   }
 
-  return (
-    <Layout>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  const ticketsAction = onOpenTickets
+    ? (
+        <button type="button" onClick={onOpenTickets} className="btn-secondary flex items-center gap-2">
+          <MessageSquarePlus className="w-4 h-4" />
+          Tickets
+        </button>
+      )
+    : (
+        <Link to="/admin/tickets" className="btn-secondary flex items-center gap-2">
+          <MessageSquarePlus className="w-4 h-4" />
+          Tickets
+        </Link>
+      )
+
+  const body = (
+      <div className={embedded ? 'admin-dash admin-dash--embedded' : 'admin-dash max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'}>
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-dark-900">{t.title}</h1>
-            <p className="text-dark-500 mt-1 text-sm">{t.subtitle}</p>
+            <h1 className="admin-dash__title">{t.title}</h1>
+            <p className="admin-dash__subtitle">{t.subtitle}</p>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
             {/* Date Range Selector */}
@@ -652,13 +707,7 @@ export default function AdminDashboard() {
               <option value="30d">{t.last30days}</option>
               <option value="90d">{t.last90days}</option>
             </select>
-            <Link
-              to="/admin/tickets"
-              className="btn-secondary flex items-center gap-2"
-            >
-              <MessageSquarePlus className="w-4 h-4" />
-              Tickets
-            </Link>
+            {ticketsAction}
             <button
               onClick={fetchData}
               disabled={refreshing}
@@ -675,6 +724,33 @@ export default function AdminDashboard() {
             <p className="text-red-600">{error}</p>
           </div>
         )}
+
+        {usageTruncated && !error && (
+          <div className="p-4 bg-amber-900/20 border border-amber-700/30 rounded-lg mb-6">
+            <p className="text-amber-700">{t.truncated}</p>
+          </div>
+        )}
+
+        <div className="admin-dash__status">
+          <div className="admin-dash__status-card">
+            <div className="admin-dash__status-label">Kill switch</div>
+            <div className="admin-dash__status-value">chat_shell · {rollout.killSwitch}</div>
+          </div>
+          <div className="admin-dash__status-card">
+            <div className="admin-dash__status-label">Text</div>
+            <div className="admin-dash__status-value">Grok 4.6 Best · 4.5 Efficient</div>
+          </div>
+          <div className="admin-dash__status-card">
+            <div className="admin-dash__status-label">Images</div>
+            <div className="admin-dash__status-value">Gemini · Grok Imagine</div>
+          </div>
+          <div className="admin-dash__status-card">
+            <div className="admin-dash__status-label">Home</div>
+            <div className="admin-dash__status-value">
+              {rollout.effectiveHome === 'chat' ? '/chat' : '/dashboard'}
+            </div>
+          </div>
+        </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -696,7 +772,7 @@ export default function AdminDashboard() {
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCost}</span>
                 </div>
-<p className="text-2xl sm:text-3xl font-bold text-dark-900">${totalCost.toFixed(4)}</p>
+<p className="admin-dash__metric">${totalCost.toFixed(4)}</p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -706,7 +782,7 @@ export default function AdminDashboard() {
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCalls}</span>
                 </div>
-<p className="text-2xl sm:text-3xl font-bold text-dark-900">{totalCalls.toLocaleString()}</p>
+<p className="admin-dash__metric">{totalCalls.toLocaleString()}</p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -716,7 +792,7 @@ export default function AdminDashboard() {
                   </div>
                   <span className="text-dark-500 text-sm">{t.successRate}</span>
                 </div>
-<p className="text-2xl sm:text-3xl font-bold text-dark-900">{successRate}%</p>
+<p className="admin-dash__metric">{successRate}%</p>
               </div>
             </div>
 
@@ -725,6 +801,12 @@ export default function AdminDashboard() {
               <div className="mb-8">
                 <Link
                   to="/admin/tickets"
+                  onClick={(e) => {
+                    if (onOpenTickets) {
+                      e.preventDefault()
+                      onOpenTickets()
+                    }
+                  }}
                   className="bg-dark-100 rounded-xl p-5 border border-dark-100 flex items-center justify-between hover:border-primary-500/30 transition-colors block"
                 >
                   <div className="flex items-center gap-3">
@@ -779,7 +861,7 @@ export default function AdminDashboard() {
                     <DollarSign className="w-4 h-4 text-green-500" />
                     <span className="text-xs text-dark-500">{language === 'es' ? 'Ingresos Totales' : 'Total Revenue'}</span>
                   </div>
-                  <p className="text-2xl font-bold text-dark-900">${totalRevenue.toFixed(2)}</p>
+                  <p className="admin-dash__metric">${totalRevenue.toFixed(2)}</p>
                   {boostRevenue > 0 && (
                     <p className="text-[10px] text-dark-400 mt-0.5">
                       ${boostRevenue.toFixed(2)} {language === 'es' ? 'de boosts' : 'from boosts'}
@@ -791,7 +873,7 @@ export default function AdminDashboard() {
                     <TrendingUp className="w-4 h-4 text-blue-500" />
                     <span className="text-xs text-dark-500">MRR</span>
                   </div>
-                  <p className="text-2xl font-bold text-dark-900">${mrr.toFixed(0)}</p>
+                  <p className="admin-dash__metric">${mrr.toFixed(0)}</p>
                   <p className="text-[10px] text-dark-400 mt-0.5">
                     {activePaidSubs.length} {language === 'es' ? 'suscriptores activos' : 'active subscribers'}
                   </p>
@@ -801,7 +883,7 @@ export default function AdminDashboard() {
                     <Users className="w-4 h-4 text-purple-500" />
                     <span className="text-xs text-dark-500">{language === 'es' ? 'Suscriptores de Pago' : 'Paid Subscribers'}</span>
                   </div>
-                  <p className="text-2xl font-bold text-dark-900">{activePaidSubs.length}</p>
+                  <p className="admin-dash__metric">{activePaidSubs.length}</p>
                   <p className="text-[10px] text-dark-400 mt-0.5">
                     {allSubscriptions.length} total
                   </p>
@@ -811,7 +893,7 @@ export default function AdminDashboard() {
                     <TrendingDown className="w-4 h-4 text-red-500" />
                     <span className="text-xs text-dark-500">{language === 'es' ? 'Tasa de Abandono' : 'Churn Rate'}</span>
                   </div>
-                  <p className="text-2xl font-bold text-dark-900">{churnRate}%</p>
+                  <p className="admin-dash__metric">{churnRate}%</p>
                   <p className="text-[10px] text-dark-400 mt-0.5">
                     {cancelledSubs.length} {language === 'es' ? 'cancelados' : 'cancelled'}
                   </p>
@@ -1310,7 +1392,7 @@ export default function AdminDashboard() {
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="admin-dash__table--wide">
                   <thead className="bg-dark-50">
                     <tr>
                       <th className="px-3 sm:px-5 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
@@ -1421,9 +1503,7 @@ export default function AdminDashboard() {
                     <div key={`${day.day}-${day.model}-${i}`} className="flex items-center justify-between py-2 border-b border-dark-50 last:border-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-dark-500">{new Date(day.day).toLocaleDateString()}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded ${MODEL_INFO[day.model]?.color || 'bg-gray-400'} text-white`}>
-                          {day.model}
-                        </span>
+                        <ModelChip model={day.model} />
                       </div>
                       <div className="text-right">
                         <span className="text-sm font-medium text-dark-700">{day.total_calls} calls</span>
@@ -1460,7 +1540,7 @@ export default function AdminDashboard() {
                   </p>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="admin-dash__table--wide">
                     <thead className="bg-dark-50">
                       <tr>
                         <th className="px-5 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.user}</th>
@@ -1468,6 +1548,7 @@ export default function AdminDashboard() {
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Desc.' : 'Desc.'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Imágenes' : 'Images'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Voz' : 'Voice'}</th>
+                        <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase" title={t.ingestHint}>{t.ingest}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Otro' : 'Other'}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.calls}</th>
                         <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
@@ -1478,12 +1559,13 @@ export default function AdminDashboard() {
                       {filteredUserStats.map((u) => (
                         <tr key={u.user_id || u.user_email} className="hover:bg-dark-50">
                           <td className="px-5 py-3">
-                            <span className="text-sm text-dark-700 font-medium">{u.user_email || '-'}</span>
+                            <span className="admin-dash__email text-sm text-dark-700 font-medium" title={u.user_email || ''}>{u.user_email || '-'}</span>
                           </td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.script_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.description_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.image_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.voice_calls || 0}</td>
+                          <td className="px-3 py-3 text-sm text-right text-dark-700">{u.ingest_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right text-dark-700">{u.other_calls || 0}</td>
                           <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">{u.total_calls}</td>
                           <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">${Number(u.total_cost_usd).toFixed(4)}</td>
@@ -1519,7 +1601,7 @@ export default function AdminDashboard() {
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="admin-dash__table--wide">
                   <thead className="bg-dark-50">
                     <tr>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.time}</th>
@@ -1534,21 +1616,21 @@ export default function AdminDashboard() {
                   <tbody className="divide-y divide-dark-100">
                     {recentLogs.map((log) => (
                       <tr key={log.id} className="hover:bg-dark-50">
-                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-500 whitespace-nowrap">
-                          {new Date(log.created_at).toLocaleString()}
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-500">
+                          {formatLogTime(log.created_at, language)}
                         </td>
-                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">{log.user_email || '-'}</td>
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">
+                          <span className="admin-dash__email" title={log.user_email || ''}>{log.user_email || '-'}</span>
+                        </td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">
                           {t[log.feature as keyof typeof t] || log.feature}
                         </td>
                         <td className="px-3 sm:px-6 py-3">
-                          <span className={`text-xs px-2 py-1 rounded ${MODEL_INFO[log.model]?.color || 'bg-gray-400'} text-white`}>
-                            {MODEL_INFO[log.model]?.name || log.model}
-                          </span>
+                          <ModelChip model={log.model} />
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right text-dark-700">{log.total_tokens?.toLocaleString() || '-'}</td>
-                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right font-medium text-dark-900">
-                          ${Number(log.estimated_cost_usd).toFixed(6)}
+                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right font-medium text-dark-900" title={`$${Number(log.estimated_cost_usd).toFixed(6)}`}>
+                          ${Number(log.estimated_cost_usd).toFixed(4)}
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-center">
                           <span className={`text-xs px-2 py-1 rounded ${log.success ? 'bg-green-900/20 text-green-700' : 'bg-red-900/20 text-red-700'}`}>
@@ -1581,6 +1663,8 @@ export default function AdminDashboard() {
           </>
         )}
       </div>
-    </Layout>
   )
+
+  if (embedded) return body
+  return <Layout>{body}</Layout>
 }

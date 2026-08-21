@@ -27,9 +27,12 @@ interface ScriptCardProps {
   messageId?: string
   scriptIndex?: number
   onSaveAsTemplate?: (content: string, suggestedName: string) => void
+  /** Shell hides Post/Carousel/template/rating; keeps Copy · Save · Edit · Improve · Hooks. */
+  actionsPreset?: 'default' | 'shell'
 }
 
-export default function ScriptCard({ script, language, onSave, onEdit, onSaveVersion, isSaved, savingScript, productType, productId, messageId, scriptIndex, onSaveAsTemplate }: ScriptCardProps) {
+export default function ScriptCard({ script, language, onSave, onEdit, onSaveVersion, isSaved, savingScript, productType, productId, messageId, scriptIndex, onSaveAsTemplate, actionsPreset = 'default' }: ScriptCardProps) {
+  const shellActions = actionsPreset === 'shell'
   const navigate = useNavigate()
   const [copiedVersion, setCopiedVersion] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
@@ -654,7 +657,7 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
   }
 
   return (
-    <div className="bg-dark-100 border border-dark-200 rounded-xl card-hover animate-entrance group/card">
+    <div className={`bg-dark-100 border border-dark-200 rounded-xl card-hover animate-entrance group/card${shellActions ? ' chat-shell-script-card' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-dark-200 bg-dark-200/40 rounded-t-xl">
         <span className="text-xs font-semibold text-dark-600 tracking-wide">
@@ -733,10 +736,10 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
         <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 border-t border-dark-200/50 opacity-60 group-hover/card:opacity-100 transition-opacity duration-200">
           <CopyBtn versionIndex={-1} />
           <SaveBtn versionIndex={-1} />
-          <RateBtn versionIndex={-1} />
-          <PostBtn versionIndex={-1} />
-          <CarouselBtn versionIndex={-1} />
-          <TemplateBtn versionIndex={-1} />
+          {!shellActions && <RateBtn versionIndex={-1} />}
+          {!shellActions && <PostBtn versionIndex={-1} />}
+          {!shellActions && <CarouselBtn versionIndex={-1} />}
+          {!shellActions && <TemplateBtn versionIndex={-1} />}
           <VersionActions versionIndex={-1} />
         </div>
       </div>
@@ -768,10 +771,10 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
               <div className="flex items-center flex-wrap gap-1.5 px-3 py-2 border-t border-dark-200/50 opacity-60 group-hover/card:opacity-100 transition-opacity duration-200">
                 <CopyBtn versionIndex={index} />
                 <SaveBtn versionIndex={index} />
-                <RateBtn versionIndex={index} />
-                <PostBtn versionIndex={index} />
-                <CarouselBtn versionIndex={index} />
-                <TemplateBtn versionIndex={index} />
+                {!shellActions && <RateBtn versionIndex={index} />}
+                {!shellActions && <PostBtn versionIndex={index} />}
+                {!shellActions && <CarouselBtn versionIndex={index} />}
+                {!shellActions && <TemplateBtn versionIndex={index} />}
                 <VersionActions versionIndex={index} />
               </div>
             </div>

@@ -1,86 +1,105 @@
 /**
- * IANAI chat-shell — Obsidian tokens (light + dark)
- * Reference mock: Scripts + creatives three-column shell (PatchHouse.CR).
- * Canonical copy also served from /design/chat-shell-obsidian-tokens.css for /chat.
+ * Advance AI chat-shell — Black + navy
+ * Mirror of public/design/chat-shell-obsidian-tokens.css
  */
 
 :root {
-  /* Typography */
-  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --font-mono: "IBM Plex Mono", "ui-monospace", monospace;
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "ui-monospace", monospace;
+  --font-size-body: 15px;
+  --font-size-ui: 13px;
 
-  /* Radii */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 10px;
 
-  /* Accents (shared) */
-  --accent: #2563eb;
-  --accent-muted: #3b82f6;
-  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
-  --danger: #dc2626;
-  --success: #059669;
-  --warning: #d97706;
+  --accent: #4f8cff;
+  --accent-muted: #82adff;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 32%, transparent);
+  --accent-active: color-mix(in srgb, var(--accent) 22%, transparent);
+  --send-from: #0284c7;
+  --send-to: #5b8def;
+  --send-glow: none;
+  --danger: #c45c5c;
+  --success: #5d9a78;
+  --warning: #c4a15a;
 
-  /* Artifact type tints */
-  --artifact-script: #2563eb;
-  --artifact-post: #0d9488;
-  --artifact-image: #7c3aed;
+  --artifact-script: #4f8cff;
+  --artifact-post: #6e9a90;
+  --artifact-image: #8a7a9c;
 
-  /* Focus */
-  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --focus-ring: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent);
 
-  /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-fast: 120ms;
-  --dur-med: 220ms;
+  --dur-fast: 80ms;
+  --dur-med: 140ms;
 }
 
-/* Dark — "Obsidian electric" (primary mock) */
 [data-theme="obsidian-dark"] {
-  --bg: #0b0e14;
-  --bg-elevated: #151921;
-  --bg-soft: #1a2030;
-  --border: #2a3142;
-  --border-strong: #3b455c;
-  --text: #f3f4f6;
-  --text-muted: #9aa3b5;
-  --text-faint: #6b7385;
-  --bubble-user: #1c2433;
-  --bubble-ai: #151921;
-  --sidebar: #0e121a;
-  --rail: #10151f;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  --grid-line: rgba(37, 99, 235, 0.08);
+  --bg: #0b0f14;
+  --bg-elevated: #18212c;
+  --bg-soft: #1e2a37;
+  --bg-stage: #0b0f14;
+  --tools-bg: #151d27;
+  --border: rgba(180, 210, 255, 0.08);
+  --border-strong: rgba(180, 210, 255, 0.12);
+  --text: #e8eef6;
+  --text-muted: #9aabc0;
+  --text-faint: #738396;
+  --bubble-user: #1a2531;
+  --bubble-user-border: rgba(180, 210, 255, 0.1);
+  --bubble-ai: transparent;
+  --sidebar: #121922;
+  --rail: #121922;
+  --shadow: none;
+  --grid-line: transparent;
+  --chip-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+  --chip-text: #c8d8f0;
+  --gen-grad-1: #0c1424;
+  --gen-grad-2: #1a1630;
+  --gen-grad-3: #2a1c28;
 }
 
-/* Light — same geometry, daylight surfaces */
 [data-theme="obsidian-light"] {
-  --bg: #f4f6fb;
+  --bg: #eef2f6;
   --bg-elevated: #ffffff;
-  --bg-soft: #e8edf7;
-  --border: #d5dbe8;
-  --border-strong: #b7c0d4;
-  --text: #0f172a;
-  --text-muted: #5b657a;
-  --text-faint: #8b93a7;
-  --bubble-user: #e8eefc;
-  --bubble-ai: #ffffff;
-  --sidebar: #eef2f9;
-  --rail: #f8fafc;
-  --shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-  --grid-line: rgba(37, 99, 235, 0.06);
+  --bg-soft: #e4eaf1;
+  --bg-stage: #f3f6fa;
+  --tools-bg: #e8edf3;
+  --border: rgba(20, 32, 52, 0.1);
+  --border-strong: rgba(20, 32, 52, 0.14);
+  --text: #152033;
+  --text-muted: #4a5870;
+  --text-faint: #6b778c;
+  --bubble-user: #e8edf3;
+  --bubble-user-border: rgba(20, 32, 52, 0.1);
+  --bubble-ai: transparent;
+  --sidebar: #e4eaf1;
+  --rail: #eef2f6;
+  --shadow: none;
+  --grid-line: transparent;
+  --chip-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --chip-text: #0f3a66;
+  --accent: #0284c7;
+  --accent-muted: #0369a1;
+  --send-from: #0284c7;
+  --send-to: #4f8cff;
+  --gen-grad-1: #d4e0f0;
+  --gen-grad-2: #e0d8ec;
+  --gen-grad-3: #f0e4e8;
 }
 
 body.obsidian-shell {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-sans);
-  background:
-    radial-gradient(1200px 600px at 10% -10%, var(--grid-line), transparent 55%),
-    linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 88%, #000) 100%);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  background: var(--bg);
   color: var(--text);
   color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
 }
 
 [data-theme="obsidian-light"] body.obsidian-shell,

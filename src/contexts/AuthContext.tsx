@@ -7,6 +7,7 @@ interface AuthContextType {
   session: Session | null
   loading: boolean
   isAdmin: boolean
+  adminResolved: boolean
   signUp: (email: string, password: string, fullName?: string, referralCode?: string) => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
@@ -21,10 +22,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [adminResolved, setAdminResolved] = useState(false)
   const authResolved = useRef(false)
   const currentUserIdRef = useRef<string | null>(null)
 
-  // Fetch admin status from profiles table
+  const clearAdmin = () => {
+    setIsAdmin(false)
+    setAdminResolved(true)
+  }
+
+  // Fetch admin status from profiles table. Do not mark adminResolved until this finishes
+  // so /admin does not bounce real admins to /dashboard during the profiles round-trip.
   const fetchAdminStatus = async (userId: string) => {
     try {
       const { data } = await supabase
@@ -35,6 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAdmin(data?.is_admin === true)
     } catch {
       setIsAdmin(false)
+    } finally {
+      setAdminResolved(true)
     }
   }
 
@@ -42,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Fail soft when env is missing/invalid (main.tsx normally shows ConfigErrorScreen first)
     if (!isSupabaseConfigured) {
       setLoading(false)
+      setAdminResolved(true)
       return
     }
 
@@ -64,11 +75,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         supabase.auth.signOut()
         setSession(null)
         setUser(null)
-        setIsAdmin(false)
+        clearAdmin()
       } else if (event === 'SIGNED_OUT') {
         setSession(null)
         setUser(null)
-        setIsAdmin(false)
+        clearAdmin()
       } else {
         authResolved.current = true
         const newUserId = session?.user?.id ?? null
@@ -85,7 +96,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         currentUserIdRef.current = newUserId
         setSession(session)
         setUser(session?.user ?? null)
-        if (session?.user) fetchAdminStatus(session.user.id)
+        if (session?.user) {
+          setAdminResolved(false)
+          void fetchAdminStatus(session.user.id)
+        } else {
+          clearAdmin()
+        }
 
         // Universal referral code fallback — applies on any sign-in event
         if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
@@ -120,12 +136,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           supabase.auth.signOut()
           setSession(null)
           setUser(null)
-          setIsAdmin(false)
+          clearAdmin()
         } else {
           currentUserIdRef.current = session?.user?.id ?? null
           setSession(session)
           setUser(session?.user ?? null)
-          if (session?.user) fetchAdminStatus(session.user.id)
+          if (session?.user) {
+            setAdminResolved(false)
+            void fetchAdminStatus(session.user.id)
+          } else {
+            clearAdmin()
+          }
         }
         setLoading(false)
       })
@@ -150,7 +171,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             currentUserIdRef.current = data.session.user.id
             setSession(data.session)
             setUser(data.session.user)
-            fetchAdminStatus(data.session.user.id)
+            setAdminResolved(false)
+            void fetchAdminStatus(data.session.user.id)
             // Apply referral code from localStorage (Google OAuth flow)
             const storedRef = localStorage.getItem('referral_code')
             if (storedRef) {
@@ -166,8 +188,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               })
             }
             setLoading(false)
-            // Clean up URL params
-            window.history.replaceState({}, '', window.location.pathname)
+            // Clean OAuth params only — preserve chat-shell ?brand=&session= deep links.
+            try {
+              const next = new URL(window.location.href)
+              next.searchParams.delete('code')
+              next.searchParams.delete('error')
+              next.searchParams.delete('error_description')
+              next.searchParams.delete('state')
+              const qs = next.searchParams.toString()
+              window.history.replaceState({}, '', `${next.pathname}${qs ? `?${qs}` : ''}${next.hash}`)
+            } catch {
+              window.history.replaceState({}, '', window.location.pathname)
+            }
           }
         })
       }
@@ -220,7 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, isAdmin, signUp, signIn, signInWithGoogle, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ user, session, loading, isAdmin, adminResolved, signUp, signIn, signInWithGoogle, signOut, updateProfile }}>
       {children}
     </AuthContext.Provider>
   )
