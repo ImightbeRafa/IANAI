@@ -52,12 +52,13 @@ AIIAN is a different Supabase **project** in the same org family; it is not the 
 
 See `docs/operations/chat-shell-aiian-canary.md`.
 
-## Canary snapshot
+## Production promote (2026-08-21)
 
-| Item | Value |
+| Step | Result |
 |------|--------|
-| Flag `chat_shell` | enabled = true |
-| Canary | `ralauas@gmail.com` (admin) |
-| `chat_beta_access` | true (1 of 48 profiles) |
-| `preferred_ui` | classic (home stays classic until Probar Chat) |
-| Protect trigger | re-enabled after invite |
+| PR #10 → `chat-shell` | merged `46a5cf1` |
+| PR #8 → `master` | merged `2262b65` |
+| Vercel Production | success for `2262b65` |
+| `ianai-omega.vercel.app` | serves chat-shell build (`ChatShellPage-CU8NLp48.js`) |
+| Flag during promote | temporarily **false**, then re-enabled **true** |
+| Canary | `ralauas@gmail.com` still invited; `preferred_ui=classic` |
