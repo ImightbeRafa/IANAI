@@ -15,6 +15,7 @@ This runbook does **not** authorize the agent to apply SQL or flip flags.
 - [ ] Inventory reviewed: `docs/operations/chat-shell-aiian-inventory.md`
 - [ ] Preflight output saved from `01_preflight_read_only.sql`
 - [ ] `02` + `03` applied; `04_postflight` shows `chat_shell.enabled = false`
+- [ ] `05_security_performance_audit.sql` + AIIAN Dashboard Advisors (Security + Performance) reviewed with no unresolved high-severity findings
 - [ ] Production deploy includes chat-shell code with fail-closed rollout
 - [ ] PITR / backup window confirmed
 - [ ] Canary email chosen (internal). Synthetic brand naming agreed (e.g. `CANARY — do not use`)

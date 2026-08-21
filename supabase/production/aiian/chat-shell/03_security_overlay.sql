@@ -254,12 +254,15 @@ CREATE POLICY "Session readers can view thread images"
     AND public.can_read_chat_session(session_id)
   );
 
+-- Tighten INSERT/DELETE with can_write_product so session_id IS NULL cannot
+-- attach or remove images on another user's product.
 CREATE POLICY "Users can insert own product images"
   ON public.product_images
   FOR INSERT
   TO authenticated
   WITH CHECK (
     user_id = auth.uid()
+    AND public.can_write_product(product_id)
     AND (session_id IS NULL OR public.can_write_chat_session(session_id))
   );
 
@@ -274,7 +277,10 @@ CREATE POLICY "Users can delete own product images"
   ON public.product_images
   FOR DELETE
   TO authenticated
-  USING (user_id = auth.uid());
+  USING (
+    user_id = auth.uid()
+    AND public.can_write_product(product_id)
+  );
 
 -- ---------------------------------------------------------------------------
 -- posts: thread read + thread-clear update (retain row when unlinking)

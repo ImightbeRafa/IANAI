@@ -9,10 +9,16 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 0) Abort if chat_shell already enabled (unexpected on AIIAN)
+-- 0) Guards: Postgres version + abort if chat_shell already enabled
 -- ---------------------------------------------------------------------------
 DO $$
 BEGIN
+  IF current_setting('server_version_num')::int < 150000 THEN
+    RAISE EXCEPTION
+      'Refuse apply: need Postgres >= 15 for ON DELETE SET NULL (column). server_version=%',
+      current_setting('server_version');
+  END IF;
+
   IF to_regclass('public.app_feature_flags') IS NOT NULL THEN
     IF EXISTS (
       SELECT 1 FROM public.app_feature_flags
@@ -161,7 +167,7 @@ COMMENT ON TABLE public.chat_session_offers IS
 
 -- ---------------------------------------------------------------------------
 -- 5) posts / product_images thread links
---    Corrected semantics: offer/session unlink SET NULL (retain assets).
+--    Offer unlink: ON DELETE SET NULL (session_id) only — retain assets + product_id.
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.posts
   ADD COLUMN IF NOT EXISTS session_id uuid REFERENCES public.chat_sessions(id) ON DELETE SET NULL,
@@ -199,14 +205,16 @@ ALTER TABLE public.product_images
   ADD CONSTRAINT product_images_message_requires_session
   CHECK (message_id IS NULL OR session_id IS NOT NULL);
 
--- ON DELETE SET NULL (not RESTRICT): deleting an offer/session clears links, keeps posts/images.
+-- Column-targeted SET NULL (session_id only): retain posts/images and keep product_id.
+-- Unrestricted composite SET NULL would also null product_id and break NOT NULL on classic rows.
+-- Requires Postgres >= 15 (guarded in section 0).
 ALTER TABLE public.posts
   DROP CONSTRAINT IF EXISTS posts_session_offer_fkey;
 ALTER TABLE public.posts
   ADD CONSTRAINT posts_session_offer_fkey
   FOREIGN KEY (session_id, product_id)
   REFERENCES public.chat_session_offers (session_id, product_id)
-  ON DELETE SET NULL;
+  ON DELETE SET NULL (session_id);
 
 ALTER TABLE public.product_images
   DROP CONSTRAINT IF EXISTS product_images_session_offer_fkey;
@@ -214,7 +222,7 @@ ALTER TABLE public.product_images
   ADD CONSTRAINT product_images_session_offer_fkey
   FOREIGN KEY (session_id, product_id)
   REFERENCES public.chat_session_offers (session_id, product_id)
-  ON DELETE SET NULL;
+  ON DELETE SET NULL (session_id);
 
 CREATE INDEX IF NOT EXISTS idx_posts_session_id
   ON public.posts (session_id)

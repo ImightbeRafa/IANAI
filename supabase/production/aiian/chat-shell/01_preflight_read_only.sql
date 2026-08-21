@@ -5,10 +5,15 @@
 -- Save the full result set before applying 02/03.
 -- =============================================================================
 
--- 0) Identity
+-- 0) Identity + engine (need PG >= 15 for column-targeted SET NULL)
 SELECT current_database() AS database,
        current_user AS db_user,
+       current_setting('server_version') AS server_version,
+       current_setting('server_version_num')::int AS server_version_num,
        now() AT TIME ZONE 'utc' AS queried_at_utc;
+-- STOP if server_version_num < 150000
+-- STOP unless you opened this editor from project lstzfxsdmggkoaxfawny (AIIAN).
+-- current_database() alone does NOT prove project identity.
 
 -- 1) Critical tables exist?
 SELECT t AS table_name,

@@ -27,15 +27,22 @@ This directory is **outside** `supabase/migrations/` so `supabase db push` / Pre
 - Does not point Vercel Preview at AIIAN
 - Does not mutate data beyond DDL + disabled flag seed
 
+## Critical corrections (do not apply older pack revisions)
+
+1. Offer FKs use **`ON DELETE SET NULL (session_id)`** (Postgres ≥ 15), not bare `SET NULL`. Bare composite `SET NULL` would also null `product_id` and break classic `NOT NULL` ownership on `posts` / `product_images`.
+2. `product_images` INSERT/DELETE policies require **`can_write_product(product_id)`** so a null `session_id` cannot attach/remove another product’s images.
+
 ## Apply order (production SQL editor / reviewed ops)
 
-1. Run `01_preflight_read_only.sql` — save output. **Stop** if unexpected kinds, enabled flag, or missing classic tables.
-2. Review policy catalog from preflight against assumptions in `03_security_overlay.sql`.
-3. In a single reviewed window:
+1. Confirm the SQL editor is open on **AIIAN** `lstzfxsdmggkoaxfawny` (not IANAI-preview).
+2. Run `01_preflight_read_only.sql` — save output. **Stop** if PG &lt; 15, unexpected kinds, enabled flag, or missing classic tables.
+3. Review policy catalog from preflight against assumptions in `03_security_overlay.sql`.
+4. In a single reviewed window:
    - `02_foundation_and_rollout.sql`
    - `03_security_overlay.sql` (only after policy review)
-4. Run `04_postflight_read_only.sql` — confirm flag still **false**, objects present.
-5. Follow `docs/operations/chat-shell-aiian-canary.md` for code deploy + invite (later).
+5. Run `04_postflight_read_only.sql` — confirm flag still **false**, objects present, offer FKs show `SET NULL (session_id)`.
+6. Run `05_security_performance_audit.sql` **and** Dashboard Advisors (Security + Performance) on AIIAN.
+7. Follow `docs/operations/chat-shell-aiian-canary.md` for code deploy + invite (later — needs explicit Phase B/C go).
 
 ## Rollback
 
@@ -50,3 +57,4 @@ Schema rollback is not automatic; restore from PITR/backup if a migration must b
 | `02_foundation_and_rollout.sql` | Schema + triggers + helpers + rollout (transactional) |
 | `03_security_overlay.sql` | RLS / grants / storage policy intents (transactional) |
 | `04_postflight_read_only.sql` | Verification queries |
+| `05_security_performance_audit.sql` | RLS / grants / indexes / SECURITY DEFINER audit |

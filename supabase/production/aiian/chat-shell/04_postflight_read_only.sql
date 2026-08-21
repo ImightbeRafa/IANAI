@@ -40,12 +40,25 @@ WHERE conrelid = 'public.posts'::regclass
   AND conname IN ('posts_session_offer_fkey','posts_message_requires_session')
 ORDER BY 1;
 
--- Expect ON DELETE SET NULL on offer FKs
+-- Expect ON DELETE SET NULL (session_id) on offer FKs — product_id must remain
 SELECT
   c.conname,
   pg_get_constraintdef(c.oid) AS def
 FROM pg_constraint c
 WHERE c.conname IN ('posts_session_offer_fkey','product_images_session_offer_fkey');
+-- def MUST contain: ON DELETE SET NULL (session_id)
+-- def MUST NOT be bare ON DELETE SET NULL (that would null product_id)
+
+-- product_images INSERT policy must require can_write_product
+SELECT p.polname,
+       pg_get_expr(p.polwithcheck, p.polrelid) AS with_check_expr
+FROM pg_policy p
+JOIN pg_class c ON c.oid = p.polrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relname = 'product_images'
+  AND p.polname = 'Users can insert own product images';
+-- with_check_expr MUST include can_write_product
 
 SELECT count(*) AS beta_true
 FROM public.profiles
