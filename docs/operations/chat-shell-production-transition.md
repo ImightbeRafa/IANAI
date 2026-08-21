@@ -18,6 +18,8 @@ Enabling the kill switch alone must not redirect anyone. Preference never grants
 
 ## 1. Inventory AIIAN (before any apply)
 
+**Latest read-only snapshot:** [`docs/operations/chat-shell-aiian-inventory.md`](./chat-shell-aiian-inventory.md) (2026-08-21). Summary: classic entities + usage RPCs are present; chat-shell foundation tables/columns and rollout controls are **missing**. Do not point a preview at AIIAN until that gap is closed with a production-reviewed migration pack.
+
 Confirm, do not invent:
 
 - `chat_sessions.product_id` nullability, `business_id`, `brand_kit_id`
@@ -107,9 +109,10 @@ Do **not** merge to `master` or enable the kill switch until a human signs this 
 
 ### Known blockers
 
-- Production AIIAN schema/RLS inventory is not complete from this agent.
+- Production AIIAN schema/RLS inventory snapshot: `docs/operations/chat-shell-aiian-inventory.md` (foundation + rollout controls missing; usage RPCs present).
 - Production cutover SQL is human-applied only.
 - No Playwright `/chat` smoke in CI yet.
+- AIIAN is not linked in Supabase MCP for this agent — REST/OpenAPI inventory only; RLS policy text still **not verified**.
 
 ## Do not
 

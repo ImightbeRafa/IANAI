@@ -57,12 +57,16 @@ Invariants:
 
 ## Known gaps / next
 
-See the production checklist in `docs/operations/chat-shell-production-transition.md`. Product next (not this patch):
+See the production checklist in `docs/operations/chat-shell-production-transition.md` and the read-only gap report in `docs/operations/chat-shell-aiian-inventory.md`.
 
-1. Split `useChatSessionThread.ts` into load / scripts / images controllers.
-2. One typed localStorage helper for every `ianai.chat-shell.*` key.
-3. Generate the docs token mirror from the public CSS so they cannot drift.
-4. Browser smoke for `/chat` (folder switch, hide/show widget, dark/light, 390px).
-5. Instrument folder-switch latency and generation stages.
+Product next (not this patch):
+
+1. Human-reviewed AIIAN migration pack (foundation + rollout). Do not replay Preview `062–066` RLS/seeds.
+2. Production canary with classic ↔ chat jump; then optional protected AIIAN-backed preview.
+3. Split `useChatSessionThread.ts` into load / scripts / images controllers.
+4. One typed localStorage helper for every `ianai.chat-shell.*` key.
+5. Generate the docs token mirror from the public CSS so they cannot drift.
+6. Browser smoke for `/chat` (folder switch, hide/show widget, dark/light, 390px).
+7. Instrument folder-switch latency and generation stages.
 
 Do not invent a second changelog. User-facing notes go in `src/data/changelog.ts`; agent notes go in `docs/agent/CHANGELOG.md`.

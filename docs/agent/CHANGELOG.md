@@ -1,3 +1,13 @@
+## 2026-08-21 — AIIAN read-only inventory
+
+**Area:** chat-shell / ops
+**Files:** `docs/operations/chat-shell-aiian-inventory.md`, `docs/operations/chat-shell-production-transition.md`, `docs/agent/README.md`, `.cursor/skills/advance-ai/reference/chat-shell.md`
+
+- Read-only gap report for production AIIAN vs chat-shell needs (OpenAPI/REST on AIIAN; MCP SQL on IANAI-preview).
+- Finding: classic data + usage RPCs present; shell foundation tables/columns and rollout controls missing. No SQL applied.
+
+---
+
 ## 2026-08-19 — Composer kit rail + stable folder heights
 
 **Area:** chat-shell

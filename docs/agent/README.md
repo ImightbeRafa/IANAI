@@ -36,6 +36,7 @@ src/data/changelog.ts              ← User-facing changelog (in-app)
 | `docs/agent/CHANGELOG.md` | High — maintained for agents |
 | `.cursor/skills/advance-ai/` | High |
 | `docs/operations/chat-shell-production-transition.md` | High — preview vs AIIAN cutover |
+| `docs/operations/chat-shell-aiian-inventory.md` | High — read-only production gap report |
 | `GUIONES_PIPELINE_REVIEW.md` | High for pipeline analysis |
 | `CODEBASE_STATUS.md` | Medium — good schema, Feb 2025 |
 | `SECURITY_AUDIT.md` | Medium — Feb 2026, some fixes since |
