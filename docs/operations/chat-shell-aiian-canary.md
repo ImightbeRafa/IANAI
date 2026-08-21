@@ -41,10 +41,16 @@ Expect: uninvited users still classic; no automatic jump to `/chat`.
 ## Phase C — invite one canary (preference stays classic)
 
 ```sql
+-- Ops invite: protect_chat_beta_access only allows service_role JWT.
+-- If running in SQL editor / migration (no service_role JWT), briefly disable:
+ALTER TABLE public.profiles DISABLE TRIGGER trg_protect_chat_beta_access;
+
 UPDATE public.profiles
 SET chat_beta_access = true
 -- preferred_ui stays 'classic'
 WHERE email = 'CANARY_EMAIL_HERE';
+
+ALTER TABLE public.profiles ENABLE TRIGGER trg_protect_chat_beta_access;
 ```
 
 Canary uses **Probar Chat** / **Volver al panel clásico**.
