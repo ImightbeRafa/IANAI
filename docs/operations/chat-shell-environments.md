@@ -12,6 +12,8 @@
 See also:
 
 - `docs/operations/chat-shell-aiian-inventory.md` — read-only AIIAN vs Preview gap report
+- `docs/operations/chat-shell-aiian-canary.md` — human canary after pack apply
+- `supabase/production/aiian/chat-shell/` — production SQL pack (manual only)
 - `docs/operations/chat-shell-p0.md` — `/chat` UI verification and preview flag SQL
 - `docs/operations/chat-shell-preview-rls.md` — Preview-only bootstrap (RLS deny-all / `RETURNING`, empty `plan_limits`)
 

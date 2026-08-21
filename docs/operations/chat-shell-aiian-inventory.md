@@ -135,11 +135,12 @@ Applied / present on IANAI-preview (evidence from MCP), **not** on AIIAN:
 
 ## Recommended next steps (still no AIIAN writes until you approve)
 
-1. **Human review this inventory** — confirm it matches what you expect on AIIAN.
-2. **Draft a production-specific migration pack** (additive) covering foundation + rollout + generated kind + storage/RLS gaps — reviewed separately from Preview `062–066`.
-3. **Keep `chat_shell` false** after apply; invite one internal canary; leave `preferred_ui = classic`.
-4. **Canary on `ianai-omega`** first (classic ↔ Probar Chat), using a synthetic brand for writes; only observe real customer brands.
-5. **Optional later:** one protected Vercel branch with AIIAN env pairing + Deployment Protection (not all previews).
+1. ~~Human review this inventory~~ — see pack below.
+2. **Apply the reviewed pack** (human only): `supabase/production/aiian/chat-shell/` (`01` preflight → `02` foundation → `03` security after policy review → `04` postflight).
+3. Follow canary: `docs/operations/chat-shell-aiian-canary.md` (flag off → deploy → invite one internal → classic ↔ chat).
+4. **Optional later:** one protected Vercel branch with AIIAN env pairing + Deployment Protection (not all previews).
+
+Pack status: **drafted in-repo, not applied.**
 
 ---
 

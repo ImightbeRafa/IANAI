@@ -1,3 +1,13 @@
+## 2026-08-21 — AIIAN production pack drafted (not applied)
+
+**Area:** chat-shell / ops
+**Files:** `supabase/production/aiian/chat-shell/*`, `docs/operations/chat-shell-aiian-canary.md`, production transition / inventory / environments docs
+
+- Human-only AIIAN pack outside `supabase/migrations/`: preflight, foundation+rollout (`chat_shell=false`), security overlay (incl. offer FK SET NULL + thread-clear), postflight.
+- Canary runbook for classic ↔ chat on real data after apply. No SQL executed against AIIAN.
+
+---
+
 ## 2026-08-21 — AIIAN read-only inventory
 
 **Area:** chat-shell / ops

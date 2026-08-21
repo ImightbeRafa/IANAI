@@ -31,13 +31,29 @@ Confirm, do not invent:
 
 If foundation tables are missing, apply a **production-reviewed** chat foundation first. Do not reuse Preview deny-all patches.
 
-## 2. Apply 067 (additive)
+## 2. Apply production pack (additive, human-only)
 
-File: `supabase/migrations/067_chat_shell_rollout_controls.sql`
+**Do not** `supabase db push` Preview migrations onto AIIAN.  
+**Do not** apply this pack from the agent without explicit approval.
 
-Adds `chat_beta_access` and `preferred_ui`. Seeds `chat_shell = false` if the flag row is missing. Does not rewrite sessions.
+Pack (outside `supabase/migrations/`):
 
-If invited users still see the invite gate and no Admin item while SQL shows the flags true, apply `068_profiles_select_own.sql` (own-row `profiles` SELECT). Preview needed this after 061 dropped the global dump policy. Do not apply 068 to AIIAN from the agent.
+`supabase/production/aiian/chat-shell/`
+
+| Step | File |
+|------|------|
+| Preflight | `01_preflight_read_only.sql` |
+| Foundation + rollout (`chat_shell=false`) | `02_foundation_and_rollout.sql` |
+| RLS / storage overlay | `03_security_overlay.sql` (after policy-catalog review) |
+| Postflight | `04_postflight_read_only.sql` |
+
+Canary runbook: [`docs/operations/chat-shell-aiian-canary.md`](./chat-shell-aiian-canary.md).
+
+`068_profiles_select_own.sql` is **not** part of this pack — AIIAN already has own-profile SELECT; confirm in preflight before inventing a second policy.
+
+### Legacy note (superseded)
+
+Older drafts mentioned applying repo migration `067` alone and maybe `068`. Prefer the consolidated pack above (foundation + corrected offer SET NULL delete semantics + rollout + security).
 
 ## 3. Deploy code with the flag off
 
@@ -109,10 +125,10 @@ Do **not** merge to `master` or enable the kill switch until a human signs this 
 
 ### Known blockers
 
-- Production AIIAN schema/RLS inventory snapshot: `docs/operations/chat-shell-aiian-inventory.md` (foundation + rollout controls missing; usage RPCs present).
-- Production cutover SQL is human-applied only.
+- Production pack is **drafted** at `supabase/production/aiian/chat-shell/` but **not applied**. Human must run preflight → review policies → apply → postflight.
+- Canary runbook: `docs/operations/chat-shell-aiian-canary.md`.
+- AIIAN is not linked in Supabase MCP for this agent — REST/OpenAPI inventory only until pack apply.
 - No Playwright `/chat` smoke in CI yet.
-- AIIAN is not linked in Supabase MCP for this agent — REST/OpenAPI inventory only; RLS policy text still **not verified**.
 
 ## Do not
 

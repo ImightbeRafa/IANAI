@@ -59,10 +59,10 @@ Invariants:
 
 See the production checklist in `docs/operations/chat-shell-production-transition.md` and the read-only gap report in `docs/operations/chat-shell-aiian-inventory.md`.
 
-Product next (not this patch):
+Product next (not this pack):
 
-1. Human-reviewed AIIAN migration pack (foundation + rollout). Do not replay Preview `062–066` RLS/seeds.
-2. Production canary with classic ↔ chat jump; then optional protected AIIAN-backed preview.
+1. Human apply of `supabase/production/aiian/chat-shell/` after preflight policy review; then canary per `docs/operations/chat-shell-aiian-canary.md`.
+2. Optional protected AIIAN-backed Vercel preview (single branch only).
 3. Split `useChatSessionThread.ts` into load / scripts / images controllers.
 4. One typed localStorage helper for every `ianai.chat-shell.*` key.
 5. Generate the docs token mirror from the public CSS so they cannot drift.
