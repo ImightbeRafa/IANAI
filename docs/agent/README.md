@@ -16,6 +16,7 @@ docs/agent/
   README.md                        ← This file
 docs/operations/
   chat-shell-production-transition.md  ← Rollout + production checklist
+  chat-shell-aiian-inventory.md        ← Read-only AIIAN vs Preview gap report
 src/data/changelog.ts              ← User-facing changelog (in-app)
 ```
 
