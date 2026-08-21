@@ -58,3 +58,10 @@ Schema rollback is not automatic; restore from PITR/backup if a migration must b
 | `03_security_overlay.sql` | RLS / grants / storage policy intents (transactional) |
 | `04_postflight_read_only.sql` | Verification queries |
 | `05_security_performance_audit.sql` | RLS / grants / indexes / SECURITY DEFINER audit |
+| `06_audit_hardening.sql` | Post-advisor: revoke trigger RPC + FK covering indexes |
+
+## Apply status (AIIAN)
+
+**Applied** 2026-08-21 via MCP `apply_migration` on `lstzfxsdmggkoaxfawny`.  
+Record: `docs/operations/chat-shell-aiian-apply-record.md`.  
+`chat_shell` remains **false**; no canary invites.

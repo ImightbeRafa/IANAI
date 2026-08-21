@@ -140,7 +140,7 @@ Applied / present on IANAI-preview (evidence from MCP), **not** on AIIAN:
 3. Follow canary: `docs/operations/chat-shell-aiian-canary.md` (flag off → deploy → invite one internal → classic ↔ chat).
 4. **Optional later:** one protected Vercel branch with AIIAN env pairing + Deployment Protection (not all previews).
 
-Pack status: **corrected in-repo (column-targeted SET NULL + image write policy).** Not applied to AIIAN until ops has a Postgres URI / MCP link for production.
+Pack status: **applied to AIIAN** on 2026-08-21 (`chat_shell` still **false**). See `docs/operations/chat-shell-aiian-apply-record.md`.
 
 ---
 
