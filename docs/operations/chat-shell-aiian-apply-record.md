@@ -46,8 +46,18 @@ AIIAN is a different Supabase **project** in the same org family; it is not the 
 
 ## Not done (needs your go)
 
-- Phase B: enable `chat_shell` kill switch  
-- Phase C: invite canary email  
-- Production frontend deploy / protected AIIAN preview  
+- ~~Phase B: enable `chat_shell` kill switch~~ — **done** 2026-08-21 (`enabled=true`)
+- ~~Phase C: invite canary email~~ — **done** `ralauas@gmail.com` (`chat_beta_access=true`, `preferred_ui=classic`); only 1 beta user
+- Production frontend deploy / protected AIIAN preview (UI must include chat-shell code for Probar Chat)
 
 See `docs/operations/chat-shell-aiian-canary.md`.
+
+## Canary snapshot
+
+| Item | Value |
+|------|--------|
+| Flag `chat_shell` | enabled = true |
+| Canary | `ralauas@gmail.com` (admin) |
+| `chat_beta_access` | true (1 of 48 profiles) |
+| `preferred_ui` | classic (home stays classic until Probar Chat) |
+| Protect trigger | re-enabled after invite |
