@@ -602,14 +602,28 @@ export async function getChatSessions(productId: string): Promise<ChatSession[]>
 }
 
 export async function getChatSession(sessionId: string): Promise<ChatSession | null> {
+  // Disambiguate: AIIAN/chat-shell also has composite FK
+  // chat_sessions(product_id, business_id) → products(id, business_id). Without the
+  // hint, PostgREST returns PGRST201 and classic Guiones looks empty.
   const { data, error } = await supabase
     .from('chat_sessions')
-    .select('*, product:products(*)')
+    .select('*, product:products!chat_sessions_product_id_fkey(*)')
     .eq('id', sessionId)
     .single()
 
-  if (error) return null
-  return data
+  if (!error && data) return data
+
+  // Fallback without embed so messages/scripts still load if the hint drifts.
+  const plain = await supabase
+    .from('chat_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .single()
+  if (plain.error) {
+    console.error('getChatSession failed:', error || plain.error)
+    return null
+  }
+  return plain.data
 }
 
 /** Safe client updates — never includes user_id / business_id / product_id (immutable after insert). */
@@ -1084,7 +1098,7 @@ export async function getFirstUserMessagePreviews(
 export async function getSessionOffers(sessionId: string): Promise<ChatSessionOffer[]> {
   const { data, error } = await supabase
     .from('chat_session_offers')
-    .select('*, product:products(*)')
+    .select('*, product:products!chat_session_offers_product_business_fkey(*)')
     .eq('session_id', sessionId)
     .order('position', { ascending: true })
 
