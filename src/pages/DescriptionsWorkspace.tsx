@@ -99,7 +99,7 @@ export default function DescriptionsWorkspace() {
         // Find or create a description session (prefixed with __desc__)
         let session = sessionsData.find(s => s.title?.startsWith('__desc__'))
         if (!session) {
-          session = await createChatSession(productId, user.id, '__desc__')
+          session = await createChatSession(productId, user.id, '__desc__', undefined, productData?.business_id)
         }
         setDescSession(session)
 

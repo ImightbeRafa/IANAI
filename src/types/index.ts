@@ -295,6 +295,11 @@ export interface ChatSession {
   product_id: string | null
   /** Brand association for chat-shell (required for Quick sessions). */
   business_id?: string | null
+  /**
+   * Brand used for chat-shell folder placement: COALESCE(business_id, product.business_id).
+   * Present when reading via chat_sessions_resolved; may be derived client-side from product.
+   */
+  resolved_business_id?: string | null
   brand_kit_id?: string | null
   primary_channel?: 'messages' | 'website' | 'physical' | null
   awareness_level?: 'cold' | 'warm' | 'hot' | null

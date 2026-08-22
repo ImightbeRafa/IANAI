@@ -393,7 +393,7 @@ export default function ProductWorkspace() {
     if (!product || !user) return
     
     try {
-      const newSession = await createChatSession(product.id, user.id, 'Nueva Sesión')
+      const newSession = await createChatSession(product.id, user.id, 'Nueva Sesión', undefined, product.business_id)
       setSessions(prev => [newSession, ...prev])
       navigate(`/product/${product.id}/session/${newSession.id}`)
     } catch (error) {
@@ -413,7 +413,7 @@ export default function ProductWorkspace() {
       let session = currentSession
 
       if (!session) {
-        session = await createChatSession(product.id, user.id, userMessage.slice(0, 50), context)
+        session = await createChatSession(product.id, user.id, userMessage.slice(0, 50), context, product.business_id)
         setCurrentSession(session)
         setSessions(prev => [session!, ...prev])
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })
@@ -821,7 +821,7 @@ export default function ProductWorkspace() {
       let session = currentSession
 
       if (!session) {
-        session = await createChatSession(product.id, user.id, `Script - ${new Date().toLocaleDateString()}`, context)
+        session = await createChatSession(product.id, user.id, `Script - ${new Date().toLocaleDateString()}`, context, product.business_id)
         setCurrentSession(session)
         setSessions(prev => [session!, ...prev])
         navigate(`/product/${product.id}/session/${session.id}`, { replace: true })

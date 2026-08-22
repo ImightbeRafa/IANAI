@@ -27,6 +27,7 @@ import { isBrandContextEditRequest, isBrandRuleRequest, isExplicitGenerationRequ
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import type { ProductImage } from '../../services/database'
 import { useChatShellRollout } from './ChatShellRolloutContext'
+import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 
 interface ChatShellProps {
   theme: ChatShellTheme
@@ -375,6 +376,12 @@ export default function ChatShell({
     return items.slice(-8).reverse()
   }, [language, thread.messages])
 
+  const classicLibrary = useClassicSessionLibrary(
+    workspace.activeSession,
+    railTab,
+    railOpen
+  )
+
   return (
     <div className={shellClass} data-theme={theme}>
       {navOpen && (
@@ -662,6 +669,9 @@ export default function ChatShell({
         sending={thread.sending}
         language={language}
         threadScripts={threadScripts}
+        classicScripts={classicLibrary.classicScripts}
+        classicPosts={classicLibrary.classicPosts}
+        classicLibraryLoading={classicLibrary.loadingScripts || classicLibrary.loadingPosts}
         onOpenSettings={() => setSettingsOpen(true)}
         onImproveSetup={brandSetup.reopen}
         onAskChatContext={() => {
