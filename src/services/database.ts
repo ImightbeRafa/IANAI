@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { uploadPostImageOriginal } from '../utils/imageCompression'
 import {
   CHAT_SHELL_MAX_OFFERS,
   normalizeOfferPositions,
@@ -510,9 +511,11 @@ export async function getProduct(productId: string): Promise<Product | null> {
     .from('products')
     .select('*, client:clients(*), business:businesses(*, target_audiences:business_target_audiences(*))')
     .eq('id', productId)
-    .single()
+    .maybeSingle()
 
-  if (error) return null
+  // Only a genuine missing/inaccessible row is null. Other PostgREST errors must
+  // surface so callers do not mis-render "Product not found".
+  if (error) throw error
   return data
 }
 
@@ -1567,8 +1570,29 @@ export interface CarouselSlideInsert {
   carousel_subtype: string
 }
 
+/** Columns needed by PostWorkspace list/pagination (avoid select *). */
+export const POST_LIST_SELECT =
+  'id,status,generated_image_url,prompt,created_at,model,generation_id,carousel_group_id,slide_index,slide_total,carousel_subtype,rating'
+
+export type PostListItem = Pick<
+  Post,
+  | 'id'
+  | 'status'
+  | 'generated_image_url'
+  | 'prompt'
+  | 'created_at'
+  | 'model'
+  | 'generation_id'
+  | 'carousel_group_id'
+  | 'slide_index'
+  | 'slide_total'
+  | 'carousel_subtype'
+  | 'rating'
+>
+
 /**
  * Persist all slides of a carousel as linked `posts` rows sharing a `carousel_group_id`.
+ * Data-URI images are uploaded to `post-images` first — never store base64 in Postgres.
  * Returns the inserted rows sorted by slide_index ascending.
  */
 export async function createCarouselPosts(
@@ -1579,21 +1603,48 @@ export async function createCarouselPosts(
   model: string = 'nano-banana-pro'
 ): Promise<Post[]> {
   if (!slides.length) return []
-  const rows = slides.map(s => ({
-    product_id: productId,
-    created_by: userId,
-    prompt: s.prompt,
-    generated_image_url: s.generated_image_url,
-    status: 'completed' as const,
-    width: s.width,
-    height: s.height,
-    output_format: 'jpeg',
-    model,
-    carousel_group_id: carouselGroupId,
-    slide_index: s.slide_index,
-    slide_total: s.slide_total,
-    carousel_subtype: s.carousel_subtype,
-  }))
+  const rows: Array<{
+    product_id: string
+    created_by: string
+    prompt: string
+    generated_image_url: string
+    status: 'completed'
+    width: number
+    height: number
+    output_format: string
+    model: string
+    carousel_group_id: string
+    slide_index: number
+    slide_total: number
+    carousel_subtype: string
+  }> = []
+  for (const s of slides) {
+    let imageUrl = s.generated_image_url
+    if (imageUrl.startsWith('data:')) {
+      const ext = /image\/png/i.test(imageUrl) ? 'png' : /image\/webp/i.test(imageUrl) ? 'webp' : 'jpg'
+      imageUrl = await uploadPostImageOriginal(
+        userId,
+        productId,
+        imageUrl,
+        `carousel-${carouselGroupId}-slide-${s.slide_index}.${ext}`
+      )
+    }
+    rows.push({
+      product_id: productId,
+      created_by: userId,
+      prompt: s.prompt,
+      generated_image_url: imageUrl,
+      status: 'completed' as const,
+      width: s.width,
+      height: s.height,
+      output_format: 'jpeg',
+      model,
+      carousel_group_id: carouselGroupId,
+      slide_index: s.slide_index,
+      slide_total: s.slide_total,
+      carousel_subtype: s.carousel_subtype,
+    })
+  }
   const { data, error } = await supabase
     .from('posts')
     .insert(rows)
@@ -1671,16 +1722,22 @@ export async function getProductPostsPaginated(
   productId: string,
   limit: number,
   offset: number
-): Promise<{ posts: Post[]; total: number }> {
+): Promise<{ posts: PostListItem[]; total: number }> {
+  // Only list completed posts with HTTP(S) image URLs. Inline data: URIs were
+  // historically written for carousels and can be tens of MB per page — they
+  // must be backfilled to storage, not transferred through this list path.
   const { data, error, count } = await supabase
     .from('posts')
-    .select('*', { count: 'exact' })
+    .select(POST_LIST_SELECT, { count: 'exact' })
     .eq('product_id', productId)
+    .eq('status', 'completed')
+    .not('generated_image_url', 'is', null)
+    .not('generated_image_url', 'like', 'data:%')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
 
   if (error) throw error
-  return { posts: data || [], total: count || 0 }
+  return { posts: (data as PostListItem[]) || [], total: count || 0 }
 }
 
 export async function ratePost(postId: string, rating: number | null): Promise<void> {

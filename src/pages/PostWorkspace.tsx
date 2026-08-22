@@ -216,6 +216,8 @@ export default function PostWorkspace() {
   const [additionalInstructions, setAdditionalInstructions] = useState('')
   const [showScriptPicker, setShowScriptPicker] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [productLoadError, setProductLoadError] = useState<string | null>(null)
+  const [postsLoadError, setPostsLoadError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
@@ -594,17 +596,13 @@ export default function PostWorkspace() {
   useEffect(() => {
     async function loadData() {
       if (!productId || !user) return
+      setLoading(true)
+      setProductLoadError(null)
+      setPostsLoadError(null)
+
       try {
-        const [productData, scriptsData, postsResult, userPalettes, prodImages, userPostTypes] = await Promise.all([
-          getProduct(productId),
-          getScripts(productId),
-          getProductPostsPaginated(productId, POSTS_PAGE_SIZE, 0),
-          getCustomPalettes(user.id),
-          getProductImages(productId),
-          getCustomPostTypes(user.id)
-        ])
+        const productData = await getProduct(productId)
         setProduct(productData)
-        // Prefill logo fields from product
         if (productData?.name && !logoBusinessName) setLogoBusinessName(productData.name)
         if (!logoIndustry) {
           const inferredIndustry = (productData?.product_category_custom ||
@@ -614,28 +612,55 @@ export default function PostWorkspace() {
             productData?.type || '') as string
           if (inferredIndustry) setLogoIndustry(inferredIndustry)
         }
-        setScripts(scriptsData)
-        setCustomPalettes(userPalettes)
-        setProductImages(prodImages)
-        setCustomPostTypes(userPostTypes)
-        setTotalPostCount(postsResult.total)
+      } catch (err) {
+        console.error('Failed to load product:', err)
+        setProduct(null)
+        setProductLoadError(err instanceof Error ? err.message : String(err))
+        setLoading(false)
+        return
+      } finally {
+        setLoading(false)
+      }
 
-        const completedPosts = postsResult.posts
-          .filter(post => post.status === 'completed' && post.generated_image_url)
-        const loadedPosts: GeneratedPost[] = completedPosts
-          .map(post => ({
-            id: post.id,
-            imageUrl: post.generated_image_url!,
-            prompt: post.prompt,
-            createdAt: new Date(post.created_at),
-            model: post.model,
-            generationId: post.generation_id ?? null,
-            saved: true,
-            carouselGroupId: post.carousel_group_id ?? null,
-            slideIndex: post.slide_index ?? null,
-            slideTotal: post.slide_total ?? null,
-            carouselSubtype: post.carousel_subtype ?? null,
-          }))
+      const settled = await Promise.allSettled([
+        getScripts(productId),
+        getProductPostsPaginated(productId, POSTS_PAGE_SIZE, 0),
+        getCustomPalettes(user.id),
+        getProductImages(productId),
+        getCustomPostTypes(user.id),
+      ])
+
+      const [scriptsResult, postsResult, palettesResult, imagesResult, postTypesResult] = settled
+
+      if (scriptsResult.status === 'fulfilled') setScripts(scriptsResult.value)
+      else console.error('Failed to load scripts:', scriptsResult.reason)
+
+      if (palettesResult.status === 'fulfilled') setCustomPalettes(palettesResult.value)
+      else console.error('Failed to load palettes:', palettesResult.reason)
+
+      if (imagesResult.status === 'fulfilled') setProductImages(imagesResult.value)
+      else console.error('Failed to load product images:', imagesResult.reason)
+
+      if (postTypesResult.status === 'fulfilled') setCustomPostTypes(postTypesResult.value)
+      else console.error('Failed to load post types:', postTypesResult.reason)
+
+      if (postsResult.status === 'fulfilled') {
+        const { posts, total } = postsResult.value
+        setTotalPostCount(total)
+        const completedPosts = posts.filter(post => post.status === 'completed' && post.generated_image_url)
+        const loadedPosts: GeneratedPost[] = completedPosts.map(post => ({
+          id: post.id,
+          imageUrl: post.generated_image_url!,
+          prompt: post.prompt,
+          createdAt: new Date(post.created_at),
+          model: post.model,
+          generationId: post.generation_id ?? null,
+          saved: true,
+          carouselGroupId: post.carousel_group_id ?? null,
+          slideIndex: post.slide_index ?? null,
+          slideTotal: post.slide_total ?? null,
+          carouselSubtype: post.carousel_subtype ?? null,
+        }))
         setGeneratedPosts(loadedPosts)
 
         const restoredRatings: Record<string, 'good' | 'bad'> = {}
@@ -644,10 +669,13 @@ export default function PostWorkspace() {
           else if (post.rating === 1) restoredRatings[post.id] = 'bad'
         }
         if (Object.keys(restoredRatings).length > 0) setPostRatings(restoredRatings)
-      } catch (err) {
-        console.error('Failed to load data:', err)
-      } finally {
-        setLoading(false)
+      } else {
+        console.error('Failed to load posts:', postsResult.reason)
+        setPostsLoadError(
+          postsResult.reason instanceof Error
+            ? postsResult.reason.message
+            : String(postsResult.reason)
+        )
       }
     }
     loadData()
@@ -1707,8 +1735,15 @@ export default function PostWorkspace() {
   if (!product) {
     return (
       <Layout>
-        <div className="flex items-center justify-center h-full">
-          <p className="text-dark-500">Product not found</p>
+        <div className="flex flex-col items-center justify-center h-full gap-2 px-4 text-center">
+          <p className="text-dark-500">
+            {productLoadError
+              ? (language === 'es' ? 'No se pudo cargar el producto.' : 'Could not load product.')
+              : 'Product not found'}
+          </p>
+          {productLoadError && (
+            <p className="text-dark-600 text-sm max-w-md">{productLoadError}</p>
+          )}
         </div>
       </Layout>
     )
@@ -1739,6 +1774,15 @@ export default function PostWorkspace() {
             : '⚠️ We\'re making improvements. You may experience temporary changes. Thanks for your patience!'}
         </p>
       </div>
+      {postsLoadError && (
+        <div className="bg-red-900/20 border-b border-red-700/30 px-4 py-2 text-center">
+          <p className="text-xs text-red-200">
+            {language === 'es'
+              ? 'No se pudieron cargar los posts guardados. El producto sigue disponible — reintentá en unos segundos.'
+              : 'Saved posts could not be loaded. The product is still available — try again in a moment.'}
+          </p>
+        </div>
+      )}
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {/* Left Panel — Script Input & Settings */}
         {/* Mobile overlay backdrop */}
