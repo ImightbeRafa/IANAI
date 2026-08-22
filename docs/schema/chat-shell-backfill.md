@@ -1,10 +1,19 @@
 # Chat-shell backfill strategy
 
-Migration `062` intentionally **does not** backfill `chat_sessions.business_id`.
+Migration `062` intentionally **did not** backfill `chat_sessions.business_id`.
+Migration `068` adds `chat_sessions_resolved` so the shell can **read** classic
+sessions under a brand via `COALESCE(session.business_id, product.business_id)`
+before (or without) mutating rows.
 
-## Why
+AIIAN production later applied a staged service-role backfill: set
+`chat_sessions.business_id` from `products.business_id` where still null, and
+insert a position-1 `chat_session_offers` row when missing. Classic UI continues
+to key off `product_id` unchanged. New classic sessions dual-write `business_id`
+when the product already belongs to a brand.
 
-Shell FKs require `products.business_id` to match `chat_sessions.business_id` when both are set. Auto-backfilling from `products.business_id` would:
+## Why the original migration skipped auto-backfill
+
+Shell FKs require `products.business_id` to match `chat_sessions.business_id` when both are set. Blind auto-backfilling from `products.business_id` would:
 
 - Freeze historical sessions to today’s product→business mapping
 - Surprise owners who later move a product across businesses

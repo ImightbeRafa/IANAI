@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ChevronLeft, MoreHorizontal, Trash2, X } from 'lucide-react'
-import type { Business, ChatSession, ChatSessionOffer, Product, ProductType } from '../../types'
-import type { ChatSessionSafeUpdates, ProductImage } from '../../services/database'
+import type { Business, ChatSession, ChatSessionOffer, Product, ProductType, Script } from '../../types'
+import type { ChatSessionSafeUpdates, PostListItem, ProductImage } from '../../services/database'
 import { CHAT_SHELL_MAX_OFFERS, displaySessionOffers, sortOffersByPosition } from './sessionOffer'
 import { Link } from 'react-router-dom'
 import { LOGO_ARCHETYPES } from '../../data/image-presets'
@@ -88,6 +88,9 @@ interface ChatContextRailProps {
   contextEditor?: ReactNode
   onAskChatContext?: () => void
   threadScripts?: { id: string; label: string }[]
+  classicScripts?: Script[]
+  classicPosts?: PostListItem[]
+  classicLibraryLoading?: boolean
 }
 
 export default function ChatContextRail({
@@ -136,6 +139,9 @@ export default function ChatContextRail({
   contextEditor,
   onAskChatContext,
   threadScripts = [],
+  classicScripts = [],
+  classicPosts = [],
+  classicLibraryLoading = false,
 }: ChatContextRailProps) {
   const t = shellT(language)
   const [title, setTitle] = useState(session?.title || '')
@@ -157,7 +163,8 @@ export default function ChatContextRail({
   const availableProducts = brandProducts.filter((p) => !attachedIds.has(p.id))
   const channelText = (brand?.sales_channels || []).join(', ') || '—'
   const offerCount = displayOffers.length
-  const imageCount = offerImages.length
+  const imageCount = offerImages.length + classicPosts.length
+  const scriptsCount = threadScripts.length + classicScripts.length
   const optionLabel = (id: RailTab) => {
     switch (id) {
       case 'context':
@@ -181,7 +188,7 @@ export default function ChatContextRail({
   const optionCount = (id: RailTab) => {
     if (id === 'offers') return offerCount
     if (id === 'images') return imageCount
-    if (id === 'scripts') return threadScripts.length
+    if (id === 'scripts') return scriptsCount
     return null
   }
 
@@ -647,17 +654,72 @@ export default function ChatContextRail({
               )}
             </>
           )}
+          {(classicLibraryLoading || classicPosts.length > 0) && (
+            <div className="chat-shell__classic-library">
+              <p className="chat-shell__rail-hint">
+                {language === 'es'
+                  ? 'Historial clásico de la oferta (posts guardados)'
+                  : 'Classic offer history (saved posts)'}
+              </p>
+              {classicLibraryLoading ? (
+                <p className="chat-shell__rail-note">{language === 'es' ? 'Cargando…' : 'Loading…'}</p>
+              ) : (
+                <div className="chat-shell__image-grid">
+                  {classicPosts.slice(0, 12).map((post) => (
+                    post.generated_image_url ? (
+                      <figure key={post.id} className="chat-shell__image-card">
+                        <img src={post.generated_image_url} alt="" loading="lazy" />
+                      </figure>
+                    ) : null
+                  ))}
+                </div>
+              )}
+              {session?.product_id ? (
+                <Link to={`/posts/product/${session.product_id}`} className="chat-shell__setup-btn">
+                  {language === 'es' ? 'Abrir Posts clásico' : 'Open classic Posts'}
+                </Link>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
 
       {tab === 'scripts' && scriptSettings && onScriptSettingsChange && onGenerateScripts ? (
-        <ChatScriptPanel
-          language={language}
-          settings={scriptSettings}
-          onChange={onScriptSettingsChange}
-          onGenerate={onGenerateScripts}
-          sending={sending}
-        />
+        <div className="chat-shell__rail-form">
+          <ChatScriptPanel
+            language={language}
+            settings={scriptSettings}
+            onChange={onScriptSettingsChange}
+            onGenerate={onGenerateScripts}
+            sending={sending}
+          />
+          {(classicLibraryLoading || classicScripts.length > 0) && (
+            <div className="chat-shell__classic-library">
+              <p className="chat-shell__rail-hint">
+                {language === 'es' ? 'Guardados clásicos (esta sesión)' : 'Classic saved (this session)'}
+              </p>
+              {classicLibraryLoading ? (
+                <p className="chat-shell__rail-note">{language === 'es' ? 'Cargando…' : 'Loading…'}</p>
+              ) : (
+                <ul className="chat-shell__offer-list">
+                  {classicScripts.slice(0, 20).map((script) => (
+                    <li key={script.id} className="chat-shell__offer-row">
+                      <span>{script.title || (language === 'es' ? 'Guion' : 'Script')}</span>
+                      {session?.product_id ? (
+                        <Link
+                          to={`/product/${session.product_id}/session/${session.id}`}
+                          className="chat-shell__row-action"
+                        >
+                          {language === 'es' ? 'Abrir' : 'Open'}
+                        </Link>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
       ) : null}
 
       {tab === 'brand' && (

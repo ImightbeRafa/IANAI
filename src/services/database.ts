@@ -578,14 +578,24 @@ export async function getOrCreateQuickPostProduct(userId: string): Promise<Produ
 // CHAT SESSION FUNCTIONS
 // =============================================
 export async function createChatSession(
-  productId: string, 
-  userId: string, 
+  productId: string,
+  userId: string,
   title: string = 'New Session',
-  context?: string
+  context?: string,
+  /** When the product already belongs to a brand, dual-write so chat-shell can list it. */
+  businessId?: string | null
 ): Promise<ChatSession> {
+  const insertPayload: Record<string, unknown> = {
+    product_id: productId,
+    user_id: userId,
+    title,
+    context,
+  }
+  if (businessId) insertPayload.business_id = businessId
+
   const { data, error } = await supabase
     .from('chat_sessions')
-    .insert({ product_id: productId, user_id: userId, title, context })
+    .insert(insertPayload)
     .select()
     .single()
 
@@ -614,7 +624,12 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
     .eq('id', sessionId)
     .single()
 
-  if (!error && data) return data
+  if (!error && data) {
+    return {
+      ...data,
+      resolved_business_id: data.business_id ?? data.product?.business_id ?? null,
+    }
+  }
 
   // Fallback without embed so messages/scripts still load if the hint drifts.
   const plain = await supabase
@@ -626,7 +641,10 @@ export async function getChatSession(sessionId: string): Promise<ChatSession | n
     console.error('getChatSession failed:', error || plain.error)
     return null
   }
-  return plain.data
+  return {
+    ...plain.data,
+    resolved_business_id: plain.data.business_id ?? null,
+  }
 }
 
 /** Safe client updates — never includes user_id / business_id / product_id (immutable after insert). */
@@ -702,25 +720,29 @@ export async function createBrandChatSession(
   return data
 }
 
-/** Chat-shell: list sessions for a brand (includes Quick / product-null rows). */
+/**
+ * Chat-shell: list sessions for a brand.
+ * Uses chat_sessions_resolved so classic rows (business_id null, product.business_id set)
+ * appear under the same MARCAS folder without mutating legacy data first.
+ */
 export async function getBusinessChatSessions(businessId: string): Promise<ChatSession[]> {
   const { data, error } = await supabase
-    .from('chat_sessions')
+    .from('chat_sessions_resolved')
     .select('*')
-    .eq('business_id', businessId)
+    .eq('resolved_business_id', businessId)
     .neq('status', 'archived')
     .order('updated_at', { ascending: false })
 
   if (error) throw error
-  return data || []
+  return (data || []) as ChatSession[]
 }
 
 /** Every session id for a brand, including archived — required before folder delete. */
 export async function getAllBusinessChatSessionIds(businessId: string): Promise<string[]> {
   const { data, error } = await supabase
-    .from('chat_sessions')
+    .from('chat_sessions_resolved')
     .select('id')
-    .eq('business_id', businessId)
+    .eq('resolved_business_id', businessId)
 
   if (error) throw error
   return (data || []).map((row) => row.id as string).filter(Boolean)
@@ -747,9 +769,9 @@ export async function deleteBusinessWithContents(businessId: string): Promise<vo
 /** Lightweight per-brand session count for collapsed sidebar labels. */
 export async function countBusinessChatSessions(businessId: string): Promise<number> {
   const { count, error } = await supabase
-    .from('chat_sessions')
+    .from('chat_sessions_resolved')
     .select('id', { count: 'exact', head: true })
-    .eq('business_id', businessId)
+    .eq('resolved_business_id', businessId)
     .neq('status', 'archived')
 
   if (error) throw error
@@ -764,17 +786,29 @@ export async function countBusinessChatSessionsBulk(
   for (const id of businessIds) out[id] = 0
   if (businessIds.length === 0) return out
   const { data, error } = await supabase
-    .from('chat_sessions')
-    .select('business_id')
-    .in('business_id', businessIds)
+    .from('chat_sessions_resolved')
+    .select('resolved_business_id')
+    .in('resolved_business_id', businessIds)
     .neq('status', 'archived')
   if (error) throw error
   for (const row of data || []) {
-    const id = row.business_id as string | null
+    const id = (row as { resolved_business_id?: string | null }).resolved_business_id
     if (!id) continue
     out[id] = (out[id] || 0) + 1
   }
   return out
+}
+
+/** Classic Guiones rows saved on a session (not chat-shell message artifacts). */
+export async function getScriptsBySession(sessionId: string): Promise<Script[]> {
+  const { data, error } = await supabase
+    .from('scripts')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data || []
 }
 
 export type AppFeatureFlagState = 'enabled' | 'disabled' | 'unreadable'
