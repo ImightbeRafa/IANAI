@@ -71,14 +71,18 @@ Canary uses **Probar Chat** / **Volver al panel clásico**.
 | Cross-user | Foreign session/product/image IDs denied |
 | Logs | No recurring 403/406/FK storms |
 
-## Phase E — optional protected prod-data preview (later approval)
+## Phase E — Preview on AIIAN (approved 2026-08-22)
 
-Only after Phase D passes:
+Default Vercel Preview env vars should pair to **AIIAN** (same as Production), not IANAI-preview.
 
-1. One locked Vercel branch/alias with **AIIAN** `VITE_*` + service role paired.
-2. Deployment Protection on.
-3. No TiloPay webhook target on that deployment.
-4. Same invite gate; never point all preview branches at AIIAN.
+Still required:
+
+1. Deployment Protection on Preview.
+2. No TiloPay webhook target on Preview deployments.
+3. Same invite gate (`chat_beta_access`); never mass-enroll everyone via preferred_ui alone.
+4. Do not apply IANAI-preview-only RLS/seed migrations onto AIIAN.
+
+See `docs/operations/chat-shell-environments.md` for the env matrix and cutover checklist.
 
 ## Rollback
 
