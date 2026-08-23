@@ -554,7 +554,9 @@ export default function ChatSidebar({
           <div className="chat-shell__user-meta">
             {usage.loading
               ? ''
-              : `${t.scriptsUsed} ${usage.scriptsUsed}/${usage.scriptsLimit === -1 ? '∞' : usage.scriptsLimit} · ${t.imagesUsed} ${usage.imagesUsed}/${usage.imagesLimit === -1 ? '∞' : usage.imagesLimit}`}
+              : usage.creditsEnabled
+                ? `${t.creditsRemaining} ${usage.creditsRemaining}`
+                : `${t.scriptsUsed} ${usage.scriptsUsed}/${usage.scriptsLimit === -1 ? '∞' : usage.scriptsLimit} · ${t.imagesUsed} ${usage.imagesUsed}/${usage.imagesLimit === -1 ? '∞' : usage.imagesLimit}`}
           </div>
         </div>
         {onSwitchToClassic && (

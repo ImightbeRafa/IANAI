@@ -1,4 +1,15 @@
-## 2026-08-21 — AIIAN production pack drafted (not applied)
+## 2026-08-23 — Créditos IA + MCP e2e (one PR, not live until migrate + CREDITS_V1)
+
+**Area:** billing / mcp
+**Files:** `api/lib/credits/*`, `076_credits_ia.sql`, `docs/operations/credits-ia-aiian.md`, auth/tilopay/Settings/UsageBanner, MCP intake+EXECUTE autosave
+
+- Single wallet catalog (weights + plans). FIFO lots math + consume path. SQL for human AIIAN apply only.
+- TiloPay: existing Starter/Premium/Enterprise links wired; Business + credit pack placeholders.
+- MCP: intake dialog, EXECUTE library autosave, quotes script=3 / Grok image=6 créditos.
+- Flag `CREDITS_V1` keeps legacy meters until cutover.
+
+---
+
 
 **Area:** chat-shell / ops
 **Files:** `supabase/production/aiian/chat-shell/*`, `docs/operations/chat-shell-aiian-canary.md`, production transition / inventory / environments docs

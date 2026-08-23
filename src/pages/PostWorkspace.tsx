@@ -909,15 +909,19 @@ export default function PostWorkspace() {
       return
     }
 
-    const cost = carouselPreviewFirstSlideOnly ? 1 : carouselSlideCount
-    const remainingImageCredits = usageLimits.imagesLimit === -1
-      ? null
-      : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+    const costSlides = carouselPreviewFirstSlideOnly ? 1 : carouselSlideCount
+    const remainingImageCredits = usageLimits.creditsEnabled
+      ? usageLimits.creditsRemaining
+      : usageLimits.imagesLimit === -1
+        ? null
+        : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+    // Until CREDITS_V1: 1 slide = 1 image credit. With credits: Estándar 6 / slide (client soft-check).
+    const cost = usageLimits.creditsEnabled ? costSlides * 6 : costSlides
     const hasEnoughCredits = remainingImageCredits === null || remainingImageCredits >= cost
     if (!hasEnoughCredits) {
       setError(language === 'es'
-        ? `Necesitas ${cost} creditos de imagen. Te quedan ${remainingImageCredits}.`
-        : `You need ${cost} image credits. You have ${remainingImageCredits}.`)
+        ? `Necesitas ${cost} ${usageLimits.creditsEnabled ? 'créditos IA' : 'créditos de imagen'}. Te quedan ${remainingImageCredits}.`
+        : `You need ${cost} ${usageLimits.creditsEnabled ? 'AI credits' : 'image credits'}. You have ${remainingImageCredits}.`)
       return
     }
 
@@ -1711,7 +1715,7 @@ export default function PostWorkspace() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({ plan: 'image_boost' })
+        body: JSON.stringify({ plan: 'credit_pack' })
       })
       const data = await response.json()
       if (data.checkoutUrl) {
@@ -1750,10 +1754,13 @@ export default function PostWorkspace() {
   }
 
   const hasScript = !!selectedScript || !!scriptText.trim()
-  const carouselCost = carouselPreviewFirstSlideOnly ? 1 : carouselSlideCount
-  const remainingImageCredits = usageLimits.imagesLimit === -1
-    ? null
-    : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+  const carouselCostSlides = carouselPreviewFirstSlideOnly ? 1 : carouselSlideCount
+  const remainingImageCredits = usageLimits.creditsEnabled
+    ? usageLimits.creditsRemaining
+    : usageLimits.imagesLimit === -1
+      ? null
+      : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
+  const carouselCost = usageLimits.creditsEnabled ? carouselCostSlides * 6 : carouselCostSlides
   const hasEnoughCarouselCredits = remainingImageCredits === null || remainingImageCredits >= carouselCost
   const textInputLabel = isGeneralImageMode ? t.generalPromptLabel : t.scriptLabel
   const textInputHint = isGeneralImageMode ? t.generalPromptHint : t.pasteScript

@@ -259,7 +259,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ received: true, warning: 'User not found' })
     }
 
-    // Determine plan
+    // Determine plan — pending_subscriptions.plan ALWAYS wins (never trust amount bands alone)
     const plan = pendingPlan || determinePlanFromData(data)
     const amount = parseAmount(data)
     const currency = String(data.currency || 'USD')
@@ -267,15 +267,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`Processing: user=${userId}, email=${email}, event=${eventType}, plan=${plan}, amount=${amount}`)
 
-    // Handle one-time image boost purchase
-    if (plan === 'image_boost') {
-      await handleImageBoost(userId, email, plan, amount, currency, data)
+    // One-time credit pack (replaces image_boost). Legacy boost → pack credits.
+    if (plan === 'credit_pack' || plan === 'image_boost') {
+      await handleCreditPack(userId, email, plan, amount, currency, data)
       await recordTransaction({
-        userId, email, eventType, plan: 'image_boost',
+        userId, email, eventType, plan: plan === 'image_boost' ? 'credit_pack' : plan,
         amount, currency, status: 'succeeded',
         tilopaySubscriptionId: subId, rawData: data
       })
-      return res.status(200).json({ received: true, event: eventType, action: 'image_boost' })
+      return res.status(200).json({ received: true, event: eventType, action: 'credit_pack' })
     }
 
     // Process based on event type
@@ -367,6 +367,8 @@ async function handleSubscribe(
     plan, description: `New subscription: ${plan}`
   })
 
+  await maybeGrantMonthlyCredits(userId, plan)
+
   console.log(`Subscription activated for ${email}`)
 }
 
@@ -405,6 +407,8 @@ async function handlePayment(
     user_id: userId, amount: amount || 0, currency, status: 'succeeded',
     plan, description: `Recurring payment: ${plan}`
   })
+
+  await maybeGrantMonthlyCredits(userId, plan)
 
   console.log(`Payment recorded, subscription extended, plan: ${plan}`)
 }
@@ -465,7 +469,19 @@ async function handleReactive(
   console.log(`Subscription reactivated`)
 }
 
-async function handleImageBoost(
+async function maybeGrantMonthlyCredits(userId: string, plan: string) {
+  if (!supabase) return
+  // Always attempt RPC — no-op if migration not applied yet
+  const { error } = await supabase.rpc('grant_monthly_credits', {
+    p_user_id: userId,
+    p_plan: plan,
+  })
+  if (error && !/could not find|does not exist/i.test(error.message || '')) {
+    console.error('grant_monthly_credits', error)
+  }
+}
+
+async function handleCreditPack(
   userId: string,
   email: string,
   plan: string,
@@ -473,28 +489,36 @@ async function handleImageBoost(
   currency: string,
   data: TiloPayWebhookData
 ) {
-  console.log(`Image boost purchase for user ${userId} (${email})`)
+  console.log(`Credit pack purchase for user ${userId} (${email}) plan=${plan}`)
 
-  const { error } = await supabase!.rpc('credit_bonus_images', {
+  // New path: +500 pack credits / 12 months
+  const { error: packErr } = await supabase!.rpc('grant_pack_credits', {
     p_user_id: userId,
-    p_amount: 100
+    p_credits: 500,
+    p_ttl_months: 12,
   })
 
-  if (error) {
-    console.error('Failed to credit bonus images:', error)
+  if (packErr) {
+    console.error('grant_pack_credits failed, legacy bonus_images fallback:', packErr)
+    // Legacy compatibility if migration not applied: convert intent to 24×100 credits via bonus_images
+    const { error } = await supabase!.rpc('credit_bonus_images', {
+      p_user_id: userId,
+      p_amount: 100,
+    })
+    if (error) console.error('Failed to credit bonus images:', error)
   }
 
   await supabase!.from('pending_subscriptions')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('user_id', userId)
-    .eq('plan', 'image_boost')
+    .in('plan', ['credit_pack', 'image_boost'])
 
   await safeInsertPayment({
     user_id: userId, amount, currency, status: 'succeeded',
-    plan: 'image_boost', description: '+100 bonus images'
+    plan: 'credit_pack', description: '+500 créditos IA (12 meses)'
   })
 
-  console.log(`+100 bonus images credited to ${email}`)
+  console.log(`Credit pack credited to ${email}`)
 }
 
 // =============================================
@@ -512,20 +536,31 @@ function getSubId(data: TiloPayWebhookData): string | null {
   return (data.subscriber_id || data.subscription_id || null) as string | null
 }
 
+/**
+ * Last-resort plan detection. Prefer pending_subscriptions.plan.
+ * Do NOT map $24/$25 → starter (Meta / credit pack collision).
+ */
 function determinePlanFromData(data: TiloPayWebhookData): string {
+  const title = String(data.modality || data.plan_title || data.description || '').toLowerCase()
   const amount = parseAmount(data) || 0
 
-  if (amount >= 14 && amount <= 16) return 'image_boost'
-  if (amount >= 200) return 'enterprise'
-  if (amount >= 40) return 'pro'
-  if (amount >= 20) return 'starter'
-
-  const title = String(data.modality || data.plan_title || data.description || '').toLowerCase()
-
-  if (title.includes('boost') || title.includes('extra') || title.includes('100')) return 'image_boost'
+  if (title.includes('pack') || title.includes('crédito') || title.includes('credito')) return 'credit_pack'
+  if (title.includes('business') || title.includes('negocio')) return 'business'
+  if (title.includes('boost') || title.includes('extra') || title.includes('100')) return 'credit_pack'
   if (title.includes('enterprise') || title.includes('empresa')) return 'enterprise'
+  if (title.includes('meta') || title.includes('advanze') || title.includes('advance')) return 'meta_advanze'
   if (title.includes('premium') || title.includes('pro')) return 'pro'
-  if (title.includes('starter') || title.includes('individual') || title.includes('básico')) return 'starter'
+  if (title.includes('starter') || title.includes('individual') || title.includes('básico') || title.includes('basico')) {
+    return 'starter'
+  }
+
+  // Amount bands only when title is empty — keep gaps so $25 pack ≠ starter ($33)
+  if (amount >= 280) return 'enterprise'
+  if (amount >= 140 && amount <= 160) return 'business'
+  if (amount >= 45 && amount <= 55) return 'pro'
+  if (amount >= 30 && amount <= 36) return 'starter'
+  if (amount >= 23 && amount <= 26) return 'credit_pack'
+  if (amount >= 14 && amount <= 16) return 'credit_pack'
 
   console.log('Could not determine plan from data, defaulting to starter:', JSON.stringify(data))
   return 'starter'

@@ -91,6 +91,26 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.9',
+    date: '2026-08-23',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'Créditos IA: un solo saldo para guiones e imágenes. Un guion cuesta 3, una imagen estándar 6, Pro 24. Compra un paquete o sube de plan cuando se te acaben.',
+          en: 'AI credits: one balance for scripts and images. A script costs 3, a standard image 6, Pro 24. Buy a pack or upgrade when you run out.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Planes Starter ($33), Premium ($49) y Business ($149) con cupos de créditos claros. El checkout de Business y el paquete de 500 créditos se activan cuando pegamos el link de TiloPay.',
+          en: 'Starter ($33), Premium ($49), and Business ($149) plans with clear credit allotments. Business checkout and the 500-credit pack go live once we paste the TiloPay links.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.8',
     date: '2026-08-19',
     items: [

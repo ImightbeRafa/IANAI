@@ -5,7 +5,7 @@ import { getProfile } from '../services/database'
 import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, MessageCircle, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info, Loader2 } from 'lucide-react'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info, Loader2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments } from '../services/database'
@@ -18,40 +18,17 @@ import {
   type TextModelProfile,
 } from '../features/chat-shell/textModelPreference'
 import type { ChatShellTheme } from '../features/chat-shell/chatShellTheme'
+import {
+  CREDIT_PACK_UI,
+  CREDITS_PITCH,
+  PLAN_CATALOG_UI,
+  PUBLIC_BILLING_PLANS,
+  type FrontendPlanId,
+} from '../lib/creditsCatalog'
 
-type PlanKey = 'free' | 'starter' | 'pro' | 'enterprise' | 'meta_advanze'
+type PlanKey = FrontendPlanId
 
-const PLAN_DETAILS = {
-  free: { name: 'Free', price: 0, scripts: 10, descriptions: 10, images: 1, color: 'gray', paymentLink: null },
-  starter: { 
-    name: 'Starter', 
-    price: 33, 
-    scripts: 30, 
-    descriptions: -1, 
-    images: 5, 
-    color: 'blue',
-    paymentLink: 'https://tp.cr/l/TkRnM01RPT18MQ=='
-  },
-  pro: { 
-    name: 'Premium', 
-    price: 49, 
-    scripts: -1, 
-    descriptions: -1, 
-    images: 100, 
-    color: 'purple',
-    paymentLink: 'https://tp.cr/l/TkRnM01nPT18MQ=='
-  },
-  enterprise: { name: 'Enterprise', price: 299, scripts: -1, descriptions: -1, images: -1, color: 'amber', paymentLink: 'https://tp.cr/l/TkRrMk53PT18MQ==' },
-  meta_advanze: {
-    name: 'Meta AdVance',
-    price: 24,
-    scripts: -1,
-    descriptions: -1,
-    images: 100,
-    color: 'purple',
-    paymentLink: null
-  }
-} as const
+const PLAN_DETAILS = PLAN_CATALOG_UI
 
 export type SettingsSection = 'all' | 'general' | 'ai' | 'brand' | 'billing' | 'updates'
 
@@ -114,10 +91,15 @@ export function SettingsContent({
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [payments, setPayments] = useState<Payment[]>([])
   const [billingLoading, setBillingLoading] = useState(true)
-  const [boostPending, setBoostPending] = useState(false)
-  const [boostConfirming, setBoostConfirming] = useState(false)
 
-  const PLAN_KIT_LIMITS: Record<string, number> = { free: 1, starter: 1, pro: 5, meta_advanze: 5, enterprise: 999 }
+  const PLAN_KIT_LIMITS: Record<string, number> = {
+    free: PLAN_DETAILS.free.kits,
+    starter: PLAN_DETAILS.starter.kits,
+    pro: PLAN_DETAILS.pro.kits,
+    business: PLAN_DETAILS.business.kits,
+    meta_advanze: PLAN_DETAILS.meta_advanze.kits,
+    enterprise: PLAN_DETAILS.enterprise.kits,
+  }
   const kitLimit = PLAN_KIT_LIMITS[currentPlan] || 1
 
   const loadBrandKitsData = async () => {
@@ -1085,76 +1067,46 @@ export function SettingsContent({
             )}
           </div>
 
-          {/* Current Usage */}
+          {/* Current Usage — Créditos IA when enabled, else legacy meters */}
           {!usageLimits.loading && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              <div className="p-4 bg-dark-50 rounded-xl">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap className="w-4 h-4 text-amber-500" />
-                  <span className="text-xs font-medium text-dark-700">
-                    {language === 'es' ? 'Guiones' : 'Scripts'}
-                  </span>
+            <div className="space-y-4 mb-6">
+              {usageLimits.creditsEnabled ? (
+                <div className="p-4 bg-dark-50 rounded-xl">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <span className="text-sm font-medium text-dark-700">
+                        {language === 'es' ? 'Créditos IA' : 'AI credits'}
+                      </span>
+                    </div>
+                    <div className="text-2xl font-bold text-dark-900">{usageLimits.creditsRemaining}</div>
+                  </div>
+                  <p className="text-xs text-dark-500">{CREDITS_PITCH[language]}</p>
                 </div>
-                <div className="text-xl font-bold text-dark-900">
-                  {usageLimits.scriptsUsed}
-                  <span className="text-sm font-normal text-dark-400">
-                    / {usageLimits.scriptsLimit === -1 ? '∞' : usageLimits.scriptsLimit}
-                  </span>
+              ) : (
+                <div className="p-4 bg-dark-50 rounded-xl space-y-2 text-sm text-dark-700">
+                  <p>
+                    {language === 'es' ? 'Guiones' : 'Scripts'}: {usageLimits.scriptsUsed}
+                    {usageLimits.scriptsLimit === -1 ? '' : ` / ${usageLimits.scriptsLimit}`}
+                  </p>
+                  <p>
+                    {language === 'es' ? 'Imágenes' : 'Images'}: {usageLimits.imagesUsed}
+                    {usageLimits.imagesLimit === -1 ? '' : ` / ${usageLimits.imagesLimit}`}
+                  </p>
+                  <p className="text-xs text-dark-500">{CREDITS_PITCH[language]}</p>
                 </div>
-              </div>
-              <div className="p-4 bg-dark-50 rounded-xl">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap className="w-4 h-4 text-blue-500" />
-                  <span className="text-xs font-medium text-dark-700">
-                    {language === 'es' ? 'Descripciones' : 'Descriptions'}
-                  </span>
-                </div>
-                <div className="text-xl font-bold text-dark-900">
-                  {usageLimits.descriptionsUsed}
-                  <span className="text-sm font-normal text-dark-400">
-                    / {usageLimits.descriptionsLimit === -1 ? '∞' : usageLimits.descriptionsLimit}
-                  </span>
-                </div>
-              </div>
-              <div className="p-4 bg-dark-50 rounded-xl">
-                <div className="flex items-center gap-2 mb-2">
-                  <Crown className="w-4 h-4 text-purple-500" />
-                  <span className="text-xs font-medium text-dark-700">
-                    {language === 'es' ? 'Diseños' : 'Designs'}
-                  </span>
-                </div>
-                <div className="text-xl font-bold text-dark-900">
-                  {usageLimits.imagesUsed}
-                  <span className="text-sm font-normal text-dark-400">
-                    / {usageLimits.imagesLimit === -1 ? '∞' : usageLimits.imagesLimit}
-                  </span>
-                </div>
-              </div>
-              <div className="p-4 bg-dark-50 rounded-xl">
-                <div className="flex items-center gap-2 mb-2">
-                  <MessageCircle className="w-4 h-4 text-green-500" />
-                  <span className="text-xs font-medium text-dark-700">
-                    {language === 'es' ? 'Respuestas' : 'Replies'}
-                  </span>
-                </div>
-                <div className="text-xl font-bold text-dark-900">
-                  {usageLimits.repliesUsed}
-                  <span className="text-sm font-normal text-dark-400">
-                    / {usageLimits.repliesLimit === -1 ? '∞' : usageLimits.repliesLimit}
-                  </span>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
-          {/* Plan Options */}
+          {/* Plan Options — public plans only */}
           <div className="space-y-3">
-            {(['starter', 'pro', 'enterprise'] as const).map((plan) => (
-              <div 
+            {PUBLIC_BILLING_PLANS.filter((p) => p !== 'free').map((plan) => (
+              <div
                 key={plan}
                 className={`p-4 rounded-xl border-2 transition-all ${
-                  currentPlan === plan 
-                    ? 'border-primary-500 bg-primary-900/20' 
+                  currentPlan === plan
+                    ? 'border-primary-500 bg-primary-900/20'
                     : 'border-dark-200 hover:border-dark-300'
                 }`}
               >
@@ -1169,21 +1121,25 @@ export function SettingsContent({
                       )}
                     </div>
                     <p className="text-sm text-dark-500 mt-1">
-                      {PLAN_DETAILS[plan].scripts === -1 ? '∞' : PLAN_DETAILS[plan].scripts} {language === 'es' ? 'guiones' : 'scripts'} + {PLAN_DETAILS[plan].images} {language === 'es' ? 'diseños' : 'designs'} / {language === 'es' ? 'mes' : 'month'}
+                      {language === 'es' ? PLAN_DETAILS[plan].creditLabelEs : PLAN_DETAILS[plan].creditLabelEn}
+                      {' · '}{PLAN_DETAILS[plan].kits} kits
                     </p>
+                    {!PLAN_DETAILS[plan].paymentLink && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        {language === 'es' ? 'Checkout pendiente (URL TiloPay)' : 'Checkout pending (TiloPay URL)'}
+                      </p>
+                    )}
                   </div>
                   <div className="text-right">
-                    <div className="text-xl font-bold text-dark-900">
-                      ${PLAN_DETAILS[plan].price || 0}
-                    </div>
+                    <div className="text-xl font-bold text-dark-900">${PLAN_DETAILS[plan].price || 0}</div>
                     <p className="text-xs text-dark-400">/ {language === 'es' ? 'mes' : 'month'}</p>
                   </div>
                 </div>
                 {currentPlan !== plan && PLAN_DETAILS[plan].paymentLink && (() => {
-                  const rank: Record<string, number> = { free: 0, starter: 1, pro: 2, meta_advanze: 2, enterprise: 3 }
+                  const rank: Record<string, number> = { free: 0, starter: 1, pro: 2, business: 3, meta_advanze: 2, enterprise: 4 }
                   return (rank[currentPlan] || 0) < (rank[plan] || 0)
                 })() && (
-                  <button 
+                  <button
                     className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
                     disabled={loading}
                     onClick={async () => {
@@ -1195,7 +1151,6 @@ export function SettingsContent({
                           setMessage({ type: 'error', text: language === 'es' ? 'Sesión expirada' : 'Session expired' })
                           return
                         }
-
                         const checkoutUrl = import.meta.env.PROD ? '/api/tilopay/create-checkout' : 'http://localhost:3000/api/tilopay/create-checkout'
                         const response = await fetch(checkoutUrl, {
                           method: 'POST',
@@ -1205,9 +1160,7 @@ export function SettingsContent({
                           },
                           body: JSON.stringify({ plan })
                         })
-
                         const data = await response.json()
-                        
                         if (data.checkoutUrl) {
                           window.open(data.checkoutUrl, '_blank')
                         } else {
@@ -1222,8 +1175,8 @@ export function SettingsContent({
                     }}
                   >
                     <Check className="w-4 h-4" />
-                    {loading 
-                      ? (language === 'es' ? 'Procesando...' : 'Processing...') 
+                    {loading
+                      ? (language === 'es' ? 'Procesando...' : 'Processing...')
                       : (language === 'es' ? 'Actualizar Plan' : 'Upgrade Plan')}
                   </button>
                 )}
@@ -1232,148 +1185,80 @@ export function SettingsContent({
           </div>
 
           <p className="text-xs text-dark-400 mt-4 text-center">
-            {language === 'es' 
-              ? 'Los pagos se procesan de forma segura con TiloPay' 
+            {language === 'es'
+              ? 'Los pagos se procesan de forma segura con TiloPay'
               : 'Payments processed securely via TiloPay'}
           </p>
 
-          {/* Image Boost — only for pro plan users */}
-          {(currentPlan === 'pro' || currentPlan === 'meta_advanze') && (
-            <div className="mt-4 p-4 rounded-xl border-2 border-dashed border-primary-300 bg-primary-900/20">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Crown className="w-4 h-4 text-primary-600" />
-                    <span className="font-semibold text-dark-900">
-                      {language === 'es' ? 'Más Diseños' : 'More Designs'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-dark-500 mt-1">
-                    {language === 'es' 
-                      ? '+100 diseños extra (pago único, no se reinician)' 
-                      : '+100 extra designs (one-time, no reset)'}
-                  </p>
-                  {usageLimits.bonusImages > 0 && (
-                    <p className="text-xs text-primary-600 mt-1 font-medium">
-                      {language === 'es' 
-                        ? `${usageLimits.bonusImages} diseños bonus disponibles` 
-                        : `${usageLimits.bonusImages} bonus designs available`}
-                    </p>
-                  )}
+          {/* Credit pack — all users */}
+          <div className="mt-4 p-4 rounded-xl border-2 border-dashed border-primary-300 bg-primary-900/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Crown className="w-4 h-4 text-primary-600" />
+                  <span className="font-semibold text-dark-900">
+                    {language === 'es' ? 'Paquete de créditos' : 'Credit pack'}
+                  </span>
                 </div>
-                <div className="text-right">
-                  <div className="text-xl font-bold text-dark-900">$14.99</div>
-                  <p className="text-xs text-dark-400">{language === 'es' ? 'único' : 'one-time'}</p>
-                </div>
+                <p className="text-sm text-dark-500 mt-1">
+                  {language === 'es' ? CREDIT_PACK_UI.labelEs : CREDIT_PACK_UI.labelEn}
+                </p>
               </div>
-
-              {!boostPending ? (
-                <button
-                  className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
-                  disabled={loading}
-                  onClick={async () => {
-                    setLoading(true)
-                    setMessage(null)
-                    try {
-                      const { data: { session } } = await supabase.auth.getSession()
-                      if (!session) {
-                        setMessage({ type: 'error', text: language === 'es' ? 'Sesión expirada' : 'Session expired' })
-                        return
-                      }
-                      const checkoutUrl = import.meta.env.PROD ? '/api/tilopay/create-checkout' : 'http://localhost:3000/api/tilopay/create-checkout'
-                      const response = await fetch(checkoutUrl, {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${session.access_token}`
-                        },
-                        body: JSON.stringify({ plan: 'image_boost' })
-                      })
-                      const data = await response.json()
-                      if (data.checkoutUrl) {
-                        window.open(data.checkoutUrl, '_blank')
-                        setBoostPending(true)
-                      } else {
-                        setMessage({ type: 'error', text: data.error || 'Error al procesar' })
-                      }
-                    } catch (error) {
-                      console.error('Boost checkout error:', error)
-                      setMessage({ type: 'error', text: language === 'es' ? 'Error de conexión' : 'Connection error' })
-                    } finally {
-                      setLoading(false)
-                    }
-                  }}
-                >
-                  <Zap className="w-4 h-4" />
-                  {loading 
-                    ? (language === 'es' ? 'Procesando...' : 'Processing...')
-                    : (language === 'es' ? 'Comprar +100 Diseños' : 'Buy +100 Designs')}
-                </button>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  <p className="text-xs text-dark-600 text-center">
-                    {language === 'es'
-                      ? '¿Ya completaste el pago en TiloPay? Haz clic para activar tus diseños.'
-                      : 'Already completed payment on TiloPay? Click to activate your designs.'}
-                  </p>
-                  <button
-                    className="w-full btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
-                    disabled={boostConfirming}
-                    onClick={async () => {
-                      setBoostConfirming(true)
-                      setMessage(null)
-                      try {
-                        const { data: { session } } = await supabase.auth.getSession()
-                        if (!session) {
-                          setMessage({ type: 'error', text: language === 'es' ? 'Sesión expirada' : 'Session expired' })
-                          return
-                        }
-                        const confirmUrl = import.meta.env.PROD ? '/api/tilopay/confirm-boost' : 'http://localhost:3000/api/tilopay/confirm-boost'
-                        const response = await fetch(confirmUrl, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${session.access_token}`
-                          }
-                        })
-                        const data = await response.json()
-                        if (data.success) {
-                          setMessage({ type: 'success', text: language === 'es' ? `¡Diseños bonus confirmados! (${data.bonusImages ?? ''})` : `Bonus designs confirmed! (${data.bonusImages ?? ''})` })
-                          setBoostPending(false)
-                          usageLimits.refresh?.()
-                        } else if (response.status === 402 || data.code === 'PAYMENT_NOT_VERIFIED') {
-                          setMessage({
-                            type: 'error',
-                            text: language === 'es'
-                              ? 'Pago aún no verificado. Completa el checkout en TiloPay, espera unos segundos e intenta de nuevo.'
-                              : 'Payment not verified yet. Finish TiloPay checkout, wait a few seconds, then try again.'
-                          })
-                        } else {
-                          setMessage({ type: 'error', text: data.error || 'Error' })
-                        }
-                      } catch (error) {
-                        console.error('Boost confirm error:', error)
-                        setMessage({ type: 'error', text: language === 'es' ? 'Error de conexión' : 'Connection error' })
-                      } finally {
-                        setBoostConfirming(false)
-                      }
-                    }}
-                  >
-                    <CheckCircle className="w-4 h-4" />
-                    {boostConfirming
-                      ? (language === 'es' ? 'Activando...' : 'Activating...')
-                      : (language === 'es' ? 'Confirmar Compra y Activar' : 'Confirm Purchase & Activate')}
-                  </button>
-                  <button
-                    className="w-full text-xs text-dark-400 hover:text-dark-600 py-1"
-                    onClick={() => setBoostPending(false)}
-                  >
-                    {language === 'es' ? 'Cancelar' : 'Cancel'}
-                  </button>
-                </div>
-              )}
+              <div className="text-right">
+                <div className="text-xl font-bold text-dark-900">${CREDIT_PACK_UI.price}</div>
+                <p className="text-xs text-dark-400">{language === 'es' ? 'único' : 'one-time'}</p>
+              </div>
             </div>
-          )}
+            <button
+              className="w-full mt-3 btn-primary py-2 flex items-center justify-center gap-2 disabled:opacity-50"
+              disabled={loading || !CREDIT_PACK_UI.paymentLink}
+              onClick={async () => {
+                if (!CREDIT_PACK_UI.paymentLink) {
+                  setMessage({
+                    type: 'error',
+                    text: language === 'es'
+                      ? 'URL de TiloPay del paquete pendiente'
+                      : 'Credit pack TiloPay URL pending',
+                  })
+                  return
+                }
+                setLoading(true)
+                setMessage(null)
+                try {
+                  const { data: { session } } = await supabase.auth.getSession()
+                  if (!session) {
+                    setMessage({ type: 'error', text: language === 'es' ? 'Sesión expirada' : 'Session expired' })
+                    return
+                  }
+                  const checkoutUrl = import.meta.env.PROD ? '/api/tilopay/create-checkout' : 'http://localhost:3000/api/tilopay/create-checkout'
+                  const response = await fetch(checkoutUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${session.access_token}`
+                    },
+                    body: JSON.stringify({ plan: 'credit_pack' })
+                  })
+                  const data = await response.json()
+                  if (data.checkoutUrl) {
+                    window.open(data.checkoutUrl, '_blank')
+                  } else {
+                    setMessage({ type: 'error', text: data.error || 'Error al procesar' })
+                  }
+                } catch (error) {
+                  console.error('Pack checkout error:', error)
+                  setMessage({ type: 'error', text: language === 'es' ? 'Error de conexión' : 'Connection error' })
+                } finally {
+                  setLoading(false)
+                }
+              }}
+            >
+              <Zap className="w-4 h-4" />
+              {!CREDIT_PACK_UI.paymentLink
+                ? (language === 'es' ? 'Próximamente' : 'Coming soon')
+                : (language === 'es' ? 'Comprar paquete' : 'Buy pack')}
+            </button>
+          </div>
 
           {/* Subscription Status */}
           {!billingLoading && subscription && subscription.plan !== 'free' && (

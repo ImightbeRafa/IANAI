@@ -69,7 +69,7 @@ export async function mcpExecuteScriptGenerate(options: {
   const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
-    const quote = 1
+    const quote = 3
     const req = await issueMcpApprovalRequest(options.approvalStore, {
       userId: options.user.id,
       toolName: 'execute_script_generate',
@@ -81,7 +81,7 @@ export async function mcpExecuteScriptGenerate(options: {
       ...req,
       toolName: 'execute_script_generate',
       quotedCreditCost: quote,
-      creditUnit: 'script',
+      creditUnit: 'credits',
       message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
       boundInput: boundWithOffer,
     }
@@ -213,7 +213,7 @@ export async function mcpExecuteImageGenerate(options: {
   const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
-    const quote = 1
+    const quote = 6
     const req = await issueMcpApprovalRequest(options.approvalStore, {
       userId: options.user.id,
       toolName: 'execute_image_generate',
@@ -225,7 +225,7 @@ export async function mcpExecuteImageGenerate(options: {
       ...req,
       toolName: 'execute_image_generate',
       quotedCreditCost: quote,
-      creditUnit: 'image',
+      creditUnit: 'credits',
       message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
       boundInput: boundWithOffer,
     }

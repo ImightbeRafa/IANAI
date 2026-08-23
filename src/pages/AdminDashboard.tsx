@@ -160,19 +160,22 @@ interface AdminPayment {
 // Plan monthly prices in USD for MRR calculation
 const PLAN_PRICES_USD: Record<string, number> = {
   free: 0,
-  starter: 29,
+  starter: 33,
   pro: 49,
-  meta_advanze: 49,
-  enterprise: 199,
+  business: 149,
+  meta_advanze: 24,
+  enterprise: 299,
 }
 
 const PLAN_COLORS: Record<string, string> = {
   free: 'bg-gray-400',
   starter: 'bg-blue-500',
   pro: 'bg-purple-500',
+  business: 'bg-emerald-500',
   meta_advanze: 'bg-indigo-500',
   enterprise: 'bg-amber-500',
   image_boost: 'bg-green-500',
+  credit_pack: 'bg-green-500',
 }
 
 // Model display names and colors

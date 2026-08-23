@@ -1,18 +1,24 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { supabaseAdmin as supabase } from '../lib/supabase-admin.js'
-
+import { CREDIT_PACK, PLAN_CATALOG, type PlanId } from '../lib/credits/catalog.js'
 
 // TiloPay API credentials from environment (NEVER hardcode these!)
 const TILOPAY_API_KEY = process.env.TILOPAY_API_KEY
 const TILOPAY_API_USER = process.env.TILOPAY_API_USER
 const TILOPAY_API_PASSWORD = process.env.TILOPAY_API_PASSWORD
 
-// TiloPay payment links (direct checkout links from TiloPay dashboard)
-const BASE_PAYMENT_LINKS: Record<string, string> = {
-  starter: 'https://tp.cr/l/TkRnM01RPT18MQ==',     // Starter $33/mo
-  pro: 'https://tp.cr/l/TkRnM01nPT18MQ==',          // Premium $49/mo
-  enterprise: 'https://tp.cr/l/TkRrMk53PT18MQ==',   // Enterprise $299/mo
-  image_boost: 'https://tp.cr/l/MTg3NTc5'               // 100 extra images $14.99 one-time
+void TILOPAY_API_KEY
+void TILOPAY_API_USER
+void TILOPAY_API_PASSWORD
+
+/** Checkout SKUs — prefer catalog links; placeholders return 503 until human pastes URLs. */
+function paymentLinkFor(plan: string): string | null {
+  if (plan === 'credit_pack' || plan === 'image_boost') {
+    // Prefer new pack; legacy boost link only as last resort for confirm-boost compat
+    return CREDIT_PACK.paymentLink || (plan === 'image_boost' ? CREDIT_PACK.legacyBoostLink : null)
+  }
+  const entry = PLAN_CATALOG[plan as PlanId]
+  return entry?.paymentLink ?? null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -29,12 +35,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Check if Supabase is configured
     if (!supabase) {
       return res.status(500).json({ error: 'Server not configured. Missing SUPABASE_URL or SUPABASE_SECRET_KEY' })
     }
 
-    // Verify auth token
     const authHeader = req.headers.authorization
     if (!authHeader?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Missing authorization' })
@@ -42,43 +46,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    
+
     if (authError || !user) {
       return res.status(401).json({ error: 'Invalid token' })
     }
 
-    const { plan } = req.body
+    let { plan } = req.body as { plan?: string }
+    if (plan === 'image_boost') {
+      // Stop selling boost; redirect intent to credit pack when URL exists
+      plan = 'credit_pack'
+    }
 
-    if (!plan || !BASE_PAYMENT_LINKS[plan]) {
+    const allowed = new Set([
+      'starter',
+      'pro',
+      'business',
+      'enterprise',
+      'credit_pack',
+    ])
+    if (!plan || !allowed.has(plan)) {
       return res.status(400).json({ error: 'Invalid plan' })
     }
 
-    // Store pending subscription in database for webhook to match
+    const checkoutUrl = paymentLinkFor(plan)
+    if (!checkoutUrl) {
+      return res.status(503).json({
+        error: 'Checkout link not configured yet',
+        plan,
+        hint: 'Paste TiloPay URL into api/lib/credits/catalog.ts (business or CREDIT_PACK.paymentLink)',
+      })
+    }
+
     const { error: pendingError } = await supabase
       .from('pending_subscriptions')
       .upsert({
         user_id: user.id,
         email: user.email,
-        plan: plan,
+        plan,
         created_at: new Date().toISOString(),
-        status: 'pending'
+        status: 'pending',
       }, { onConflict: 'user_id' })
 
     if (pendingError) {
       console.error('Failed to store pending subscription:', pendingError)
-      // Continue anyway - we can still try to match by email in webhook
     }
 
-    // Return the direct payment link (don't modify shortened URLs)
-    // User matching happens via pending_subscriptions table using email
-    return res.status(200).json({
-      checkoutUrl: BASE_PAYMENT_LINKS[plan]
-    })
-
+    return res.status(200).json({ checkoutUrl, plan })
   } catch (error) {
     console.error('Checkout error:', error)
-    return res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Internal server error' 
+    return res.status(500).json({
+      error: 'Failed to create checkout',
     })
   }
 }
