@@ -43,20 +43,24 @@ describe('grok edit helpers', () => {
 })
 
 describe('mcp tool registry', () => {
-  it('exposes versioned read tools only by default', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
+  it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.2\./)
     const enabled = listEnabledMcpTools()
     expect(enabled.map((t) => t.name).sort()).toEqual(['get_brand_context', 'list_brands'])
-    expect(enabled.every((t) => t.risk === 'read')).toBe(true)
-    expect(getMcpTool('generate_image')?.requiresApproval).toBe(true)
-    expect(getMcpTool('generate_image')?.enabled).toBe(false)
-    expect(MCP_TOOL_GROUPS.visual_studio.defaultEnabled).toBe(false)
+    expect(enabled.every((t) => !t.consumesAdvanceCredits)).toBe(true)
+    expect(getMcpTool('guide_image')?.consumesAdvanceCredits).toBe(false)
+    expect(getMcpTool('execute_image_generate')?.consumesAdvanceCredits).toBe(true)
+    expect(getMcpTool('execute_image_generate')?.requiresApproval).toBe(true)
+    expect(getMcpTool('execute_image_generate')?.enabled).toBe(false)
+    expect(MCP_TOOL_GROUPS.guide_studio.defaultEnabled).toBe(true)
+    expect(MCP_TOOL_GROUPS.execute_studio.defaultEnabled).toBe(false)
   })
 
-  it('can enable visual studio group once product unlocks it', () => {
-    // Even with group on, generate_image stays disabled until flagged enabled in registry.
-    const listed = listEnabledMcpTools({ groupsEnabled: { visual_studio: true, brand_workspace: true } })
-    expect(listed.some((t) => t.name === 'generate_image')).toBe(false)
+  it('keeps execute tools off even if execute_studio group is flipped on', () => {
+    const listed = listEnabledMcpTools({
+      groupsEnabled: { execute_studio: true, brand_workspace: true, guide_studio: true },
+    })
+    expect(listed.some((t) => t.name === 'execute_image_generate')).toBe(false)
     expect(listed.some((t) => t.name === 'list_brands')).toBe(true)
   })
 })

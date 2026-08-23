@@ -90,8 +90,13 @@ export const MCP_READ_TOOL_SCHEMAS = [
 ] as const
 
 export const MCP_MUTATION_POLICY = {
-  deleteTools: false,
+  deleteTools: true,
   generateRequiresApprovalToken: true,
+  /** GUIDE (Grok-owned generation) never consumes Advance credits. */
+  guideConsumesAdvanceCredits: false,
+  /** EXECUTE (Advance APIs) uses the same subscription credits as the web app. */
+  executeConsumesAdvanceCredits: true,
   sameSubscriptionCredits: true,
-  scope: 'signed_in_user_only' as const,
+  scope: 'signed_in_user_and_team_as_web' as const,
+  syncVisibleInWebApp: true,
 }

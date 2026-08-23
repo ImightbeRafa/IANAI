@@ -1,18 +1,19 @@
 /**
  * Versioned MCP tool registry for Grok bot (primary) and later Codex.
- * Enable/disable groups without rewriting the host.
+ *
+ * Dual mode:
+ * - GUIDE: context/prompts/skills for Grok's own generation — no Advance credits
+ * - EXECUTE: Advance APIs run generation — credits + approval
  */
 
-export type McpToolRisk = 'read' | 'write_low' | 'generate' | 'admin'
+export type McpToolRisk = 'read' | 'guide' | 'sync_write' | 'execute' | 'delete' | 'admin'
 
 export type McpToolGroupId =
   | 'brand_workspace'
-  | 'creative_context'
-  | 'script_studio'
-  | 'visual_studio'
-  | 'carousel_studio'
-  | 'post_reply_studio'
+  | 'guide_studio'
+  | 'execute_studio'
   | 'library_sessions'
+  | 'deletes'
   | 'account_team'
 
 export type McpToolDefinition = {
@@ -20,13 +21,14 @@ export type McpToolDefinition = {
   group: McpToolGroupId
   risk: McpToolRisk
   description: string
-  /** When false, tool is hidden from MCP listTools (still in registry for tests). */
   enabled: boolean
-  /** Generate/mutate tools require a server-verified approval token once product chooses UX. */
+  /** EXECUTE tools always true; GUIDE/sync usually false. */
   requiresApproval: boolean
+  /** When true, Advance subscription credits are charged on success. */
+  consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.1.0'
+export const MCP_REGISTRY_VERSION = '0.2.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -35,63 +37,55 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
 }> = {
   brand_workspace: {
     title: 'Brand Workspace',
-    summary: 'Brands, offers, brand kits, palettes, product assets.',
+    summary: 'Brands, offers, brand kits — shared with the web app.',
     defaultEnabled: true,
   },
-  creative_context: {
-    title: 'Creative Context',
-    summary: 'Uploads, site/PDF/image analysis, memories.',
-    defaultEnabled: false,
+  guide_studio: {
+    title: 'Guide Studio',
+    summary: 'Prompts and context so Grok generates with the user’s own Grok usage (no Advance credits).',
+    defaultEnabled: true,
   },
-  script_studio: {
-    title: 'Script Studio',
-    summary: 'Generate, revise, list, version, rate scripts.',
-    defaultEnabled: false,
-  },
-  visual_studio: {
-    title: 'Visual Studio',
-    summary: 'Generate, edit, enhance, list and rate images (Grok default).',
-    defaultEnabled: false,
-  },
-  carousel_studio: {
-    title: 'Carousel Studio',
-    summary: 'Plan/generate carousels (Gemini render).',
-    defaultEnabled: false,
-  },
-  post_reply_studio: {
-    title: 'Post & Reply Studio',
-    summary: 'Post copy, organic formats, customer replies.',
+  execute_studio: {
+    title: 'Execute Studio',
+    summary: 'Advance-run scripts/images/carousel (credits + approval).',
     defaultEnabled: false,
   },
   library_sessions: {
     title: 'Library & Sessions',
-    summary: 'Histories, artifacts, templates, session context.',
+    summary: 'Sessions, artifacts, deep links into the web app.',
+    defaultEnabled: false,
+  },
+  deletes: {
+    title: 'Deletes',
+    summary: 'Permission-checked deletes with confirmation (no generation credits).',
     defaultEnabled: false,
   },
   account_team: {
     title: 'Account & Team',
-    summary: 'Usage, limits, subscription; role-gated admin.',
+    summary: 'Usage and team/admin — same rules as the web app.',
     defaultEnabled: false,
   },
 }
 
-/** Seed tools — expand via registry only; host reads listEnabledMcpTools(). */
 export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
+  // Brand / sync reads
   {
     name: 'list_brands',
     group: 'brand_workspace',
     risk: 'read',
-    description: 'List brands owned by the signed-in user.',
+    description: 'List brands owned by the signed-in user (or team-visible).',
     enabled: true,
     requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
   {
     name: 'get_brand_context',
     group: 'brand_workspace',
     risk: 'read',
-    description: 'Get one owned brand with offers and brand kit.',
+    description: 'Get one brand with offers and brand kit for GUIDE or EXECUTE.',
     enabled: true,
     requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
   {
     name: 'list_offers',
@@ -100,46 +94,161 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description: 'List offers for an owned brand.',
     enabled: false,
     requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+
+  // GUIDE — free for Advance credits
+  {
+    name: 'guide_script',
+    group: 'guide_studio',
+    risk: 'guide',
+    description: 'Return brand-aware script brief + prompt for Grok text (user’s Grok usage).',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
   {
-    name: 'generate_image',
-    group: 'visual_studio',
-    risk: 'generate',
-    description: 'Generate a single social image (Grok Imagine default).',
+    name: 'guide_image',
+    group: 'guide_studio',
+    risk: 'guide',
+    description: 'Return Grok Imagine prompt, refs, size, and fidelity rules (user’s Grok Imagine usage).',
     enabled: false,
-    requiresApproval: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
   {
-    name: 'edit_image',
-    group: 'visual_studio',
-    risk: 'generate',
-    description: 'Edit an existing image with an instruction (Grok Imagine).',
+    name: 'guide_brand_pack',
+    group: 'guide_studio',
+    risk: 'guide',
+    description: 'Pack voice, palette, logo URL, offer facts for Grok without generating.',
     enabled: false,
-    requiresApproval: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+
+  // Workspace sync writes (no generation credits)
+  {
+    name: 'workspace_save_url_context',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description: 'Save a source URL / extracted context onto the brand or offer (visible in web app).',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
   {
-    name: 'enhance_image',
-    group: 'visual_studio',
-    risk: 'generate',
-    description: 'Enhance/polish an existing image (Grok Imagine).',
+    name: 'workspace_import_asset',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description: 'Import an image/file URL into product or context refs for the offer.',
     enabled: false,
-    requiresApproval: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
   {
-    name: 'generate_carousel',
-    group: 'carousel_studio',
-    risk: 'generate',
-    description: 'Generate a carousel (Gemini Nano Banana Pro).',
+    name: 'workspace_save_artifact',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description: 'Persist a Grok-produced script/image pointer into the library with deep link.',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+
+  // EXECUTE — Advance credits
+  {
+    name: 'execute_script_generate',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Generate a script via Advance AI (credits).',
     enabled: false,
     requiresApproval: true,
+    consumesAdvanceCredits: true,
   },
   {
-    name: 'generate_script',
-    group: 'script_studio',
-    risk: 'generate',
-    description: 'Generate or revise a sales/organic script.',
+    name: 'execute_image_generate',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Generate an image via Advance (Grok Imagine default, credits).',
     enabled: false,
     requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
+    name: 'execute_image_edit',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Edit an image via Advance (Grok Imagine, credits).',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
+    name: 'execute_image_enhance',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Enhance an image via Advance (Grok Imagine, credits).',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
+    name: 'execute_carousel_generate',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Generate a carousel via Advance (Gemini render, credits).',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+
+  // Deletes
+  {
+    name: 'delete_offer',
+    group: 'deletes',
+    risk: 'delete',
+    description: 'Delete an offer after confirmation (same rules as web).',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'delete_brand',
+    group: 'deletes',
+    risk: 'delete',
+    description: 'Delete a brand/folder after confirmation (cascade disclosed).',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'delete_asset',
+    group: 'deletes',
+    risk: 'delete',
+    description: 'Delete a product/context/generated image after confirmation.',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: false,
+  },
+
+  // Team / admin
+  {
+    name: 'team_list_members',
+    group: 'account_team',
+    risk: 'admin',
+    description: 'List team members when the user has team access.',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_get_usage',
+    group: 'account_team',
+    risk: 'admin',
+    description: 'Admin-only usage summary (server-enforced).',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
 ]
 
@@ -156,4 +265,12 @@ export function listEnabledMcpTools(options?: {
 
 export function getMcpTool(name: string): McpToolDefinition | undefined {
   return MCP_TOOL_REGISTRY.find((tool) => tool.name === name)
+}
+
+export function listGuideTools(): McpToolDefinition[] {
+  return MCP_TOOL_REGISTRY.filter((tool) => tool.risk === 'guide')
+}
+
+export function listExecuteTools(): McpToolDefinition[] {
+  return MCP_TOOL_REGISTRY.filter((tool) => tool.risk === 'execute')
 }

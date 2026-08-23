@@ -42,10 +42,13 @@ describe('mcp user read tools', () => {
     await expect(mcpGetBrandContext(db, { id: 'user-b' }, 'b1')).rejects.toThrow(/not found|denied/i)
   })
 
-  it('locks mutation policy: no deletes, approval for generate', () => {
-    expect(MCP_MUTATION_POLICY.deleteTools).toBe(false)
+  it('locks mutation policy: deletes allowed, guide free, execute metered', () => {
+    expect(MCP_MUTATION_POLICY.deleteTools).toBe(true)
     expect(MCP_MUTATION_POLICY.generateRequiresApprovalToken).toBe(true)
-    expect(MCP_MUTATION_POLICY.scope).toBe('signed_in_user_only')
+    expect(MCP_MUTATION_POLICY.guideConsumesAdvanceCredits).toBe(false)
+    expect(MCP_MUTATION_POLICY.executeConsumesAdvanceCredits).toBe(true)
+    expect(MCP_MUTATION_POLICY.syncVisibleInWebApp).toBe(true)
+    expect(MCP_MUTATION_POLICY.scope).toBe('signed_in_user_and_team_as_web')
     expect(MCP_READ_TOOL_SCHEMAS.map((tool) => tool.name)).toEqual([
       'list_brands',
       'get_brand_context',

@@ -1,68 +1,69 @@
 # Advance MCP for Grok bot (`advanceai.studio`)
 
 Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`  
-Later: Codex (same registry, same auth).
+Later: Codex (same registry / auth).
 
-## Locked product choices
+## Locked product model
+
+### Dual mode (critical)
+| Mode | Who generates | Advance credits? | What MCP does |
+|---|---|---|---|
+| **GUIDE** | Grok bot (user’s own Grok text / Imagine usage) | **No** | Brand/context, skills, packed prompts, refs, constraints |
+| **EXECUTE** | Advance AI APIs | **Yes** | Same pipelines as the web app (scripts, images, carousel, …) |
+
+Unfair to charge when Grok does everything. Credits only when Advance runs generation.
+
+### Workspace sync (autosave across surfaces)
+Anything MCP creates or attaches (brand folder, offer, URL context, product/scene images, sessions, drafts) is written to the **real AIIAN DB** so opening the web app shows the same business → brand → assets → editable context. Not a separate Grok-only silo.
+
+### Other locks
 - Domain: `https://advanceai.studio`
-- Auth: OAuth 2.1 + PKCE against Advance/Supabase (browser sign-in; **no pasted service-role keys**)
-- Scope: signed-in user only (RLS / `owner_id` / `user_id`)
-- Credits: same subscription as the web app
-- No delete tools
-- Generate / edit / enhance / carousel: **require approval** (UX TBD — see questions below)
-- Image routing: generate default Grok; **edit+enhance = Grok**; **carousel = Gemini**
+- Auth: OAuth 2.1 + PKCE (Advance/Supabase browser login; no service-role pasting)
+- Scope: signed-in user + same team/admin rules as the web app
+- Deletes: **included** (permission-checked, confirmed)
+- Team/admin: **included** (server-enforced; natural extension of web)
+- Plans/billing redesign: **later** — ignore for MCP wiring now
+- Image routing in-app: generate default Grok; edit+enhance Grok; carousel Gemini
+
+## What “publishing” meant (clarification)
+In this product today, “Publish” on the marketing site means **content ready for you to post** (record/design/post yourself). There is **no** built-in Instagram/Facebook/Meta scheduler or auto-post from Advance.
+
+So “publishing tools” are **not** in scope unless you want us to add social posting later.
 
 ## Tool surface (versioned registry)
-Code: `api/lib/mcp/tool-registry.ts` (`MCP_REGISTRY_VERSION`).
+Code: `api/lib/mcp/tool-registry.ts`
 
-| Group | Purpose | Default |
+| Group | Modes | Notes |
 |---|---|---|
-| Brand Workspace | brands, offers, kits | ON (reads) |
-| Creative Context | uploads, analysis, memory | OFF until unlocked |
-| Script Studio | scripts | OFF |
-| Visual Studio | generate/edit/enhance images | OFF until approval UX chosen |
-| Carousel Studio | carousels (Gemini) | OFF |
-| Post & Reply Studio | posts / replies | OFF |
-| Library & Sessions | history / artifacts | OFF |
-| Account & Team | usage / team | OFF |
+| Brand Workspace | read + sync writes | brands, offers, kits |
+| Guide Studio | GUIDE only | prompts/context for Grok’s own generation |
+| Execute Studio | EXECUTE + approval | Advance-run scripts/images/carousel |
+| Library & Sessions | sync | histories, artifacts, deep links |
+| Deletes | confirmed writes | brand/offer/asset/session (no gen credits) |
+| Account & Team | read/admin | usage, members — role-gated |
 
-Flip groups + per-tool `enabled` flags to expand safely after testing.
+Flip `enabled` flags per tool/group as we test.
 
-## Host plan
-1. Public MCP HTTP endpoint on Vercel: `https://advanceai.studio/api/mcp`
-2. Grok.com → Connectors → Custom → that URL
-3. First use: Grok opens Advance login (OAuth); tokens bound to one user
-4. `listTools` returns `listEnabledMcpTools()` only
-5. Mutations call the same backend paths as the SPA (shared credits + logging)
+## Approval (EXECUTE only)
+GUIDE needs no credit approval. EXECUTE still needs a confirmed “run this on Advance.”
 
-## Approval — plain English (needs your pick)
-When Grok wants to spend credits or write content, something must confirm **you really want that exact action**.
-
-**Option A — Approve in Grok chat**  
-Grok asks “Generate this image for Brand X (~1 credit)?” and you say yes in the chat.  
-Simple, stays in Grok. Weaker unless Grok can prove that yes to our server (often it cannot).
-
-**Option B — Approve on Advance web**  
-Grok returns a link → you open Advance → see exact preview (brand, prompt, cost) → Approve.  
-Strongest security; one extra click outside Grok.
-
-**Option C — Hybrid**  
-Cheap/low-risk writes confirm in Grok; paid generation / batches use Advance link.
-
-We will **not** wire generate/edit tools until you choose A/B/C (and the questions below).
-
-## Open questions (do not assume)
-1. Approval: **A, B, or C**? Token lifetime (e.g. 10 min / 1 hour)?
-2. Does “entire tools” include **deletes**, **publishing**, **team/admin**, shared/team assets?
-3. After MCP generate: **auto-save** to posts library, or draft until you say save?
-4. Do you already have a **paid Grok account** that can add Custom Connectors at grok.com/connectors?
-5. Should the first live unlock be **Brand reads only**, then Visual Studio next?
+Hybrid default direction from product:
+- Low-risk workspace sync / saves: can proceed when authenticated
+- EXECUTE generation: confirm before spend (exact UX still open — see questions)
 
 ## Phase status
 | Slice | Status |
 |---|---|
 | Read helpers + AIIAN adapter | Done |
-| Tool registry v0.1 | Done |
-| Edit/enhance → Grok; carousel → Gemini | Done (app routing) |
-| `/api/mcp` OAuth host on advanceai.studio | Blocked on questions 1–5 |
-| Generate via MCP | Blocked on approval choice |
+| Provider routing (Grok edit/enhance) | Done |
+| Dual-mode registry (guide vs execute) | In progress |
+| Workspace sync writers | Not started |
+| `/api/mcp` OAuth host | Not started |
+| EXECUTE generate tools | Blocked on remaining questions |
+
+## Remaining questions
+1. **EXECUTE approval:** confirm in **Grok chat**, **Advance web link**, or **hybrid** (chat for small, link for batches/expensive)? Rough TTL?
+2. **GUIDE analysis:** may GUIDE run free URL/PDF/site analysis into the brand folder, or only read/save what the user already provided?
+3. **Importing Grok outputs:** when Grok Imagine finishes on Grok’s side, how should assets land in Advance — **user**, **file upload**, or **either**?
+4. **Deletes:** permanent (like current web “cannot undo”), or soft-delete/archive?
+5. Confirm: **no social auto-post** for now (only “ready to publish” content in library)?
