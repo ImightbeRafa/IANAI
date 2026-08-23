@@ -21,6 +21,8 @@ const DEFAULT_DATA: UsageLimitsRow = {
   descriptionsLimit: 10,
   repliesUsed: 0,
   repliesLimit: 10,
+  creditsRemaining: 0,
+  creditsEnabled: false,
 }
 
 /**

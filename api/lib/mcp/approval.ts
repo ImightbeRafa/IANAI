@@ -33,6 +33,8 @@ export type McpApprovalRecord = {
   consumedAtMs: number | null
   approvedAtMs: number | null
   deniedAtMs: number | null
+  resultJson: unknown | null
+  resultStoredAtMs: number | null
 }
 
 export type McpApprovalStore = {
@@ -42,6 +44,7 @@ export type McpApprovalStore = {
   markApproved: (id: string, atMs: number) => Promise<McpApprovalRecord | null>
   markDenied: (id: string, atMs: number) => Promise<McpApprovalRecord | null>
   markConsumed: (id: string, consumedAtMs: number) => Promise<McpApprovalRecord | null>
+  storeResult: (id: string, result: unknown, atMs: number) => Promise<McpApprovalRecord | null>
 }
 
 export function hashMcpApprovalToken(token: string): string {
@@ -94,6 +97,8 @@ export function createMcpApprovalRequest(options: {
     consumedAtMs: null,
     approvedAtMs: null,
     deniedAtMs: null,
+    resultJson: null,
+    resultStoredAtMs: null,
   }
   return { token, record }
 }
@@ -199,6 +204,41 @@ export async function consumeMcpApprovalRequest(
   return { ok: true, record: updated }
 }
 
+/**
+ * After EXECUTE succeeds, store a compact result for lost-response replay.
+ */
+export async function storeMcpApprovalResult(
+  store: McpApprovalStore,
+  options: { approvalRequestId: string; result: unknown; nowMs?: number }
+): Promise<void> {
+  await store.storeResult(options.approvalRequestId, options.result, options.nowMs ?? Date.now())
+}
+
+/**
+ * If approval was already consumed but result was stored, return it (idempotent retry).
+ */
+export async function replayMcpApprovalResult(
+  store: McpApprovalStore,
+  options: {
+    approvalRequestId: string
+    userId: string
+    toolName: string
+    input: unknown
+  }
+): Promise<{ ok: true; result: unknown } | { ok: false; reason: string }> {
+  const row = await store.findById(options.approvalRequestId)
+  if (!row) return { ok: false, reason: 'Approval not found' }
+  if (row.userId !== options.userId) return { ok: false, reason: 'Approval user mismatch' }
+  if (row.toolName !== options.toolName) return { ok: false, reason: 'Approval tool mismatch' }
+  if (row.inputHash !== hashMcpToolInput(options.input)) {
+    return { ok: false, reason: 'Approval input mismatch' }
+  }
+  if (row.status !== 'consumed' || row.resultJson == null) {
+    return { ok: false, reason: 'No stored result to replay' }
+  }
+  return { ok: true, result: row.resultJson }
+}
+
 /** Legacy token consume (tests). */
 export async function consumeMcpApproval(
   store: McpApprovalStore,
@@ -268,6 +308,13 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
       const row = byId.get(id)
       if (!row || (row.status !== 'pending' && row.status !== 'approved')) return null
       const next = { ...row, status: 'consumed' as const, consumedAtMs }
+      byId.set(id, next)
+      return { ...next }
+    },
+    async storeResult(id, result, atMs) {
+      const row = byId.get(id)
+      if (!row) return null
+      const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }
     },

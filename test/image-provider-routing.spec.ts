@@ -44,7 +44,7 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.5\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.6\./)
     const enabled = listEnabledMcpTools()
     const names = enabled.map((t) => t.name).sort()
     expect(names).toContain('list_brands')

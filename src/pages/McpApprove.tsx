@@ -133,7 +133,7 @@ export default function McpApprove() {
               <p><span className="font-medium text-dark-700">Tool:</span> {details.tool_name}</p>
               <p><span className="font-medium text-dark-700">Status:</span> {details.status}</p>
               <p>
-                <span className="font-medium text-dark-700">Credits:</span>{' '}
+                <span className="font-medium text-dark-700">Créditos IA:</span>{' '}
                 {details.quoted_credit_cost ?? '—'}
               </p>
               <p>

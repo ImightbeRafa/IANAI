@@ -11,6 +11,7 @@ import { requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { createMcpSupabaseAdapter, createMcpUrlIntakeStore, createMcpWorkspaceStore } from './lib/mcp/supabase-adapter.js'
 import { createMcpApprovalStore } from './lib/mcp/approval-store.js'
+import { createMcpArtifactStore } from './lib/mcp/artifact-store.js'
 import { handleMcpJsonRpc, type McpJsonRpcRequest } from './lib/mcp/protocol.js'
 import { mcpWwwAuthenticateHeader, MCP_RESOURCE_METADATA_URL } from './lib/mcp/www-authenticate.js'
 
@@ -91,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     urlIntakeStore: createMcpUrlIntakeStore(),
     workspaceStore: createMcpWorkspaceStore(),
     approvalStore: createMcpApprovalStore(),
+    artifactStore: createMcpArtifactStore(),
     appOrigin: 'https://advanceai.studio',
   })
 

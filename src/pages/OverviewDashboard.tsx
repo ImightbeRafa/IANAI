@@ -103,6 +103,7 @@ export default function OverviewDashboard() {
       plan: 'Plan',
       scriptsUsed: 'Guiones usados',
       imagesUsed: 'Imágenes usadas',
+      creditsRemaining: 'Créditos IA',
       unlimited: 'Ilimitado',
       of: 'de',
       recentScripts: 'Guiones Recientes',
@@ -113,7 +114,8 @@ export default function OverviewDashboard() {
       upgrade: 'Mejorar plan',
       free: 'Gratis',
       starter: 'Starter',
-      pro: 'Pro',
+      pro: 'Premium',
+      business: 'Business',
       enterprise: 'Enterprise',
       meta_advanze: 'Meta AdVance',
       quickActions: 'Acciones Rápidas',
@@ -131,6 +133,7 @@ export default function OverviewDashboard() {
       plan: 'Plan',
       scriptsUsed: 'Scripts used',
       imagesUsed: 'Images used',
+      creditsRemaining: 'AI credits',
       unlimited: 'Unlimited',
       of: 'of',
       recentScripts: 'Recent Scripts',
@@ -141,7 +144,8 @@ export default function OverviewDashboard() {
       upgrade: 'Upgrade plan',
       free: 'Free',
       starter: 'Starter',
-      pro: 'Pro',
+      pro: 'Premium',
+      business: 'Business',
       enterprise: 'Enterprise',
       meta_advanze: 'Meta AdVance',
       quickActions: 'Quick Actions',
@@ -154,6 +158,7 @@ export default function OverviewDashboard() {
     free: t.free,
     starter: t.starter,
     pro: t.pro,
+    business: t.business,
     enterprise: t.enterprise,
     meta_advanze: t.meta_advanze,
   }
@@ -248,41 +253,57 @@ export default function OverviewDashboard() {
               </span>
             </div>
 
-            {/* Scripts usage */}
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-sm mb-1.5">
-                <span className="text-dark-600">{t.scriptsUsed}</span>
-                <span className="text-dark-900 font-medium">
-                  {formatLimit(usage.scriptsUsed, usage.scriptsLimit)}
-                </span>
-              </div>
-              {usage.scriptsLimit !== -1 && (
-                <div className="h-2 bg-dark-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-green-500 rounded-full transition-all"
-                    style={{ width: `${getPercentage(usage.scriptsUsed, usage.scriptsLimit)}%` }}
-                  />
+            {usage.creditsEnabled ? (
+              <div>
+                <div className="flex items-center justify-between text-sm mb-1.5">
+                  <span className="text-dark-600">{t.creditsRemaining}</span>
+                  <span className="text-dark-900 font-medium text-2xl">
+                    {usage.creditsRemaining}
+                  </span>
                 </div>
-              )}
-            </div>
+                <p className="text-xs text-dark-500">
+                  {language === 'es'
+                    ? 'Guion 3 · Imagen 6 · Pro 24'
+                    : 'Script 3 · Image 6 · Pro 24'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <div className="flex items-center justify-between text-sm mb-1.5">
+                    <span className="text-dark-600">{t.scriptsUsed}</span>
+                    <span className="text-dark-900 font-medium">
+                      {formatLimit(usage.scriptsUsed, usage.scriptsLimit)}
+                    </span>
+                  </div>
+                  {usage.scriptsLimit !== -1 && (
+                    <div className="h-2 bg-dark-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-green-500 rounded-full transition-all"
+                        style={{ width: `${getPercentage(usage.scriptsUsed, usage.scriptsLimit)}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
 
-            {/* Images usage */}
-            <div>
-              <div className="flex items-center justify-between text-sm mb-1.5">
-                <span className="text-dark-600">{t.imagesUsed}</span>
-                <span className="text-dark-900 font-medium">
-                  {formatLimit(usage.imagesUsed, usage.imagesLimit)}
-                </span>
-              </div>
-              {usage.imagesLimit !== -1 && (
-                <div className="h-2 bg-dark-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 rounded-full transition-all"
-                    style={{ width: `${getPercentage(usage.imagesUsed, usage.imagesLimit)}%` }}
-                  />
+                <div>
+                  <div className="flex items-center justify-between text-sm mb-1.5">
+                    <span className="text-dark-600">{t.imagesUsed}</span>
+                    <span className="text-dark-900 font-medium">
+                      {formatLimit(usage.imagesUsed, usage.imagesLimit)}
+                    </span>
+                  </div>
+                  {usage.imagesLimit !== -1 && (
+                    <div className="h-2 bg-dark-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all"
+                        style={{ width: `${getPercentage(usage.imagesUsed, usage.imagesLimit)}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
 
           {/* Recent Scripts */}

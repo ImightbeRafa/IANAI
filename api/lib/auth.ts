@@ -1,5 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from './supabase-admin.js'
+import {
+  isCreditsV1Enabled,
+  legacyActionToCredit,
+  quoteCredits,
+} from './credits/catalog.js'
+import { checkCredits, consumeCredits, ensureWelcomeCredits } from './credits/consume.js'
 
 export interface AuthenticatedUser {
   id: string
@@ -107,15 +114,38 @@ export async function requireAuth(
 }
 
 /**
- * Check if user can perform an action based on their plan limits
+ * Check if user can perform an action based on their plan limits.
+ * When CREDITS_V1 is enabled, uses Créditos IA wallet instead of monthly meters.
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply'
-): Promise<{ allowed: boolean; remaining: number; limit: number }> {
+  action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
+  options?: { imageModel?: string | null; units?: number }
+): Promise<{ allowed: boolean; remaining: number; limit: number; creditsRequired?: number }> {
   if (!supabaseAdmin) {
     console.error('Usage limit check: Supabase not configured — denying request')
     return { allowed: false, remaining: 0, limit: 0 }
+  }
+
+  if (isCreditsV1Enabled()) {
+    try {
+      await ensureWelcomeCredits(userId)
+      const mapped = legacyActionToCredit({
+        action,
+        imageModel: options?.imageModel,
+      })
+      const units = options?.units ?? mapped.units
+      const check = await checkCredits(userId, mapped.creditAction, units)
+      return {
+        allowed: check.allowed,
+        remaining: check.remaining,
+        limit: check.remaining + (check.allowed ? check.required : 0),
+        creditsRequired: check.required,
+      }
+    } catch (err) {
+      console.error('Credit limit check error:', err)
+      return { allowed: false, remaining: 0, limit: 0 }
+    }
   }
 
   try {
@@ -156,7 +186,7 @@ export async function checkUsageLimit(
       return { allowed: false, remaining: 0, limit: 0 }
     }
 
-    // Enhance checks against the image limit (at half rate)
+    // Enhance checks against the image limit (at half rate) — legacy path only
     const effectiveAction = action === 'enhance' ? 'image' : action
 
     let limit = effectiveAction === 'script' 
@@ -167,7 +197,7 @@ export async function checkUsageLimit(
           ? (limits.descriptions_per_month ?? -1)
           : (limits.replies_per_month ?? 10)
 
-    // -1 means unlimited
+    // -1 means unlimited (legacy only; CREDITS_V1 never uses this branch)
     if (limit === -1) {
       return { allowed: true, remaining: -1, limit: -1 }
     }
@@ -236,13 +266,38 @@ export async function deductBonusImage(userId: string): Promise<void> {
 }
 
 /**
- * Increment usage counter for a user (atomic via Postgres function)
+ * Increment usage counter for a user (atomic via Postgres function).
+ * When CREDITS_V1 is on, consumes Créditos IA instead (idempotent on generationId).
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply'
-): Promise<void> {
+  action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
+  options?: { generationId?: string; imageModel?: string | null; units?: number }
+): Promise<{ creditsError?: string; creditsCharged?: number } | void> {
   if (!supabaseAdmin) return
+
+  if (isCreditsV1Enabled()) {
+    try {
+      const mapped = legacyActionToCredit({
+        action,
+        imageModel: options?.imageModel,
+      })
+      const result = await consumeCredits({
+        userId,
+        action: mapped.creditAction,
+        generationId: options?.generationId || randomUUID(),
+        units: options?.units ?? mapped.units,
+      })
+      if (!result.ok) {
+        console.error('consumeCredits failed after success path', result)
+        return { creditsError: result.code, creditsCharged: 0 }
+      }
+      return { creditsCharged: result.credits }
+    } catch (err) {
+      console.error('Credit consume error:', err)
+      return { creditsError: err instanceof Error ? err.message : 'credit_error' }
+    }
+  }
 
   try {
     const { error } = await supabaseAdmin.rpc('increment_usage', {
@@ -256,4 +311,13 @@ export async function incrementUsage(
   } catch (err) {
     console.error('Increment usage error:', err)
   }
+}
+
+/** Quote credits for UI / MCP (0 when CREDITS_V1 off — callers use legacy). */
+export function quoteLegacyActionCredits(
+  action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
+  imageModel?: string | null
+): number {
+  const mapped = legacyActionToCredit({ action, imageModel })
+  return quoteCredits(mapped.creditAction, mapped.units)
 }

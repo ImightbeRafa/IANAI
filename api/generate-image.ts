@@ -565,13 +565,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Check usage limits for new generation requests
-      const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'image')
+      const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, 'image', {
+        imageModel: model,
+      })
       if (!allowed) {
         return res.status(429).json({ 
           error: 'Límite de imágenes alcanzado',
-          message: `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
+          message: creditsRequired
+            ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
+            : `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
           limit,
-          remaining: 0
+          remaining: 0,
+          creditsRequired,
         })
       }
     }
@@ -710,7 +715,7 @@ Edit instruction: ${editPrompt}`
           const outputTokens = openAIUsage?.output_tokens || 0
           const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
 
-          await incrementUsage(user.id, 'image')
+          await incrementUsage(user.id, 'image', { generationId, imageModel: model })
           await deductBonusImage(user.id)
 
           await logApiUsage({
@@ -789,7 +794,7 @@ Edit instruction: ${editPrompt}`
             supportImageUrls: supportUrls,
             aspectRatio: editAR,
           })
-          await incrementUsage(user.id, 'image')
+          await incrementUsage(user.id, 'image', { generationId, imageModel: model })
           await deductBonusImage(user.id)
           await logApiUsage({
             userId: user.id,
@@ -896,7 +901,7 @@ Edit instruction: ${editPrompt}`
         }
         if (!imageUrl) return res.status(500).json({ error: 'Gemini did not return an edited image' })
 
-        await incrementUsage(user.id, 'image')
+        await incrementUsage(user.id, 'image', { generationId, imageModel: model })
         await deductBonusImage(user.id)
 
         const editUsage = response.usageMetadata
@@ -950,7 +955,7 @@ Edit instruction: ${editPrompt}`
     // =============================================
     if (action === 'enhance') {
       // Check usage limit (enhance costs 0.5 image credit)
-      const enhanceUsage = await checkUsageLimit(user.id, 'enhance')
+      const enhanceUsage = await checkUsageLimit(user.id, 'enhance', { imageModel: model })
       if (!enhanceUsage.allowed) {
         return res.status(403).json({ error: 'Image limit reached. Upgrade your plan for more.' })
       }
@@ -1140,7 +1145,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             supportImageUrls: supportUrls,
             aspectRatio: typeof imageParams.aspectRatio === 'string' ? imageParams.aspectRatio : '9:16',
           })
-          await incrementUsage(user.id, 'enhance')
+          await incrementUsage(user.id, 'enhance', { generationId, imageModel: model })
           await logApiUsage({
             userId: user.id,
             userEmail: user.email,
@@ -1247,7 +1252,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           const inputTokens = openAIUsage?.input_tokens || 0
           const outputTokens = openAIUsage?.output_tokens || 0
           const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
-          await incrementUsage(user.id, 'enhance')
+          await incrementUsage(user.id, 'enhance', { generationId, imageModel: model })
           await logApiUsage({
             userId: user.id, userEmail: user.email, feature: 'enhance', model: selectedModel, inputTokens, outputTokens, generationId, costOverrideUsd, costSource: costOverrideUsd === undefined ? 'unavailable' : 'provider_usage', success: true,
             metadata: { action: 'enhance', provider: 'openai', providerModel, rawUsage: openAIUsage, textInputTokens: openAIUsage?.input_tokens_details?.text_tokens || 0, imageInputTokens: openAIUsage?.input_tokens_details?.image_tokens || 0, imageOutputTokens: outputTokens, enhanceTier, referenceCount: references.length, size, quality: 'medium' }
@@ -1401,7 +1406,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           return res.status(500).json({ error: 'Gemini did not return an enhanced image' })
         }
 
-        await incrementUsage(user.id, 'enhance')
+        await incrementUsage(user.id, 'enhance', { generationId, imageModel: model })
 
         // Extract token usage from Gemini response
         const enhanceUsage = response.usageMetadata
@@ -2033,7 +2038,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const outputTokens = openAIUsage?.output_tokens || 0
         const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
 
-        await incrementUsage(user.id, 'image')
+        await incrementUsage(user.id, 'image', { generationId, imageModel: model })
         await deductBonusImage(user.id)
 
         await logApiUsage({
@@ -2301,7 +2306,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         // Increment usage counter after successful generation
-        await incrementUsage(user.id, 'image')
+        await incrementUsage(user.id, 'image', { generationId, imageModel: model })
         await deductBonusImage(user.id)
 
         // Extract token usage from Gemini response
@@ -2499,7 +2504,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         const imageUrl = `data:image/jpeg;base64,${b64Data}`
 
-        await incrementUsage(user.id, 'image')
+        await incrementUsage(user.id, 'image', { generationId, imageModel: model })
         await deductBonusImage(user.id)
 
         const costOverrideUsd = estimateGrokImageCostUsd({

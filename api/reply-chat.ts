@@ -95,12 +95,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Usage limit check
-  const { allowed, remaining, limit } = await checkUsageLimit(user.id, 'reply')
+  const replyGenerationId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-reply`
+  const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, 'reply')
   if (!allowed) {
     return res.status(403).json({
-      error: 'Reply limit reached for your plan',
+      error: creditsRequired
+        ? `Need ${creditsRequired} AI credits. You have ${remaining}.`
+        : 'Reply limit reached for your plan',
       limit,
-      remaining: 0
+      remaining: 0,
+      creditsRequired,
     })
   }
 
@@ -354,7 +358,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metadata: { productId, sessionId, hasWebSearch: !!data.search_results, brandKitId: resolvedBrandKit?.id, brandKitName: resolvedBrandKit?.name }
     })
 
-    await incrementUsage(user.id, 'reply')
+    await incrementUsage(user.id, 'reply', { generationId: replyGenerationId })
 
     return res.status(200).json({
       content,

@@ -912,6 +912,9 @@ export interface UsageLimitsRow {
   descriptionsLimit: number
   repliesUsed: number
   repliesLimit: number
+  /** Créditos IA remaining (0 when wallet not migrated / empty). */
+  creditsRemaining: number
+  creditsEnabled: boolean
 }
 
 /** Plan + monthly usage. Prefer RPC `get_usage_limits`; fall back to table reads. */
@@ -930,6 +933,9 @@ export async function getUsageLimits(userId: string): Promise<UsageLimitsRow> {
 }
 
 async function loadUsageLimits(userId: string): Promise<UsageLimitsRow> {
+  const creditsRemaining = await sumCreditLotsRemaining(userId)
+  const creditsEnabled = creditsRemaining > 0 || (import.meta.env.VITE_CREDITS_V1 === 'true')
+
   if (!usageRpcMissing) {
     try {
       const { data, error } = await supabase.rpc('get_usage_limits', { p_user_id: userId })
@@ -945,6 +951,8 @@ async function loadUsageLimits(userId: string): Promise<UsageLimitsRow> {
           descriptionsLimit: data.descriptionsLimit ?? 10,
           repliesUsed: data.repliesUsed || 0,
           repliesLimit: data.repliesLimit ?? 10,
+          creditsRemaining,
+          creditsEnabled,
         }
       }
       if (isMissingRpcError(error)) usageRpcMissing = true
@@ -998,6 +1006,27 @@ async function loadUsageLimits(userId: string): Promise<UsageLimitsRow> {
     descriptionsLimit: limits?.descriptions_per_month ?? 10,
     repliesUsed: usage?.replies_generated || 0,
     repliesLimit: limits?.replies_per_month ?? 10,
+    creditsRemaining,
+    creditsEnabled,
+  }
+}
+
+async function sumCreditLotsRemaining(userId: string): Promise<number> {
+  try {
+    const { data, error } = await supabase
+      .from('credit_lots')
+      .select('remaining, expires_at')
+      .eq('user_id', userId)
+      .gt('remaining', 0)
+    if (error || !data) return 0
+    const now = Date.now()
+    return data.reduce((sum, row) => {
+      const exp = row.expires_at ? new Date(String(row.expires_at)).getTime() : null
+      if (exp != null && exp <= now) return sum
+      return sum + (Number(row.remaining) || 0)
+    }, 0)
+  } catch {
+    return 0
   }
 }
 
