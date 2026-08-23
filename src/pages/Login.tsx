@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -14,6 +15,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [referralCode, setReferralCode] = useState<string | null>(null)
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/dashboard'
 
   // Capture referral code from URL and persist in localStorage
   useEffect(() => {
@@ -31,7 +33,7 @@ export default function Login() {
     setGoogleLoading(true)
     setError('')
     try {
-      await signInWithGoogle()
+      await signInWithGoogle({ redirectPath: returnPath })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in with Google')
       setGoogleLoading(false)
@@ -45,7 +47,7 @@ export default function Login() {
 
     try {
       await signIn(email, password)
-      navigate('/dashboard')
+      navigate(returnPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sign in')
     } finally {

@@ -44,9 +44,13 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.3\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.4\./)
     const enabled = listEnabledMcpTools()
-    expect(enabled.map((t) => t.name).sort()).toEqual(['get_brand_context', 'list_brands'])
+    expect(enabled.map((t) => t.name).sort()).toEqual([
+      'get_brand_context',
+      'list_brands',
+      'workspace_save_url_context',
+    ])
     expect(enabled.every((t) => !t.consumesAdvanceCredits)).toBe(true)
     expect(getMcpTool('guide_image')?.consumesAdvanceCredits).toBe(false)
     expect(getMcpTool('execute_image_generate')?.consumesAdvanceCredits).toBe(true)

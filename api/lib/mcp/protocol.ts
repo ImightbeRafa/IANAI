@@ -10,11 +10,12 @@ import {
   type McpDbClient,
 } from './user-tools.js'
 import { validateMcpGuideIntake } from './guide-intake.js'
+import { saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.3.0',
+  version: '0.4.0',
 }
 
 export type McpJsonRpcRequest = {
@@ -53,6 +54,17 @@ function toolInputSchema(name: string): Record<string, unknown> {
       additionalProperties: false,
     }
   }
+  if (name === 'workspace_save_url_context') {
+    return {
+      type: 'object',
+      properties: {
+        brandId: { type: 'string' },
+        url: { type: 'string', description: 'HTTPS public URL to analyze later (GUIDE; no credits)' },
+      },
+      required: ['brandId', 'url'],
+      additionalProperties: false,
+    }
+  }
   return { type: 'object', properties: {}, additionalProperties: false }
 }
 
@@ -60,6 +72,8 @@ export async function handleMcpJsonRpc(options: {
   body: McpJsonRpcRequest
   user: McpAuthUser
   db: McpDbClient
+  urlIntakeStore?: McpUrlIntakeStore | null
+  appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
   const { body, user, db } = options
   if (body.jsonrpc && body.jsonrpc !== '2.0') {
@@ -95,7 +109,14 @@ export async function handleMcpJsonRpc(options: {
         return fail(body.id, -32601, `Unknown or disabled tool: ${name || '(missing)'}`)
       }
       try {
-        const text = await dispatchEnabledTool({ name, args, user, db })
+        const text = await dispatchEnabledTool({
+          name,
+          args,
+          user,
+          db,
+          urlIntakeStore: options.urlIntakeStore,
+          appOrigin: options.appOrigin,
+        })
         return ok(body.id, {
           content: [{ type: 'text', text }],
           isError: false,
@@ -118,6 +139,8 @@ async function dispatchEnabledTool(options: {
   args: Record<string, unknown>
   user: McpAuthUser
   db: McpDbClient
+  urlIntakeStore?: McpUrlIntakeStore | null
+  appOrigin?: string
 }): Promise<string> {
   switch (options.name) {
     case 'list_brands': {
@@ -129,9 +152,24 @@ async function dispatchEnabledTool(options: {
       const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
       return JSON.stringify(ctx, null, 2)
     }
-    case 'workspace_save_url_context':
+    case 'workspace_save_url_context': {
+      if (!options.urlIntakeStore) {
+        throw new Error('URL intake store not configured')
+      }
+      const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
+      const url = typeof options.args.url === 'string' ? options.args.url : ''
+      const row = await saveMcpUrlContext({
+        db: options.db,
+        store: options.urlIntakeStore,
+        user: options.user,
+        brandId,
+        url,
+        appOrigin: options.appOrigin,
+      })
+      return JSON.stringify(row, null, 2)
+    }
     case 'workspace_ingest_file': {
-      // Stubs stay disabled in registry; if called, validate then refuse processing.
+      // Still disabled in registry; validate then refuse processing.
       const validated = validateMcpGuideIntake({
         brandId: typeof options.args.brandId === 'string' ? options.args.brandId : undefined,
         url: typeof options.args.url === 'string' ? options.args.url : null,
@@ -140,7 +178,7 @@ async function dispatchEnabledTool(options: {
           : [],
       })
       if (!validated.ok) throw new Error(validated.error)
-      throw new Error('GUIDE intake processing is not enabled yet')
+      throw new Error('GUIDE file ingest is not enabled yet')
     }
     default:
       throw new Error(`Unhandled tool: ${options.name}`)

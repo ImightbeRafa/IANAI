@@ -1,10 +1,11 @@
 /**
- * Server-only AIIAN adapter for per-user MCP read tools.
+ * Server-only AIIAN adapter for per-user MCP read tools + URL intake.
  * Uses the admin client with explicit owner/user filters on every query.
  */
 
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { McpBrandContext, McpBrandSummary, McpDbClient } from './user-tools.js'
+import type { McpUrlIntakeStore } from './url-intake.js'
 
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
@@ -82,6 +83,27 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         primaryColor: (data.primary_color as string | null) ?? null,
         secondaryColor: (data.secondary_color as string | null) ?? null,
       }
+    },
+  }
+}
+
+export function createMcpUrlIntakeStore(): McpUrlIntakeStore | null {
+  const db = getSupabaseAdmin()
+  if (!db) return null
+  return {
+    async insertPendingUrlIntake(row) {
+      const { data, error } = await db
+        .from('mcp_url_intakes')
+        .insert({
+          user_id: row.userId,
+          business_id: row.businessId,
+          source_url: row.sourceUrl,
+          status: 'pending_analysis',
+        })
+        .select('id')
+        .single()
+      if (error) throw error
+      return { id: data.id as string }
     },
   }
 }

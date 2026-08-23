@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 interface AuthContextType {
   user: User | null
@@ -10,7 +11,7 @@ interface AuthContextType {
   adminResolved: boolean
   signUp: (email: string, password: string, fullName?: string, referralCode?: string) => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
-  signInWithGoogle: () => Promise<void>
+  signInWithGoogle: (options?: { redirectPath?: string }) => Promise<void>
   signOut: () => Promise<void>
   updateProfile: (updates: { full_name?: string; avatar_url?: string }) => Promise<void>
 }
@@ -227,12 +228,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error
   }
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (options?: { redirectPath?: string }) => {
+    const path = safeAppReturnPath(options?.redirectPath) || '/dashboard'
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/dashboard`
-      }
+        redirectTo: `${window.location.origin}${path}`,
+      },
     })
     if (error) throw error
   }

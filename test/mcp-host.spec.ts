@@ -13,6 +13,7 @@ import {
 } from '../api/lib/mcp/brand-delete'
 import { validateMcpGuideIntake } from '../api/lib/mcp/guide-intake'
 import { handleMcpJsonRpc } from '../api/lib/mcp/protocol'
+import type { McpUrlIntakeStore } from '../api/lib/mcp/url-intake'
 import type { McpDbClient } from '../api/lib/mcp/user-tools'
 
 const db: McpDbClient = {
@@ -157,7 +158,7 @@ describe('mcp protocol', () => {
       db,
     })
     const tools = (listed.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name).sort()
-    expect(tools).toEqual(['get_brand_context', 'list_brands'])
+    expect(tools).toEqual(['get_brand_context', 'list_brands', 'workspace_save_url_context'])
 
     const called = await handleMcpJsonRpc({
       body: {
@@ -187,5 +188,36 @@ describe('mcp protocol', () => {
       db,
     })
     expect((listed.result as { content: Array<{ text: string }> }).content[0].text).toContain('"brands": []')
+  })
+
+  it('saves GUIDE url intake as pending_analysis without credits', async () => {
+    const store: McpUrlIntakeStore = {
+      async insertPendingUrlIntake(row) {
+        expect(row.userId).toBe('user-a')
+        expect(row.businessId).toBe('b1')
+        expect(row.sourceUrl).toMatch(/^https:\/\//)
+        return { id: 'intake-1' }
+      },
+    }
+    const called = await handleMcpJsonRpc({
+      body: {
+        jsonrpc: '2.0',
+        id: 5,
+        method: 'tools/call',
+        params: {
+          name: 'workspace_save_url_context',
+          arguments: { brandId: 'b1', url: 'https://example.com/brand' },
+        },
+      },
+      user: { id: 'user-a' },
+      db,
+      urlIntakeStore: store,
+      appOrigin: 'https://advanceai.studio',
+    })
+    expect(called.result).toMatchObject({ isError: false })
+    const text = (called.result as { content: Array<{ text: string }> }).content[0].text
+    expect(text).toContain('pending_analysis')
+    expect(text).toContain('intake-1')
+    expect(text).toContain('/chat?brandId=b1')
   })
 })

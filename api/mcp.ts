@@ -3,16 +3,19 @@
  * URL: https://advanceai.studio/api/mcp
  *
  * Auth: Bearer Supabase access token (same as the web app API).
- * OAuth browser login for Grok will mint this token via Advance login (next slice).
+ * Unauthenticated calls get WWW-Authenticate pointing at protected-resource metadata.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
-import { createMcpSupabaseAdapter } from './lib/mcp/supabase-adapter.js'
+import { createMcpSupabaseAdapter, createMcpUrlIntakeStore } from './lib/mcp/supabase-adapter.js'
 import { handleMcpJsonRpc, type McpJsonRpcRequest } from './lib/mcp/protocol.js'
 
 const MAX_BODY_BYTES = 256_000
+const MCP_RESOURCE_METADATA = 'https://advanceai.studio/.well-known/oauth-protected-resource'
+const MCP_WWW_AUTHENTICATE =
+  `Bearer FAKESECRET_u1v2w3x4y5z6a7b8c9d0="${MCP_RESOURCE_METADATA}"`
 
 function readRawBodySize(req: VercelRequest): number {
   if (typeof req.body === 'string') return Buffer.byteLength(req.body)
@@ -44,6 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       transport: 'http',
       auth: 'bearer_supabase_jwt',
       docs: 'https://advanceai.studio',
+      oauth_protected_resource: MCP_RESOURCE_METADATA,
       tools: 'POST JSON-RPC initialize | tools/list | tools/call',
     })
     return
@@ -59,7 +63,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  const user = await requireAuth(req, res)
+  const user = await requireAuth(req, res, {
+    unauthorizedHeaders: { 'WWW-Authenticate': MCP_WWW_AUTHENTICATE },
+  })
   if (!user) return
 
   const rate = checkRateLimit(`mcp:${user.id}`, { maxRequests: 60, windowSeconds: 60 })
@@ -82,6 +88,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     body,
     user: { id: user.id, email: user.email },
     db,
+    urlIntakeStore: createMcpUrlIntakeStore(),
+    appOrigin: 'https://advanceai.studio',
   })
 
   res.status(200).json(rpc)

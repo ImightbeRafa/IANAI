@@ -26,7 +26,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.3.0'
+export const MCP_REGISTRY_VERSION = '0.4.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -51,7 +51,7 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   library_sessions: {
     title: 'Library & Sessions',
     summary: 'Sessions, provenance, URL/file intake into brand folders, deep links.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   deletes: {
     title: 'Archive & Deletes',
@@ -129,8 +129,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'workspace_save_url_context',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Save a source URL / extracted context onto the brand or offer (visible in web app).',
-    enabled: false,
+    description: 'Save a source URL onto an owned brand as pending_analysis (no credits; no fetch yet).',
+    enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
   },
