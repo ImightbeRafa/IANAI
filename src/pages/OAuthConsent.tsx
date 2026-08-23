@@ -69,7 +69,12 @@ export default function OAuthConsent() {
       )
       if (cancelled) return
       if (detailsError) {
-        setError(detailsError.message)
+        const msg = detailsError.message || 'Failed to load authorization'
+        setError(
+          /oauth server is disabled|feature_disabled/i.test(msg)
+            ? 'OAuth Server is disabled on this Supabase project. Enable Authentication → OAuth Server (path /oauth/consent, Dynamic Client Registration on), then retry from Grok.'
+            : msg
+        )
         setLoading(false)
         return
       }
