@@ -1710,7 +1710,7 @@ export async function createPost(
     width: data.width || 1080,
     height: data.height || 1080,
     output_format: data.output_format || 'jpeg',
-    model: data.model || 'nano-banana-pro',
+    model: data.model || 'grok-imagine',
     generation_id: data.generation_id || null,
     status: 'generating'
   }

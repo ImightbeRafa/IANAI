@@ -76,7 +76,7 @@ export const IMAGE_DENSITY_CHOICES: Array<{
 /** Workplace-aligned shell defaults (style unresolved until sticky/clarify). */
 export const DEFAULT_IMAGE_PREFERENCES: ShellImagePreferences = {
   aspectRatio: '9:16',
-  model: 'nano-banana-pro',
+  model: 'grok-imagine',
   density: 'hard',
 }
 

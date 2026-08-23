@@ -63,13 +63,14 @@ describe('parseChatShellImageIntent', () => {
 })
 
 describe('resolveImagePreferences / clarifications / stickies', () => {
-  it('defaults to 9:16, Pro, Hard', () => {
+  it('defaults to 9:16, Grok Imagine, Hard', () => {
     const resolved = resolveImagePreferences({}, {})
     expect(resolved.aspectRatio).toBe('9:16')
-    expect(resolved.model).toBe('nano-banana-pro')
+    expect(resolved.model).toBe('grok-imagine')
     expect(resolved.density).toBe('hard')
     expect(resolved.style).toBeUndefined()
     expect(DEFAULT_IMAGE_PREFERENCES.aspectRatio).toBe('9:16')
+    expect(DEFAULT_IMAGE_PREFERENCES.model).toBe('grok-imagine')
   })
 
   it('explicit overrides sticky', () => {

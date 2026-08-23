@@ -113,11 +113,11 @@ export default function ChatImageSettingsPanel({
       <label className="chat-shell__field">
         <span>{es ? 'Modelo de imagen (elegí en cada generación)' : 'Image model (pick every generation)'}</span>
         <select
-          value={preferences?.model || 'nano-banana-pro'}
+          value={preferences?.model || 'grok-imagine'}
           onChange={(event) => onChange?.({ model: event.target.value as ShellImagePreferences['model'] })}
         >
-          <option value="nano-banana-pro">Nano Banana Pro</option>
           <option value="grok-imagine">Grok Imagine 2.0</option>
+          <option value="nano-banana-pro">Nano Banana Pro</option>
         </select>
         <small className="chat-shell__field-hint">
           {es

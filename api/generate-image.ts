@@ -34,6 +34,13 @@ import {
   GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
 } from './lib/grok-models.js'
+import {
+  buildExplicitReferenceRoleContract,
+  buildLifestyleCreativeBrief,
+  normalizeImageReferenceRole,
+  selectGrokReferenceBudget,
+  type ImageReferenceRole,
+} from './lib/image-prompt-context.js'
 
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations'
 const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits'
@@ -157,6 +164,7 @@ async function hydrateInputImagesFromProductImages(
     session_id: string | null
     image_url: string | null
     kind: string | null
+    label: string | null
     message_id?: string | null
     created_at: string | null
   }
@@ -171,7 +179,7 @@ async function hydrateInputImagesFromProductImages(
     }
     const { data, error } = await imgMemSupabase
       .from('product_images')
-      .select('id, product_id, user_id, session_id, image_url, kind, message_id, created_at')
+      .select('id, product_id, user_id, session_id, image_url, kind, label, message_id, created_at')
       .in('id', ids)
     if (error) {
       console.error('hydrate product_images load error', error)
@@ -201,7 +209,7 @@ async function hydrateInputImagesFromProductImages(
   } else if (options.autoLoadOfferRefs && options.sessionId) {
     const { data, error } = await imgMemSupabase
       .from('product_images')
-      .select('id, product_id, user_id, session_id, image_url, kind, message_id, created_at')
+      .select('id, product_id, user_id, session_id, image_url, kind, label, message_id, created_at')
       .eq('product_id', options.productId)
       .or(`session_id.is.null,session_id.eq.${options.sessionId}`)
       .eq('kind', 'product')
@@ -224,8 +232,12 @@ async function hydrateInputImagesFromProductImages(
     return 0
   })
 
+  const roles: ImageReferenceRole[] = rows.slice(0, 4).map((row) =>
+    normalizeImageReferenceRole({ kind: row.kind, label: row.label })
+  )
+  imageParams.referenceImageKinds = roles.map((role) => (role === 'product' ? 'product' : 'context'))
+  imageParams.referenceImageRoles = roles
   let slot = 0
-  imageParams.referenceImageKinds = rows.slice(0, 4).map((row) => row.kind === 'context' ? 'context' : 'product')
   for (const row of rows.slice(0, 4)) {
     if (!row.image_url) continue
     const dataUrl = await fetchImageUrlAsDataUrl(row.image_url)
@@ -241,6 +253,44 @@ async function hydrateInputImagesFromProductImages(
   }
 
   return { ok: true }
+}
+
+/** Cap Grok to 3 refs and keep slot order aligned with role contracts. */
+function applyGrokThreeReferenceBudget(imageParams: Record<string, unknown>): void {
+  const keys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4'] as const
+  const rolesRaw = Array.isArray(imageParams.referenceImageRoles)
+    ? imageParams.referenceImageRoles
+    : []
+  const candidates = keys
+    .map((key, index) => {
+      const url = imageParams[key]
+      if (typeof url !== 'string' || !url) return null
+      const roleRaw = rolesRaw[index]
+      const role: ImageReferenceRole =
+        roleRaw === 'scene' || roleRaw === 'style' || roleRaw === 'product'
+          ? roleRaw
+          : 'product'
+      return { url, role }
+    })
+    .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
+
+  if (candidates.length === 0) {
+    imageParams.referenceImageRoles = []
+    imageParams.referenceImageKinds = []
+    return
+  }
+
+  const picked = selectGrokReferenceBudget(candidates, 3)
+  for (const key of keys) {
+    delete imageParams[key]
+  }
+  picked.forEach((row, index) => {
+    imageParams[keys[index]] = row.url
+  })
+  imageParams.referenceImageRoles = picked.map((row) => row.role)
+  imageParams.referenceImageKinds = picked.map((row) =>
+    (row.role === 'product' ? 'product' : 'context')
+  )
 }
 
 function normalizePostTextDensity(value: unknown): PostTextDensity {
@@ -268,57 +318,35 @@ function buildProductReferenceStrategyPrefix(
   language: string,
   refCount: number,
   isProductMode: boolean,
-  referenceKinds: unknown
+  referenceKinds: unknown,
+  referenceRoles?: unknown
 ): string {
   if (refCount <= 0) return ''
-  const isEs = language === 'es'
+  const rolesFromPayload = Array.isArray(referenceRoles)
+    ? referenceRoles.filter((role): role is ImageReferenceRole =>
+      role === 'product' || role === 'scene' || role === 'style')
+    : []
+  if (rolesFromPayload.length > 0) {
+    return buildExplicitReferenceRoleContract({
+      language,
+      roles: rolesFromPayload.slice(0, refCount),
+      isProductMode,
+    })
+  }
+
   const kinds = Array.isArray(referenceKinds) ? referenceKinds : []
   const contextCount = kinds.filter((kind) => kind === 'context').length
   const productCount = Math.max(0, refCount - contextCount)
-  const modeRule = isProductMode
-    ? (isEs
-      ? 'Como estas en modo fotografia de producto, prioriza una representacion limpia del producto vendible. Si varias imagenes son vistas del mismo item, usalas para fidelidad; si son items distintos, no los mezcles.'
-      : 'Because this is product photography mode, prioritize a clean representation of the sellable product. If several images are views of the same item, use them for fidelity; if they are distinct items, do not blend them.')
-    : (isEs
-      ? 'Como estas creando un post/anuncio, usa las referencias secundarias como prueba visual, contexto o apoyo de composicion sin competir con el producto heroe.'
-      : 'Because this is a post/ad, use secondary references as proof, context, or composition support without competing with the hero product.')
-
-  if (refCount === 1) {
-    if (contextCount === 1) {
-      return isEs
-        ? 'ESTRATEGIA DE REFERENCIA DE ESTILO (NO RENDERIZAR): Se adjunta 1 post de referencia. Copiá SOLO el tipo de diseño: layout, jerarquía, tipografía, densidad y composición. NO copies el producto, marca, logo, precios ni textos de esa referencia. El producto, colores y copy salen del guion y las fotos reales del usuario.\n\n'
-        : 'STYLE REFERENCE STRATEGY (DO NOT RENDER): 1 social-post reference is attached. Copy ONLY the design type: layout, hierarchy, typography, density, and composition. Do NOT copy that reference’s product, branding, logo, prices, or text. Product, colors, and copy come from the user’s script and real product photos.\n\n'
-    }
-    return isEs
-      ? `ESTRATEGIA DE REFERENCIA VISUAL (NO RENDERIZAR): Se adjunta 1 imagen de referencia del producto/oferta real. Usala como fuente visual principal. Copia su forma, color, textura, proporcion y detalles sin inventar otro producto.\n\n`
-      : `VISUAL REFERENCE STRATEGY (DO NOT RENDER): 1 reference image of the real product/offer is attached. Use it as the main visual source. Copy its shape, color, texture, proportions, and details without inventing another product.\n\n`
-  }
-
-  return isEs
-    ? `ESTRATEGIA DE REFERENCIAS MULTIPLES (NO RENDERIZAR, MAXIMA PRIORIDAD):
-Recibiras ${refCount} imagenes relacionadas con el producto/oferta (${productCount} de producto y ${contextCount} de contexto). NO asumas automaticamente que todas son el mismo objeto ni las fusiones en un hibrido.
-
-Antes de disenar, clasifica mentalmente cada imagen en uno de estos roles:
-- PRODUCTO HEROE: el objeto vendible real, empaque, botella, prenda, plato, dispositivo o set que debe protagonizar.
-- VARIANTE / SABOR / COLOR: otro producto real de la misma linea. Si aparece, muestralo como item separado o lineup limpio, nunca mezclado con otro.
-- RESULTADO / PRUEBA / DETALLE: antes-despues, dientes, piel, textura, close-up, ingrediente, captura o evidencia. Usalo como inset, panel de prueba, textura sutil o contexto visual; NO lo pegues encima del producto ni lo conviertas en parte del empaque.
-- CONTEXTO / ESTILO: escena, fondo, mood, lifestyle o composicion. Usalo para ambiente y direccion de arte, no como producto.
-
-${modeRule}
-
-Regla de composicion: el resultado final debe tener UNA idea visual coherente. Elige un producto heroe claro y usa las demas referencias solo en su rol correcto. Prohibido amalgamar fotos distintas en un solo objeto raro. Prohibido poner una foto de resultado dentro del producto salvo que el empaque real ya la tenga. Prohibido ignorar referencias relevantes: si no son producto heroe, deben influir como prueba, detalle, contexto o estilo.\n\n`
-    : `MULTI-REFERENCE STRATEGY (DO NOT RENDER, HIGHEST PRIORITY):
-You will receive ${refCount} images related to the product/offer (${productCount} product and ${contextCount} context). Do NOT automatically assume they are all the same object, and do NOT fuse them into a hybrid.
-
-Before designing, silently classify each image into one of these roles:
-- HERO PRODUCT: the real sellable object, package, bottle, garment, dish, device, or set that should lead the ad.
-- VARIANT / FLAVOR / COLOR: another real product from the same line. Show it as a separate item or clean lineup, never blended into another product.
-- RESULT / PROOF / DETAIL: before-after, teeth, skin, texture, close-up, ingredient, screenshot, or evidence. Use it as an inset, proof panel, subtle texture, or visual context; do NOT paste it onto the product or turn it into packaging.
-- CONTEXT / STYLE: scene, background, mood, lifestyle, or composition. Use it for environment and art direction, not as the product.
-
-${modeRule}
-
-Composition rule: the final image must have ONE coherent visual idea. Choose a clear hero product and use the other references only in their correct roles. Do not amalgamate different photos into one strange object. Do not put a result photo inside the product unless the real packaging already contains it. Do not ignore relevant references: if they are not the hero product, they must influence proof, detail, context, or style.\n\n`
+  const roles: ImageReferenceRole[] = [
+    ...Array.from({ length: productCount }, () => 'product' as const),
+    ...Array.from({ length: contextCount }, () => 'scene' as const),
+  ]
+  while (roles.length < refCount) roles.push('product')
+  return buildExplicitReferenceRoleContract({
+    language,
+    roles: roles.slice(0, refCount),
+    isProductMode,
+  })
 }
 
 // Map width/height to aspect ratio string
@@ -441,7 +469,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Request body is required' })
     }
 
-    const { action, taskId, model = 'nano-banana', ...imageParams } = req.body
+    const { action, taskId, model = 'grok-imagine', ...imageParams } = req.body
 
     // Chat-shell C3: when sessionId is present, bind product (+ optional productImageId) server-side.
     // No legacy empty-offers fallback for images. Ignore spoofed brand fields for authz.
@@ -1307,6 +1335,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         return res.status(hydrate.status).json({ error: hydrate.error })
       }
     }
+
+    // Align Grok's 3-ref budget with role contracts before prompt assembly.
+    if (selectedModel === 'grok-imagine') {
+      applyGrokThreeReferenceBudget(imageParams)
+    }
     
     let enhancedPrompt: string
 
@@ -1361,8 +1394,24 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         postLanguage,
         productReferenceCount,
         isProductMode,
-        imageParams.referenceImageKinds
+        imageParams.referenceImageKinds,
+        imageParams.referenceImageRoles
       )
+      const referenceRoles = Array.isArray(imageParams.referenceImageRoles)
+        ? imageParams.referenceImageRoles.filter((role): role is ImageReferenceRole =>
+          role === 'product' || role === 'scene' || role === 'style')
+        : []
+      const lifestyleBriefPrefix = buildLifestyleCreativeBrief({
+        language: postLanguage,
+        postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : null,
+        productSubStyle: typeof imageParams.productSubStyle === 'string' ? imageParams.productSubStyle : null,
+        hasProductRef: referenceRoles.includes('product') || productReferenceCount > 0,
+        hasSceneRef: referenceRoles.includes('scene'),
+        hasStyleRef: referenceRoles.includes('style'),
+        scriptContext: typeof imageParams.scriptContext === 'string'
+          ? imageParams.scriptContext
+          : (typeof imageParams.prompt === 'string' ? imageParams.prompt : null),
+      })
 
       // Resolve color palette override (if any)
       // Priority: custom colors > predefined palette > brand kit colors > none
@@ -1575,7 +1624,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
           || buildProductPrompt('studio-hero', productAR, postLanguage, productOpts)!
 
-        enhancedPrompt = productFormatPrefix + productReferenceStrategyPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
+        enhancedPrompt = productFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + productPrompt
       } else if (postStyle === 'custom-type' && imageParams.customPostTypeId && imgMemSupabase && UUID_RE.test(imageParams.customPostTypeId as string)) {
         // CUSTOM POST TYPE MODE: load master prompt from DB
         try {
@@ -1588,13 +1637,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
-            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
           }
         } catch {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'anuncio-conversion') {
         // ANUNCIO DE CONVERSIÓN MODE: high-conversion Instagram ad with niche-adaptive prompt
@@ -1618,14 +1667,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
           : aspectRatioPrefix
         const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
-        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
+        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
         const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
         if (presetPrompt) {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'organic-single' && imageParams.organicSubtype) {
         // ORGANIC SINGLE IMAGE MODE — top-of-funnel aesthetic post (quote, infographic, showcase, aesthetic).
@@ -1665,10 +1714,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         // Organic builds its own language / aspect-ratio rules internally; skip the sales aspectRatioPrefix.
-        enhancedPrompt = productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
+        enhancedPrompt = productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
@@ -2186,10 +2235,22 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       }
 
       const providerModel = GROK_IMAGE_PROVIDER_MODEL
-      const referenceUrls = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
-        .map((key) => imageParams[key])
-        .filter((value): value is string => typeof value === 'string' && value.length > 0)
-        .slice(0, 3)
+      const grokRefCandidates = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
+        .map((key, index) => {
+          const url = imageParams[key]
+          if (typeof url !== 'string' || !url) return null
+          const roles = Array.isArray(imageParams.referenceImageRoles)
+            ? imageParams.referenceImageRoles
+            : []
+          const roleRaw = roles[index]
+          const role: ImageReferenceRole =
+            roleRaw === 'scene' || roleRaw === 'style' || roleRaw === 'product'
+              ? roleRaw
+              : 'product'
+          return { url, role }
+        })
+        .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
+      const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
 
       console.log('Submitting to Grok Imagine 2.0 API:', {
         prompt: enhancedPrompt.substring(0, 100) + '...',

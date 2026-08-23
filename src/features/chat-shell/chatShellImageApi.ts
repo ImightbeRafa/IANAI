@@ -112,7 +112,7 @@ async function mirrorShellImageAsPost(options: {
   const model =
     typeof options.metadata?.model === 'string'
       ? options.metadata.model
-      : 'nano-banana-pro'
+      : 'grok-imagine'
   const post = await createPost(options.productId, options.userId, {
     prompt: options.label || options.userText,
     model,

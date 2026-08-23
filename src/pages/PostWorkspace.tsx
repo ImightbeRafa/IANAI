@@ -221,7 +221,7 @@ export default function PostWorkspace() {
   const [generating, setGenerating] = useState(false)
   const [generatedPosts, setGeneratedPosts] = useState<GeneratedPost[]>([])
   const [error, setError] = useState('')
-  const [imageModel, setImageModel] = useState<ImageModel>('nano-banana-pro')
+  const [imageModel, setImageModel] = useState<ImageModel>('grok-imagine')
   const [aspectRatio, setAspectRatio] = useState<PostAspectRatio>('9:16')
   const [postStyle, setPostStyle] = useState<string>('venta-directa')
   const [showStyleDropdown, setShowStyleDropdown] = useState(false)
@@ -3165,8 +3165,8 @@ export default function PostWorkspace() {
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
                   {([
-                    { id: 'nano-banana-pro' as ImageModel, name: 'Nano Banana Pro', sub: language === 'es' ? 'Comparar' : 'Compare' },
-                    { id: 'grok-imagine' as ImageModel, name: 'Grok Imagine 2.0', sub: language === 'es' ? 'Comparar' : 'Compare' },
+                    { id: 'grok-imagine' as ImageModel, name: 'Grok Imagine 2.0', sub: language === 'es' ? 'Default' : 'Default' },
+                    { id: 'nano-banana-pro' as ImageModel, name: 'Nano Banana Pro', sub: language === 'es' ? 'Alternativa' : 'Alternate' },
                     ...(isAdmin
                       ? [{ id: 'gpt-image-2' as ImageModel, name: 'GPT Image 2', sub: 'Admin' }]
                       : []),
