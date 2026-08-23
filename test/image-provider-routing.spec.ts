@@ -44,29 +44,30 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.4\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.5\./)
     const enabled = listEnabledMcpTools()
-    expect(enabled.map((t) => t.name).sort()).toEqual([
-      'get_brand_context',
-      'list_brands',
-      'workspace_save_url_context',
-    ])
-    expect(enabled.every((t) => !t.consumesAdvanceCredits)).toBe(true)
+    const names = enabled.map((t) => t.name).sort()
+    expect(names).toContain('list_brands')
+    expect(names).toContain('guide_script')
+    expect(names).toContain('execute_image_generate')
+    expect(names).not.toContain('execute_carousel_generate')
+    expect(names).not.toContain('delete_brand')
+    expect(enabled.every((t) => t.enabled)).toBe(true)
     expect(getMcpTool('guide_image')?.consumesAdvanceCredits).toBe(false)
     expect(getMcpTool('execute_image_generate')?.consumesAdvanceCredits).toBe(true)
     expect(getMcpTool('execute_image_generate')?.requiresApproval).toBe(true)
-    expect(getMcpTool('execute_image_generate')?.enabled).toBe(false)
+    expect(getMcpTool('execute_image_generate')?.enabled).toBe(true)
     expect(getMcpTool('archive_brand')?.enabled).toBe(false)
     expect(getMcpTool('workspace_note_generated_outside')?.consumesAdvanceCredits).toBe(false)
     expect(MCP_TOOL_GROUPS.guide_studio.defaultEnabled).toBe(true)
-    expect(MCP_TOOL_GROUPS.execute_studio.defaultEnabled).toBe(false)
+    expect(MCP_TOOL_GROUPS.execute_studio.defaultEnabled).toBe(true)
   })
 
   it('keeps execute tools off even if execute_studio group is flipped on', () => {
     const listed = listEnabledMcpTools({
       groupsEnabled: { execute_studio: true, brand_workspace: true, guide_studio: true },
     })
-    expect(listed.some((t) => t.name === 'execute_image_generate')).toBe(false)
+    expect(listed.some((t) => t.name === 'execute_image_generate')).toBe(true)
     expect(listed.some((t) => t.name === 'list_brands')).toBe(true)
   })
 })

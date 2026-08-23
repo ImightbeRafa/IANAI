@@ -11,6 +11,7 @@ import type {
   McpGuideIntakeSummary,
 } from './user-tools.js'
 import type { McpUrlIntakeStore } from './url-intake.js'
+import type { McpWorkspaceStore } from './workspace-ops.js'
 
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
@@ -168,6 +169,43 @@ export function createMcpUrlIntakeStore(): McpUrlIntakeStore | null {
         }
         throw error
       }
+      return { id: data.id as string }
+    },
+  }
+}
+
+export function createMcpWorkspaceStore(): McpWorkspaceStore | null {
+  const db = getSupabaseAdmin()
+  if (!db) return null
+  return {
+    async insertProvenanceNote(row) {
+      const { data, error } = await db
+        .from('mcp_workspace_notes')
+        .insert({
+          user_id: row.userId,
+          business_id: row.businessId,
+          kind: row.kind,
+          note: row.note,
+          metadata: row.metadata,
+        })
+        .select('id')
+        .single()
+      if (error) throw error
+      return { id: data.id as string }
+    },
+    async insertFileIntakePlaceholder(row) {
+      const { data, error } = await db
+        .from('mcp_workspace_notes')
+        .insert({
+          user_id: row.userId,
+          business_id: row.businessId,
+          kind: 'file_intake_placeholder',
+          note: row.fileName,
+          metadata: { mimeType: row.mimeType, status: 'upload_required' },
+        })
+        .select('id')
+        .single()
+      if (error) throw error
       return { id: data.id as string }
     },
   }

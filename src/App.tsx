@@ -9,6 +9,7 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import OAuthConsent from './pages/OAuthConsent'
+import McpApprove from './pages/McpApprove'
 import { ChatShellRolloutProvider, useChatShellRollout } from './features/chat-shell/ChatShellRolloutContext'
 
 // Lazy-loaded pages (code-split for smaller initial bundle)
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/oauth/consent" element={<OAuthConsent />} />
+            <Route path="/mcp/approve/:approvalId" element={<McpApprove />} />
             <Route
               path="/dashboard"
               element={
