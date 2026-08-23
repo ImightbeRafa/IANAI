@@ -759,6 +759,15 @@ export async function deleteBusinessWithContents(businessId: string): Promise<vo
   ])
   const steps = planBusinessContentDeletion({ businessId, sessionIds, productIds })
   await runBusinessContentDeletion(steps, {
+    detachBrandKits: async (id) => {
+      const { data, error } = await supabase
+        .from('brand_kits')
+        .update({ business_id: null, updated_at: new Date().toISOString() })
+        .eq('business_id', id)
+        .select('id')
+      if (error) throw error
+      return (data || []).length
+    },
     deleteSession: deleteChatSession,
     deleteProduct,
     getRemainingProductIds: () => getBusinessProductIds(businessId),
@@ -1698,9 +1707,11 @@ export async function createPost(
     output_format?: string
     model?: string
     generation_id?: string
+    session_id?: string
+    message_id?: string
   }
 ): Promise<Post> {
-  const insertPayload = {
+  const insertPayload: Record<string, unknown> = {
     product_id: productId,
     created_by: userId,
     prompt: data.prompt,
@@ -1708,10 +1719,12 @@ export async function createPost(
     width: data.width || 1080,
     height: data.height || 1080,
     output_format: data.output_format || 'jpeg',
-    model: data.model || 'nano-banana-pro',
+    model: data.model || 'grok-imagine',
     generation_id: data.generation_id || null,
     status: 'generating'
   }
+  if (data.session_id) insertPayload.session_id = data.session_id
+  if (data.message_id) insertPayload.message_id = data.message_id
 
   let { data: post, error } = await supabase
     .from('posts')

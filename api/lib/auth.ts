@@ -84,15 +84,21 @@ export async function isAdminUser(userId: string): Promise<boolean> {
 
 /**
  * Middleware helper to require authentication
- * Returns true if authenticated, false if response was sent
+ * Returns the user if authenticated, null if a 401 response was sent
  */
 export async function requireAuth(
-  req: VercelRequest, 
-  res: VercelResponse
+  req: VercelRequest,
+  res: VercelResponse,
+  options?: { unauthorizedHeaders?: Record<string, string> }
 ): Promise<AuthenticatedUser | null> {
   const { user, error } = await verifyAuth(req)
 
   if (!user) {
+    if (options?.unauthorizedHeaders) {
+      for (const [key, value] of Object.entries(options.unauthorizedHeaders)) {
+        res.setHeader(key, value)
+      }
+    }
     res.status(401).json({ error: error || 'Unauthorized' })
     return null
   }

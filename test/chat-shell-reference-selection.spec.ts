@@ -63,4 +63,15 @@ describe('chat-shell reference selection', () => {
       draft: 'new post copy',
     })).toBe(true)
   })
+
+  it('classifies legacy context as scene and style labels as style', () => {
+    const catalog = catalogOfferReferences([
+      { id: 'c1', product_id: 'offer-a', kind: 'context', image_url: 'https://cdn/c1.webp', label: 'Escena · contexto' },
+      { id: 's1', product_id: 'offer-a', kind: 'context', image_url: 'https://cdn/s1.webp', label: 'Estilo · post ref' },
+      { id: 'legacy', product_id: 'offer-a', kind: 'context', image_url: 'https://cdn/legacy.webp', label: null },
+    ])
+    expect(catalog.find((row) => row.id === 'c1')?.kind).toBe('scene')
+    expect(catalog.find((row) => row.id === 's1')?.kind).toBe('style')
+    expect(catalog.find((row) => row.id === 'legacy')?.kind).toBe('scene')
+  })
 })

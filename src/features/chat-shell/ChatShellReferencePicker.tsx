@@ -16,6 +16,12 @@ interface ChatShellReferencePickerProps {
   onRemove?: (id: string) => void | Promise<void>
 }
 
+function roleBadge(kind: ReferenceRole, es: boolean): string {
+  if (kind === 'product') return es ? 'Producto' : 'Product'
+  if (kind === 'style') return es ? 'Estilo' : 'Style'
+  return es ? 'Escena' : 'Scene'
+}
+
 export default function ChatShellReferencePicker({
   images,
   currentProductId,
@@ -28,7 +34,8 @@ export default function ChatShellReferencePicker({
 }: ChatShellReferencePickerProps) {
   const es = language === 'es'
   const productInputRef = useRef<HTMLInputElement>(null)
-  const contextInputRef = useRef<HTMLInputElement>(null)
+  const sceneInputRef = useRef<HTMLInputElement>(null)
+  const styleInputRef = useRef<HTMLInputElement>(null)
   const groups = groupOfferReferences(images, currentProductId || '')
   const selectedCount = images.filter((img) => img.selected === true).length
 
@@ -41,11 +48,7 @@ export default function ChatShellReferencePicker({
         onClick={() => onToggle(image.id)}
       >
         <img src={image.url} alt={image.label || image.kind} />
-        <span>
-          {image.kind === 'context'
-            ? (es ? 'Contexto' : 'Context')
-            : (es ? 'Producto' : 'Product')}
-        </span>
+        <span>{roleBadge(image.kind, es)}</span>
         <small>
           {image.selected === true
             ? (es ? 'Usar' : 'Use')
@@ -71,8 +74,8 @@ export default function ChatShellReferencePicker({
     <div className={`chat-shell__ref-picker${compact ? ' is-compact' : ''}`}>
       <p className="chat-shell__ref-picker-lead">
         {es
-          ? `Elegí hasta ${MAX_POST_REFERENCE_IMAGES} fotos: producto (verdad visual), contexto (escena) y estilo. ${selectedCount} seleccionada${selectedCount === 1 ? '' : 's'}.`
-          : `Pick up to ${MAX_POST_REFERENCE_IMAGES} photos: product (visual truth), context (scene), and style. ${selectedCount} selected.`}
+          ? `Elegí hasta ${MAX_POST_REFERENCE_IMAGES} fotos: producto (verdad visual), escena (gimnasio/oficina) o estilo (post que te gusta). ${selectedCount} seleccionada${selectedCount === 1 ? '' : 's'}.`
+          : `Pick up to ${MAX_POST_REFERENCE_IMAGES} photos: product (visual truth), scene (gym/office), or style (a post you like). ${selectedCount} selected.`}
       </p>
       {groups.currentProduct.length > 0 ? (
         <section className="chat-shell__ref-picker-group" aria-label={es ? 'Producto' : 'Product'}>
@@ -82,11 +85,19 @@ export default function ChatShellReferencePicker({
           </div>
         </section>
       ) : null}
-      {groups.currentContext.length > 0 ? (
-        <section className="chat-shell__ref-picker-group" aria-label={es ? 'Contexto' : 'Context'}>
-          <h4>{es ? 'Contexto / estilo' : 'Context / style'}</h4>
+      {groups.currentScene.length > 0 ? (
+        <section className="chat-shell__ref-picker-group" aria-label={es ? 'Escena' : 'Scene'}>
+          <h4>{es ? 'Escena · inspiración' : 'Scene · inspiration'}</h4>
           <div className="chat-shell__ref-picker-grid">
-            {groups.currentContext.map((image) => renderTile(image))}
+            {groups.currentScene.map((image) => renderTile(image))}
+          </div>
+        </section>
+      ) : null}
+      {groups.currentStyle.length > 0 ? (
+        <section className="chat-shell__ref-picker-group" aria-label={es ? 'Estilo' : 'Style'}>
+          <h4>{es ? 'Estilo · post de referencia' : 'Style · post reference'}</h4>
+          <div className="chat-shell__ref-picker-grid">
+            {groups.currentStyle.map((image) => renderTile(image))}
           </div>
         </section>
       ) : null}
@@ -101,8 +112,8 @@ export default function ChatShellReferencePicker({
       {images.length === 0 ? (
         <p className="chat-shell__ref-picker-empty">
           {es
-            ? 'Todavía no hay fotos. Subí producto, contexto o un post de referencia.'
-            : 'No photos yet. Upload a product, context, or style reference.'}
+            ? 'Todavía no hay fotos. Subí producto, una escena, o un post de estilo que te guste.'
+            : 'No photos yet. Upload a product, a scene, or a style post you like.'}
         </p>
       ) : null}
       {onUpload ? (
@@ -119,13 +130,24 @@ export default function ChatShellReferencePicker({
             }}
           />
           <input
-            ref={contextInputRef}
+            ref={sceneInputRef}
             type="file"
             accept="image/png,image/jpeg,image/webp"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0]
-              if (file) void onUpload(file, 'context')
+              if (file) void onUpload(file, 'scene')
+              event.target.value = ''
+            }}
+          />
+          <input
+            ref={styleInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void onUpload(file, 'style')
               event.target.value = ''
             }}
           />
@@ -141,9 +163,17 @@ export default function ChatShellReferencePicker({
             type="button"
             className="chat-shell__btn chat-shell__btn--pill"
             disabled={busy}
-            onClick={() => contextInputRef.current?.click()}
+            onClick={() => sceneInputRef.current?.click()}
           >
-            {es ? 'Subir contexto o estilo' : 'Upload context or style'}
+            {es ? 'Subir escena' : 'Upload scene'}
+          </button>
+          <button
+            type="button"
+            className="chat-shell__btn chat-shell__btn--pill"
+            disabled={busy}
+            onClick={() => styleInputRef.current?.click()}
+          >
+            {es ? 'Subir estilo' : 'Upload style'}
           </button>
         </div>
       ) : null}

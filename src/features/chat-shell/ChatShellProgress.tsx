@@ -115,7 +115,7 @@ export default function ChatShellProgress({
   kind,
   language = 'es',
   subtitle,
-  imageModel = 'nano-banana-pro',
+  imageModel = 'grok-imagine',
   aspectRatio = '9:16',
   context,
 }: ChatShellProgressProps) {

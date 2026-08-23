@@ -88,7 +88,7 @@ interface ChatShellScriptCardProps {
     referenceImageIds?: string[]
     alreadyOptimized?: boolean
   }) => void | Promise<void>
-  onUploadPostReference?: (file: File, kind: 'product' | 'context') => void | Promise<void>
+  onUploadPostReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style') => void | Promise<void>
   onOpenPostPreview?: () => void
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
   snapshotKey?: string
@@ -269,6 +269,7 @@ export default function ChatShellScriptCard({
       id: `url-${index}`,
       url,
       kind: 'product' as const,
+      dbKind: 'product' as const,
       productId: productId || '',
       selected: index < 4,
     }))

@@ -2,11 +2,13 @@ import { supabase } from '../../lib/supabase'
 import { compressBase64ForApi, uploadProductImage, urlToBase64 } from '../../utils/imageCompression'
 import {
   addMessage,
+  createPost,
   createProductImage,
   getSessionOfferImages,
   getSessionOffersImages,
   insertImageMessageArtifact,
   nextMessageArtifactOrdinal,
+  updatePostStatus,
   type ProductImage,
 } from '../../services/database'
 import type { Message, MessageArtifact } from '../../types'
@@ -23,6 +25,11 @@ import {
   buildShellImageEnhanceBody,
   type ShellEnhanceTier,
 } from './chatShellImageEnhance'
+import {
+  dbKindForReferenceRole,
+  labelForReferenceRole,
+  type ReferenceRole,
+} from './chatShellReferenceSelection'
 
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
@@ -39,9 +46,17 @@ interface ImageApiResult {
   result?: { sample?: string }
   imageUrl?: string
   error?: string
+  model?: string
+  providerModel?: string
+  generationId?: string
 }
 
-async function callGenerateImage(body: Record<string, unknown>): Promise<string> {
+async function callGenerateImageDetailed(body: Record<string, unknown>): Promise<{
+  sample: string
+  model?: string
+  providerModel?: string
+  generationId?: string
+}> {
   const token = await getAccessToken()
   const res = await fetch(IMAGE_API, {
     method: 'POST',
@@ -57,7 +72,55 @@ async function callGenerateImage(body: Record<string, unknown>): Promise<string>
   }
   const sample = json.result?.sample || json.imageUrl
   if (!sample) throw new Error('No image returned')
-  return sample
+  return {
+    sample,
+    model: json.model,
+    providerModel: json.providerModel,
+    generationId: json.generationId,
+  }
+}
+
+async function callGenerateImage(body: Record<string, unknown>): Promise<string> {
+  const detailed = await callGenerateImageDetailed(body)
+  return detailed.sample
+}
+
+async function mirrorShellImageAsPost(options: {
+  userId: string
+  sessionId: string
+  productId: string
+  messageId: string
+  publicUrl: string
+  label: string
+  userText: string
+  metadata?: Record<string, unknown>
+}): Promise<void> {
+  const styleKind =
+    options.metadata
+    && typeof options.metadata === 'object'
+    && options.metadata.style
+    && typeof options.metadata.style === 'object'
+    && 'kind' in (options.metadata.style as object)
+      ? String((options.metadata.style as { kind?: unknown }).kind || '')
+      : ''
+  if (styleKind !== 'preset' && styleKind !== 'organic') return
+
+  const generationId =
+    typeof options.metadata?.generationId === 'string'
+      ? options.metadata.generationId
+      : undefined
+  const model =
+    typeof options.metadata?.model === 'string'
+      ? options.metadata.model
+      : 'grok-imagine'
+  const post = await createPost(options.productId, options.userId, {
+    prompt: options.label || options.userText,
+    model,
+    generation_id: generationId,
+    session_id: options.sessionId,
+    message_id: options.messageId,
+  })
+  await updatePostStatus(post.id, 'completed', options.publicUrl)
 }
 
 export async function persistShellGeneratedImage(options: {
@@ -106,6 +169,20 @@ export async function persistShellGeneratedImage(options: {
       actionType: options.actionType,
       metadata: options.metadata || {},
     })
+    try {
+      await mirrorShellImageAsPost({
+        userId: options.userId,
+        sessionId: options.sessionId,
+        productId: options.productId,
+        messageId: workspaceMessageId,
+        publicUrl,
+        label: options.label,
+        userText: options.userText,
+        metadata: options.metadata,
+      })
+    } catch (mirrorError) {
+      console.error('Failed to auto-save shell image as post', mirrorError)
+    }
     return {
       userMessage: null,
       assistantMessage: null,
@@ -142,6 +219,21 @@ export async function persistShellGeneratedImage(options: {
     actionType: options.actionType,
     metadata: options.metadata || {},
   })
+
+  try {
+    await mirrorShellImageAsPost({
+      userId: options.userId,
+      sessionId: options.sessionId,
+      productId: options.productId,
+      messageId: assistantMessage.id,
+      publicUrl,
+      label: options.label,
+      userText: options.userText,
+      metadata: options.metadata,
+    })
+  } catch (mirrorError) {
+    console.error('Failed to auto-save shell image as post', mirrorError)
+  }
 
   return {
     userMessage,
@@ -202,22 +294,23 @@ export async function generateShellOfferImage(options: {
 
   let sample: string
   let actualModel = prefs.model
+  let generationId: string | undefined
+  let providerModel: string | undefined
   try {
-    sample = await callGenerateImage(body)
+    const result = await callGenerateImageDetailed(body)
+    sample = result.sample
+    generationId = result.generationId
+    providerModel = result.providerModel
+    if (result.model) actualModel = result.model as typeof prefs.model
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    const retryableGeminiFailure = prefs.model !== 'grok-imagine'
-      && /no image (?:generated by gemini|returned)|gemini.*(?:empty|blocked|finish)/i.test(message)
-    if (!retryableGeminiFailure) throw err
-    try {
-      sample = await callGenerateImage({ ...body, model: 'grok-imagine' })
-      actualModel = 'grok-imagine'
-    } catch (fallbackErr) {
-      console.error('Gemini image generation and Grok fallback both failed', fallbackErr)
+    // Do not silently switch providers — manual model comparison requires the chosen model.
+    if (/no image (?:generated by gemini|returned)|gemini.*(?:empty|blocked|finish)/i.test(message)) {
       throw new Error(language === 'es'
-        ? 'El proveedor no devolvió una imagen. Conservé el guion, el tipo y las referencias para que puedas reintentar.'
-        : 'The provider did not return an image. I kept the script, type, and references so you can retry.')
+        ? 'El proveedor no devolvió una imagen. Conservé el guion, el tipo y las referencias para que puedas reintentar con el mismo modelo o elegir otro.'
+        : 'The provider did not return an image. I kept the script, type, and references so you can retry with the same model or pick another.')
     }
+    throw err
   }
 
   if (!isLiveThread(
@@ -245,6 +338,8 @@ export async function generateShellOfferImage(options: {
       style: prefs.style,
       aspectRatio: prefs.aspectRatio,
       model: actualModel,
+      providerModel: providerModel || null,
+      generationId: generationId || null,
       density: prefs.density,
       brandKitId: options.brandKitId || null,
     },
@@ -336,7 +431,7 @@ export async function editShellOfferImage(options: {
         })
       : {
           action: 'edit',
-          model: 'nano-banana-pro',
+          model: 'grok-imagine',
           productId: options.productId,
           sessionId: options.sessionId,
           productImageId: options.productImageId,
@@ -413,10 +508,18 @@ export async function uploadShellOfferImage(options: {
   productId: string
   dataUrl: string
   filename?: string
-  kind?: 'product' | 'context'
+  kind?: 'product' | 'context' | 'scene' | 'style'
 }): Promise<ProductImage> {
+  const role: ReferenceRole =
+    options.kind === 'style'
+      ? 'style'
+      : options.kind === 'scene' || options.kind === 'context'
+        ? 'scene'
+        : 'product'
+  const dbKind = dbKindForReferenceRole(role)
+  const label = labelForReferenceRole(role, 'es')
   // uploadProductImage always unique-ifies the storage object name.
-  // Keep the original filename as the product_images label only.
+  // Keep the role label as the product_images label for scene/style classification.
   const publicUrl = await uploadProductImage(
     options.userId,
     options.productId,
@@ -427,8 +530,8 @@ export async function uploadShellOfferImage(options: {
     options.productId,
     options.userId,
     publicUrl,
-    options.filename || 'Upload',
-    options.kind || 'product',
+    label,
+    dbKind,
     { sessionId: options.sessionId }
   )
 }
@@ -439,10 +542,16 @@ export async function copyShellOfferImageToProduct(options: {
     id: string
     image_url: string
     label?: string | null
-    kind: 'product' | 'context'
+    kind: 'product' | 'context' | 'scene' | 'style'
   }
   targetProductId: string
 }): Promise<ProductImage> {
+  const role: ReferenceRole =
+    options.source.kind === 'style'
+      ? 'style'
+      : options.source.kind === 'scene' || options.source.kind === 'context'
+        ? 'scene'
+        : 'product'
   const dataUrl = await compressBase64ForApi(await urlToBase64(options.source.image_url))
   const publicUrl = await uploadProductImage(
     options.userId,
@@ -454,8 +563,8 @@ export async function copyShellOfferImageToProduct(options: {
     options.targetProductId,
     options.userId,
     publicUrl,
-    options.source.label || 'Reference',
-    options.source.kind
+    options.source.label || labelForReferenceRole(role, 'es'),
+    dbKindForReferenceRole(role)
   )
 }
 

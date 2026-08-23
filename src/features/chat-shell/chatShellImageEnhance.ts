@@ -86,7 +86,7 @@ export function buildShellImageEnhanceBody(options: {
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     action: 'enhance',
-    model: options.model || 'nano-banana-pro',
+    model: options.model || 'grok-imagine',
     productId: options.productId,
     sessionId: options.sessionId,
     enhanceImage: options.enhanceImage,

@@ -7,7 +7,7 @@ import {
 } from '../src/services/businessDelete'
 
 describe('planBusinessContentDeletion', () => {
-  it('deletes sessions first, then products, then verifies, then the folder', () => {
+  it('detaches brand kits first, then sessions, products, verify, folder', () => {
     expect(
       planBusinessContentDeletion({
         businessId: 'b1',
@@ -15,6 +15,7 @@ describe('planBusinessContentDeletion', () => {
         productIds: ['p1', 'p2'],
       })
     ).toEqual([
+      { type: 'detach-brand-kits', businessId: 'b1' },
       { type: 'session', id: 's-active' },
       { type: 'session', id: 's-archived' },
       { type: 'product', id: 'p1' },
@@ -32,6 +33,7 @@ describe('planBusinessContentDeletion', () => {
         productIds: [],
       })
     ).toEqual([
+      { type: 'detach-brand-kits', businessId: 'b1' },
       { type: 'verify-products' },
       { type: 'business', id: 'b1' },
     ])
@@ -64,6 +66,10 @@ describe('runBusinessContentDeletion', () => {
   it('runs steps in order and stops after the first failure', async () => {
     const calls: string[] = []
     const fns = {
+      detachBrandKits: vi.fn(async () => {
+        calls.push('detach-kits')
+        return 1
+      }),
       deleteSession: vi.fn(async (id: string) => {
         calls.push(`session:${id}`)
       }),
@@ -87,7 +93,7 @@ describe('runBusinessContentDeletion', () => {
     })
 
     await expect(runBusinessContentDeletion(steps, fns)).rejects.toThrow(/23503/)
-    expect(calls).toEqual(['session:s1', 'product:p1', 'product:p2'])
+    expect(calls).toEqual(['detach-kits', 'session:s1', 'product:p1', 'product:p2'])
     expect(fns.getRemainingProductIds).not.toHaveBeenCalled()
     expect(fns.deleteBusinessRow).not.toHaveBeenCalled()
     expect(fns.deleteProduct).not.toHaveBeenCalledWith('p3')
@@ -95,6 +101,7 @@ describe('runBusinessContentDeletion', () => {
 
   it('verifies no products remain before deleting the folder', async () => {
     const fns = {
+      detachBrandKits: vi.fn(async () => 0),
       deleteSession: vi.fn(async () => {}),
       deleteProduct: vi.fn(async () => {}),
       getRemainingProductIds: vi.fn(async () => ['leftover']),

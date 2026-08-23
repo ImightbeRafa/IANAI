@@ -22,12 +22,14 @@ export type AdminUsageLogRow = {
   user_email: string | null
   feature: string
   model: string
+  generation_id?: string | null
   input_tokens: number | null
   output_tokens: number | null
   total_tokens: number | null
   estimated_cost_usd: number | string | null
   success: boolean | null
   created_at: string
+  metadata?: Record<string, unknown> | null
 }
 
 export type UsageSummaryRow = {
@@ -68,10 +70,12 @@ export type RecentLogRow = {
   user_email: string
   feature: string
   model: string
+  generation_id?: string | null
   total_tokens: number
   estimated_cost_usd: number
   success: boolean
   created_at: string
+  metadata?: Record<string, unknown> | null
 }
 
 function num(value: number | string | null | undefined): number {
@@ -95,10 +99,12 @@ function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
     user_email: row.user_email || '',
     feature: row.feature,
     model: row.model,
+    generation_id: row.generation_id || null,
     total_tokens: num(row.total_tokens),
     estimated_cost_usd: roundCost(num(row.estimated_cost_usd)),
     success: row.success !== false,
     created_at: row.created_at,
+    metadata: row.metadata || {},
   }
 }
 

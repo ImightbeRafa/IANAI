@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
-import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
+import {
+  GROK_TEXT_MODEL_EFFICIENT,
+  grokChatComplete,
+} from './lib/grok-models.js'
 import {
   DENSITY_CONFIG,
   getStreamlineSystemPrompt,
@@ -44,31 +47,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const densityConfig = DENSITY_CONFIG[textDensity]
     const systemPrompt = getStreamlineSystemPrompt(postStyle, language, safeContext, textDensity)
 
-    const response = await fetch(GROK_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${xaiApiKey}`
-      },
-      body: JSON.stringify({
-        model: GROK_TEXT_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: script.trim() }
-        ],
-        temperature: densityConfig.temperature,
-        max_tokens: densityConfig.maxTokens
-      })
+    // Efficient model for speed — Hook / Desarrollo / CTA structure stays in the prompt contract.
+    const completion = await grokChatComplete({
+      apiKey: xaiApiKey,
+      model: GROK_TEXT_MODEL_EFFICIENT,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: script.trim() },
+      ],
+      temperature: densityConfig.temperature,
+      maxTokens: densityConfig.maxTokens,
     })
 
-    if (!response.ok) {
-      const errText = await response.text()
-      console.error('Grok API error:', response.status, errText)
-      return res.status(502).json({ error: 'AI service error' })
-    }
-
-    const data = await response.json()
-    const rawStreamlined = data.choices?.[0]?.message?.content?.trim() || ''
+    const rawStreamlined = completion.content.trim()
     const streamlined = rawStreamlined
       .replace(/\[[^\]\n]{2,80}\]/g, '')
       .replace(/[ \t]+\n/g, '\n')
@@ -79,17 +70,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'Empty response from AI' })
     }
 
-    const inputTokens = estimateTokens(systemPrompt + script)
-    const outputTokens = estimateTokens(streamlined)
+    const inputTokens = completion.usage.prompt_tokens || estimateTokens(systemPrompt + script)
+    const outputTokens = completion.usage.completion_tokens || estimateTokens(streamlined)
     await logApiUsage({
       userId: user.id,
       userEmail: user.email,
       feature: 'prompt_condense',
-      model: GROK_TEXT_MODEL,
+      model: GROK_TEXT_MODEL_EFFICIENT,
       inputTokens,
       outputTokens,
       success: true,
-      metadata: { action: 'streamline_script', postStyle, language, textDensity, hasProductContext: !!safeContext }
+      metadata: {
+        action: 'streamline_script',
+        postStyle,
+        language,
+        textDensity,
+        hasProductContext: !!safeContext,
+        endpoint: completion.endpoint,
+      }
     })
 
     return res.status(200).json({ streamlined, textDensity })
@@ -101,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userId: user.id,
       userEmail: user.email,
       feature: 'prompt_condense',
-      model: GROK_TEXT_MODEL,
+      model: GROK_TEXT_MODEL_EFFICIENT,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

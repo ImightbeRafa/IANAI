@@ -1568,7 +1568,7 @@ export function useChatSessionThread(options: {
   const uploadOfferImage = useCallback(async (
     file: File,
     productIdOverride?: string | null,
-    kind: 'product' | 'context' = 'product'
+    kind: 'product' | 'context' | 'scene' | 'style' = 'product'
   ) => {
     const targetProductId = productIdOverride || activeImageOfferId
     if (!session || !targetProductId || imageBusyRef.current) return
@@ -1620,7 +1620,12 @@ export function useChatSessionThread(options: {
             {
               id: uploaded.id,
               url: uploaded.image_url,
-              kind,
+              kind: (kind === 'style'
+                ? 'style'
+                : kind === 'scene' || kind === 'context'
+                  ? 'scene'
+                  : 'product') as 'product' | 'scene' | 'style',
+              dbKind: (kind === 'product' ? 'product' : 'context') as 'product' | 'context',
               label: uploaded.label,
               selected: true,
               productId: targetProductId,

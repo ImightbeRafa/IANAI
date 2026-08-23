@@ -1,10 +1,12 @@
 export type BusinessContentDeletionStep =
+  | { type: 'detach-brand-kits'; businessId: string }
   | { type: 'session'; id: string }
   | { type: 'product'; id: string }
   | { type: 'verify-products' }
   | { type: 'business'; id: string }
 
 export interface BusinessContentDeletionFns {
+  detachBrandKits: (businessId: string) => Promise<number>
   deleteSession: (sessionId: string) => Promise<void>
   deleteProduct: (productId: string) => Promise<void>
   getRemainingProductIds: () => Promise<string[]>
@@ -20,6 +22,7 @@ export function planBusinessContentDeletion(input: {
     throw new Error('Folder delete failed: missing folder id.')
   }
   return [
+    { type: 'detach-brand-kits', businessId: input.businessId },
     ...input.sessionIds.filter(Boolean).map((id) => ({ type: 'session' as const, id })),
     ...input.productIds.filter(Boolean).map((id) => ({ type: 'product' as const, id })),
     { type: 'verify-products' },
@@ -54,6 +57,9 @@ export async function runBusinessContentDeletion(
 ): Promise<void> {
   for (const step of steps) {
     switch (step.type) {
+      case 'detach-brand-kits':
+        await fns.detachBrandKits(step.businessId)
+        break
       case 'session':
         await fns.deleteSession(step.id)
         break

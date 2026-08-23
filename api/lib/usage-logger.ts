@@ -19,7 +19,8 @@ const MODEL_COSTS = {
   // Image generation models
   'nano-banana': { perImage: 0.0315, inputPer1M: 0.10, thinkingPer1M: 1.25 },
   'nano-banana-pro': { imageOutputPer1M: 120.00, fallback1K2K: 0.134, fallback4K: 0.24, inputPer1M: 2.00, thinkingPer1M: 12.00 },
-  'grok-imagine': { perImage: 0.07 },
+  // App id `grok-imagine` → provider grok-imagine-image-2.0 ($0.04 per output image; edits also bill each input).
+  'grok-imagine': { perImage: 0.04 },
 
   // Voice transcription
   'whisper-1': { perMinute: 0.006 },
