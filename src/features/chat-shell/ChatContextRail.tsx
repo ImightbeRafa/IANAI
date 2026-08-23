@@ -70,7 +70,7 @@ interface ChatContextRailProps {
   offerImages?: ProductImage[]
   imageBusy?: boolean
   onSelectImageOffer?: (productId: string) => void
-  onUploadOfferImage?: (file: File, kind?: 'product' | 'context') => void | Promise<void>
+  onUploadOfferImage?: (file: File, kind?: 'product' | 'context' | 'scene' | 'style') => void | Promise<void>
   onRemoveOfferImage?: (imageId: string) => void | Promise<void>
   onGenerateOfferImage?: () => void | Promise<void>
   onOpenOfferImage?: (image: ProductImage) => void
@@ -575,7 +575,7 @@ export default function ChatContextRail({
                   />
                 </label>
                 <label className="chat-shell__setup-btn">
-                  {language === 'es' ? 'Subir contexto' : 'Upload context'}
+                  {language === 'es' ? 'Subir escena' : 'Upload scene'}
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -584,7 +584,21 @@ export default function ChatContextRail({
                     onChange={(e) => {
                       const file = e.target.files?.[0]
                       e.target.value = ''
-                      if (file) void onUploadOfferImage?.(file, 'context')
+                      if (file) void onUploadOfferImage?.(file, 'scene')
+                    }}
+                  />
+                </label>
+                <label className="chat-shell__setup-btn">
+                  {language === 'es' ? 'Subir estilo' : 'Upload style'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    disabled={imageBusy || !activeImageOfferId}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (file) void onUploadOfferImage?.(file, 'style')
                     }}
                   />
                 </label>

@@ -28,7 +28,7 @@ import {
   type ScriptCtaChannel,
 } from './useChatSessionThread'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
-import { catalogOfferReferences } from './chatShellReferenceSelection'
+import { catalogOfferReferences, hasSelectedProductReference } from './chatShellReferenceSelection'
 import {
   buildImageWorkspaces,
   isImageWorkspaceAnchor,
@@ -96,7 +96,7 @@ interface ChatThreadProps {
   }) => void
   onCancelScriptClarify?: () => void
   onOpenImagesRail?: () => void
-  onUploadOfferReference?: (file: File, kind: 'product' | 'context', productId?: string) => void | Promise<void>
+  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
   offerProductNames?: Record<string, string>
   onPreparePostFromScript?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
@@ -879,7 +879,7 @@ export default memo(function ChatThread({
                       imageBusy
                       || (
                         Boolean(imageClarify.referencesRequired)
-                        && !(imageClarify.referenceImages || []).some((image) => image.selected === true && image.kind !== 'context')
+                        && !hasSelectedProductReference(imageClarify.referenceImages || [])
                       )
                     }
                     onClick={() => onAnswerImageClarify?.({ useReferences: true })}

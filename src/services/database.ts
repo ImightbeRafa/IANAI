@@ -1698,9 +1698,11 @@ export async function createPost(
     output_format?: string
     model?: string
     generation_id?: string
+    session_id?: string
+    message_id?: string
   }
 ): Promise<Post> {
-  const insertPayload = {
+  const insertPayload: Record<string, unknown> = {
     product_id: productId,
     created_by: userId,
     prompt: data.prompt,
@@ -1712,6 +1714,8 @@ export async function createPost(
     generation_id: data.generation_id || null,
     status: 'generating'
   }
+  if (data.session_id) insertPayload.session_id = data.session_id
+  if (data.message_id) insertPayload.message_id = data.message_id
 
   let { data: post, error } = await supabase
     .from('posts')

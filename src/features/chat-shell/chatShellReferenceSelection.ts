@@ -1,11 +1,18 @@
 import { isGeneratedOfferImage } from './chatShellImages'
 
-export type ReferenceRole = 'product' | 'context'
+/** Upload / UI roles. DB `kind` stays product|context|generated. */
+export type ReferenceRole = 'product' | 'scene' | 'style'
+
+/** @deprecated Prefer ReferenceRole; kept for call sites that still pass DB kind. */
+export type ReferenceDbKind = 'product' | 'context'
 
 export interface OfferReferenceImage {
   id: string
   url: string
+  /** Visual role used by the picker and prompts. */
   kind: ReferenceRole
+  /** Raw DB kind for persistence paths. */
+  dbKind: ReferenceDbKind
   label?: string | null
   productId: string
   productName?: string | null
@@ -15,6 +22,30 @@ export interface OfferReferenceImage {
 
 export const MAX_POST_REFERENCE_IMAGES = 4
 export const MAX_PRODUCT_ANGLE_PRESELECT = 3
+
+const SCENE_LABEL_RE = /\b(scene|escena|contexto)\b/i
+const STYLE_LABEL_RE = /\b(style|estilo|layout|formato|post\s*ref)\b/i
+
+export function referenceRoleFromStored(options: {
+  kind?: string | null
+  label?: string | null
+}): ReferenceRole {
+  if (options.kind === 'product') return 'product'
+  if (STYLE_LABEL_RE.test(options.label || '')) return 'style'
+  if (SCENE_LABEL_RE.test(options.label || '')) return 'scene'
+  // Legacy context rows default to scene inspiration.
+  return 'scene'
+}
+
+export function dbKindForReferenceRole(role: ReferenceRole): ReferenceDbKind {
+  return role === 'product' ? 'product' : 'context'
+}
+
+export function labelForReferenceRole(role: ReferenceRole, language: 'en' | 'es' = 'es'): string {
+  if (role === 'product') return language === 'es' ? 'Producto' : 'Product'
+  if (role === 'style') return language === 'es' ? 'Estilo · post ref' : 'Style · post ref'
+  return language === 'es' ? 'Escena · contexto' : 'Scene · context'
+}
 
 export function shouldPromptImageReferences(options: {
   styleKind?: string | null
@@ -43,15 +74,19 @@ export function catalogOfferReferences(
   }
   return images
     .filter((img) => Boolean(img.image_url) && !isGeneratedOfferImage(img))
-    .map((img) => ({
-      id: img.id,
-      url: img.image_url as string,
-      kind: img.kind === 'context' ? 'context' as const : 'product' as const,
-      label: img.label,
-      productId: img.product_id,
-      productName: nameOf(img.product_id),
-      createdAt: img.created_at,
-    }))
+    .map((img) => {
+      const role = referenceRoleFromStored({ kind: img.kind, label: img.label })
+      return {
+        id: img.id,
+        url: img.image_url as string,
+        kind: role,
+        dbKind: dbKindForReferenceRole(role),
+        label: img.label,
+        productId: img.product_id,
+        productName: nameOf(img.product_id),
+        createdAt: img.created_at,
+      }
+    })
 }
 
 function sortByRecency(images: OfferReferenceImage[]): OfferReferenceImage[] {
@@ -62,7 +97,7 @@ function sortByRecency(images: OfferReferenceImage[]): OfferReferenceImage[] {
   })
 }
 
-/** Up to 3 current-offer product angles + 1 context, cap 4. */
+/** Up to 3 current-offer product angles + 1 scene/style, cap 4. */
 export function preselectOfferReferenceIds(
   images: OfferReferenceImage[],
   currentProductId: string,
@@ -72,12 +107,12 @@ export function preselectOfferReferenceIds(
   const others = images.filter((img) => img.productId !== currentProductId)
   const currentProducts = sortByRecency(current.filter((img) => img.kind === 'product'))
     .slice(0, MAX_PRODUCT_ANGLE_PRESELECT)
-  const currentContexts = sortByRecency(current.filter((img) => img.kind === 'context'))
-  const otherContexts = sortByRecency(others.filter((img) => img.kind === 'context'))
+  const currentScenes = sortByRecency(current.filter((img) => img.kind === 'scene' || img.kind === 'style'))
+  const otherScenes = sortByRecency(others.filter((img) => img.kind === 'scene' || img.kind === 'style'))
   const otherProducts = sortByRecency(others.filter((img) => img.kind === 'product'))
 
   const selected: OfferReferenceImage[] = [...currentProducts]
-  const context = currentContexts[0] || otherContexts[0]
+  const context = currentScenes[0] || otherScenes[0]
   if (context && selected.length < max && !selected.some((img) => img.id === context.id)) {
     selected.push(context)
   }
@@ -117,7 +152,7 @@ export function confirmedReferenceImageIds(
 export function hasSelectedProductReference(
   images: Array<{ selected?: boolean; kind?: string | null }>
 ): boolean {
-  return images.some((img) => img.selected === true && img.kind !== 'context')
+  return images.some((img) => img.selected === true && img.kind === 'product')
 }
 
 export function shouldCopyForeignOfferImage(
@@ -185,12 +220,20 @@ export function groupOfferReferences(
   currentProductId: string
 ): {
   currentProduct: OfferReferenceImage[]
+  currentScene: OfferReferenceImage[]
+  currentStyle: OfferReferenceImage[]
+  /** @deprecated alias of scene+style for older UI */
   currentContext: OfferReferenceImage[]
   otherOffers: OfferReferenceImage[]
 } {
+  const currentProduct = images.filter((img) => img.productId === currentProductId && img.kind === 'product')
+  const currentScene = images.filter((img) => img.productId === currentProductId && img.kind === 'scene')
+  const currentStyle = images.filter((img) => img.productId === currentProductId && img.kind === 'style')
   return {
-    currentProduct: images.filter((img) => img.productId === currentProductId && img.kind === 'product'),
-    currentContext: images.filter((img) => img.productId === currentProductId && img.kind === 'context'),
+    currentProduct,
+    currentScene,
+    currentStyle,
+    currentContext: [...currentScene, ...currentStyle],
     otherOffers: images.filter((img) => img.productId !== currentProductId),
   }
 }
