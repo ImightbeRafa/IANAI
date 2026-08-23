@@ -221,3 +221,22 @@ describe('mcp protocol', () => {
     expect(text).toContain('/chat?brandId=b1')
   })
 })
+
+describe('mcp www-authenticate', () => {
+  it('emits RFC 9728 resource_metadata challenge (exact)', async () => {
+    const {
+      mcpWwwAuthenticateHeader,
+      MCP_RESOURCE_METADATA_URL,
+      MCP_RESOURCE_METADATA_PARAM,
+    } = await import('../api/lib/mcp/www-authenticate')
+    expect(MCP_RESOURCE_METADATA_PARAM).toBe('resource_metadata')
+    expect(MCP_RESOURCE_METADATA_URL).toBe(
+      'https://advanceai.studio/.well-known/oauth-protected-resource'
+    )
+    expect(mcpWwwAuthenticateHeader()).toBe(
+      `Bearer ${MCP_RESOURCE_METADATA_PARAM}="${MCP_RESOURCE_METADATA_URL}"`
+    )
+    expect(mcpWwwAuthenticateHeader().startsWith('Bearer resource_')).toBe(true)
+    expect(mcpWwwAuthenticateHeader().includes('metadata=')).toBe(true)
+  })
+})

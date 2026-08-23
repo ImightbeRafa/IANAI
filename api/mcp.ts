@@ -11,11 +11,10 @@ import { requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { createMcpSupabaseAdapter, createMcpUrlIntakeStore } from './lib/mcp/supabase-adapter.js'
 import { handleMcpJsonRpc, type McpJsonRpcRequest } from './lib/mcp/protocol.js'
+import { mcpWwwAuthenticateHeader, MCP_RESOURCE_METADATA_URL } from './lib/mcp/www-authenticate.js'
 
 const MAX_BODY_BYTES = 256_000
-const MCP_RESOURCE_METADATA = 'https://advanceai.studio/.well-known/oauth-protected-resource'
-const MCP_WWW_AUTHENTICATE =
-  `Bearer FAKESECRET_u1v2w3x4y5z6a7b8c9d0="${MCP_RESOURCE_METADATA}"`
+const MCP_WWW_AUTHENTICATE = mcpWwwAuthenticateHeader()
 
 function readRawBodySize(req: VercelRequest): number {
   if (typeof req.body === 'string') return Buffer.byteLength(req.body)
@@ -47,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       transport: 'http',
       auth: 'bearer_supabase_jwt',
       docs: 'https://advanceai.studio',
-      oauth_protected_resource: MCP_RESOURCE_METADATA,
+      oauth_protected_resource: MCP_RESOURCE_METADATA_URL,
       tools: 'POST JSON-RPC initialize | tools/list | tools/call',
     })
     return

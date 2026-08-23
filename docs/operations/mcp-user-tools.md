@@ -36,6 +36,11 @@ In **Supabase Dashboard → Authentication → OAuth Server** (AIIAN `lstzfxsdmg
 
 Without this, Custom Connector OAuth discovery fails (`feature_disabled`).
 
+### Vercel env (Preview + Production)
+PRM reads `SUPABASE_URL` / `VITE_SUPABASE_URL` at runtime. Both Preview and Production must point at **AIIAN** (`lstzfxsdmggkoaxfawny`), not the old IANAI-preview project. After changing env vars, redeploy.
+
+Authorize always redirects to the Supabase **Site URL** (`https://advanceai.studio/oauth/consent`), so full Grok OAuth needs this branch **deployed to Production**. Preview can smoke PRM / MCP / consent SPA only.
+
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
 - Registry: `api/lib/mcp/tool-registry.ts`
