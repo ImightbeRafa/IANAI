@@ -885,6 +885,7 @@ export interface BrandKit {
   is_active: boolean
   is_default: boolean
   client_id: string | null
+  business_id?: string | null
   created_at: string
   updated_at: string
 }

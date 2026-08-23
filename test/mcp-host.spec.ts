@@ -218,7 +218,7 @@ describe('mcp protocol', () => {
     const text = (called.result as { content: Array<{ text: string }> }).content[0].text
     expect(text).toContain('pending_analysis')
     expect(text).toContain('intake-1')
-    expect(text).toContain('/chat?brandId=b1')
+    expect(text).toContain('/chat?brand=b1')
   })
 })
 

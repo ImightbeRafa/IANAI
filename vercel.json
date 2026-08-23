@@ -15,6 +15,12 @@
     "api/mcp.ts": {
       "maxDuration": 30
     },
+    "api/mcp-guide-analysis.ts": {
+      "maxDuration": 60
+    },
+    "api/analyze-site.ts": {
+      "maxDuration": 60
+    },
     "api/reflect-memory.ts": {
       "maxDuration": 30
     },
@@ -22,6 +28,12 @@
       "maxDuration": 30
     }
   },
+  "crons": [
+    {
+      "path": "/api/mcp-guide-analysis",
+      "schedule": "* * * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/.well-known/oauth-protected-resource", "destination": "/api/mcp-oauth-metadata" },
     { "source": "/.well-known/oauth-protected-resource/api/mcp", "destination": "/api/mcp-oauth-metadata" },
