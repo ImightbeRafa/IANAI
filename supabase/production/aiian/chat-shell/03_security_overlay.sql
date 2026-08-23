@@ -63,7 +63,13 @@ CREATE POLICY "chat_sessions_select"
   ON public.chat_sessions
   FOR SELECT
   TO authenticated
-  USING (public.can_read_chat_session(id));
+  USING (
+    -- Column checks first so INSERT...RETURNING works (helper re-SELECT misses new row).
+    user_id = auth.uid()
+    OR (business_id IS NOT NULL AND public.can_access_business(business_id))
+    OR (product_id IS NOT NULL AND public.can_read_product(product_id))
+    OR public.can_read_chat_session(id)
+  );
 
 CREATE POLICY "chat_sessions_insert"
   ON public.chat_sessions
