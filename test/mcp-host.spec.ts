@@ -158,7 +158,14 @@ describe('mcp protocol', () => {
       db,
     })
     const tools = (listed.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name).sort()
-    expect(tools).toEqual(['get_brand_context', 'list_brands', 'workspace_save_url_context'])
+    expect(tools).toContain('list_brands')
+    expect(tools).toContain('get_brand_context')
+    expect(tools).toContain('workspace_save_url_context')
+    expect(tools).toContain('guide_brand_pack')
+    expect(tools).toContain('execute_script_generate')
+    expect(tools).toContain('execute_image_generate')
+    expect(tools).not.toContain('execute_carousel_generate')
+    expect(tools).not.toContain('delete_brand')
 
     const called = await handleMcpJsonRpc({
       body: {

@@ -1,5 +1,5 @@
 /**
- * Minimal MCP JSON-RPC (initialize / tools/list / tools/call) for Grok Custom Connector.
+ * Minimal MCP JSON-RPC host for Grok Custom Connector.
  */
 
 import { listEnabledMcpTools, getMcpTool } from './tool-registry.js'
@@ -9,8 +9,23 @@ import {
   type McpAuthUser,
   type McpDbClient,
 } from './user-tools.js'
-import { validateMcpGuideIntake } from './guide-intake.js'
 import { saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
+import {
+  mcpGuideBrandPack,
+  mcpGuideImage,
+  mcpGuideScript,
+} from './guide-packs.js'
+import {
+  mcpWorkspaceImportAsset,
+  mcpWorkspaceIngestFile,
+  mcpWorkspaceNoteGeneratedOutside,
+  type McpWorkspaceStore,
+} from './workspace-ops.js'
+import {
+  mcpExecuteImageGenerate,
+  mcpExecuteScriptGenerate,
+} from './execute-tools.js'
+import type { McpApprovalStore } from './approval.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
@@ -46,26 +61,103 @@ function fail(
 }
 
 function toolInputSchema(name: string): Record<string, unknown> {
-  if (name === 'get_brand_context') {
-    return {
-      type: 'object',
-      properties: { brandId: { type: 'string' } },
-      required: ['brandId'],
-      additionalProperties: false,
-    }
+  const brand = { brandId: { type: 'string' } }
+  switch (name) {
+    case 'get_brand_context':
+    case 'list_offers':
+    case 'guide_brand_pack':
+      return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'guide_script':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          goal: { type: 'string' },
+          language: { type: 'string', enum: ['es', 'en'] },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'guide_image':
+    case 'execute_image_generate':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          scene: { type: 'string' },
+          aspectRatio: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'execute_script_generate':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          goal: { type: 'string' },
+          language: { type: 'string', enum: ['es', 'en'] },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'workspace_save_url_context':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          url: { type: 'string' },
+        },
+        required: ['brandId', 'url'],
+        additionalProperties: false,
+      }
+    case 'workspace_ingest_file':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          files: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                mimeType: { type: 'string' },
+                sizeBytes: { type: 'number' },
+              },
+              required: ['mimeType'],
+            },
+          },
+        },
+        required: ['brandId', 'files'],
+        additionalProperties: false,
+      }
+    case 'workspace_note_generated_outside':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          kind: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'workspace_import_asset':
+      return {
+        type: 'object',
+        properties: brand,
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    default:
+      return { type: 'object', properties: {}, additionalProperties: false }
   }
-  if (name === 'workspace_save_url_context') {
-    return {
-      type: 'object',
-      properties: {
-        brandId: { type: 'string' },
-        url: { type: 'string', description: 'HTTPS public URL to analyze later (GUIDE; no credits)' },
-      },
-      required: ['brandId', 'url'],
-      additionalProperties: false,
-    }
-  }
-  return { type: 'object', properties: {}, additionalProperties: false }
 }
 
 export async function handleMcpJsonRpc(options: {
@@ -73,6 +165,8 @@ export async function handleMcpJsonRpc(options: {
   user: McpAuthUser
   db: McpDbClient
   urlIntakeStore?: McpUrlIntakeStore | null
+  workspaceStore?: McpWorkspaceStore | null
+  approvalStore?: McpApprovalStore | null
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
   const { body, user, db } = options
@@ -109,16 +203,18 @@ export async function handleMcpJsonRpc(options: {
         return fail(body.id, -32601, `Unknown or disabled tool: ${name || '(missing)'}`)
       }
       try {
-        const text = await dispatchEnabledTool({
+        const payload = await dispatchEnabledTool({
           name,
           args,
           user,
           db,
           urlIntakeStore: options.urlIntakeStore,
+          workspaceStore: options.workspaceStore,
+          approvalStore: options.approvalStore,
           appOrigin: options.appOrigin,
         })
         return ok(body.id, {
-          content: [{ type: 'text', text }],
+          content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
           isError: false,
         })
       } catch (err) {
@@ -140,45 +236,101 @@ async function dispatchEnabledTool(options: {
   user: McpAuthUser
   db: McpDbClient
   urlIntakeStore?: McpUrlIntakeStore | null
+  workspaceStore?: McpWorkspaceStore | null
+  approvalStore?: McpApprovalStore | null
   appOrigin?: string
-}): Promise<string> {
+}): Promise<unknown> {
+  const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
+
   switch (options.name) {
-    case 'list_brands': {
-      const brands = await mcpListBrands(options.db, options.user)
-      return JSON.stringify({ brands }, null, 2)
+    case 'list_brands':
+      return { brands: await mcpListBrands(options.db, options.user) }
+    case 'list_offers': {
+      if (!brandId) throw new Error('brandId is required')
+      const brand = await options.db.getBusinessForUser(options.user.id, brandId)
+      if (!brand) throw new Error('Brand not found')
+      return { offers: await options.db.listOffersForBrand(options.user.id, brandId) }
     }
-    case 'get_brand_context': {
-      const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
-      const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
-      return JSON.stringify(ctx, null, 2)
-    }
+    case 'get_brand_context':
+      return mcpGetBrandContext(options.db, options.user, brandId)
+    case 'guide_brand_pack':
+      return mcpGuideBrandPack(options.db, options.user, brandId)
+    case 'guide_script':
+      return mcpGuideScript(options.db, options.user, {
+        brandId,
+        offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
+        goal: typeof options.args.goal === 'string' ? options.args.goal : undefined,
+        language: typeof options.args.language === 'string' ? options.args.language : undefined,
+      })
+    case 'guide_image':
+      return mcpGuideImage(options.db, options.user, {
+        brandId,
+        offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
+        scene: typeof options.args.scene === 'string' ? options.args.scene : undefined,
+        aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : undefined,
+      })
     case 'workspace_save_url_context': {
-      if (!options.urlIntakeStore) {
-        throw new Error('URL intake store not configured')
-      }
-      const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
-      const url = typeof options.args.url === 'string' ? options.args.url : ''
-      const row = await saveMcpUrlContext({
+      if (!options.urlIntakeStore) throw new Error('URL intake store not configured')
+      return saveMcpUrlContext({
         db: options.db,
         store: options.urlIntakeStore,
         user: options.user,
         brandId,
-        url,
+        url: typeof options.args.url === 'string' ? options.args.url : '',
         appOrigin: options.appOrigin,
       })
-      return JSON.stringify(row, null, 2)
     }
     case 'workspace_ingest_file': {
-      // Still disabled in registry; validate then refuse processing.
-      const validated = validateMcpGuideIntake({
-        brandId: typeof options.args.brandId === 'string' ? options.args.brandId : undefined,
-        url: typeof options.args.url === 'string' ? options.args.url : null,
+      if (!options.workspaceStore) throw new Error('Workspace store not configured')
+      return mcpWorkspaceIngestFile({
+        db: options.db,
+        store: options.workspaceStore,
+        user: options.user,
+        brandId,
         files: Array.isArray(options.args.files)
-          ? options.args.files as Array<{ mimeType: string; name?: string; sizeBytes?: number }>
+          ? options.args.files as Array<{ name?: string; mimeType: string; sizeBytes?: number }>
           : [],
+        appOrigin: options.appOrigin,
       })
-      if (!validated.ok) throw new Error(validated.error)
-      throw new Error('GUIDE file ingest is not enabled yet')
+    }
+    case 'workspace_note_generated_outside': {
+      if (!options.workspaceStore) throw new Error('Workspace store not configured')
+      return mcpWorkspaceNoteGeneratedOutside({
+        db: options.db,
+        store: options.workspaceStore,
+        user: options.user,
+        brandId,
+        kind: typeof options.args.kind === 'string' ? options.args.kind : undefined,
+        note: typeof options.args.note === 'string' ? options.args.note : undefined,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'workspace_import_asset':
+      return mcpWorkspaceImportAsset({
+        db: options.db,
+        user: options.user,
+        brandId,
+        appOrigin: options.appOrigin,
+      })
+    case 'execute_script_generate': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      return mcpExecuteScriptGenerate({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_image_generate': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      return mcpExecuteImageGenerate({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
     }
     default:
       throw new Error(`Unhandled tool: ${options.name}`)
