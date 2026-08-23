@@ -34,6 +34,8 @@ import {
   GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
 } from './lib/grok-models.js'
+import { runGrokImageEdit } from './lib/grok-image-edit.js'
+import { resolveImageModelForAction } from './lib/image-provider-routing.js'
 import {
   buildExplicitReferenceRoleContract,
   buildLifestyleCreativeBrief,
@@ -530,7 +532,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!VALID_MODELS.includes(model)) {
       return res.status(400).json({ error: `Invalid model. Must be one of: ${VALID_MODELS.join(', ')}` })
     }
-    const selectedModel: ImageModel = model
+    // Edit/enhance force Grok (carousel stays Gemini elsewhere); generate keeps manual pick.
+    const selectedModel: ImageModel = resolveImageModelForAction({
+      action: typeof action === 'string' ? action : 'generate',
+      requested: model,
+    })
 
     if (selectedModel === 'gpt-image-2' && !(await isAdminUser(user.id))) {
       return res.status(403).json({ error: 'Admin access required' })
@@ -761,6 +767,76 @@ Edit instruction: ${editPrompt}`
         }
       }
 
+      if (selectedModel === 'grok-imagine') {
+        const xaiApiKey = process.env.GROK_API_KEY
+        if (!xaiApiKey) return res.status(500).json({ error: 'xAI API key not configured' })
+        try {
+          const supportUrls = editRefImages.slice(0, 2)
+          if (brandKit?.logo_url || logoFallbackUrl) {
+            try {
+              const logoData = await resolveInlineLogo()
+              if (logoData) {
+                supportUrls.push(`data:${logoData.mimeType};base64,${logoData.data}`)
+              }
+            } catch (logoErr) {
+              console.warn('Failed to inject brand logo in Grok edit:', logoErr)
+            }
+          }
+          const grokEdit = await runGrokImageEdit({
+            apiKey: xaiApiKey,
+            prompt: systemEditPrompt,
+            baseImageUrl: editImage,
+            supportImageUrls: supportUrls,
+            aspectRatio: editAR,
+          })
+          await incrementUsage(user.id, 'image')
+          await deductBonusImage(user.id)
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'edit',
+            model: 'grok-imagine',
+            generationId,
+            success: true,
+            costOverrideUsd: grokEdit.estimatedCostUsd,
+            costSource: 'list_price',
+            metadata: {
+              action: 'edit',
+              provider: 'xai',
+              providerModel: grokEdit.providerModel,
+              referenceCount: grokEdit.referenceCount,
+              resolution: grokEdit.resolution,
+              quality: grokEdit.quality,
+              editPrompt: String(editPrompt).substring(0, 100),
+            },
+          })
+          return res.status(200).json({
+            status: 'Ready',
+            result: { sample: grokEdit.imageDataUrl },
+            model: 'grok-imagine',
+            providerModel: grokEdit.providerModel,
+            generationId,
+            edited: true,
+          })
+        } catch (editError) {
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'edit',
+            model: 'grok-imagine',
+            generationId,
+            success: false,
+            errorMessage: editError instanceof Error ? editError.message : 'Unknown error',
+            metadata: { action: 'edit', provider: 'xai', costSource: 'unavailable' },
+          })
+          return res.status(500).json({
+            error: 'Image edit failed',
+            details: editError instanceof Error ? editError.message : 'Unknown error',
+            retryable: false,
+          })
+        }
+      }
+
       const geminiApiKey = process.env.GEMINI_API_KEY
       if (!geminiApiKey) return res.status(500).json({ error: 'Gemini API key not configured' })
       const editModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
@@ -869,8 +945,8 @@ Edit instruction: ${editPrompt}`
       }
     }
     // =============================================
-    // MAGIC WAND ENHANCE MODE (Gemini only)
-    // Sends existing image + creative-director mega-prompt → upgraded design
+    // MAGIC WAND ENHANCE MODE
+    // Default provider: Grok Imagine (carousel stays Gemini elsewhere)
     // =============================================
     if (action === 'enhance') {
       // Check usage limit (enhance costs 0.5 image credit)
@@ -879,17 +955,10 @@ Edit instruction: ${editPrompt}`
         return res.status(403).json({ error: 'Image limit reached. Upgrade your plan for more.' })
       }
 
-      const geminiApiKey = process.env.GEMINI_API_KEY
-      if (!geminiApiKey) {
-        return res.status(500).json({ error: 'Gemini API key not configured' })
-      }
-
       const enhanceImage = imageParams.enhanceImage || ''
       if (!enhanceImage) {
         return res.status(400).json({ error: 'enhanceImage is required for enhance action' })
       }
-
-      const enhanceModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
 
       const enhanceLang = imageParams.language || 'es'
       const langLabel = enhanceLang === 'es' ? 'ESPAÑOL' : 'ENGLISH'
@@ -1041,6 +1110,84 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         resolveEnhanceUserDirection(imageParams.editPrompt, imageParams.originalPrompt)
       )
 
+      if (selectedModel === 'grok-imagine') {
+        const xaiApiKey = process.env.GROK_API_KEY
+        if (!xaiApiKey) return res.status(500).json({ error: 'xAI API key not configured' })
+        try {
+          const supportUrls: string[] = []
+          if (hasProductRef) {
+            for (const refImg of imageParams.productReferenceImages!.slice(0, 2)) {
+              if (typeof refImg === 'string' && refImg.startsWith('data:')) supportUrls.push(refImg)
+            }
+          }
+          if (Array.isArray(imageParams.contextReferenceImages)) {
+            for (const ctxImg of imageParams.contextReferenceImages.slice(0, 1)) {
+              if (typeof ctxImg === 'string' && ctxImg.startsWith('data:')) supportUrls.push(ctxImg)
+            }
+          }
+          if (brandKit?.logo_url || logoFallbackUrl) {
+            try {
+              const logoData = await resolveInlineLogo()
+              if (logoData) supportUrls.push(`data:${logoData.mimeType};base64,${logoData.data}`)
+            } catch (logoErr) {
+              console.warn('Failed to inject brand logo in Grok enhance:', logoErr)
+            }
+          }
+          const grokEnhance = await runGrokImageEdit({
+            apiKey: xaiApiKey,
+            prompt: ENHANCE_SYSTEM_PROMPT,
+            baseImageUrl: enhanceImage,
+            supportImageUrls: supportUrls,
+            aspectRatio: typeof imageParams.aspectRatio === 'string' ? imageParams.aspectRatio : '9:16',
+          })
+          await incrementUsage(user.id, 'enhance')
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'enhance',
+            model: 'grok-imagine',
+            generationId,
+            success: true,
+            costOverrideUsd: grokEnhance.estimatedCostUsd,
+            costSource: 'list_price',
+            metadata: {
+              action: 'enhance',
+              provider: 'xai',
+              providerModel: grokEnhance.providerModel,
+              enhanceTier,
+              referenceCount: grokEnhance.referenceCount,
+              resolution: grokEnhance.resolution,
+              quality: grokEnhance.quality,
+            },
+          })
+          return res.status(200).json({
+            status: 'Ready',
+            result: { sample: grokEnhance.imageDataUrl },
+            model: 'grok-imagine',
+            providerModel: grokEnhance.providerModel,
+            generationId,
+            textWarning: false,
+            enhanced: true,
+          })
+        } catch (enhanceError) {
+          await logApiUsage({
+            userId: user.id,
+            userEmail: user.email,
+            feature: 'enhance',
+            model: 'grok-imagine',
+            generationId,
+            success: false,
+            errorMessage: enhanceError instanceof Error ? enhanceError.message : 'Unknown error',
+            metadata: { action: 'enhance', provider: 'xai', enhanceTier, costSource: 'unavailable' },
+          })
+          return res.status(500).json({
+            error: 'Image enhance failed',
+            details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error',
+            retryable: false,
+          })
+        }
+      }
+
       if (selectedModel === 'gpt-image-2') {
         const openAiApiKey = process.env.OPENAI_API_KEY
         if (!openAiApiKey) return res.status(500).json({ error: 'OpenAI API key not configured' })
@@ -1111,6 +1258,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           return res.status(isTimeoutError(enhanceError) ? 504 : 500).json({ error: isTimeoutError(enhanceError) ? 'OpenAI image enhance timed out' : 'OpenAI image enhance failed', details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error', retryable: isTimeoutError(enhanceError) })
         }
       }
+
+      const geminiApiKey = process.env.GEMINI_API_KEY
+      if (!geminiApiKey) {
+        return res.status(500).json({ error: 'Gemini API key not configured' })
+      }
+      const enhanceModelId = GEMINI_IMAGE_MODELS['nano-banana-pro']
+
       try {
         const ai = new GoogleGenAI({ apiKey: geminiApiKey })
 

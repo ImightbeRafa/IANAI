@@ -94,7 +94,7 @@ describe('buildShellImageEnhanceBody', () => {
       aspectRatio: '9:16',
     })).toEqual({
       action: 'enhance',
-      model: 'nano-banana-pro',
+      model: 'grok-imagine',
       productId: 'prod-1',
       sessionId: 'sess-1',
       enhanceImage: 'data:image/webp;base64,aaa',
@@ -120,7 +120,7 @@ describe('buildShellImageEnhanceBody', () => {
       editPrompt: '   ',
     })).toEqual({
       action: 'enhance',
-      model: 'nano-banana-pro',
+      model: 'grok-imagine',
       productId: 'prod-1',
       sessionId: 'sess-1',
       enhanceImage: 'data:image/webp;base64,aaa',

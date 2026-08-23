@@ -431,7 +431,7 @@ export async function editShellOfferImage(options: {
         })
       : {
           action: 'edit',
-          model: 'nano-banana-pro',
+          model: 'grok-imagine',
           productId: options.productId,
           sessionId: options.sessionId,
           productImageId: options.productImageId,

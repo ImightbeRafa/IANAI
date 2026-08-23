@@ -1,39 +1,68 @@
-# Per-user MCP tools (Advance AI)
+# Advance MCP for Grok bot (`advanceai.studio`)
 
-Goal: let a signed-in user (or their Grok bot) call **their own** account tools — brands, context, later generate/edit — without exposing the whole company stack.
+Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`  
+Later: Codex (same registry, same auth).
 
-## Locked rules
-- Auth = the signed-in personal user (RLS / user_id). Never service-role browse of all accounts.
-- **No delete tools.**
-- Generate / edit / mutations: **approval required** (short-lived, argument-bound, single-use token).
-- Credits = same subscription limits as the web app.
-- Real AIIAN DB.
+## Locked product choices
+- Domain: `https://advanceai.studio`
+- Auth: OAuth 2.1 + PKCE against Advance/Supabase (browser sign-in; **no pasted service-role keys**)
+- Scope: signed-in user only (RLS / `owner_id` / `user_id`)
+- Credits: same subscription as the web app
+- No delete tools
+- Generate / edit / enhance / carousel: **require approval** (UX TBD — see questions below)
+- Image routing: generate default Grok; **edit+enhance = Grok**; **carousel = Gemini**
+
+## Tool surface (versioned registry)
+Code: `api/lib/mcp/tool-registry.ts` (`MCP_REGISTRY_VERSION`).
+
+| Group | Purpose | Default |
+|---|---|---|
+| Brand Workspace | brands, offers, kits | ON (reads) |
+| Creative Context | uploads, analysis, memory | OFF until unlocked |
+| Script Studio | scripts | OFF |
+| Visual Studio | generate/edit/enhance images | OFF until approval UX chosen |
+| Carousel Studio | carousels (Gemini) | OFF |
+| Post & Reply Studio | posts / replies | OFF |
+| Library & Sessions | history / artifacts | OFF |
+| Account & Team | usage / team | OFF |
+
+Flip groups + per-tool `enabled` flags to expand safely after testing.
+
+## Host plan
+1. Public MCP HTTP endpoint on Vercel: `https://advanceai.studio/api/mcp`
+2. Grok.com → Connectors → Custom → that URL
+3. First use: Grok opens Advance login (OAuth); tokens bound to one user
+4. `listTools` returns `listEnabledMcpTools()` only
+5. Mutations call the same backend paths as the SPA (shared credits + logging)
+
+## Approval — plain English (needs your pick)
+When Grok wants to spend credits or write content, something must confirm **you really want that exact action**.
+
+**Option A — Approve in Grok chat**  
+Grok asks “Generate this image for Brand X (~1 credit)?” and you say yes in the chat.  
+Simple, stays in Grok. Weaker unless Grok can prove that yes to our server (often it cannot).
+
+**Option B — Approve on Advance web**  
+Grok returns a link → you open Advance → see exact preview (brand, prompt, cost) → Approve.  
+Strongest security; one extra click outside Grok.
+
+**Option C — Hybrid**  
+Cheap/low-risk writes confirm in Grok; paid generation / batches use Advance link.
+
+We will **not** wire generate/edit tools until you choose A/B/C (and the questions below).
+
+## Open questions (do not assume)
+1. Approval: **A, B, or C**? Token lifetime (e.g. 10 min / 1 hour)?
+2. Does “entire tools” include **deletes**, **publishing**, **team/admin**, shared/team assets?
+3. After MCP generate: **auto-save** to posts library, or draft until you say save?
+4. Do you already have a **paid Grok account** that can add Custom Connectors at grok.com/connectors?
+5. Should the first live unlock be **Brand reads only**, then Visual Studio next?
 
 ## Phase status
 | Slice | Status |
 |---|---|
-| `list_brands` / `get_brand_context` core helpers | Code in `api/lib/mcp/user-tools.ts` |
-| AIIAN Supabase adapter (owner-scoped) | `api/lib/mcp/supabase-adapter.ts` |
-| HTTP / Grok Custom Connector host | Not wired yet — needs hosting choice |
-| Approval inbox + token for generate | Not started |
-| Image generate via MCP | Blocked on host + approval |
-
-## AIIAN table mapping (read tools)
-| Tool field | Table / filter |
-|---|---|
-| Brands | `businesses` where `owner_id = auth user` |
-| Offers | `products` where `business_id = brand` **and** `owner_id = auth user` |
-| Brand kit | `brand_kits` where `business_id = brand` **and** `user_id = auth user` (prefer default) |
-
-Unassigned products (`business_id` null) are **not** exposed.
-
-## Needed from product owner
-1. **Host / first client:** Grok.com Custom Connector, Advance-hosted bot, or xAI Responses tools?
-2. **Canonical Vercel domain** for the MCP endpoint (and whether OAuth 2.1 → Supabase Auth is OK).
-3. **Approval UX:** in-app inbox + deep link? Desired token TTL?
-4. Confirm carousel / enhance stay on Gemini for now (single-image default is already Grok).
-
-## Next implementation steps
-1. After host choice: wire authenticated MCP transport to these helpers + adapter.
-2. Add `request_generation` → pending approval row → approval URL.
-3. After approval, `execute_approved_generation` consumes the token once and runs the same generate-image path as chat-shell (Grok default).
+| Read helpers + AIIAN adapter | Done |
+| Tool registry v0.1 | Done |
+| Edit/enhance → Grok; carousel → Gemini | Done (app routing) |
+| `/api/mcp` OAuth host on advanceai.studio | Blocked on questions 1–5 |
+| Generate via MCP | Blocked on approval choice |
