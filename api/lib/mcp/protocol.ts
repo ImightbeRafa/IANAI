@@ -80,6 +80,17 @@ function toolInputSchema(name: string): Record<string, unknown> {
         additionalProperties: false,
       }
     case 'guide_image':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          scene: { type: 'string' },
+          aspectRatio: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
     case 'execute_image_generate':
       return {
         type: 'object',
