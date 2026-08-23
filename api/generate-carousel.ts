@@ -471,18 +471,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const contextReferenceImages = parseInlineImages(body.contextReferenceImages, 4)
     const carouselReferenceImages = parseInlineImages(body.carouselReferenceImages, 8)
 
-    // Upfront usage check: carousel requires slideCount generations.
-    const usage = await checkUsageLimit(user.id, 'image')
+    // Upfront usage check: carousel requires N image generations (credits × N when CREDITS_V1).
+    const requiredSlides = previewFirstSlideOnly ? 1 : slideCount
+    const usage = await checkUsageLimit(user.id, 'image', {
+      imageModel: GEMINI_IMAGE_MODEL,
+      units: requiredSlides,
+    })
     if (!usage.allowed) {
-      return res.status(429).json({ error: 'Image limit reached. Upgrade for more.', limit: usage.limit, remaining: usage.remaining })
-    }
-    const requiredCredits = previewFirstSlideOnly ? 1 : slideCount
-    if (usage.remaining !== -1 && usage.remaining < requiredCredits) {
       return res.status(429).json({
-        error: `This carousel requires ${requiredCredits} image credits, but you only have ${usage.remaining} remaining.`,
+        error: usage.creditsRequired
+          ? `Need ${usage.creditsRequired} AI credits for this carousel (${requiredSlides} slides).`
+          : 'Image limit reached. Upgrade for more.',
         limit: usage.limit,
         remaining: usage.remaining,
-        required: requiredCredits,
+        required: usage.creditsRequired ?? requiredSlides,
+      })
+    }
+    // Legacy meters: remaining is image slots, not credits
+    if (usage.creditsRequired == null && usage.remaining !== -1 && usage.remaining < requiredSlides) {
+      return res.status(429).json({
+        error: `This carousel requires ${requiredSlides} image credits, but you only have ${usage.remaining} remaining.`,
+        limit: usage.limit,
+        remaining: usage.remaining,
+        required: requiredSlides,
       })
     }
 
@@ -571,7 +582,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Charge only for succeeded slides (fair-fail behavior).
     for (let i = 0; i < succeeded; i++) {
       try {
-        await incrementUsage(user.id, 'image')
+        const slideGenerationId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${i}-${Math.random().toString(36).slice(2)}`
+        await incrementUsage(user.id, 'image', {
+          generationId: slideGenerationId,
+          imageModel: GEMINI_IMAGE_MODEL,
+        })
         await deductBonusImage(user.id)
       } catch (e) { console.warn('increment usage failed on slide', i, e) }
     }

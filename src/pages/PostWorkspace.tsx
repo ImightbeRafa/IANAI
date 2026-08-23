@@ -915,8 +915,8 @@ export default function PostWorkspace() {
       : usageLimits.imagesLimit === -1
         ? null
         : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
-    // Until CREDITS_V1: 1 slide = 1 image credit. With credits: Estándar 6 / slide (client soft-check).
-    const cost = usageLimits.creditsEnabled ? costSlides * 6 : costSlides
+    // Until CREDITS_V1: 1 slide = 1 image credit. With credits: Pro carousel = 24 / slide.
+    const cost = usageLimits.creditsEnabled ? costSlides * 24 : costSlides
     const hasEnoughCredits = remainingImageCredits === null || remainingImageCredits >= cost
     if (!hasEnoughCredits) {
       setError(language === 'es'
@@ -1760,7 +1760,7 @@ export default function PostWorkspace() {
     : usageLimits.imagesLimit === -1
       ? null
       : Math.max(0, usageLimits.imagesLimit - usageLimits.imagesUsed + (usageLimits.bonusImages || 0))
-  const carouselCost = usageLimits.creditsEnabled ? carouselCostSlides * 6 : carouselCostSlides
+  const carouselCost = usageLimits.creditsEnabled ? carouselCostSlides * 24 : carouselCostSlides
   const hasEnoughCarouselCredits = remainingImageCredits === null || remainingImageCredits >= carouselCost
   const textInputLabel = isGeneralImageMode ? t.generalPromptLabel : t.scriptLabel
   const textInputHint = isGeneralImageMode ? t.generalPromptHint : t.pasteScript

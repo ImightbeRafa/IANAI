@@ -187,6 +187,8 @@ export function resolveImageCreditAction(options: {
   const isPro =
     model.includes('nano-banana-pro')
     || model.includes('gpt-image')
+    || model.includes('gemini-3-pro-image')
+    || model.includes('pro-image-preview')
     || model === 'pro'
   if (options.action === 'carousel') {
     return isPro ? 'carousel_slide_pro' : 'carousel_slide_standard'

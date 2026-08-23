@@ -111,6 +111,10 @@ export async function mcpExecuteScriptGenerate(options: {
   const limit = await checkUsageLimit(options.user.id, 'script')
   if (!limit.allowed) throw new Error('Script credit limit reached')
 
+  const scriptGenerationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalRequestId)
+    ? approvalRequestId
+    : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-script`)
+
   const ctx = ctxPreview
   const offer = ctx.offers.find((o) => o.id === offerId)!
 
@@ -163,7 +167,7 @@ export async function mcpExecuteScriptGenerate(options: {
     success: true,
     metadata: { action: 'mcp_execute_script_generate', brandId, approvalRequestId, sessionId },
   })
-  await incrementUsage(options.user.id, 'script')
+  await incrementUsage(options.user.id, 'script', { generationId: scriptGenerationId })
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
   const result = {
@@ -252,8 +256,12 @@ export async function mcpExecuteImageGenerate(options: {
   })
   if (!consumed.ok) throw new Error(consumed.reason)
 
-  const limit = await checkUsageLimit(options.user.id, 'image')
+  const limit = await checkUsageLimit(options.user.id, 'image', { imageModel: 'grok-imagine' })
   if (!limit.allowed) throw new Error('Image credit limit reached')
+
+  const imageGenerationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalRequestId)
+    ? approvalRequestId
+    : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-image`)
 
   const guide = await mcpGuideImage(options.db, options.user, {
     brandId,
@@ -312,7 +320,10 @@ export async function mcpExecuteImageGenerate(options: {
       quality: generated.quality,
     },
   })
-  await incrementUsage(options.user.id, 'image')
+  await incrementUsage(options.user.id, 'image', {
+    generationId: imageGenerationId,
+    imageModel: 'grok-imagine',
+  })
   await deductBonusImage(options.user.id)
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')

@@ -1609,16 +1609,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Determine usage action: 'description' if feature param says so, otherwise 'script'
   const usageAction: 'script' | 'description' = req.body?.feature === 'description' ? 'description' : 'script'
+  const chatGenerationId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-chat`
 
   // Check usage limits
-  const { allowed, remaining, limit } = await checkUsageLimit(user.id, usageAction)
+  const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, usageAction)
   if (!allowed) {
     const label = usageAction === 'description' ? 'descripciones' : 'scripts'
     return res.status(429).json({ 
       error: `Límite de ${label} alcanzado`,
-      message: `Has alcanzado el límite de ${limit} ${label} este mes. Actualiza tu plan para continuar.`,
+      message: creditsRequired
+        ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
+        : `Has alcanzado el límite de ${limit} ${label} este mes. Actualiza tu plan para continuar.`,
       limit,
-      remaining: 0
+      remaining: 0,
+      creditsRequired,
     })
   }
 
@@ -1890,7 +1894,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         })
 
-        await incrementUsage(user.id, usageAction)
+        await incrementUsage(user.id, usageAction, { generationId: chatGenerationId })
 
         return res.status(200).json({
           content: structured.content,
@@ -1948,7 +1952,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
 
     // Increment usage counter after successful generation
-    await incrementUsage(user.id, usageAction)
+    await incrementUsage(user.id, usageAction, { generationId: chatGenerationId })
 
     return res.status(200).json({ content, remaining: remaining - 1, model: chatModel, _debug: { systemPrompt } })
   } catch (error) {

@@ -40,8 +40,10 @@ describe('credit catalog', () => {
   it('maps image models to Estándar vs Pro', () => {
     expect(resolveImageCreditAction({ action: 'generate', model: 'grok-imagine' })).toBe('image_standard')
     expect(resolveImageCreditAction({ action: 'generate', model: 'nano-banana-pro' })).toBe('image_pro')
+    expect(resolveImageCreditAction({ action: 'generate', model: 'gemini-3-pro-image-preview' })).toBe('image_pro')
     expect(resolveImageCreditAction({ action: 'enhance', model: 'grok-imagine' })).toBe('image_enhance')
     expect(resolveImageCreditAction({ action: 'carousel', model: 'nano-banana-pro' })).toBe('carousel_slide_pro')
+    expect(resolveImageCreditAction({ action: 'carousel', model: 'gemini-3-pro-image-preview' })).toBe('carousel_slide_pro')
   })
 
   it('maps legacy enhance to 18 not half-image', () => {
