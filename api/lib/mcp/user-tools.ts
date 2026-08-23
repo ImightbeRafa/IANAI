@@ -94,17 +94,19 @@ export const MCP_MUTATION_POLICY = {
   archiveTools: true,
   /** Permanent delete = no recovery; UI/MCP must warn with impact counts first. */
   permanentDeleteRequiresTypedConfirm: true,
+  /** Brand folder delete removes sessions/offers/assets; brand_kits are detached and kept. */
+  brandDeletePreservesBrandKits: true,
   generateRequiresApprovalToken: true,
-  /** Primary EXECUTE approval surface: Grok chat popup (not Advance web link). */
   executeApprovalSurface: 'grok_chat_popup' as const,
-  /** GUIDE (Grok-owned generation) never consumes Advance credits. */
+  executeApprovalTtlMs: 60 * 60 * 1000,
+  guideIntakeMaxFiles: 5,
+  guideIntakeAllowUrl: true,
+  guideIntakeAllowPdf: true,
+  guideIntakeAllowImages: true,
   guideConsumesAdvanceCredits: false,
-  /** EXECUTE (Advance APIs) uses the same subscription credits as the web app. */
   executeConsumesAdvanceCredits: true,
   sameSubscriptionCredits: true,
-  /** Do not import externally generated Grok images as Advance assets. */
   importExternalGrokImages: false,
-  /** Session may store provenance that an image was generated outside Advance. */
   sessionProvenanceGeneratedOutside: true,
   socialAutoPost: false,
   scope: 'signed_in_user_and_team_as_web' as const,

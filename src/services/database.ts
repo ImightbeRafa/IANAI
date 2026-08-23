@@ -759,6 +759,15 @@ export async function deleteBusinessWithContents(businessId: string): Promise<vo
   ])
   const steps = planBusinessContentDeletion({ businessId, sessionIds, productIds })
   await runBusinessContentDeletion(steps, {
+    detachBrandKits: async (id) => {
+      const { data, error } = await supabase
+        .from('brand_kits')
+        .update({ business_id: null, updated_at: new Date().toISOString() })
+        .eq('business_id', id)
+        .select('id')
+      if (error) throw error
+      return (data || []).length
+    },
     deleteSession: deleteChatSession,
     deleteProduct,
     getRemainingProductIds: () => getBusinessProductIds(businessId),

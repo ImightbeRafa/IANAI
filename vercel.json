@@ -12,6 +12,9 @@
     "api/generate-carousel.ts": {
       "maxDuration": 240
     },
+    "api/mcp.ts": {
+      "maxDuration": 30
+    },
     "api/reflect-memory.ts": {
       "maxDuration": 30
     },
@@ -20,7 +23,8 @@
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/" }
+    { "source": "/.well-known/oauth-protected-resource", "destination": "/api/mcp-oauth-metadata" },
+    { "source": "/((?!api/).*)", "destination": "/" }
   ],
   "headers": [
     {
