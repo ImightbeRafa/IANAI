@@ -185,7 +185,7 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'nano-banana': { name: 'Nano Banana', color: 'bg-yellow-500' },
   'nano-banana-pro': { name: 'Nano Banana Pro', color: 'bg-orange-500' },
   'gpt-image-2': { name: 'GPT Image 2', color: 'bg-emerald-500' },
-  'grok-imagine': { name: 'Grok Imagine', color: 'bg-pink-500' },
+  'grok-imagine': { name: 'Grok Imagine 2.0', color: 'bg-pink-500' },
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
   'gemini-2.5-flash': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
@@ -202,7 +202,7 @@ const MODEL_PRICING: Record<string, string> = {
   'nano-banana': '~$0.02/image',
   'nano-banana-pro': '$2/1M in, $120/1M image out',
   'gpt-image-2': '$5/1M text in, $8/1M image in, $30/1M image out',
-  'grok-imagine': '~$0.07/image',
+  'grok-imagine': '~$0.04/image (2.0 base)',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
   'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
@@ -742,7 +742,7 @@ export default function AdminDashboard({
           </div>
           <div className="admin-dash__status-card">
             <div className="admin-dash__status-label">Images</div>
-            <div className="admin-dash__status-value">Gemini · Grok Imagine</div>
+            <div className="admin-dash__status-value">Gemini · Grok Imagine 2.0</div>
           </div>
           <div className="admin-dash__status-card">
             <div className="admin-dash__status-label">Home</div>

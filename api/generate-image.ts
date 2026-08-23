@@ -26,8 +26,13 @@ import {
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicUrl } from './lib/url-safety.js'
+import {
+  GROK_IMAGE_COST_USD,
+  GROK_IMAGE_EDITS_URL,
+  GROK_IMAGE_GENERATIONS_URL,
+  GROK_IMAGE_PROVIDER_MODEL,
+} from './lib/grok-models.js'
 
-const GROK_IMAGINE_API_URL = 'https://api.x.ai/v1/images/generations'
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations'
 const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits'
 const GEMINI_IMAGE_TIMEOUT_MS = 135_000
@@ -2166,7 +2171,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     }
 
     // =============================================
-    // GROK IMAGINE IMAGE GENERATION
+    // GROK IMAGINE 2.0 IMAGE GENERATION / EDIT
     // =============================================
     if (selectedModel === 'grok-imagine') {
       const xaiApiKey = process.env.GROK_API_KEY
@@ -2174,18 +2179,24 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         return res.status(500).json({ error: 'xAI API key not configured' })
       }
 
-      console.log('Submitting to Grok Imagine API:', { 
+      const providerModel = GROK_IMAGE_PROVIDER_MODEL
+      const referenceUrls = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4']
+        .map((key) => imageParams[key])
+        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+        .slice(0, 3)
+
+      console.log('Submitting to Grok Imagine 2.0 API:', {
         prompt: enhancedPrompt.substring(0, 100) + '...',
-        hasInputImage: !!imageParams.input_image
+        providerModel,
+        referenceCount: referenceUrls.length,
       })
 
       try {
-        // Use b64_json to avoid CORS issues with xAI's image hosting
-        // Model: grok-2-image-1212 ($0.07/image, 300 rpm)
-        // Determine aspect ratio from dimensions
-        // Grok supports: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 2:1, 1:2
-        // Map unsupported ratios to closest supported ones (e.g. 4:5 → 3:4)
-        const GROK_SUPPORTED_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2']
+        // Grok Imagine 2.0 ratios (plus common social fallbacks)
+        const GROK_SUPPORTED_RATIOS = [
+          '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2',
+          '19.5:9', '9:19.5', '20:9', '9:20', 'auto',
+        ]
         const GROK_RATIO_FALLBACK: Record<string, string> = { '4:5': '3:4', '5:4': '4:3' }
         let grokAspectRatio = getAspectRatio(
           imageParams.width || 1080,
@@ -2195,15 +2206,29 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           grokAspectRatio = GROK_RATIO_FALLBACK[grokAspectRatio] || '1:1'
         }
 
+        const isEdit = referenceUrls.length > 0
         const grokRequest: Record<string, unknown> = {
-          model: 'grok-2-image-1212',
+          model: providerModel,
           prompt: enhancedPrompt,
           n: 1,
           response_format: 'b64_json',
-          aspect_ratio: grokAspectRatio
+          aspect_ratio: grokAspectRatio,
+          resolution: '1k',
+          quality: 'medium',
         }
 
-        const response = await fetch(GROK_IMAGINE_API_URL, {
+        let endpoint = GROK_IMAGE_GENERATIONS_URL
+        if (isEdit) {
+          endpoint = GROK_IMAGE_EDITS_URL
+          // Official edit shape: one `image` or multi `images` with { url, type }
+          if (referenceUrls.length === 1) {
+            grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
+          } else {
+            grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
+          }
+        }
+
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2215,72 +2240,107 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         if (!response.ok) {
           const errorText = await response.text()
           console.error('Grok Imagine API error:', errorText)
-          
+
           await logApiUsage({
             userId: user.id,
             userEmail: user.email,
             feature: 'image',
             model: 'grok-imagine',
+            generationId,
             success: false,
             errorMessage: errorText,
-            metadata: { hasInputImage: !!imageParams.input_image }
+            metadata: {
+              provider: 'xai',
+              providerModel,
+              action: isEdit ? 'edit' : 'generate',
+              hasInputImage: isEdit,
+              referenceCount: referenceUrls.length,
+              costSource: 'unavailable',
+            }
           })
 
-          return res.status(response.status).json({ 
+          return res.status(response.status).json({
             error: 'Grok Imagine generation failed',
-            details: errorText
+            details: errorText,
+            model: selectedModel,
+            providerModel,
+            generationId,
           })
         }
 
         const result = await response.json()
-        
-        // Handle base64 response format
         const b64Data = result.data?.[0]?.b64_json
         if (!b64Data) {
           throw new Error('No image data in response')
         }
-        
-        // Convert to data URL for client consumption
+
         const imageUrl = `data:image/jpeg;base64,${b64Data}`
 
-        // Increment usage counter
         await incrementUsage(user.id, 'image')
         await deductBonusImage(user.id)
 
-        // Log usage
+        // Base documented rate; edits may bill extra per input — surface referenceCount for admin.
+        const costOverrideUsd = GROK_IMAGE_COST_USD + (isEdit ? 0.01 * referenceUrls.length : 0)
+
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'image',
           model: 'grok-imagine',
+          generationId,
+          costOverrideUsd,
+          costSource: 'documented_image_rate',
           success: true,
-          metadata: { width: imageParams.width, height: imageParams.height, brandKitId: brandKit?.id, brandKitName: brandKit?.name }
+          metadata: {
+            provider: 'xai',
+            providerModel,
+            action: isEdit ? 'edit' : 'generate',
+            width: imageParams.width,
+            height: imageParams.height,
+            aspectRatio: grokAspectRatio,
+            resolution: '1k',
+            quality: 'medium',
+            referenceCount: referenceUrls.length,
+            brandKitId: brandKit?.id,
+            brandKitName: brandKit?.name,
+          }
         })
 
-        // Return immediately (Grok Imagine is synchronous)
         return res.status(200).json({
           status: 'Ready',
           result: { sample: imageUrl },
           model: selectedModel,
+          providerModel,
+          generationId,
           textWarning: false
         })
 
       } catch (grokError) {
         console.error('Grok Imagine error:', grokError)
-        
+
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: 'image',
           model: 'grok-imagine',
+          generationId,
           success: false,
           errorMessage: grokError instanceof Error ? grokError.message : 'Unknown error',
-          metadata: { hasInputImage: !!imageParams.input_image }
+          metadata: {
+            provider: 'xai',
+            providerModel,
+            hasInputImage: referenceUrls.length > 0,
+            referenceCount: referenceUrls.length,
+            costSource: 'unavailable',
+          }
         })
 
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: 'Grok Imagine generation failed',
-          details: grokError instanceof Error ? grokError.message : 'Unknown error'
+          details: grokError instanceof Error ? grokError.message : 'Unknown error',
+          model: selectedModel,
+          providerModel,
+          generationId,
         })
       }
     }
