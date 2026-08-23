@@ -45,7 +45,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error, isChunkError: isChunkLoadError(error) }
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     // Auto-recover from DOM errors caused by browser extensions (e.g. Google Translate)
     if (isDOMExtensionError(error) && this.state.retryCount < 3) {
       console.warn('ErrorBoundary: DOM extension error detected, auto-recovering…', error.message)
