@@ -14,26 +14,68 @@ export type McpBrandSummary = {
   type?: string | null
 }
 
+export type McpBrandKitContext = {
+  id: string
+  name: string
+  primaryColor?: string | null
+  secondaryColor?: string | null
+  accentColor?: string | null
+  logoUrl?: string | null
+  tagline?: string | null
+  brandVoice?: string | null
+  toneKeywords?: string[]
+  targetAudience?: string | null
+  visualStyleNotes?: string | null
+  fontPrimary?: string | null
+  referenceImages?: string[]
+}
+
+export type McpGuideIntakeSummary = {
+  id: string
+  sourceUrl: string
+  status: string
+  errorMessage?: string | null
+  completedAt?: string | null
+  warnings?: string[]
+  analysisFacts?: Record<string, unknown> | null
+}
+
 export type McpBrandContext = {
-  brand: McpBrandSummary
+  brand: McpBrandSummary & {
+    location?: string | null
+    salesChannels?: string[] | null
+    doesShipping?: boolean | null
+    shippingMethod?: string | null
+    icpDescription?: string | null
+  }
   offers: Array<{ id: string; name: string; type?: string | null }>
-  brandKit?: {
-    id: string
-    name: string
-    primaryColor?: string | null
-    secondaryColor?: string | null
-  } | null
+  brandKit?: McpBrandKitContext | null
+  latestGuideIntake?: McpGuideIntakeSummary | null
 }
 
 export type McpDbClient = {
   listBusinessesForUser: (userId: string) => Promise<McpBrandSummary[]>
-  getBusinessForUser: (userId: string, brandId: string) => Promise<(McpBrandSummary & { userId: string }) | null>
+  getBusinessForUser: (
+    userId: string,
+    brandId: string
+  ) => Promise<(McpBrandSummary & {
+    userId: string
+    location?: string | null
+    salesChannels?: string[] | null
+    doesShipping?: boolean | null
+    shippingMethod?: string | null
+    icpDescription?: string | null
+  }) | null>
   /** Always scoped by authenticated userId + brandId (defense in depth). */
   listOffersForBrand: (
     userId: string,
     brandId: string
   ) => Promise<Array<{ id: string; name: string; type?: string | null }>>
-  getBrandKitForBrand: (userId: string, brandId: string) => Promise<McpBrandContext['brandKit']>
+  getBrandKitForBrand: (userId: string, brandId: string) => Promise<McpBrandKitContext | null>
+  getLatestGuideIntakeForBrand?: (
+    userId: string,
+    brandId: string
+  ) => Promise<McpGuideIntakeSummary | null>
 }
 
 /** list_brands — personal brands only. */
@@ -58,15 +100,28 @@ export async function mcpGetBrandContext(
   if (!brand) throw new Error('Brand not found')
   if (brand.userId !== user.id) throw new Error('Access denied')
 
-  const [offers, brandKit] = await Promise.all([
+  const [offers, brandKit, latestGuideIntake] = await Promise.all([
     db.listOffersForBrand(user.id, brandId),
     db.getBrandKitForBrand(user.id, brandId),
+    db.getLatestGuideIntakeForBrand
+      ? db.getLatestGuideIntakeForBrand(user.id, brandId)
+      : Promise.resolve(null),
   ])
 
   return {
-    brand: { id: brand.id, name: brand.name, type: brand.type ?? null },
+    brand: {
+      id: brand.id,
+      name: brand.name,
+      type: brand.type ?? null,
+      location: brand.location ?? null,
+      salesChannels: brand.salesChannels ?? null,
+      doesShipping: brand.doesShipping ?? null,
+      shippingMethod: brand.shippingMethod ?? null,
+      icpDescription: brand.icpDescription ?? null,
+    },
     offers,
     brandKit: brandKit || null,
+    latestGuideIntake: latestGuideIntake || null,
   }
 }
 

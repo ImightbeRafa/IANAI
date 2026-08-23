@@ -51,6 +51,14 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 - Consent UI: `src/pages/OAuthConsent.tsx`
 
 ## Next
-1. Enable Supabase OAuth Server (dashboard step above)
-2. GUIDE analysis worker for `pending_analysis` rows + file ingest
+1. Confirm Production `CRON_SECRET` + `GEMINI_API_KEY` (required for worker)
+2. File ingest (PDF/images) for GUIDE
 3. EXECUTE tools behind Grok approval popup
+
+## GUIDE URL analysis worker
+- Save via `workspace_save_url_context` → `mcp_url_intakes.status=pending_analysis`
+- Cron `* * * * *` → `GET/POST /api/mcp-guide-analysis` (Bearer `CRON_SECRET`)
+- Worker claims one row, runs shared site analyzer, fill-only merges into `businesses` + `brand_kits`
+- `get_brand_context` returns richer kit + `latestGuideIntake`
+- Deep link: `/chat?brand=<id>&intake=<id>`
+- No Advance credits

@@ -15,7 +15,7 @@ import { saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.4.0',
+  version: '0.5.0',
 }
 
 export type McpJsonRpcRequest = {

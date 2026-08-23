@@ -66,5 +66,7 @@ describe('mcp url intake', () => {
       sourceUrl: 'https://example.com/x',
     })
     expect(row.deepLink).toContain('intake=u1')
+    expect(row.deepLink).toContain('brand=b1')
+    expect(row.deepLink).not.toContain('brandId=')
   })
 })

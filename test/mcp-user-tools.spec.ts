@@ -39,6 +39,7 @@ describe('mcp user read tools', () => {
     expect(ctx.brand.name).toBe('Pura Sonrisa')
     expect(ctx.offers[0]?.id).toBe('p1')
     expect(ctx.brandKit?.primaryColor).toBe('#111111')
+    expect(ctx.latestGuideIntake).toBeNull()
     await expect(mcpGetBrandContext(db, { id: 'user-b' }, 'b1')).rejects.toThrow(/not found|denied/i)
   })
 

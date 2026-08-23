@@ -50,6 +50,6 @@ export async function saveMcpUrlContext(options: {
     businessId: options.brandId,
     sourceUrl: validated.url,
     status: 'pending_analysis',
-    deepLink: `${origin}/chat?brandId=${encodeURIComponent(options.brandId)}&intake=${encodeURIComponent(inserted.id)}`,
+    deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&intake=${encodeURIComponent(inserted.id)}`,
   }
 }
