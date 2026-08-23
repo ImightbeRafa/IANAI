@@ -27,7 +27,9 @@ import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicUrl } from './lib/url-safety.js'
 import {
-  GROK_IMAGE_COST_USD,
+  estimateGrokImageCostUsd,
+  GROK_IMAGE_DEFAULT_QUALITY,
+  GROK_IMAGE_DEFAULT_RESOLUTION,
   GROK_IMAGE_EDITS_URL,
   GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
@@ -2041,11 +2043,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           imageParams.height || 1080
         )
 
-        // Generate image using SDK (format from official docs)
-        // nano-banana-pro supports imageSize: '1K' | '2K' | '4K' (default 1K)
+        // nano-banana-pro: 4K for premium social posts; 2K only when client opts down.
         const imageConfig: Record<string, string> = { aspectRatio: geminiAspectRatio }
         if (selectedModel === 'nano-banana-pro') {
-          imageConfig.imageSize = '2K'
+          const requestedSize = typeof imageParams.imageSize === 'string'
+            ? imageParams.imageSize.toUpperCase()
+            : ''
+          imageConfig.imageSize = requestedSize === '1K' || requestedSize === '2K' || requestedSize === '4K'
+            ? requestedSize
+            : '4K'
         }
 
         let response: Awaited<ReturnType<typeof ai.models.generateContent>>
@@ -2213,8 +2219,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           n: 1,
           response_format: 'b64_json',
           aspect_ratio: grokAspectRatio,
-          resolution: '1k',
-          quality: 'medium',
+          resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
+          quality: GROK_IMAGE_DEFAULT_QUALITY,
         }
 
         let endpoint = GROK_IMAGE_GENERATIONS_URL
@@ -2255,6 +2261,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
               action: isEdit ? 'edit' : 'generate',
               hasInputImage: isEdit,
               referenceCount: referenceUrls.length,
+              resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
+              quality: GROK_IMAGE_DEFAULT_QUALITY,
               costSource: 'unavailable',
             }
           })
@@ -2279,8 +2287,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         await incrementUsage(user.id, 'image')
         await deductBonusImage(user.id)
 
-        // Base documented rate; edits may bill extra per input — surface referenceCount for admin.
-        const costOverrideUsd = GROK_IMAGE_COST_USD + (isEdit ? 0.01 * referenceUrls.length : 0)
+        const costOverrideUsd = estimateGrokImageCostUsd({
+          outputImages: 1,
+          referenceCount: isEdit ? referenceUrls.length : 0,
+        })
 
         await logApiUsage({
           userId: user.id,
@@ -2298,8 +2308,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             width: imageParams.width,
             height: imageParams.height,
             aspectRatio: grokAspectRatio,
-            resolution: '1k',
-            quality: 'medium',
+            resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
+            quality: GROK_IMAGE_DEFAULT_QUALITY,
             referenceCount: referenceUrls.length,
             brandKitId: brandKit?.id,
             brandKitName: brandKit?.name,
@@ -2331,6 +2341,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             providerModel,
             hasInputImage: referenceUrls.length > 0,
             referenceCount: referenceUrls.length,
+            resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
+            quality: GROK_IMAGE_DEFAULT_QUALITY,
             costSource: 'unavailable',
           }
         })

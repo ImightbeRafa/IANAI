@@ -9,7 +9,7 @@ import {
   type AdminUsageLogRow,
 } from './lib/admin-usage.js'
 
-const LOG_SELECT = 'id, user_id, user_email, feature, model, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at'
+const LOG_SELECT = 'id, user_id, user_email, feature, model, generation_id, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata'
 
 function queryString(value: string | string[] | undefined): string {
   return typeof value === 'string' ? value : ''
@@ -69,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (logsOnly) {
       let query = supabase
         .from('api_usage_logs')
-        .select('id, user_email, feature, model, total_tokens, estimated_cost_usd, success, created_at')
+        .select('id, user_email, feature, model, generation_id, total_tokens, estimated_cost_usd, success, created_at, metadata')
         .gte('created_at', startIso)
         .lte('created_at', endIso)
         .order('created_at', { ascending: false })
@@ -89,10 +89,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           user_email: row.user_email || '',
           feature: row.feature,
           model: row.model,
+          generation_id: row.generation_id || null,
           total_tokens: Number(row.total_tokens || 0),
           estimated_cost_usd: Number(row.estimated_cost_usd || 0),
           success: row.success !== false,
           created_at: row.created_at,
+          metadata: row.metadata || {},
         })),
         hasMore: logs.length >= limit,
       })

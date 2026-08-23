@@ -65,6 +65,7 @@ interface RecentLog {
   estimated_cost_usd: number
   success: boolean
   created_at: string
+  metadata?: Record<string, unknown> | null
 }
 
 interface ImageModelPerformance {
@@ -200,12 +201,26 @@ const MODEL_PRICING: Record<string, string> = {
   'whisper-1': '~$0.006/min',
   'gemini': '$0.15/1M in, $0.60/1M out',
   'nano-banana': '~$0.02/image',
-  'nano-banana-pro': '$2/1M in, $120/1M image out',
+  'nano-banana-pro': '~$0.134 (1K/2K) · ~$0.24 (4K) + tokens',
   'gpt-image-2': '$5/1M text in, $8/1M image in, $30/1M image out',
-  'grok-imagine': '~$0.04/image (2.0 base)',
+  'grok-imagine': '$0.04/output · edits +$0.04/input',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
   'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
+}
+
+function formatImageLogDetail(log: RecentLog): string {
+  const meta = log.metadata || {}
+  const parts: string[] = []
+  if (typeof meta.providerModel === 'string' && meta.providerModel) parts.push(meta.providerModel)
+  if (typeof meta.imageSize === 'string' && meta.imageSize) parts.push(meta.imageSize)
+  if (typeof meta.resolution === 'string' && meta.resolution) parts.push(String(meta.resolution).toUpperCase())
+  if (typeof meta.quality === 'string' && meta.quality) parts.push(meta.quality)
+  if (typeof meta.costSource === 'string' && meta.costSource) parts.push(meta.costSource)
+  if (typeof meta.referenceCount === 'number' && meta.referenceCount > 0) {
+    parts.push(`${meta.referenceCount} ref${meta.referenceCount === 1 ? '' : 's'}`)
+  }
+  return parts.join(' · ')
 }
 
 function ModelChip({ model }: { model: string }) {
@@ -1626,7 +1641,14 @@ export default function AdminDashboard({
                           {t[log.feature as keyof typeof t] || log.feature}
                         </td>
                         <td className="px-3 sm:px-6 py-3">
-                          <ModelChip model={log.model} />
+                          <div className="flex flex-col gap-0.5">
+                            <ModelChip model={log.model} />
+                            {formatImageLogDetail(log) ? (
+                              <span className="text-[10px] text-dark-400 leading-tight" title={formatImageLogDetail(log)}>
+                                {formatImageLogDetail(log)}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right text-dark-700">{log.total_tokens?.toLocaleString() || '-'}</td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right font-medium text-dark-900" title={`$${Number(log.estimated_cost_usd).toFixed(6)}`}>
