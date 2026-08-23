@@ -26,11 +26,12 @@ import {
   mcpExecuteScriptGenerate,
 } from './execute-tools.js'
 import type { McpApprovalStore } from './approval.js'
+import type { McpArtifactStore } from './artifact-store.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.5.0',
+  version: '0.6.0',
 }
 
 export type McpJsonRpcRequest = {
@@ -99,6 +100,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           scene: { type: 'string' },
           aspectRatio: { type: 'string' },
+          sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
         },
         required: ['brandId'],
@@ -112,6 +114,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           goal: { type: 'string' },
           language: { type: 'string', enum: ['es', 'en'] },
+          sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
         },
         required: ['brandId'],
@@ -178,6 +181,7 @@ export async function handleMcpJsonRpc(options: {
   urlIntakeStore?: McpUrlIntakeStore | null
   workspaceStore?: McpWorkspaceStore | null
   approvalStore?: McpApprovalStore | null
+  artifactStore?: McpArtifactStore | null
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
   const { body, user, db } = options
@@ -222,6 +226,7 @@ export async function handleMcpJsonRpc(options: {
           urlIntakeStore: options.urlIntakeStore,
           workspaceStore: options.workspaceStore,
           approvalStore: options.approvalStore,
+          artifactStore: options.artifactStore,
           appOrigin: options.appOrigin,
         })
         return ok(body.id, {
@@ -249,6 +254,7 @@ async function dispatchEnabledTool(options: {
   urlIntakeStore?: McpUrlIntakeStore | null
   workspaceStore?: McpWorkspaceStore | null
   approvalStore?: McpApprovalStore | null
+  artifactStore?: McpArtifactStore | null
   appOrigin?: string
 }): Promise<unknown> {
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
@@ -325,9 +331,11 @@ async function dispatchEnabledTool(options: {
       })
     case 'execute_script_generate': {
       if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
       return mcpExecuteScriptGenerate({
         db: options.db,
         approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,
@@ -335,9 +343,11 @@ async function dispatchEnabledTool(options: {
     }
     case 'execute_image_generate': {
       if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
       return mcpExecuteImageGenerate({
         db: options.db,
         approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,

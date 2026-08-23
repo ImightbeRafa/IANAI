@@ -1,5 +1,5 @@
 /**
- * MCP EXECUTE — script + image generation behind web approval.
+ * MCP EXECUTE — script + image generation behind web approval, auto-saved to library.
  */
 
 import { checkUsageLimit, incrementUsage, deductBonusImage } from '../auth.js'
@@ -10,10 +10,13 @@ import { runGrokImageGenerate } from '../grok-image-generate.js'
 import {
   consumeMcpApprovalRequest,
   issueMcpApprovalRequest,
+  replayMcpApprovalResult,
+  storeMcpApprovalResult,
   type McpApprovalStore,
 } from './approval.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
+import type { McpArtifactStore } from './artifact-store.js'
 import type { ProductType, SalesChannel, ScriptSettings } from '../guiones/types.js'
 
 function xaiKey(): string {
@@ -22,9 +25,25 @@ function xaiKey(): string {
   return key
 }
 
+function resolveOfferId(
+  ctx: Awaited<ReturnType<typeof mcpGetBrandContext>>,
+  offerId?: string
+): string {
+  if (offerId) {
+    const found = ctx.offers.find((o) => o.id === offerId)
+    if (!found) throw new Error('Offer not found on this brand')
+    return found.id
+  }
+  if (!ctx.offers[0]) {
+    throw new Error('Brand has no offers — create an offer in Advance before EXECUTE')
+  }
+  return ctx.offers[0].id
+}
+
 export async function mcpExecuteScriptGenerate(options: {
   db: McpDbClient
   approvalStore: McpApprovalStore
+  artifactStore: McpArtifactStore
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
@@ -35,19 +54,26 @@ export async function mcpExecuteScriptGenerate(options: {
     ? options.args.approvalRequestId
     : ''
   const language = options.args.language === 'en' ? 'en' : 'es'
+  const sessionIdArg = typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
     language,
     goal: typeof options.args.goal === 'string' ? options.args.goal : undefined,
+    sessionId: sessionIdArg,
   }
+
+  // Validate brand/offer before issuing or consuming approval
+  const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
+  const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
+  const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
     const quote = 1
     const req = await issueMcpApprovalRequest(options.approvalStore, {
       userId: options.user.id,
       toolName: 'execute_script_generate',
-      input: boundInput,
+      input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
     })
@@ -57,7 +83,20 @@ export async function mcpExecuteScriptGenerate(options: {
       quotedCreditCost: quote,
       creditUnit: 'script',
       message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput,
+      boundInput: boundWithOffer,
+    }
+  }
+
+  const replay = await replayMcpApprovalResult(options.approvalStore, {
+    approvalRequestId,
+    userId: options.user.id,
+    toolName: 'execute_script_generate',
+    input: boundWithOffer,
+  })
+  if (replay.ok) {
+    return {
+      ...(replay.result as Record<string, unknown>),
+      replayed: true,
     }
   }
 
@@ -65,17 +104,15 @@ export async function mcpExecuteScriptGenerate(options: {
     approvalRequestId,
     userId: options.user.id,
     toolName: 'execute_script_generate',
-    input: boundInput,
+    input: boundWithOffer,
   })
   if (!consumed.ok) throw new Error(consumed.reason)
 
   const limit = await checkUsageLimit(options.user.id, 'script')
   if (!limit.allowed) throw new Error('Script credit limit reached')
 
-  const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
-  const offer = boundInput.offerId
-    ? ctx.offers.find((o) => o.id === boundInput.offerId)
-    : ctx.offers[0]
+  const ctx = ctxPreview
+  const offer = ctx.offers.find((o) => o.id === offerId)!
 
   const pipeline = await runGuionesStructuredPipeline({
     apiKey: xaiKey(),
@@ -86,16 +123,11 @@ export async function mcpExecuteScriptGenerate(options: {
       sales_channels: (ctx.brand.salesChannels || undefined) as SalesChannel[] | undefined,
       icp_description: ctx.brand.icpDescription || ctx.brandKit?.targetAudience || undefined,
     },
-    productContext: offer
-      ? {
-          name: offer.name,
-          type: (offer.type as ProductType | undefined) || undefined,
-          product_description: ctx.brandKit?.tagline || undefined,
-        }
-      : {
-          name: ctx.brand.name,
-          type: 'product',
-        },
+    productContext: {
+      name: offer.name,
+      type: (offer.type as ProductType | undefined) || undefined,
+      product_description: ctx.brandKit?.tagline || undefined,
+    },
     scriptSettings: {
       framework: 'venta_directa',
       variations: 1,
@@ -104,34 +136,60 @@ export async function mcpExecuteScriptGenerate(options: {
   })
 
   const text = pipeline.content || JSON.stringify(pipeline.scripts || [], null, 2)
+  const { sessionId } = await options.artifactStore.ensureExecuteSession({
+    userId: options.user.id,
+    brandId,
+    offerId,
+    sessionId: sessionIdArg,
+    title: `MCP script — ${offer.name}`,
+  })
+  const saved = await options.artifactStore.saveScriptArtifact({
+    userId: options.user.id,
+    brandId,
+    offerId,
+    sessionId,
+    title: `${offer.name} script`,
+    content: text,
+    approvalRequestId,
+  })
+
   await logApiUsage({
     userId: options.user.id,
     userEmail: options.user.email || undefined,
     feature: 'script',
     model: GROK_TEXT_MODEL,
-    inputTokens: estimateTokens(text) ,
+    inputTokens: estimateTokens(text),
     outputTokens: estimateTokens(text),
     success: true,
-    metadata: { action: 'mcp_execute_script_generate', brandId, approvalRequestId },
+    metadata: { action: 'mcp_execute_script_generate', brandId, approvalRequestId, sessionId },
   })
   await incrementUsage(options.user.id, 'script')
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  return {
+  const result = {
     status: 'completed',
     consumesAdvanceCredits: true,
     charged: 1,
     brandId,
-    offerId: offer?.id || null,
+    offerId,
+    sessionId,
+    messageId: saved.messageId,
+    scriptId: saved.scriptId,
     scripts: pipeline.scripts || null,
     content: text,
-    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}`,
+    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
   }
+  await storeMcpApprovalResult(options.approvalStore, {
+    approvalRequestId,
+    result,
+  })
+  return result
 }
 
 export async function mcpExecuteImageGenerate(options: {
   db: McpDbClient
   approvalStore: McpApprovalStore
+  artifactStore: McpArtifactStore
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
@@ -141,19 +199,25 @@ export async function mcpExecuteImageGenerate(options: {
   const approvalRequestId = typeof options.args.approvalRequestId === 'string'
     ? options.args.approvalRequestId
     : ''
+  const sessionIdArg = typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
     scene: typeof options.args.scene === 'string' ? options.args.scene : undefined,
     aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : '9:16',
+    sessionId: sessionIdArg,
   }
+
+  const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
+  const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
+  const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
     const quote = 1
     const req = await issueMcpApprovalRequest(options.approvalStore, {
       userId: options.user.id,
       toolName: 'execute_image_generate',
-      input: boundInput,
+      input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
     })
@@ -163,7 +227,20 @@ export async function mcpExecuteImageGenerate(options: {
       quotedCreditCost: quote,
       creditUnit: 'image',
       message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput,
+      boundInput: boundWithOffer,
+    }
+  }
+
+  const replay = await replayMcpApprovalResult(options.approvalStore, {
+    approvalRequestId,
+    userId: options.user.id,
+    toolName: 'execute_image_generate',
+    input: boundWithOffer,
+  })
+  if (replay.ok) {
+    return {
+      ...(replay.result as Record<string, unknown>),
+      replayed: true,
     }
   }
 
@@ -171,7 +248,7 @@ export async function mcpExecuteImageGenerate(options: {
     approvalRequestId,
     userId: options.user.id,
     toolName: 'execute_image_generate',
-    input: boundInput,
+    input: boundWithOffer,
   })
   if (!consumed.ok) throw new Error(consumed.reason)
 
@@ -180,9 +257,9 @@ export async function mcpExecuteImageGenerate(options: {
 
   const guide = await mcpGuideImage(options.db, options.user, {
     brandId,
-    offerId: boundInput.offerId,
-    scene: boundInput.scene,
-    aspectRatio: boundInput.aspectRatio,
+    offerId,
+    scene: boundWithOffer.scene,
+    aspectRatio: boundWithOffer.aspectRatio,
   })
   const prompt = String(guide.prompt || '')
   const refs = Array.isArray(guide.referenceUrls)
@@ -192,8 +269,31 @@ export async function mcpExecuteImageGenerate(options: {
   const generated = await runGrokImageGenerate({
     apiKey: xaiKey(),
     prompt,
-    aspectRatio: boundInput.aspectRatio,
+    aspectRatio: boundWithOffer.aspectRatio,
     referenceImageUrls: refs,
+  })
+
+  const { sessionId } = await options.artifactStore.ensureExecuteSession({
+    userId: options.user.id,
+    brandId,
+    offerId,
+    sessionId: sessionIdArg,
+    title: `MCP image — ${ctxPreview.offers.find((o) => o.id === offerId)?.name || offerId}`,
+  })
+  const saved = await options.artifactStore.saveImageArtifact({
+    userId: options.user.id,
+    brandId,
+    offerId,
+    sessionId,
+    imageDataUrl: generated.imageDataUrl,
+    label: 'MCP generate',
+    approvalRequestId,
+    metadata: {
+      resolution: generated.resolution,
+      quality: generated.quality,
+      providerModel: generated.providerModel,
+      aspectRatio: generated.aspectRatio,
+    },
   })
 
   await logApiUsage({
@@ -207,6 +307,7 @@ export async function mcpExecuteImageGenerate(options: {
       action: 'mcp_execute_image_generate',
       brandId,
       approvalRequestId,
+      sessionId,
       resolution: generated.resolution,
       quality: generated.quality,
     },
@@ -215,20 +316,28 @@ export async function mcpExecuteImageGenerate(options: {
   await deductBonusImage(options.user.id)
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  return {
+  const result = {
     status: 'completed',
     consumesAdvanceCredits: true,
     charged: 1,
     brandId,
+    offerId,
+    sessionId,
+    messageId: saved.messageId,
+    productImageId: saved.productImageId,
+    imageUrl: saved.imageUrl,
     providerModel: generated.providerModel,
     aspectRatio: generated.aspectRatio,
     resolution: generated.resolution,
     quality: generated.quality,
     estimatedCostUsd: generated.estimatedCostUsd,
-    // Data URL so Grok can display; also point user to chat for library persistence later
-    imageDataUrl: generated.imageDataUrl,
     prompt,
-    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}`,
-    note: 'Image generated on Advance credits. Library auto-save via workspace_save_artifact comes next if needed.',
+    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
+    note: 'Image saved to Advance library at max Grok quality (2k/medium). Open deepLink to view in chat.',
   }
+  await storeMcpApprovalResult(options.approvalStore, {
+    approvalRequestId,
+    result,
+  })
+  return result
 }

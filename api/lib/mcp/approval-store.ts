@@ -20,6 +20,8 @@ function rowToRecord(row: Record<string, unknown>): McpApprovalRecord {
     consumedAtMs: row.consumed_at ? new Date(String(row.consumed_at)).getTime() : null,
     approvedAtMs: row.approved_at ? new Date(String(row.approved_at)).getTime() : null,
     deniedAtMs: row.denied_at ? new Date(String(row.denied_at)).getTime() : null,
+    resultJson: row.result_json ?? null,
+    resultStoredAtMs: row.result_stored_at ? new Date(String(row.result_stored_at)).getTime() : null,
   }
 }
 
@@ -98,6 +100,20 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
         })
         .eq('id', id)
         .in('status', ['pending', 'approved'])
+        .select('*')
+        .maybeSingle()
+      if (error) throw error
+      return data ? rowToRecord(data as Record<string, unknown>) : null
+    },
+    async storeResult(id, result, atMs) {
+      const { data, error } = await db
+        .from('mcp_approval_tokens')
+        .update({
+          result_json: result,
+          result_stored_at: new Date(atMs).toISOString(),
+        })
+        .eq('id', id)
+        .eq('status', 'consumed')
         .select('*')
         .maybeSingle()
       if (error) throw error

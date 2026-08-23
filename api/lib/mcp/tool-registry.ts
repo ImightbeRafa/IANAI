@@ -26,7 +26,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.5.0'
+export const MCP_REGISTRY_VERSION = '0.6.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -45,7 +45,7 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   },
   execute_studio: {
     title: 'Execute Studio',
-    summary: 'Advance-run scripts/images/carousel (credits + Grok chat approval popup).',
+    summary: 'Advance-run scripts/images (credits + Advance web approval page).',
     defaultEnabled: true,
   },
   library_sessions: {

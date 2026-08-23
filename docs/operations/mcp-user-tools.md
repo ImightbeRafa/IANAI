@@ -6,10 +6,10 @@ Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`
 | Topic | Decision |
 |---|---|
 | Modes | GUIDE = free (Grok’s own usage); EXECUTE = Advance credits |
-| Approval | Nice Grok chat popup; **TTL = 1 hour**; single-use; input-bound |
-| Intake | HTTPS URL + up to **5** PDF/image files → build brand folder |
+| Approval | Advance web page `/mcp/approve/:id`; **TTL = 1 hour**; single-use; input-bound; result replay after consume |
+| Intake | HTTPS URL + up to **5** PDF/image files → Chat upload dialog via `?intake=files\|asset` |
 | External Grok images | Not imported; session `generated_outside` only |
-| Advance images | Save in session/library at max API quality (`2k`/`medium`) |
+| Advance images | Auto-saved to session/library at max API quality (`2k`/`medium`) |
 | Brand delete | Delete everything under brand; **keep brand kits** (detach; delete kits separately) |
 | Archive | Supported for folders |
 | Social post | **No** |
@@ -35,7 +35,7 @@ Enabled tools now:
 
 **Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`
 
-**EXECUTE (credits + web approval):** `execute_script_generate`, `execute_image_generate` — first call returns `/mcp/approve/:id` deep link; user approves in Advance; Grok retries with `approvalRequestId`.
+**EXECUTE (credits + web approval):** `execute_script_generate`, `execute_image_generate` — first call returns `/mcp/approve/:id`; after approve + retry, Advance generates, charges credits once, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging.
 
 ## Operator step (required for Grok OAuth)
 In **Supabase Dashboard → Authentication → OAuth Server** (AIIAN `lstzfxsdmggkoaxfawny`):
@@ -57,7 +57,9 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 - Approval: `api/lib/mcp/approval.ts`, `api/lib/mcp/approval-store.ts`, `api/mcp-approve.ts`, `src/pages/McpApprove.tsx` + migrations `070`, `073`
 - Workspace notes: `api/lib/mcp/workspace-ops.ts` + migration `074`
 - GUIDE packs: `api/lib/mcp/guide-packs.ts`
-- EXECUTE: `api/lib/mcp/execute-tools.ts`, `api/lib/grok-image-generate.ts`
+- EXECUTE: `api/lib/mcp/execute-tools.ts`, `api/lib/grok-image-generate.ts`, `api/lib/mcp/artifact-store.ts`
+- Chat intake UX: `src/features/chat-shell/ChatShellMcpIntakeDialog.tsx`, `chatShellMcpIntake.ts`
+- Migration `075_mcp_e2e_intake_autosave.sql` (approval result_json + note updates)
 - URL intake: `api/lib/mcp/url-intake.ts` + migration `071_mcp_url_intakes.sql`
 - Intake validation: `api/lib/mcp/guide-intake.ts`
 - Brand delete contract: `api/lib/mcp/brand-delete.ts` (+ web cascade detaches kits)
@@ -65,8 +67,8 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Next
 1. Confirm Production `CRON_SECRET` + `GEMINI_API_KEY` (required for URL analysis worker)
-2. `workspace_save_artifact` auto-save after EXECUTE (optional)
-3. Carousel / edit / enhance EXECUTE tools (deferred)
+2. Carousel / edit / enhance EXECUTE tools (deferred)
+3. Deletes / archive / admin tools (deferred)
 
 ## GUIDE URL analysis worker
 - Save via `workspace_save_url_context` → `mcp_url_intakes.status=pending_analysis`

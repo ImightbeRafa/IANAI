@@ -4,6 +4,7 @@
 
 import type { McpAuthUser, McpDbClient } from './user-tools.js'
 import { validateMcpGuideIntake } from './guide-intake.js'
+import { randomUUID } from 'node:crypto'
 
 export type McpWorkspaceStore = {
   insertProvenanceNote: (row: {
@@ -18,6 +19,7 @@ export type McpWorkspaceStore = {
     businessId: string
     fileName: string
     mimeType: string
+    requestId?: string
   }) => Promise<{ id: string }>
 }
 
@@ -73,6 +75,7 @@ export async function mcpWorkspaceIngestFile(options: {
   if (!brand) throw new Error('Brand not found')
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
+  const requestId = randomUUID()
   const placeholders = []
   for (const file of validated.files) {
     const row = await options.store.insertFileIntakePlaceholder({
@@ -80,6 +83,7 @@ export async function mcpWorkspaceIngestFile(options: {
       businessId: options.brandId,
       fileName: file.name || 'upload',
       mimeType: file.mimeType,
+      requestId,
     })
     placeholders.push(row)
   }
@@ -92,7 +96,8 @@ export async function mcpWorkspaceIngestFile(options: {
     brandId: options.brandId,
     acceptedDescriptors: validated.files,
     intakeIds: placeholders.map((p) => p.id),
-    uploadDeepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&intake=files`,
+    requestId,
+    uploadDeepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&intake=files&request=${encodeURIComponent(requestId)}`,
   }
 }
 

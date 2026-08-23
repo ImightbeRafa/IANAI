@@ -76,6 +76,11 @@ export type McpDbClient = {
     userId: string,
     brandId: string
   ) => Promise<McpGuideIntakeSummary | null>
+  listOfferReferenceImages?: (
+    userId: string,
+    brandId: string,
+    offerId: string
+  ) => Promise<string[]>
 }
 
 /** list_brands — personal brands only. */

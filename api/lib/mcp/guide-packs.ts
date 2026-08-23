@@ -110,10 +110,14 @@ export async function mcpGuideImage(
     : ctx.offers[0]
   const aspectRatio = args.aspectRatio || '9:16'
   const scene = (args.scene || 'lifestyle product hero, natural light, premium but real').trim()
+  const offerRefs = offer && db.listOfferReferenceImages
+    ? await db.listOfferReferenceImages(user.id, args.brandId, offer.id)
+    : []
   const refs = [
+    ...offerRefs,
     ctx.brandKit?.logoUrl,
     ...(ctx.brandKit?.referenceImages || []),
-  ].filter(Boolean).slice(0, 3)
+  ].filter(Boolean).slice(0, 5)
 
   const prompt = [
     `Photoreal lifestyle ad still for ${ctx.brand.name}`,

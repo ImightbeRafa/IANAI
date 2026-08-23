@@ -133,6 +133,31 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         analysisFacts: analysis?.facts || null,
       }
     },
+
+    async listOfferReferenceImages(userId, brandId, offerId) {
+      if (!userId || !brandId || !offerId) return []
+      const { data: product, error: productErr } = await db
+        .from('products')
+        .select('id')
+        .eq('id', offerId)
+        .eq('business_id', brandId)
+        .eq('owner_id', userId)
+        .maybeSingle()
+      if (productErr) throw productErr
+      if (!product) return []
+      const { data, error } = await db
+        .from('product_images')
+        .select('image_url, kind')
+        .eq('product_id', offerId)
+        .eq('user_id', userId)
+        .in('kind', ['product', 'context'])
+        .order('created_at', { ascending: false })
+        .limit(5)
+      if (error) throw error
+      return (data || [])
+        .map((row) => row.image_url as string)
+        .filter(Boolean)
+    },
   }
 }
 
@@ -201,7 +226,11 @@ export function createMcpWorkspaceStore(): McpWorkspaceStore | null {
           business_id: row.businessId,
           kind: 'file_intake_placeholder',
           note: row.fileName,
-          metadata: { mimeType: row.mimeType, status: 'upload_required' },
+          metadata: {
+            mimeType: row.mimeType,
+            status: 'upload_required',
+            ...(row.requestId ? { requestId: row.requestId } : {}),
+          },
         })
         .select('id')
         .single()

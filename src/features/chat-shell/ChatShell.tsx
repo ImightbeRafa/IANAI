@@ -28,6 +28,16 @@ import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import type { ProductImage } from '../../services/database'
 import { useChatShellRollout } from './ChatShellRolloutContext'
 import { useClassicSessionLibrary } from './useClassicSessionLibrary'
+import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
+import {
+  captureMcpIntakeFromUrl,
+  clearStoredMcpIntake,
+  readStoredMcpIntake,
+  type ChatShellMcpIntakeIntent,
+} from './chatShellMcpIntake'
+import { supabase } from '../../lib/supabase'
+import { createBrandChatSession, replaceSessionOffers } from '../../services/database'
+import { uploadShellOfferImage } from './chatShellImageApi'
 
 interface ChatShellProps {
   theme: ChatShellTheme
@@ -67,6 +77,11 @@ export default function ChatShell({
   const [aiMemoryEnabled] = useState(() => readAiMemoryEnabled(
     typeof localStorage !== 'undefined' ? localStorage : null
   ))
+  const [mcpIntake, setMcpIntake] = useState<ChatShellMcpIntakeIntent | null>(() => {
+    if (typeof window === 'undefined') return null
+    return captureMcpIntakeFromUrl() || readStoredMcpIntake()
+  })
+  const [mcpIntakeBusy, setMcpIntakeBusy] = useState(false)
   const workspace = useChatShellWorkspace(userId)
   const patchActiveSession = workspace.patchActiveSession
 
@@ -128,6 +143,108 @@ export default function ChatShell({
     sessionId: workspace.activeSession?.id,
     offerName: brandSetup.facts.offerName || brandSetup.facts.businessName,
   })
+
+  // Open MCP intake only once brand matches (or URL had no brand constraint).
+  const mcpIntakeOpen = Boolean(
+    mcpIntake
+    && !workspace.loadingBusinesses
+    && workspace.activeBrand
+    && (!mcpIntake.brandId || mcpIntake.brandId === workspace.activeBrand.id)
+  )
+
+  const dismissMcpIntake = useCallback(() => {
+    clearStoredMcpIntake()
+    setMcpIntake(null)
+  }, [])
+
+  const markMcpIntakeNotes = useCallback(async (status: 'completed' | 'failed', detail?: string) => {
+    const requestId = mcpIntake?.requestId
+    if (!requestId || !userId) return
+    try {
+      const metadata: Record<string, unknown> = { status, source: 'chat_shell_mcp_intake' }
+      if (detail) metadata.detail = detail
+      await supabase
+        .from('mcp_workspace_notes')
+        .update({
+          metadata,
+          note: status === 'completed' ? 'upload_completed' : 'upload_failed',
+        })
+        .eq('user_id', userId)
+        .filter('metadata->>requestId', 'eq', requestId)
+    } catch {
+      // non-blocking
+    }
+  }, [mcpIntake?.requestId, userId])
+
+  const handleMcpUploadFiles = useCallback(async (files: File[]) => {
+    setMcpIntakeBusy(true)
+    try {
+      for (const file of files) {
+        if ((file.type || '').includes('pdf') || file.name.toLowerCase().endsWith('.pdf')) {
+          await brandSetup.uploadSetupDocument(file)
+        } else {
+          await brandSetup.uploadBrandAsset(file, 'reference')
+        }
+      }
+      await markMcpIntakeNotes('completed')
+      dismissMcpIntake()
+    } catch (err) {
+      await markMcpIntakeNotes('failed', err instanceof Error ? err.message : 'upload failed')
+      throw err
+    } finally {
+      setMcpIntakeBusy(false)
+    }
+  }, [brandSetup, dismissMcpIntake, markMcpIntakeNotes])
+
+  const handleMcpUploadAsset = useCallback(async (
+    file: File,
+    productId: string,
+    kind: 'product' | 'context'
+  ) => {
+    const brand = workspace.activeBrand
+    if (!brand) throw new Error('Brand required')
+    setMcpIntakeBusy(true)
+    try {
+      let sessionId = workspace.activeSession?.id || null
+      if (!sessionId) {
+        const session = await createBrandChatSession(brand.id, userId, 'MCP intake')
+        await replaceSessionOffers(session.id, brand.id, [productId], userId)
+        workspace.patchActiveSession(session)
+        sessionId = session.id
+      } else if (!thread.linkedOfferIds.has(productId)) {
+        await thread.addOffer(productId)
+      }
+
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Failed to read file'))
+        reader.readAsDataURL(file)
+      })
+      await uploadShellOfferImage({
+        userId,
+        sessionId,
+        productId,
+        dataUrl,
+        filename: file.name,
+        kind,
+      })
+      await thread.refreshBrandProducts()
+      await markMcpIntakeNotes('completed')
+      dismissMcpIntake()
+    } catch (err) {
+      await markMcpIntakeNotes('failed', err instanceof Error ? err.message : 'upload failed')
+      throw err
+    } finally {
+      setMcpIntakeBusy(false)
+    }
+  }, [
+    dismissMcpIntake,
+    markMcpIntakeNotes,
+    thread,
+    userId,
+    workspace,
+  ])
 
   brandVisualRef.current = {
     primary_color: brandSetup.facts.primary_color,
@@ -709,6 +826,19 @@ export default function ChatShell({
         onRequestEdit={(reason, attachments) => void requestImageEdit(reason, attachments)}
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
+
+      {mcpIntakeOpen && mcpIntake && workspace.activeBrand && (
+        <ChatShellMcpIntakeDialog
+          intent={mcpIntake}
+          brandName={workspace.activeBrand.name}
+          products={thread.brandProducts}
+          language={language}
+          busy={mcpIntakeBusy || brandSetup.busy || thread.imageBusy}
+          onClose={dismissMcpIntake}
+          onUploadFiles={handleMcpUploadFiles}
+          onUploadAsset={handleMcpUploadAsset}
+        />
+      )}
     </div>
   )
 }
