@@ -8,7 +8,7 @@ export const GROK_IMAGE_GENERATIONS_URL = 'https://api.x.ai/v1/images/generation
 export const GROK_IMAGE_EDITS_URL = 'https://api.x.ai/v1/images/edits'
 /** Documented output price per generated image (xAI list). */
 export const GROK_IMAGE_COST_USD = 0.04
-/** Premium social default: max resolution + medium quality. */
+/** Premium social default: max resolution + highest API quality (xAI: low|medium only). */
 export const GROK_IMAGE_DEFAULT_RESOLUTION = '2k' as const
 export const GROK_IMAGE_DEFAULT_QUALITY = 'medium' as const
 

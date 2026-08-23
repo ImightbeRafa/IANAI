@@ -22,13 +22,11 @@ export type McpToolDefinition = {
   risk: McpToolRisk
   description: string
   enabled: boolean
-  /** EXECUTE tools always true; GUIDE/sync usually false. */
   requiresApproval: boolean
-  /** When true, Advance subscription credits are charged on success. */
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.2.0'
+export const MCP_REGISTRY_VERSION = '0.3.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -47,17 +45,17 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   },
   execute_studio: {
     title: 'Execute Studio',
-    summary: 'Advance-run scripts/images/carousel (credits + approval).',
+    summary: 'Advance-run scripts/images/carousel (credits + Grok chat approval popup).',
     defaultEnabled: false,
   },
   library_sessions: {
     title: 'Library & Sessions',
-    summary: 'Sessions, artifacts, deep links into the web app.',
+    summary: 'Sessions, provenance, URL/file intake into brand folders, deep links.',
     defaultEnabled: false,
   },
   deletes: {
-    title: 'Deletes',
-    summary: 'Permission-checked deletes with confirmation (no generation credits).',
+    title: 'Archive & Deletes',
+    summary: 'Archive brands/folders; permanent delete with clear no-recovery warnings.',
     defaultEnabled: false,
   },
   account_team: {
@@ -137,10 +135,28 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: false,
   },
   {
+    name: 'workspace_ingest_file',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description: 'Accept a user-submitted file via Grok and attach analysis to the brand/offer folder.',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'workspace_note_generated_outside',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description: 'Record session provenance that an image/script was generated outside Advance (no binary import).',
+    enabled: false,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
     name: 'workspace_import_asset',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Import an image/file URL into product or context refs for the offer.',
+    description: 'Import a user-uploaded product/context reference (not external Grok outputs).',
     enabled: false,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -149,18 +165,18 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'workspace_save_artifact',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Persist a Grok-produced script/image pointer into the library with deep link.',
+    description: 'Persist an Advance-generated script/image into the library with deep link.',
     enabled: false,
     requiresApproval: false,
     consumesAdvanceCredits: false,
   },
 
-  // EXECUTE — Advance credits
+  // EXECUTE — Advance credits + Grok chat approval popup
   {
     name: 'execute_script_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate a script via Advance AI (credits).',
+    description: 'Generate a script via Advance AI (credits; Grok chat approval popup).',
     enabled: false,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -169,7 +185,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate an image via Advance (Grok Imagine default, credits).',
+    description: 'Generate an image via Advance at max Grok quality 2k/medium (credits; Grok approval popup).',
     enabled: false,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -178,7 +194,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_edit',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Edit an image via Advance (Grok Imagine, credits).',
+    description: 'Edit an image via Advance (Grok Imagine, credits; Grok approval popup).',
     enabled: false,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -187,7 +203,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_enhance',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Enhance an image via Advance (Grok Imagine, credits).',
+    description: 'Enhance an image via Advance (Grok Imagine, credits; Grok approval popup).',
     enabled: false,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -196,13 +212,22 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_carousel_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate a carousel via Advance (Gemini render, credits).',
+    description: 'Generate a carousel via Advance (Gemini render, credits; Grok approval popup).',
     enabled: false,
     requiresApproval: true,
     consumesAdvanceCredits: true,
   },
 
-  // Deletes
+  // Archive & deletes
+  {
+    name: 'archive_brand',
+    group: 'deletes',
+    risk: 'delete',
+    description: 'Archive a brand/business folder (recoverable; hidden from default lists).',
+    enabled: false,
+    requiresApproval: true,
+    consumesAdvanceCredits: false,
+  },
   {
     name: 'delete_offer',
     group: 'deletes',
@@ -216,7 +241,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_brand',
     group: 'deletes',
     risk: 'delete',
-    description: 'Delete a brand/folder after confirmation (cascade disclosed).',
+    description: 'Permanently delete a brand/folder after typed confirm + impact warning (no recovery).',
     enabled: false,
     requiresApproval: true,
     consumesAdvanceCredits: false,

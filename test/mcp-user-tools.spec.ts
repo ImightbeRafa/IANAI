@@ -44,9 +44,15 @@ describe('mcp user read tools', () => {
 
   it('locks mutation policy: deletes allowed, guide free, execute metered', () => {
     expect(MCP_MUTATION_POLICY.deleteTools).toBe(true)
+    expect(MCP_MUTATION_POLICY.archiveTools).toBe(true)
+    expect(MCP_MUTATION_POLICY.permanentDeleteRequiresTypedConfirm).toBe(true)
+    expect(MCP_MUTATION_POLICY.executeApprovalSurface).toBe('grok_chat_popup')
     expect(MCP_MUTATION_POLICY.generateRequiresApprovalToken).toBe(true)
     expect(MCP_MUTATION_POLICY.guideConsumesAdvanceCredits).toBe(false)
     expect(MCP_MUTATION_POLICY.executeConsumesAdvanceCredits).toBe(true)
+    expect(MCP_MUTATION_POLICY.importExternalGrokImages).toBe(false)
+    expect(MCP_MUTATION_POLICY.sessionProvenanceGeneratedOutside).toBe(true)
+    expect(MCP_MUTATION_POLICY.socialAutoPost).toBe(false)
     expect(MCP_MUTATION_POLICY.syncVisibleInWebApp).toBe(true)
     expect(MCP_MUTATION_POLICY.scope).toBe('signed_in_user_and_team_as_web')
     expect(MCP_READ_TOOL_SCHEMAS.map((tool) => tool.name)).toEqual([

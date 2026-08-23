@@ -3,67 +3,55 @@
 Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`  
 Later: Codex (same registry / auth).
 
-## Locked product model
+## Locked decisions
 
-### Dual mode (critical)
-| Mode | Who generates | Advance credits? | What MCP does |
+### Dual mode
+| Mode | Who generates | Advance credits? | MCP role |
 |---|---|---|---|
-| **GUIDE** | Grok bot (user’s own Grok text / Imagine usage) | **No** | Brand/context, skills, packed prompts, refs, constraints |
-| **EXECUTE** | Advance AI APIs | **Yes** | Same pipelines as the web app (scripts, images, carousel, …) |
+| **GUIDE** | Grok bot (user’s Grok text / Imagine) | **No** | Brand/context, skills, packed prompts |
+| **EXECUTE** | Advance AI APIs | **Yes** | Same pipelines as the web app |
 
-Unfair to charge when Grok does everything. Credits only when Advance runs generation.
+### Intake via Grok
+User can submit **URLs and files** in Grok chat. Advance uses them to build/update the **brand business folder** (offer facts, kit, context) so web + MCP stay in sync.
 
-### Workspace sync (autosave across surfaces)
-Anything MCP creates or attaches (brand folder, offer, URL context, product/scene images, sessions, drafts) is written to the **real AIIAN DB** so opening the web app shows the same business → brand → assets → editable context. Not a separate Grok-only silo.
+### Images / provenance
+- **Do not import** images Grok generated outside Advance into the asset library as “ours.”
+- Session records a clear **`generated_outside`** pointer (provenance only).
+- Images **Advance generates** save normally into the session/library and are served at **max Grok Imagine API quality** (`2k` + `medium` — the API’s highest supported pair).
 
-### Other locks
+### Approval (EXECUTE)
+Primary UX: **nice Grok bot chat approval popup** (confirm action + cost before Advance runs).  
+Not an Advance web deep-link as the main path.
+
+### Archive & delete (brands / folders)
+- **Archive** = hide from default lists; recoverable.
+- **Delete** = permanent, **no recovery**; warn clearly (counts of offers/assets, type brand name) before cascade.
+- Same spirit for other deletes: warn first; archive preferred when safe.
+
+### Out of scope (for now)
+- **No** Instagram/Facebook/Meta auto-posting or social scheduling.
+- Billing/plan redesign: later.
+
+## Auth & host
 - Domain: `https://advanceai.studio`
-- Auth: OAuth 2.1 + PKCE (Advance/Supabase browser login; no service-role pasting)
-- Scope: signed-in user + same team/admin rules as the web app
-- Deletes: **included** (permission-checked, confirmed)
-- Team/admin: **included** (server-enforced; natural extension of web)
-- Plans/billing redesign: **later** — ignore for MCP wiring now
-- Image routing in-app: generate default Grok; edit+enhance Grok; carousel Gemini
+- OAuth 2.1 + PKCE (Advance/Supabase browser login)
+- Same team/admin permissions as the web app
 
-## What “publishing” meant (clarification)
-In this product today, “Publish” on the marketing site means **content ready for you to post** (record/design/post yourself). There is **no** built-in Instagram/Facebook/Meta scheduler or auto-post from Advance.
+## Tool registry
+`api/lib/mcp/tool-registry.ts` (`MCP_REGISTRY_VERSION`).
 
-So “publishing tools” are **not** in scope unless you want us to add social posting later.
+Groups: Brand Workspace · Guide Studio · Execute Studio · Library/Sessions · Deletes/Archive · Account & Team.
 
-## Tool surface (versioned registry)
-Code: `api/lib/mcp/tool-registry.ts`
-
-| Group | Modes | Notes |
-|---|---|---|
-| Brand Workspace | read + sync writes | brands, offers, kits |
-| Guide Studio | GUIDE only | prompts/context for Grok’s own generation |
-| Execute Studio | EXECUTE + approval | Advance-run scripts/images/carousel |
-| Library & Sessions | sync | histories, artifacts, deep links |
-| Deletes | confirmed writes | brand/offer/asset/session (no gen credits) |
-| Account & Team | read/admin | usage, members — role-gated |
-
-Flip `enabled` flags per tool/group as we test.
-
-## Approval (EXECUTE only)
-GUIDE needs no credit approval. EXECUTE still needs a confirmed “run this on Advance.”
-
-Hybrid default direction from product:
-- Low-risk workspace sync / saves: can proceed when authenticated
-- EXECUTE generation: confirm before spend (exact UX still open — see questions)
+## Remaining questions (short)
+1. Permanent brand delete: also wipe completed session history, or keep redacted/tombstoned sessions?
+2. Initial URL/file intake limits (e.g. max files, PDF/image/URL only)?
+3. How long should the Grok EXECUTE approval popup stay valid (e.g. 10 min / 1 hour)?
 
 ## Phase status
 | Slice | Status |
 |---|---|
-| Read helpers + AIIAN adapter | Done |
-| Provider routing (Grok edit/enhance) | Done |
-| Dual-mode registry (guide vs execute) | In progress |
-| Workspace sync writers | Not started |
-| `/api/mcp` OAuth host | Not started |
-| EXECUTE generate tools | Blocked on remaining questions |
-
-## Remaining questions
-1. **EXECUTE approval:** confirm in **Grok chat**, **Advance web link**, or **hybrid** (chat for small, link for batches/expensive)? Rough TTL?
-2. **GUIDE analysis:** may GUIDE run free URL/PDF/site analysis into the brand folder, or only read/save what the user already provided?
-3. **Importing Grok outputs:** when Grok Imagine finishes on Grok’s side, how should assets land in Advance — **user**, **file upload**, or **either**?
-4. **Deletes:** permanent (like current web “cannot undo”), or soft-delete/archive?
-5. Confirm: **no social auto-post** for now (only “ready to publish” content in library)?
+| Dual-mode registry + docs | Done |
+| Grok max quality (`2k`/`medium`) | Already API max |
+| OAuth MCP host + GUIDE intake | Next after Q1–3 |
+| EXECUTE + Grok approval popup | After host |
+| Archive/delete brand contracts | After host |
