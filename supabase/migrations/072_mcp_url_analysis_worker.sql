@@ -19,6 +19,7 @@ create unique index if not exists mcp_url_intakes_inflight_uniq
   where status in ('pending_analysis', 'processing');
 
 -- Atomically claim the oldest eligible row for the worker (service_role only).
+-- SECURITY DEFINER so the worker can claim under service_role; still refuses non-service callers.
 create or replace function public.claim_mcp_url_intake(
   p_stale_after_seconds integer default 300
 )
@@ -30,7 +31,8 @@ as $$
 declare
   claimed public.mcp_url_intakes;
 begin
-  if auth.role() is distinct from 'service_role' then
+  -- Hard gate: only the service role (admin client) may claim work.
+  if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'service_role required';
   end if;
 
