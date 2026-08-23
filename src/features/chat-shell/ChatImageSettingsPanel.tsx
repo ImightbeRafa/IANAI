@@ -110,6 +110,22 @@ export default function ChatImageSettingsPanel({
         </label>
       </div>
 
+      <label className="chat-shell__field">
+        <span>{es ? 'Modelo de imagen (elegí en cada generación)' : 'Image model (pick every generation)'}</span>
+        <select
+          value={preferences?.model || 'nano-banana-pro'}
+          onChange={(event) => onChange?.({ model: event.target.value as ShellImagePreferences['model'] })}
+        >
+          <option value="nano-banana-pro">Nano Banana Pro</option>
+          <option value="grok-imagine">Grok Imagine 2.0</option>
+        </select>
+        <small className="chat-shell__field-hint">
+          {es
+            ? 'Durante la comparación, confirmá el modelo antes de generar. No hay cambio automático entre proveedores.'
+            : 'While comparing, confirm the model before generate. No automatic cross-provider switching.'}
+        </small>
+      </label>
+
       <button type="button" className="chat-shell__setup-btn is-primary" disabled={busy || !hasOffer || !preferences?.style} onClick={() => void onGenerate?.()}>
         {busy ? (es ? 'Generando…' : 'Generating…') : (es ? 'Crear en el chat' : 'Create in chat')}
       </button>

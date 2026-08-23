@@ -474,7 +474,7 @@ export function formatImageAssumptions(
       : prefs.model === 'nano-banana'
         ? 'Nano Banana'
         : prefs.model === 'grok-imagine'
-          ? 'Grok Imagine'
+          ? 'Grok Imagine 2.0'
           : prefs.model
 
   const densityLabel =

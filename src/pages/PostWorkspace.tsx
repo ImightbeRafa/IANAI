@@ -3157,7 +3157,7 @@ export default function PostWorkspace() {
             </div>
             )}
 
-            {isAdmin && !isCarouselMode && (
+            {!isCarouselMode && (
               <div>
                 <label className="flex items-center gap-1.5 text-xs font-semibold text-dark-600 tracking-wide uppercase mb-2">
                   <Sparkles className="w-3.5 h-3.5 text-primary-500" />
@@ -3165,8 +3165,11 @@ export default function PostWorkspace() {
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
                   {([
-                    { id: 'nano-banana-pro' as ImageModel, name: 'Nano Banana Pro', sub: language === 'es' ? 'Actual' : 'Current' },
-                    { id: 'gpt-image-2' as ImageModel, name: 'GPT Image 2', sub: 'Admin' },
+                    { id: 'nano-banana-pro' as ImageModel, name: 'Nano Banana Pro', sub: language === 'es' ? 'Comparar' : 'Compare' },
+                    { id: 'grok-imagine' as ImageModel, name: 'Grok Imagine 2.0', sub: language === 'es' ? 'Comparar' : 'Compare' },
+                    ...(isAdmin
+                      ? [{ id: 'gpt-image-2' as ImageModel, name: 'GPT Image 2', sub: 'Admin' }]
+                      : []),
                   ]).map(option => (
                     <button
                       key={option.id}

@@ -2127,6 +2127,15 @@ html.chat-shell-route *::-webkit-scrollbar {
   box-shadow: var(--focus-ring);
 }
 
+.chat-shell__field-hint {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
 .chat-shell__card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
