@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase'
-import { compressBase64ForApi, uploadProductImage, urlToBase64 } from '../../utils/imageCompression'
+import { compressBase64ForApi, uploadGeneratedImageJpeg, uploadProductImage, urlToBase64 } from '../../utils/imageCompression'
 import {
   addMessage,
   createPost,
@@ -141,11 +141,11 @@ export async function persistShellGeneratedImage(options: {
   attachedToExisting: boolean
   workspaceMessageId?: string
 }> {
-  const publicUrl = await uploadProductImage(
+  const publicUrl = await uploadGeneratedImageJpeg(
     options.userId,
     options.productId,
     options.imageSource,
-    `${Date.now()}.webp`
+    `${Date.now()}.jpg`
   )
 
   const workspaceMessageId = options.workspaceMessageId?.trim() || ''

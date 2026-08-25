@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.9.1'
+export const MCP_REGISTRY_VERSION = '0.9.3'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -99,6 +99,16 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'read',
     description: 'List offers for an owned brand.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'list_assets',
+    group: 'brand_workspace',
+    risk: 'read',
+    description:
+      'List product, context, and generated images for an owned brand/offer. Returns stored HTTPS URLs and reusable productImageId values.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -248,7 +258,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'workspace_save_artifact',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Save a GUIDE/external script or image into the Advance library via https URL or already-in-workspace id (no credits; no base64).',
+    description: 'Save a GUIDE/external script or image into the Advance library, including product/context refs from an https URL (no credits; no base64).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -272,8 +282,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'read',
     description:
-      'Poll an async EXECUTE job by jobId (same as approvalRequestId). Returns running|completed|failed. ' +
-      'Use after execute_script_generate / execute_image_generate return status=running so the artifact reaches chat without MCP client timeout.',
+      'Poll any async EXECUTE job by jobId (same as approvalRequestId). Returns running|completed|failed plus a bilingual statusMessage. ' +
+      'Keep polling after an EXECUTE tool returns status=running so the artifact reaches chat without MCP client timeout.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -294,7 +304,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate an image via Advance at max Grok quality 2k/medium (credits). Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'Generate an image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
       'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
@@ -305,7 +315,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate up to N diverse scripts from an angle board (3 credits each succeeded; one in-chat approval via confirm_execute).',
+      'Generate up to N diverse scripts from an angle board (3 credits each succeeded; one in-chat approval via confirm_execute). ' +
+      'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -315,7 +326,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute).',
+      'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute). ' +
+      'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -325,7 +337,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total.',
+      'Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total. ' +
+      'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -335,7 +348,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Edit an image via Advance (Grok Imagine; 18 credits). Confirm in chat with userPrompt + confirm_execute.',
+      'Edit an image via Advance (Grok Imagine; 18 credits). Defaults to the offer’s latest generated image when no source is supplied. Confirm in chat with userPrompt + confirm_execute. ' +
+      'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -345,7 +359,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Enhance an image via Advance (Grok Imagine; 18 credits). Confirm in chat with userPrompt + confirm_execute.',
+      'Enhance an image via Advance (Grok Imagine; 18 credits). Defaults to the offer’s latest generated image when no source is supplied. Confirm in chat with userPrompt + confirm_execute. ' +
+      'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -355,7 +370,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate a carousel via Advance (Gemini Pro, 24 credits/slide; one in-chat approval). Host timeout is 180s — large carousels may need a smaller slideCount.',
+      'Generate a carousel from scriptId or scriptContent via Advance (Gemini Pro, max 5 slides, 24 credits/slide; one in-chat approval). ' +
+      'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,

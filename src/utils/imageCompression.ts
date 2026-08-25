@@ -2,8 +2,51 @@ import { supabase } from '../lib/supabase'
 import { CANONICAL_IMAGE_BUCKET, ensureCanonicalImageBucket, isMissingImageBucketError } from '../services/imageStorage'
 
 /**
+ * Compress an image to JPEG (generated ads/social — no WebP).
+ */
+export async function compressImageToJpeg(
+  imageSource: string,
+  quality: number = 0.92
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'))
+        return
+      }
+
+      // White background so transparent PNG sources don't get black fills in JPEG.
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('Failed to create JPEG blob'))
+        },
+        'image/jpeg',
+        quality
+      )
+    }
+
+    img.onerror = () => reject(new Error('Failed to load image'))
+    img.src = imageSource
+  })
+}
+
+/**
  * Compress an image to WebP format with specified quality
  * Reduces file size by ~60-80% with minimal visible quality loss
+ * (product/style reference uploads only — not generated ads)
  */
 async function compressImageToWebP(
   imageSource: string,
@@ -124,6 +167,52 @@ export async function uploadPostImageOriginal(
 
   if (error) {
     console.error('Upload error:', error)
+    throw error
+  }
+  if (!data) throw new Error('Storage upload returned no file')
+
+  const { data: { publicUrl } } = supabase.storage
+    .from(CANONICAL_IMAGE_BUCKET)
+    .getPublicUrl(data.path)
+
+  return publicUrl
+}
+
+/**
+ * Upload an AI-generated image as high-quality JPEG (ads/social).
+ * Never WebP/PNG for generated creatives — keeps Storage under the 5 MiB limit.
+ */
+export async function uploadGeneratedImageJpeg(
+  userId: string,
+  productId: string,
+  imageSource: string,
+  filename?: string
+): Promise<string> {
+  const jpegBlob = await compressImageToJpeg(imageSource, 0.92)
+  const timestamp = Date.now()
+  const rawName = filename?.replace(/\.[^.]+$/, '') || `${timestamp}`
+  const safeUserId = sanitizePathSegment(userId)
+  const safeProductId = sanitizePathSegment(productId)
+  const safeFileName = sanitizePathSegment(`${rawName}.jpg`)
+
+  if (!safeUserId || !safeProductId || !safeFileName) {
+    throw new Error('Invalid file path parameters')
+  }
+
+  const filePath = `${safeUserId}/${safeProductId}/product-refs/${safeFileName}`
+
+  const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(filePath, jpegBlob, {
+    contentType: 'image/jpeg',
+    upsert: true,
+  })
+  let { data, error } = await upload()
+  if (error && isMissingImageBucketError(error)) {
+    await ensureCanonicalImageBucket()
+    ;({ data, error } = await upload())
+  }
+
+  if (error) {
+    console.error('Generated JPEG upload error:', error)
     throw error
   }
   if (!data) throw new Error('Storage upload returned no file')

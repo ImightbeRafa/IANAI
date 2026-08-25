@@ -80,8 +80,14 @@ export async function mcpConfirmExecute(options: {
     approvalRequestId,
     toolName: result.record.toolName,
     quotedCreditCost: result.record.quotedCreditCost,
+    executeArguments: {
+      ...(result.record.inputJson && typeof result.record.inputJson === 'object'
+        ? result.record.inputJson as Record<string, unknown>
+        : {}),
+      approvalRequestId,
+    },
     message:
-      'Approved in Advance. Immediately retry the original execute tool with the same arguments plus this approvalRequestId. Do not ask the user to open a link.',
+      'Approved in Advance. Immediately retry the original execute tool with executeArguments (it preserves selected angleIds) and do not ask the user to open a link.',
     nextStep: 'retry_original_tool',
   }
 }

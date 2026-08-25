@@ -10,6 +10,7 @@ export async function generateScriptForAngle(options: {
   audience?: string | null
   angle: AngleBoardItem
   recentSummaries?: string[]
+  guidePrompt?: string
 }): Promise<{ title: string; content: string }> {
   const isEs = options.language === 'es'
   const recent = (options.recentSummaries || []).filter(Boolean).slice(0, 6)
@@ -26,6 +27,7 @@ export async function generateScriptForAngle(options: {
     `Why they buy: ${options.angle.whyItBuys}`,
     `Hook style: ${options.angle.hookStyle}`,
     `Framework hint: ${options.angle.frameworkHint}`,
+    options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
     recent.length
       ? (isEs
         ? `No te acerques a estos resúmenes recientes:\n- ${recent.join('\n- ')}`

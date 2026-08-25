@@ -1,14 +1,14 @@
 export function imageExtensionFromMime(mime: string, url = ''): string {
   const type = mime.toLowerCase()
+  if (type.includes('jpeg') || type.includes('jpg')) return 'jpg'
   if (type.includes('png')) return 'png'
   if (type.includes('webp')) return 'webp'
   if (type.includes('gif')) return 'gif'
   if (type.includes('avif')) return 'avif'
-  if (type.includes('jpeg') || type.includes('jpg')) return 'jpg'
   const fromUrl = url.split('?')[0].split('#')[0].split('.').pop()?.toLowerCase() || ''
   if (fromUrl === 'jpeg') return 'jpg'
   if (/^(png|webp|jpg|gif|avif)$/.test(fromUrl)) return fromUrl
-  return 'webp'
+  return 'jpg'
 }
 
 export function filenameForShellImage(options: {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { encodeGeneratedImageJpeg } from '../generated-image-jpeg.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { RecentScriptSummary, StyleDna } from './types.js'
 import { parseStyleDnas, upsertStyleDnaList } from './style-dna.js'
@@ -54,18 +55,10 @@ export async function saveExpandedProductRef(options: {
 }): Promise<{ productImageId: string; imageUrl: string }> {
   const db = getSupabaseAdmin()
   if (!db) throw new Error('Storage is not configured')
-  const match = /^data:([^;]+);base64,(.+)$/i.exec(options.imageDataUrl.trim())
-  if (!match) throw new Error('Expected image data URL')
-  const contentType = match[1] || 'image/png'
-  const bytes = Buffer.from(match[2], 'base64')
-  const ext = contentType.includes('jpeg') || contentType.includes('jpg')
-    ? 'jpg'
-    : contentType.includes('webp')
-      ? 'webp'
-      : 'png'
-  const path = `${options.userId}/${options.offerId}/product-refs/bulk-expand-${randomUUID()}.${ext}`
-  const { error: upErr } = await db.storage.from('post-images').upload(path, bytes, {
-    contentType,
+  const jpeg = await encodeGeneratedImageJpeg(options.imageDataUrl)
+  const path = `${options.userId}/${options.offerId}/product-refs/bulk-expand-${randomUUID()}.${jpeg.extension}`
+  const { error: upErr } = await db.storage.from('post-images').upload(path, jpeg.bytes, {
+    contentType: jpeg.contentType,
     upsert: false,
   })
   if (upErr) throw upErr

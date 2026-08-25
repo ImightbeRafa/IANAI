@@ -5,8 +5,8 @@
  * Auth: Bearer Supabase access token (same as the web app API).
  * Unauthenticated calls get WWW-Authenticate pointing at protected-resource metadata.
  *
- * EXECUTE script/image: claim job → return jobId immediately → waitUntil continues
- * generation so Grok polls get_execute_result instead of MCP -32001 timeout.
+ * EXECUTE generation: claim job → return jobId immediately → waitUntil continues
+ * work so Grok polls get_execute_result instead of MCP -32001 timeout.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -23,7 +23,7 @@ import { mcpWwwAuthenticateHeader, MCP_RESOURCE_METADATA_URL } from './lib/mcp/w
 const MAX_BODY_BYTES = 256_000
 const MCP_WWW_AUTHENTICATE = mcpWwwAuthenticateHeader()
 
-// Keep GENERATE work alive after the JSON-RPC response returns (jobId + poll).
+// Keep EXECUTE work alive after the JSON-RPC response returns (jobId + poll).
 setMcpExecuteScheduler((work) => {
   waitUntil(
     work().catch((err) => {
@@ -64,7 +64,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       docs: 'https://advanceai.studio',
       oauth_protected_resource: MCP_RESOURCE_METADATA_URL,
       tools: 'POST JSON-RPC initialize | tools/list | tools/call',
-      executeJobs: 'execute_script_generate / execute_image_generate return jobId; poll get_execute_result',
+      executeJobs:
+        'execute_script_generate / execute_image_generate / execute_image_edit / execute_image_enhance / execute_carousel_generate / execute_bulk_scripts / execute_bulk_posts / execute_campaign_pack return jobId + statusMessage; poll get_execute_result',
     })
     return
   }

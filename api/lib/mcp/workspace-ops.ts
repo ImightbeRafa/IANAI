@@ -154,10 +154,13 @@ export async function mcpWorkspaceSaveArtifact(options: {
   if (!brand) throw new Error('Brand not found')
   const offers = await options.db.listOffersForBrand(options.user.id, brandId)
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  const kind = options.args.kind === 'script' || options.args.kind === 'image'
+  const kind = options.args.kind === 'script'
+    || options.args.kind === 'image'
+    || options.args.kind === 'product'
+    || options.args.kind === 'context'
     ? options.args.kind
     : null
-  if (!kind) throw new Error('kind must be "script" or "image"')
+  if (!kind) throw new Error('kind must be "script", "image", "product", or "context"')
 
   const offerIdArg = typeof options.args.offerId === 'string' ? options.args.offerId : undefined
   const sessionIdArg = typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined
@@ -169,14 +172,18 @@ export async function mcpWorkspaceSaveArtifact(options: {
 
   const libraryLink = `${origin}/chat?brand=${encodeURIComponent(brandId)}`
 
-  if (kind === 'image' && imageUrl && (/^data:/i.test(imageUrl) || imageUrl.length > 8_000)) {
+  const isImageKind = kind === 'image' || kind === 'product' || kind === 'context'
+  if (isImageKind && imageUrl && (/^data:/i.test(imageUrl) || imageUrl.length > 8_000)) {
     throw new Error('Do not send base64. Pass an https imageUrl or productImageId already in the workspace.')
   }
   if (kind === 'script' && content && content.length > MCP_SAVE_ARTIFACT_MAX_SCRIPT_CHARS) {
     throw new Error(`Script content exceeds ${MCP_SAVE_ARTIFACT_MAX_SCRIPT_CHARS} characters`)
   }
+  if ((kind === 'product' || kind === 'context') && !imageUrl) {
+    throw new Error(`${kind} imports require an https imageUrl`)
+  }
 
-  const hasDirect = kind === 'image'
+  const hasDirect = isImageKind
     ? Boolean(productImageId || imageUrl)
     : Boolean(scriptId || (content && content.trim()))
   if (!hasDirect) {
@@ -191,6 +198,32 @@ export async function mcpWorkspaceSaveArtifact(options: {
   }
 
   const offerId = resolveOfferIdForSave(offers, offerIdArg)
+  if (kind === 'product' || kind === 'context') {
+    if (productImageId) {
+      throw new Error(`${kind} imports require an https imageUrl; productImageId is already in the library.`)
+    }
+    if (!imageUrl) throw new Error(`${kind} imports require an https imageUrl`)
+    const parsed = assertPublicHttpUrl(imageUrl)
+    if (parsed.protocol !== 'https:') throw new Error('Only https imageUrl is allowed')
+    const saved = await options.artifactStore.saveReferenceImageFromPublicUrl({
+      userId: options.user.id,
+      brandId,
+      offerId,
+      imageUrl: parsed.toString(),
+      kind,
+      label: title || `MCP ${kind} reference`,
+    })
+    return {
+      status: 'saved',
+      consumesAdvanceCredits: false,
+      kind,
+      brandId,
+      offerId,
+      ...saved,
+      message: `Saved as a ${kind} image in the Advance library.`,
+    }
+  }
+
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
     brandId,

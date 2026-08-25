@@ -1,3 +1,26 @@
+## 2026-08-25 — CreativeDirector MCP must-haves (0.9.3)
+
+**Area:** mcp + chat-shell
+**Files:** `execute-tools.ts`, `bulk-tools.ts`, `artifact-store.ts`, `workspace-ops.ts`, `user-tools.ts`, `guide-packs.ts`, `protocol.ts`, `tool-registry.ts`, `generated-image-jpeg.ts`, `imageCompression.ts`, `chatShellImageApi.ts`, `chatShellDownload.ts`
+
+- Generated ads upload as high-quality JPEG HTTPS URLs only (MCP artifact store + chat-shell persist). Fixes Storage “object exceeded maximum allowed size” on 2k PNG. Job results never store blobs.
+- Carousel EXECUTE accepts an owned `scriptId`, edit/enhance default to the offer’s latest generated image, and execute tools preserve settings, GUIDE direction, references, and bulk angle selections through approval.
+- New `list_assets` returns reusable library image ids/URLs; `workspace_save_artifact` saves HTTPS product/context references directly without credits or a chat upload detour.
+- `list_brands` reports kit/offer readiness, deterministic default-offer resolution, and duplicate-name sibling ids without mutating records.
+- MCP `serverInfo.icons` advertises `/brand/advance-mark.png` for Grok connector tile.
+
+---
+
+## 2026-08-25 — All MCP generation tools async (0.9.2)
+
+**Area:** mcp
+**Files:** `execute-tools.ts`, `bulk-tools.ts`, `tool-registry.ts`, `protocol.ts`, `api/mcp.ts`
+
+- Image edit/enhance, carousel, bulk scripts/posts, and campaign packs now claim a job and return `jobId` + `statusMessage` immediately; clients poll `get_execute_result`.
+- Background failures persist a retryable failed job result, and carousel slide charge IDs are deterministic per approval.
+
+---
+
 ## 2026-08-25 — MCP EXECUTE jobId + poll (0.9.1)
 
 **Area:** mcp

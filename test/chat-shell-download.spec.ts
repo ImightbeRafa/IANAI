@@ -22,6 +22,17 @@ describe('shell image download', () => {
     })).toBe('Arnés-ForgeCR.webp')
   })
 
+  it('defaults unknown mime to jpg for generated downloads', () => {
+    expect(imageExtensionFromMime('', 'https://cdn.example/gen.jpg')).toBe('jpg')
+    expect(imageExtensionFromMime('image/jpeg', 'https://cdn.example/x')).toBe('jpg')
+    expect(imageExtensionFromMime('', '')).toBe('jpg')
+    expect(filenameForShellImage({
+      productName: 'ForgeCR',
+      mime: 'image/jpeg',
+      url: 'https://cdn.example/gen.jpg',
+    })).toBe('ForgeCR.jpg')
+  })
+
   it('downloads original bytes via blob and falls back to opening the url', async () => {
     const blob = new Blob(['raw-bytes'], { type: 'image/webp' })
     const fetchMock = vi.fn(async () => new Response(blob, { status: 200 }))
