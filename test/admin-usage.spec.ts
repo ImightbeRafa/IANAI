@@ -133,3 +133,51 @@ describe('resolveUsageLogSource', () => {
     expect(resolveUsageLogSource({ source: null, metadata: {} })).toBe('web')
   })
 })
+
+describe('mcp_tool audit exclusion', () => {
+  it('excludes $0 mcp_tool audits from cost totals but keeps real MCP execute costs', () => {
+    const rows = [
+      log({
+        id: 'audit',
+        feature: 'mcp_tool',
+        model: 'mcp',
+        created_at: '2026-08-14T10:00:00.000Z',
+        estimated_cost_usd: 0,
+        source: 'mcp',
+      }),
+      log({
+        id: 'exec',
+        feature: 'script',
+        model: 'grok-4.6',
+        created_at: '2026-08-14T11:00:00.000Z',
+        estimated_cost_usd: 0.12,
+        source: 'mcp',
+      }),
+      log({
+        id: 'web',
+        feature: 'script',
+        model: 'grok-4.6',
+        created_at: '2026-08-14T12:00:00.000Z',
+        estimated_cost_usd: 0.08,
+        source: 'web',
+      }),
+    ]
+
+    const summary = aggregateUsageSummary(rows)
+    expect(summary.find((r) => r.feature === 'mcp_tool')).toBeUndefined()
+    expect(summary.find((r) => r.feature === 'script')?.total_calls).toBe(2)
+    expect(summary.find((r) => r.feature === 'script')?.total_cost_usd).toBe(0.2)
+
+    const daily = aggregateDailyUsage(rows)
+    expect(daily.find((r) => r.model === 'mcp')).toBeUndefined()
+    expect(daily.find((r) => r.model === 'grok-4.6')?.total_cost_usd).toBe(0.2)
+
+    const stats = aggregateUserUsageStats(rows)
+    expect(stats[0]?.total_calls).toBe(2)
+    expect(stats[0]?.total_cost_usd).toBe(0.2)
+    expect(stats[0]?.other_calls).toBe(0)
+
+    const mcpLogs = paginateUsageLogs(rows, { source: 'mcp', limit: 10 })
+    expect(mcpLogs.logs.map((r) => r.id).sort()).toEqual(['audit', 'exec'])
+  })
+})

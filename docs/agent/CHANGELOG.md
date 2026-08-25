@@ -1,4 +1,15 @@
-## 2026-08-25 — MCP reclaim: never completed→running
+## 2026-08-25 — Admin dashboard Meta/referrals + MCP cost noise
+
+**Area:** admin
+**Files:** `api/admin-referrals.ts`, `api/lib/admin-usage.ts`, `AdminDashboard.tsx`, `admin-dashboard.css`, `chat-shell.css`, `admin-usage.spec.ts`
+
+- Meta AdVance referral block is collapsible (closed by default).
+- New `/api/admin-referrals` (service role) enriches signup emails via profiles + Auth Admin — fixes "Unknown" after profiles RLS 068.
+- Trial/expired/converted badges use real trial end + treat paid/active `meta_advanze` as converted (not forever expired).
+- `$0` `mcp_tool` audit rows excluded from usage cost/call aggregates; real MCP EXECUTE costs (feature≠mcp_tool, source=mcp) still counted. Logs still list audits.
+- Wider/taller admin settings embed; table cells wrap; emails truncate with `title`.
+
+---
 
 **Area:** mcp
 **Files:** `cas-running-result.ts`, `approval-store.ts`, `approval.ts`, `execute-job.ts`, `mcp-charge-uuid-reclaim.spec.ts`

@@ -292,6 +292,7 @@ export default function AdminDashboard({
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([])
   const [referralSignups, setReferralSignups] = useState<ReferralSignup[]>([])
+  const [metaAdvanzeOpen, setMetaAdvanzeOpen] = useState(false)
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [userStats, setUserStats] = useState<UserUsageStats[]>([])
   const [logSearch, setLogSearch] = useState('')
@@ -503,69 +504,37 @@ export default function AdminDashboard({
         setError(usageErr instanceof Error ? usageErr.message : 'Failed to load usage data')
       }
 
-      // Fetch referral campaigns
-      const { data: campaignsData } = await supabase
-        .from('referral_campaigns')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      setCampaigns(campaignsData || [])
-
-      // Fetch referral signups (no FK join — user_id references auth.users, not profiles)
-      const { data: signupsData } = await supabase
-        .from('referral_signups')
-        .select('*')
-        .order('signed_up_at', { ascending: false })
-
-      const rawSignups = signupsData || []
-      const userIds = [...new Set(rawSignups.map((s: Record<string, unknown>) => s.user_id as string))]
-
-      // Fetch profiles and subscriptions for these users in bulk
-      let profilesMap: Record<string, { email: string; full_name: string }> = {}
-      let subsMap: Record<string, { plan: string; status: string }> = {}
-
-      if (userIds.length > 0) {
-        const { data: profilesData } = await supabase
-          .from('profiles')
-          .select('id, email, full_name')
-          .in('id', userIds)
-
-        for (const p of (profilesData || []) as { id: string; email: string; full_name: string }[]) {
-          profilesMap[p.id] = { email: p.email, full_name: p.full_name }
+      // Fetch referral campaigns + signups via admin API (service role — emails survive RLS 068)
+      try {
+        const { data: { session: referralSession } } = await supabase.auth.getSession()
+        if (referralSession) {
+          const referralsResp = await fetch(adminApiUrl('admin-referrals'), {
+            headers: { Authorization: `Bearer ${referralSession.access_token}` },
+          })
+          if (referralsResp.ok) {
+            const referralsData = await referralsResp.json() as {
+              campaigns?: ReferralCampaign[]
+              signups?: ReferralSignup[]
+            }
+            setCampaigns(referralsData.campaigns || [])
+            setReferralSignups(referralsData.signups || [])
+          } else {
+            console.warn('Admin referrals API failed:', referralsResp.status)
+            setCampaigns([])
+            setReferralSignups([])
+          }
         }
-
-        const { data: subsData } = await supabase
-          .from('subscriptions')
-          .select('user_id, plan, status')
-          .in('user_id', userIds)
-
-        for (const s of (subsData || []) as { user_id: string; plan: string; status: string }[]) {
-          subsMap[s.user_id] = { plan: s.plan, status: s.status }
-        }
+      } catch (referralErr) {
+        console.error('Failed to fetch referral data:', referralErr)
+        setCampaigns([])
+        setReferralSignups([])
       }
-
-      const enrichedSignups: ReferralSignup[] = rawSignups.map((s: Record<string, unknown>) => {
-        const uid = s.user_id as string
-        return {
-          id: s.id as string,
-          campaign_id: s.campaign_id as string,
-          user_id: uid,
-          signed_up_at: s.signed_up_at as string,
-          trial_ends_at: s.trial_ends_at as string,
-          converted_to_paid: s.converted_to_paid as boolean,
-          user_email: profilesMap[uid]?.email || 'Unknown',
-          user_name: profilesMap[uid]?.full_name || '',
-          current_plan: subsMap[uid]?.plan || 'free',
-          current_status: subsMap[uid]?.status || 'unknown'
-        }
-      })
-      setReferralSignups(enrichedSignups)
 
       // Fetch ALL billing data via admin API (uses service role — bypasses RLS)
       try {
         const { data: { session: adminSession } } = await supabase.auth.getSession()
         if (adminSession) {
-          const billingApiUrl = import.meta.env.PROD ? '/api/admin-billing' : 'http://localhost:3000/api/admin-billing'
+          const billingApiUrl = adminApiUrl('admin-billing')
           const billingResp = await fetch(billingApiUrl, {
             headers: { 'Authorization': `Bearer ${adminSession.access_token}` }
           })
@@ -577,7 +546,7 @@ export default function AdminDashboard({
             console.warn('Admin billing API failed:', billingResp.status)
           }
 
-          const imagePerformanceApiUrl = import.meta.env.PROD ? '/api/admin-image-performance' : 'http://localhost:3000/api/admin-image-performance'
+          const imagePerformanceApiUrl = adminApiUrl('admin-image-performance')
           const imagePerfResp = await fetch(`${imagePerformanceApiUrl}?start_date=${encodeURIComponent(startDate.toISOString())}&end_date=${encodeURIComponent(new Date().toISOString())}`, {
             headers: { 'Authorization': `Bearer ${adminSession.access_token}` }
           })
@@ -663,14 +632,15 @@ export default function AdminDashboard({
     ? userStats.filter(u => u.user_email?.toLowerCase().includes(userStatsSearch.toLowerCase()))
     : userStats
 
-  // Calculate totals
-  const totalCost = usageSummary.reduce((sum, u) => sum + Number(u.total_cost_usd), 0)
-  const totalCalls = usageSummary.reduce((sum, u) => sum + u.total_calls, 0)
-  const successfulCalls = usageSummary.reduce((sum, u) => sum + u.successful_calls, 0)
+  // Calculate totals (mcp_tool $0 audits excluded server-side; skip if present)
+  const billableSummary = usageSummary.filter((u) => u.feature !== 'mcp_tool')
+  const totalCost = billableSummary.reduce((sum, u) => sum + Number(u.total_cost_usd), 0)
+  const totalCalls = billableSummary.reduce((sum, u) => sum + u.total_calls, 0)
+  const successfulCalls = billableSummary.reduce((sum, u) => sum + u.successful_calls, 0)
   const successRate = totalCalls > 0 ? (successfulCalls / totalCalls * 100).toFixed(1) : '0'
 
   // Group by model
-  const byModel = usageSummary.reduce((acc, u) => {
+  const byModel = billableSummary.reduce((acc, u) => {
     if (!acc[u.model]) {
       acc[u.model] = { calls: 0, tokens: 0, cost: 0 }
     }
@@ -681,7 +651,7 @@ export default function AdminDashboard({
   }, {} as Record<string, { calls: number; tokens: number; cost: number }>)
 
   // Group by feature
-  const byFeature = usageSummary.reduce((acc, u) => {
+  const byFeature = billableSummary.reduce((acc, u) => {
     if (!acc[u.feature]) {
       acc[u.feature] = { calls: 0, cost: 0 }
     }
@@ -1021,7 +991,7 @@ export default function AdminDashboard({
                       {allPayments.slice(0, 8).map(p => (
                         <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
                           <div>
-                            <p className="text-xs font-medium text-dark-900">{p.user_email}</p>
+                            <p className="text-xs font-medium text-dark-900 admin-dash__email" title={p.user_email || ''}>{p.user_email}</p>
                             <p className="text-[10px] text-dark-400">{p.plan || '-'} &middot; {p.paid_at ? new Date(p.paid_at).toLocaleDateString() : '-'}</p>
                           </div>
                           <div className="text-right">
@@ -1067,7 +1037,7 @@ export default function AdminDashboard({
                         <div className="divide-y divide-dark-50 max-h-36 overflow-y-auto">
                           {boostPayments.slice(0, 5).map(p => (
                             <div key={p.id} className="py-2 flex items-center justify-between">
-                              <span className="text-xs text-dark-600">{p.user_email}</span>
+                              <span className="text-xs text-dark-600 admin-dash__email" title={p.user_email || ''}>{p.user_email}</span>
                               <span className="text-xs text-dark-400">{p.paid_at ? new Date(p.paid_at).toLocaleDateString() : '-'}</span>
                             </div>
                           ))}
@@ -1113,7 +1083,7 @@ export default function AdminDashboard({
                             <td className="px-4 py-2.5 text-sm text-dark-600 whitespace-nowrap">
                               {p.paid_at ? new Date(p.paid_at).toLocaleDateString() : new Date(p.created_at).toLocaleDateString()}
                             </td>
-                            <td className="px-4 py-2.5 text-sm text-dark-900 font-medium">{p.user_email}</td>
+                            <td className="px-4 py-2.5 text-sm text-dark-900 font-medium admin-dash__email" title={p.user_email || ''}>{p.user_email}</td>
                             <td className="px-4 py-2.5">
                               <span className={`text-xs px-2 py-0.5 rounded ${PLAN_COLORS[p.plan || ''] ? PLAN_COLORS[p.plan || ''] + ' text-white' : 'bg-dark-50 text-dark-600'}`}>
                                 {p.plan || '-'}
@@ -1184,7 +1154,7 @@ export default function AdminDashboard({
                               <td className="px-4 py-2.5">
                                 <div>
                                   <p className="text-sm font-medium text-dark-900">{s.user_name || '-'}</p>
-                                  <p className="text-xs text-dark-500">{s.user_email}</p>
+                                  <p className="text-xs text-dark-500 admin-dash__email" title={s.user_email || ''}>{s.user_email}</p>
                                 </div>
                               </td>
                               <td className="px-4 py-2.5">
@@ -1239,11 +1209,25 @@ export default function AdminDashboard({
               )}
             </div>
 
-            {/* Referral Tracking Section */}
+            {/* Meta AdVance / Referral Tracking — collapsed by default */}
             {campaigns.length > 0 && (
               <div className="mb-8">
-                <h2 className="text-lg font-semibold text-dark-900 flex items-center gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setMetaAdvanzeOpen((open) => !open)}
+                  className="flex items-center gap-2 mb-4 text-lg font-semibold text-dark-900 hover:text-dark-700 transition-colors"
+                  aria-expanded={metaAdvanzeOpen}
+                >
                   <Gift className="w-5 h-5 text-purple-500" />
+                  Meta AdVance
+                  <ChevronDown
+                    className={`w-5 h-5 text-dark-400 transition-transform ${metaAdvanzeOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {metaAdvanzeOpen && (
+                  <>
+                <h2 className="text-sm font-medium text-dark-500 flex items-center gap-2 mb-4">
                   {language === 'es' ? 'Seguimiento de Referidos' : 'Referral Tracking'}
                 </h2>
 
@@ -1262,7 +1246,11 @@ export default function AdminDashboard({
                       <span className="text-xs text-dark-500">{language === 'es' ? 'Trials Activos' : 'Active Trials'}</span>
                     </div>
                     <p className="text-2xl font-bold text-dark-900">
-                      {referralSignups.filter(s => new Date(s.trial_ends_at) > new Date() && s.current_status === 'trialing').length}
+                      {referralSignups.filter((s) => {
+                        const trialEnded = Date.parse(s.trial_ends_at) <= Date.now()
+                        const isConverted = s.converted_to_paid || (s.current_status === 'active' && s.current_plan !== 'free')
+                        return !isConverted && !trialEnded && (s.current_status === 'trialing' || s.current_plan === 'meta_advanze')
+                      }).length}
                     </p>
                   </div>
                   <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
@@ -1271,7 +1259,11 @@ export default function AdminDashboard({
                       <span className="text-xs text-dark-500">{language === 'es' ? 'Trials Expirados' : 'Expired Trials'}</span>
                     </div>
                     <p className="text-2xl font-bold text-dark-900">
-                      {referralSignups.filter(s => new Date(s.trial_ends_at) <= new Date() && !s.converted_to_paid).length}
+                      {referralSignups.filter((s) => {
+                        const trialEnded = Date.parse(s.trial_ends_at) <= Date.now()
+                        const isConverted = s.converted_to_paid || (s.current_status === 'active' && s.current_plan !== 'free')
+                        return trialEnded && !isConverted
+                      }).length}
                     </p>
                   </div>
                   <div className="bg-dark-100 rounded-xl p-4 border border-dark-100">
@@ -1280,7 +1272,9 @@ export default function AdminDashboard({
                       <span className="text-xs text-dark-500">{language === 'es' ? 'Convertidos' : 'Converted'}</span>
                     </div>
                     <p className="text-2xl font-bold text-dark-900">
-                      {referralSignups.filter(s => s.converted_to_paid).length}
+                      {referralSignups.filter((s) =>
+                        s.converted_to_paid || (s.current_status === 'active' && s.current_plan !== 'free')
+                      ).length}
                     </p>
                   </div>
                 </div>
@@ -1339,26 +1333,31 @@ export default function AdminDashboard({
                           </thead>
                           <tbody className="divide-y divide-dark-50">
                             {referralSignups.filter(s => s.campaign_id === campaign.id).map(signup => {
-                              const daysLeft = Math.max(0, Math.ceil((new Date(signup.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-                              const isExpired = daysLeft === 0
-                              const isConverted = signup.converted_to_paid || (signup.current_plan !== 'free' && signup.current_plan !== 'meta_advanze' && signup.current_status === 'active')
+                              const trialEndMs = Date.parse(signup.trial_ends_at)
+                              const msLeft = Number.isFinite(trialEndMs) ? trialEndMs - Date.now() : 0
+                              const trialEnded = !Number.isFinite(trialEndMs) || msLeft <= 0
+                              const daysLeft = trialEnded ? 0 : Math.max(1, Math.ceil(msLeft / (1000 * 60 * 60 * 24)))
+                              // Paid/active plans (including paid meta_advanze) count as converted — not forever-expired
+                              const isConverted = Boolean(signup.converted_to_paid) ||
+                                (signup.current_status === 'active' && signup.current_plan !== 'free')
+                              const isExpired = !isConverted && trialEnded
                               return (
                                 <tr key={signup.id} className="hover:bg-dark-50">
                                   <td className="px-5 py-3">
                                     <div>
                                       <p className="text-sm font-medium text-dark-900">{signup.user_name || '-'}</p>
-                                      <p className="text-xs text-dark-500">{signup.user_email}</p>
+                                      <p className="text-xs text-dark-500 admin-dash__email" title={signup.user_email || ''}>{signup.user_email}</p>
                                     </div>
                                   </td>
                                   <td className="px-5 py-3 text-sm text-dark-600">
                                     {new Date(signup.signed_up_at).toLocaleDateString()}
                                   </td>
                                   <td className="px-5 py-3 text-sm text-dark-600">
-                                    {new Date(signup.trial_ends_at).toLocaleDateString()}
+                                    {signup.trial_ends_at ? new Date(signup.trial_ends_at).toLocaleDateString() : '-'}
                                   </td>
                                   <td className="px-5 py-3 text-center">
                                     <span className={`text-sm font-semibold ${isExpired ? 'text-red-400' : daysLeft <= 14 ? 'text-amber-400' : 'text-green-400'}`}>
-                                      {isExpired ? '0' : daysLeft}
+                                      {isConverted ? '—' : isExpired ? '0' : daysLeft}
                                     </span>
                                   </td>
                                   <td className="px-5 py-3 text-center">
@@ -1390,6 +1389,8 @@ export default function AdminDashboard({
                     )}
                   </div>
                 ))}
+                  </>
+                )}
               </div>
             )}
 

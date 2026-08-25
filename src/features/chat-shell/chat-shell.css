@@ -4706,8 +4706,8 @@ html.chat-shell-route *::-webkit-scrollbar {
 }
 
 .chat-shell__settings--wide {
-  width: min(calc(100vw - 32px), 1240px);
-  height: min(90vh, 860px);
+  width: min(calc(100vw - 16px), 1480px);
+  height: min(94vh, 980px);
 }
 
 .chat-shell__settings-main {
