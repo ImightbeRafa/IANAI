@@ -687,5 +687,6 @@ Key architectural milestones not captured above:
 **Files:** `bulk-tools.ts`, `run-bulk.ts`, `protocol.ts`, `mcp-campaign-resume.spec.ts`
 
 - `execute_campaign_pack` now persists a CAS-leased checkpoint after every script and image rather than trying to finish the full pack inside one 180-second MCP request.
-- `get_execute_result` advances one ready chunk and reclaims only a stale working lease. Stable pack/index generation UUIDs preserve idempotent charging across retries.
-- The terminal payload includes full script text and saved JPEG HTTPS URLs; only a fully generated pack is reported `completed`, while provider/save/charge errors become real `failed` results.
+- The first chunk and each chunk leased by `get_execute_result` run inline in that request, avoiding nested `waitUntil` work that can be dropped before generation starts. Stale working leases retry the same stable pack/index generation UUID.
+- Every chunk outcome is CAS-persisted, so a late worker cannot overwrite a newer checkpoint or change `completed` back to `running`; provider/save/charge errors record the real failing chunk and error.
+- Running status identifies the next script/image index. The terminal payload includes full script text and saved JPEG HTTPS URLs, never blobs.
