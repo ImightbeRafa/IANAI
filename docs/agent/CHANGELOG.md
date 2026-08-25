@@ -682,3 +682,10 @@ Key architectural milestones not captured above:
 - Team/client account structure
 - TiloPay billing integration (CRC)
 - Supabase RLS + usage RPC functions
+## 2026-08-25 — MCP campaign packs survive host timeout
+
+**Files:** `bulk-tools.ts`, `run-bulk.ts`, `protocol.ts`, `mcp-campaign-resume.spec.ts`
+
+- `execute_campaign_pack` now persists a CAS-leased checkpoint after every script and image rather than trying to finish the full pack inside one 180-second MCP request.
+- `get_execute_result` advances one ready chunk and reclaims only a stale working lease. Stable pack/index generation UUIDs preserve idempotent charging across retries.
+- The terminal payload includes full script text and saved JPEG HTTPS URLs; only a fully generated pack is reported `completed`, while provider/save/charge errors become real `failed` results.

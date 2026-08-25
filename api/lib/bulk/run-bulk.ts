@@ -54,6 +54,8 @@ const POST_APPROACHES = [
 export async function runBulkScripts(options: {
   runtime: BulkRunContext
   angles: AngleBoardItem[]
+  /** Stable position in the pack, used for idempotent per-item credit UUIDs on resume. */
+  indexOffset?: number
 }): Promise<{
   packId: string
   sessionId: string
@@ -76,7 +78,7 @@ export async function runBulkScripts(options: {
   const items: BulkScriptItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
     const angle = angles[i]
-    const generationId = generationUuidFromApproval(packId, `script:${i + 1}`)
+    const generationId = generationUuidFromApproval(packId, `script:${(options.indexOffset || 0) + i + 1}`)
     const limit = await checkUsageLimit(runtime.user.id, 'script')
     if (!limit.allowed) {
       items.push({
@@ -181,6 +183,8 @@ export async function runBulkPosts(options: {
   scripts?: Array<{ angleId: string; title?: string; content?: string }>
   imageModel?: string | null
   styleDnaId?: string | null
+  /** Stable position in the pack, used for idempotent per-item credit UUIDs on resume. */
+  indexOffset?: number
 }): Promise<{
   packId: string
   sessionId: string
@@ -222,8 +226,9 @@ export async function runBulkPosts(options: {
   const items: BulkPostItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
     const angle = angles[i]
-    const generationId = generationUuidFromApproval(packId, `image:${i + 1}`)
-    const approach = POST_APPROACHES[i % POST_APPROACHES.length]
+    const absoluteIndex = (options.indexOffset || 0) + i
+    const generationId = generationUuidFromApproval(packId, `image:${absoluteIndex + 1}`)
+    const approach = POST_APPROACHES[absoluteIndex % POST_APPROACHES.length]
     const script = options.scripts?.find((row) => row.angleId === angle.id)
     const rotated = refs.length ? [refs[i % refs.length], refs[(i + 1) % refs.length]].filter(Boolean) : []
     const limit = await checkUsageLimit(runtime.user.id, 'image', { imageModel })

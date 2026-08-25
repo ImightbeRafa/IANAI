@@ -38,6 +38,7 @@ import {
   mcpExecuteBulkPosts,
   mcpExecuteBulkScripts,
   mcpExecuteCampaignPack,
+  resumeMcpCampaignPack,
   mcpGuideBulkAngles,
   mcpListStyleDnas,
   mcpSetStyleDna,
@@ -911,10 +912,27 @@ async function dispatchEnabledTool(options: {
     }
     case 'get_execute_result': {
       if (!options.approvalStore) throw new Error('Approval store not configured')
+      const jobId = typeof options.args.jobId === 'string'
+        ? options.args.jobId
+        : typeof options.args.approvalRequestId === 'string'
+          ? options.args.approvalRequestId
+          : undefined
+      // A campaign pack is deliberately split across requests. Polling leases the
+      // next artifact (or reclaims a host-killed chunk) before returning status.
+      if (jobId && options.artifactStore) {
+        await resumeMcpCampaignPack({
+          db: options.db,
+          approvalStore: options.approvalStore,
+          artifactStore: options.artifactStore,
+          user: options.user,
+          jobId,
+          appOrigin: options.appOrigin,
+        })
+      }
       return getMcpExecuteResult({
         approvalStore: options.approvalStore,
         userId: options.user.id,
-        jobId: typeof options.args.jobId === 'string' ? options.args.jobId : undefined,
+        jobId,
         approvalRequestId:
           typeof options.args.approvalRequestId === 'string'
             ? options.args.approvalRequestId

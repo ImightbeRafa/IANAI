@@ -22,7 +22,7 @@ import {
   listStyleDnasForBrand,
   saveStyleDnaForBrand,
 } from '../bulk/store.js'
-import { BULK_COUNT_DEFAULT, BULK_COUNT_MAX, type AngleBoardItem, type BulkLanguage } from '../bulk/types.js'
+import { BULK_COUNT_DEFAULT, BULK_COUNT_MAX, type AngleBoardItem, type BulkLanguage, type BulkPostItem, type BulkScriptItem } from '../bulk/types.js'
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
@@ -37,6 +37,7 @@ import {
   buildExecuteStatusMessage,
   buildFailedJobResult,
   claimMcpExecuteJob,
+  MCP_EXECUTE_STALE_MS,
   scheduleMcpExecuteWork,
   shouldReplayStoredExecuteResult,
   withStatusMessage,
@@ -710,6 +711,244 @@ export async function mcpExecuteBulkPosts(options: {
   return claim.handle as unknown as Record<string, unknown>
 }
 
+type CampaignCheckpoint = {
+  status: 'running'
+  jobId: string
+  approvalRequestId: string
+  toolName: 'execute_campaign_pack'
+  startedAtMs: number
+  chunkState: 'ready' | 'working'
+  phase: 'scripts' | 'posts'
+  nextIndex: number
+  quotedCreditCost: number
+  chargedCredits: number
+  usage: { quotedCredits: number; chargedCredits: number }
+  angles: AngleBoardItem[]
+  scripts: BulkScriptItem[]
+  posts: BulkPostItem[]
+  expandedRefs: unknown[]
+  sessionId?: string
+  retryAfterMs: number
+  statusMessage: string
+  message: string
+}
+
+export function isCampaignCheckpoint(value: unknown): value is CampaignCheckpoint {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return row.status === 'running'
+    && row.toolName === 'execute_campaign_pack'
+    && (row.chunkState === 'ready' || row.chunkState === 'working')
+    && (row.phase === 'scripts' || row.phase === 'posts')
+    && Array.isArray(row.angles)
+    && Array.isArray(row.scripts)
+    && Array.isArray(row.posts)
+}
+
+export function isCampaignChunkLeasable(value: unknown, nowMs = Date.now()): boolean {
+  if (!isCampaignCheckpoint(value)) return false
+  return value.chunkState === 'ready' || nowMs - value.startedAtMs > MCP_EXECUTE_STALE_MS
+}
+
+function campaignRunning(options: {
+  approvalRequestId: string
+  quote: number
+  angles: AngleBoardItem[]
+  startedAtMs?: number
+}): CampaignCheckpoint {
+  return {
+    status: 'running',
+    jobId: options.approvalRequestId,
+    approvalRequestId: options.approvalRequestId,
+    toolName: 'execute_campaign_pack',
+    startedAtMs: options.startedAtMs ?? Date.now(),
+    chunkState: 'ready',
+    phase: 'scripts',
+    nextIndex: 0,
+    quotedCreditCost: options.quote,
+    chargedCredits: 0,
+    usage: { quotedCredits: options.quote, chargedCredits: 0 },
+    angles: options.angles,
+    scripts: [],
+    posts: [],
+    expandedRefs: [],
+    retryAfterMs: 2_000,
+    statusMessage: buildExecuteStatusMessage('execute_campaign_pack', 'running'),
+    message: 'Campaign pack is durable and resumes one generated artifact per poll.',
+  }
+}
+
+async function runCampaignChunk(options: {
+  db: McpDbClient
+  approvalStore: McpApprovalStore
+  artifactStore: McpArtifactStore
+  user: McpAuthUser
+  args: Record<string, unknown>
+  checkpoint: CampaignCheckpoint
+  appOrigin?: string
+}): Promise<void> {
+  const toolName = 'execute_campaign_pack'
+  const approvalRequestId = options.checkpoint.approvalRequestId
+  try {
+    const brandId = String(options.args.brandId || '')
+    const offerId = String(options.args.offerId || '')
+    const imageModel = typeof options.args.imageModel === 'string' ? options.args.imageModel : 'grok-imagine'
+    const styleDnaId = typeof options.args.styleDnaId === 'string' ? options.args.styleDnaId : undefined
+    const runtime = await buildRuntime({
+      db: options.db,
+      user: options.user,
+      artifactStore: options.artifactStore,
+      brandId,
+      offerId,
+      args: { ...options.args, sessionId: options.checkpoint.sessionId },
+      packId: approvalRequestId,
+    })
+    runtime.appOrigin = options.appOrigin
+    const cp = options.checkpoint
+    const angle = cp.angles[cp.nextIndex]
+    if (!angle) throw new Error('Campaign checkpoint has no next angle')
+
+    let next: CampaignCheckpoint
+    if (cp.phase === 'scripts') {
+      const result = await runBulkScripts({ runtime, angles: [angle], indexOffset: cp.nextIndex })
+      const item = result.items[0]
+      if (!item || item.error || !item.scriptId) {
+        throw new Error(item?.error || 'Campaign script generation failed')
+      }
+      const scripts = [...cp.scripts, item]
+      const finished = cp.nextIndex + 1 >= cp.angles.length
+      next = {
+        ...cp,
+        startedAtMs: Date.now(),
+        chunkState: 'ready',
+        phase: finished ? 'posts' : 'scripts',
+        nextIndex: finished ? 0 : cp.nextIndex + 1,
+        sessionId: result.sessionId,
+        scripts,
+        chargedCredits: cp.chargedCredits + item.charged,
+        usage: { quotedCredits: cp.quotedCreditCost, chargedCredits: cp.chargedCredits + item.charged },
+      }
+    } else {
+      const script = cp.scripts[cp.nextIndex]
+      const result = await runBulkPosts({
+        runtime,
+        angles: [angle],
+        scripts: script ? [script] : [],
+        imageModel,
+        styleDnaId,
+        indexOffset: cp.nextIndex,
+      })
+      const item = result.items[0]
+      if (!item || item.error || !item.imageUrl) {
+        throw new Error(item?.error || 'Campaign image generation failed')
+      }
+      const posts = [...cp.posts, item]
+      const charged = cp.chargedCredits + result.charged
+      const finished = cp.nextIndex + 1 >= cp.angles.length
+      if (!finished) {
+        next = {
+          ...cp,
+          startedAtMs: Date.now(),
+          chunkState: 'ready',
+          nextIndex: cp.nextIndex + 1,
+          sessionId: result.sessionId,
+          posts,
+          expandedRefs: [...cp.expandedRefs, ...result.expanded],
+          chargedCredits: charged,
+          usage: { quotedCredits: cp.quotedCreditCost, chargedCredits: charged },
+        }
+      } else {
+        const payload = withStatusMessage({
+          status: 'completed',
+          jobId: approvalRequestId,
+          approvalRequestId,
+          toolName,
+          consumesAdvanceCredits: true,
+          packId: approvalRequestId,
+          sessionId: result.sessionId,
+          brandId,
+          offerId,
+          charged,
+          chargedCredits: charged,
+          usage: { quotedCredits: cp.quotedCreditCost, chargedCredits: charged },
+          succeededScripts: cp.scripts.length,
+          succeededPosts: posts.length,
+          quotedCreditCost: cp.quotedCreditCost,
+          scripts: cp.scripts.map((saved) => ({
+            angleId: saved.angleId,
+            title: saved.title,
+            content: saved.content,
+            scriptId: saved.scriptId,
+            charged: saved.charged,
+          })),
+          posts: posts.map((saved) => ({
+            angleId: saved.angleId,
+            imageUrl: saved.imageUrl,
+            productImageId: saved.productImageId,
+            approach: saved.approach,
+            charged: saved.charged,
+          })),
+          expandedRefs: [...cp.expandedRefs, ...result.expanded],
+          deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, approvalRequestId),
+          styleDna: findStyleDna(runtime.styleDnas || [], styleDnaId),
+          note: 'Durable campaign completed. Each artifact used a stable UUID; credits were charged once after its successful save.',
+        }, toolName)
+        await finalizeIfSucceeded({
+          approvalStore: options.approvalStore,
+          approvalRequestId,
+          userId: options.user.id,
+          toolName,
+          input: options.args,
+          result: payload,
+          succeeded: cp.scripts.length + posts.length,
+        })
+        return
+      }
+    }
+    await storeMcpApprovalResult(options.approvalStore, { approvalRequestId, result: next })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Campaign pack failed'
+    await storeMcpApprovalResult(options.approvalStore, {
+      approvalRequestId,
+      result: buildFailedJobResult({
+        approvalRequestId,
+        toolName,
+        error: message,
+        quotedCreditCost: options.checkpoint.quotedCreditCost,
+      }),
+    })
+    console.error('mcp execute_campaign_pack chunk', message)
+  }
+}
+
+/** Poll hook: atomically leases and schedules exactly one durable campaign artifact. */
+export async function resumeMcpCampaignPack(options: {
+  db: McpDbClient
+  approvalStore: McpApprovalStore
+  artifactStore: McpArtifactStore
+  user: McpAuthUser
+  jobId: string
+  appOrigin?: string
+}): Promise<void> {
+  const row = await options.approvalStore.findById(options.jobId)
+  if (!row || row.userId !== options.user.id || !isCampaignCheckpoint(row.resultJson)) return
+  const cp = row.resultJson
+  if (!isCampaignChunkLeasable(cp)) return
+  if (!options.approvalStore.compareAndSwapRunningResult) return
+  const working: CampaignCheckpoint = { ...cp, chunkState: 'working', startedAtMs: Date.now() }
+  const claimed = await options.approvalStore.compareAndSwapRunningResult(
+    row.id,
+    cp.startedAtMs,
+    working,
+    working.startedAtMs
+  )
+  if (!claimed) return
+  const args = row.inputJson && typeof row.inputJson === 'object' && !Array.isArray(row.inputJson)
+    ? row.inputJson as Record<string, unknown>
+    : {}
+  scheduleMcpExecuteWork(() => runCampaignChunk({ ...options, args, checkpoint: working }))
+}
+
 export async function mcpExecuteCampaignPack(options: {
   db: McpDbClient
   approvalStore: McpApprovalStore
@@ -718,32 +957,18 @@ export async function mcpExecuteCampaignPack(options: {
   args: Record<string, unknown>
   appOrigin?: string
 }): Promise<Record<string, unknown>> {
-  const args = await hydrateBulkApprovalArgs({
-    approvalStore: options.approvalStore,
-    userId: options.user.id,
-    toolName: 'execute_campaign_pack',
-    args: options.args,
-  })
+  const args = await hydrateBulkApprovalArgs({ approvalStore: options.approvalStore, userId: options.user.id, toolName: 'execute_campaign_pack', args: options.args })
   const brandId = typeof args.brandId === 'string' ? args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
   const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
-  const styleDnaId = typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
-  const quote = quoteCampaignPack({
-    scriptCount: count,
-    imageCount: count,
-    imageModel,
-    expandCount: countExpandNeeded(existingRefs.length),
-  })
+  const quote = quoteCampaignPack({ scriptCount: count, imageCount: count, imageModel, expandCount: countExpandNeeded(existingRefs.length) })
   const boundInput = {
-    brandId,
-    offerId,
-    count,
-    imageModel,
-    styleDnaId,
+    brandId, offerId, count, imageModel,
+    styleDnaId: typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined,
     language: languageOf(args.language),
     angleIds: selectedIds(args),
     aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16',
@@ -751,156 +976,18 @@ export async function mcpExecuteCampaignPack(options: {
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
   }
-  const approvalRequestId = typeof args.approvalRequestId === 'string'
-    ? args.approvalRequestId
-    : ''
-  const pending = await requireOrIssueApproval({
-    approvalStore: options.approvalStore,
-    approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_campaign_pack',
-    input: boundInput,
-    quotedCreditCost: quote.totalCredits,
-    appOrigin: options.appOrigin,
-    language: boundInput.language,
-  })
+  const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
+  const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language })
   if (pending) return { ...pending, quote }
 
-  const toolName = 'execute_campaign_pack'
-  const claim = await claimMcpExecuteJob(options.approvalStore, {
-    approvalRequestId,
-    toolName,
-    quotedCreditCost: quote.totalCredits,
-  })
-  if (!claim.claimed) {
-    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
-    return (formatted || withStatusMessage({
-      status: 'running',
-      jobId: approvalRequestId,
-      approvalRequestId,
-      toolName,
-      chargedCredits: 0,
-    }, toolName)) as Record<string, unknown>
-  }
+  const claim = await claimMcpExecuteJob(options.approvalStore, { approvalRequestId, toolName: 'execute_campaign_pack', quotedCreditCost: quote.totalCredits })
+  if (!claim.claimed) return (asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_campaign_pack') || claim.handle) as Record<string, unknown>
 
-  const work = async () => {
-    try {
-      const angles = await loadAngles({
-        db: options.db,
-        user: options.user,
-        brandId,
-        offerId,
-        ctx,
-        args,
-      })
-      const runtime = await buildRuntime({
-        db: options.db,
-        user: options.user,
-        artifactStore: options.artifactStore,
-        brandId,
-        offerId,
-        args,
-        packId: approvalRequestId,
-      })
-      runtime.appOrigin = options.appOrigin
-      const scripts = await runBulkScripts({ runtime, angles })
-      if (scripts.succeeded <= 0) {
-        await storeMcpApprovalResult(options.approvalStore, {
-          approvalRequestId,
-          result: buildFailedJobResult({
-            approvalRequestId,
-            toolName,
-            error: scripts.items[0]?.error || 'Campaign pack failed — approval remains reusable',
-            quotedCreditCost: quote.totalCredits,
-          }),
-        })
-        return
-      }
-
-      const succeededScripts = scripts.items.filter((item) => !item.error && item.content)
-      const posts = succeededScripts.length
-        ? await runBulkPosts({
-            runtime: { ...runtime, packId: scripts.packId, sessionId: scripts.sessionId },
-            angles: angles.filter((angle) => succeededScripts.some((item) => item.angleId === angle.id)),
-            scripts: succeededScripts,
-            imageModel,
-            styleDnaId,
-          })
-        : {
-            packId: scripts.packId,
-            sessionId: scripts.sessionId,
-            items: [],
-            expanded: [],
-            succeeded: 0,
-            charged: 0,
-          }
-      const charged = scripts.charged + posts.charged
-      const payload = withStatusMessage({
-        status: 'completed',
-        jobId: approvalRequestId,
-        approvalRequestId,
-        toolName,
-        consumesAdvanceCredits: true,
-        packId: scripts.packId,
-        sessionId: scripts.sessionId,
-        brandId,
-        offerId,
-        charged,
-        chargedCredits: charged,
-        usage: {
-          quotedCredits: quote.totalCredits,
-          chargedCredits: charged,
-        },
-        succeededScripts: scripts.succeeded,
-        succeededPosts: posts.succeeded,
-        quotedCreditCost: quote.totalCredits,
-        quote,
-        scripts: scripts.items.map((item) => ({
-          angleId: item.angleId,
-          title: item.title,
-          scriptId: item.scriptId,
-          charged: item.charged,
-          error: item.error,
-          statusMessage: buildExecuteStatusMessage('execute_bulk_scripts', item.error ? 'failed' : 'completed'),
-        })),
-        posts: posts.items.map((item) => ({
-          angleId: item.angleId,
-          imageUrl: item.imageUrl,
-          approach: item.approach,
-          charged: item.charged,
-          error: item.error,
-          statusMessage: buildExecuteStatusMessage('execute_bulk_posts', item.error ? 'failed' : 'completed'),
-        })),
-        expandedRefs: posts.expanded,
-        deepLink: deepLinkForPack(options.appOrigin, brandId, scripts.sessionId, scripts.packId),
-        styleDna: findStyleDna(runtime.styleDnas || [], styleDnaId),
-        note: 'One approval. Charge per succeeded script (3) and image (6 or 24). Failed items were not charged.',
-      }, toolName)
-      await finalizeIfSucceeded({
-        approvalStore: options.approvalStore,
-        approvalRequestId,
-        userId: options.user.id,
-        toolName,
-        input: boundInput,
-        result: payload,
-        succeeded: scripts.succeeded + posts.succeeded,
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Campaign pack failed'
-      await storeMcpApprovalResult(options.approvalStore, {
-        approvalRequestId,
-        result: buildFailedJobResult({
-          approvalRequestId,
-          toolName,
-          error: message,
-          quotedCreditCost: quote.totalCredits,
-        }),
-      })
-      console.error('mcp execute_campaign_pack job', message)
-    }
-  }
-  scheduleMcpExecuteWork(work)
-  return claim.handle as unknown as Record<string, unknown>
+  const angles = await loadAngles({ db: options.db, user: options.user, brandId, offerId, ctx, args })
+  const checkpoint = campaignRunning({ approvalRequestId, quote: quote.totalCredits, angles })
+  await storeMcpApprovalResult(options.approvalStore, { approvalRequestId, result: checkpoint })
+  await resumeMcpCampaignPack({ ...options, jobId: approvalRequestId })
+  return checkpoint as unknown as Record<string, unknown>
 }
 
 export type { StyleDna } from '../bulk/types.js'
