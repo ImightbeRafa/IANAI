@@ -11,6 +11,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { matchesRunningCasExpectation } from './cas-running-result.js'
 
 export const MCP_APPROVAL_TTL_MS = 60 * 60 * 1000 // 1 hour
 
@@ -378,8 +379,8 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
     async compareAndSwapRunningResult(id, expectedStartedAtMs, result, atMs) {
       const row = byId.get(id)
       if (!row || row.status !== 'approved' || row.resultJson == null) return null
-      const json = row.resultJson as { status?: string; startedAtMs?: number }
-      if (json.status !== 'running' || json.startedAtMs !== expectedStartedAtMs) return null
+      // Same atomic predicate as prod JSONB filters (no check-then-write gap).
+      if (!matchesRunningCasExpectation(row.resultJson, expectedStartedAtMs)) return null
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }

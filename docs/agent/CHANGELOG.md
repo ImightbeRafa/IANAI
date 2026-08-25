@@ -1,3 +1,13 @@
+## 2026-08-25 — MCP reclaim CAS atomic JSON filters
+
+**Area:** mcp
+**Files:** `approval-store.ts`, `cas-running-result.ts`, `approval.ts`, `mcp-charge-uuid-reclaim.spec.ts`
+
+- Prod `compareAndSwapRunningResult` is a single UPDATE with `result_json->>status = running` and `startedAtMs` match — no check-then-write gap that could clobber completed → running.
+- Shared `matchesRunningCasExpectation` + race regression test.
+
+---
+
 ## 2026-08-25 — MCP bulk/carousel credit UUID + reclaim CAS
 
 **Area:** mcp / credits
