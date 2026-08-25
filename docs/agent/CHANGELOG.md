@@ -616,4 +616,76 @@
 
 - Created agent context protocol for future model sessions
 - Added project skill with reference docs: architecture, API routes, database, guiones pipeline, changelog protocol
-- Added Cursor rules: core (always), API backend, frontend React, g
+- Added Cursor rules: core (always), API backend, frontend React, guiones pipeline
+- Documented stale vs current docs (README, PROGRESS.md contain removed B-Roll/chat-interview features)
+- Established dual-changelog system: user-facing (`src/data/changelog.ts`) vs agent-facing (this file)
+
+---
+
+## 2026-03-06 — v0.1.3 release
+
+**Area:** frontend
+**Files:** `src/App.tsx`, navigation/lazy-loading, mobile optimization
+
+- Fixed app reload on tab switch / return from background
+- Smoother navigation with reduced unnecessary loading
+- Mobile optimization for phone usage
+- Editable optimized script prompt in "Optimize for post" flow
+
+---
+
+## 2026-02-27 — v0.1.2 release
+
+**Area:** posts, brand, frontend
+**Files:** `api/generate-image.ts`, brand kit modules, `src/data/changelog.ts`
+
+- Product Photo post type with 6 AI photography styles
+- Square (1:1) format for e-commerce/catalog use
+- Ideal customer description (ICP) field on business
+- Brand Kit: colors, voice, phrases in Settings
+- "From the Developer" section with changelog + roadmap
+- Script ratings persist across sessions; positive ratings feed AI memory
+- Reply usage visible in plan summary
+
+---
+
+## 2026-02-23 — v0.1.1 release
+
+**Area:** posts, respuestas
+**Files:** `RespuestasWorkspace.tsx`, `api/reply-chat.ts`, custom post types
+
+- Custom post styles from reference uploads
+- Respuestas feature: AI-powered sales DM replies
+- Magic wand post enhancement
+
+---
+
+## 2026-02-16 — v0.1.0 release
+
+**Area:** posts
+**Files:** `PostWorkspace.tsx`, `api/generate-image.ts`, image presets
+
+- 8 post style presets
+- Color palette system
+- AI image editing with instructions
+
+---
+
+## Prior history
+
+See `PROGRESS.md` and `CODEBASE_STATUS.md` for earlier development notes.
+Note: those files contain references to removed features (B-Roll/video, fal.ai, 5-question chat interview).
+
+Key architectural milestones not captured above:
+- Structured guiones pipeline in `api/lib/guiones/` (replaces monolithic prompt-only approach)
+- Business → Product form hierarchy (replaces chat interview)
+- Team/client account structure
+- TiloPay billing integration (CRC)
+- Supabase RLS + usage RPC functions
+## 2026-08-25 — MCP campaign packs survive host timeout
+
+**Files:** `bulk-tools.ts`, `run-bulk.ts`, `protocol.ts`, `mcp-campaign-resume.spec.ts`
+
+- `execute_campaign_pack` now persists a CAS-leased checkpoint after every script and image rather than trying to finish the full pack inside one 180-second MCP request.
+- `get_execute_result` advances one ready chunk and reclaims only a stale working lease. Stable pack/index generation UUIDs preserve idempotent charging across retries.
+- The terminal payload includes full script text and saved JPEG HTTPS URLs; only a fully generated pack is reported `completed`, while provider/save/charge errors become real `failed` results.
