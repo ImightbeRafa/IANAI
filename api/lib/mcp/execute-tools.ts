@@ -48,6 +48,7 @@ import {
   scheduleMcpExecuteWork,
   shouldReplayStoredExecuteResult,
   withChargedCredits,
+  withStatusMessage,
 } from './execute-job.js'
 import { assertMcpCarouselSlideCount } from './limits.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
@@ -701,13 +702,13 @@ export async function mcpExecuteImageEdit(options: {
   })
   if (!claim.claimed) {
     const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_image_edit')
-    return (formatted || {
+    return (formatted || withStatusMessage({
       status: 'running',
       jobId: approvalRequestId,
       approvalRequestId,
       toolName: 'execute_image_edit',
       chargedCredits: 0,
-    }) as Record<string, unknown>
+    }, 'execute_image_edit')) as Record<string, unknown>
   }
 
   const work = async () => {
@@ -947,13 +948,13 @@ export async function mcpExecuteImageEnhance(options: {
   })
   if (!claim.claimed) {
     const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_image_enhance')
-    return (formatted || {
+    return (formatted || withStatusMessage({
       status: 'running',
       jobId: approvalRequestId,
       approvalRequestId,
       toolName: 'execute_image_enhance',
       chargedCredits: 0,
-    }) as Record<string, unknown>
+    }, 'execute_image_enhance')) as Record<string, unknown>
   }
 
   const work = async () => {
@@ -1231,13 +1232,13 @@ export async function mcpExecuteCarouselGenerate(options: {
   })
   if (!claim.claimed) {
     const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_carousel_generate')
-    return (formatted || {
+    return (formatted || withStatusMessage({
       status: 'running',
       jobId: approvalRequestId,
       approvalRequestId,
       toolName: 'execute_carousel_generate',
       chargedCredits: 0,
-    }) as Record<string, unknown>
+    }, 'execute_carousel_generate')) as Record<string, unknown>
   }
 
   const work = async () => {

@@ -344,13 +344,13 @@ export async function mcpExecuteBulkScripts(options: {
   })
   if (!claim.claimed) {
     const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
-    return (formatted || {
+    return (formatted || withStatusMessage({
       status: 'running',
       jobId: approvalRequestId,
       approvalRequestId,
       toolName,
       chargedCredits: 0,
-    }) as Record<string, unknown>
+    }, toolName)) as Record<string, unknown>
   }
 
   const work = async () => {
@@ -498,13 +498,13 @@ export async function mcpExecuteBulkPosts(options: {
   })
   if (!claim.claimed) {
     const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
-    return (formatted || {
+    return (formatted || withStatusMessage({
       status: 'running',
       jobId: approvalRequestId,
       approvalRequestId,
       toolName,
       chargedCredits: 0,
-    }) as Record<string, unknown>
+    }, toolName)) as Record<string, unknown>
   }
 
   const work = async () => {
@@ -659,13 +659,13 @@ export async function mcpExecuteCampaignPack(options: {
   })
   if (!claim.claimed) {
     const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
-    return (formatted || {
+    return (formatted || withStatusMessage({
       status: 'running',
       jobId: approvalRequestId,
       approvalRequestId,
       toolName,
       chargedCredits: 0,
-    }) as Record<string, unknown>
+    }, toolName)) as Record<string, unknown>
   }
 
   const work = async () => {
