@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.9.3'
+export const MCP_REGISTRY_VERSION = '0.9.4'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -109,6 +109,16 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     risk: 'read',
     description:
       'List product, context, and generated images for an owned brand/offer. Returns stored HTTPS URLs and reusable productImageId values.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'list_scripts',
+    group: 'brand_workspace',
+    risk: 'read',
+    description:
+      'List saved scripts for an owned brand (optional offerId/sessionId). Returns full content so agents can reload copy after bulk/pack jobs.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,

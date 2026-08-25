@@ -194,8 +194,29 @@ export async function mcpGetBrandKit(options: {
   args: Record<string, unknown>
 }): Promise<Record<string, unknown>> {
   const kitId = asString(options.args.kitId)
-  if (!kitId) throw new Error('kitId is required')
   const brandId = asString(options.args.brandId) || undefined
+  if (!kitId && !brandId) {
+    throw new Error('Provide kitId, or brandId to resolve the primary kit')
+  }
+  if (!kitId && brandId) {
+    const owns = await options.store.assertOwnsBrand(options.user.id, brandId)
+    if (!owns) throw new Error('Brand not found')
+    const kits = await options.store.listKits({
+      userId: options.user.id,
+      brandId,
+      includeInactive: false,
+    })
+    const primary =
+      kits.find((k) => k.is_primary_for_business === true) ||
+      kits.find((k) => k.is_default === true) ||
+      kits[0]
+    if (!primary) throw new Error('No brand kit linked to this brand')
+    return {
+      ...mapKitDetail(primary),
+      resolvedFrom: 'brandId',
+      brandId,
+    }
+  }
   const row = await options.store.getKit({ userId: options.user.id, kitId })
   if (!row) throw new Error('Brand kit not found')
   if (brandId && row.business_id && row.business_id !== brandId) {

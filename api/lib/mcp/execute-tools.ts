@@ -17,7 +17,7 @@ import { logApiUsage, estimateTokens } from '../usage-logger.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import { runGrokImageGenerate } from '../grok-image-generate.js'
-import { buildImageEditSystemPrompt, runGrokImageEdit } from '../grok-image-edit.js'
+import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
 import {
   buildEnhanceSystemPrompt,
   resolveEnhanceTier,
@@ -51,6 +51,7 @@ import {
   withStatusMessage,
 } from './execute-job.js'
 import { assertMcpCarouselSlideCount } from './limits.js'
+import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
 import type { McpArtifactStore } from './artifact-store.js'
@@ -411,14 +412,30 @@ async function runScriptGenerateBody(options: {
     productContext: {
       name: offer.name,
       type: (offer.type as ProductType | undefined) || undefined,
-      product_description: ctx.brandKit?.tagline || undefined,
-      price_range: offer.price || undefined,
+      product_description: offer.productDescription || ctx.brandKit?.tagline || undefined,
+      differentiation: offer.differentiation || undefined,
+      main_problem: offer.mainProblem || undefined,
+      result: offer.result || undefined,
+      utility: offer.utility || undefined,
+      technical_specs: offer.technicalSpecs || undefined,
+      price_range: offer.priceRange || undefined,
+      exact_price: offer.price || undefined,
+      re_price: offer.price || undefined,
     },
+    forbiddenPhrases: [
+      ...(offer.doNotClaim || []),
+      ...(ctx.brandKit?.forbiddenPhrases || []),
+    ],
     scriptSettings: options.scriptSettings,
     styleMemoryPrompt: [
       options.goal ? `Generation goal: ${options.goal}` : '',
       options.buyerStage ? `Target buyer stage: ${options.buyerStage}` : '',
       options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
+      ctx.brandKit?.brandVoice ? `Brand voice: ${ctx.brandKit.brandVoice}` : '',
+      ctx.brandKit?.mustUsePhrases?.length
+        ? `Must use phrases: ${ctx.brandKit.mustUsePhrases.join('; ')}`
+        : '',
+      offer.price ? `Exact price fact: ${offer.price}` : '',
     ].filter(Boolean).join('\n'),
   })
 
@@ -507,20 +524,39 @@ export async function mcpExecuteImageGenerate(options: {
     selectedReferenceIds.unshift(productImageId)
   }
   const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
+  const referenceMode = parseReferenceMode(options.args.referenceMode) || 'use'
+  const aspectRatioFallback = options.args.aspectRatioFallback === true
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
     scene: typeof options.args.scene === 'string' ? options.args.scene : undefined,
     aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : '9:16',
+    aspectRatioFallback,
     imageModel,
     productImageId,
     referenceImageIds: selectedReferenceIds,
+    referenceMode,
     guidePrompt,
     sessionId: sessionIdArg,
   }
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
+  const productAssets = await options.artifactStore.listOwnedAssets({
+    userId: options.user.id,
+    brandId,
+    offerId,
+    kind: 'product',
+  })
+  assertProductReferenceGate({
+    toolName: 'execute_image_generate',
+    productRefCount: productAssets.length,
+    referenceMode,
+    referenceImageIds: selectedReferenceIds,
+    productImageId,
+  })
+  // Validate aspect early (fail before approval if unsupported).
+  resolveGrokAspectRatio(boundInput.aspectRatio, { allowFallback: aspectRatioFallback })
   await resolveOwnedReferenceUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -592,6 +628,7 @@ export async function mcpExecuteImageGenerate(options: {
         offerId,
         scene: boundWithOffer.scene,
         aspectRatio: boundWithOffer.aspectRatio,
+        aspectRatioFallback: boundWithOffer.aspectRatioFallback,
         referenceImageIds: selectedReferenceIds,
         guidePrompt,
         sessionIdArg,
@@ -634,6 +671,7 @@ async function runImageGenerateBody(options: {
   offerId: string
   scene?: string
   aspectRatio: string
+  aspectRatioFallback?: boolean
   referenceImageIds: string[]
   guidePrompt?: string
   sessionIdArg?: string
@@ -643,33 +681,38 @@ async function runImageGenerateBody(options: {
   quote: number
 }): Promise<Record<string, unknown>> {
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
+  const appliedAspectRatio = resolveGrokAspectRatio(options.aspectRatio, {
+    allowFallback: options.aspectRatioFallback === true,
+  })
 
   const guide = await mcpGuideImage(options.db, options.user, {
     brandId: options.brandId,
     offerId: options.offerId,
     scene: options.scene,
     aspectRatio: options.aspectRatio,
-  })
+  }, options.artifactStore)
+  const kit = options.ctxPreview.brandKit
   const prompt = [
     String(guide.prompt || ''),
     options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
+    kit?.primaryColor || kit?.secondaryColor || kit?.accentColor
+      ? `Brand palette: ${[kit.primaryColor, kit.secondaryColor, kit.accentColor].filter(Boolean).join(' / ')}`
+      : '',
+    kit?.visualStyleNotes ? `Visual rules: ${kit.visualStyleNotes}` : '',
   ].filter(Boolean).join('. ')
-  const selectedRefs = await resolveOwnedReferenceUrls({
+  // Confirmed IDs only — never silent-union kit/guide refs after user confirm.
+  const refs = await resolveOwnedReferenceUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
     brandId: options.brandId,
     offerId: options.offerId,
     imageIds: options.referenceImageIds,
   })
-  const guideRefs = Array.isArray(guide.referenceUrls)
-    ? guide.referenceUrls.filter((u): u is string => typeof u === 'string')
-    : []
-  const refs = [...selectedRefs, ...guideRefs]
 
   const generated = await runGrokImageGenerate({
     apiKey: xaiKey(),
     prompt,
-    aspectRatio: options.aspectRatio,
+    aspectRatio: appliedAspectRatio,
     referenceImageUrls: refs,
   })
 
@@ -740,6 +783,8 @@ async function runImageGenerateBody(options: {
     productImageId: saved.productImageId,
     imageUrl: saved.imageUrl,
     providerModel: generated.providerModel,
+    requestedAspectRatio: options.aspectRatio,
+    appliedAspectRatio: appliedAspectRatio,
     aspectRatio: generated.aspectRatio,
     resolution: generated.resolution,
     quality: generated.quality,
@@ -1381,6 +1426,19 @@ export async function mcpExecuteCarouselGenerate(options: {
       ? options.args.offerId
       : ownedScript?.offerId || undefined
   )
+  const productAssets = await options.artifactStore.listOwnedAssets({
+    userId: options.user.id,
+    brandId,
+    offerId,
+    kind: 'product',
+  })
+  assertProductReferenceGate({
+    toolName: 'execute_carousel_generate',
+    productRefCount: productAssets.length,
+    referenceMode: parseReferenceMode(options.args.referenceMode) || 'use',
+    referenceImageIds: selectedReferenceIds,
+    productImageId,
+  })
   await resolveOwnedReferenceUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -1392,18 +1450,21 @@ export async function mcpExecuteCarouselGenerate(options: {
   const boundInput = {
     brandId,
     offerId,
-    scriptId,
-    scriptContent,
+    scriptId: scriptId || undefined,
+    scriptContent: scriptContent.slice(0, 2_000),
+    // Preview bills/runs exactly requiredSlides — never bind a larger slideCount silently.
+    slideCount: requiredSlides,
+    requestedSlideCount: slideCount,
     subtype,
-    slideCount,
     aspectRatio,
     language,
     designDirection: sanitizeCarouselText(options.args.designDirection, 1500),
     slideDetails: sanitizeCarouselText(options.args.slideDetails, 3000),
+    previewFirstSlideOnly,
     productImageId,
     referenceImageIds: selectedReferenceIds,
+    referenceMode: parseReferenceMode(options.args.referenceMode) || 'use',
     guidePrompt,
-    previewFirstSlideOnly,
     sessionId: sessionIdArg,
   }
   const boundWithOffer = boundInput
@@ -1642,12 +1703,19 @@ async function runCarouselGenerateBody(options: {
 
   let charged = 0
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  const slides = savedSlides.map((s) => ({
-    index: s.index,
-    productImageId: s.productImageId,
-    imageUrl: s.imageUrl,
-    postId: s.postId || null,
-  }))
+  const slides = savedSlides.map((s) => {
+    const planned = generated.slides.find((g) => g.index === s.index)
+    return {
+      index: s.index,
+      productImageId: s.productImageId,
+      imageUrl: s.imageUrl,
+      postId: s.postId || null,
+      headline: planned?.headline || null,
+      body: planned?.body || null,
+      role: planned?.role || null,
+      copy: [planned?.headline, planned?.body].filter(Boolean).join('\n') || null,
+    }
+  })
   const baseCompleted = {
     jobId: options.approvalRequestId,
     approvalRequestId: options.approvalRequestId,

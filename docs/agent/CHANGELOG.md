@@ -1,3 +1,18 @@
+## 2026-08-25 — MCP chat-shell fat PR (0.9.4)
+
+**Area:** mcp + guiones + admin
+**Files:** `bulk-tools.ts`, `execute-tools.ts`, `execute-job.ts`, `guide-packs.ts`, `reference-gate.ts`, `artifact-store.ts`, `protocol.ts`, `tool-registry.ts`, `user-tools.ts`, `brand-kit-tools.ts`, `grok-image-edit.ts`, `guiones/*`, admin referrals/usage UI, tests
+
+- Campaign pack: chunks schedule via `waitUntil` (cheap poll, no -32001); stale reclaim capped then terminal fail; running handles keep progress scripts/posts/chargedCredits.
+- `list_scripts` + bulk/pack full script `content`.
+- Product-ref GUIDE clarify + hard EXECUTE gates (image/bulk posts/pack/carousel); confirmed IDs only (no silent kit-logo union).
+- Grok aspectRatio fail-closed (opt-in `aspectRatioFallback` for 4:5→3:4); return requested vs applied.
+- Offer facts: exact price + mapped price_range; quality gate fails placeholders/enum leaks; stronger hooks; strip unresolved brackets before save.
+- `get_brand_kit(brandId)` primary resolve; `list_brands` defaults to kitReady; carousel slides include copy; preview binds billed N.
+- Admin Meta collapsible + service-role emails; MCP audit $0 noise excluded from cost totals; wider admin embed.
+
+---
+
 ## 2026-08-25 — Admin dashboard Meta/referrals + MCP cost noise
 
 **Area:** admin

@@ -19,17 +19,33 @@ export type GrokImageEditResult = {
   quality: typeof GROK_IMAGE_DEFAULT_QUALITY
 }
 
-const GROK_SUPPORTED_RATIOS = new Set([
+export const GROK_NATIVE_ASPECT_RATIOS = [
   '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2',
   '19.5:9', '9:19.5', '20:9', '9:20', 'auto',
-])
+] as const
 
-const GROK_RATIO_FALLBACK: Record<string, string> = { '4:5': '3:4', '5:4': '4:3' }
+const GROK_SUPPORTED_RATIOS = new Set<string>(GROK_NATIVE_ASPECT_RATIOS)
 
-export function resolveGrokAspectRatio(aspectRatio: string | null | undefined): string {
+/**
+ * Fail-closed by default — no silent 4:5→3:4.
+ * Pass allowFallback:true only when the caller explicitly opted in.
+ */
+export function resolveGrokAspectRatio(
+  aspectRatio: string | null | undefined,
+  options?: { allowFallback?: boolean }
+): string {
   const raw = (aspectRatio || '9:16').trim()
   if (GROK_SUPPORTED_RATIOS.has(raw)) return raw
-  return GROK_RATIO_FALLBACK[raw] || '9:16'
+  if (options?.allowFallback) {
+    if (raw === '4:5') return '3:4'
+    if (raw === '5:4') return '4:3'
+    return '9:16'
+  }
+  const supported = GROK_NATIVE_ASPECT_RATIOS.filter((r) => r !== 'auto').join(', ')
+  throw new Error(
+    `Unsupported aspectRatio "${raw}" for Grok Imagine. Supported: ${supported}. ` +
+      `4:5 is not native — pass aspectRatioFallback:true to allow closest (3:4), or pick 9:16 / 1:1 / 3:4.`
+  )
 }
 
 /** Cap refs for edits: base image + up to 2 supporting refs (API budget ~3). */

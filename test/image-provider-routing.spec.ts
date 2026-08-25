@@ -33,8 +33,9 @@ describe('image provider routing', () => {
 })
 
 describe('grok edit helpers', () => {
-  it('maps 4:5 to a supported Grok ratio and budgets refs', () => {
-    expect(resolveGrokAspectRatio('4:5')).toBe('3:4')
+  it('fail-closes unsupported 4:5 unless allowFallback', () => {
+    expect(() => resolveGrokAspectRatio('4:5')).toThrow(/Unsupported aspectRatio/)
+    expect(resolveGrokAspectRatio('4:5', { allowFallback: true })).toBe('3:4')
     expect(selectGrokEditReferenceUrls({
       baseImageUrl: 'data:base',
       supportUrls: ['data:a', 'data:b', 'data:c'],

@@ -65,7 +65,7 @@ export async function generateAngleInventory(input: GenerateAngleInventoryInput)
 ${isEs ? 'REGLAS' : 'RULES'}:
 - ${isEs ? 'Usa solo hechos del perfil; nunca inventes claims.' : 'Use only facts from the profile; never invent claims.'}
 - ${isEs ? 'Cada candidato debe variar hookMechanism, buyerStage, coreDoubt y proofToUse cuando sea posible.' : 'Each candidate must vary hookMechanism, buyerStage, coreDoubt and proofToUse where possible.'}
-- ${isEs ? 'Si faltan datos, usa placeholders especificos en hookDraft o proofToUse.' : 'If facts are missing, use specific placeholders in hookDraft or proofToUse.'}
+- ${isEs ? 'Si faltan datos, omite ese hecho — no inventes ni uses placeholders entre corchetes.' : 'If facts are missing, omit that fact — do not invent or use bracket placeholders.'}
 - ${isEs ? 'Incluye suficientes candidatos para estos tipos solicitados' : 'Include enough candidates for these requested types'}: ${requested.join(', ')}.
 - ${isEs ? 'No reutilices estos briefs recientes' : 'Do not reuse these recent briefs'}: ${(input.recentBriefs || []).join(' | ') || 'none'}.
 

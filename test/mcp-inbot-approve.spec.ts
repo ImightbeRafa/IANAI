@@ -13,7 +13,7 @@ import { MCP_MUTATION_POLICY } from '../api/lib/mcp/user-tools'
 
 describe('mcp in-chat approval (confirm_execute)', () => {
   it('exposes confirm_execute and chat-first policy', () => {
-    expect(MCP_SERVER_INFO.version).toBe('0.9.3')
+    expect(MCP_SERVER_INFO.version).toBe('0.9.4')
     expect(MCP_MUTATION_POLICY.executeApprovalSurface).toBe('grok_chat')
     expect(listEnabledMcpTools().some((t) => t.name === 'confirm_execute')).toBe(true)
   })

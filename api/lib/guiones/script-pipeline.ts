@@ -28,6 +28,8 @@ interface RunPipelineInput {
   scriptSettings?: ScriptSettings
   styleMemoryPrompt?: string
   scriptTemplatesPrompt?: string
+  /** Brand-kit forbidden phrases injected into the quality gate. */
+  forbiddenPhrases?: string[]
 }
 
 function effectiveCtaStrength(settings: ScriptSettings | undefined, requestedTypes: string[]): CTAStrength {
@@ -82,11 +84,27 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     categoryLens,
     typeLenses: uniqueTypeLenses,
   })
-  const firstReports = evaluateScriptBatch(drafted, briefs)
+  const firstReports = evaluateScriptBatch(drafted, briefs, {
+    forbiddenPhrases: input.forbiddenPhrases,
+  })
   const repaired = repairFailedScripts(drafted, firstReports, briefs)
-  const qualityReports = evaluateScriptBatch(repaired, briefs)
+  const qualityReports = evaluateScriptBatch(repaired, briefs, {
+    forbiddenPhrases: input.forbiddenPhrases,
+  })
   const scripts = applyQualityScores(repaired, qualityReports)
-  const content = renderScriptsAsText(scripts, input.language)
+  // Strip any lingering unresolved placeholders before save (fail-soft for callers).
+  const cleaned = scripts.map((script) => {
+    const strip = (value: string) => value.replace(/\[[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9 _./-]{1,60}\]/g, '').replace(/\s{2,}/g, ' ').trim()
+    return {
+      ...script,
+      spokenScript: {
+        hook: strip(script.spokenScript.hook),
+        development: strip(script.spokenScript.development),
+        ctaOrClose: strip(script.spokenScript.ctaOrClose),
+      },
+    }
+  })
+  const content = renderScriptsAsText(cleaned, input.language)
   const promptPreview = [
     categoryLens,
     ...uniqueTypeLenses,
@@ -100,7 +118,7 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     angleCandidates,
     briefs,
     qualityReports,
-    scripts,
+    scripts: cleaned,
     promptPreview,
   }
 }

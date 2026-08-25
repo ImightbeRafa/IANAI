@@ -36,6 +36,7 @@ export type McpBrandKitContext = {
   fontPrimary?: string | null
   referenceImages?: string[]
   forbiddenPhrases?: string[]
+  mustUsePhrases?: string[]
   styleDnas?: Array<{
     id: string
     name: string
@@ -70,7 +71,15 @@ export type McpBrandContext = {
     id: string
     name: string
     type?: string | null
+    /** Exact price string when known (e.g. ₡9.900). Never an enum bucket. */
     price?: string | null
+    priceRange?: string | null
+    productDescription?: string | null
+    differentiation?: string | null
+    mainProblem?: string | null
+    result?: string | null
+    utility?: string | null
+    technicalSpecs?: string | null
     doNotClaim?: string[]
   }>
   brandKit?: McpBrandKitContext | null
@@ -109,6 +118,13 @@ export type McpDbClient = {
     name: string
     type?: string | null
     price?: string | null
+    priceRange?: string | null
+    productDescription?: string | null
+    differentiation?: string | null
+    mainProblem?: string | null
+    result?: string | null
+    utility?: string | null
+    technicalSpecs?: string | null
     doNotClaim?: string[]
   }>>
   getBrandKitForBrand: (
@@ -145,12 +161,14 @@ export type McpDbClient = {
   ) => Promise<string[]>
 }
 
-/** list_brands — personal brands only. */
+/** list_brands — personal brands only. Default hides kitReady:false unless includeIncomplete. */
 export async function mcpListBrands(
   db: McpDbClient,
-  user: McpAuthUser
+  user: McpAuthUser,
+  args?: { includeIncomplete?: boolean }
 ): Promise<McpBrandSummary[]> {
   if (!user?.id) throw new Error('Authentication required')
+  const includeIncomplete = args?.includeIncomplete === true
   const brands = await db.listBusinessesForUser(user.id)
   const enriched = await Promise.all(brands.map(async (brand) => {
     const [offers, kitBundle] = await Promise.all([
@@ -190,17 +208,19 @@ export async function mcpListBrands(
     const key = brand.name.trim().toLocaleLowerCase()
     idsByName.set(key, [...(idsByName.get(key) || []), brand.id])
   }
-  return enriched.map((brand) => {
+  const withWarnings = enriched.map((brand) => {
     const siblingBrandIds = (idsByName.get(brand.name.trim().toLocaleLowerCase()) || [])
       .filter((id) => id !== brand.id)
     return {
       ...brand,
       siblingBrandIds,
       nameCollisionWarning: siblingBrandIds.length
-        ? `Duplicate brand name "${brand.name}". Select by id; no records were changed.`
+        ? `Duplicate brand name "${brand.name}". Select by brandId; no records were changed.`
         : null,
     }
   })
+  if (includeIncomplete) return withWarnings
+  return withWarnings.filter((brand) => brand.kitReady !== false)
 }
 
 /** get_brand_context — brand + offers + kit owned by the same user. */
