@@ -118,9 +118,22 @@ export async function consumeCredits(options: {
     }
   }
 
-  // Fallback TS path (migration pending or RPC missing)
-  if (rpcError && !/could not find|does not exist|PGRST/i.test(rpcError.message || '')) {
+  // Missing-function / schema-cache only → TS fallback. Any other RPC error
+  // (invalid UUID, etc.) must NOT mutate lots then fail the ledger insert.
+  const rpcMsg = rpcError?.message || ''
+  const rpcMissing = /could not find|does not exist|PGRST/i.test(rpcMsg)
+  if (rpcError && !rpcMissing) {
     console.error('consume_credits RPC', rpcError)
+    return {
+      ok: false,
+      code: 'UNAVAILABLE',
+      remaining: 0,
+      required,
+      error: rpcMsg || 'consume_credits unavailable',
+    }
+  }
+  if (rpcError) {
+    console.error('consume_credits RPC missing — TS fallback', rpcError)
   }
 
   const { data: existing } = await db

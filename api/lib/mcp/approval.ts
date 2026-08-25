@@ -11,6 +11,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { canStoreExecuteResult, matchesRunningCasExpectation } from './cas-running-result.js'
 
 export const MCP_APPROVAL_TTL_MS = 60 * 60 * 1000 // 1 hour
 
@@ -57,6 +58,15 @@ export type McpApprovalStore = {
    * Prevents double-generate on client timeout retries.
    */
   claimEmptyResult?: (id: string, result: unknown, atMs: number) => Promise<McpApprovalRecord | null>
+  /**
+   * CAS reclaim: replace stale running only if startedAtMs still matches (do not clobber completed).
+   */
+  compareAndSwapRunningResult?: (
+    id: string,
+    expectedStartedAtMs: number,
+    result: unknown,
+    atMs: number
+  ) => Promise<McpApprovalRecord | null>
 }
 
 export function hashMcpApprovalToken(token: string): string {
@@ -355,6 +365,7 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
       if (row.status !== 'approved' && row.status !== 'consumed' && row.status !== 'pending') {
         return null
       }
+      if (!canStoreExecuteResult(row.resultJson, result)) return null
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }
@@ -362,6 +373,15 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
     async claimEmptyResult(id, result, atMs) {
       const row = byId.get(id)
       if (!row || row.status !== 'approved' || row.resultJson != null) return null
+      const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
+      byId.set(id, next)
+      return { ...next }
+    },
+    async compareAndSwapRunningResult(id, expectedStartedAtMs, result, atMs) {
+      const row = byId.get(id)
+      if (!row || row.status !== 'approved' || row.resultJson == null) return null
+      // Same atomic predicate as prod JSONB filters (no check-then-write gap).
+      if (!matchesRunningCasExpectation(row.resultJson, expectedStartedAtMs)) return null
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }

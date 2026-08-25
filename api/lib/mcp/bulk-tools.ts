@@ -405,15 +405,46 @@ export async function mcpExecuteBulkScripts(options: {
       })
       runtime.appOrigin = options.appOrigin
       const result = await runBulkScripts({ runtime, angles })
+      const savedAny = result.items.some((item) => Boolean(item.scriptId))
       if (result.succeeded <= 0) {
         await storeMcpApprovalResult(options.approvalStore, {
           approvalRequestId,
-          result: buildFailedJobResult({
+          result: withStatusMessage({
+            status: 'failed',
+            jobId: approvalRequestId,
             approvalRequestId,
             toolName,
-            error: result.items[0]?.error || 'Bulk scripts failed — approval remains reusable',
+            failureStage: savedAny ? 'charge' : 'generate',
+            artifactsSaved: savedAny,
+            resumeMode: savedAny ? 'charge_only' : undefined,
+            packId: result.packId,
+            sessionId: result.sessionId,
+            brandId,
+            offerId,
+            charged: result.charged,
+            chargedCredits: result.charged,
+            usage: {
+              quotedCredits: quote.totalCredits,
+              chargedCredits: result.charged,
+            },
+            succeeded: result.succeeded,
             quotedCreditCost: quote.totalCredits,
-          }),
+            quote,
+            items: result.items.map((item) => ({
+              angleId: item.angleId,
+              title: item.title,
+              scriptId: item.scriptId,
+              messageId: item.messageId,
+              charged: item.charged,
+              error: item.error,
+              statusMessage: buildExecuteStatusMessage(toolName, item.error ? 'failed' : 'completed'),
+            })),
+            deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
+            error: result.items[0]?.error || 'Bulk scripts failed — approval remains reusable',
+            message: savedAny
+              ? 'Scripts were saved to Advance, but billing failed. Artifacts are kept; approval stays reusable without regenerating.'
+              : 'Bulk scripts failed. Approval remains reusable.',
+          }, toolName),
         })
         return
       }
@@ -574,15 +605,48 @@ export async function mcpExecuteBulkPosts(options: {
         imageModel,
         styleDnaId,
       })
+      const savedAny = result.items.some((item) => Boolean(item.imageUrl))
+        || result.expanded.some((item) => Boolean(item.imageUrl))
       if (result.succeeded <= 0) {
         await storeMcpApprovalResult(options.approvalStore, {
           approvalRequestId,
-          result: buildFailedJobResult({
+          result: withStatusMessage({
+            status: 'failed',
+            jobId: approvalRequestId,
             approvalRequestId,
             toolName,
-            error: result.items[0]?.error || 'Bulk posts failed — approval remains reusable',
+            failureStage: savedAny ? 'charge' : 'generate',
+            artifactsSaved: savedAny,
+            resumeMode: savedAny ? 'charge_only' : undefined,
+            packId: result.packId,
+            sessionId: result.sessionId,
+            brandId,
+            offerId,
+            charged: result.charged,
+            chargedCredits: result.charged,
+            usage: {
+              quotedCredits: quote.totalCredits,
+              chargedCredits: result.charged,
+            },
+            succeeded: result.succeeded,
             quotedCreditCost: quote.totalCredits,
-          }),
+            quote,
+            expandedRefs: result.expanded,
+            items: result.items.map((item) => ({
+              angleId: item.angleId,
+              imageUrl: item.imageUrl,
+              productImageId: item.productImageId,
+              approach: item.approach,
+              charged: item.charged,
+              error: item.error,
+              statusMessage: buildExecuteStatusMessage(toolName, item.error ? 'failed' : 'completed'),
+            })),
+            deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
+            error: result.items[0]?.error || 'Bulk posts failed — approval remains reusable',
+            message: savedAny
+              ? 'Images were saved to Advance, but billing failed. Artifacts are kept; approval stays reusable without regenerating.'
+              : 'Bulk posts failed. Approval remains reusable.',
+          }, toolName),
         })
         return
       }

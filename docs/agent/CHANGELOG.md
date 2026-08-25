@@ -1,3 +1,36 @@
+## 2026-08-25 — MCP reclaim: never completed→running
+
+**Area:** mcp
+**Files:** `cas-running-result.ts`, `approval-store.ts`, `approval.ts`, `execute-job.ts`, `mcp-charge-uuid-reclaim.spec.ts`
+
+- `storeResult` refuses writing running/queued over completed (memory guard + Supabase `result_json->>status.neq.completed` filter).
+- Stale-running reclaim always uses atomic CAS; no bare `storeResult` fallback that could clobber.
+- Regression: `storeResult`/`claimMcpExecuteJob` leave completed intact.
+
+---
+
+## 2026-08-25 — MCP reclaim CAS atomic JSON filters
+
+**Area:** mcp
+**Files:** `approval-store.ts`, `cas-running-result.ts`, `approval.ts`, `mcp-charge-uuid-reclaim.spec.ts`
+
+- Prod `compareAndSwapRunningResult` is a single UPDATE with `result_json->>status = running` and `startedAtMs` match — no check-then-write gap that could clobber completed → running.
+- Shared `matchesRunningCasExpectation` + race regression test.
+
+---
+
+## 2026-08-25 — MCP bulk/carousel credit UUID + reclaim CAS
+
+**Area:** mcp / credits
+**Files:** `generation-id.ts`, `consume.ts`, `run-bulk.ts`, `expand-product-refs.ts`, `execute-tools.ts`, `bulk-tools.ts`, `execute-job.ts`, `approval.ts`, `approval-store.ts`
+
+- Root cause of live `Credit charge failed: UNAVAILABLE` on bulk/carousel: composite generation ids (`{approval}-script-1`, `{approval}-carousel-0`) are not UUID-typed for `consume_credits` / `credit_ledger`. Now use deterministic UUIDs (or one approval UUID + `units` for carousel).
+- RPC errors (invalid UUID, etc.) no longer fall through to the TS lot-mutation fallback.
+- Charge failure after artifacts are saved stores `artifactsSaved` + URLs/ids and is **not** generation-reclaimable (stops regen storm). Poll returns the failed payload with artifacts.
+- Stale reclaim re-reads and CAS-swaps running only — cannot overwrite a completed `result_json` (fixes poll stuck on `running`).
+
+---
+
 ## 2026-08-25 — CreativeDirector MCP must-haves (0.9.3)
 
 **Area:** mcp + chat-shell

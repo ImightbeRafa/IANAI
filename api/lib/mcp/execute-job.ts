@@ -245,23 +245,25 @@ export function asJobHandleFromStored(
     }
   }
   if (status === 'failed') {
-    return withStatusMessage(
-      {
-        status: 'failed',
-        jobId: approvalRequestId,
-        approvalRequestId,
-        toolName,
+    const base = {
+      ...stored,
+      status: 'failed' as const,
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName,
+      chargedCredits: 0,
+      usage: {
+        quotedCredits:
+          typeof stored.quotedCreditCost === 'number' ? stored.quotedCreditCost : null,
         chargedCredits: 0,
-        usage: {
-          quotedCredits:
-            typeof stored.quotedCreditCost === 'number' ? stored.quotedCreditCost : null,
-          chargedCredits: 0,
-        },
-        error: typeof stored.error === 'string' ? stored.error : 'Execute failed',
-        message: 'Generation failed. Approval may still be reusable if not consumed.',
       },
-      toolName
-    )
+      error: typeof stored.error === 'string' ? stored.error : 'Execute failed',
+      message:
+        typeof stored.message === 'string'
+          ? stored.message
+          : 'Generation failed. Approval may still be reusable if not consumed.',
+    }
+    return withStatusMessage(base as Record<string, unknown>, toolName)
   }
   // completed (or legacy completed payload without explicit status)
   const row = { ...stored } as Record<string, unknown>
@@ -307,10 +309,34 @@ export async function claimMcpExecuteJob(
     return { claimed: false, existing: existingRow.resultJson }
   }
   if (existingRow?.resultJson != null && isReclaimableExecuteJob(existingRow.resultJson, nowMs)) {
-    // Failed stays reusable; stale running (startedAtMs older than host maxDuration) can CAS-reclaim.
+    // Re-read then CAS: never clobber a completed result that landed mid-reclaim.
+    const latest = await store.findById(options.approvalRequestId)
+    if (!latest?.resultJson || !isReclaimableExecuteJob(latest.resultJson, nowMs)) {
+      return { claimed: false, existing: latest?.resultJson ?? existingRow.resultJson }
+    }
+    const expectedStarted =
+      isMcpExecuteJobPayload(latest.resultJson)
+        && typeof latest.resultJson.startedAtMs === 'number'
+        ? latest.resultJson.startedAtMs
+        : null
+
+    // Stale running → must CAS on startedAtMs (atomic in prod). Never bare storeResult.
+    if (isStaleRunningJob(latest.resultJson, nowMs)) {
+      const cas = store.compareAndSwapRunningResult
+      if (!cas || expectedStarted == null) {
+        return { claimed: false, existing: latest.resultJson }
+      }
+      const updated = await cas(options.approvalRequestId, expectedStarted, handle, nowMs)
+      if (updated) return { claimed: true, handle }
+      const after = await store.findById(options.approvalRequestId)
+      return { claimed: false, existing: after?.resultJson ?? latest.resultJson }
+    }
+
+    // Failed (non charge-only) reclaim → write running only if store refuses completed clobber.
     const updated = await store.storeResult(options.approvalRequestId, handle, nowMs)
     if (updated) return { claimed: true, handle }
-    return { claimed: false, existing: existingRow.resultJson }
+    const after = await store.findById(options.approvalRequestId)
+    return { claimed: false, existing: after?.resultJson ?? latest.resultJson }
   }
 
   const claimFn = store.claimEmptyResult
@@ -331,8 +357,18 @@ export function isFailedExecuteJob(stored: unknown): boolean {
   return isMcpExecuteJobPayload(stored) && stored.status === 'failed'
 }
 
+/** Artifacts landed but billing failed — poll must show them; do not regenerate. */
+export function isArtifactsSavedChargeFailure(stored: unknown): boolean {
+  if (!isFailedExecuteJob(stored)) return false
+  const row = stored as Record<string, unknown>
+  return row.artifactsSaved === true || row.failureStage === 'charge' || row.resumeMode === 'charge_only'
+}
+
 /** Reclaim when failed (retry) or when running+startedAtMs is past STALE (> host maxDuration). */
 export function isReclaimableExecuteJob(stored: unknown, nowMs = Date.now()): boolean {
+  // Charge-stage failure after save: reusable approval, but reclaim must NOT regenerate.
+  // Poll/replay returns the failed payload (with artifact URLs/ids) until a charge-only retry lands.
+  if (isArtifactsSavedChargeFailure(stored)) return false
   if (isFailedExecuteJob(stored)) return true
   return isStaleRunningJob(stored, nowMs)
 }

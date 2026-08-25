@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { checkUsageLimit, incrementUsage } from '../auth.js'
+import { generationUuidFromApproval } from '../credits/generation-id.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import { runGrokImageGenerate } from '../grok-image-generate.js'
 import { logApiUsage, estimateTokens } from '../usage-logger.js'
@@ -75,7 +76,7 @@ export async function runBulkScripts(options: {
   const items: BulkScriptItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
     const angle = angles[i]
-    const generationId = `${packId}-script-${i + 1}`
+    const generationId = generationUuidFromApproval(packId, `script:${i + 1}`)
     const limit = await checkUsageLimit(runtime.user.id, 'script')
     if (!limit.allowed) {
       items.push({
@@ -126,19 +127,33 @@ export async function runBulkScripts(options: {
           niche: angle.niche,
         },
       })
-      const incrementResult = await incrementUsage(runtime.user.id, 'script', { generationId })
-      if (incrementResult?.creditsError) {
-        throw new Error(`Credit charge failed: ${incrementResult.creditsError}`)
+      try {
+        const incrementResult = await incrementUsage(runtime.user.id, 'script', { generationId })
+        if (incrementResult?.creditsError) {
+          throw new Error(`Credit charge failed: ${incrementResult.creditsError}`)
+        }
+        items.push({
+          angleId: angle.id,
+          title: script.title,
+          content: script.content,
+          scriptId: saved.scriptId,
+          messageId: saved.messageId,
+          charged: incrementResult?.creditsCharged ?? SCRIPT_CREDITS_EACH,
+          generationId,
+        })
+      } catch (chargeErr) {
+        // Artifact already in library — keep ids so reclaim can charge-only / surface once.
+        items.push({
+          angleId: angle.id,
+          title: script.title,
+          content: script.content,
+          scriptId: saved.scriptId,
+          messageId: saved.messageId,
+          charged: 0,
+          generationId,
+          error: chargeErr instanceof Error ? chargeErr.message : 'Credit charge failed',
+        })
       }
-      items.push({
-        angleId: angle.id,
-        title: script.title,
-        content: script.content,
-        scriptId: saved.scriptId,
-        messageId: saved.messageId,
-        charged: incrementResult?.creditsCharged ?? SCRIPT_CREDITS_EACH,
-        generationId,
-      })
     } catch (err) {
       items.push({
         angleId: angle.id,
@@ -207,7 +222,7 @@ export async function runBulkPosts(options: {
   const items: BulkPostItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
     const angle = angles[i]
-    const generationId = `${packId}-image-${i + 1}`
+    const generationId = generationUuidFromApproval(packId, `image:${i + 1}`)
     const approach = POST_APPROACHES[i % POST_APPROACHES.length]
     const script = options.scripts?.find((row) => row.angleId === angle.id)
     const rotated = refs.length ? [refs[i % refs.length], refs[(i + 1) % refs.length]].filter(Boolean) : []
@@ -270,23 +285,37 @@ export async function runBulkPosts(options: {
         source: runtime.source,
         metadata: { action: 'bulk_post', packId, angleId: angle.id, approach },
       })
-      const incrementResult = await incrementUsage(runtime.user.id, 'image', {
-        generationId,
-        imageModel,
-      })
-      if (incrementResult?.creditsError) {
-        throw new Error(`Credit charge failed: ${incrementResult.creditsError}`)
+      try {
+        const incrementResult = await incrementUsage(runtime.user.id, 'image', {
+          generationId,
+          imageModel,
+        })
+        if (incrementResult?.creditsError) {
+          throw new Error(`Credit charge failed: ${incrementResult.creditsError}`)
+        }
+        items.push({
+          angleId: angle.id,
+          scriptTitle: script?.title,
+          imageUrl: saved.imageUrl,
+          productImageId: saved.productImageId,
+          messageId: saved.messageId,
+          charged: incrementResult?.creditsCharged ?? imageCreditsEach(imageModel),
+          generationId,
+          approach,
+        })
+      } catch (chargeErr) {
+        items.push({
+          angleId: angle.id,
+          scriptTitle: script?.title,
+          imageUrl: saved.imageUrl,
+          productImageId: saved.productImageId,
+          messageId: saved.messageId,
+          charged: 0,
+          generationId,
+          approach,
+          error: chargeErr instanceof Error ? chargeErr.message : 'Credit charge failed',
+        })
       }
-      items.push({
-        angleId: angle.id,
-        scriptTitle: script?.title,
-        imageUrl: saved.imageUrl,
-        productImageId: saved.productImageId,
-        messageId: saved.messageId,
-        charged: incrementResult?.creditsCharged ?? imageCreditsEach(imageModel),
-        generationId,
-        approach,
-      })
     } catch (err) {
       items.push({
         angleId: angle.id,
