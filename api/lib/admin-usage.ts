@@ -30,6 +30,7 @@ export type AdminUsageLogRow = {
   success: boolean | null
   created_at: string
   metadata?: Record<string, unknown> | null
+  source?: string | null
 }
 
 export type UsageSummaryRow = {
@@ -76,6 +77,7 @@ export type RecentLogRow = {
   success: boolean
   created_at: string
   metadata?: Record<string, unknown> | null
+  source?: string | null
 }
 
 function num(value: number | string | null | undefined): number {
@@ -93,6 +95,16 @@ function utcDay(iso: string): string {
   return new Date(parsed).toISOString().slice(0, 10)
 }
 
+export function resolveUsageLogSource(row: {
+  source?: string | null
+  metadata?: Record<string, unknown> | null
+}): string {
+  if (typeof row.source === 'string' && row.source.trim()) return row.source.trim()
+  const meta = row.metadata?.source
+  if (typeof meta === 'string' && meta.trim()) return meta.trim()
+  return 'web'
+}
+
 function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
   return {
     id: row.id,
@@ -105,6 +117,7 @@ function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
     success: row.success !== false,
     created_at: row.created_at,
     metadata: row.metadata || {},
+    source: resolveUsageLogSource(row),
   }
 }
 
@@ -206,15 +219,18 @@ export function aggregateUserUsageStats(rows: AdminUsageLogRow[]): UserUsageStat
 
 export function paginateUsageLogs(
   rows: AdminUsageLogRow[],
-  opts: { search?: string; offset?: number; limit?: number }
+  opts: { search?: string; offset?: number; limit?: number; source?: string }
 ): { logs: RecentLogRow[]; hasMore: boolean } {
   const search = (opts.search || '').trim().toLowerCase()
+  const source = (opts.source || '').trim().toLowerCase()
   const offset = Math.max(0, opts.offset || 0)
   const limit = Math.max(1, opts.limit || 20)
 
-  const filtered = search
-    ? rows.filter(row => (row.user_email || '').toLowerCase().includes(search))
-    : rows
+  const filtered = rows.filter((row) => {
+    if (search && !(row.user_email || '').toLowerCase().includes(search)) return false
+    if (source && source !== 'all' && resolveUsageLogSource(row) !== source) return false
+    return true
+  })
 
   const ordered = [...filtered].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
   const slice = ordered.slice(offset, offset + limit)

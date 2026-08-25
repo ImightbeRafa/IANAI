@@ -380,6 +380,28 @@ export default function AdminTickets({
                           <p className="text-[10px] font-semibold text-dark-400 uppercase mb-1">{t.browser}</p>
                           <p className="text-[10px] text-dark-600 font-mono truncate">{ticket.browser_info || '-'}</p>
                         </div>
+                        <div className="bg-dark-50 rounded-lg p-2.5">
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase mb-1">
+                            {language === 'es' ? 'Superficie' : 'Surface'}
+                          </p>
+                          <p className="text-xs text-dark-700 font-mono">{ticket.ui_surface || '-'}</p>
+                        </div>
+                        <div className="bg-dark-50 rounded-lg p-2.5">
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase mb-1">
+                            {language === 'es' ? 'Idioma' : 'Locale'}
+                          </p>
+                          <p className="text-xs text-dark-700 font-mono">{ticket.locale || '-'}</p>
+                        </div>
+                        <div className="bg-dark-50 rounded-lg p-2.5">
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase mb-1">Viewport</p>
+                          <p className="text-xs text-dark-700 font-mono">{ticket.viewport || '-'}</p>
+                        </div>
+                        <div className="bg-dark-50 rounded-lg p-2.5">
+                          <p className="text-[10px] font-semibold text-dark-400 uppercase mb-1">
+                            {language === 'es' ? 'Versión' : 'Version'}
+                          </p>
+                          <p className="text-xs text-dark-700 font-mono">{ticket.app_version || '-'}</p>
+                        </div>
                       </div>
 
                       {/* Console errors */}

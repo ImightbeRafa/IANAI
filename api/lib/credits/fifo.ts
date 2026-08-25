@@ -82,8 +82,8 @@ export function planFifoSpend(
 }
 
 /**
- * After a monthly grant: fold leftover monthly into rollover (1 cycle),
- * cap monthly+rollover at 2× allotment (burn oldest first).
+ * After a monthly grant: unused monthly is burned (no rollover).
+ * Pack / welcome / bonus_migration / comp lots are untouched.
  */
 export function applyMonthlyGrant(options: {
   lots: CreditLot[]
@@ -94,47 +94,18 @@ export function applyMonthlyGrant(options: {
   newMonthlyLotId: string
   newRolloverLotId: string
 }): CreditLot[] {
-  const { allotment, nowMs, periodEndMs, nextPeriodEndMs } = options
+  const { allotment, nowMs, nextPeriodEndMs } = options
   const lots = options.lots.map((l) => ({ ...l }))
 
-  // Expire anything past expiry
   for (const lot of lots) {
     if (lot.expiresAtMs != null && lot.expiresAtMs <= nowMs) {
       lot.remaining = 0
     }
   }
 
-  const leftoverMonthly = lots
-    .filter((l) => l.kind === 'monthly' && l.remaining > 0)
-    .reduce((s, l) => s + l.remaining, 0)
-
+  // Burn prior monthly + legacy rollover
   for (const lot of lots) {
-    if (lot.kind === 'monthly') lot.remaining = 0
-  }
-
-  if (leftoverMonthly > 0) {
-    lots.push({
-      id: options.newRolloverLotId,
-      kind: 'rollover',
-      remaining: leftoverMonthly,
-      expiresAtMs: nextPeriodEndMs,
-      createdAtMs: nowMs,
-    })
-  }
-
-  // Cap monthly+rollover at 2×
-  const cap = allotment * 2
-  let pool = lots
-    .filter((l) => (l.kind === 'monthly' || l.kind === 'rollover') && l.remaining > 0)
-    .sort((a, b) => (a.expiresAtMs ?? 0) - (b.expiresAtMs ?? 0) || a.createdAtMs - b.createdAtMs)
-  let total = pool.reduce((s, l) => s + l.remaining, 0)
-  while (total > cap && pool.length) {
-    const burn = total - cap
-    const oldest = pool[0]
-    const take = Math.min(oldest.remaining, burn)
-    oldest.remaining -= take
-    total -= take
-    if (oldest.remaining <= 0) pool = pool.slice(1)
+    if (lot.kind === 'monthly' || lot.kind === 'rollover') lot.remaining = 0
   }
 
   lots.push({
@@ -145,8 +116,8 @@ export function applyMonthlyGrant(options: {
     createdAtMs: nowMs,
   })
 
-  // periodEndMs reserved for callers who stamp metadata; silence unused if identical
-  void periodEndMs
+  void options.periodEndMs
+  void options.newRolloverLotId
 
   return lots.filter((l) => l.remaining > 0 || l.kind === 'monthly')
 }

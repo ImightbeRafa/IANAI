@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'name', 'logo_url', 'primary_color', 'secondary_color', 'accent_color',
     'font_primary', 'font_secondary', 'tagline', 'industry', 'target_audience',
     'brand_voice', 'tone_keywords', 'must_use_phrases', 'forbidden_phrases',
-    'visual_style_notes', 'reference_images', 'is_active', 'is_default', 'business_id',
+    'visual_style_notes', 'reference_images', 'style_dnas', 'is_active', 'is_default', 'business_id',
   ] as const
   for (const key of copyKeys) {
     if (key in body) payload[key] = body[key]

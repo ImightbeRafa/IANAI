@@ -67,8 +67,7 @@ export const PLAN_CATALOG_UI: Record<FrontendPlanId, {
     credits: 4800,
     kits: 20,
     color: 'emerald',
-    // TODO(human): TiloPay Business $149/mo
-    paymentLink: null,
+    paymentLink: 'https://tp.cr/l/TmpreE9BPT18MQ==',
     publicUpgrade: true,
     creditLabelEs: '4,800 créditos / mes',
     creditLabelEn: '4,800 credits / month',
@@ -100,8 +99,8 @@ export const PLAN_CATALOG_UI: Record<FrontendPlanId, {
 export const CREDIT_PACK_UI = {
   price: 25,
   credits: 500,
-  // TODO(human): TiloPay $25 / 500 créditos
-  paymentLink: null as string | null,
+  /** Pack checkout uses TiloPay one-time API (no static link). */
+  paymentLink: 'api:one-time' as string | null,
   labelEs: '500 créditos · $25 · válidos 12 meses',
   labelEn: '500 credits · $25 · valid 12 months',
 }

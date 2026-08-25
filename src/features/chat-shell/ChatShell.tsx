@@ -29,6 +29,8 @@ import type { ProductImage } from '../../services/database'
 import { useChatShellRollout } from './ChatShellRolloutContext'
 import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
+import ChatShellBulkDialog from './ChatShellBulkDialog'
+import { clampComposerBulkCount } from './chatShellBulk'
 import {
   captureMcpIntakeFromUrl,
   clearStoredMcpIntake,
@@ -77,6 +79,8 @@ export default function ChatShell({
   const [aiMemoryEnabled] = useState(() => readAiMemoryEnabled(
     typeof localStorage !== 'undefined' ? localStorage : null
   ))
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkCount, setBulkCount] = useState(10)
   const [mcpIntake, setMcpIntake] = useState<ChatShellMcpIntakeIntent | null>(() => {
     if (typeof window === 'undefined') return null
     return captureMcpIntakeFromUrl() || readStoredMcpIntake()
@@ -323,6 +327,11 @@ export default function ChatShell({
     }
     if (command?.id === 'logo') {
       return send(command.rest ? `logo ${command.rest}` : 'logo')
+    }
+    if (command?.id === 'bulk') {
+      setBulkCount(clampComposerBulkCount(command.rest || 10))
+      setBulkOpen(true)
+      return
     }
     if (isBrandRuleRequest(text)) {
       return brandSetup.addRule(text)
@@ -693,6 +702,16 @@ export default function ChatShell({
                     void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
                   },
                 },
+                {
+                  id: 'bulk',
+                  label: t.createBulkShort,
+                  active: false,
+                  disabled: brandSetup.busy || thread.loadingMessages || !workspace.activeBrand,
+                  onClick: () => {
+                    setBulkCount(10)
+                    setBulkOpen(true)
+                  },
+                },
               ]}
               reviewPanel={(
             <ChatBrandProfileCard
@@ -826,6 +845,22 @@ export default function ChatShell({
         onRequestEdit={(reason, attachments) => void requestImageEdit(reason, attachments)}
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
+
+      {bulkOpen && workspace.activeBrand ? (
+        <ChatShellBulkDialog
+          open={bulkOpen}
+          language={language}
+          brandId={workspace.activeBrand.id}
+          offerId={thread.activeProduct?.id || thread.offers[0]?.product_id}
+          sessionId={workspace.activeSession?.id}
+          initialCount={bulkCount}
+          onClose={() => setBulkOpen(false)}
+          onDone={(summary) => {
+            setBulkOpen(false)
+            void thread.persistTurn('assistant', summary)
+          }}
+        />
+      ) : null}
 
       {mcpIntakeOpen && mcpIntake && workspace.activeBrand && (
         <ChatShellMcpIntakeDialog

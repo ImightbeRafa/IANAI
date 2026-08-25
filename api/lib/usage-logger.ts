@@ -50,6 +50,8 @@ export type FeatureType =
   | 'script_hook'
   | 'script_consciousness'
 
+export type UsageSource = 'mcp' | 'web' | 'cron'
+
 interface UsageLogParams {
   userId?: string
   userEmail?: string
@@ -64,6 +66,22 @@ interface UsageLogParams {
   success?: boolean
   errorMessage?: string
   metadata?: Record<string, unknown>
+  /** Origin of the call. Defaults to web; falls back to metadata.source when omitted. */
+  source?: UsageSource | string
+}
+
+export function resolveUsageSource(params: {
+  source?: string
+  metadata?: Record<string, unknown>
+}): string {
+  if (typeof params.source === 'string' && params.source.trim()) {
+    return params.source.trim()
+  }
+  const metaSource = params.metadata?.source
+  if (typeof metaSource === 'string' && metaSource.trim()) {
+    return metaSource.trim()
+  }
+  return 'web'
 }
 
 export async function logApiUsage(params: UsageLogParams): Promise<void> {
@@ -86,7 +104,8 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       costSource,
       success = true,
       errorMessage,
-      metadata = {}
+      metadata = {},
+      source,
     } = params
 
     let estimatedCostUsd = 0
@@ -143,6 +162,8 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       ...(inferredCostSource ? { costSource: inferredCostSource } : {})
     }
 
+    const resolvedSource = resolveUsageSource({ source, metadata: enrichedMetadata })
+
     const insertPayload = {
       user_id: userId,
       user_email: userEmail,
@@ -155,13 +176,20 @@ export async function logApiUsage(params: UsageLogParams): Promise<void> {
       estimated_cost_usd: estimatedCostUsd,
       success,
       error_message: errorMessage,
-      metadata: enrichedMetadata
+      metadata: enrichedMetadata,
+      source: resolvedSource,
     }
 
     let { error } = await supabase.from('api_usage_logs').insert(insertPayload)
 
     if (error && generationId && /generation_id/i.test(error.message || '')) {
       const { generation_id: _generationId, ...fallbackPayload } = insertPayload
+      const retry = await supabase.from('api_usage_logs').insert(fallbackPayload)
+      error = retry.error
+    }
+
+    if (error && /source/i.test(error.message || '')) {
+      const { source: _source, ...fallbackPayload } = insertPayload
       const retry = await supabase.from('api_usage_logs').insert(fallbackPayload)
       error = retry.error
     }

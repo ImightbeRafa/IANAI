@@ -7,6 +7,7 @@ import {
   planBrandSwitch,
   removeInFlightSession,
   selectionsEqual,
+  shouldApplyBrandProductRefresh,
 } from '../src/features/chat-shell/chatShellAsync'
 
 /** Minimal stand-in for the thread gate used by useChatSessionThread. */
@@ -121,6 +122,26 @@ describe('chatShellAsync helpers', () => {
     expect(isSessionSending(inFlight, 'b')).toBe(false)
     inFlight = removeInFlightSession(inFlight, 'a')
     expect(isSessionSending(inFlight, 'a')).toBe(false)
+  })
+
+  it('shouldApplyBrandProductRefresh ignores stale or cancelled brand fetches', () => {
+    expect(shouldApplyBrandProductRefresh({
+      requestedBrandId: 'b1',
+      liveBrandId: 'b1',
+    })).toBe(true)
+    expect(shouldApplyBrandProductRefresh({
+      requestedBrandId: 'b1',
+      liveBrandId: 'b2',
+    })).toBe(false)
+    expect(shouldApplyBrandProductRefresh({
+      requestedBrandId: 'b1',
+      liveBrandId: 'b1',
+      cancelled: true,
+    })).toBe(false)
+    expect(shouldApplyBrandProductRefresh({
+      requestedBrandId: 'b1',
+      liveBrandId: null,
+    })).toBe(false)
   })
 
   it('selectionsEqual compares brand and session', () => {
@@ -294,6 +315,34 @@ describe('thread async isolation races', () => {
 
     expect(sessions.map((s) => s.id)).toEqual(['brand2-s'])
     expect(sessions.every((s) => s.business_id === 'brand-2')).toBe(true)
+  })
+
+  it('ignores stale refreshBrandProducts after brand A→B', async () => {
+    let liveBrandId: string | null = 'brand-a'
+    let requestId = 0
+    let products: string[] = ['a-old']
+    const deferred = createDeferred<string[]>()
+
+    const refreshPromise = (async () => {
+      const requestedBrandId = liveBrandId
+      if (!requestedBrandId) return
+      const captured = ++requestId
+      const next = await deferred.promise
+      if (!shouldApplyBrandProductRefresh({
+        requestedBrandId,
+        liveBrandId,
+        cancelled: captured !== requestId,
+      })) return
+      products = next
+    })()
+
+    liveBrandId = 'brand-b'
+    requestId += 1
+    products = ['b-cached']
+    deferred.resolve(['a-stale'])
+    await refreshPromise
+
+    expect(products).toEqual(['b-cached'])
   })
 
   it('switches instantly when the destination folder already has a session cache', () => {

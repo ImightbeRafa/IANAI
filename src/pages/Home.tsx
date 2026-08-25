@@ -65,9 +65,9 @@ export default function Home() {
           name: 'Free',
           price: '$0',
           features: [
-            '10 guiones al mes',
-            '10 descripciones al mes',
-            '1 diseño gráfico de regalo al mes'
+            '150 créditos de bienvenida (una vez)',
+            '1 Brand Kit',
+            'Guion = 3 · Imagen = 6 · Pro = 24'
           ],
           cta: 'Empezá gratis'
         },
@@ -75,9 +75,9 @@ export default function Home() {
           name: 'Starter',
           price: '$33',
           features: [
-            '30 guiones al mes',
-            'Descripciones ilimitadas',
-            '5 diseños publicitarios de regalo al mes'
+            '750 créditos / mes',
+            '2 Brand Kits',
+            'Paquete extra de créditos disponible'
           ],
           cta: 'Comenzar'
         },
@@ -86,10 +86,10 @@ export default function Home() {
           badge: 'Más popular',
           price: '$49',
           features: [
-            'Guiones ilimitados',
-            'Descripciones ilimitadas',
+            '1,500 créditos / mes',
+            '5 Brand Kits',
             'Entrada de voz para guiones',
-            '100 diseños publicitarios al mes'
+            'Ideal para publicar seguido'
           ],
           cta: 'Comenzar'
         },
@@ -97,8 +97,8 @@ export default function Home() {
           name: 'Enterprise',
           price: '$299',
           features: [
-            'Todo ilimitado',
-            'Personalización del comportamiento de la IA',
+            '9,600 créditos / mes',
+            'Hasta 50 Brand Kits',
             'Soporte prioritario'
           ],
           cta: 'Contactanos'
@@ -198,9 +198,9 @@ export default function Home() {
           name: 'Free',
           price: '$0',
           features: [
-            '10 scripts per month',
-            '10 descriptions per month',
-            '1 free graphic design per month'
+            '150 welcome credits (once)',
+            '1 Brand Kit',
+            'Script = 3 · Image = 6 · Pro = 24'
           ],
           cta: 'Start for free'
         },
@@ -208,9 +208,9 @@ export default function Home() {
           name: 'Starter',
           price: '$33',
           features: [
-            '30 scripts per month',
-            'Unlimited descriptions',
-            '5 free ad designs per month'
+            '750 credits / month',
+            '2 Brand Kits',
+            'Extra credit packs available'
           ],
           cta: 'Get Started'
         },
@@ -219,10 +219,10 @@ export default function Home() {
           badge: 'Most popular',
           price: '$49',
           features: [
-            'Unlimited scripts',
-            'Unlimited descriptions',
+            '1,500 credits / month',
+            '5 Brand Kits',
             'Voice input for scripts',
-            '100 ad designs per month'
+            'Built for steady publishing'
           ],
           cta: 'Get Started'
         },
@@ -230,8 +230,8 @@ export default function Home() {
           name: 'Enterprise',
           price: '$299',
           features: [
-            'Everything unlimited',
-            'AI behavior customization',
+            '9,600 credits / month',
+            'Up to 50 Brand Kits',
             'Priority support'
           ],
           cta: 'Contact us'

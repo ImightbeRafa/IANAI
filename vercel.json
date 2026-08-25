@@ -13,7 +13,19 @@
       "maxDuration": 240
     },
     "api/mcp.ts": {
-      "maxDuration": 30
+      "maxDuration": 180
+    },
+    "api/bulk-angles.ts": {
+      "maxDuration": 60
+    },
+    "api/bulk-scripts.ts": {
+      "maxDuration": 180
+    },
+    "api/bulk-posts.ts": {
+      "maxDuration": 300
+    },
+    "api/bulk-campaign.ts": {
+      "maxDuration": 300
     },
     "api/mcp-guide-analysis.ts": {
       "maxDuration": 60

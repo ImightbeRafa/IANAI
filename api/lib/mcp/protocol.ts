@@ -4,6 +4,11 @@
 
 import { listEnabledMcpTools, getMcpTool } from './tool-registry.js'
 import {
+  dispatchAdminTool,
+  isAdminToolName,
+  type McpAdminStore,
+} from './admin-tools.js'
+import {
   mcpGetBrandContext,
   mcpListBrands,
   type McpAuthUser,
@@ -19,19 +24,38 @@ import {
   mcpWorkspaceImportAsset,
   mcpWorkspaceIngestFile,
   mcpWorkspaceNoteGeneratedOutside,
+  mcpWorkspaceSaveArtifact,
   type McpWorkspaceStore,
 } from './workspace-ops.js'
 import {
+  mcpExecuteCarouselGenerate,
+  mcpExecuteImageEdit,
+  mcpExecuteImageEnhance,
   mcpExecuteImageGenerate,
   mcpExecuteScriptGenerate,
 } from './execute-tools.js'
+import {
+  mcpExecuteBulkPosts,
+  mcpExecuteBulkScripts,
+  mcpExecuteCampaignPack,
+  mcpGuideBulkAngles,
+  mcpListStyleDnas,
+  mcpSetStyleDna,
+} from './bulk-tools.js'
 import type { McpApprovalStore } from './approval.js'
 import type { McpArtifactStore } from './artifact-store.js'
+import {
+  mcpArchiveBrand,
+  mcpDeleteAsset,
+  mcpDeleteBrand,
+  mcpDeleteOffer,
+  type McpDeleteStore,
+} from './delete-tools.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.6.0',
+  version: '0.8.1',
 }
 
 export type McpJsonRpcRequest = {
@@ -120,6 +144,53 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['brandId'],
         additionalProperties: false,
       }
+    case 'guide_bulk_angles':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          count: { type: 'number' },
+          language: { type: 'string', enum: ['es', 'en'] },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'list_style_dnas':
+      return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'set_style_dna':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          id: { type: 'string' },
+          name: { type: 'string' },
+          kind: { type: 'string', enum: ['organic', 'ads'] },
+          referenceUrls: { type: 'array', items: { type: 'string' } },
+          notes: { type: 'string' },
+        },
+        required: ['brandId', 'name'],
+        additionalProperties: false,
+      }
+    case 'execute_bulk_scripts':
+    case 'execute_bulk_posts':
+    case 'execute_campaign_pack':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          count: { type: 'number' },
+          language: { type: 'string', enum: ['es', 'en'] },
+          angleIds: { type: 'array', items: { type: 'string' } },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+          imageModel: { type: 'string' },
+          styleDnaId: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
     case 'workspace_save_url_context':
       return {
         type: 'object',
@@ -169,6 +240,163 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['brandId'],
         additionalProperties: false,
       }
+    case 'workspace_save_artifact':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          kind: { type: 'string', enum: ['script', 'image'] },
+          title: { type: 'string' },
+          content: { type: 'string', description: 'Script text. Do not send huge payloads.' },
+          imageUrl: { type: 'string', description: 'https URL only — no base64 data URLs.' },
+          productImageId: { type: 'string' },
+          scriptId: { type: 'string' },
+          sessionId: { type: 'string' },
+        },
+        required: ['brandId', 'kind'],
+        additionalProperties: false,
+      }
+    case 'execute_image_edit':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          productImageId: { type: 'string' },
+          imageUrl: { type: 'string', description: 'https URL of an already-in-workspace or public image. No base64.' },
+          editPrompt: { type: 'string' },
+          aspectRatio: { type: 'string' },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'editPrompt'],
+        additionalProperties: false,
+      }
+    case 'execute_image_enhance':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          productImageId: { type: 'string' },
+          imageUrl: { type: 'string', description: 'https URL. No base64.' },
+          enhanceTier: { type: 'string', enum: ['polish', 'modernize', 'rebuild'] },
+          instruction: { type: 'string' },
+          aspectRatio: { type: 'string' },
+          language: { type: 'string', enum: ['es', 'en'] },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'execute_carousel_generate':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          scriptContent: { type: 'string' },
+          subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },
+          slideCount: { type: 'number', minimum: 2, maximum: 10 },
+          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
+          language: { type: 'string', enum: ['es', 'en'] },
+          designDirection: { type: 'string' },
+          slideDetails: { type: 'string' },
+          previewFirstSlideOnly: { type: 'boolean' },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'scriptContent'],
+        additionalProperties: false,
+      }
+    case 'archive_brand':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          confirm: { type: 'string', description: 'Type the exact brand name.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'delete_offer':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          confirm: { type: 'string', description: 'Type the exact offer name.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'offerId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'delete_brand':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          confirm: { type: 'string', description: 'Type the exact brand name. Permanent. No recovery.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'delete_asset':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          assetId: { type: 'string' },
+          productImageId: { type: 'string' },
+          confirm: { type: 'string', description: 'Must be DELETE.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'admin_list_tickets':
+      return {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'closed'] },
+          limit: { type: 'number' },
+        },
+        additionalProperties: false,
+      }
+    case 'admin_get_ticket':
+    case 'admin_request_cursor_fix':
+      return {
+        type: 'object',
+        properties: { ticketId: { type: 'string' } },
+        required: ['ticketId'],
+        additionalProperties: false,
+      }
+    case 'admin_update_ticket':
+      return {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'string' },
+          status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'closed'] },
+          comment: { type: 'string' },
+        },
+        required: ['ticketId'],
+        additionalProperties: false,
+      }
+    case 'admin_get_usage':
+      return {
+        type: 'object',
+        properties: {
+          startDate: { type: 'string' },
+          endDate: { type: 'string' },
+          source: { type: 'string', enum: ['mcp', 'web', 'cron'] },
+          limit: { type: 'number' },
+        },
+        additionalProperties: false,
+      }
     default:
       return { type: 'object', properties: {}, additionalProperties: false }
   }
@@ -182,9 +410,13 @@ export async function handleMcpJsonRpc(options: {
   workspaceStore?: McpWorkspaceStore | null
   approvalStore?: McpApprovalStore | null
   artifactStore?: McpArtifactStore | null
+  adminStore?: McpAdminStore | null
+  deleteStore?: McpDeleteStore | null
+  isAdmin?: boolean
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
   const { body, user, db } = options
+  const isAdmin = options.isAdmin === true
   if (body.jsonrpc && body.jsonrpc !== '2.0') {
     return fail(body.id, -32600, 'Invalid Request: jsonrpc must be 2.0')
   }
@@ -201,7 +433,7 @@ export async function handleMcpJsonRpc(options: {
     case 'notifications/initialized':
       return ok(body.id, {})
     case 'tools/list': {
-      const tools = listEnabledMcpTools().map((tool) => ({
+      const tools = listEnabledMcpTools({ isAdmin }).map((tool) => ({
         name: tool.name,
         description: tool.description,
         inputSchema: toolInputSchema(tool.name),
@@ -217,6 +449,9 @@ export async function handleMcpJsonRpc(options: {
       if (!def || !def.enabled) {
         return fail(body.id, -32601, `Unknown or disabled tool: ${name || '(missing)'}`)
       }
+      if ((def.group === 'admin' || def.risk === 'admin' || isAdminToolName(name)) && !isAdmin) {
+        return fail(body.id, -32601, `Unknown or disabled tool: ${name}`)
+      }
       try {
         const payload = await dispatchEnabledTool({
           name,
@@ -227,6 +462,9 @@ export async function handleMcpJsonRpc(options: {
           workspaceStore: options.workspaceStore,
           approvalStore: options.approvalStore,
           artifactStore: options.artifactStore,
+          adminStore: options.adminStore,
+          deleteStore: options.deleteStore,
+          isAdmin,
           appOrigin: options.appOrigin,
         })
         return ok(body.id, {
@@ -255,8 +493,21 @@ async function dispatchEnabledTool(options: {
   workspaceStore?: McpWorkspaceStore | null
   approvalStore?: McpApprovalStore | null
   artifactStore?: McpArtifactStore | null
+  adminStore?: McpAdminStore | null
+  deleteStore?: McpDeleteStore | null
+  isAdmin?: boolean
   appOrigin?: string
 }): Promise<unknown> {
+  if (isAdminToolName(options.name)) {
+    if (!options.isAdmin) throw new Error('Admin access required')
+    if (!options.adminStore) throw new Error('Admin store not configured')
+    return dispatchAdminTool({
+      name: options.name,
+      args: options.args,
+      store: options.adminStore,
+    })
+  }
+
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
 
   switch (options.name) {
@@ -348,6 +599,142 @@ async function dispatchEnabledTool(options: {
         db: options.db,
         approvalStore: options.approvalStore,
         artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'guide_bulk_angles':
+      return mcpGuideBulkAngles(options.db, options.user, options.args)
+    case 'list_style_dnas':
+      return mcpListStyleDnas(options.db, options.user, brandId)
+    case 'set_style_dna':
+      return mcpSetStyleDna(options.db, options.user, options.args)
+    case 'execute_bulk_scripts': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteBulkScripts({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_bulk_posts': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteBulkPosts({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_campaign_pack': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteCampaignPack({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_image_edit': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteImageEdit({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_image_enhance': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteImageEnhance({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_carousel_generate': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteCarouselGenerate({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'workspace_save_artifact': {
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpWorkspaceSaveArtifact({
+        db: options.db,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'archive_brand': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpArchiveBrand({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'delete_offer': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpDeleteOffer({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'delete_brand': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpDeleteBrand({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'delete_asset': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpDeleteAsset({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,

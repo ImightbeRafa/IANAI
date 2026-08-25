@@ -55,6 +55,8 @@ interface DailyUsage {
   total_cost_usd: number
 }
 
+type UsageSourceFilter = 'all' | 'web' | 'mcp' | 'cron'
+
 interface RecentLog {
   id: string
   user_email: string
@@ -66,6 +68,7 @@ interface RecentLog {
   success: boolean
   created_at: string
   metadata?: Record<string, unknown> | null
+  source?: string | null
 }
 
 interface ImageModelPerformance {
@@ -236,6 +239,27 @@ function ModelChip({ model }: { model: string }) {
   )
 }
 
+function resolveLogSource(log: RecentLog): string {
+  if (typeof log.source === 'string' && log.source.trim()) return log.source.trim()
+  const meta = log.metadata?.source
+  if (typeof meta === 'string' && meta.trim()) return meta.trim()
+  return 'web'
+}
+
+function SourceBadge({ source }: { source: string }) {
+  const label = source === 'mcp' ? 'MCP' : source === 'cron' ? 'Cron' : 'Web'
+  const tone = source === 'mcp'
+    ? 'bg-sky-900/20 text-sky-400'
+    : source === 'cron'
+      ? 'bg-amber-900/20 text-amber-400'
+      : 'bg-dark-200 text-dark-500'
+  return (
+    <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${tone}`}>
+      {label}
+    </span>
+  )
+}
+
 function formatLogTime(iso: string, language: string) {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
@@ -271,6 +295,7 @@ export default function AdminDashboard({
   const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [userStats, setUserStats] = useState<UserUsageStats[]>([])
   const [logSearch, setLogSearch] = useState('')
+  const [logSource, setLogSource] = useState<UsageSourceFilter>('all')
   const [logPage, setLogPage] = useState(0)
   const [hasMoreLogs, setHasMoreLogs] = useState(true)
   const [loadingMoreLogs, setLoadingMoreLogs] = useState(false)
@@ -335,7 +360,12 @@ export default function AdminDashboard({
       time: 'Hora',
       status: 'Estado',
       success: 'Éxito',
-      failed: 'Fallido'
+      failed: 'Fallido',
+      source: 'Origen',
+      sourceAll: 'Todos',
+      sourceWeb: 'Web',
+      sourceMcp: 'MCP',
+      sourceCron: 'Cron'
     },
     en: {
       title: 'Admin Dashboard',
@@ -388,7 +418,12 @@ export default function AdminDashboard({
       time: 'Time',
       status: 'Status',
       success: 'Success',
-      failed: 'Failed'
+      failed: 'Failed',
+      source: 'Source',
+      sourceAll: 'All',
+      sourceWeb: 'Web',
+      sourceMcp: 'MCP',
+      sourceCron: 'Cron'
     }
   }
 
@@ -403,7 +438,7 @@ export default function AdminDashboard({
 
   const LOG_PAGE_SIZE = 20
 
-  const fetchUsageFromApi = async (opts?: { search?: string; offset?: number; logsOnly?: boolean }) => {
+  const fetchUsageFromApi = async (opts?: { search?: string; offset?: number; logsOnly?: boolean; source?: UsageSourceFilter }) => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error(language === 'es' ? 'Sesión no encontrada' : 'No active session')
 
@@ -416,6 +451,7 @@ export default function AdminDashboard({
     })
     if (opts?.search?.trim()) params.set('search', opts.search.trim())
     if (opts?.logsOnly) params.set('logs_only', '1')
+    if (opts?.source && opts.source !== 'all') params.set('source', opts.source)
 
     const resp = await fetch(`${adminApiUrl('admin-usage')}?${params.toString()}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
@@ -447,7 +483,7 @@ export default function AdminDashboard({
       const { startDate } = usageWindow()
 
       try {
-        const usageData = await fetchUsageFromApi({ offset: 0 })
+        const usageData = await fetchUsageFromApi({ offset: 0, source: logSource })
         setUsageSummary(usageData.summary || [])
         setDailyUsage(usageData.daily || [])
         setUserStats(usageData.userStats || [])
@@ -586,12 +622,13 @@ export default function AdminDashboard({
     }
   }, [isAdmin, dateRange])
 
-  const fetchLogs = async (search: string) => {
+  const fetchLogs = async (search: string, source: UsageSourceFilter = logSource) => {
     setLogSearch(search)
+    setLogSource(source)
     setLogPage(0)
     setLoadingMoreLogs(true)
     try {
-      const usageData = await fetchUsageFromApi({ search, offset: 0, logsOnly: true })
+      const usageData = await fetchUsageFromApi({ search, offset: 0, logsOnly: true, source })
       setRecentLogs(usageData.logs || [])
       setHasMoreLogs(Boolean(usageData.hasMore))
     } catch (err) {
@@ -609,6 +646,7 @@ export default function AdminDashboard({
         search: logSearch,
         offset: nextPage * LOG_PAGE_SIZE,
         logsOnly: true,
+        source: logSource,
       })
       setRecentLogs(prev => [...prev, ...(usageData.logs || [])])
       setHasMoreLogs(Boolean(usageData.hasMore))
@@ -1607,15 +1645,37 @@ export default function AdminDashboard({
                       type="text"
                       value={logSearch}
                       onChange={(e) => setLogSearch(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(logSearch) }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') fetchLogs(logSearch, logSource) }}
                       placeholder={language === 'es' ? 'Buscar por email...' : 'Search by email...'}
                       className="pl-9 pr-3 py-1.5 text-sm bg-dark-50 border border-dark-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary-500 w-full sm:w-64"
                     />
                   </div>
                 </div>
+                <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                  {([
+                    { id: 'all' as const, label: t.sourceAll },
+                    { id: 'web' as const, label: t.sourceWeb },
+                    { id: 'mcp' as const, label: t.sourceMcp },
+                    { id: 'cron' as const, label: t.sourceCron },
+                  ]).map((chip) => (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      onClick={() => { if (logSource !== chip.id) void fetchLogs(logSearch, chip.id) }}
+                      className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors ${
+                        logSource === chip.id
+                          ? 'bg-primary-900/20 text-primary-400 border-primary-500'
+                          : 'bg-dark-50 text-dark-500 border-dark-200 hover:border-dark-300'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
                 <p className="text-xs text-dark-400 mt-1">
                   {language === 'es' ? `Mostrando ${recentLogs.length} registros` : `Showing ${recentLogs.length} logs`}
                   {logSearch && (language === 'es' ? ` — filtrado por "${logSearch}"` : ` — filtered by "${logSearch}"`)}
+                  {logSource !== 'all' && (language === 'es' ? ` — origen ${logSource}` : ` — source ${logSource}`)}
                 </p>
               </div>
               <div className="overflow-x-auto">
@@ -1624,6 +1684,7 @@ export default function AdminDashboard({
                     <tr>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.time}</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.user}</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.source}</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.feature}</th>
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
                       <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.tokens}</th>
@@ -1639,6 +1700,9 @@ export default function AdminDashboard({
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">
                           <span className="admin-dash__email" title={log.user_email || ''}>{log.user_email || '-'}</span>
+                        </td>
+                        <td className="px-3 sm:px-6 py-3">
+                          <SourceBadge source={resolveLogSource(log)} />
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-dark-700">
                           {t[log.feature as keyof typeof t] || log.feature}

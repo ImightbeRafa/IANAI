@@ -28,6 +28,13 @@ export type McpBrandKitContext = {
   visualStyleNotes?: string | null
   fontPrimary?: string | null
   referenceImages?: string[]
+  styleDnas?: Array<{
+    id: string
+    name: string
+    kind: 'organic' | 'ads'
+    referenceUrls: string[]
+    notes: string
+  }>
 }
 
 export type McpGuideIntakeSummary = {

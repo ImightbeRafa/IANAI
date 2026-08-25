@@ -1,21 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { randomUUID } from 'node:crypto'
 import { supabaseAdmin as supabase } from '../lib/supabase-admin.js'
 import { CREDIT_PACK, PLAN_CATALOG, type PlanId } from '../lib/credits/catalog.js'
+import { createTilopayOneTimeCheckout } from '../lib/tilopay/one-time.js'
 
-// TiloPay API credentials from environment (NEVER hardcode these!)
-const TILOPAY_API_KEY = process.env.TILOPAY_API_KEY
-const TILOPAY_API_USER = process.env.TILOPAY_API_USER
-const TILOPAY_API_PASSWORD = process.env.TILOPAY_API_PASSWORD
-
-void TILOPAY_API_KEY
-void TILOPAY_API_USER
-void TILOPAY_API_PASSWORD
-
-/** Checkout SKUs — prefer catalog links; placeholders return 503 until human pastes URLs. */
+/** Checkout SKUs — subscription plans use static TiloPay links; credit_pack uses one-time API. */
 function paymentLinkFor(plan: string): string | null {
   if (plan === 'credit_pack' || plan === 'image_boost') {
-    // Prefer new pack; legacy boost link only as last resort for confirm-boost compat
-    return CREDIT_PACK.paymentLink || (plan === 'image_boost' ? CREDIT_PACK.legacyBoostLink : null)
+    return null // one-time API path below
   }
   const entry = PLAN_CATALOG[plan as PlanId]
   return entry?.paymentLink ?? null
@@ -53,7 +45,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let { plan } = req.body as { plan?: string }
     if (plan === 'image_boost') {
-      // Stop selling boost; redirect intent to credit pack when URL exists
       plan = 'credit_pack'
     }
 
@@ -68,13 +59,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid plan' })
     }
 
-    const checkoutUrl = paymentLinkFor(plan)
-    if (!checkoutUrl) {
-      return res.status(503).json({
-        error: 'Checkout link not configured yet',
-        plan,
-        hint: 'Paste TiloPay URL into api/lib/credits/catalog.ts (business or CREDIT_PACK.paymentLink)',
+    let checkoutUrl: string | null = null
+
+    if (plan === 'credit_pack') {
+      const orderNumber = `pack-${user.id.slice(0, 8)}-${Date.now()}`
+      const origin = (process.env.APP_ORIGIN || process.env.VITE_APP_ORIGIN || 'https://advanceai.studio').replace(/\/$/, '')
+      const oneTime = await createTilopayOneTimeCheckout({
+        amountUsd: CREDIT_PACK.priceUsd,
+        email: user.email || '',
+        description: `${CREDIT_PACK.credits} créditos IA (${CREDIT_PACK.ttlMonths} meses)`,
+        orderNumber,
+        redirectUrl: `${origin}/settings?pack=return`,
       })
+      if (!oneTime.ok) {
+        return res.status(502).json({ error: oneTime.error, plan })
+      }
+      checkoutUrl = oneTime.checkoutUrl
+    } else {
+      checkoutUrl = paymentLinkFor(plan)
+      if (!checkoutUrl) {
+        return res.status(503).json({
+          error: 'Checkout link not configured yet',
+          plan,
+          hint: 'Paste TiloPay subscription URL into api/lib/credits/catalog.ts',
+        })
+      }
     }
 
     const { error: pendingError } = await supabase
@@ -91,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('Failed to store pending subscription:', pendingError)
     }
 
-    return res.status(200).json({ checkoutUrl, plan })
+    return res.status(200).json({ checkoutUrl, plan, orderId: plan === 'credit_pack' ? randomUUID() : undefined })
   } catch (error) {
     console.error('Checkout error:', error)
     return res.status(500).json({

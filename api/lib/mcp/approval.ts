@@ -4,7 +4,9 @@
  * Flow:
  * 1) execute_* without approvalRequestId → create pending request, return deep link
  * 2) User opens /mcp/approve/:id and Approves → status=approved
- * 3) Grok retries with same args + approvalRequestId → consume once → run
+ * 3) Grok retries with same args + approvalRequestId → validate (do not consume)
+ * 4) check limit → generate → save → charge → store result → consume
+ *    If generate fails, approval stays approved and reusable.
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -172,9 +174,10 @@ export async function denyMcpApprovalRequest(
 }
 
 /**
- * Consume an approved request by id (Grok continuation), binding tool+input.
+ * Validate an approved request without consuming it.
+ * EXECUTE uses this before generate so a failed run stays retryable.
  */
-export async function consumeMcpApprovalRequest(
+export async function assertMcpApprovalReady(
   store: McpApprovalStore,
   options: {
     approvalRequestId: string
@@ -199,7 +202,27 @@ export async function consumeMcpApprovalRequest(
     return { ok: false, reason: 'Approval not approved yet — open the deep link first' }
   }
   if (nowMs > row.expiresAtMs) return { ok: false, reason: 'Approval expired' }
-  const updated = await store.markConsumed(row.id, nowMs)
+  return { ok: true, record: row }
+}
+
+/**
+ * Consume an approved request by id (Grok continuation), binding tool+input.
+ * Call only after generate + save + charge succeed.
+ */
+export async function consumeMcpApprovalRequest(
+  store: McpApprovalStore,
+  options: {
+    approvalRequestId: string
+    userId: string
+    toolName: string
+    input: unknown
+    nowMs?: number
+  }
+): Promise<{ ok: true; record: McpApprovalRecord } | { ok: false; reason: string }> {
+  const nowMs = options.nowMs ?? Date.now()
+  const ready = await assertMcpApprovalReady(store, { ...options, nowMs })
+  if (!ready.ok) return ready
+  const updated = await store.markConsumed(ready.record.id, nowMs)
   if (!updated) return { ok: false, reason: 'Approval already used' }
   return { ok: true, record: updated }
 }

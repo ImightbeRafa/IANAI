@@ -4,6 +4,7 @@ import {
   aggregateUsageSummary,
   aggregateUserUsageStats,
   paginateUsageLogs,
+  resolveUsageLogSource,
   type AdminUsageLogRow,
 } from '../api/lib/admin-usage'
 
@@ -104,5 +105,31 @@ describe('paginateUsageLogs', () => {
     const next = paginateUsageLogs(rows, { search: 'a@', offset: 1, limit: 1 })
     expect(next.logs[0].id).toBe('3')
     expect(next.hasMore).toBe(false)
+  })
+
+  it('filters by source and treats missing source as web', () => {
+    const rows = [
+      log({ id: '1', feature: 'script', model: 'grok-4.6', created_at: '2026-08-14T12:00:00.000Z', source: 'mcp' }),
+      log({ id: '2', feature: 'script', model: 'grok-4.6', created_at: '2026-08-14T11:00:00.000Z' }),
+      log({ id: '3', feature: 'script', model: 'grok-4.6', created_at: '2026-08-14T10:00:00.000Z', metadata: { source: 'cron' } }),
+    ]
+
+    const mcp = paginateUsageLogs(rows, { source: 'mcp', limit: 10 })
+    expect(mcp.logs.map((row) => row.id)).toEqual(['1'])
+    expect(mcp.logs[0].source).toBe('mcp')
+
+    const web = paginateUsageLogs(rows, { source: 'web', limit: 10 })
+    expect(web.logs.map((row) => row.id)).toEqual(['2'])
+
+    const cron = paginateUsageLogs(rows, { source: 'cron', limit: 10 })
+    expect(cron.logs.map((row) => row.id)).toEqual(['3'])
+  })
+})
+
+describe('resolveUsageLogSource', () => {
+  it('prefers column, then metadata, then web', () => {
+    expect(resolveUsageLogSource({ source: 'mcp', metadata: { source: 'web' } })).toBe('mcp')
+    expect(resolveUsageLogSource({ source: null, metadata: { source: 'cron' } })).toBe('cron')
+    expect(resolveUsageLogSource({ source: null, metadata: {} })).toBe('web')
   })
 })

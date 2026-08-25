@@ -1,5 +1,5 @@
 -- Créditos IA wallet (lots + ledger + RPCs).
--- DO NOT apply from the agent onto production AIIAN — human review first.
+-- Policy: monthly unused → gone at grant; pack credits expire in 12 months.
 -- See docs/operations/credits-ia-aiian.md
 
 -- Plan capability columns (keep legacy usage columns for shadow period)
@@ -74,14 +74,23 @@ update public.plan_limits set credits_per_month = 1500, kits_max = 5, products_p
 update public.plan_limits set credits_per_month = 600, kits_max = 5, products_per_kit_max = 25, is_hidden = true, grant_once = false where plan = 'meta_advanze';
 update public.plan_limits set credits_per_month = 9600, kits_max = 50, products_per_kit_max = 500, is_hidden = true, grant_once = false where plan = 'enterprise';
 
+-- Allow Business plan id on plan_limits
+alter table public.plan_limits drop constraint if exists plan_limits_plan_check;
+alter table public.plan_limits add constraint plan_limits_plan_check
+  check (plan = any (array['free'::text, 'starter'::text, 'pro'::text, 'business'::text, 'enterprise'::text, 'meta_advanze'::text]));
+
 -- Business is NEW — insert only if missing (copy numeric shape from pro as shadow defaults)
 insert into public.plan_limits (
   plan, scripts_per_month, images_per_month, descriptions_per_month, replies_per_month,
-  credits_per_month, kits_max, products_per_kit_max, is_hidden, grant_once
+  max_team_members, max_clients, max_products, brand_kits_max,
+  credits_per_month, kits_max, products_per_kit_max, is_hidden, grant_once,
+  price_monthly
 )
 select
   'business', 1600, 200, 1600, 1600,
-  4800, 20, 100, false, false
+  10, 50, 500, 20,
+  4800, 20, 100, false, false,
+  149
 where not exists (select 1 from public.plan_limits where plan = 'business');
 
 -- Atomic consume (service_role only)
@@ -247,9 +256,8 @@ set search_path = public
 as $$
 declare
   allotment int;
-  leftover int;
-  cap int;
-  next_end timestamptz := now() + interval '2 months';
+  period_end timestamptz := now() + interval '1 month';
+  already int;
 begin
   select coalesce(credits_per_month, 0) into allotment
   from public.plan_limits where plan = p_plan;
@@ -262,7 +270,18 @@ begin
     return jsonb_build_object('ok', true, 'skipped', true);
   end if;
 
-  -- Expire old
+  -- Idempotent: one monthly grant per calendar day (covers subscribe+payment double fire)
+  select count(*)::int into already
+  from public.credit_lots
+  where user_id = p_user_id
+    and kind = 'monthly'
+    and period_start = current_date
+    and remaining > 0;
+  if already > 0 then
+    return jsonb_build_object('ok', true, 'already', true, 'credits', allotment);
+  end if;
+
+  -- Expire dated lots
   update public.credit_lots
   set remaining = 0
   where user_id = p_user_id
@@ -270,36 +289,16 @@ begin
     and expires_at is not null
     and expires_at <= now();
 
-  select coalesce(sum(remaining), 0) into leftover
-  from public.credit_lots
-  where user_id = p_user_id and kind = 'monthly' and remaining > 0;
-
+  -- Unused monthly from prior period is gone (no rollover)
   update public.credit_lots set remaining = 0
   where user_id = p_user_id and kind = 'monthly';
 
-  if leftover > 0 then
-    insert into public.credit_lots (user_id, kind, granted, remaining, expires_at)
-    values (p_user_id, 'rollover', leftover, leftover, next_end);
-  end if;
-
-  cap := allotment * 2;
-  -- Burn oldest monthly/rollover above cap
-  while (
-    select coalesce(sum(remaining), 0) from public.credit_lots
-    where user_id = p_user_id and kind in ('monthly', 'rollover') and remaining > 0
-  ) > cap loop
-    update public.credit_lots l
-    set remaining = greatest(0, remaining - 1)
-    where l.id = (
-      select id from public.credit_lots
-      where user_id = p_user_id and kind in ('monthly', 'rollover') and remaining > 0
-      order by expires_at nulls last, created_at
-      limit 1
-    );
-  end loop;
+  -- Legacy rollover lots also burn at renewal
+  update public.credit_lots set remaining = 0
+  where user_id = p_user_id and kind = 'rollover';
 
   insert into public.credit_lots (user_id, kind, granted, remaining, expires_at, period_start)
-  values (p_user_id, 'monthly', allotment, allotment, next_end, current_date);
+  values (p_user_id, 'monthly', allotment, allotment, period_end, current_date);
 
   return jsonb_build_object('ok', true, 'credits', allotment);
 end;

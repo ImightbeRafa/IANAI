@@ -44,6 +44,31 @@ export function selectGrokEditReferenceUrls(options: {
   return picked.slice(0, maxTotal)
 }
 
+export function buildImageEditSystemPrompt(options: {
+  editPrompt: string
+  hasRefs?: boolean
+  brandRules?: string | null
+}): string {
+  const hasRefs = options.hasRefs === true
+  const brandBlock = options.brandRules?.trim()
+    ? `\nBRAND KIT (non-negotiable unless the edit instruction explicitly overrides a specific element):\n${options.brandRules}\n`
+    : ''
+  return `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images - use them as visual guidance for the requested change.' : ''}
+Your task: Apply ONLY the requested change to the image while preserving everything else exactly as-is.
+Keep the same composition, layout, colors, style, typography, and overall look.
+Make the minimum change necessary to fulfill the user's request.${hasRefs ? '\nUse the reference images to understand what the user wants - match their style, colors, elements, or content as needed.' : ''}
+${brandBlock}
+TEXT LOCK (non-negotiable):
+- Copy every visible word, accent, currency symbol (including ₡), price, and CTA exactly unless the edit instruction explicitly replaces that specific string.
+- Do not translate, paraphrase, invent, duplicate, autocorrect, or "fix" copy by guessing.
+- If a glyph is unreadable, leave that region unchanged rather than regenerating nearby text.
+- Never add extra headlines, bullets, or watermarks.
+
+Return the edited image.
+
+Edit instruction: ${options.editPrompt}`
+}
+
 export async function runGrokImageEdit(options: {
   apiKey: string
   prompt: string

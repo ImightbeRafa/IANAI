@@ -15,6 +15,7 @@ export type McpToolGroupId =
   | 'library_sessions'
   | 'deletes'
   | 'account_team'
+  | 'admin'
 
 export type McpToolDefinition = {
   name: string
@@ -26,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.6.0'
+export const MCP_REGISTRY_VERSION = '0.8.1'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -56,11 +57,16 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   deletes: {
     title: 'Archive & Deletes',
     summary: 'Archive brands/folders; permanent delete with clear no-recovery warnings.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   account_team: {
     title: 'Account & Team',
     summary: 'Usage and team/admin — same rules as the web app.',
+    defaultEnabled: false,
+  },
+  admin: {
+    title: 'Admin',
+    summary: 'Admin-only tickets and usage. Hidden unless the user is an Advance admin.',
     defaultEnabled: false,
   },
 }
@@ -123,6 +129,33 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     requiresApproval: false,
     consumesAdvanceCredits: false,
   },
+  {
+    name: 'guide_bulk_angles',
+    group: 'guide_studio',
+    risk: 'guide',
+    description: 'Return a diverse buyer-niche angle board (not same-ad-different-words). Free GUIDE.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'list_style_dnas',
+    group: 'brand_workspace',
+    risk: 'read',
+    description: 'List Style DNAs saved on the brand kit (organic/ads reference packs).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'set_style_dna',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description: 'Create or update a Style DNA on the brand kit (no generation credits).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
 
   // Workspace sync writes (no generation credits)
   {
@@ -165,8 +198,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'workspace_save_artifact',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Persist an Advance-generated script/image into the library with deep link.',
-    enabled: false,
+    description: 'Save a GUIDE/external script or image into the Advance library via https URL or already-in-workspace id (no credits; no base64).',
+    enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
   },
@@ -191,11 +224,38 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: true,
   },
   {
+    name: 'execute_bulk_scripts',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Generate up to N diverse scripts from an angle board (3 credits each succeeded; one approval).',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
+    name: 'execute_bulk_posts',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one approval).',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
+    name: 'execute_campaign_pack',
+    group: 'execute_studio',
+    risk: 'execute',
+    description: 'Launch pack: angles → scripts → posts with one approval and a quoted total.',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
     name: 'execute_image_edit',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Edit an image via Advance (Grok Imagine, credits; Grok approval popup).',
-    enabled: false,
+    description: 'Edit an image via Advance (Grok Imagine; 18 credits; Advance web approval required).',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
   },
@@ -203,8 +263,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_enhance',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Enhance an image via Advance (Grok Imagine, credits; Grok approval popup).',
-    enabled: false,
+    description: 'Enhance an image via Advance (Grok Imagine; 18 credits; Advance web approval required).',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
   },
@@ -212,8 +272,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_carousel_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate a carousel via Advance (Gemini render, credits; Grok approval popup).',
-    enabled: false,
+    description: 'Generate a carousel via Advance (Gemini Pro, 24 credits/slide; one approval for the batch). Host timeout is 180s — large carousels may need a smaller slideCount.',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
   },
@@ -223,8 +283,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'archive_brand',
     group: 'deletes',
     risk: 'delete',
-    description: 'Archive a brand/business folder (recoverable; hidden from default lists).',
-    enabled: false,
+    description: 'Archive a brand/folder (recoverable; hidden from default MCP lists). Requires typed confirm + web approval.',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
   },
@@ -232,8 +292,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_offer',
     group: 'deletes',
     risk: 'delete',
-    description: 'Delete an offer after confirmation (same rules as web).',
-    enabled: false,
+    description: 'Permanently delete an offer after typed confirm + web approval (same rules as web).',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
   },
@@ -241,8 +301,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_brand',
     group: 'deletes',
     risk: 'delete',
-    description: 'Permanently delete a brand/folder after typed confirm + impact warning (no recovery).',
-    enabled: false,
+    description: 'Permanently delete a brand/folder after typed brand-name confirm + impact warning (no recovery).',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
   },
@@ -250,8 +310,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_asset',
     group: 'deletes',
     risk: 'delete',
-    description: 'Delete a product/context/generated image after confirmation.',
-    enabled: false,
+    description: 'Permanently delete a product/context/generated image after typed confirm + web approval.',
+    enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
   },
@@ -268,10 +328,46 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
   },
   {
     name: 'admin_get_usage',
-    group: 'account_team',
+    group: 'admin',
     risk: 'admin',
     description: 'Admin-only usage summary (server-enforced).',
-    enabled: false,
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_list_tickets',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only list of feedback tickets (server-enforced).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_get_ticket',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only ticket detail including diagnostics (server-enforced).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_update_ticket',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only ticket status + comment update (server-enforced).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_request_cursor_fix',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only structured Cursor Cloud Agent brief for a ticket. Does not auto-call Cursor.',
+    enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
   },
@@ -279,8 +375,12 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
 
 export function listEnabledMcpTools(options?: {
   groupsEnabled?: Partial<Record<McpToolGroupId, boolean>>
+  isAdmin?: boolean
 }): McpToolDefinition[] {
   return MCP_TOOL_REGISTRY.filter((tool) => {
+    if (tool.group === 'admin' || tool.risk === 'admin') {
+      return Boolean(options?.isAdmin) && tool.enabled
+    }
     const groupOn = options?.groupsEnabled?.[tool.group]
     const groupDefault = MCP_TOOL_GROUPS[tool.group].defaultEnabled
     const groupAllowed = groupOn === undefined ? groupDefault : groupOn

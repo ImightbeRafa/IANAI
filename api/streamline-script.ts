@@ -10,6 +10,9 @@ import {
   getStreamlineSystemPrompt,
   normalizeTextDensity,
 } from './lib/streamline-copy.js'
+import { isUuid, resolveAuthorizedSessionProduct } from './lib/session-access.js'
+import { userHasProductAccess } from './lib/product-access.js'
+import { requireChatShellAccess } from './lib/chat-shell-access.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -23,11 +26,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return
 
   try {
-    const { script, postStyle = 'venta-directa', language = 'es', productContext } = req.body
+    const {
+      script,
+      postStyle = 'venta-directa',
+      language = 'es',
+      productContext,
+      sessionId,
+      productId,
+    } = req.body || {}
     const textDensity = normalizeTextDensity(req.body?.textDensity)
 
     if (!script || typeof script !== 'string' || script.trim().length === 0) {
       return res.status(400).json({ error: 'Script text is required' })
+    }
+
+    // Chat-shell: when sessionId is present, bind product to that session's offer.
+    // Classic /posts callers omit sessionId and keep prior behavior.
+    if (sessionId != null && sessionId !== '') {
+      if (!(await requireChatShellAccess(res, user.id))) return
+      if (!isUuid(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' })
+      const access = await resolveAuthorizedSessionProduct(
+        user.id,
+        sessionId,
+        typeof productId === 'string' ? productId : null
+      )
+      if (!access.ok) return res.status(access.status).json({ error: access.error })
+    } else if (typeof productId === 'string' && productId) {
+      if (!isUuid(productId)) return res.status(400).json({ error: 'Invalid productId' })
+      if (!(await userHasProductAccess(user.id, productId))) {
+        return res.status(403).json({ error: 'No access to product' })
+      }
     }
 
     const xaiApiKey = process.env.GROK_API_KEY

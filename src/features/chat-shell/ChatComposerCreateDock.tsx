@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { PanelLeft, PanelLeftClose } from 'lucide-react'
-import { IconAdvanceMark, IconDoc, IconImage, IconOffer } from './ChatShellIcons'
+import { IconAdvanceMark, IconDoc, IconImage, IconOffer, IconRefs } from './ChatShellIcons'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 
-export type ComposerCreateActionId = 'scripts' | 'post' | 'product'
+export type ComposerCreateActionId = 'scripts' | 'post' | 'product' | 'bulk'
 
 export interface ComposerCreateAction {
   id: ComposerCreateActionId
@@ -32,6 +32,8 @@ function actionIcon(id: ComposerCreateActionId) {
       return <IconImage size={14} />
     case 'product':
       return <IconOffer size={14} />
+    case 'bulk':
+      return <IconRefs size={14} />
     default: {
       const _never: never = id
       return _never

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { quoteLegacyActionCredits } from '../api/lib/auth'
 import {
   approveMcpApprovalRequest,
+  assertMcpApprovalReady,
   consumeMcpApprovalRequest,
   createMemoryMcpApprovalStore,
   denyMcpApprovalRequest,
@@ -120,5 +122,71 @@ describe('mcp web approval flow', () => {
     })
     expect(replay.ok).toBe(true)
     if (replay.ok) expect(replay.result).toEqual(stored)
+  })
+
+  it('keeps approval reusable until consume-after-success', async () => {
+    const store = createMemoryMcpApprovalStore()
+    const input = { brandId: 'b1', language: 'es' }
+    const issued = await issueMcpApprovalRequest(store, {
+      userId: 'user-a',
+      toolName: 'execute_script_generate',
+      input,
+      quotedCreditCost: quoteLegacyActionCredits('script'),
+      nowMs: 200,
+    })
+    await approveMcpApprovalRequest(store, {
+      approvalRequestId: issued.approvalRequestId,
+      userId: 'user-a',
+      nowMs: 210,
+    })
+
+    const firstPeek = await assertMcpApprovalReady(store, {
+      approvalRequestId: issued.approvalRequestId,
+      userId: 'user-a',
+      toolName: 'execute_script_generate',
+      input,
+      nowMs: 220,
+    })
+    expect(firstPeek.ok).toBe(true)
+    if (firstPeek.ok) expect(firstPeek.record.status).toBe('approved')
+
+    const retryPeek = await assertMcpApprovalReady(store, {
+      approvalRequestId: issued.approvalRequestId,
+      userId: 'user-a',
+      toolName: 'execute_script_generate',
+      input,
+      nowMs: 230,
+    })
+    expect(retryPeek.ok).toBe(true)
+
+    await storeMcpApprovalResult(store, {
+      approvalRequestId: issued.approvalRequestId,
+      result: { status: 'completed', charged: quoteLegacyActionCredits('script') },
+      nowMs: 240,
+    })
+    const consumed = await consumeMcpApprovalRequest(store, {
+      approvalRequestId: issued.approvalRequestId,
+      userId: 'user-a',
+      toolName: 'execute_script_generate',
+      input,
+      nowMs: 250,
+    })
+    expect(consumed.ok).toBe(true)
+
+    const afterConsume = await assertMcpApprovalReady(store, {
+      approvalRequestId: issued.approvalRequestId,
+      userId: 'user-a',
+      toolName: 'execute_script_generate',
+      input,
+      nowMs: 260,
+    })
+    expect(afterConsume.ok).toBe(false)
+  })
+
+  it('quotes MCP execute credits from the catalog', () => {
+    expect(quoteLegacyActionCredits('script')).toBe(3)
+    expect(quoteLegacyActionCredits('image', 'grok-imagine')).toBe(6)
+    expect(quoteLegacyActionCredits('edit')).toBe(18)
+    expect(quoteLegacyActionCredits('enhance')).toBe(18)
   })
 })

@@ -44,20 +44,32 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.6\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.8\./)
+    expect(listEnabledMcpTools().some((t) => t.name.startsWith('admin_'))).toBe(false)
+    expect(listEnabledMcpTools({ isAdmin: true }).map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'admin_list_tickets',
+        'admin_get_ticket',
+        'admin_update_ticket',
+        'admin_get_usage',
+        'admin_request_cursor_fix',
+      ])
+    )
     const enabled = listEnabledMcpTools()
     const names = enabled.map((t) => t.name).sort()
     expect(names).toContain('list_brands')
     expect(names).toContain('guide_script')
+    expect(names).toContain('guide_bulk_angles')
+    expect(names).toContain('execute_bulk_scripts')
+    expect(names).toContain('execute_campaign_pack')
+    expect(names).toContain('list_style_dnas')
     expect(names).toContain('execute_image_generate')
-    expect(names).not.toContain('execute_carousel_generate')
-    expect(names).not.toContain('delete_brand')
     expect(enabled.every((t) => t.enabled)).toBe(true)
     expect(getMcpTool('guide_image')?.consumesAdvanceCredits).toBe(false)
     expect(getMcpTool('execute_image_generate')?.consumesAdvanceCredits).toBe(true)
     expect(getMcpTool('execute_image_generate')?.requiresApproval).toBe(true)
     expect(getMcpTool('execute_image_generate')?.enabled).toBe(true)
-    expect(getMcpTool('archive_brand')?.enabled).toBe(false)
+    expect(getMcpTool('guide_bulk_angles')?.enabled).toBe(true)
     expect(getMcpTool('workspace_note_generated_outside')?.consumesAdvanceCredits).toBe(false)
     expect(MCP_TOOL_GROUPS.guide_studio.defaultEnabled).toBe(true)
     expect(MCP_TOOL_GROUPS.execute_studio.defaultEnabled).toBe(true)

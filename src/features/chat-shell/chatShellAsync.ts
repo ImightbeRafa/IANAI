@@ -13,6 +13,16 @@ export function isLiveThread(
   )
 }
 
+/** True when a brand-product fetch still belongs to the live brand. */
+export function shouldApplyBrandProductRefresh(options: {
+  requestedBrandId: string
+  liveBrandId: string | null
+  cancelled?: boolean
+}): boolean {
+  if (options.cancelled) return false
+  return options.liveBrandId === options.requestedBrandId
+}
+
 /** Cached folder lists switch immediately; a miss waits for the session fetch. */
 export function planBrandSwitch(cachedSessions: { id: string }[] | undefined): {
   instant: boolean

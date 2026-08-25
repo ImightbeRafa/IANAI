@@ -87,6 +87,22 @@ void setInterval(() => {
   }
 }, 500)
 
+const APP_VERSION = (typeof import.meta.env.VITE_APP_VERSION === 'string' && import.meta.env.VITE_APP_VERSION)
+  ? import.meta.env.VITE_APP_VERSION
+  : '0.1.7'
+
+const CLASSIC_SURFACES = /^\/(dashboard|scripts|product|settings|posts|descriptions|respuestas|team)(?:\/|$)/
+
+function resolveUiSurface(pathname: string): 'chat' | 'classic' | 'other' {
+  if (/^\/chat(?:\/|$)/.test(pathname)) return 'chat'
+  if (CLASSIC_SURFACES.test(pathname)) return 'classic'
+  return 'other'
+}
+
+function resolveViewportClass(): 'mobile' | 'desktop' {
+  return window.innerWidth < 768 ? 'mobile' : 'desktop'
+}
+
 function compressScreenshot(blob: Blob, maxWidth = 1280, quality = 0.7): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -287,6 +303,10 @@ export default function FeedbackButton() {
         category,
         priority,
         page_url: `${location.pathname}${location.search}`,
+        ui_surface: resolveUiSurface(location.pathname),
+        app_version: APP_VERSION,
+        locale: language,
+        viewport: resolveViewportClass(),
         browser_info: navigator.userAgent,
         screen_size: `${window.innerWidth}x${window.innerHeight}`,
         console_errors: consoleErrors.slice(-10),
@@ -319,7 +339,7 @@ export default function FeedbackButton() {
 
   const onChat = /^\/chat(?:\/|$)/.test(location.pathname)
 
-  if (!user || onChat) return null
+  if (!user) return null
 
   return (
     <>

@@ -129,8 +129,7 @@ export const PLAN_CATALOG: Record<PlanId, PlanCatalogEntry> = {
     productsPerKitMax: 100,
     publicUpgrade: true,
     hidden: false,
-    // TODO(human): paste TiloPay Business $149/mo link
-    paymentLink: null,
+    paymentLink: 'https://tp.cr/l/TmpreE9BPT18MQ==',
     billing: 'monthly',
   },
   meta_advanze: {
@@ -170,7 +169,7 @@ export const CREDIT_PACK = {
   priceUsd: 25,
   credits: 500,
   ttlMonths: 12,
-  // TODO(human): paste TiloPay $25 / 500 créditos one-time link
+  /** One-time via TiloPay processPayment API — no static link. */
   paymentLink: null as string | null,
   /** Legacy boost link — stop selling; convert leftover bonus_images on migrate. */
   legacyBoostLink: 'https://tp.cr/l/MTg3NTc5',
@@ -203,9 +202,11 @@ export function quoteCredits(action: CreditAction, units = 1): number {
   return per * n
 }
 
+export type LegacyMeterAction = 'script' | 'image' | 'description' | 'enhance' | 'reply' | 'edit'
+
 /** Map legacy checkUsageLimit actions when CREDITS_V1 is on. */
 export function legacyActionToCredit(options: {
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply'
+  action: LegacyMeterAction
   imageModel?: string | null
 }): { creditAction: CreditAction; units: number } {
   switch (options.action) {
@@ -217,6 +218,8 @@ export function legacyActionToCredit(options: {
       return { creditAction: 'reply', units: 1 }
     case 'enhance':
       return { creditAction: 'image_enhance', units: 1 }
+    case 'edit':
+      return { creditAction: 'image_edit', units: 1 }
     case 'image':
       return {
         creditAction: resolveImageCreditAction({
