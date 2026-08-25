@@ -218,7 +218,6 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         .eq('user_id', userId)
         .in('kind', ['product', 'context'])
         .order('created_at', { ascending: false })
-        .limit(5)
       if (error) throw error
       return (data || [])
         .sort((a, b) => {
@@ -227,6 +226,7 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         })
         .map((row) => row.image_url as string)
         .filter(Boolean)
+        .slice(0, 5)
     },
   }
 }
