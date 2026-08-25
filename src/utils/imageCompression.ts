@@ -4,7 +4,7 @@ import { CANONICAL_IMAGE_BUCKET, ensureCanonicalImageBucket, isMissingImageBucke
 /**
  * Compress an image to JPEG (generated ads/social — no WebP).
  */
-async function compressImageToJpeg(
+export async function compressImageToJpeg(
   imageSource: string,
   quality: number = 0.92
 ): Promise<Blob> {
