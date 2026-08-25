@@ -45,6 +45,7 @@ import {
   asJobHandleFromStored,
   claimMcpExecuteJob,
   scheduleMcpExecuteWork,
+  shouldReplayStoredExecuteResult,
   withChargedCredits,
 } from './execute-job.js'
 import { assertMcpCarouselSlideCount } from './limits.js'
@@ -184,9 +185,13 @@ export async function mcpExecuteScriptGenerate(options: {
   })
   if (replay.ok) {
     const formatted = asJobHandleFromStored(approvalRequestId, replay.result, 'execute_script_generate')
-    return {
-      ...((formatted || replay.result) as Record<string, unknown>),
-      replayed: true,
+    const payload = formatted || replay.result
+    // Stale running / failed must fall through to reclaim (replay runs before claim)
+    if (shouldReplayStoredExecuteResult(payload)) {
+      return {
+        ...(payload as Record<string, unknown>),
+        replayed: true,
+      }
     }
   }
 
@@ -400,9 +405,13 @@ export async function mcpExecuteImageGenerate(options: {
   })
   if (replay.ok) {
     const formatted = asJobHandleFromStored(approvalRequestId, replay.result, 'execute_image_generate')
-    return {
-      ...((formatted || replay.result) as Record<string, unknown>),
-      replayed: true,
+    const payload = formatted || replay.result
+    // Stale running / failed must fall through to reclaim (replay runs before claim)
+    if (shouldReplayStoredExecuteResult(payload)) {
+      return {
+        ...(payload as Record<string, unknown>),
+        replayed: true,
+      }
     }
   }
 

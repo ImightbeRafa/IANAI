@@ -203,11 +203,22 @@ function scrubBreadcrumbs(value: unknown, depth = 0): unknown {
         const t = raw.trim()
         if (t.length > 240 || /pegar información|paste/i.test(t)) {
           out[key] = `[scrubbed ${Math.min(t.length, 9999)} chars]`
-        } else if (/^[#.\[a-z]/i.test(t)) {
-          out[key] = t.slice(0, 120)
         } else {
-          out[key] = '[selector]'
+          // CSS selector only — cut before first space/quote so "button.x innerText" cannot leak
+          const selectorOnly = (t.split(/[\s"'`]/)[0] || '').trim()
+          out[key] =
+            selectorOnly && /^[#.\[a-z]/i.test(selectorOnly)
+              ? selectorOnly.slice(0, 120)
+              : '[selector]'
         }
+      } else {
+        out[key] = scrubBreadcrumbs(raw, depth + 1)
+      }
+      continue
+    }
+    if (key === 'url' || key === 'href' || key === 'pageUrl' || key === 'page_url') {
+      if (typeof raw === 'string') {
+        out[key] = scrubPageUrl(raw) || stripQuery(raw)
       } else {
         out[key] = scrubBreadcrumbs(raw, depth + 1)
       }
@@ -231,7 +242,13 @@ function scrubPageUrl(url: string | null): string | null {
       return '/chat'
     }
   }
+  // Non-chat paths: redact session / resource UUIDs (e.g. /product/{uuid}/session/{uuid})
   return stripped
+    .replace(/\/session\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/session/[id]')
+    .replace(
+      /\/(product|brand|offer|business)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      '/$1/[id]'
+    )
 }
 
 export function toSafeTicketDiagnostics(ticket: McpAdminTicket): Omit<McpAdminTicket, 'user_email'> & {
@@ -344,14 +361,14 @@ export async function mcpAdminGetTicket(
 export async function mcpAdminUpdateTicket(
   store: McpAdminStore,
   args: Record<string, unknown>
-): Promise<{ ticket: McpAdminTicket }> {
+): Promise<{ ticket: ReturnType<typeof toSafeTicketDiagnostics> }> {
   const ticketId = asString(args.ticketId)
   if (!ticketId) throw new Error('ticketId is required')
   const status = parseStatus(args.status)
   const comment = asString(args.comment) || undefined
   if (!status && !comment) throw new Error('status or comment is required')
   const ticket = await store.updateTicket({ ticketId, status, comment })
-  return { ticket }
+  return { ticket: toSafeTicketDiagnostics(ticket) }
 }
 
 export async function mcpAdminGetUsage(

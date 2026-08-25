@@ -4,9 +4,11 @@
  */
 
 import type { McpApprovalRecord, McpApprovalStore } from './approval.js'
+import { MCP_HOST_MAX_DURATION_SEC } from '../organic-carousel.js'
 
 export const MCP_EXECUTE_RETRY_AFTER_MS = 2_000
-export const MCP_EXECUTE_STALE_MS = 120_000
+/** Must exceed host waitUntil/maxDuration so a still-running generate is not reclaimed (double charge). */
+export const MCP_EXECUTE_STALE_MS = (MCP_HOST_MAX_DURATION_SEC + 10) * 1000 // 190s > 180s host cap
 
 export type McpExecuteJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 
@@ -165,10 +167,11 @@ export async function claimMcpExecuteJob(
   })
 
   const existingRow = await store.findById(options.approvalRequestId)
-  if (existingRow?.resultJson != null && !isStaleRunningJob(existingRow.resultJson, nowMs)) {
+  if (existingRow?.resultJson != null && !isReclaimableExecuteJob(existingRow.resultJson, nowMs)) {
     return { claimed: false, existing: existingRow.resultJson }
   }
-  if (existingRow?.resultJson != null && isStaleRunningJob(existingRow.resultJson, nowMs)) {
+  if (existingRow?.resultJson != null && isReclaimableExecuteJob(existingRow.resultJson, nowMs)) {
+    // Failed stays reusable; stale running (startedAtMs older than host maxDuration) can CAS-reclaim.
     const updated = await store.storeResult(options.approvalRequestId, handle, nowMs)
     if (updated) return { claimed: true, handle }
     return { claimed: false, existing: existingRow.resultJson }
@@ -187,9 +190,32 @@ export async function claimMcpExecuteJob(
   return { claimed: true, handle }
 }
 
+/** Failed jobs must stay retryable — never treat as terminal success / never consume. */
+export function isFailedExecuteJob(stored: unknown): boolean {
+  return isMcpExecuteJobPayload(stored) && stored.status === 'failed'
+}
+
+/** Reclaim when failed (retry) or when running+startedAtMs is past STALE (> host maxDuration). */
+export function isReclaimableExecuteJob(stored: unknown, nowMs = Date.now()): boolean {
+  if (isFailedExecuteJob(stored)) return true
+  return isStaleRunningJob(stored, nowMs)
+}
+
+/**
+ * Replay runs BEFORE claim. Only return stored payloads that are still useful:
+ * completed (success) or fresh running. Stale running / failed must NOT short-circuit
+ * replay — otherwise a dead waitUntil leaves the approval stuck forever (under-delivery).
+ */
+export function shouldReplayStoredExecuteResult(stored: unknown, nowMs = Date.now()): boolean {
+  if (stored == null) return false
+  if (isReclaimableExecuteJob(stored, nowMs)) return false
+  return true
+}
+
 export function isStaleRunningJob(stored: unknown, nowMs = Date.now()): boolean {
   if (!isMcpExecuteJobPayload(stored)) return false
-  if (stored.status !== 'running' && stored.status !== 'queued') return false
+  // Only status=running with startedAtMs older than host maxDuration (+ buffer)
+  if (stored.status !== 'running') return false
   const started =
     typeof stored.startedAtMs === 'number' ? stored.startedAtMs : null
   if (started == null) return false
@@ -228,7 +254,13 @@ export async function getMcpExecuteResult(options: {
   }
   const formatted = asJobHandleFromStored(id, row.resultJson, row.toolName)
   if (!formatted) throw new Error('Invalid job payload')
-  return formatted as Record<string, unknown>
+  const out = formatted as Record<string, unknown>
+  if (isStaleRunningJob(row.resultJson)) {
+    out.stale = true
+    out.message =
+      'Job appears stuck past host maxDuration. Retry the original execute_* tool with the same approvalRequestId to reclaim (no double charge — credits only on success).'
+  }
+  return out
 }
 
 export function withChargedCredits<T extends Record<string, unknown>>(
