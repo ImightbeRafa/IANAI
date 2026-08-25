@@ -102,7 +102,7 @@ describe('usage source resolution', () => {
 
 describe('mcp admin gate', () => {
   it('hides admin tools from tools/list for non-admins', async () => {
-    expect(MCP_SERVER_INFO.version).toBe('0.9.4')
+    expect(MCP_SERVER_INFO.version).toBe('0.9.5')
     expect(listEnabledMcpTools().some((tool) => isAdminToolName(tool.name))).toBe(false)
 
     const listed = await handleMcpJsonRpc({

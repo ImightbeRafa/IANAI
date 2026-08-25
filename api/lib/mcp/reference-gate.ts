@@ -23,6 +23,11 @@ export function assertProductReferenceGate(options: {
   referenceImageIds?: string[]
   productImageId?: string | null
   requireProduct?: boolean
+  /**
+   * Bulk/campaign historically use all offer product URLs without per-id confirm.
+   * When true and the offer already has product refs, omitting ids is OK.
+   */
+  allowImplicitOfferRefs?: boolean
   toolName: string
 }): void {
   const requireProduct = options.requireProduct !== false
@@ -47,6 +52,7 @@ export function assertProductReferenceGate(options: {
     return
   }
   if (!hasExplicitIds && options.productRefCount > 0) {
+    if (options.allowImplicitOfferRefs) return
     throw new Error(
       `${options.toolName}: product images exist but none were confirmed. ` +
         'List them with list_assets(kind=product), ask the user which to use (and optional scene/style context refs), ' +

@@ -47,6 +47,14 @@ describe('assertProductReferenceGate', () => {
       referenceImageIds: ['img-1'],
     })).not.toThrow()
   })
+
+  it('allowImplicitOfferRefs bypasses confirm when offer already has refs', () => {
+    expect(() => assertProductReferenceGate({
+      toolName: 'execute_bulk_posts',
+      productRefCount: 3,
+      allowImplicitOfferRefs: true,
+    })).not.toThrow()
+  })
 })
 
 describe('offer facts + quality', () => {

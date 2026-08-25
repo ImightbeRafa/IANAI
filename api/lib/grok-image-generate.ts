@@ -24,9 +24,13 @@ export async function runGrokImageGenerate(options: {
   apiKey: string
   prompt: string
   aspectRatio?: string | null
+  /** Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed. */
+  aspectRatioFallback?: boolean
   referenceImageUrls?: string[]
 }): Promise<GrokImageGenerateResult> {
-  const aspectRatio = resolveGrokAspectRatio(options.aspectRatio)
+  const aspectRatio = resolveGrokAspectRatio(options.aspectRatio, {
+    allowFallback: options.aspectRatioFallback === true,
+  })
   const refs = (options.referenceImageUrls || []).filter(Boolean).slice(0, 3)
   const body: Record<string, unknown> = {
     model: GROK_IMAGE_PROVIDER_MODEL,

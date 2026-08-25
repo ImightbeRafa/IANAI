@@ -46,6 +46,7 @@ export async function expandProductRefs(options: {
     })
     if (!limit.allowed) break
     try {
+      // Internal expand path opts into 4:5→3:4; fail-closed default still applies to user EXECUTE.
       const generated = await runGrokImageGenerate({
         apiKey: options.apiKey,
         prompt: [
@@ -55,6 +56,7 @@ export async function expandProductRefs(options: {
           'Photoreal, match product fidelity if a ref is attached, no invented branding',
         ].join('. '),
         aspectRatio: '4:5',
+        aspectRatioFallback: true,
         referenceImageUrls: refs.slice(0, 2),
       })
       const saved = await saveExpandedProductRef({

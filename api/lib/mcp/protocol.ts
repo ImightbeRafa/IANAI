@@ -68,10 +68,34 @@ import { auditMcpToolCall } from './tool-audit.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.9.4',
+  version: '0.9.5',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
+}
+
+/** Prefer Error.message; also accept PostgREST-style `{ message, code }` objects. */
+export function formatMcpToolErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message.trim()) return err.message
+  if (err && typeof err === 'object') {
+    const row = err as { message?: unknown; error?: unknown; details?: unknown }
+    if (typeof row.message === 'string' && row.message.trim()) return row.message
+    if (typeof row.error === 'string' && row.error.trim()) return row.error
+    if (typeof row.details === 'string' && row.details.trim()) return row.details
+  }
+  if (typeof err === 'string' && err.trim()) return err
+  return 'Tool failed'
+}
+
+export function formatMcpToolErrorCode(err: unknown): string | undefined {
+  if (err && typeof err === 'object') {
+    const row = err as { code?: unknown; status?: unknown }
+    if (typeof row.code === 'string' && row.code.trim()) return row.code
+    if (typeof row.code === 'number') return String(row.code)
+    if (typeof row.status === 'string' && row.status.trim()) return row.status
+    if (typeof row.status === 'number') return String(row.status)
+  }
+  return undefined
 }
 
 export type McpJsonRpcRequest = {
@@ -407,8 +431,15 @@ function toolInputSchema(name: string): Record<string, unknown> {
           imageModel: { type: 'string' },
           styleDnaId: { type: 'string' },
           aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
+          aspectRatioFallback: {
+            type: 'boolean',
+            description: 'Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed.',
+          },
           scene: { type: 'string' },
           guidePrompt: { type: 'string' },
+          productImageId: { type: 'string' },
+          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+          referenceMode: { type: 'string', enum: ['use', 'none'] },
         },
         required: ['brandId'],
         additionalProperties: false,
@@ -713,7 +744,8 @@ export async function handleMcpJsonRpc(options: {
           isError: false,
         })
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Tool failed'
+        const message = formatMcpToolErrorMessage(err)
+        const code = formatMcpToolErrorCode(err)
         await auditMcpToolCall({
           userId: user.id,
           userEmail: user.email,
@@ -723,8 +755,16 @@ export async function handleMcpJsonRpc(options: {
           success: false,
           errorMessage: message,
         })
+        // Structured JSON so hosts (Grok) surface a real body instead of bare "Tool failed".
         return ok(body.id, {
-          content: [{ type: 'text', text: message }],
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: 'error',
+              toolName: name,
+              error: { message, code },
+            }, null, 2),
+          }],
           isError: true,
         })
       }
