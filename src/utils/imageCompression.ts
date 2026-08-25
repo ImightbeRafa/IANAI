@@ -179,6 +179,52 @@ export async function uploadPostImageOriginal(
 }
 
 /**
+ * Upload an AI-generated image as high-quality JPEG (ads/social).
+ * Never WebP/PNG for generated creatives — keeps Storage under the 5 MiB limit.
+ */
+export async function uploadGeneratedImageJpeg(
+  userId: string,
+  productId: string,
+  imageSource: string,
+  filename?: string
+): Promise<string> {
+  const jpegBlob = await compressImageToJpeg(imageSource, 0.92)
+  const timestamp = Date.now()
+  const rawName = filename?.replace(/\.[^.]+$/, '') || `${timestamp}`
+  const safeUserId = sanitizePathSegment(userId)
+  const safeProductId = sanitizePathSegment(productId)
+  const safeFileName = sanitizePathSegment(`${rawName}.jpg`)
+
+  if (!safeUserId || !safeProductId || !safeFileName) {
+    throw new Error('Invalid file path parameters')
+  }
+
+  const filePath = `${safeUserId}/${safeProductId}/product-refs/${safeFileName}`
+
+  const upload = () => supabase.storage.from(CANONICAL_IMAGE_BUCKET).upload(filePath, jpegBlob, {
+    contentType: 'image/jpeg',
+    upsert: true,
+  })
+  let { data, error } = await upload()
+  if (error && isMissingImageBucketError(error)) {
+    await ensureCanonicalImageBucket()
+    ;({ data, error } = await upload())
+  }
+
+  if (error) {
+    console.error('Generated JPEG upload error:', error)
+    throw error
+  }
+  if (!data) throw new Error('Storage upload returned no file')
+
+  const { data: { publicUrl } } = supabase.storage
+    .from(CANONICAL_IMAGE_BUCKET)
+    .getPublicUrl(data.path)
+
+  return publicUrl
+}
+
+/**
  * Upload a product reference image (compressed to WebP).
  * Stored under product-images/{userId}/{productId}/{timestamp}.webp
  */
