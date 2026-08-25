@@ -1,4 +1,15 @@
-## 2026-08-23 — Créditos IA + MCP e2e (one PR, not live until migrate + CREDITS_V1)
+## 2026-08-25 — Fat product complete (branch, no PR yet)
+
+**Area:** credits / mcp / chat-shell / bulk / admin
+**Files:** credits 076–080, MCP 0.8.1 full tools, bulk packs, admin tickets, usage source
+
+- Créditos IA on AIIAN: monthly unused expires; pack one-time TiloPay API; Business link wired; bonus→credits migrated.
+- MCP: execute reliability (consume after success), admin ticket tools, edit/enhance/carousel/delete/save, bulk angles/scripts/posts/campaign, style DNA.
+- ChatShell: P0 races, feedback FAB, streamline gate, bulk slash/dialog.
+- Admin: usage filter MCP vs web; ticket diagnostics (ui_surface/locale/viewport).
+
+---
+
 
 **Area:** billing / mcp
 **Files:** `api/lib/credits/*`, `076_credits_ia.sql`, `docs/operations/credits-ia-aiian.md`, auth/tilopay/Settings/UsageBanner, MCP intake+EXECUTE autosave
