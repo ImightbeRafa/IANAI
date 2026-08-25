@@ -67,7 +67,10 @@ import { auditMcpToolCall } from './tool-audit.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.9.1',
+  version: '0.9.2',
+  title: 'Advance AI',
+  websiteUrl: 'https://advanceai.studio',
+  icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
 }
 
 export type McpJsonRpcRequest = {

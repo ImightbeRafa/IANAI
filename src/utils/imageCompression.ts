@@ -2,8 +2,51 @@ import { supabase } from '../lib/supabase'
 import { CANONICAL_IMAGE_BUCKET, ensureCanonicalImageBucket, isMissingImageBucketError } from '../services/imageStorage'
 
 /**
+ * Compress an image to JPEG (generated ads/social — no WebP).
+ */
+async function compressImageToJpeg(
+  imageSource: string,
+  quality: number = 0.92
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'))
+        return
+      }
+
+      // White background so transparent PNG sources don't get black fills in JPEG.
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('Failed to create JPEG blob'))
+        },
+        'image/jpeg',
+        quality
+      )
+    }
+
+    img.onerror = () => reject(new Error('Failed to load image'))
+    img.src = imageSource
+  })
+}
+
+/**
  * Compress an image to WebP format with specified quality
  * Reduces file size by ~60-80% with minimal visible quality loss
+ * (product/style reference uploads only — not generated ads)
  */
 async function compressImageToWebP(
   imageSource: string,

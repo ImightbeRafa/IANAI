@@ -1,3 +1,13 @@
+## 2026-08-25 — All MCP generation tools async (0.9.2)
+
+**Area:** mcp
+**Files:** `execute-tools.ts`, `bulk-tools.ts`, `tool-registry.ts`, `protocol.ts`, `api/mcp.ts`
+
+- Image edit/enhance, carousel, bulk scripts/posts, and campaign packs now claim a job and return `jobId` + `statusMessage` immediately; clients poll `get_execute_result`.
+- Background failures persist a retryable failed job result, and carousel slide charge IDs are deterministic per approval.
+
+---
+
 ## 2026-08-25 — MCP EXECUTE jobId + poll (0.9.1)
 
 **Area:** mcp

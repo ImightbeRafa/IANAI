@@ -32,6 +32,14 @@ import {
 } from './approval.js'
 import { issueMcpChatApproval } from './approval-prompt.js'
 import type { McpArtifactStore } from './artifact-store.js'
+import {
+  asJobHandleFromStored,
+  buildFailedJobResult,
+  claimMcpExecuteJob,
+  scheduleMcpExecuteWork,
+  shouldReplayStoredExecuteResult,
+  withStatusMessage,
+} from './execute-job.js'
 import { assertMcpBulkCount } from './limits.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 
@@ -175,9 +183,17 @@ async function requireOrIssueApproval(options: {
     input: options.input,
   })
   if (replay.ok) {
-    return {
-      ...(replay.result as Record<string, unknown>),
-      replayed: true,
+    const formatted = asJobHandleFromStored(
+      options.approvalRequestId,
+      replay.result,
+      options.toolName
+    )
+    const payload = formatted || replay.result
+    if (shouldReplayStoredExecuteResult(payload)) {
+      return {
+        ...(payload as Record<string, unknown>),
+        replayed: true,
+      }
     }
   }
   const ready = await assertMcpApprovalReady(options.approvalStore, {
@@ -320,60 +336,112 @@ export async function mcpExecuteBulkScripts(options: {
   })
   if (pending) return { ...pending, quote }
 
-  const angles = await loadAngles({
-    db: options.db,
-    user: options.user,
-    brandId,
-    offerId,
-    ctx,
-    args: options.args,
-  })
-  const runtime = await buildRuntime({
-    db: options.db,
-    user: options.user,
-    artifactStore: options.artifactStore,
-    brandId,
-    offerId,
-    args: options.args,
-    packId: approvalRequestId || undefined,
-  })
-  runtime.appOrigin = options.appOrigin
-  const result = await runBulkScripts({ runtime, angles })
-  const payload = {
-    status: result.succeeded > 0 ? 'completed' : 'failed',
-    consumesAdvanceCredits: true,
-    packId: result.packId,
-    sessionId: result.sessionId,
-    brandId,
-    offerId,
-    charged: result.charged,
-    succeeded: result.succeeded,
-    quotedCreditCost: quote.totalCredits,
-    quote,
-    items: result.items.map((item) => ({
-      angleId: item.angleId,
-      title: item.title,
-      scriptId: item.scriptId,
-      messageId: item.messageId,
-      charged: item.charged,
-      error: item.error,
-    })),
-    deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
-    note: 'Charged 3 credits per succeeded script. Failed items were not charged.',
-  }
-  await finalizeIfSucceeded({
-    approvalStore: options.approvalStore,
+  const toolName = 'execute_bulk_scripts'
+  const claim = await claimMcpExecuteJob(options.approvalStore, {
     approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_bulk_scripts',
-    input: boundInput,
-    result: payload,
-    succeeded: result.succeeded,
+    toolName,
+    quotedCreditCost: quote.totalCredits,
   })
-  if (result.succeeded <= 0) {
-    throw new Error(result.items[0]?.error || 'Bulk scripts failed — approval remains reusable')
+  if (!claim.claimed) {
+    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
+    return (formatted || {
+      status: 'running',
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName,
+      chargedCredits: 0,
+    }) as Record<string, unknown>
   }
-  return payload
+
+  const work = async () => {
+    try {
+      const angles = await loadAngles({
+        db: options.db,
+        user: options.user,
+        brandId,
+        offerId,
+        ctx,
+        args: options.args,
+      })
+      const runtime = await buildRuntime({
+        db: options.db,
+        user: options.user,
+        artifactStore: options.artifactStore,
+        brandId,
+        offerId,
+        args: options.args,
+        packId: approvalRequestId,
+      })
+      runtime.appOrigin = options.appOrigin
+      const result = await runBulkScripts({ runtime, angles })
+      if (result.succeeded <= 0) {
+        await storeMcpApprovalResult(options.approvalStore, {
+          approvalRequestId,
+          result: buildFailedJobResult({
+            approvalRequestId,
+            toolName,
+            error: result.items[0]?.error || 'Bulk scripts failed — approval remains reusable',
+            quotedCreditCost: quote.totalCredits,
+          }),
+        })
+        return
+      }
+
+      const payload = withStatusMessage({
+        status: 'completed',
+        jobId: approvalRequestId,
+        approvalRequestId,
+        toolName,
+        consumesAdvanceCredits: true,
+        packId: result.packId,
+        sessionId: result.sessionId,
+        brandId,
+        offerId,
+        charged: result.charged,
+        chargedCredits: result.charged,
+        usage: {
+          quotedCredits: quote.totalCredits,
+          chargedCredits: result.charged,
+        },
+        succeeded: result.succeeded,
+        quotedCreditCost: quote.totalCredits,
+        quote,
+        items: result.items.map((item) => ({
+          angleId: item.angleId,
+          title: item.title,
+          scriptId: item.scriptId,
+          messageId: item.messageId,
+          charged: item.charged,
+          error: item.error,
+        })),
+        deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
+        note: 'Charged 3 credits per succeeded script. Failed items were not charged.',
+      }, toolName)
+      await finalizeIfSucceeded({
+        approvalStore: options.approvalStore,
+        approvalRequestId,
+        userId: options.user.id,
+        toolName,
+        input: boundInput,
+        result: payload,
+        succeeded: result.succeeded,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Bulk scripts failed'
+      await storeMcpApprovalResult(options.approvalStore, {
+        approvalRequestId,
+        result: buildFailedJobResult({
+          approvalRequestId,
+          toolName,
+          error: message,
+          quotedCreditCost: quote.totalCredits,
+        }),
+      })
+      console.error('mcp execute_bulk_scripts job', message)
+    }
+  }
+  scheduleMcpExecuteWork(work)
+  return claim.handle as unknown as Record<string, unknown>
 }
 
 export async function mcpExecuteBulkPosts(options: {
@@ -403,6 +471,7 @@ export async function mcpExecuteBulkPosts(options: {
     count,
     imageModel,
     styleDnaId,
+    language: languageOf(options.args.language),
     angleIds: selectedIds(options.args),
     sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
   }
@@ -421,66 +490,118 @@ export async function mcpExecuteBulkPosts(options: {
   })
   if (pending) return { ...pending, quote }
 
-  const angles = await loadAngles({
-    db: options.db,
-    user: options.user,
-    brandId,
-    offerId,
-    ctx,
-    args: options.args,
-  })
-  const runtime = await buildRuntime({
-    db: options.db,
-    user: options.user,
-    artifactStore: options.artifactStore,
-    brandId,
-    offerId,
-    args: options.args,
-    packId: approvalRequestId || undefined,
-  })
-  runtime.appOrigin = options.appOrigin
-  const result = await runBulkPosts({
-    runtime,
-    angles,
-    imageModel,
-    styleDnaId,
-  })
-  const payload = {
-    status: result.succeeded > 0 ? 'completed' : 'failed',
-    consumesAdvanceCredits: true,
-    packId: result.packId,
-    sessionId: result.sessionId,
-    brandId,
-    offerId,
-    charged: result.charged,
-    succeeded: result.succeeded,
-    quotedCreditCost: quote.totalCredits,
-    quote,
-    expandedRefs: result.expanded,
-    items: result.items.map((item) => ({
-      angleId: item.angleId,
-      imageUrl: item.imageUrl,
-      productImageId: item.productImageId,
-      approach: item.approach,
-      charged: item.charged,
-      error: item.error,
-    })),
-    deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
-    note: `Charged ${quoteLegacyActionCredits('image', imageModel)} credits per succeeded image (plus any expanded product refs).`,
-  }
-  await finalizeIfSucceeded({
-    approvalStore: options.approvalStore,
+  const toolName = 'execute_bulk_posts'
+  const claim = await claimMcpExecuteJob(options.approvalStore, {
     approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_bulk_posts',
-    input: boundInput,
-    result: payload,
-    succeeded: result.succeeded + result.expanded.length,
+    toolName,
+    quotedCreditCost: quote.totalCredits,
   })
-  if (result.succeeded <= 0) {
-    throw new Error(result.items[0]?.error || 'Bulk posts failed — approval remains reusable')
+  if (!claim.claimed) {
+    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
+    return (formatted || {
+      status: 'running',
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName,
+      chargedCredits: 0,
+    }) as Record<string, unknown>
   }
-  return payload
+
+  const work = async () => {
+    try {
+      const angles = await loadAngles({
+        db: options.db,
+        user: options.user,
+        brandId,
+        offerId,
+        ctx,
+        args: options.args,
+      })
+      const runtime = await buildRuntime({
+        db: options.db,
+        user: options.user,
+        artifactStore: options.artifactStore,
+        brandId,
+        offerId,
+        args: options.args,
+        packId: approvalRequestId,
+      })
+      runtime.appOrigin = options.appOrigin
+      const result = await runBulkPosts({
+        runtime,
+        angles,
+        imageModel,
+        styleDnaId,
+      })
+      if (result.succeeded <= 0) {
+        await storeMcpApprovalResult(options.approvalStore, {
+          approvalRequestId,
+          result: buildFailedJobResult({
+            approvalRequestId,
+            toolName,
+            error: result.items[0]?.error || 'Bulk posts failed — approval remains reusable',
+            quotedCreditCost: quote.totalCredits,
+          }),
+        })
+        return
+      }
+
+      const payload = withStatusMessage({
+        status: 'completed',
+        jobId: approvalRequestId,
+        approvalRequestId,
+        toolName,
+        consumesAdvanceCredits: true,
+        packId: result.packId,
+        sessionId: result.sessionId,
+        brandId,
+        offerId,
+        charged: result.charged,
+        chargedCredits: result.charged,
+        usage: {
+          quotedCredits: quote.totalCredits,
+          chargedCredits: result.charged,
+        },
+        succeeded: result.succeeded,
+        quotedCreditCost: quote.totalCredits,
+        quote,
+        expandedRefs: result.expanded,
+        items: result.items.map((item) => ({
+          angleId: item.angleId,
+          imageUrl: item.imageUrl,
+          productImageId: item.productImageId,
+          approach: item.approach,
+          charged: item.charged,
+          error: item.error,
+        })),
+        deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
+        note: `Charged ${quoteLegacyActionCredits('image', imageModel)} credits per succeeded image (plus any expanded product refs).`,
+      }, toolName)
+      await finalizeIfSucceeded({
+        approvalStore: options.approvalStore,
+        approvalRequestId,
+        userId: options.user.id,
+        toolName,
+        input: boundInput,
+        result: payload,
+        succeeded: result.succeeded,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Bulk posts failed'
+      await storeMcpApprovalResult(options.approvalStore, {
+        approvalRequestId,
+        result: buildFailedJobResult({
+          approvalRequestId,
+          toolName,
+          error: message,
+          quotedCreditCost: quote.totalCredits,
+        }),
+      })
+      console.error('mcp execute_bulk_posts job', message)
+    }
+  }
+  scheduleMcpExecuteWork(work)
+  return claim.handle as unknown as Record<string, unknown>
 }
 
 export async function mcpExecuteCampaignPack(options: {
@@ -511,6 +632,7 @@ export async function mcpExecuteCampaignPack(options: {
     count,
     imageModel,
     styleDnaId,
+    language: languageOf(options.args.language),
     angleIds: selectedIds(options.args),
     sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
   }
@@ -529,86 +651,139 @@ export async function mcpExecuteCampaignPack(options: {
   })
   if (pending) return { ...pending, quote }
 
-  const angles = await loadAngles({
-    db: options.db,
-    user: options.user,
-    brandId,
-    offerId,
-    ctx,
-    args: options.args,
+  const toolName = 'execute_campaign_pack'
+  const claim = await claimMcpExecuteJob(options.approvalStore, {
+    approvalRequestId,
+    toolName,
+    quotedCreditCost: quote.totalCredits,
   })
-  const runtime = await buildRuntime({
-    db: options.db,
-    user: options.user,
-    artifactStore: options.artifactStore,
-    brandId,
-    offerId,
-    args: options.args,
-    packId: approvalRequestId || undefined,
-  })
-  runtime.appOrigin = options.appOrigin
-  const scripts = await runBulkScripts({ runtime, angles })
-  const succeededScripts = scripts.items.filter((item) => !item.error && item.content)
-  const posts = succeededScripts.length
-    ? await runBulkPosts({
-        runtime: { ...runtime, packId: scripts.packId, sessionId: scripts.sessionId },
-        angles: angles.filter((angle) => succeededScripts.some((item) => item.angleId === angle.id)),
-        scripts: succeededScripts,
-        imageModel,
-        styleDnaId,
+  if (!claim.claimed) {
+    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, toolName)
+    return (formatted || {
+      status: 'running',
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName,
+      chargedCredits: 0,
+    }) as Record<string, unknown>
+  }
+
+  const work = async () => {
+    try {
+      const angles = await loadAngles({
+        db: options.db,
+        user: options.user,
+        brandId,
+        offerId,
+        ctx,
+        args: options.args,
       })
-    : {
+      const runtime = await buildRuntime({
+        db: options.db,
+        user: options.user,
+        artifactStore: options.artifactStore,
+        brandId,
+        offerId,
+        args: options.args,
+        packId: approvalRequestId,
+      })
+      runtime.appOrigin = options.appOrigin
+      const scripts = await runBulkScripts({ runtime, angles })
+      if (scripts.succeeded <= 0) {
+        await storeMcpApprovalResult(options.approvalStore, {
+          approvalRequestId,
+          result: buildFailedJobResult({
+            approvalRequestId,
+            toolName,
+            error: scripts.items[0]?.error || 'Campaign pack failed — approval remains reusable',
+            quotedCreditCost: quote.totalCredits,
+          }),
+        })
+        return
+      }
+
+      const succeededScripts = scripts.items.filter((item) => !item.error && item.content)
+      const posts = succeededScripts.length
+        ? await runBulkPosts({
+            runtime: { ...runtime, packId: scripts.packId, sessionId: scripts.sessionId },
+            angles: angles.filter((angle) => succeededScripts.some((item) => item.angleId === angle.id)),
+            scripts: succeededScripts,
+            imageModel,
+            styleDnaId,
+          })
+        : {
+            packId: scripts.packId,
+            sessionId: scripts.sessionId,
+            items: [],
+            expanded: [],
+            succeeded: 0,
+            charged: 0,
+          }
+      const charged = scripts.charged + posts.charged
+      const payload = withStatusMessage({
+        status: 'completed',
+        jobId: approvalRequestId,
+        approvalRequestId,
+        toolName,
+        consumesAdvanceCredits: true,
         packId: scripts.packId,
         sessionId: scripts.sessionId,
-        items: [],
-        expanded: [],
-        succeeded: 0,
-        charged: 0,
-      }
-  const payload = {
-    status: scripts.succeeded > 0 ? 'completed' : 'failed',
-    consumesAdvanceCredits: true,
-    packId: scripts.packId,
-    sessionId: scripts.sessionId,
-    brandId,
-    offerId,
-    charged: scripts.charged + posts.charged,
-    succeededScripts: scripts.succeeded,
-    succeededPosts: posts.succeeded,
-    quotedCreditCost: quote.totalCredits,
-    quote,
-    scripts: scripts.items.map((item) => ({
-      angleId: item.angleId,
-      title: item.title,
-      scriptId: item.scriptId,
-      charged: item.charged,
-      error: item.error,
-    })),
-    posts: posts.items.map((item) => ({
-      angleId: item.angleId,
-      imageUrl: item.imageUrl,
-      approach: item.approach,
-      charged: item.charged,
-      error: item.error,
-    })),
-    expandedRefs: posts.expanded,
-    deepLink: deepLinkForPack(options.appOrigin, brandId, scripts.sessionId, scripts.packId),
-    styleDna: findStyleDna(runtime.styleDnas || [], styleDnaId),
-    note: 'One approval. Charge per succeeded script (3) and image (6 or 24). Failed items were not charged.',
+        brandId,
+        offerId,
+        charged,
+        chargedCredits: charged,
+        usage: {
+          quotedCredits: quote.totalCredits,
+          chargedCredits: charged,
+        },
+        succeededScripts: scripts.succeeded,
+        succeededPosts: posts.succeeded,
+        quotedCreditCost: quote.totalCredits,
+        quote,
+        scripts: scripts.items.map((item) => ({
+          angleId: item.angleId,
+          title: item.title,
+          scriptId: item.scriptId,
+          charged: item.charged,
+          error: item.error,
+        })),
+        posts: posts.items.map((item) => ({
+          angleId: item.angleId,
+          imageUrl: item.imageUrl,
+          approach: item.approach,
+          charged: item.charged,
+          error: item.error,
+        })),
+        expandedRefs: posts.expanded,
+        deepLink: deepLinkForPack(options.appOrigin, brandId, scripts.sessionId, scripts.packId),
+        styleDna: findStyleDna(runtime.styleDnas || [], styleDnaId),
+        note: 'One approval. Charge per succeeded script (3) and image (6 or 24). Failed items were not charged.',
+      }, toolName)
+      await finalizeIfSucceeded({
+        approvalStore: options.approvalStore,
+        approvalRequestId,
+        userId: options.user.id,
+        toolName,
+        input: boundInput,
+        result: payload,
+        succeeded: scripts.succeeded + posts.succeeded,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Campaign pack failed'
+      await storeMcpApprovalResult(options.approvalStore, {
+        approvalRequestId,
+        result: buildFailedJobResult({
+          approvalRequestId,
+          toolName,
+          error: message,
+          quotedCreditCost: quote.totalCredits,
+        }),
+      })
+      console.error('mcp execute_campaign_pack job', message)
+    }
   }
-  await finalizeIfSucceeded({
-    approvalStore: options.approvalStore,
-    approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_campaign_pack',
-    input: boundInput,
-    result: payload,
-    succeeded: scripts.succeeded + posts.succeeded,
-  })
-  if (scripts.succeeded <= 0) {
-    throw new Error(scripts.items[0]?.error || 'Campaign pack failed — approval remains reusable')
-  }
-  return payload
+  scheduleMcpExecuteWork(work)
+  return claim.handle as unknown as Record<string, unknown>
 }
 
 export type { StyleDna } from '../bulk/types.js'

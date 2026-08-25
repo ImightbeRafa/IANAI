@@ -3,6 +3,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { encodeGeneratedImageJpeg } from '../generated-image-jpeg.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 
 export type McpOwnedImage = {
@@ -89,12 +90,16 @@ export type McpArtifactStore = {
   }) => Promise<Array<{ index: number; messageId: string; productImageId: string; imageUrl: string; postId?: string }>>
 }
 
-function parseDataUrl(dataUrl: string): { contentType: string; bytes: Buffer } {
-  const match = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl.trim())
-  if (!match) throw new Error('Expected image data URL')
+async function jpegBytesForGeneratedUpload(imageSource: string): Promise<{
+  bytes: Buffer
+  contentType: 'image/jpeg'
+  extension: 'jpg'
+}> {
+  const jpeg = await encodeGeneratedImageJpeg(imageSource)
   return {
-    contentType: match[1] || 'image/png',
-    bytes: Buffer.from(match[2], 'base64'),
+    bytes: jpeg.bytes,
+    contentType: jpeg.contentType,
+    extension: jpeg.extension,
   }
 }
 
@@ -209,15 +214,11 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
     },
 
     async saveImageArtifact(options) {
-      const parsed = parseDataUrl(options.imageDataUrl)
-      const ext = parsed.contentType.includes('jpeg') || parsed.contentType.includes('jpg')
-        ? 'jpg'
-        : parsed.contentType.includes('webp')
-          ? 'webp'
-          : 'png'
-      const path = `${options.userId}/${options.offerId}/product-refs/mcp-${randomUUID()}.${ext}`
-      const { error: upErr } = await db.storage.from('post-images').upload(path, parsed.bytes, {
-        contentType: parsed.contentType,
+      // Always JPEG for generated ads — avoids 5 MiB Storage failures on 2k PNG and never stores blobs in jobs.
+      const jpeg = await jpegBytesForGeneratedUpload(options.imageDataUrl)
+      const path = `${options.userId}/${options.offerId}/product-refs/mcp-${randomUUID()}.${jpeg.extension}`
+      const { error: upErr } = await db.storage.from('post-images').upload(path, jpeg.bytes, {
+        contentType: jpeg.contentType,
         upsert: false,
       })
       if (upErr) throw upErr

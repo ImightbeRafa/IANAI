@@ -24,6 +24,8 @@ export type McpExecuteJobHandle = {
     quotedCredits: number | null
     chargedCredits: number
   }
+  /** Human status for Grok/CoS chat bubbles (ES + EN). */
+  statusMessage?: string
   message?: string
   error?: string
   startedAtMs?: number
@@ -60,6 +62,109 @@ export function readChargedCredits(payload: Record<string, unknown> | null | und
   return 0
 }
 
+/** Classify EXECUTE tool for human status copy. */
+export function executeWorkKind(toolName: string):
+  | 'script'
+  | 'image'
+  | 'edit'
+  | 'enhance'
+  | 'bulk_scripts'
+  | 'bulk_posts'
+  | 'carousel'
+  | 'campaign'
+  | 'generic' {
+  switch (toolName) {
+    case 'execute_script_generate':
+      return 'script'
+    case 'execute_image_generate':
+      return 'image'
+    case 'execute_image_edit':
+      return 'edit'
+    case 'execute_image_enhance':
+      return 'enhance'
+    case 'execute_bulk_scripts':
+      return 'bulk_scripts'
+    case 'execute_bulk_posts':
+      return 'bulk_posts'
+    case 'execute_carousel_generate':
+      return 'carousel'
+    case 'execute_campaign_pack':
+      return 'campaign'
+    default:
+      return 'generic'
+  }
+}
+
+/** Bilingual human status for Grok chat (CoS narrates; not a blocking widget). */
+export function buildExecuteStatusMessage(
+  toolName: string,
+  status: McpExecuteJobStatus | 'completed' | string
+): string {
+  const kind = executeWorkKind(toolName)
+  const nounEs =
+    kind === 'script'
+      ? 'un guion'
+      : kind === 'image'
+        ? 'una imagen'
+        : kind === 'edit'
+          ? 'una edición de imagen'
+          : kind === 'enhance'
+            ? 'una mejora de imagen'
+            : kind === 'bulk_scripts'
+              ? 'varios guiones'
+              : kind === 'bulk_posts'
+                ? 'varios posts'
+                : kind === 'carousel'
+                  ? 'un carrusel'
+                  : kind === 'campaign'
+                    ? 'un pack de campaña'
+                    : 'tu solicitud'
+  const nounEn =
+    kind === 'script'
+      ? 'a script'
+      : kind === 'image'
+        ? 'an image'
+        : kind === 'edit'
+          ? 'an image edit'
+          : kind === 'enhance'
+            ? 'an image enhance'
+            : kind === 'bulk_scripts'
+              ? 'bulk scripts'
+              : kind === 'bulk_posts'
+                ? 'bulk posts'
+                : kind === 'carousel'
+                  ? 'a carousel'
+                  : kind === 'campaign'
+                    ? 'a campaign pack'
+                    : 'your request'
+
+  if (status === 'running' || status === 'queued') {
+    return `Advance está generando ${nounEs}… / Advance is generating ${nounEn}…`
+  }
+  if (status === 'failed') {
+    return `Advance no pudo completar ${nounEs}. Puedes reintentar. / Advance could not finish ${nounEn}. You can retry.`
+  }
+  if (status === 'completed') {
+    return `Advance terminó ${nounEs}. / Advance finished ${nounEn}.`
+  }
+  return `Advance: ${status}`
+}
+
+export function withStatusMessage<T extends Record<string, unknown>>(
+  result: T,
+  toolName: string
+): T & { statusMessage: string; toolName: string } {
+  const status = typeof result.status === 'string' ? result.status : 'completed'
+  return {
+    ...result,
+    toolName: typeof result.toolName === 'string' ? result.toolName : toolName,
+    statusMessage:
+      typeof result.statusMessage === 'string' && result.statusMessage.trim()
+        ? result.statusMessage
+        : buildExecuteStatusMessage(toolName, status),
+  }
+}
+
 export function buildRunningJobHandle(options: {
   approvalRequestId: string
   toolName: string
@@ -77,9 +182,34 @@ export function buildRunningJobHandle(options: {
     chargedCredits: 0,
     usage: { quotedCredits: quoted, chargedCredits: 0 },
     startedAtMs: options.startedAtMs ?? Date.now(),
+    statusMessage: buildExecuteStatusMessage(options.toolName, 'running'),
     message:
       'Generation started. Poll get_execute_result with this jobId (or retry this tool with the same approvalRequestId) until status=completed. Do not start a second approval.',
   }
+}
+
+export function buildFailedJobResult(options: {
+  approvalRequestId: string
+  toolName: string
+  error: string
+  quotedCreditCost?: number | null
+}): Record<string, unknown> {
+  return withStatusMessage(
+    {
+      status: 'failed',
+      jobId: options.approvalRequestId,
+      approvalRequestId: options.approvalRequestId,
+      toolName: options.toolName,
+      chargedCredits: 0,
+      usage: {
+        quotedCredits: options.quotedCreditCost ?? null,
+        chargedCredits: 0,
+      },
+      error: options.error,
+      message: 'Generation failed. Approval may still be reusable if not consumed.',
+    },
+    options.toolName
+  )
 }
 
 export function asJobHandleFromStored(
@@ -89,6 +219,8 @@ export function asJobHandleFromStored(
 ): McpExecuteJobHandle | Record<string, unknown> | null {
   if (!isMcpExecuteJobPayload(stored)) return null
   const status = stored.status
+  const toolName =
+    typeof stored.toolName === 'string' ? stored.toolName : fallbackToolName || 'execute'
   if (status === 'running' || status === 'queued') {
     const quoted =
       typeof stored.quotedCreditCost === 'number'
@@ -98,14 +230,14 @@ export function asJobHandleFromStored(
       status: status as McpExecuteJobStatus,
       jobId: typeof stored.jobId === 'string' ? stored.jobId : approvalRequestId,
       approvalRequestId,
-      toolName:
-        typeof stored.toolName === 'string' ? stored.toolName : fallbackToolName,
+      toolName,
       retryAfterMs: MCP_EXECUTE_RETRY_AFTER_MS,
       quotedCreditCost: quoted,
       chargedCredits: 0,
       usage: { quotedCredits: quoted, chargedCredits: 0 },
       startedAtMs:
         typeof stored.startedAtMs === 'number' ? stored.startedAtMs : undefined,
+      statusMessage: buildExecuteStatusMessage(toolName, status),
       message:
         typeof stored.message === 'string'
           ? stored.message
@@ -113,21 +245,23 @@ export function asJobHandleFromStored(
     }
   }
   if (status === 'failed') {
-    return {
-      status: 'failed',
-      jobId: approvalRequestId,
-      approvalRequestId,
-      toolName:
-        typeof stored.toolName === 'string' ? stored.toolName : fallbackToolName,
-      chargedCredits: 0,
-      usage: {
-        quotedCredits:
-          typeof stored.quotedCreditCost === 'number' ? stored.quotedCreditCost : null,
+    return withStatusMessage(
+      {
+        status: 'failed',
+        jobId: approvalRequestId,
+        approvalRequestId,
+        toolName,
         chargedCredits: 0,
+        usage: {
+          quotedCredits:
+            typeof stored.quotedCreditCost === 'number' ? stored.quotedCreditCost : null,
+          chargedCredits: 0,
+        },
+        error: typeof stored.error === 'string' ? stored.error : 'Execute failed',
+        message: 'Generation failed. Approval may still be reusable if not consumed.',
       },
-      error: typeof stored.error === 'string' ? stored.error : 'Execute failed',
-      message: 'Generation failed. Approval may still be reusable if not consumed.',
-    }
+      toolName
+    )
   }
   // completed (or legacy completed payload without explicit status)
   const row = { ...stored } as Record<string, unknown>
@@ -142,7 +276,9 @@ export function asJobHandleFromStored(
   }
   if (typeof row.jobId !== 'string') row.jobId = approvalRequestId
   if (typeof row.approvalRequestId !== 'string') row.approvalRequestId = approvalRequestId
-  return row
+  if (typeof row.toolName !== 'string') row.toolName = toolName
+  if (typeof row.status !== 'string') row.status = 'completed'
+  return withStatusMessage(row, toolName)
 }
 
 /**
@@ -235,20 +371,23 @@ export async function getMcpExecuteResult(options: {
   if (row.userId !== options.userId) throw new Error('Job user mismatch')
   if (row.resultJson == null) {
     if (row.status === 'approved') {
-      return {
-        status: 'queued',
-        jobId: id,
-        approvalRequestId: id,
-        toolName: row.toolName,
-        retryAfterMs: MCP_EXECUTE_RETRY_AFTER_MS,
-        chargedCredits: 0,
-        usage: {
-          quotedCredits: row.quotedCreditCost,
+      return withStatusMessage(
+        {
+          status: 'queued',
+          jobId: id,
+          approvalRequestId: id,
+          toolName: row.toolName,
+          retryAfterMs: MCP_EXECUTE_RETRY_AFTER_MS,
           chargedCredits: 0,
+          usage: {
+            quotedCredits: row.quotedCreditCost,
+            chargedCredits: 0,
+          },
+          message:
+            'Approved but not started — retry the original execute_* tool with this approvalRequestId.',
         },
-        message:
-          'Approved but not started — retry the original execute_* tool with this approvalRequestId.',
-      }
+        row.toolName
+      )
     }
     throw new Error('No job result yet')
   }
@@ -266,13 +405,15 @@ export async function getMcpExecuteResult(options: {
 export function withChargedCredits<T extends Record<string, unknown>>(
   result: T,
   charged: number,
-  quotedCreditCost?: number | null
+  quotedCreditCost?: number | null,
+  toolName?: string
 ): T & {
   chargedCredits: number
   charged: number
   usage: { quotedCredits: number | null; chargedCredits: number }
+  statusMessage?: string
 } {
-  return {
+  const base = {
     ...result,
     charged,
     chargedCredits: charged,
@@ -281,6 +422,11 @@ export function withChargedCredits<T extends Record<string, unknown>>(
       chargedCredits: charged,
     },
   }
+  const name =
+    toolName ||
+    (typeof result.toolName === 'string' ? result.toolName : undefined)
+  if (!name) return base
+  return withStatusMessage(base, name)
 }
 
 export type { McpApprovalRecord }

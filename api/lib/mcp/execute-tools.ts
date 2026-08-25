@@ -43,6 +43,7 @@ import {
 import { issueMcpChatApproval } from './approval-prompt.js'
 import {
   asJobHandleFromStored,
+  buildFailedJobResult,
   claimMcpExecuteJob,
   scheduleMcpExecuteWork,
   shouldReplayStoredExecuteResult,
@@ -243,15 +244,12 @@ export async function mcpExecuteScriptGenerate(options: {
       const message = err instanceof Error ? err.message : 'Script generate failed'
       await storeMcpApprovalResult(options.approvalStore, {
         approvalRequestId,
-        result: {
-          status: 'failed',
-          jobId: approvalRequestId,
+        result: buildFailedJobResult({
           approvalRequestId,
           toolName: 'execute_script_generate',
-          chargedCredits: 0,
-          usage: { quotedCredits: quote, chargedCredits: 0 },
           error: message,
-        },
+          quotedCreditCost: quote,
+        }),
       })
       console.error('mcp execute_script_generate job', message)
     }
@@ -346,6 +344,7 @@ async function runScriptGenerateBody(options: {
     status: 'completed',
     jobId: options.approvalRequestId,
     approvalRequestId: options.approvalRequestId,
+    toolName: 'execute_script_generate',
     consumesAdvanceCredits: true,
     brandId: options.brandId,
     offerId: options.offerId,
@@ -355,7 +354,7 @@ async function runScriptGenerateBody(options: {
     scripts: pipeline.scripts || null,
     content: text,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
-  }, charged, options.quote)
+  }, charged, options.quote, 'execute_script_generate')
 }
 
 export async function mcpExecuteImageGenerate(options: {
@@ -464,15 +463,12 @@ export async function mcpExecuteImageGenerate(options: {
       const message = err instanceof Error ? err.message : 'Image generate failed'
       await storeMcpApprovalResult(options.approvalStore, {
         approvalRequestId,
-        result: {
-          status: 'failed',
-          jobId: approvalRequestId,
+        result: buildFailedJobResult({
           approvalRequestId,
           toolName: 'execute_image_generate',
-          chargedCredits: 0,
-          usage: { quotedCredits: quote, chargedCredits: 0 },
           error: message,
-        },
+          quotedCreditCost: quote,
+        }),
       })
       console.error('mcp execute_image_generate job', message)
     }
@@ -573,6 +569,7 @@ async function runImageGenerateBody(options: {
     status: 'completed',
     jobId: options.approvalRequestId,
     approvalRequestId: options.approvalRequestId,
+    toolName: 'execute_image_generate',
     consumesAdvanceCredits: true,
     brandId: options.brandId,
     offerId: options.offerId,
@@ -587,8 +584,8 @@ async function runImageGenerateBody(options: {
     estimatedCostUsd: generated.estimatedCostUsd,
     prompt,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
-    note: 'Image saved to Advance library at max Grok quality (2k/medium). Open deepLink to view in chat.',
-  }, charged, options.quote)
+    note: 'Image saved to Advance library as high-quality JPEG (HTTPS URL only — no blob in job result). Open deepLink to view in chat.',
+  }, charged, options.quote, 'execute_image_generate')
 }
 
 function rejectHugeBase64(label: string, value?: string): void {
@@ -675,7 +672,16 @@ export async function mcpExecuteImageEdit(options: {
     toolName: 'execute_image_edit',
     input: boundWithOffer,
   })
-  if (replay.ok) return { ...(replay.result as Record<string, unknown>), replayed: true }
+  if (replay.ok) {
+    const formatted = asJobHandleFromStored(approvalRequestId, replay.result, 'execute_image_edit')
+    const payload = formatted || replay.result
+    if (shouldReplayStoredExecuteResult(payload)) {
+      return {
+        ...(payload as Record<string, unknown>),
+        replayed: true,
+      }
+    }
+  }
 
   await requireApprovedMcpRequest({
     approvalStore: options.approvalStore,
@@ -685,20 +691,94 @@ export async function mcpExecuteImageEdit(options: {
     input: boundWithOffer,
   })
 
-  const source = await resolveMcpSourceImage({
-    artifactStore: options.artifactStore,
-    userId: options.user.id,
-    brandId,
-    offerId,
-    productImageId,
-    imageUrl: imageUrlArg,
-  })
-
   const limit = await checkUsageLimit(options.user.id, 'edit', { imageModel: 'grok-imagine' })
   if (!limit.allowed) throw new Error('Image edit credit limit reached')
 
-  const generationId = generationIdFromApproval(approvalRequestId, 'edit')
-  const kit = ctxPreview.brandKit
+  const claim = await claimMcpExecuteJob(options.approvalStore, {
+    approvalRequestId,
+    toolName: 'execute_image_edit',
+    quotedCreditCost: quote,
+  })
+  if (!claim.claimed) {
+    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_image_edit')
+    return (formatted || {
+      status: 'running',
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName: 'execute_image_edit',
+      chargedCredits: 0,
+    }) as Record<string, unknown>
+  }
+
+  const work = async () => {
+    try {
+      const result = await runImageEditBody({
+        artifactStore: options.artifactStore,
+        user: options.user,
+        brandId,
+        offerId,
+        productImageId,
+        imageUrlArg,
+        editPrompt,
+        aspectRatio: boundWithOffer.aspectRatio,
+        sessionIdArg,
+        approvalRequestId,
+        appOrigin: options.appOrigin,
+        ctxPreview,
+        quote,
+      })
+      await finalizeMcpApproval({
+        approvalStore: options.approvalStore,
+        approvalRequestId,
+        userId: options.user.id,
+        toolName: 'execute_image_edit',
+        input: boundWithOffer,
+        result,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Image edit failed'
+      await storeMcpApprovalResult(options.approvalStore, {
+        approvalRequestId,
+        result: buildFailedJobResult({
+          approvalRequestId,
+          toolName: 'execute_image_edit',
+          error: message,
+          quotedCreditCost: quote,
+        }),
+      })
+      console.error('mcp execute_image_edit job', message)
+    }
+  }
+  scheduleMcpExecuteWork(work)
+  return claim.handle as unknown as Record<string, unknown>
+}
+
+async function runImageEditBody(options: {
+  artifactStore: McpArtifactStore
+  user: McpAuthUser
+  brandId: string
+  offerId: string
+  productImageId?: string
+  imageUrlArg?: string
+  editPrompt: string
+  aspectRatio: string
+  sessionIdArg?: string
+  approvalRequestId: string
+  appOrigin?: string
+  ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
+  quote: number
+}): Promise<Record<string, unknown>> {
+  const source = await resolveMcpSourceImage({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    productImageId: options.productImageId,
+    imageUrl: options.imageUrlArg,
+  })
+
+  const generationId = generationIdFromApproval(options.approvalRequestId, 'edit')
+  const kit = options.ctxPreview.brandKit
   const brandRules = [
     kit?.primaryColor ? `Primary ${kit.primaryColor}` : null,
     kit?.secondaryColor ? `Secondary ${kit.secondaryColor}` : null,
@@ -706,31 +786,31 @@ export async function mcpExecuteImageEdit(options: {
     kit?.logoUrl ? `Official logo: ${kit.logoUrl}` : null,
   ].filter(Boolean).join('\n')
   const prompt = buildImageEditSystemPrompt({
-    editPrompt,
+    editPrompt: options.editPrompt,
     brandRules,
   })
   const generated = await runGrokImageEdit({
     apiKey: xaiKey(),
     prompt,
     baseImageUrl: source.imageUrl,
-    aspectRatio: boundWithOffer.aspectRatio,
+    aspectRatio: options.aspectRatio,
   })
 
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
-    brandId,
-    offerId,
-    sessionId: sessionIdArg,
-    title: `MCP edit — ${ctxPreview.offers.find((o) => o.id === offerId)?.name || offerId}`,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    sessionId: options.sessionIdArg,
+    title: `MCP edit — ${options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId}`,
   })
   const saved = await options.artifactStore.saveImageArtifact({
     userId: options.user.id,
-    brandId,
-    offerId,
+    brandId: options.brandId,
+    offerId: options.offerId,
     sessionId,
     imageDataUrl: generated.imageDataUrl,
     label: 'MCP edit',
-    approvalRequestId,
+    approvalRequestId: options.approvalRequestId,
     actionType: 'edit',
     metadata: {
       resolution: generated.resolution,
@@ -752,8 +832,8 @@ export async function mcpExecuteImageEdit(options: {
     metadata: {
       action: 'mcp_execute_image_edit',
       source: 'mcp',
-      brandId,
-      approvalRequestId,
+      brandId: options.brandId,
+      approvalRequestId: options.approvalRequestId,
       sessionId,
     },
   })
@@ -768,29 +848,21 @@ export async function mcpExecuteImageEdit(options: {
   }
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  const result = {
+  return withChargedCredits({
     status: 'completed',
+    jobId: options.approvalRequestId,
+    approvalRequestId: options.approvalRequestId,
+    toolName: 'execute_image_edit',
     consumesAdvanceCredits: true,
-    charged,
-    chargedCredits: charged,
-    brandId,
-    offerId,
+    brandId: options.brandId,
+    offerId: options.offerId,
     sessionId,
     messageId: saved.messageId,
     productImageId: saved.productImageId,
     imageUrl: saved.imageUrl,
     providerModel: generated.providerModel,
-    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
-  }
-  await finalizeMcpApproval({
-    approvalStore: options.approvalStore,
-    approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_image_edit',
-    input: boundWithOffer,
-    result,
-  })
-  return result
+    deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
+  }, charged, options.quote, 'execute_image_edit')
 }
 
 export async function mcpExecuteImageEnhance(options: {
@@ -846,7 +918,16 @@ export async function mcpExecuteImageEnhance(options: {
     toolName: 'execute_image_enhance',
     input: boundWithOffer,
   })
-  if (replay.ok) return { ...(replay.result as Record<string, unknown>), replayed: true }
+  if (replay.ok) {
+    const formatted = asJobHandleFromStored(approvalRequestId, replay.result, 'execute_image_enhance')
+    const payload = formatted || replay.result
+    if (shouldReplayStoredExecuteResult(payload)) {
+      return {
+        ...(payload as Record<string, unknown>),
+        replayed: true,
+      }
+    }
+  }
 
   await requireApprovedMcpRequest({
     approvalStore: options.approvalStore,
@@ -856,56 +937,134 @@ export async function mcpExecuteImageEnhance(options: {
     input: boundWithOffer,
   })
 
-  const source = await resolveMcpSourceImage({
-    artifactStore: options.artifactStore,
-    userId: options.user.id,
-    brandId,
-    offerId,
-    productImageId,
-    imageUrl: imageUrlArg,
-  })
-
   const limit = await checkUsageLimit(options.user.id, 'enhance', { imageModel: 'grok-imagine' })
   if (!limit.allowed) throw new Error('Image enhance credit limit reached')
 
-  const generationId = generationIdFromApproval(approvalRequestId, 'enhance')
-  const kit = ctxPreview.brandKit
+  const claim = await claimMcpExecuteJob(options.approvalStore, {
+    approvalRequestId,
+    toolName: 'execute_image_enhance',
+    quotedCreditCost: quote,
+  })
+  if (!claim.claimed) {
+    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_image_enhance')
+    return (formatted || {
+      status: 'running',
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName: 'execute_image_enhance',
+      chargedCredits: 0,
+    }) as Record<string, unknown>
+  }
+
+  const work = async () => {
+    try {
+      const result = await runImageEnhanceBody({
+        artifactStore: options.artifactStore,
+        user: options.user,
+        brandId,
+        offerId,
+        productImageId,
+        imageUrlArg,
+        enhanceTier,
+        instruction: boundWithOffer.instruction,
+        aspectRatio: boundWithOffer.aspectRatio,
+        language,
+        sessionIdArg,
+        approvalRequestId,
+        appOrigin: options.appOrigin,
+        ctxPreview,
+        quote,
+      })
+      await finalizeMcpApproval({
+        approvalStore: options.approvalStore,
+        approvalRequestId,
+        userId: options.user.id,
+        toolName: 'execute_image_enhance',
+        input: boundWithOffer,
+        result,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Image enhance failed'
+      await storeMcpApprovalResult(options.approvalStore, {
+        approvalRequestId,
+        result: buildFailedJobResult({
+          approvalRequestId,
+          toolName: 'execute_image_enhance',
+          error: message,
+          quotedCreditCost: quote,
+        }),
+      })
+      console.error('mcp execute_image_enhance job', message)
+    }
+  }
+  scheduleMcpExecuteWork(work)
+  return claim.handle as unknown as Record<string, unknown>
+}
+
+async function runImageEnhanceBody(options: {
+  artifactStore: McpArtifactStore
+  user: McpAuthUser
+  brandId: string
+  offerId: string
+  productImageId?: string
+  imageUrlArg?: string
+  enhanceTier: ReturnType<typeof resolveEnhanceTier>
+  instruction?: string
+  aspectRatio: string
+  language: 'es' | 'en'
+  sessionIdArg?: string
+  approvalRequestId: string
+  appOrigin?: string
+  ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
+  quote: number
+}): Promise<Record<string, unknown>> {
+  const source = await resolveMcpSourceImage({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    productImageId: options.productImageId,
+    imageUrl: options.imageUrlArg,
+  })
+
+  const generationId = generationIdFromApproval(options.approvalRequestId, 'enhance')
+  const kit = options.ctxPreview.brandKit
   const brandPrefix = [
     kit?.primaryColor ? `USA SOLO ESTOS COLORES DE MARCA: ${[kit.primaryColor, kit.secondaryColor, kit.accentColor].filter(Boolean).join(', ')}` : null,
     kit?.visualStyleNotes || null,
   ].filter(Boolean).join('\n')
   const prompt = buildEnhanceSystemPrompt({
-    language,
-    tier: enhanceTier,
+    language: options.language,
+    tier: options.enhanceTier,
     hasProductRef: false,
     brandPrefix,
-    userDirection: resolveEnhanceUserDirection(boundWithOffer.instruction, null),
+    userDirection: resolveEnhanceUserDirection(options.instruction, null),
   })
   const generated = await runGrokImageEdit({
     apiKey: xaiKey(),
     prompt,
     baseImageUrl: source.imageUrl,
-    aspectRatio: boundWithOffer.aspectRatio,
+    aspectRatio: options.aspectRatio,
   })
 
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
-    brandId,
-    offerId,
-    sessionId: sessionIdArg,
-    title: `MCP enhance — ${ctxPreview.offers.find((o) => o.id === offerId)?.name || offerId}`,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    sessionId: options.sessionIdArg,
+    title: `MCP enhance — ${options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId}`,
   })
   const saved = await options.artifactStore.saveImageArtifact({
     userId: options.user.id,
-    brandId,
-    offerId,
+    brandId: options.brandId,
+    offerId: options.offerId,
     sessionId,
     imageDataUrl: generated.imageDataUrl,
-    label: `MCP enhance (${enhanceTier})`,
-    approvalRequestId,
+    label: `MCP enhance (${options.enhanceTier})`,
+    approvalRequestId: options.approvalRequestId,
     actionType: 'enhance',
     metadata: {
-      enhanceTier,
+      enhanceTier: options.enhanceTier,
       resolution: generated.resolution,
       quality: generated.quality,
       providerModel: generated.providerModel,
@@ -925,10 +1084,10 @@ export async function mcpExecuteImageEnhance(options: {
     metadata: {
       action: 'mcp_execute_image_enhance',
       source: 'mcp',
-      brandId,
-      approvalRequestId,
+      brandId: options.brandId,
+      approvalRequestId: options.approvalRequestId,
       sessionId,
-      enhanceTier,
+      enhanceTier: options.enhanceTier,
     },
   })
   const charged = await chargeMcpCredits({
@@ -939,30 +1098,22 @@ export async function mcpExecuteImageEnhance(options: {
   })
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  const result = {
+  return withChargedCredits({
     status: 'completed',
+    jobId: options.approvalRequestId,
+    approvalRequestId: options.approvalRequestId,
+    toolName: 'execute_image_enhance',
     consumesAdvanceCredits: true,
-    charged,
-    chargedCredits: charged,
-    brandId,
-    offerId,
+    brandId: options.brandId,
+    offerId: options.offerId,
     sessionId,
     messageId: saved.messageId,
     productImageId: saved.productImageId,
     imageUrl: saved.imageUrl,
-    enhanceTier,
+    enhanceTier: options.enhanceTier,
     providerModel: generated.providerModel,
-    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
-  }
-  await finalizeMcpApproval({
-    approvalStore: options.approvalStore,
-    approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_image_enhance',
-    input: boundWithOffer,
-    result,
-  })
-  return result
+    deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
+  }, charged, options.quote, 'execute_image_enhance')
 }
 
 export async function mcpExecuteCarouselGenerate(options: {
@@ -1042,7 +1193,16 @@ export async function mcpExecuteCarouselGenerate(options: {
     toolName: 'execute_carousel_generate',
     input: boundWithOffer,
   })
-  if (replay.ok) return { ...(replay.result as Record<string, unknown>), replayed: true }
+  if (replay.ok) {
+    const formatted = asJobHandleFromStored(approvalRequestId, replay.result, 'execute_carousel_generate')
+    const payload = formatted || replay.result
+    if (shouldReplayStoredExecuteResult(payload)) {
+      return {
+        ...(payload as Record<string, unknown>),
+        replayed: true,
+      }
+    }
+  }
 
   await requireApprovedMcpRequest({
     approvalStore: options.approvalStore,
@@ -1064,18 +1224,100 @@ export async function mcpExecuteCarouselGenerate(options: {
     )
   }
 
-  const offer = ctxPreview.offers.find((o) => o.id === offerId)
+  const claim = await claimMcpExecuteJob(options.approvalStore, {
+    approvalRequestId,
+    toolName: 'execute_carousel_generate',
+    quotedCreditCost: quote,
+  })
+  if (!claim.claimed) {
+    const formatted = asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_carousel_generate')
+    return (formatted || {
+      status: 'running',
+      jobId: approvalRequestId,
+      approvalRequestId,
+      toolName: 'execute_carousel_generate',
+      chargedCredits: 0,
+    }) as Record<string, unknown>
+  }
+
+  const work = async () => {
+    try {
+      const result = await runCarouselGenerateBody({
+        artifactStore: options.artifactStore,
+        user: options.user,
+        brandId,
+        offerId,
+        subtype,
+        slideCount,
+        scriptContent,
+        aspectRatio,
+        language,
+        designDirection: boundWithOffer.designDirection,
+        slideDetails: boundWithOffer.slideDetails,
+        previewFirstSlideOnly,
+        sessionIdArg,
+        approvalRequestId,
+        appOrigin: options.appOrigin,
+        ctxPreview,
+        quote,
+      })
+      await finalizeMcpApproval({
+        approvalStore: options.approvalStore,
+        approvalRequestId,
+        userId: options.user.id,
+        toolName: 'execute_carousel_generate',
+        input: boundWithOffer,
+        result,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Carousel generation failed'
+      await storeMcpApprovalResult(options.approvalStore, {
+        approvalRequestId,
+        result: buildFailedJobResult({
+          approvalRequestId,
+          toolName: 'execute_carousel_generate',
+          error: message,
+          quotedCreditCost: quote,
+        }),
+      })
+      console.error('mcp execute_carousel_generate job', message)
+    }
+  }
+  scheduleMcpExecuteWork(work)
+  return claim.handle as unknown as Record<string, unknown>
+}
+
+async function runCarouselGenerateBody(options: {
+  artifactStore: McpArtifactStore
+  user: McpAuthUser
+  brandId: string
+  offerId: string
+  subtype: ReturnType<typeof normalizeCarouselSubtype>
+  slideCount: number
+  scriptContent: string
+  aspectRatio: typeof VALID_CAROUSEL_ASPECT_RATIOS[number]
+  language: 'es' | 'en'
+  designDirection?: string
+  slideDetails?: string
+  previewFirstSlideOnly: boolean
+  sessionIdArg?: string
+  approvalRequestId: string
+  appOrigin?: string
+  ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
+  quote: number
+}): Promise<Record<string, unknown>> {
+  const offer = options.ctxPreview.offers.find((o) => o.id === options.offerId)
   const generated = await runOrganicCarouselGenerate({
     userId: options.user.id,
-    subtype,
-    slideCount,
-    scriptContent,
-    aspectRatio,
-    language,
-    brandKitId: ctxPreview.brandKit?.id,
-    designDirection: boundWithOffer.designDirection,
-    slideDetails: boundWithOffer.slideDetails,
-    previewFirstSlideOnly,
+    subtype: options.subtype,
+    slideCount: options.slideCount,
+    scriptContent: options.scriptContent,
+    aspectRatio: options.aspectRatio,
+    language: options.language,
+    brandKitId: options.ctxPreview.brandKit?.id,
+    designDirection: options.designDirection,
+    slideDetails: options.slideDetails,
+    previewFirstSlideOnly: options.previewFirstSlideOnly,
     productContext: { name: offer?.name, type: offer?.type || undefined },
   })
   if (generated.succeeded < 1) {
@@ -1084,19 +1326,19 @@ export async function mcpExecuteCarouselGenerate(options: {
 
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
-    brandId,
-    offerId,
-    sessionId: sessionIdArg,
-    title: `MCP carousel — ${offer?.name || offerId}`,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    sessionId: options.sessionIdArg,
+    title: `MCP carousel — ${offer?.name || options.offerId}`,
   })
   const savedSlides = await options.artifactStore.saveCarouselSlides({
     userId: options.user.id,
-    brandId,
-    offerId,
+    brandId: options.brandId,
+    offerId: options.offerId,
     sessionId,
     carouselGroupId: generated.carouselGroupId,
-    subtype,
-    approvalRequestId,
+    subtype: options.subtype,
+    approvalRequestId: options.approvalRequestId,
     slides: generated.slides
       .filter((s): s is typeof s & { imageUrl: string } => Boolean(s.imageUrl))
       .map((s) => ({
@@ -1120,18 +1362,18 @@ export async function mcpExecuteCarouselGenerate(options: {
     metadata: {
       action: 'mcp_execute_carousel_generate',
       source: 'mcp',
-      brandId,
-      approvalRequestId,
+      brandId: options.brandId,
+      approvalRequestId: options.approvalRequestId,
       sessionId,
-      subtype,
-      slideCount,
+      subtype: options.subtype,
+      slideCount: options.slideCount,
       succeeded: generated.succeeded,
     },
   })
 
   let charged = 0
   for (let i = 0; i < generated.succeeded; i++) {
-    const slideGenerationId = globalThis.crypto?.randomUUID?.() || `${generationIdFromApproval(approvalRequestId, 'carousel')}-${i}`
+    const slideGenerationId = `${options.approvalRequestId}-carousel-${i}`
     charged += await chargeMcpCredits({
       userId: options.user.id,
       action: 'image',
@@ -1144,17 +1386,18 @@ export async function mcpExecuteCarouselGenerate(options: {
   }
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  const result = {
+  return withChargedCredits({
     status: 'completed',
+    jobId: options.approvalRequestId,
+    approvalRequestId: options.approvalRequestId,
+    toolName: 'execute_carousel_generate',
     consumesAdvanceCredits: true,
-    charged,
-    chargedCredits: charged,
-    quotedCreditCost: quote,
-    brandId,
-    offerId,
+    quotedCreditCost: options.quote,
+    brandId: options.brandId,
+    offerId: options.offerId,
     sessionId,
     carouselGroupId: generated.carouselGroupId,
-    subtype,
+    subtype: options.subtype,
     totalSlides: generated.totalSlides,
     succeeded: generated.succeeded,
     slides: savedSlides.map((s) => ({
@@ -1165,15 +1408,6 @@ export async function mcpExecuteCarouselGenerate(options: {
     })),
     failed: generated.slides.filter((s) => !s.imageUrl).map((s) => ({ index: s.index, error: s.error })),
     durationNote: `MCP host maxDuration is ${MCP_HOST_MAX_DURATION_SEC}s; large carousels may time out.`,
-    deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
-  }
-  await finalizeMcpApproval({
-    approvalStore: options.approvalStore,
-    approvalRequestId,
-    userId: options.user.id,
-    toolName: 'execute_carousel_generate',
-    input: boundWithOffer,
-    result,
-  })
-  return result
+    deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
+  }, charged, options.quote, 'execute_carousel_generate')
 }
