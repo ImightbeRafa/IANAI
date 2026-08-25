@@ -11,7 +11,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { matchesRunningCasExpectation } from './cas-running-result.js'
+import { canStoreExecuteResult, matchesRunningCasExpectation } from './cas-running-result.js'
 
 export const MCP_APPROVAL_TTL_MS = 60 * 60 * 1000 // 1 hour
 
@@ -365,6 +365,7 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
       if (row.status !== 'approved' && row.status !== 'consumed' && row.status !== 'pending') {
         return null
       }
+      if (!canStoreExecuteResult(row.resultJson, result)) return null
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }

@@ -309,7 +309,7 @@ export async function claimMcpExecuteJob(
     return { claimed: false, existing: existingRow.resultJson }
   }
   if (existingRow?.resultJson != null && isReclaimableExecuteJob(existingRow.resultJson, nowMs)) {
-    // Re-read then CAS-style write: never clobber a completed result that landed mid-reclaim.
+    // Re-read then CAS: never clobber a completed result that landed mid-reclaim.
     const latest = await store.findById(options.approvalRequestId)
     if (!latest?.resultJson || !isReclaimableExecuteJob(latest.resultJson, nowMs)) {
       return { claimed: false, existing: latest?.resultJson ?? existingRow.resultJson }
@@ -319,17 +319,24 @@ export async function claimMcpExecuteJob(
         && typeof latest.resultJson.startedAtMs === 'number'
         ? latest.resultJson.startedAtMs
         : null
-    const cas = store.compareAndSwapRunningResult
-    if (cas && expectedStarted != null) {
+
+    // Stale running → must CAS on startedAtMs (atomic in prod). Never bare storeResult.
+    if (isStaleRunningJob(latest.resultJson, nowMs)) {
+      const cas = store.compareAndSwapRunningResult
+      if (!cas || expectedStarted == null) {
+        return { claimed: false, existing: latest.resultJson }
+      }
       const updated = await cas(options.approvalRequestId, expectedStarted, handle, nowMs)
       if (updated) return { claimed: true, handle }
       const after = await store.findById(options.approvalRequestId)
       return { claimed: false, existing: after?.resultJson ?? latest.resultJson }
     }
-    // Memory store / older adapters: only overwrite if still reclaimable after re-read.
+
+    // Failed (non charge-only) reclaim → write running only if store refuses completed clobber.
     const updated = await store.storeResult(options.approvalRequestId, handle, nowMs)
     if (updated) return { claimed: true, handle }
-    return { claimed: false, existing: latest.resultJson }
+    const after = await store.findById(options.approvalRequestId)
+    return { claimed: false, existing: after?.resultJson ?? latest.resultJson }
   }
 
   const claimFn = store.claimEmptyResult

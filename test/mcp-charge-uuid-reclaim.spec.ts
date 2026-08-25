@@ -10,7 +10,7 @@ import {
   issueMcpApprovalRequest,
   storeMcpApprovalResult,
 } from '../api/lib/mcp/approval'
-import { matchesRunningCasExpectation } from '../api/lib/mcp/cas-running-result'
+import { canStoreExecuteResult, matchesRunningCasExpectation } from '../api/lib/mcp/cas-running-result'
 import {
   asJobHandleFromStored,
   claimMcpExecuteJob,
@@ -211,5 +211,64 @@ describe('prod CAS race (check-then-write vs atomic JSON filters)', () => {
     const row = await store.findById(issued.approvalRequestId)
     expect((row?.resultJson as { status: string }).status).toBe('completed')
     expect((row?.resultJson as { chargedCredits: number }).chargedCredits).toBe(24)
+  })
+
+  it('storeResult and claim refuse completed → running clobber', async () => {
+    expect(canStoreExecuteResult(
+      { status: 'completed', chargedCredits: 9 },
+      { status: 'running', startedAtMs: Date.now(), chargedCredits: 0 }
+    )).toBe(false)
+    expect(canStoreExecuteResult(
+      { status: 'running', startedAtMs: 1 },
+      { status: 'completed', chargedCredits: 9 }
+    )).toBe(true)
+
+    const store = createMemoryMcpApprovalStore()
+    const issued = await issueMcpApprovalRequest(store, {
+      userId: 'user-a',
+      toolName: 'execute_bulk_scripts',
+      input: { brandId: 'b1' },
+      quotedCreditCost: 9,
+    })
+    await approveMcpApprovalRequest(store, {
+      approvalRequestId: issued.approvalRequestId,
+      userId: 'user-a',
+    })
+
+    const completed = {
+      status: 'completed' as const,
+      jobId: issued.approvalRequestId,
+      approvalRequestId: issued.approvalRequestId,
+      toolName: 'execute_bulk_scripts',
+      chargedCredits: 9,
+      items: [{ scriptId: 's1', content: 'ok' }],
+    }
+    await store.storeResult(issued.approvalRequestId, completed, Date.now())
+
+    const clobber = await store.storeResult(
+      issued.approvalRequestId,
+      { status: 'running', startedAtMs: Date.now(), chargedCredits: 0 },
+      Date.now()
+    )
+    expect(clobber).toBeNull()
+
+    const claim = await claimMcpExecuteJob(store, {
+      approvalRequestId: issued.approvalRequestId,
+      toolName: 'execute_bulk_scripts',
+      quotedCreditCost: 9,
+    })
+    expect(claim.claimed).toBe(false)
+
+    const row = await store.findById(issued.approvalRequestId)
+    expect(row?.resultJson).toEqual(completed)
+    expect((row?.resultJson as { status: string }).status).toBe('completed')
+
+    const polled = await getMcpExecuteResult({
+      approvalStore: store,
+      userId: 'user-a',
+      jobId: issued.approvalRequestId,
+    })
+    expect(polled.status).toBe('completed')
+    expect(polled.chargedCredits).toBe(9)
   })
 })

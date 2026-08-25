@@ -4,6 +4,7 @@
 
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { McpApprovalRecord, McpApprovalStore, McpApprovalStatus } from './approval.js'
+import { readExecuteResultStatus } from './cas-running-result.js'
 
 function rowToRecord(row: Record<string, unknown>): McpApprovalRecord {
   return {
@@ -107,7 +108,9 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
     },
     async storeResult(id, result, atMs) {
       // Allow while approved (running marker / final before consume) or consumed (legacy).
-      const { data, error } = await db
+      // Never allow completed → running/queued clobber (atomic filter when writing in-flight).
+      const nextStatus = readExecuteResultStatus(result)
+      let query = db
         .from('mcp_approval_tokens')
         .update({
           result_json: result,
@@ -115,8 +118,13 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
         })
         .eq('id', id)
         .in('status', ['approved', 'consumed'])
-        .select('*')
-        .maybeSingle()
+
+      if (nextStatus === 'running' || nextStatus === 'queued') {
+        // JSON null or non-completed only — completed jobs stay completed.
+        query = query.or('result_json.is.null,result_json->>status.neq.completed')
+      }
+
+      const { data, error } = await query.select('*').maybeSingle()
       if (error) throw error
       return data ? rowToRecord(data as Record<string, unknown>) : null
     },

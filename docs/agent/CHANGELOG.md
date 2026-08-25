@@ -1,3 +1,14 @@
+## 2026-08-25 — MCP reclaim: never completed→running
+
+**Area:** mcp
+**Files:** `cas-running-result.ts`, `approval-store.ts`, `approval.ts`, `execute-job.ts`, `mcp-charge-uuid-reclaim.spec.ts`
+
+- `storeResult` refuses writing running/queued over completed (memory guard + Supabase `result_json->>status.neq.completed` filter).
+- Stale-running reclaim always uses atomic CAS; no bare `storeResult` fallback that could clobber.
+- Regression: `storeResult`/`claimMcpExecuteJob` leave completed intact.
+
+---
+
 ## 2026-08-25 — MCP reclaim CAS atomic JSON filters
 
 **Area:** mcp
