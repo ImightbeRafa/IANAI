@@ -30,8 +30,43 @@ const db: McpDbClient = {
 describe('mcp user read tools', () => {
   it('lists only the signed-in user brands', async () => {
     const brands = await mcpListBrands(db, { id: 'user-a' })
-    expect(brands).toEqual([{ id: 'b1', name: 'Pura Sonrisa', type: 'brand' }])
+    expect(brands).toEqual([expect.objectContaining({
+      id: 'b1',
+      name: 'Pura Sonrisa',
+      type: 'brand',
+      kitReady: true,
+      offerCount: 1,
+      hasPrimaryKit: false,
+      defaultOfferId: 'p1',
+      defaultOfferResolution: 'first_offer_with_brand_kit',
+      nameCollisionWarning: null,
+      siblingBrandIds: [],
+    })])
     expect(await mcpListBrands(db, { id: 'user-b' })).toEqual([])
+  })
+
+  it('warns on duplicate names and returns sibling ids without changing records', async () => {
+    const duplicateDb: McpDbClient = {
+      ...db,
+      async listBusinessesForUser() {
+        return [
+          { id: 'b1', name: 'Same Name' },
+          { id: 'b2', name: 'same name' },
+        ]
+      },
+      async listOffersForBrand(_userId, brandId) {
+        return [{ id: `offer-${brandId}`, name: 'Offer' }]
+      },
+      async getBrandKitForBrand() {
+        return null
+      },
+    }
+    const brands = await mcpListBrands(duplicateDb, { id: 'user-a' })
+    expect(brands[0]).toMatchObject({
+      siblingBrandIds: ['b2'],
+      nameCollisionWarning: expect.stringContaining('Duplicate brand name'),
+    })
+    expect(brands[1]).toMatchObject({ siblingBrandIds: ['b1'] })
   })
 
   it('returns brand context for an owned brand and denies others', async () => {

@@ -70,6 +70,9 @@ describe('mcp execute async jobs', () => {
       quotedCreditCost: 3,
     })
     expect(first.claimed).toBe(true)
+    if (first.claimed) {
+      expect(first.handle.statusMessage).toMatch(/Advance está generando|Advance is generating/)
+    }
 
     const second = await claimMcpExecuteJob(store, {
       approvalRequestId: issued.approvalRequestId,
@@ -209,6 +212,7 @@ describe('mcp execute async jobs', () => {
       jobId: issued.approvalRequestId,
     })
     expect(polled.status).toBe('completed')
+    expect(polled.statusMessage).toMatch(/Advance terminó|Advance finished/)
     expect(polled.chargedCredits).toBe(3)
     expect(polled.content).toBe('Guion listo')
   })

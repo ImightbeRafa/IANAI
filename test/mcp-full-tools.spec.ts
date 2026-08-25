@@ -40,6 +40,7 @@ const db: McpDbClient = {
 }
 
 const NEW_ENABLED = [
+  'list_assets',
   'workspace_save_artifact',
   'execute_image_edit',
   'execute_image_enhance',
@@ -58,11 +59,25 @@ function artifactStore(): McpArtifactStore {
     async saveImageFromPublicUrl(options) {
       return { messageId: 'm1', productImageId: 'img2', imageUrl: options.imageUrl }
     },
+    async saveReferenceImageFromPublicUrl(options) {
+      return { productImageId: `img-${options.kind}`, imageUrl: options.imageUrl }
+    },
     async linkExistingProductImage() {
       return { messageId: 'm1', productImageId: 'img-existing', imageUrl: 'https://cdn.example/existing.jpg' }
     },
     async getOwnedProductImage() { return null },
     async getOwnedScript() { return null },
+    async listLatestGeneratedImage() { return null },
+    async listOwnedAssets() {
+      return [{
+        id: 'img1',
+        imageUrl: 'https://cdn.example/product.webp',
+        offerId: 'p1',
+        kind: 'product',
+        label: 'Front',
+        createdAt: '2026-08-25T00:00:00.000Z',
+      }]
+    },
     async saveCarouselSlides() { return [] },
   }
 }
@@ -108,7 +123,11 @@ describe('mcp 0.8 remaining tools', () => {
     const schemaByName = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema]))
     expect(schemaByName.workspace_save_artifact.required).toEqual(expect.arrayContaining(['brandId', 'kind']))
     expect(schemaByName.execute_image_edit.required).toEqual(expect.arrayContaining(['brandId', 'editPrompt']))
-    expect(schemaByName.execute_carousel_generate.required).toEqual(expect.arrayContaining(['brandId', 'scriptContent']))
+    expect(schemaByName.execute_carousel_generate.required).toEqual(['brandId'])
+    expect(schemaByName.execute_carousel_generate.anyOf).toEqual([
+      { required: ['scriptId'] },
+      { required: ['scriptContent'] },
+    ])
     expect(schemaByName.delete_brand.required).toEqual(expect.arrayContaining(['brandId', 'confirm']))
     expect(schemaByName.delete_asset.required).toEqual(expect.arrayContaining(['brandId', 'confirm']))
     expect(JSON.stringify(schemaByName.archive_brand.properties)).toContain('confirm')
@@ -182,6 +201,48 @@ describe('mcp 0.8 remaining tools', () => {
     })
     expect(rejected.result).toMatchObject({ isError: true })
     expect((rejected.result as { content: Array<{ text: string }> }).content[0].text).toMatch(/base64/i)
+  })
+
+  it('lists stored assets and saves an https product reference without a chat detour', async () => {
+    const store = artifactStore()
+    const listed = await handleMcpJsonRpc({
+      body: {
+        jsonrpc: '2.0',
+        id: 40,
+        method: 'tools/call',
+        params: { name: 'list_assets', arguments: { brandId: 'b1', offerId: 'p1' } },
+      },
+      user: { id: 'user-a' },
+      db,
+      artifactStore: store,
+    })
+    const listText = (listed.result as { content: Array<{ text: string }> }).content[0].text
+    expect(listText).toContain('"productImageId": "img1"')
+    expect(listText).toContain('https://cdn.example/product.webp')
+
+    const saved = await handleMcpJsonRpc({
+      body: {
+        jsonrpc: '2.0',
+        id: 41,
+        method: 'tools/call',
+        params: {
+          name: 'workspace_save_artifact',
+          arguments: {
+            brandId: 'b1',
+            offerId: 'p1',
+            kind: 'product',
+            imageUrl: 'https://cdn.example/new-product.png',
+          },
+        },
+      },
+      user: { id: 'user-a' },
+      db,
+      artifactStore: store,
+    })
+    const saveText = (saved.result as { content: Array<{ text: string }> }).content[0].text
+    expect(saveText).toContain('"status": "saved"')
+    expect(saveText).toContain('"kind": "product"')
+    expect(saveText).not.toContain('deepLink')
   })
 
   it('delete tools require typed confirm before issuing approval', async () => {
