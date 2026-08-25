@@ -107,7 +107,7 @@ export function assertPublicHttpsUrl(url: string, label = 'url'): string {
 
 export function maskEmail(email: string | null | undefined): string | null {
   if (!email || !email.includes('@')) return email ?? null
-  const [user, domain] = email.split('@')
+  const [local, domain] = email.split('@')
   if (!local || !domain) return '***'
   const keep = Math.min(2, local.length)
   return `${local.slice(0, keep)}***@${domain}`
