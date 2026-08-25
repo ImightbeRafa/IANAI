@@ -2127,6 +2127,10 @@ export interface FeedbackTicket {
   product_id: string | null
   product_name: string | null
   user_plan: string | null
+  ui_surface: string | null
+  app_version: string | null
+  locale: string | null
+  viewport: string | null
   admin_notes: string | null
   notes_history: { text: string; status: string; timestamp: string }[]
   resolved_at: string | null
@@ -2151,6 +2155,10 @@ export async function createFeedbackTicket(ticket: {
   product_id?: string
   product_name?: string
   user_plan?: string
+  ui_surface?: 'chat' | 'classic' | 'other' | string
+  app_version?: string
+  locale?: string
+  viewport?: 'mobile' | 'desktop' | string
 }): Promise<FeedbackTicket> {
   const { data, error } = await supabase
     .from('feedback_tickets')
