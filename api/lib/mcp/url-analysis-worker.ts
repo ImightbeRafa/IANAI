@@ -8,7 +8,7 @@ import { runSiteAnalysis, SITE_ANALYSIS_MODEL } from '../site-analysis.js'
 import { logApiUsage } from '../usage-logger.js'
 import { assertPublicHttpUrl } from '../url-safety.js'
 import {
-  buildFillOnlyBrandKitPatch,
+  buildFillOnlyBrandKitPatchWithReview,
   buildFillOnlyBusinessPatch,
   sanitizeWorkerError,
 } from './url-analysis-merge.js'
@@ -78,11 +78,19 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       .maybeSingle()
     if (kitReadError) throw kitReadError
 
-    const kitPatch = buildFillOnlyBrandKitPatch(
+    const kitMerge = buildFillOnlyBrandKitPatchWithReview(
       existingKit as Record<string, unknown> | null,
       analysis,
       (business.name as string) || 'Brand'
     )
+    const kitPatch = kitMerge.patch
+    if (kitMerge.reviewRequired) {
+      analysis.warnings = [
+        ...(analysis.warnings || []),
+        ...kitMerge.warnings,
+        'High-risk marketing claims held for human review — not auto-stamped into brand_voice/must_use_phrases.',
+      ]
+    }
 
     let appliedBrandKitId: string | null = existingKit?.id ?? null
     if (existingKit?.id) {

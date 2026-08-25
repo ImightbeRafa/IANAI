@@ -47,7 +47,16 @@ export type McpApprovalStore = {
   markApproved: (id: string, atMs: number) => Promise<McpApprovalRecord | null>
   markDenied: (id: string, atMs: number) => Promise<McpApprovalRecord | null>
   markConsumed: (id: string, consumedAtMs: number) => Promise<McpApprovalRecord | null>
+  /**
+   * Persist result while approved or consumed.
+   * Used for running markers (approved) and final payloads (approved → then consume).
+   */
   storeResult: (id: string, result: unknown, atMs: number) => Promise<McpApprovalRecord | null>
+  /**
+   * Atomic claim: set result_json only when status=approved and result_json is null.
+   * Prevents double-generate on client timeout retries.
+   */
+  claimEmptyResult?: (id: string, result: unknown, atMs: number) => Promise<McpApprovalRecord | null>
 }
 
 export function hashMcpApprovalToken(token: string): string {
@@ -239,7 +248,8 @@ export async function storeMcpApprovalResult(
 }
 
 /**
- * If approval was already consumed but result was stored, return it (idempotent retry).
+ * Idempotent retry: return stored running/completed/failed payload when present.
+ * Works while still approved (async job) or after consume.
  */
 export async function replayMcpApprovalResult(
   store: McpApprovalStore,
@@ -257,7 +267,11 @@ export async function replayMcpApprovalResult(
   if (row.inputHash !== hashMcpToolInput(options.input)) {
     return { ok: false, reason: 'Approval input mismatch' }
   }
-  if (row.status !== 'consumed' || row.resultJson == null) {
+  if (row.resultJson == null) {
+    return { ok: false, reason: 'No stored result to replay' }
+  }
+  // Allow replay for approved+running/completed and consumed+result
+  if (row.status !== 'consumed' && row.status !== 'approved') {
     return { ok: false, reason: 'No stored result to replay' }
   }
   return { ok: true, result: row.resultJson }
@@ -338,6 +352,16 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
     async storeResult(id, result, atMs) {
       const row = byId.get(id)
       if (!row) return null
+      if (row.status !== 'approved' && row.status !== 'consumed' && row.status !== 'pending') {
+        return null
+      }
+      const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
+      byId.set(id, next)
+      return { ...next }
+    },
+    async claimEmptyResult(id, result, atMs) {
+      const row = byId.get(id)
+      if (!row || row.status !== 'approved' || row.resultJson != null) return null
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }

@@ -44,6 +44,7 @@ import {
 } from './bulk-tools.js'
 import type { McpApprovalStore } from './approval.js'
 import type { McpArtifactStore } from './artifact-store.js'
+import { getMcpExecuteResult } from './execute-job.js'
 import {
   mcpArchiveBrand,
   mcpDeleteAsset,
@@ -66,7 +67,7 @@ import { auditMcpToolCall } from './tool-audit.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.9.0',
+  version: '0.9.1',
 }
 
 export type McpJsonRpcRequest = {
@@ -272,6 +273,22 @@ function toolInputSchema(name: string): Record<string, unknown> {
           },
         },
         required: ['approvalRequestId'],
+        additionalProperties: false,
+      }
+    case 'get_execute_result':
+      return {
+        type: 'object',
+        properties: {
+          jobId: {
+            type: 'string',
+            description: 'Job id returned by execute_* (same as approvalRequestId)',
+          },
+          approvalRequestId: {
+            type: 'string',
+            description: 'Alias for jobId',
+          },
+        },
+        required: [],
         additionalProperties: false,
       }
     case 'guide_bulk_angles':
@@ -803,6 +820,18 @@ async function dispatchEnabledTool(options: {
         approvalStore: options.approvalStore,
         user: options.user,
         args: options.args,
+      })
+    }
+    case 'get_execute_result': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      return getMcpExecuteResult({
+        approvalStore: options.approvalStore,
+        userId: options.user.id,
+        jobId: typeof options.args.jobId === 'string' ? options.args.jobId : undefined,
+        approvalRequestId:
+          typeof options.args.approvalRequestId === 'string'
+            ? options.args.approvalRequestId
+            : undefined,
       })
     }
     case 'execute_image_generate': {
