@@ -44,9 +44,33 @@ export function assertTypedBrandNameConfirm(options: {
   brandName: string
   typedName: string
 }): void {
-  if (options.typedName.trim() !== options.brandName.trim()) {
-    throw new Error('Type the exact brand name to confirm permanent delete')
+  assertTypedConfirm(options.brandName, options.typedName, 'Type the exact brand name to confirm permanent delete')
+}
+
+export const MCP_DELETE_ASSET_CONFIRM = 'DELETE'
+
+export function assertTypedConfirm(expected: string, typed: string, message: string): void {
+  if ((typed || '').trim() !== (expected || '').trim()) {
+    throw new Error(message)
   }
+}
+
+export function assertTypedOfferNameConfirm(options: {
+  offerName: string
+  typedName: string
+}): void {
+  assertTypedConfirm(options.offerName, options.typedName, 'Type the exact offer name to confirm permanent delete')
+}
+
+export function assertTypedAssetDeleteConfirm(typed: string): void {
+  assertTypedConfirm(MCP_DELETE_ASSET_CONFIRM, typed, `Type ${MCP_DELETE_ASSET_CONFIRM} to confirm permanent asset delete`)
+}
+
+export function assertTypedArchiveConfirm(options: {
+  brandName: string
+  typedName: string
+}): void {
+  assertTypedConfirm(options.brandName, options.typedName, 'Type the exact brand name to confirm archive')
 }
 
 export function planMcpBrandDelete(options: {

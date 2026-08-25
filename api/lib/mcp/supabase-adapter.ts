@@ -14,6 +14,8 @@ import type { McpUrlIntakeStore } from './url-intake.js'
 import type { McpWorkspaceStore } from './workspace-ops.js'
 import type { McpAdminStore, McpAdminTicket, McpAdminUsageRow } from './admin-tools.js'
 import { parseStyleDnas } from '../bulk/style-dna.js'
+import type { McpDeleteStore } from './delete-tools.js'
+import { MCP_BRAND_ARCHIVED_NOTE_KIND } from './delete-tools.js'
 
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
@@ -28,11 +30,19 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         .eq('owner_id', userId)
         .order('created_at', { ascending: false })
       if (error) throw error
-      return (data || []).map((row) => ({
-        id: row.id as string,
-        name: row.name as string,
-        type: null,
-      }))
+      const { data: archived } = await db
+        .from('mcp_workspace_notes')
+        .select('business_id')
+        .eq('user_id', userId)
+        .eq('kind', MCP_BRAND_ARCHIVED_NOTE_KIND)
+      const hidden = new Set((archived || []).map((row) => row.business_id as string))
+      return (data || [])
+        .filter((row) => !hidden.has(row.id as string))
+        .map((row) => ({
+          id: row.id as string,
+          name: row.name as string,
+          type: null,
+        }))
     },
 
     async getBusinessForUser(userId: string, brandId: string) {
@@ -388,6 +398,194 @@ export function createMcpAdminStore(): McpAdminStore | null {
       const { data, error } = await query
       if (error) throw error
       return (data || []) as McpAdminUsageRow[]
+    },
+  }
+}
+
+export function createMcpDeleteStore(): McpDeleteStore | null {
+  const db = getSupabaseAdmin()
+  if (!db) return null
+
+  async function clearSessionLinks(sessionId: string): Promise<void> {
+    for (const table of ['product_images', 'posts'] as const) {
+      const { error } = await db
+        .from(table)
+        .update({ message_id: null, session_id: null })
+        .eq('session_id', sessionId)
+      if (error) throw error
+    }
+  }
+
+  return {
+    async listArchivedBrandIds(userId) {
+      const { data, error } = await db
+        .from('mcp_workspace_notes')
+        .select('business_id')
+        .eq('user_id', userId)
+        .eq('kind', MCP_BRAND_ARCHIVED_NOTE_KIND)
+      if (error) throw error
+      return [...new Set((data || []).map((row) => row.business_id as string).filter(Boolean))]
+    },
+
+    async archiveBrand({ userId, brandId, brandName }) {
+      const { data: sessions, error: sessErr } = await db
+        .from('chat_sessions')
+        .select('id')
+        .eq('business_id', brandId)
+        .eq('user_id', userId)
+        .neq('status', 'archived')
+      if (sessErr) throw sessErr
+      const ids = (sessions || []).map((row) => row.id as string)
+      if (ids.length) {
+        const { error: archErr } = await db
+          .from('chat_sessions')
+          .update({ status: 'archived', updated_at: new Date().toISOString() })
+          .in('id', ids)
+        if (archErr) throw archErr
+      }
+      const { data: note, error: noteErr } = await db
+        .from('mcp_workspace_notes')
+        .insert({
+          user_id: userId,
+          business_id: brandId,
+          kind: MCP_BRAND_ARCHIVED_NOTE_KIND,
+          note: `Archived ${brandName}`,
+          metadata: { source: 'mcp', recoverable: true },
+        })
+        .select('id')
+        .single()
+      if (noteErr) throw noteErr
+      return { noteId: note.id as string, sessionsArchived: ids.length }
+    },
+
+    async countBrandImpact({ userId, brandId }) {
+      const [{ data: sessions, error: sErr }, { data: offers, error: oErr }, { count: kitCount, error: kErr }] = await Promise.all([
+        db.from('chat_sessions').select('id').eq('business_id', brandId).eq('user_id', userId),
+        db.from('products').select('id').eq('business_id', brandId).eq('owner_id', userId),
+        db.from('brand_kits').select('id', { count: 'exact', head: true }).eq('business_id', brandId).eq('user_id', userId),
+      ])
+      if (sErr) throw sErr
+      if (oErr) throw oErr
+      if (kErr) throw kErr
+      const sessionIds = (sessions || []).map((row) => row.id as string)
+      const offerIds = (offers || []).map((row) => row.id as string)
+      return {
+        sessionCount: sessionIds.length,
+        offerCount: offerIds.length,
+        kitCount: kitCount ?? 0,
+        sessionIds,
+        offerIds,
+      }
+    },
+
+    async detachBrandKits(brandId) {
+      const { data, error } = await db
+        .from('brand_kits')
+        .update({ business_id: null, updated_at: new Date().toISOString() })
+        .eq('business_id', brandId)
+        .select('id')
+      if (error) throw error
+      return (data || []).length
+    },
+
+    async deleteSession(sessionId) {
+      await clearSessionLinks(sessionId)
+      const { data, error } = await db
+        .from('chat_sessions')
+        .delete()
+        .eq('id', sessionId)
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('Session was not deleted')
+    },
+
+    async deleteOffer({ userId, brandId, offerId }) {
+      const { data, error } = await db
+        .from('products')
+        .delete()
+        .eq('id', offerId)
+        .eq('business_id', brandId)
+        .eq('owner_id', userId)
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('Offer was not deleted')
+    },
+
+    async remainingOfferIds(brandId) {
+      const { data, error } = await db
+        .from('products')
+        .select('id')
+        .eq('business_id', brandId)
+      if (error) throw error
+      return (data || []).map((row) => row.id as string)
+    },
+
+    async deleteBrandRow({ userId, brandId }) {
+      const { data, error } = await db
+        .from('businesses')
+        .delete()
+        .eq('id', brandId)
+        .eq('owner_id', userId)
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('Folder was not deleted')
+    },
+
+    async getOffer({ userId, brandId, offerId }) {
+      const { data, error } = await db
+        .from('products')
+        .select('id, name')
+        .eq('id', offerId)
+        .eq('business_id', brandId)
+        .eq('owner_id', userId)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return null
+      return { id: data.id as string, name: data.name as string }
+    },
+
+    async getAsset({ userId, brandId, assetId }) {
+      const { data, error } = await db
+        .from('product_images')
+        .select('id, image_url, product_id, user_id')
+        .eq('id', assetId)
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return null
+      const { data: product } = await db
+        .from('products')
+        .select('id')
+        .eq('id', data.product_id)
+        .eq('business_id', brandId)
+        .eq('owner_id', userId)
+        .maybeSingle()
+      if (!product) return null
+      return { id: data.id as string, imageUrl: (data.image_url as string | null) ?? null }
+    },
+
+    async deleteAsset({ userId, brandId, assetId }) {
+      const asset = await this.getAsset({ userId, brandId, assetId })
+      if (!asset) throw new Error('Asset not found')
+      const imageUrl = asset.imageUrl || ''
+      const marker = '/storage/v1/object/public/post-images/'
+      const markerIndex = imageUrl.indexOf(marker)
+      if (markerIndex >= 0) {
+        const objectPath = decodeURIComponent(imageUrl.slice(markerIndex + marker.length).split('?')[0])
+        if (objectPath.startsWith(`${userId}/`)) {
+          const { error: storageError } = await db.storage.from('post-images').remove([objectPath])
+          if (storageError && !/not found/i.test(storageError.message || '')) throw storageError
+        }
+      }
+      const { data, error } = await db
+        .from('product_images')
+        .delete()
+        .eq('id', assetId)
+        .eq('user_id', userId)
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('Asset was not deleted')
+      return { imageUrl: asset.imageUrl }
     },
   }
 }

@@ -169,6 +169,11 @@ describe('mcp protocol', () => {
     expect(tools).toContain('execute_bulk_posts')
     expect(tools).toContain('execute_campaign_pack')
     expect(tools).toContain('list_style_dnas')
+    expect(tools).toContain('workspace_save_artifact')
+    expect(tools).toContain('execute_image_edit')
+    expect(tools).toContain('execute_carousel_generate')
+    expect(tools).toContain('delete_brand')
+    expect(tools).not.toContain('team_list_members')
 
     const called = await handleMcpJsonRpc({
       body: {

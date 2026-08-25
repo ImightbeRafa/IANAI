@@ -5,6 +5,7 @@ import {
   isCreditsV1Enabled,
   legacyActionToCredit,
   quoteCredits,
+  type LegacyMeterAction,
 } from './credits/catalog.js'
 import { checkCredits, consumeCredits, ensureWelcomeCredits } from './credits/consume.js'
 
@@ -119,7 +120,7 @@ export async function requireAuth(
  */
 export async function checkUsageLimit(
   userId: string,
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
+  action: LegacyMeterAction,
   options?: { imageModel?: string | null; units?: number }
 ): Promise<{ allowed: boolean; remaining: number; limit: number; creditsRequired?: number }> {
   if (!supabaseAdmin) {
@@ -186,8 +187,8 @@ export async function checkUsageLimit(
       return { allowed: false, remaining: 0, limit: 0 }
     }
 
-    // Enhance checks against the image limit (at half rate) — legacy path only
-    const effectiveAction = action === 'enhance' ? 'image' : action
+    // Enhance/edit check against the image limit (enhance at half rate) — legacy path only
+    const effectiveAction = action === 'enhance' || action === 'edit' ? 'image' : action
 
     let limit = effectiveAction === 'script' 
       ? limits.scripts_per_month 
@@ -271,7 +272,7 @@ export async function deductBonusImage(userId: string): Promise<void> {
  */
 export async function incrementUsage(
   userId: string,
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
+  action: LegacyMeterAction,
   options?: { generationId?: string; imageModel?: string | null; units?: number }
 ): Promise<{ creditsError?: string; creditsCharged?: number } | void> {
   if (!supabaseAdmin) {
@@ -306,9 +307,10 @@ export async function incrementUsage(
   }
 
   try {
+    const rpcAction = action === 'edit' ? 'image' : action
     const { error } = await supabaseAdmin.rpc('increment_usage', {
       p_user_id: userId,
-      p_action: action
+      p_action: rpcAction
     })
 
     if (error) {
@@ -321,7 +323,7 @@ export async function incrementUsage(
 
 /** Quote credits for UI / MCP (0 when CREDITS_V1 off — callers use legacy). */
 export function quoteLegacyActionCredits(
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
+  action: LegacyMeterAction,
   imageModel?: string | null
 ): number {
   const mapped = legacyActionToCredit({ action, imageModel })

@@ -202,9 +202,11 @@ export function quoteCredits(action: CreditAction, units = 1): number {
   return per * n
 }
 
+export type LegacyMeterAction = 'script' | 'image' | 'description' | 'enhance' | 'reply' | 'edit'
+
 /** Map legacy checkUsageLimit actions when CREDITS_V1 is on. */
 export function legacyActionToCredit(options: {
-  action: 'script' | 'image' | 'description' | 'enhance' | 'reply'
+  action: LegacyMeterAction
   imageModel?: string | null
 }): { creditAction: CreditAction; units: number } {
   switch (options.action) {
@@ -216,6 +218,8 @@ export function legacyActionToCredit(options: {
       return { creditAction: 'reply', units: 1 }
     case 'enhance':
       return { creditAction: 'image_enhance', units: 1 }
+    case 'edit':
+      return { creditAction: 'image_edit', units: 1 }
     case 'image':
       return {
         creditAction: resolveImageCreditAction({

@@ -186,5 +186,7 @@ describe('mcp web approval flow', () => {
   it('quotes MCP execute credits from the catalog', () => {
     expect(quoteLegacyActionCredits('script')).toBe(3)
     expect(quoteLegacyActionCredits('image', 'grok-imagine')).toBe(6)
+    expect(quoteLegacyActionCredits('edit')).toBe(18)
+    expect(quoteLegacyActionCredits('enhance')).toBe(18)
   })
 })

@@ -240,6 +240,124 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['brandId'],
         additionalProperties: false,
       }
+    case 'workspace_save_artifact':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          kind: { type: 'string', enum: ['script', 'image'] },
+          title: { type: 'string' },
+          content: { type: 'string', description: 'Script text. Do not send huge payloads.' },
+          imageUrl: { type: 'string', description: 'https URL only — no base64 data URLs.' },
+          productImageId: { type: 'string' },
+          scriptId: { type: 'string' },
+          sessionId: { type: 'string' },
+        },
+        required: ['brandId', 'kind'],
+        additionalProperties: false,
+      }
+    case 'execute_image_edit':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          productImageId: { type: 'string' },
+          imageUrl: { type: 'string', description: 'https URL of an already-in-workspace or public image. No base64.' },
+          editPrompt: { type: 'string' },
+          aspectRatio: { type: 'string' },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'editPrompt'],
+        additionalProperties: false,
+      }
+    case 'execute_image_enhance':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          productImageId: { type: 'string' },
+          imageUrl: { type: 'string', description: 'https URL. No base64.' },
+          enhanceTier: { type: 'string', enum: ['polish', 'modernize', 'rebuild'] },
+          instruction: { type: 'string' },
+          aspectRatio: { type: 'string' },
+          language: { type: 'string', enum: ['es', 'en'] },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'execute_carousel_generate':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          scriptContent: { type: 'string' },
+          subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },
+          slideCount: { type: 'number', minimum: 2, maximum: 10 },
+          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
+          language: { type: 'string', enum: ['es', 'en'] },
+          designDirection: { type: 'string' },
+          slideDetails: { type: 'string' },
+          previewFirstSlideOnly: { type: 'boolean' },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'scriptContent'],
+        additionalProperties: false,
+      }
+    case 'archive_brand':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          confirm: { type: 'string', description: 'Type the exact brand name.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'delete_offer':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          confirm: { type: 'string', description: 'Type the exact offer name.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'offerId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'delete_brand':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          confirm: { type: 'string', description: 'Type the exact brand name. Permanent. No recovery.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'confirm'],
+        additionalProperties: false,
+      }
+    case 'delete_asset':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          assetId: { type: 'string' },
+          productImageId: { type: 'string' },
+          confirm: { type: 'string', description: 'Must be DELETE.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId', 'confirm'],
+        additionalProperties: false,
+      }
     case 'admin_list_tickets':
       return {
         type: 'object',
@@ -345,6 +463,7 @@ export async function handleMcpJsonRpc(options: {
           approvalStore: options.approvalStore,
           artifactStore: options.artifactStore,
           adminStore: options.adminStore,
+          deleteStore: options.deleteStore,
           isAdmin,
           appOrigin: options.appOrigin,
         })

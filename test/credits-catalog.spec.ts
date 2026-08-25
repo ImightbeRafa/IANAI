@@ -52,6 +52,11 @@ describe('credit catalog', () => {
       units: 1,
     })
     expect(quoteCredits('image_enhance')).toBe(18)
+    expect(legacyActionToCredit({ action: 'edit' })).toEqual({
+      creditAction: 'image_edit',
+      units: 1,
+    })
+    expect(quoteCredits('image_edit')).toBe(18)
   })
 
   it('defines public plans without unlimited', () => {
