@@ -353,6 +353,8 @@ export async function streamlineScriptForPost(options: {
     niche?: string
     differentiation?: string
   }
+  sessionId?: string
+  productId?: string
 }): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -370,6 +372,8 @@ export async function streamlineScriptForPost(options: {
       textDensity: options.textDensity || 'hard',
       language: options.language || 'es',
       productContext: options.productContext,
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options.productId ? { productId: options.productId } : {}),
     }),
   })
 

@@ -319,7 +319,7 @@ export default function FeedbackButton() {
 
   const onChat = /^\/chat(?:\/|$)/.test(location.pathname)
 
-  if (!user || onChat) return null
+  if (!user) return null
 
   return (
     <>

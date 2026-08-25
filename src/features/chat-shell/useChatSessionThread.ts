@@ -61,6 +61,7 @@ import {
   isLiveThread,
   isSessionSending,
   removeInFlightSession,
+  shouldApplyBrandProductRefresh,
 } from './chatShellAsync'
 import {
   planOfferGenerationWalk,
@@ -414,12 +415,16 @@ export function useChatSessionThread(options: {
   /** Bumped on every session change including null. */
   const sessionGenRef = useRef(0)
   const activeThreadSessionIdRef = useRef<string | null>(null)
+  const liveBrandIdRef = useRef<string | null>(brand?.id ?? null)
+  const brandProductRequestRef = useRef(0)
   const threadCacheRef = useRef<Map<string, CachedThread>>(new Map())
 
   activeThreadSessionIdRef.current = sessionId
 
   const liveBrandId = brand?.id ?? null
+  liveBrandIdRef.current = liveBrandId
   if (liveBrandId !== productsBrandId) {
+    brandProductRequestRef.current += 1
     setProductsBrandId(liveBrandId)
     const cached = readBrandProductCache(brandProductCacheRef.current, liveBrandId)
     setBrandProducts(cached ?? [])
@@ -552,22 +557,31 @@ export function useChatSessionThread(options: {
     })()
     return () => {
       cancelled = true
+      brandProductRequestRef.current += 1
     }
   }, [brand?.id, userId])
 
   const refreshBrandProducts = useCallback(async () => {
-    if (!brand?.id) {
+    const requestedBrandId = brand?.id
+    if (!requestedBrandId) {
       setBrandProducts([])
       setUnassignedProducts([])
       return
     }
+    const requestId = ++brandProductRequestRef.current
     try {
       const [products, unassigned] = await Promise.all([
-        getBusinessProducts(brand.id),
+        getBusinessProducts(requestedBrandId),
         getUnassignedProducts(userId),
       ])
+      const cancelled = requestId !== brandProductRequestRef.current
+      if (!shouldApplyBrandProductRefresh({
+        requestedBrandId,
+        liveBrandId: liveBrandIdRef.current,
+        cancelled,
+      })) return
       setBrandProducts(products)
-      writeBrandProductCache(brandProductCacheRef.current, brand.id, products)
+      writeBrandProductCache(brandProductCacheRef.current, requestedBrandId, products)
       setUnassignedProducts(unassigned.filter((product) => !isQuickPostSentinel(product)))
     } catch (err) {
       console.error(err)
@@ -1812,6 +1826,8 @@ export function useChatSessionThread(options: {
             language,
             textDensity: prefs.density || 'hard',
             postStyle: prefs.style.kind === 'preset' ? prefs.style.presetId : 'venta-directa',
+            sessionId: originSessionId,
+            productId: options.productId,
           }))
           prompt = scriptText
         } catch (err) {
@@ -2438,6 +2454,8 @@ export function useChatSessionThread(options: {
           niche: product.product_category_custom || product.product_category || undefined,
           differentiation: product.differentiation || product.unique_value || undefined,
         } : undefined,
+        sessionId: sessionId || undefined,
+        productId: product?.id,
       }).then(stripUnresolvedPlaceholders)
     } catch (err) {
       console.error(err)
@@ -2445,7 +2463,7 @@ export function useChatSessionThread(options: {
         ? 'No pude optimizar el guión para el post. Reintentá.'
         : 'Could not optimize the script for the post. Try again.')
     }
-  }, [language, activeProduct])
+  }, [language, activeProduct, sessionId])
 
   const generateImageFromScript = useCallback(async (
     scriptText: string,
