@@ -67,7 +67,7 @@ import { auditMcpToolCall } from './tool-audit.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.9.2',
+  version: '0.9.3',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -140,6 +140,17 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'list_offers':
     case 'guide_brand_pack':
       return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'list_assets':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          kind: { type: 'string', enum: ['product', 'context', 'generated'] },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
     case 'list_brand_kits':
       return {
         type: 'object',
@@ -234,6 +245,10 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           scene: { type: 'string' },
           aspectRatio: { type: 'string' },
+          imageModel: { type: 'string', enum: ['grok-imagine'] },
+          productImageId: { type: 'string' },
+          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 3 },
+          guidePrompt: { type: 'string' },
           sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
         },
@@ -248,6 +263,17 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           goal: { type: 'string' },
           language: { type: 'string', enum: ['es', 'en'] },
+          framework: {
+            type: 'string',
+            enum: ['venta_directa', 'desvalidar_alternativas', 'mostrar_servicio', 'variedad_productos', 'paso_a_paso', 'reconocimiento', 'educativo', 'storytelling', 'tendencia', 'engagement'],
+          },
+          variations: { type: 'number', minimum: 1, maximum: 10 },
+          generationMode: { type: 'string', enum: ['mixed', 'by_type'] },
+          scriptTypeConfig: { type: 'object' },
+          ctaStrength: { type: 'string', enum: ['none', 'soft', 'brand_mention', 'sales'] },
+          forceFreshAngles: { type: 'boolean' },
+          buyerStage: { type: 'string', enum: ['cold', 'warm', 'hot'] },
+          guidePrompt: { type: 'string' },
           sessionId: { type: 'string' },
           approvalRequestId: {
             type: 'string',
@@ -323,6 +349,21 @@ function toolInputSchema(name: string): Record<string, unknown> {
         additionalProperties: false,
       }
     case 'execute_bulk_scripts':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          count: { type: 'number', maximum: 10 },
+          language: { type: 'string', enum: ['es', 'en'] },
+          angleIds: { type: 'array', items: { type: 'string' } },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+          guidePrompt: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
     case 'execute_bulk_posts':
     case 'execute_campaign_pack':
       return {
@@ -337,6 +378,9 @@ function toolInputSchema(name: string): Record<string, unknown> {
           approvalRequestId: { type: 'string' },
           imageModel: { type: 'string' },
           styleDnaId: { type: 'string' },
+          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
+          scene: { type: 'string' },
+          guidePrompt: { type: 'string' },
         },
         required: ['brandId'],
         additionalProperties: false,
@@ -396,7 +440,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           offerId: { type: 'string' },
-          kind: { type: 'string', enum: ['script', 'image'] },
+          kind: { type: 'string', enum: ['script', 'image', 'product', 'context'] },
           title: { type: 'string' },
           content: { type: 'string', description: 'Script text. Do not send huge payloads.' },
           imageUrl: { type: 'string', description: 'https URL only — no base64 data URLs.' },
@@ -417,6 +461,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           imageUrl: { type: 'string', description: 'https URL of an already-in-workspace or public image. No base64.' },
           editPrompt: { type: 'string' },
           aspectRatio: { type: 'string' },
+          guidePrompt: { type: 'string' },
           sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
         },
@@ -429,12 +474,13 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           offerId: { type: 'string' },
-          productImageId: { type: 'string' },
-          imageUrl: { type: 'string', description: 'https URL. No base64.' },
+          productImageId: { type: 'string', description: 'Optional; defaults to the latest generated image for the offer.' },
+          imageUrl: { type: 'string', description: 'Optional https URL. Defaults to the latest generated image for the offer. No base64.' },
           enhanceTier: { type: 'string', enum: ['polish', 'modernize', 'rebuild'] },
           instruction: { type: 'string' },
           aspectRatio: { type: 'string' },
           language: { type: 'string', enum: ['es', 'en'] },
+          guidePrompt: { type: 'string' },
           sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
         },
@@ -447,6 +493,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           offerId: { type: 'string' },
+          scriptId: { type: 'string' },
           scriptContent: { type: 'string' },
           subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },
           slideCount: { type: 'number', minimum: 2, maximum: 5 },
@@ -454,11 +501,15 @@ function toolInputSchema(name: string): Record<string, unknown> {
           language: { type: 'string', enum: ['es', 'en'] },
           designDirection: { type: 'string' },
           slideDetails: { type: 'string' },
+          productImageId: { type: 'string' },
+          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+          guidePrompt: { type: 'string' },
           previewFirstSlideOnly: { type: 'boolean' },
           sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
         },
-        required: ['brandId', 'scriptContent'],
+        required: ['brandId'],
+        anyOf: [{ required: ['scriptId'] }, { required: ['scriptContent'] }],
         additionalProperties: false,
       }
     case 'archive_brand':
@@ -685,12 +736,45 @@ async function dispatchEnabledTool(options: {
 
   switch (options.name) {
     case 'list_brands':
-      return { brands: await mcpListBrands(options.db, options.user) }
+      return {
+        brands: await mcpListBrands(options.db, options.user),
+        defaultOfferPolicy:
+          'defaultOfferId is the first owned offer; defaultOfferResolution reports whether a resolved brand kit is available. Duplicate names are never merged or deleted—select by id.',
+      }
     case 'list_offers': {
       if (!brandId) throw new Error('brandId is required')
       const brand = await options.db.getBusinessForUser(options.user.id, brandId)
       if (!brand) throw new Error('Brand not found')
       return { offers: await options.db.listOffersForBrand(options.user.id, brandId) }
+    }
+    case 'list_assets': {
+      if (!brandId) throw new Error('brandId is required')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      const kind = options.args.kind === 'product'
+        || options.args.kind === 'context'
+        || options.args.kind === 'generated'
+        ? options.args.kind
+        : undefined
+      const assets = await options.artifactStore.listOwnedAssets({
+        userId: options.user.id,
+        brandId,
+        offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
+        kind,
+      })
+      return {
+        brandId,
+        offerId: typeof options.args.offerId === 'string' ? options.args.offerId : null,
+        kind: kind || 'all',
+        assets: assets.map((asset) => ({
+          id: asset.id,
+          productImageId: asset.id,
+          offerId: asset.offerId,
+          imageUrl: asset.imageUrl,
+          kind: asset.kind,
+          label: asset.label || null,
+          createdAt: asset.createdAt || null,
+        })),
+      }
     }
     case 'get_brand_context':
       return mcpGetBrandContext(options.db, options.user, brandId, brandKitId)

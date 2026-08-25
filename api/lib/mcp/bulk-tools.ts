@@ -34,6 +34,7 @@ import { issueMcpChatApproval } from './approval-prompt.js'
 import type { McpArtifactStore } from './artifact-store.js'
 import {
   asJobHandleFromStored,
+  buildExecuteStatusMessage,
   buildFailedJobResult,
   claimMcpExecuteJob,
   scheduleMcpExecuteWork,
@@ -234,6 +235,26 @@ function selectedIds(args: Record<string, unknown>): string[] | undefined {
   return args.angleIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
 }
 
+async function hydrateBulkApprovalArgs(options: {
+  approvalStore: McpApprovalStore
+  userId: string
+  toolName: string
+  args: Record<string, unknown>
+}): Promise<Record<string, unknown>> {
+  const approvalRequestId = typeof options.args.approvalRequestId === 'string'
+    ? options.args.approvalRequestId
+    : ''
+  if (!approvalRequestId) return options.args
+  const record = await options.approvalStore.findById(approvalRequestId)
+  if (!record || record.userId !== options.userId || record.toolName !== options.toolName) {
+    return options.args
+  }
+  const bound = record.inputJson && typeof record.inputJson === 'object' && !Array.isArray(record.inputJson)
+    ? record.inputJson as Record<string, unknown>
+    : {}
+  return { ...bound, ...options.args, approvalRequestId }
+}
+
 async function loadAngles(options: {
   db: McpDbClient
   user: McpAuthUser
@@ -294,6 +315,9 @@ async function buildRuntime(options: {
     source: 'mcp',
     appOrigin: undefined,
     packId: options.packId,
+    guidePrompt: typeof options.args.guidePrompt === 'string' ? options.args.guidePrompt.trim() : undefined,
+    scene: typeof options.args.scene === 'string' ? options.args.scene.trim() : undefined,
+    aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : undefined,
     recentSummaries: await recentSummariesFor(options.user.id, options.offerId),
     styleDnas: style.styleDnas,
   }
@@ -307,22 +331,29 @@ export async function mcpExecuteBulkScripts(options: {
   args: Record<string, unknown>
   appOrigin?: string
 }): Promise<Record<string, unknown>> {
-  const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
+  const args = await hydrateBulkApprovalArgs({
+    approvalStore: options.approvalStore,
+    userId: options.user.id,
+    toolName: 'execute_bulk_scripts',
+    args: options.args,
+  })
+  const brandId = typeof args.brandId === 'string' ? args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
-  const offerId = resolveOfferId(ctx, typeof options.args.offerId === 'string' ? options.args.offerId : undefined)
-  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
+  const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const boundInput = {
     brandId,
     offerId,
     count,
-    language: languageOf(options.args.language),
-    angleIds: selectedIds(options.args),
-    sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
+    language: languageOf(args.language),
+    angleIds: selectedIds(args),
+    guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
+    sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
   }
   const quote = quoteBulkScripts(count)
-  const approvalRequestId = typeof options.args.approvalRequestId === 'string'
-    ? options.args.approvalRequestId
+  const approvalRequestId = typeof args.approvalRequestId === 'string'
+    ? args.approvalRequestId
     : ''
   const pending = await requireOrIssueApproval({
     approvalStore: options.approvalStore,
@@ -361,7 +392,7 @@ export async function mcpExecuteBulkScripts(options: {
         brandId,
         offerId,
         ctx,
-        args: options.args,
+        args,
       })
       const runtime = await buildRuntime({
         db: options.db,
@@ -369,7 +400,7 @@ export async function mcpExecuteBulkScripts(options: {
         artifactStore: options.artifactStore,
         brandId,
         offerId,
-        args: options.args,
+        args,
         packId: approvalRequestId,
       })
       runtime.appOrigin = options.appOrigin
@@ -413,6 +444,7 @@ export async function mcpExecuteBulkScripts(options: {
           messageId: item.messageId,
           charged: item.charged,
           error: item.error,
+          statusMessage: buildExecuteStatusMessage(toolName, item.error ? 'failed' : 'completed'),
         })),
         deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
         note: 'Charged 3 credits per succeeded script. Failed items were not charged.',
@@ -452,13 +484,19 @@ export async function mcpExecuteBulkPosts(options: {
   args: Record<string, unknown>
   appOrigin?: string
 }): Promise<Record<string, unknown>> {
-  const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
+  const args = await hydrateBulkApprovalArgs({
+    approvalStore: options.approvalStore,
+    userId: options.user.id,
+    toolName: 'execute_bulk_posts',
+    args: options.args,
+  })
+  const brandId = typeof args.brandId === 'string' ? args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
-  const offerId = resolveOfferId(ctx, typeof options.args.offerId === 'string' ? options.args.offerId : undefined)
-  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
-  const imageModel = typeof options.args.imageModel === 'string' ? options.args.imageModel : 'grok-imagine'
-  const styleDnaId = typeof options.args.styleDnaId === 'string' ? options.args.styleDnaId : undefined
+  const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
+  const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
+  const styleDnaId = typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
   const quote = quoteBulkPosts({
     count,
@@ -471,12 +509,15 @@ export async function mcpExecuteBulkPosts(options: {
     count,
     imageModel,
     styleDnaId,
-    language: languageOf(options.args.language),
-    angleIds: selectedIds(options.args),
-    sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
+    language: languageOf(args.language),
+    angleIds: selectedIds(args),
+    aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16',
+    scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
+    guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
+    sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
   }
-  const approvalRequestId = typeof options.args.approvalRequestId === 'string'
-    ? options.args.approvalRequestId
+  const approvalRequestId = typeof args.approvalRequestId === 'string'
+    ? args.approvalRequestId
     : ''
   const pending = await requireOrIssueApproval({
     approvalStore: options.approvalStore,
@@ -515,7 +556,7 @@ export async function mcpExecuteBulkPosts(options: {
         brandId,
         offerId,
         ctx,
-        args: options.args,
+        args,
       })
       const runtime = await buildRuntime({
         db: options.db,
@@ -523,7 +564,7 @@ export async function mcpExecuteBulkPosts(options: {
         artifactStore: options.artifactStore,
         brandId,
         offerId,
-        args: options.args,
+        args,
         packId: approvalRequestId,
       })
       runtime.appOrigin = options.appOrigin
@@ -573,6 +614,7 @@ export async function mcpExecuteBulkPosts(options: {
           approach: item.approach,
           charged: item.charged,
           error: item.error,
+          statusMessage: buildExecuteStatusMessage(toolName, item.error ? 'failed' : 'completed'),
         })),
         deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
         note: `Charged ${quoteLegacyActionCredits('image', imageModel)} credits per succeeded image (plus any expanded product refs).`,
@@ -612,13 +654,19 @@ export async function mcpExecuteCampaignPack(options: {
   args: Record<string, unknown>
   appOrigin?: string
 }): Promise<Record<string, unknown>> {
-  const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
+  const args = await hydrateBulkApprovalArgs({
+    approvalStore: options.approvalStore,
+    userId: options.user.id,
+    toolName: 'execute_campaign_pack',
+    args: options.args,
+  })
+  const brandId = typeof args.brandId === 'string' ? args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
-  const offerId = resolveOfferId(ctx, typeof options.args.offerId === 'string' ? options.args.offerId : undefined)
-  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
-  const imageModel = typeof options.args.imageModel === 'string' ? options.args.imageModel : 'grok-imagine'
-  const styleDnaId = typeof options.args.styleDnaId === 'string' ? options.args.styleDnaId : undefined
+  const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
+  const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
+  const styleDnaId = typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
   const quote = quoteCampaignPack({
     scriptCount: count,
@@ -632,12 +680,15 @@ export async function mcpExecuteCampaignPack(options: {
     count,
     imageModel,
     styleDnaId,
-    language: languageOf(options.args.language),
-    angleIds: selectedIds(options.args),
-    sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
+    language: languageOf(args.language),
+    angleIds: selectedIds(args),
+    aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16',
+    scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
+    guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
+    sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
   }
-  const approvalRequestId = typeof options.args.approvalRequestId === 'string'
-    ? options.args.approvalRequestId
+  const approvalRequestId = typeof args.approvalRequestId === 'string'
+    ? args.approvalRequestId
     : ''
   const pending = await requireOrIssueApproval({
     approvalStore: options.approvalStore,
@@ -676,7 +727,7 @@ export async function mcpExecuteCampaignPack(options: {
         brandId,
         offerId,
         ctx,
-        args: options.args,
+        args,
       })
       const runtime = await buildRuntime({
         db: options.db,
@@ -684,7 +735,7 @@ export async function mcpExecuteCampaignPack(options: {
         artifactStore: options.artifactStore,
         brandId,
         offerId,
-        args: options.args,
+        args,
         packId: approvalRequestId,
       })
       runtime.appOrigin = options.appOrigin
@@ -746,6 +797,7 @@ export async function mcpExecuteCampaignPack(options: {
           scriptId: item.scriptId,
           charged: item.charged,
           error: item.error,
+          statusMessage: buildExecuteStatusMessage('execute_bulk_scripts', item.error ? 'failed' : 'completed'),
         })),
         posts: posts.items.map((item) => ({
           angleId: item.angleId,
@@ -753,6 +805,7 @@ export async function mcpExecuteCampaignPack(options: {
           approach: item.approach,
           charged: item.charged,
           error: item.error,
+          statusMessage: buildExecuteStatusMessage('execute_bulk_posts', item.error ? 'failed' : 'completed'),
         })),
         expandedRefs: posts.expanded,
         deepLink: deepLinkForPack(options.appOrigin, brandId, scripts.sessionId, scripts.packId),

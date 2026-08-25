@@ -7,7 +7,11 @@ import { mcpGetBrandContext } from './user-tools.js'
 
 function offerLine(offers: McpBrandContext['offers']): string {
   if (!offers.length) return '(no offers yet)'
-  return offers.map((o) => `- ${o.name}${o.type ? ` (${o.type})` : ''} [${o.id}]`).join('\n')
+  return offers.map((o) => [
+    `- ${o.name}${o.type ? ` (${o.type})` : ''} [${o.id}]`,
+    o.price ? `Price: ${o.price}` : '',
+    o.doNotClaim?.length ? `Do not claim: ${o.doNotClaim.join('; ')}` : '',
+  ].filter(Boolean).join(' — ')).join('\n')
 }
 
 function kitBlock(kit: McpBrandContext['brandKit']): string {
@@ -64,21 +68,29 @@ export async function mcpGuideScript(
     : ctx.offers[0]
   const language = args.language === 'en' ? 'en' : 'es'
   const goal = (args.goal || 'winning short-form ad script').trim()
+  const doNotClaim = [
+    ...(offer?.doNotClaim || []),
+    ...(ctx.brandKit?.forbiddenPhrases || []),
+  ]
   const prompt = language === 'en'
     ? [
         `Write a high-converting short-form ad script for ${ctx.brand.name}.`,
         offer ? `Offer focus: ${offer.name}.` : 'Use the brand’s primary offer if known.',
+        offer?.price ? `Known price: ${offer.price}.` : '',
         `Goal: ${goal}.`,
         ctx.brandKit?.brandVoice ? `Voice: ${ctx.brandKit.brandVoice}.` : '',
         ctx.brandKit?.targetAudience ? `Audience: ${ctx.brandKit.targetAudience}.` : '',
+        doNotClaim.length ? `Do not claim: ${doNotClaim.join('; ')}.` : '',
         'Structure: Hook / Development / CTA. Keep it spoken and specific. Do not invent fake claims.',
       ].filter(Boolean).join(' ')
     : [
         `Escribe un guion publicitario corto de alta conversión para ${ctx.brand.name}.`,
         offer ? `Oferta: ${offer.name}.` : 'Usa la oferta principal si existe.',
+        offer?.price ? `Precio conocido: ${offer.price}.` : '',
         `Objetivo: ${goal}.`,
         ctx.brandKit?.brandVoice ? `Voz: ${ctx.brandKit.brandVoice}.` : '',
         ctx.brandKit?.targetAudience ? `Audiencia: ${ctx.brandKit.targetAudience}.` : '',
+        doNotClaim.length ? `No afirmar: ${doNotClaim.join('; ')}.` : '',
         'Estructura: Hook / Desarrollo / CTA. Natural, específico, sin inventar claims.',
       ].filter(Boolean).join(' ')
 
@@ -89,6 +101,8 @@ export async function mcpGuideScript(
     language,
     brandId: ctx.brand.id,
     offerId: offer?.id || null,
+    price: offer?.price || null,
+    doNotClaim,
     prompt,
     brandPackHint: 'Call guide_brand_pack for fuller context if needed.',
   }

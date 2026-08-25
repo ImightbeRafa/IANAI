@@ -35,6 +35,9 @@ export type BulkRunContext = {
   source: 'mcp' | 'web'
   appOrigin?: string
   packId?: string
+  guidePrompt?: string
+  scene?: string
+  aspectRatio?: string
   recentSummaries?: string[]
   styleDnas?: StyleDna[]
 }
@@ -95,6 +98,7 @@ export async function runBulkScripts(options: {
         audience: runtime.ctx.brandKit?.targetAudience || runtime.ctx.brand.icpDescription,
         angle,
         recentSummaries: runtime.recentSummaries,
+        guidePrompt: runtime.guidePrompt,
       })
       const saved = await runtime.artifactStore.saveScriptArtifact({
         userId: runtime.user.id,
@@ -224,16 +228,18 @@ export async function runBulkPosts(options: {
         `featuring ${offerName}`,
         `Buyer niche: ${angle.niche}. ${angle.whyItBuys}`,
         `Visual approach: ${approach}`,
+        runtime.scene ? `Requested scene: ${runtime.scene}` : '',
         `Hook style: ${angle.hookStyle}`,
         script?.content ? `Script cue: ${script.content.slice(0, 280)}` : '',
         dna ? `Style DNA (${dna.kind}): ${dna.notes || dna.name}` : '',
         runtime.ctx.brandKit?.visualStyleNotes ? `Brand visual: ${runtime.ctx.brandKit.visualStyleNotes}` : '',
+        runtime.guidePrompt ? `Additional user direction: ${runtime.guidePrompt}` : '',
         'No fake logos or unreadable text. Match product fidelity from refs.',
       ].filter(Boolean).join('. ')
       const generated = await runGrokImageGenerate({
         apiKey: xaiKey(),
         prompt,
-        aspectRatio: '9:16',
+        aspectRatio: runtime.aspectRatio || '9:16',
         referenceImageUrls: rotated.slice(0, 3),
       })
       const saved = await runtime.artifactStore.saveImageArtifact({

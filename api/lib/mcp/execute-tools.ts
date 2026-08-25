@@ -54,9 +54,112 @@ import { assertMcpCarouselSlideCount } from './limits.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
 import type { McpArtifactStore } from './artifact-store.js'
-import type { ProductType, SalesChannel, ScriptSettings } from '../guiones/types.js'
+import type {
+  CTAStrength,
+  GenerationMode,
+  ProductType,
+  SalesChannel,
+  ScriptFramework,
+  ScriptSettings,
+  ScriptTypeConfig,
+} from '../guiones/types.js'
 
 const APPROVAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SCRIPT_FRAMEWORKS: readonly ScriptFramework[] = [
+  'venta_directa',
+  'desvalidar_alternativas',
+  'mostrar_servicio',
+  'variedad_productos',
+  'paso_a_paso',
+  'reconocimiento',
+  'educativo',
+  'storytelling',
+  'tendencia',
+  'engagement',
+]
+const CTA_STRENGTHS: readonly CTAStrength[] = ['none', 'soft', 'brand_mention', 'sales']
+const SCRIPT_GENERATION_MODES: readonly GenerationMode[] = ['mixed', 'by_type']
+
+function optionalTrimmedString(value: unknown, maxLength = 4_000): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed.slice(0, maxLength) : undefined
+}
+
+function scriptSettingsFromArgs(args: Record<string, unknown>): ScriptSettings {
+  const framework = SCRIPT_FRAMEWORKS.includes(args.framework as ScriptFramework)
+    ? args.framework as ScriptFramework
+    : 'venta_directa'
+  const variations = typeof args.variations === 'number'
+    ? Math.max(1, Math.min(10, Math.floor(args.variations)))
+    : 1
+  const generationMode = SCRIPT_GENERATION_MODES.includes(args.generationMode as GenerationMode)
+    ? args.generationMode as GenerationMode
+    : 'mixed'
+  const ctaStrength = CTA_STRENGTHS.includes(args.ctaStrength as CTAStrength)
+    ? args.ctaStrength as CTAStrength
+    : undefined
+  const rawConfig = args.scriptTypeConfig && typeof args.scriptTypeConfig === 'object'
+    ? args.scriptTypeConfig as Record<string, unknown>
+    : null
+  const scriptTypeConfig = rawConfig
+    ? Object.fromEntries(SCRIPT_FRAMEWORKS.map((type) => [
+        type,
+        Math.max(0, Math.min(10, Math.floor(Number(rawConfig[type]) || 0))),
+      ])) as unknown as ScriptTypeConfig
+    : undefined
+  return {
+    framework,
+    variations,
+    generationMode,
+    scriptTypeConfig,
+    ctaStrength,
+    useStructuredPipeline: true,
+    forceFreshAngles: args.forceFreshAngles === true,
+  }
+}
+
+function referenceImageIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value
+    .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    .map((id) => id.trim()))].slice(0, 4)
+}
+
+async function resolveOwnedReferenceUrls(options: {
+  artifactStore: McpArtifactStore
+  userId: string
+  brandId: string
+  offerId: string
+  imageIds: string[]
+}): Promise<string[]> {
+  const urls: string[] = []
+  for (const imageId of options.imageIds) {
+    const image = await options.artifactStore.getOwnedProductImage({
+      userId: options.userId,
+      brandId: options.brandId,
+      offerId: options.offerId,
+      imageId,
+    })
+    if (!image) throw new Error(`Reference image ${imageId} not found for this brand/offer`)
+    urls.push(image.imageUrl)
+  }
+  return urls
+}
+
+async function publicImageUrlToDataUrl(imageUrl: string): Promise<string> {
+  const parsed = assertPublicHttpUrl(imageUrl)
+  if (parsed.protocol !== 'https:') throw new Error('Reference images must use https URLs')
+  const response = await fetch(parsed)
+  if (!response.ok) throw new Error(`Could not load reference image (${response.status})`)
+  const contentType = (response.headers.get('content-type') || '').split(';')[0].toLowerCase()
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+    throw new Error('Reference URL must return JPEG, PNG, or WebP')
+  }
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.length > 2_500_000) throw new Error('Reference image exceeds 2.5 MB')
+  return `data:${contentType};base64,${bytes.toString('base64')}`
+}
 
 function generationIdFromApproval(approvalRequestId: string, fallbackSuffix: string): string {
   if (APPROVAL_UUID_RE.test(approvalRequestId)) return approvalRequestId
@@ -152,11 +255,21 @@ export async function mcpExecuteScriptGenerate(options: {
     : ''
   const language = options.args.language === 'en' ? 'en' : 'es'
   const sessionIdArg = typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined
+  const scriptSettings = scriptSettingsFromArgs(options.args)
+  const buyerStage = options.args.buyerStage === 'cold'
+    || options.args.buyerStage === 'warm'
+    || options.args.buyerStage === 'hot'
+    ? options.args.buyerStage
+    : undefined
+  const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
     language,
     goal: typeof options.args.goal === 'string' ? options.args.goal : undefined,
+    ...scriptSettings,
+    buyerStage,
+    guidePrompt,
     sessionId: sessionIdArg,
   }
 
@@ -227,6 +340,10 @@ export async function mcpExecuteScriptGenerate(options: {
         brandId,
         offerId,
         language,
+        scriptSettings,
+        goal: boundWithOffer.goal,
+        buyerStage,
+        guidePrompt,
         sessionIdArg,
         approvalRequestId,
         appOrigin: options.appOrigin,
@@ -266,6 +383,10 @@ async function runScriptGenerateBody(options: {
   brandId: string
   offerId: string
   language: 'es' | 'en'
+  scriptSettings: ScriptSettings
+  goal?: string
+  buyerStage?: 'cold' | 'warm' | 'hot'
+  guidePrompt?: string
   sessionIdArg?: string
   approvalRequestId: string
   appOrigin?: string
@@ -289,12 +410,14 @@ async function runScriptGenerateBody(options: {
       name: offer.name,
       type: (offer.type as ProductType | undefined) || undefined,
       product_description: ctx.brandKit?.tagline || undefined,
+      price_range: offer.price || undefined,
     },
-    scriptSettings: {
-      framework: 'venta_directa',
-      variations: 1,
-      useStructuredPipeline: true,
-    } satisfies ScriptSettings,
+    scriptSettings: options.scriptSettings,
+    styleMemoryPrompt: [
+      options.goal ? `Generation goal: ${options.goal}` : '',
+      options.buyerStage ? `Target buyer stage: ${options.buyerStage}` : '',
+      options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
+    ].filter(Boolean).join('\n'),
   })
 
   const text = pipeline.content || JSON.stringify(pipeline.scripts || [], null, 2)
@@ -372,16 +495,37 @@ export async function mcpExecuteImageGenerate(options: {
     ? options.args.approvalRequestId
     : ''
   const sessionIdArg = typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined
+  const imageModel = typeof options.args.imageModel === 'string' ? options.args.imageModel : 'grok-imagine'
+  if (imageModel !== 'grok-imagine') {
+    throw new Error('execute_image_generate currently supports imageModel "grok-imagine"')
+  }
+  const selectedReferenceIds = referenceImageIds(options.args.referenceImageIds)
+  const productImageId = optionalTrimmedString(options.args.productImageId, 200)
+  if (productImageId && !selectedReferenceIds.includes(productImageId)) {
+    selectedReferenceIds.unshift(productImageId)
+  }
+  const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
     scene: typeof options.args.scene === 'string' ? options.args.scene : undefined,
     aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : '9:16',
+    imageModel,
+    productImageId,
+    referenceImageIds: selectedReferenceIds,
+    guidePrompt,
     sessionId: sessionIdArg,
   }
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
+  await resolveOwnedReferenceUrls({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId,
+    offerId,
+    imageIds: selectedReferenceIds,
+  })
   const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
@@ -446,6 +590,8 @@ export async function mcpExecuteImageGenerate(options: {
         offerId,
         scene: boundWithOffer.scene,
         aspectRatio: boundWithOffer.aspectRatio,
+        referenceImageIds: selectedReferenceIds,
+        guidePrompt,
         sessionIdArg,
         approvalRequestId,
         appOrigin: options.appOrigin,
@@ -486,6 +632,8 @@ async function runImageGenerateBody(options: {
   offerId: string
   scene?: string
   aspectRatio: string
+  referenceImageIds: string[]
+  guidePrompt?: string
   sessionIdArg?: string
   approvalRequestId: string
   appOrigin?: string
@@ -500,10 +648,21 @@ async function runImageGenerateBody(options: {
     scene: options.scene,
     aspectRatio: options.aspectRatio,
   })
-  const prompt = String(guide.prompt || '')
-  const refs = Array.isArray(guide.referenceUrls)
+  const prompt = [
+    String(guide.prompt || ''),
+    options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
+  ].filter(Boolean).join('. ')
+  const selectedRefs = await resolveOwnedReferenceUrls({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    imageIds: options.referenceImageIds,
+  })
+  const guideRefs = Array.isArray(guide.referenceUrls)
     ? guide.referenceUrls.filter((u): u is string => typeof u === 'string')
     : []
+  const refs = [...selectedRefs, ...guideRefs]
 
   const generated = await runGrokImageGenerate({
     apiKey: xaiKey(),
@@ -596,7 +755,7 @@ function rejectHugeBase64(label: string, value?: string): void {
   }
 }
 
-async function resolveMcpSourceImage(options: {
+export async function resolveMcpSourceImage(options: {
   artifactStore: McpArtifactStore
   userId: string
   brandId: string
@@ -620,7 +779,18 @@ async function resolveMcpSourceImage(options: {
     if (parsed.protocol !== 'https:') throw new Error('Only https imageUrl is allowed')
     return { imageUrl: parsed.toString() }
   }
-  throw new Error('productImageId or https imageUrl is required')
+  if (!options.offerId) {
+    throw new Error('offerId is required to default to the latest generated image')
+  }
+  const latest = await options.artifactStore.listLatestGeneratedImage({
+    userId: options.userId,
+    brandId: options.brandId,
+    offerId: options.offerId,
+  })
+  if (!latest) {
+    throw new Error('No generated image found for this offer; pass productImageId or https imageUrl')
+  }
+  return { imageUrl: latest.imageUrl, productImageId: latest.id }
 }
 
 export async function mcpExecuteImageEdit(options: {
@@ -640,12 +810,14 @@ export async function mcpExecuteImageEdit(options: {
   const productImageId = typeof options.args.productImageId === 'string' ? options.args.productImageId : undefined
   const imageUrlArg = typeof options.args.imageUrl === 'string' ? options.args.imageUrl : undefined
   rejectHugeBase64('imageUrl', imageUrlArg)
+  const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
     productImageId,
     imageUrl: imageUrlArg,
     editPrompt,
+    guidePrompt,
     // Do not silently force 9:16 — omitted aspect defaults to 1:1
     aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : '1:1',
     sessionId: sessionIdArg,
@@ -653,7 +825,20 @@ export async function mcpExecuteImageEdit(options: {
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
-  const boundWithOffer = { ...boundInput, offerId }
+  const source = await resolveMcpSourceImage({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId,
+    offerId,
+    productImageId,
+    imageUrl: imageUrlArg,
+  })
+  const boundWithOffer = {
+    ...boundInput,
+    offerId,
+    productImageId: source.productImageId,
+    imageUrl: source.productImageId ? undefined : source.imageUrl,
+  }
   const quote = quoteLegacyActionCredits('edit')
 
   if (!approvalRequestId) {
@@ -718,9 +903,10 @@ export async function mcpExecuteImageEdit(options: {
         user: options.user,
         brandId,
         offerId,
-        productImageId,
-        imageUrlArg,
+        productImageId: boundWithOffer.productImageId,
+        imageUrlArg: boundWithOffer.imageUrl,
         editPrompt,
+        guidePrompt,
         aspectRatio: boundWithOffer.aspectRatio,
         sessionIdArg,
         approvalRequestId,
@@ -762,6 +948,7 @@ async function runImageEditBody(options: {
   productImageId?: string
   imageUrlArg?: string
   editPrompt: string
+  guidePrompt?: string
   aspectRatio: string
   sessionIdArg?: string
   approvalRequestId: string
@@ -787,7 +974,10 @@ async function runImageEditBody(options: {
     kit?.logoUrl ? `Official logo: ${kit.logoUrl}` : null,
   ].filter(Boolean).join('\n')
   const prompt = buildImageEditSystemPrompt({
-    editPrompt: options.editPrompt,
+    editPrompt: [
+      options.editPrompt,
+      options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
+    ].filter(Boolean).join('\n'),
     brandRules,
   })
   const generated = await runGrokImageEdit({
@@ -883,6 +1073,7 @@ export async function mcpExecuteImageEnhance(options: {
   rejectHugeBase64('imageUrl', imageUrlArg)
   const enhanceTier = resolveEnhanceTier(options.args.enhanceTier)
   const language = options.args.language === 'en' ? 'en' : 'es'
+  const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
@@ -890,6 +1081,7 @@ export async function mcpExecuteImageEnhance(options: {
     imageUrl: imageUrlArg,
     enhanceTier,
     instruction: typeof options.args.instruction === 'string' ? options.args.instruction : undefined,
+    guidePrompt,
     // Do not silently force 9:16 — omitted aspect defaults to 1:1
     aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : '1:1',
     language,
@@ -898,7 +1090,20 @@ export async function mcpExecuteImageEnhance(options: {
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
-  const boundWithOffer = { ...boundInput, offerId }
+  const source = await resolveMcpSourceImage({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId,
+    offerId,
+    productImageId,
+    imageUrl: imageUrlArg,
+  })
+  const boundWithOffer = {
+    ...boundInput,
+    offerId,
+    productImageId: source.productImageId,
+    imageUrl: source.productImageId ? undefined : source.imageUrl,
+  }
   const quote = quoteLegacyActionCredits('enhance')
 
   if (!approvalRequestId) {
@@ -964,10 +1169,11 @@ export async function mcpExecuteImageEnhance(options: {
         user: options.user,
         brandId,
         offerId,
-        productImageId,
-        imageUrlArg,
+        productImageId: boundWithOffer.productImageId,
+        imageUrlArg: boundWithOffer.imageUrl,
         enhanceTier,
         instruction: boundWithOffer.instruction,
+        guidePrompt,
         aspectRatio: boundWithOffer.aspectRatio,
         language,
         sessionIdArg,
@@ -1011,6 +1217,7 @@ async function runImageEnhanceBody(options: {
   imageUrlArg?: string
   enhanceTier: ReturnType<typeof resolveEnhanceTier>
   instruction?: string
+  guidePrompt?: string
   aspectRatio: string
   language: 'es' | 'en'
   sessionIdArg?: string
@@ -1039,7 +1246,10 @@ async function runImageEnhanceBody(options: {
     tier: options.enhanceTier,
     hasProductRef: false,
     brandPrefix,
-    userDirection: resolveEnhanceUserDirection(options.instruction, null),
+    userDirection: resolveEnhanceUserDirection(
+      [options.instruction, options.guidePrompt].filter(Boolean).join('\n'),
+      null
+    ),
   })
   const generated = await runGrokImageEdit({
     apiKey: xaiKey(),
@@ -1127,10 +1337,23 @@ export async function mcpExecuteCarouselGenerate(options: {
 }): Promise<Record<string, unknown>> {
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
-  const scriptContent = typeof options.args.scriptContent === 'string' ? options.args.scriptContent.trim() : ''
-  if (!scriptContent) throw new Error('scriptContent is required')
+  const scriptId = optionalTrimmedString(options.args.scriptId, 200)
+  let scriptContent = optionalTrimmedString(options.args.scriptContent, 80_000) || ''
+  if (!scriptId && !scriptContent) throw new Error('scriptId or scriptContent is required')
+  const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
+  let ownedScript: Awaited<ReturnType<McpArtifactStore['getOwnedScript']>> = null
+  if (scriptId) {
+    ownedScript = await options.artifactStore.getOwnedScript({
+      userId: options.user.id,
+      brandId,
+      scriptId,
+    })
+    if (!ownedScript) throw new Error('scriptId not found for this brand/user')
+    scriptContent = ownedScript.content.trim()
+    if (!scriptContent) throw new Error('scriptId has no content')
+  }
   const slideCount = typeof options.args.slideCount === 'number' || typeof options.args.slideCount === 'string'
-    ? assertMcpCarouselSlideCount(Number(options.args.slideCount), 10)
+    ? assertMcpCarouselSlideCount(Number(options.args.slideCount), 5)
     : 5
   const subtype = options.args.subtype
     ? normalizeCarouselSubtype(options.args.subtype)
@@ -1144,10 +1367,30 @@ export async function mcpExecuteCarouselGenerate(options: {
   const quote = quoteCarouselCredits(requiredSlides)
   const approvalRequestId = typeof options.args.approvalRequestId === 'string' ? options.args.approvalRequestId : ''
   const sessionIdArg = typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined
+  const selectedReferenceIds = referenceImageIds(options.args.referenceImageIds)
+  const productImageId = optionalTrimmedString(options.args.productImageId, 200)
+  if (productImageId && !selectedReferenceIds.includes(productImageId)) {
+    selectedReferenceIds.unshift(productImageId)
+  }
+  const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
+  const offerId = resolveOfferId(
+    ctxPreview,
+    typeof options.args.offerId === 'string'
+      ? options.args.offerId
+      : ownedScript?.offerId || undefined
+  )
+  await resolveOwnedReferenceUrls({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId,
+    offerId,
+    imageIds: selectedReferenceIds,
+  })
 
   const boundInput = {
     brandId,
-    offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
+    offerId,
+    scriptId,
     scriptContent,
     subtype,
     slideCount,
@@ -1155,13 +1398,13 @@ export async function mcpExecuteCarouselGenerate(options: {
     language,
     designDirection: sanitizeCarouselText(options.args.designDirection, 1500),
     slideDetails: sanitizeCarouselText(options.args.slideDetails, 3000),
+    productImageId,
+    referenceImageIds: selectedReferenceIds,
+    guidePrompt,
     previewFirstSlideOnly,
     sessionId: sessionIdArg,
   }
-
-  const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
-  const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
-  const boundWithOffer = { ...boundInput, offerId }
+  const boundWithOffer = boundInput
 
   if (!approvalRequestId) {
     const slideLabelEs = previewFirstSlideOnly
@@ -1255,6 +1498,8 @@ export async function mcpExecuteCarouselGenerate(options: {
         language,
         designDirection: boundWithOffer.designDirection,
         slideDetails: boundWithOffer.slideDetails,
+        referenceImageIds: selectedReferenceIds,
+        guidePrompt,
         previewFirstSlideOnly,
         sessionIdArg,
         approvalRequestId,
@@ -1300,6 +1545,8 @@ async function runCarouselGenerateBody(options: {
   language: 'es' | 'en'
   designDirection?: string
   slideDetails?: string
+  referenceImageIds: string[]
+  guidePrompt?: string
   previewFirstSlideOnly: boolean
   sessionIdArg?: string
   approvalRequestId: string
@@ -1308,6 +1555,14 @@ async function runCarouselGenerateBody(options: {
   quote: number
 }): Promise<Record<string, unknown>> {
   const offer = options.ctxPreview.offers.find((o) => o.id === options.offerId)
+  const referenceUrls = await resolveOwnedReferenceUrls({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId: options.brandId,
+    offerId: options.offerId,
+    imageIds: options.referenceImageIds,
+  })
+  const productReferenceImages = await Promise.all(referenceUrls.map(publicImageUrlToDataUrl))
   const generated = await runOrganicCarouselGenerate({
     userId: options.user.id,
     subtype: options.subtype,
@@ -1316,10 +1571,14 @@ async function runCarouselGenerateBody(options: {
     aspectRatio: options.aspectRatio,
     language: options.language,
     brandKitId: options.ctxPreview.brandKit?.id,
-    designDirection: options.designDirection,
+    designDirection: [
+      options.designDirection,
+      options.guidePrompt ? `Additional user direction: ${options.guidePrompt}` : '',
+    ].filter(Boolean).join('\n'),
     slideDetails: options.slideDetails,
     previewFirstSlideOnly: options.previewFirstSlideOnly,
     productContext: { name: offer?.name, type: offer?.type || undefined },
+    productReferenceImages,
   })
   if (generated.succeeded < 1) {
     throw new Error('Carousel generation failed — no slides rendered. Approval was not consumed.')

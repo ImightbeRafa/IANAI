@@ -1,3 +1,14 @@
+## 2026-08-25 — CreativeDirector MCP must-haves (0.9.3)
+
+**Area:** mcp
+**Files:** `execute-tools.ts`, `bulk-tools.ts`, `artifact-store.ts`, `workspace-ops.ts`, `user-tools.ts`, `guide-packs.ts`, `protocol.ts`, `tool-registry.ts`
+
+- Carousel EXECUTE accepts an owned `scriptId`, edit/enhance default to the offer’s latest generated image, and execute tools preserve settings, GUIDE direction, references, and bulk angle selections through approval.
+- New `list_assets` returns reusable library image ids/URLs; `workspace_save_artifact` saves HTTPS product/context references directly without credits or a chat upload detour.
+- `list_brands` reports kit/offer readiness, deterministic default-offer resolution, and duplicate-name sibling ids without mutating records.
+
+---
+
 ## 2026-08-25 — All MCP generation tools async (0.9.2)
 
 **Area:** mcp

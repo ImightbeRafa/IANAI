@@ -12,6 +12,13 @@ export type McpBrandSummary = {
   id: string
   name: string
   type?: string | null
+  kitReady?: boolean
+  offerCount?: number
+  hasPrimaryKit?: boolean
+  defaultOfferId?: string | null
+  defaultOfferResolution?: 'first_offer_with_brand_kit' | 'first_offer' | 'none'
+  nameCollisionWarning?: string | null
+  siblingBrandIds?: string[]
 }
 
 export type McpBrandKitContext = {
@@ -28,6 +35,7 @@ export type McpBrandKitContext = {
   visualStyleNotes?: string | null
   fontPrimary?: string | null
   referenceImages?: string[]
+  forbiddenPhrases?: string[]
   styleDnas?: Array<{
     id: string
     name: string
@@ -58,7 +66,13 @@ export type McpBrandContext = {
     shippingMethod?: string | null
     icpDescription?: string | null
   }
-  offers: Array<{ id: string; name: string; type?: string | null }>
+  offers: Array<{
+    id: string
+    name: string
+    type?: string | null
+    price?: string | null
+    doNotClaim?: string[]
+  }>
   brandKit?: McpBrandKitContext | null
   brandKits?: Array<{
     id: string
@@ -90,7 +104,13 @@ export type McpDbClient = {
   listOffersForBrand: (
     userId: string,
     brandId: string
-  ) => Promise<Array<{ id: string; name: string; type?: string | null }>>
+  ) => Promise<Array<{
+    id: string
+    name: string
+    type?: string | null
+    price?: string | null
+    doNotClaim?: string[]
+  }>>
   getBrandKitForBrand: (
     userId: string,
     brandId: string,
@@ -131,7 +151,56 @@ export async function mcpListBrands(
   user: McpAuthUser
 ): Promise<McpBrandSummary[]> {
   if (!user?.id) throw new Error('Authentication required')
-  return db.listBusinessesForUser(user.id)
+  const brands = await db.listBusinessesForUser(user.id)
+  const enriched = await Promise.all(brands.map(async (brand) => {
+    const [offers, kitBundle] = await Promise.all([
+      db.listOffersForBrand(user.id, brand.id),
+      db.resolveBrandKitsForBrand
+        ? db.resolveBrandKitsForBrand(user.id, brand.id)
+        : db.getBrandKitForBrand(user.id, brand.id).then((brandKit) => ({
+            brandKit,
+            brandKits: brandKit ? [{
+              id: brandKit.id,
+              name: brandKit.name,
+              businessId: brandKit.businessId ?? brand.id,
+              isPrimaryForBusiness: brandKit.isPrimaryForBusiness === true,
+              isDefault: brandKit.isDefault === true,
+              isActive: true,
+              hasLogo: Boolean(brandKit.logoUrl),
+            }] : [],
+            brandKitResolution: brandKit ? 'primary' : 'missing',
+          })),
+    ])
+    const kitReady = Boolean(kitBundle.brandKit)
+    const defaultOffer = offers[0]
+    return {
+      ...brand,
+      kitReady,
+      offerCount: offers.length,
+      hasPrimaryKit: kitBundle.brandKits.some((kit) => kit.isPrimaryForBusiness),
+      defaultOfferId: defaultOffer?.id || null,
+      defaultOfferResolution: defaultOffer
+        ? (kitReady ? 'first_offer_with_brand_kit' : 'first_offer')
+        : 'none',
+    } satisfies McpBrandSummary
+  }))
+
+  const idsByName = new Map<string, string[]>()
+  for (const brand of enriched) {
+    const key = brand.name.trim().toLocaleLowerCase()
+    idsByName.set(key, [...(idsByName.get(key) || []), brand.id])
+  }
+  return enriched.map((brand) => {
+    const siblingBrandIds = (idsByName.get(brand.name.trim().toLocaleLowerCase()) || [])
+      .filter((id) => id !== brand.id)
+    return {
+      ...brand,
+      siblingBrandIds,
+      nameCollisionWarning: siblingBrandIds.length
+        ? `Duplicate brand name "${brand.name}". Select by id; no records were changed.`
+        : null,
+    }
+  })
 }
 
 /** get_brand_context — brand + offers + kit owned by the same user. */

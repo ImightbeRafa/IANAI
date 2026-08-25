@@ -12,6 +12,8 @@ export type McpOwnedImage = {
   offerId: string
   sessionId?: string | null
   label?: string | null
+  kind?: 'product' | 'context' | 'generated'
+  createdAt?: string | null
 }
 
 export type McpOwnedScript = {
@@ -57,8 +59,17 @@ export type McpArtifactStore = {
     sessionId: string
     imageUrl: string
     label?: string
+    kind?: 'generated'
     metadata?: Record<string, unknown>
   }) => Promise<{ messageId: string; productImageId: string; imageUrl: string }>
+  saveReferenceImageFromPublicUrl: (options: {
+    userId: string
+    brandId: string
+    offerId: string
+    imageUrl: string
+    kind: 'product' | 'context'
+    label?: string
+  }) => Promise<{ productImageId: string; imageUrl: string }>
   linkExistingProductImage: (options: {
     userId: string
     brandId: string
@@ -78,6 +89,17 @@ export type McpArtifactStore = {
     brandId: string
     scriptId: string
   }) => Promise<McpOwnedScript | null>
+  listLatestGeneratedImage: (options: {
+    userId: string
+    brandId: string
+    offerId: string
+  }) => Promise<McpOwnedImage | null>
+  listOwnedAssets: (options: {
+    userId: string
+    brandId: string
+    offerId?: string
+    kind?: 'product' | 'context' | 'generated'
+  }) => Promise<McpOwnedImage[]>
   saveCarouselSlides: (options: {
     userId: string
     brandId: string
@@ -280,6 +302,35 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
       }
     },
 
+    async saveReferenceImageFromPublicUrl(options) {
+      const { data: product, error: productErr } = await db
+        .from('products')
+        .select('id')
+        .eq('id', options.offerId)
+        .eq('business_id', options.brandId)
+        .eq('owner_id', options.userId)
+        .maybeSingle()
+      if (productErr) throw productErr
+      if (!product) throw new Error('Offer not found for this brand/user')
+
+      const { data, error } = await db
+        .from('product_images')
+        .insert({
+          product_id: options.offerId,
+          user_id: options.userId,
+          image_url: options.imageUrl,
+          label: options.label || `MCP ${options.kind} reference`,
+          kind: options.kind,
+        })
+        .select('id')
+        .single()
+      if (error) throw error
+      return {
+        productImageId: data.id as string,
+        imageUrl: options.imageUrl,
+      }
+    },
+
     async saveImageFromPublicUrl(options) {
       const { data: message, error: msgErr } = await db
         .from('messages')
@@ -299,7 +350,7 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
           user_id: options.userId,
           image_url: options.imageUrl,
           label: options.label || 'MCP save',
-          kind: 'generated',
+          kind: options.kind || 'generated',
           session_id: options.sessionId,
           message_id: message.id,
         })
@@ -388,7 +439,7 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
     async getOwnedProductImage(options) {
       const { data, error } = await db
         .from('product_images')
-        .select('id, image_url, product_id, session_id, label, user_id')
+        .select('id, image_url, product_id, session_id, label, user_id, kind, created_at')
         .eq('id', options.imageId)
         .eq('user_id', options.userId)
         .maybeSingle()
@@ -410,6 +461,8 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         offerId: data.product_id as string,
         sessionId: (data.session_id as string | null) ?? null,
         label: (data.label as string | null) ?? null,
+        kind: data.kind as McpOwnedImage['kind'],
+        createdAt: (data.created_at as string | null) ?? null,
       }
     },
 
@@ -449,6 +502,48 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         offerId: (data.product_id as string | null) ?? null,
         sessionId: (data.session_id as string | null) ?? null,
       }
+    },
+
+    async listLatestGeneratedImage(options) {
+      const assets = await this.listOwnedAssets({
+        userId: options.userId,
+        brandId: options.brandId,
+        offerId: options.offerId,
+        kind: 'generated',
+      })
+      return assets[0] || null
+    },
+
+    async listOwnedAssets(options) {
+      let productQuery = db
+        .from('products')
+        .select('id')
+        .eq('business_id', options.brandId)
+        .eq('owner_id', options.userId)
+      if (options.offerId) productQuery = productQuery.eq('id', options.offerId)
+      const { data: products, error: productErr } = await productQuery
+      if (productErr) throw productErr
+      const offerIds = (products || []).map((row) => row.id as string)
+      if (!offerIds.length) return []
+
+      let imageQuery = db
+        .from('product_images')
+        .select('id, image_url, product_id, session_id, label, kind, created_at')
+        .eq('user_id', options.userId)
+        .in('product_id', offerIds)
+      if (options.kind) imageQuery = imageQuery.eq('kind', options.kind)
+      const { data, error } = await imageQuery
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return (data || []).map((row) => ({
+        id: row.id as string,
+        imageUrl: row.image_url as string,
+        offerId: row.product_id as string,
+        sessionId: (row.session_id as string | null) ?? null,
+        label: (row.label as string | null) ?? null,
+        kind: row.kind as McpOwnedImage['kind'],
+        createdAt: (row.created_at as string | null) ?? null,
+      }))
     },
 
     async saveCarouselSlides(options) {

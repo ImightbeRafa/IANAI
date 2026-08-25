@@ -37,6 +37,7 @@ function mapBrandKitRow(data: Record<string, unknown>): McpBrandKitContext {
     visualStyleNotes: (data.visual_style_notes as string | null) ?? null,
     fontPrimary: (data.font_primary as string | null) ?? null,
     referenceImages: Array.isArray(data.reference_images) ? data.reference_images as string[] : [],
+    forbiddenPhrases: Array.isArray(data.forbidden_phrases) ? data.forbidden_phrases as string[] : [],
     styleDnas: parseStyleDnas(data.style_dnas),
     isPrimaryForBusiness: data.is_primary_for_business === true,
     isDefault: data.is_default === true,
@@ -146,7 +147,7 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
       if (!userId || !brandId) return []
       const { data, error } = await db
         .from('products')
-        .select('id, name, type')
+        .select('id, name, type, price_range, re_price')
         .eq('business_id', brandId)
         .eq('owner_id', userId)
         .order('created_at', { ascending: false })
@@ -155,6 +156,7 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         id: row.id as string,
         name: row.name as string,
         type: (row.type as string | null) ?? null,
+        price: (row.re_price as string | null) || (row.price_range as string | null) || null,
       }))
     },
 
@@ -219,6 +221,10 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         .limit(5)
       if (error) throw error
       return (data || [])
+        .sort((a, b) => {
+          if (a.kind === b.kind) return 0
+          return a.kind === 'product' ? -1 : 1
+        })
         .map((row) => row.image_url as string)
         .filter(Boolean)
     },
