@@ -15,6 +15,7 @@ export type McpToolGroupId =
   | 'library_sessions'
   | 'deletes'
   | 'account_team'
+  | 'admin'
 
 export type McpToolDefinition = {
   name: string
@@ -26,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.6.0'
+export const MCP_REGISTRY_VERSION = '0.7.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -61,6 +62,11 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   account_team: {
     title: 'Account & Team',
     summary: 'Usage and team/admin — same rules as the web app.',
+    defaultEnabled: false,
+  },
+  admin: {
+    title: 'Admin',
+    summary: 'Admin-only tickets and usage. Hidden unless the user is an Advance admin.',
     defaultEnabled: false,
   },
 }
@@ -268,10 +274,46 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
   },
   {
     name: 'admin_get_usage',
-    group: 'account_team',
+    group: 'admin',
     risk: 'admin',
     description: 'Admin-only usage summary (server-enforced).',
-    enabled: false,
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_list_tickets',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only list of feedback tickets (server-enforced).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_get_ticket',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only ticket detail including diagnostics (server-enforced).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_update_ticket',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only ticket status + comment update (server-enforced).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'admin_request_cursor_fix',
+    group: 'admin',
+    risk: 'admin',
+    description: 'Admin-only structured Cursor Cloud Agent brief for a ticket. Does not auto-call Cursor.',
+    enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
   },
@@ -279,8 +321,12 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
 
 export function listEnabledMcpTools(options?: {
   groupsEnabled?: Partial<Record<McpToolGroupId, boolean>>
+  isAdmin?: boolean
 }): McpToolDefinition[] {
   return MCP_TOOL_REGISTRY.filter((tool) => {
+    if (tool.group === 'admin' || tool.risk === 'admin') {
+      return Boolean(options?.isAdmin) && tool.enabled
+    }
     const groupOn = options?.groupsEnabled?.[tool.group]
     const groupDefault = MCP_TOOL_GROUPS[tool.group].defaultEnabled
     const groupAllowed = groupOn === undefined ? groupDefault : groupOn

@@ -4,6 +4,11 @@
 
 import { listEnabledMcpTools, getMcpTool } from './tool-registry.js'
 import {
+  dispatchAdminTool,
+  isAdminToolName,
+  type McpAdminStore,
+} from './admin-tools.js'
+import {
   mcpGetBrandContext,
   mcpListBrands,
   type McpAuthUser,
@@ -31,7 +36,7 @@ import type { McpArtifactStore } from './artifact-store.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.6.0',
+  version: '0.7.0',
 }
 
 export type McpJsonRpcRequest = {
@@ -169,6 +174,45 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['brandId'],
         additionalProperties: false,
       }
+    case 'admin_list_tickets':
+      return {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'closed'] },
+          limit: { type: 'number' },
+        },
+        additionalProperties: false,
+      }
+    case 'admin_get_ticket':
+    case 'admin_request_cursor_fix':
+      return {
+        type: 'object',
+        properties: { ticketId: { type: 'string' } },
+        required: ['ticketId'],
+        additionalProperties: false,
+      }
+    case 'admin_update_ticket':
+      return {
+        type: 'object',
+        properties: {
+          ticketId: { type: 'string' },
+          status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'closed'] },
+          comment: { type: 'string' },
+        },
+        required: ['ticketId'],
+        additionalProperties: false,
+      }
+    case 'admin_get_usage':
+      return {
+        type: 'object',
+        properties: {
+          startDate: { type: 'string' },
+          endDate: { type: 'string' },
+          source: { type: 'string', enum: ['mcp', 'web', 'cron'] },
+          limit: { type: 'number' },
+        },
+        additionalProperties: false,
+      }
     default:
       return { type: 'object', properties: {}, additionalProperties: false }
   }
@@ -182,9 +226,12 @@ export async function handleMcpJsonRpc(options: {
   workspaceStore?: McpWorkspaceStore | null
   approvalStore?: McpApprovalStore | null
   artifactStore?: McpArtifactStore | null
+  adminStore?: McpAdminStore | null
+  isAdmin?: boolean
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
   const { body, user, db } = options
+  const isAdmin = options.isAdmin === true
   if (body.jsonrpc && body.jsonrpc !== '2.0') {
     return fail(body.id, -32600, 'Invalid Request: jsonrpc must be 2.0')
   }
@@ -201,7 +248,7 @@ export async function handleMcpJsonRpc(options: {
     case 'notifications/initialized':
       return ok(body.id, {})
     case 'tools/list': {
-      const tools = listEnabledMcpTools().map((tool) => ({
+      const tools = listEnabledMcpTools({ isAdmin }).map((tool) => ({
         name: tool.name,
         description: tool.description,
         inputSchema: toolInputSchema(tool.name),
@@ -217,6 +264,9 @@ export async function handleMcpJsonRpc(options: {
       if (!def || !def.enabled) {
         return fail(body.id, -32601, `Unknown or disabled tool: ${name || '(missing)'}`)
       }
+      if ((def.group === 'admin' || def.risk === 'admin' || isAdminToolName(name)) && !isAdmin) {
+        return fail(body.id, -32601, `Unknown or disabled tool: ${name}`)
+      }
       try {
         const payload = await dispatchEnabledTool({
           name,
@@ -227,6 +277,8 @@ export async function handleMcpJsonRpc(options: {
           workspaceStore: options.workspaceStore,
           approvalStore: options.approvalStore,
           artifactStore: options.artifactStore,
+          adminStore: options.adminStore,
+          isAdmin,
           appOrigin: options.appOrigin,
         })
         return ok(body.id, {
@@ -255,8 +307,20 @@ async function dispatchEnabledTool(options: {
   workspaceStore?: McpWorkspaceStore | null
   approvalStore?: McpApprovalStore | null
   artifactStore?: McpArtifactStore | null
+  adminStore?: McpAdminStore | null
+  isAdmin?: boolean
   appOrigin?: string
 }): Promise<unknown> {
+  if (isAdminToolName(options.name)) {
+    if (!options.isAdmin) throw new Error('Admin access required')
+    if (!options.adminStore) throw new Error('Admin store not configured')
+    return dispatchAdminTool({
+      name: options.name,
+      args: options.args,
+      store: options.adminStore,
+    })
+  }
+
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
 
   switch (options.name) {

@@ -12,6 +12,7 @@ import type {
 } from './user-tools.js'
 import type { McpUrlIntakeStore } from './url-intake.js'
 import type { McpWorkspaceStore } from './workspace-ops.js'
+import type { McpAdminStore, McpAdminTicket, McpAdminUsageRow } from './admin-tools.js'
 
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
@@ -236,6 +237,141 @@ export function createMcpWorkspaceStore(): McpWorkspaceStore | null {
         .single()
       if (error) throw error
       return { id: data.id as string }
+    },
+  }
+}
+
+const ADMIN_TICKET_SELECT = [
+  'id',
+  'user_id',
+  'user_email',
+  'subject',
+  'description',
+  'category',
+  'priority',
+  'status',
+  'page_url',
+  'ui_surface',
+  'app_version',
+  'locale',
+  'viewport',
+  'browser_info',
+  'screen_size',
+  'console_errors',
+  'breadcrumbs',
+  'admin_notes',
+  'notes_history',
+  'product_name',
+  'user_plan',
+  'created_at',
+  'updated_at',
+].join(', ')
+
+function mapAdminTicket(row: Record<string, unknown>): McpAdminTicket {
+  const history = Array.isArray(row.notes_history)
+    ? row.notes_history as { text: string; status: string; timestamp: string }[]
+    : []
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    user_email: (row.user_email as string | null) ?? null,
+    subject: String(row.subject || ''),
+    description: String(row.description || ''),
+    category: String(row.category || ''),
+    priority: String(row.priority || ''),
+    status: String(row.status || ''),
+    page_url: (row.page_url as string | null) ?? null,
+    ui_surface: (row.ui_surface as string | null) ?? null,
+    app_version: (row.app_version as string | null) ?? null,
+    locale: (row.locale as string | null) ?? null,
+    viewport: (row.viewport as string | null) ?? null,
+    browser_info: (row.browser_info as string | null) ?? null,
+    screen_size: (row.screen_size as string | null) ?? null,
+    console_errors: row.console_errors ?? [],
+    breadcrumbs: row.breadcrumbs ?? [],
+    admin_notes: (row.admin_notes as string | null) ?? null,
+    notes_history: history,
+    product_name: (row.product_name as string | null) ?? null,
+    user_plan: (row.user_plan as string | null) ?? null,
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || ''),
+  }
+}
+
+export function createMcpAdminStore(): McpAdminStore | null {
+  const db = getSupabaseAdmin()
+  if (!db) return null
+
+  return {
+    async listTickets({ status, limit }) {
+      let query = db
+        .from('feedback_tickets')
+        .select(ADMIN_TICKET_SELECT)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (status) query = query.eq('status', status)
+      const { data, error } = await query
+      if (error) throw error
+      return (data || []).map((row) => mapAdminTicket(row as Record<string, unknown>))
+    },
+
+    async getTicket(ticketId) {
+      const { data, error } = await db
+        .from('feedback_tickets')
+        .select(ADMIN_TICKET_SELECT)
+        .eq('id', ticketId)
+        .maybeSingle()
+      if (error) throw error
+      return data ? mapAdminTicket(data as Record<string, unknown>) : null
+    },
+
+    async updateTicket({ ticketId, status, comment }) {
+      const { data: existing, error: loadError } = await db
+        .from('feedback_tickets')
+        .select(ADMIN_TICKET_SELECT)
+        .eq('id', ticketId)
+        .maybeSingle()
+      if (loadError) throw loadError
+      if (!existing) throw new Error('Ticket not found')
+
+      const current = mapAdminTicket(existing as Record<string, unknown>)
+      const nextStatus = status || current.status
+      const history = [...(current.notes_history || [])]
+      history.push({
+        text: comment || '',
+        status: nextStatus,
+        timestamp: new Date().toISOString(),
+      })
+
+      const update: Record<string, unknown> = {
+        notes_history: history,
+      }
+      if (status) update.status = status
+      if (comment !== undefined) update.admin_notes = comment
+      if (status === 'resolved') update.resolved_at = new Date().toISOString()
+
+      const { data, error } = await db
+        .from('feedback_tickets')
+        .update(update)
+        .eq('id', ticketId)
+        .select(ADMIN_TICKET_SELECT)
+        .single()
+      if (error) throw error
+      return mapAdminTicket(data as Record<string, unknown>)
+    },
+
+    async listUsage({ startIso, endIso, source, limit }) {
+      let query = db
+        .from('api_usage_logs')
+        .select('id, user_id, user_email, feature, model, generation_id, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata, source')
+        .gte('created_at', startIso)
+        .lte('created_at', endIso)
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (source && source !== 'all') query = query.eq('source', source)
+      const { data, error } = await query
+      if (error) throw error
+      return (data || []) as McpAdminUsageRow[]
     },
   }
 }

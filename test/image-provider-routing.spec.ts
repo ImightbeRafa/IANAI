@@ -44,7 +44,17 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.6\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.7\./)
+    expect(listEnabledMcpTools().some((t) => t.name.startsWith('admin_'))).toBe(false)
+    expect(listEnabledMcpTools({ isAdmin: true }).map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'admin_list_tickets',
+        'admin_get_ticket',
+        'admin_update_ticket',
+        'admin_get_usage',
+        'admin_request_cursor_fix',
+      ])
+    )
     const enabled = listEnabledMcpTools()
     const names = enabled.map((t) => t.name).sort()
     expect(names).toContain('list_brands')
