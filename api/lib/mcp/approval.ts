@@ -57,6 +57,15 @@ export type McpApprovalStore = {
    * Prevents double-generate on client timeout retries.
    */
   claimEmptyResult?: (id: string, result: unknown, atMs: number) => Promise<McpApprovalRecord | null>
+  /**
+   * CAS reclaim: replace stale running only if startedAtMs still matches (do not clobber completed).
+   */
+  compareAndSwapRunningResult?: (
+    id: string,
+    expectedStartedAtMs: number,
+    result: unknown,
+    atMs: number
+  ) => Promise<McpApprovalRecord | null>
 }
 
 export function hashMcpApprovalToken(token: string): string {
@@ -362,6 +371,15 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
     async claimEmptyResult(id, result, atMs) {
       const row = byId.get(id)
       if (!row || row.status !== 'approved' || row.resultJson != null) return null
+      const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
+      byId.set(id, next)
+      return { ...next }
+    },
+    async compareAndSwapRunningResult(id, expectedStartedAtMs, result, atMs) {
+      const row = byId.get(id)
+      if (!row || row.status !== 'approved' || row.resultJson == null) return null
+      const json = row.resultJson as { status?: string; startedAtMs?: number }
+      if (json.status !== 'running' || json.startedAtMs !== expectedStartedAtMs) return null
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }

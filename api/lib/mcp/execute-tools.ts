@@ -171,10 +171,12 @@ async function chargeMcpCredits(options: {
   action: 'script' | 'image' | 'enhance' | 'edit'
   generationId: string
   imageModel?: string | null
+  units?: number
 }): Promise<number> {
   const incrementResult = await incrementUsage(options.userId, options.action, {
     generationId: options.generationId,
     imageModel: options.imageModel,
+    units: options.units,
   })
   if (incrementResult?.creditsError) {
     throw new Error(`Credit charge failed: ${incrementResult.creditsError}`)
@@ -1507,6 +1509,13 @@ export async function mcpExecuteCarouselGenerate(options: {
         ctxPreview,
         quote,
       })
+      if (result.status === 'failed') {
+        await storeMcpApprovalResult(options.approvalStore, {
+          approvalRequestId,
+          result,
+        })
+        return
+      }
       await finalizeMcpApproval({
         approvalStore: options.approvalStore,
         approvalRequestId,
@@ -1632,25 +1641,17 @@ async function runCarouselGenerateBody(options: {
   })
 
   let charged = 0
-  for (let i = 0; i < generated.succeeded; i++) {
-    const slideGenerationId = `${options.approvalRequestId}-carousel-${i}`
-    charged += await chargeMcpCredits({
-      userId: options.user.id,
-      action: 'image',
-      generationId: slideGenerationId,
-      imageModel: GEMINI_CAROUSEL_IMAGE_MODEL,
-    })
-    if (!isCreditsV1Enabled()) {
-      await deductBonusImage(options.user.id)
-    }
-  }
-
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
-  return withChargedCredits({
-    status: 'completed',
+  const slides = savedSlides.map((s) => ({
+    index: s.index,
+    productImageId: s.productImageId,
+    imageUrl: s.imageUrl,
+    postId: s.postId || null,
+  }))
+  const baseCompleted = {
     jobId: options.approvalRequestId,
     approvalRequestId: options.approvalRequestId,
-    toolName: 'execute_carousel_generate',
+    toolName: 'execute_carousel_generate' as const,
     consumesAdvanceCredits: true,
     quotedCreditCost: options.quote,
     brandId: options.brandId,
@@ -1660,14 +1661,48 @@ async function runCarouselGenerateBody(options: {
     subtype: options.subtype,
     totalSlides: generated.totalSlides,
     succeeded: generated.succeeded,
-    slides: savedSlides.map((s) => ({
-      index: s.index,
-      productImageId: s.productImageId,
-      imageUrl: s.imageUrl,
-      postId: s.postId || null,
-    })),
+    slides,
     failed: generated.slides.filter((s) => !s.imageUrl).map((s) => ({ index: s.index, error: s.error })),
     durationNote: `MCP host maxDuration is ${MCP_HOST_MAX_DURATION_SEC}s; large carousels may time out.`,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
+  }
+
+  // One UUID charge for all succeeded slides (same path as single image).
+  // Composite `${approvalId}-carousel-N` is NOT a valid credit_ledger UUID.
+  try {
+    if (generated.succeeded > 0) {
+      charged = await chargeMcpCredits({
+        userId: options.user.id,
+        action: 'image',
+        generationId: options.approvalRequestId,
+        imageModel: GEMINI_CAROUSEL_IMAGE_MODEL,
+        units: generated.succeeded,
+      })
+      if (!isCreditsV1Enabled()) {
+        for (let i = 0; i < generated.succeeded; i++) {
+          await deductBonusImage(options.user.id)
+        }
+      }
+    }
+  } catch (chargeErr) {
+    const message = chargeErr instanceof Error ? chargeErr.message : 'Credit charge failed'
+    return withStatusMessage({
+      ...baseCompleted,
+      status: 'failed',
+      failureStage: 'charge',
+      artifactsSaved: true,
+      resumeMode: 'charge_only',
+      charged: 0,
+      chargedCredits: 0,
+      usage: { quotedCredits: options.quote, chargedCredits: 0 },
+      error: message,
+      message:
+        'Carousel slides were saved to Advance, but billing was temporarily unavailable. Artifacts are kept; retry the same approval to charge without regenerating once billing is back.',
+    }, 'execute_carousel_generate')
+  }
+
+  return withChargedCredits({
+    ...baseCompleted,
+    status: 'completed',
   }, charged, options.quote, 'execute_carousel_generate')
 }

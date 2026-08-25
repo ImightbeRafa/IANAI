@@ -1,4 +1,5 @@
 import { checkUsageLimit, incrementUsage } from '../auth.js'
+import { generationUuidFromApproval } from '../credits/generation-id.js'
 import { runGrokImageGenerate } from '../grok-image-generate.js'
 import { logApiUsage } from '../usage-logger.js'
 import { listProductRefUrls, saveExpandedProductRef } from './store.js'
@@ -39,7 +40,7 @@ export async function expandProductRefs(options: {
   const expanded: ExpandedProductRef[] = []
   const refs = [...existing]
   for (let i = 0; i < needed; i += 1) {
-    const generationId = `${options.packId}-expand-${i + 1}`
+    const generationId = generationUuidFromApproval(options.packId, `expand:${i + 1}`)
     const limit = await checkUsageLimit(options.userId, 'image', {
       imageModel: options.imageModel || 'grok-imagine',
     })

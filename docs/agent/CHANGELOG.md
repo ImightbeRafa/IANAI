@@ -1,3 +1,15 @@
+## 2026-08-25 — MCP bulk/carousel credit UUID + reclaim CAS
+
+**Area:** mcp / credits
+**Files:** `generation-id.ts`, `consume.ts`, `run-bulk.ts`, `expand-product-refs.ts`, `execute-tools.ts`, `bulk-tools.ts`, `execute-job.ts`, `approval.ts`, `approval-store.ts`
+
+- Root cause of live `Credit charge failed: UNAVAILABLE` on bulk/carousel: composite generation ids (`{approval}-script-1`, `{approval}-carousel-0`) are not UUID-typed for `consume_credits` / `credit_ledger`. Now use deterministic UUIDs (or one approval UUID + `units` for carousel).
+- RPC errors (invalid UUID, etc.) no longer fall through to the TS lot-mutation fallback.
+- Charge failure after artifacts are saved stores `artifactsSaved` + URLs/ids and is **not** generation-reclaimable (stops regen storm). Poll returns the failed payload with artifacts.
+- Stale reclaim re-reads and CAS-swaps running only — cannot overwrite a completed `result_json` (fixes poll stuck on `running`).
+
+---
+
 ## 2026-08-25 — CreativeDirector MCP must-haves (0.9.3)
 
 **Area:** mcp + chat-shell

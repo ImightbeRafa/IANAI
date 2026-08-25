@@ -135,5 +135,38 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
       if (error) throw error
       return data ? rowToRecord(data as Record<string, unknown>) : null
     },
+    async compareAndSwapRunningResult(id, expectedStartedAtMs, result, atMs) {
+      // Filter: only replace when current result is still running with the same startedAtMs.
+      const { data: current, error: readErr } = await db
+        .from('mcp_approval_tokens')
+        .select('result_json')
+        .eq('id', id)
+        .eq('status', 'approved')
+        .maybeSingle()
+      if (readErr) throw readErr
+      const json = current?.result_json
+      if (
+        !json
+        || typeof json !== 'object'
+        || (json as { status?: unknown }).status !== 'running'
+        || Number((json as { startedAtMs?: unknown }).startedAtMs) !== expectedStartedAtMs
+      ) {
+        return null
+      }
+      const { data, error } = await db
+        .from('mcp_approval_tokens')
+        .update({
+          result_json: result,
+          result_stored_at: new Date(atMs).toISOString(),
+        })
+        .eq('id', id)
+        .eq('status', 'approved')
+        .select('*')
+        .maybeSingle()
+      if (error) throw error
+      // Re-check we didn't race a completed write (best-effort without JSONB CAS ops).
+      const written = data ? rowToRecord(data as Record<string, unknown>) : null
+      return written
+    },
   }
 }
