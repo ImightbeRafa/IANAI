@@ -187,13 +187,83 @@ function scrubBreadcrumbs(value: unknown, depth = 0): unknown {
       out[key] = '[REDACTED]'
       continue
     }
-    if (key === 'target' || key === 'text' || key === 'value' || key === 'label') {
-      out[key] = scrubBreadcrumbs(raw, depth + 1)
+    // Diagnostics keep CSS selector only — drop innerText / textContent / pasted labels
+    if (
+      key === 'innerText'
+      || key === 'textContent'
+      || key === 'innerHTML'
+      || key === 'text'
+      || key === 'value'
+      || key === 'label'
+    ) {
+      continue
+    }
+    if (key === 'target') {
+      if (typeof raw === 'string') {
+        const t = raw.trim()
+        if (t.length > 240 || /pegar información|paste/i.test(t)) {
+          out[key] = `[scrubbed ${Math.min(t.length, 9999)} chars]`
+        } else {
+          // CSS selector only — cut before first space/quote so "button.x innerText" cannot leak
+          const selectorOnly = (t.split(/[\s"'`]/)[0] || '').trim()
+          out[key] =
+            selectorOnly && /^[#.\[a-z]/i.test(selectorOnly)
+              ? selectorOnly.slice(0, 120)
+              : '[selector]'
+        }
+      } else {
+        out[key] = scrubBreadcrumbs(raw, depth + 1)
+      }
+      continue
+    }
+    if (key === 'url' || key === 'href' || key === 'pageUrl' || key === 'page_url') {
+      if (typeof raw === 'string') {
+        out[key] = scrubPageUrl(raw) || stripQuery(raw)
+      } else {
+        out[key] = scrubBreadcrumbs(raw, depth + 1)
+      }
       continue
     }
     out[key] = scrubBreadcrumbs(raw, depth + 1)
   }
   return out
+}
+
+function scrubPageUrl(url: string | null): string | null {
+  const stripped = stripQuery(url)
+  if (!stripped) return null
+  // Prefer path-only chat surface; drop session query (already stripped) and keep /chat
+  if (stripped.includes('/chat')) {
+    try {
+      if (stripped.startsWith('/')) return '/chat'
+      const parsed = new URL(stripped)
+      return `${parsed.origin}/chat`
+    } catch {
+      return '/chat'
+    }
+  }
+  // Non-chat paths: redact session / resource UUIDs (e.g. /product/{uuid}/session/{uuid})
+  return stripped
+    .replace(/\/session\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/session/[id]')
+    .replace(
+      /\/(product|brand|offer|business)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      '/$1/[id]'
+    )
+}
+
+export function toSafeTicketDiagnostics(ticket: McpAdminTicket): Omit<McpAdminTicket, 'user_email'> & {
+  user_email: string | null
+  user_email_masked: string | null
+} {
+  return {
+    ...ticket,
+    user_email: null,
+    user_email_masked: maskEmail(ticket.user_email),
+    page_url: scrubPageUrl(ticket.page_url),
+    breadcrumbs: scrubBreadcrumbs(ticket.breadcrumbs),
+    console_errors: scrubBreadcrumbs(ticket.console_errors),
+    description: redactSecrets((ticket.description || '').slice(0, 2_000)),
+  }
 }
 
 export function buildCursorFixBrief(ticket: McpAdminTicket): {
@@ -220,7 +290,7 @@ export function buildCursorFixBrief(ticket: McpAdminTicket): {
   }
 } {
   const suggestedFiles = suggestTicketFiles(ticket)
-  const pageUrl = stripQuery(ticket.page_url)
+  const pageUrl = scrubPageUrl(ticket.page_url)
   const description = redactSecrets((ticket.description || '').slice(0, 2_000))
   const breadcrumbs = scrubBreadcrumbs(ticket.breadcrumbs)
   const consoleErrors = scrubBreadcrumbs(ticket.console_errors)
@@ -280,31 +350,36 @@ export async function mcpAdminListTickets(
 export async function mcpAdminGetTicket(
   store: McpAdminStore,
   args: Record<string, unknown>
-): Promise<{ ticket: McpAdminTicket }> {
+): Promise<{ ticket: ReturnType<typeof toSafeTicketDiagnostics> }> {
   const ticketId = asString(args.ticketId)
   if (!ticketId) throw new Error('ticketId is required')
   const ticket = await store.getTicket(ticketId)
   if (!ticket) throw new Error('Ticket not found')
-  return { ticket }
+  return { ticket: toSafeTicketDiagnostics(ticket) }
 }
 
 export async function mcpAdminUpdateTicket(
   store: McpAdminStore,
   args: Record<string, unknown>
-): Promise<{ ticket: McpAdminTicket }> {
+): Promise<{ ticket: ReturnType<typeof toSafeTicketDiagnostics> }> {
   const ticketId = asString(args.ticketId)
   if (!ticketId) throw new Error('ticketId is required')
   const status = parseStatus(args.status)
   const comment = asString(args.comment) || undefined
   if (!status && !comment) throw new Error('status or comment is required')
   const ticket = await store.updateTicket({ ticketId, status, comment })
-  return { ticket }
+  return { ticket: toSafeTicketDiagnostics(ticket) }
 }
 
 export async function mcpAdminGetUsage(
   store: McpAdminStore,
   args: Record<string, unknown>
-): Promise<{ logs: McpAdminUsageRow[]; source: string; startIso: string; endIso: string }> {
+): Promise<{
+  logs: Array<Omit<McpAdminUsageRow, 'user_email'> & { user_email: null; user_email_masked: string | null }>
+  source: string
+  startIso: string
+  endIso: string
+}> {
   const end = asString(args.endDate) ? new Date(asString(args.endDate)) : new Date()
   const start = asString(args.startDate)
     ? new Date(asString(args.startDate))
@@ -317,7 +392,16 @@ export async function mcpAdminGetUsage(
   const startIso = start.toISOString()
   const endIso = end.toISOString()
   const logs = await store.listUsage({ startIso, endIso, source, limit })
-  return { logs, source: source || 'all', startIso, endIso }
+  return {
+    logs: logs.map((row) => ({
+      ...row,
+      user_email: null,
+      user_email_masked: maskEmail(row.user_email),
+    })),
+    source: source || 'all',
+    startIso,
+    endIso,
+  }
 }
 
 export async function mcpAdminRequestCursorFix(

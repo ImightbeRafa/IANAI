@@ -106,6 +106,7 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
       return data ? rowToRecord(data as Record<string, unknown>) : null
     },
     async storeResult(id, result, atMs) {
+      // Allow while approved (running marker / final before consume) or consumed (legacy).
       const { data, error } = await db
         .from('mcp_approval_tokens')
         .update({
@@ -113,7 +114,22 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
           result_stored_at: new Date(atMs).toISOString(),
         })
         .eq('id', id)
-        .eq('status', 'consumed')
+        .in('status', ['approved', 'consumed'])
+        .select('*')
+        .maybeSingle()
+      if (error) throw error
+      return data ? rowToRecord(data as Record<string, unknown>) : null
+    },
+    async claimEmptyResult(id, result, atMs) {
+      const { data, error } = await db
+        .from('mcp_approval_tokens')
+        .update({
+          result_json: result,
+          result_stored_at: new Date(atMs).toISOString(),
+        })
+        .eq('id', id)
+        .eq('status', 'approved')
+        .is('result_json', null)
         .select('*')
         .maybeSingle()
       if (error) throw error

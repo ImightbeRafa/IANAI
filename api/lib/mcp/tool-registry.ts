@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.9.0'
+export const MCP_REGISTRY_VERSION = '0.9.1'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -268,11 +268,23 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: false,
   },
   {
+    name: 'get_execute_result',
+    group: 'execute_studio',
+    risk: 'read',
+    description:
+      'Poll an async EXECUTE job by jobId (same as approvalRequestId). Returns running|completed|failed. ' +
+      'Use after execute_script_generate / execute_image_generate return status=running so the artifact reaches chat without MCP client timeout.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
     name: 'execute_script_generate',
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate a script via Advance AI (credits). Without approvalRequestId, returns a chat confirmation prompt — show userPrompt, then call confirm_execute after the user says yes.',
+      'Generate a script via Advance AI (credits). Without approvalRequestId, returns a chat confirmation prompt — show userPrompt, then call confirm_execute after the user says yes. ' +
+      'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes script text). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -282,7 +294,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate an image via Advance at max Grok quality 2k/medium (credits). Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL.',
+      'Generate an image via Advance at max Grok quality 2k/medium (credits). Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,

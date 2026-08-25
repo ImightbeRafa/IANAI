@@ -59,6 +59,31 @@ function asBool(value: unknown): boolean | undefined {
 
 const CHANNELS = new Set(['website', 'messages', 'physical'])
 
+/** High-risk medical / drug / absolute-claim language — do not auto-stamp into GUIDE kits. */
+const HIGH_RISK_CLAIM_RE =
+  /\b(glp-?\s*1|semaglutida|ozempic|wegovy|mounjaro|torrente\s+sangu[ií]neo|sin\s+efectos|efectos\s+secundarios|cruelty[-\s]?free|cura\b|milagro|fda\s+approved|aprobado\s+por\s+la\s+fda|pierde\s+\d+\s*kg|garantizado)\b/i
+
+export function isHighRiskMarketingClaim(text: string): boolean {
+  return HIGH_RISK_CLAIM_RE.test(text)
+}
+
+function filterSafePhrases(phrases: string[] | undefined): {
+  safe: string[] | undefined
+  heldForReview: string[]
+} {
+  if (!phrases?.length) return { safe: phrases, heldForReview: [] }
+  const safe: string[] = []
+  const heldForReview: string[] = []
+  for (const phrase of phrases) {
+    if (isHighRiskMarketingClaim(phrase)) heldForReview.push(phrase)
+    else safe.push(phrase)
+  }
+  return {
+    safe: safe.length ? safe : undefined,
+    heldForReview,
+  }
+}
+
 function asChannels(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const items = value
@@ -88,14 +113,34 @@ export function buildFillOnlyBusinessPatch(
   return patch
 }
 
+export type FillOnlyBrandKitMergeResult = {
+  patch: FillOnlyBrandKitPatch
+  reviewRequired: boolean
+  heldForReview: {
+    must_use_phrases?: string[]
+    brand_voice?: string
+  }
+  warnings: string[]
+}
+
 export function buildFillOnlyBrandKitPatch(
   current: Record<string, unknown> | null,
   analysis: SiteAnalysisResult,
   fallbackName: string
 ): FillOnlyBrandKitPatch {
+  return buildFillOnlyBrandKitPatchWithReview(current, analysis, fallbackName).patch
+}
+
+export function buildFillOnlyBrandKitPatchWithReview(
+  current: Record<string, unknown> | null,
+  analysis: SiteAnalysisResult,
+  fallbackName: string
+): FillOnlyBrandKitMergeResult {
   const facts = analysis.facts
   const cur = current || {}
   const patch: FillOnlyBrandKitPatch = {}
+  const heldForReview: FillOnlyBrandKitMergeResult['heldForReview'] = {}
+  const warnings: string[] = []
 
   if (isBlank(cur.name)) patch.name = asString(facts.businessName) || fallbackName
   const logo = asString(facts.logo_url)
@@ -110,12 +155,30 @@ export function buildFillOnlyBrandKitPatch(
   if (font && isBlank(cur.font_primary)) patch.font_primary = font
   const tagline = asString(facts.tagline)
   if (tagline && isBlank(cur.tagline)) patch.tagline = tagline
+
   const voice = asString(facts.brand_voice)
-  if (voice && isBlank(cur.brand_voice)) patch.brand_voice = voice
+  if (voice && isBlank(cur.brand_voice)) {
+    if (isHighRiskMarketingClaim(voice)) {
+      heldForReview.brand_voice = voice
+      warnings.push('brand_voice held for review (high-risk medical/absolute claim language)')
+    } else {
+      patch.brand_voice = voice
+    }
+  }
+
   const tones = asStringArray(facts.tone_keywords)
   if (tones && isBlank(cur.tone_keywords)) patch.tone_keywords = tones
+
   const must = asStringArray(facts.must_use_phrases)
-  if (must && isBlank(cur.must_use_phrases)) patch.must_use_phrases = must
+  if (must && isBlank(cur.must_use_phrases)) {
+    const filtered = filterSafePhrases(must)
+    if (filtered.safe) patch.must_use_phrases = filtered.safe
+    if (filtered.heldForReview.length) {
+      heldForReview.must_use_phrases = filtered.heldForReview
+      warnings.push('must_use_phrases partially held for review (high-risk claims)')
+    }
+  }
+
   const forbid = asStringArray(facts.forbidden_phrases)
   if (forbid && isBlank(cur.forbidden_phrases)) patch.forbidden_phrases = forbid
   const visual = asString(facts.brand_visual)
@@ -125,7 +188,12 @@ export function buildFillOnlyBrandKitPatch(
   const refs = asStringArray(facts.reference_images, 8)
   if (refs && isBlank(cur.reference_images)) patch.reference_images = refs
 
-  return patch
+  return {
+    patch,
+    reviewRequired: Boolean(heldForReview.brand_voice || heldForReview.must_use_phrases?.length),
+    heldForReview,
+    warnings,
+  }
 }
 
 export function sanitizeWorkerError(err: unknown): string {

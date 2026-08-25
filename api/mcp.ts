@@ -4,19 +4,33 @@
  *
  * Auth: Bearer Supabase access token (same as the web app API).
  * Unauthenticated calls get WWW-Authenticate pointing at protected-resource metadata.
+ *
+ * EXECUTE script/image: claim job → return jobId immediately → waitUntil continues
+ * generation so Grok polls get_execute_result instead of MCP -32001 timeout.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { waitUntil } from '@vercel/functions'
 import { isAdminUser, requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { createMcpAdminStore, createMcpSupabaseAdapter, createMcpUrlIntakeStore, createMcpWorkspaceStore, createMcpDeleteStore, createMcpBrandKitStore } from './lib/mcp/supabase-adapter.js'
 import { createMcpApprovalStore } from './lib/mcp/approval-store.js'
 import { createMcpArtifactStore } from './lib/mcp/artifact-store.js'
+import { setMcpExecuteScheduler } from './lib/mcp/execute-job.js'
 import { handleMcpJsonRpc, type McpJsonRpcRequest } from './lib/mcp/protocol.js'
 import { mcpWwwAuthenticateHeader, MCP_RESOURCE_METADATA_URL } from './lib/mcp/www-authenticate.js'
 
 const MAX_BODY_BYTES = 256_000
 const MCP_WWW_AUTHENTICATE = mcpWwwAuthenticateHeader()
+
+// Keep GENERATE work alive after the JSON-RPC response returns (jobId + poll).
+setMcpExecuteScheduler((work) => {
+  waitUntil(
+    work().catch((err) => {
+      console.error('mcp execute waitUntil', err instanceof Error ? err.message : err)
+    })
+  )
+})
 
 function readRawBodySize(req: VercelRequest): number {
   if (typeof req.body === 'string') return Buffer.byteLength(req.body)
@@ -50,6 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       docs: 'https://advanceai.studio',
       oauth_protected_resource: MCP_RESOURCE_METADATA_URL,
       tools: 'POST JSON-RPC initialize | tools/list | tools/call',
+      executeJobs: 'execute_script_generate / execute_image_generate return jobId; poll get_execute_result',
     })
     return
   }

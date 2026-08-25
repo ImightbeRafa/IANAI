@@ -112,6 +112,7 @@ export function buildMcpApprovalRequiredPayload(input: McpApprovalRequiredInput)
       'Show userPrompt to the user as a clear confirmation message. Do NOT paste optionalAdvancePage or any raw URL unless the user explicitly asks for the Advance web fallback. ' +
       'When they say yes/approve/sí/aprobar, call confirm_execute with { approvalRequestId, action: "approve" }, ' +
       'then retry the original tool with the same arguments plus approvalRequestId. ' +
+      'If the retry returns status=running with a jobId, poll get_execute_result until status=completed (do not open a second approval). ' +
       'When they say no/cancel/deny, call confirm_execute with action "deny".',
     nextTool: 'confirm_execute',
     // Optional fallback only — never the primary message

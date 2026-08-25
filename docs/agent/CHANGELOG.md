@@ -1,3 +1,20 @@
+## 2026-08-25 — MCP EXECUTE jobId + poll (0.9.1)
+
+**Area:** mcp
+**Files:** `execute-job.ts`, `execute-tools.ts`, `approval.ts`, `approval-store.ts`, `api/mcp.ts`, `protocol.ts`, `tool-registry.ts`, admin/url P1
+
+- P0: `execute_script_generate` / `execute_image_generate` claim a running job, return `jobId` immediately via `waitUntil`, poll with `get_execute_result` (avoids Grok MCP -32001). Same `approvalRequestId` is idempotent (atomic `claimEmptyResult`).
+- P0: `chargedCredits` is always a number on job handles + completed results; usage audit reads it.
+- P0: `storeResult` works while `approved` (was requiring `consumed` after store-then-consume — results never persisted).
+- P0 SD-01: replay skips **stale running** and **failed** so reclaim can retry after a dead `waitUntil` (under-delivery; credits only on success). Stale TTL `190s` > host `maxDuration` `180s`.
+- P0: `api/mcp.ts` maxDuration 180s aligned with generate runtime.
+- P1: admin get/**update** ticket mask email; strip session query/path UUIDs; breadcrumbs CSS selector only; strip breadcrumb `url`/`href` query.
+- P1: carousel preview quote/userPrompt says 1 slide / 24 credits when `previewFirstSlideOnly`.
+- P1: image edit/enhance omitted aspect → `1:1` (not silent `9:16`).
+- P1: URL intake holds high-risk medical/absolute claims out of `brand_voice` / `must_use_phrases` (review flag).
+
+---
+
 ## 2026-08-25 — MCP brand kits complete (0.9.0)
 
 **Area:** mcp
