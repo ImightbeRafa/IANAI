@@ -235,6 +235,7 @@ export async function mcpExecuteScriptGenerate(options: {
     outputTokens: estimateTokens(text),
     success: true,
     generationId: scriptGenerationId,
+    source: 'mcp',
     metadata: {
       action: 'mcp_execute_script_generate',
       source: 'mcp',
@@ -394,6 +395,7 @@ export async function mcpExecuteImageGenerate(options: {
     success: true,
     costOverrideUsd: generated.estimatedCostUsd,
     generationId: imageGenerationId,
+    source: 'mcp',
     metadata: {
       action: 'mcp_execute_image_generate',
       source: 'mcp',

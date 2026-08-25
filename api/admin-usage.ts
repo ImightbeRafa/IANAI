@@ -6,10 +6,11 @@ import {
   aggregateUsageSummary,
   aggregateUserUsageStats,
   paginateUsageLogs,
+  resolveUsageLogSource,
   type AdminUsageLogRow,
 } from './lib/admin-usage.js'
 
-const LOG_SELECT = 'id, user_id, user_email, feature, model, generation_id, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata'
+const LOG_SELECT = 'id, user_id, user_email, feature, model, generation_id, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata, source'
 
 function queryString(value: string | string[] | undefined): string {
   return typeof value === 'string' ? value : ''
@@ -61,6 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const startIso = startDate.toISOString()
   const endIso = endDate.toISOString()
   const search = queryString(req.query.search).trim()
+  const source = queryString(req.query.source).trim().toLowerCase()
   const offset = Math.max(0, Number(queryString(req.query.offset) || 0) || 0)
   const limit = Math.min(100, Math.max(1, Number(queryString(req.query.limit) || 20) || 20))
   const logsOnly = queryString(req.query.logs_only) === '1'
@@ -69,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (logsOnly) {
       let query = supabase
         .from('api_usage_logs')
-        .select('id, user_email, feature, model, generation_id, total_tokens, estimated_cost_usd, success, created_at, metadata')
+        .select('id, user_email, feature, model, generation_id, total_tokens, estimated_cost_usd, success, created_at, metadata, source')
         .gte('created_at', startIso)
         .lte('created_at', endIso)
         .order('created_at', { ascending: false })
@@ -77,6 +79,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (search) {
         query = query.ilike('user_email', `%${search}%`)
+      }
+      if (source === 'web') {
+        query = query.or('source.eq.web,source.is.null')
+      } else if (source === 'mcp' || source === 'cron') {
+        query = query.or(`source.eq.${source},metadata->>source.eq.${source}`)
       }
 
       const { data, error } = await query
@@ -95,6 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           success: row.success !== false,
           created_at: row.created_at,
           metadata: row.metadata || {},
+          source: resolveUsageLogSource(row),
         })),
         hasMore: logs.length >= limit,
       })
@@ -111,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) return res.status(500).json({ error: 'Failed to fetch usage logs', details: error.message })
 
     const rows = (data || []) as AdminUsageLogRow[]
-    const page = paginateUsageLogs(rows, { search, offset, limit })
+    const page = paginateUsageLogs(rows, { search, offset, limit, source })
 
     return res.status(200).json({
       summary: aggregateUsageSummary(rows),

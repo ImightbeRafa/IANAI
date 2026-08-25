@@ -160,8 +160,10 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       outputTokens: usage.output,
       thinkingTokens: usage.thinking,
       success: true,
+      source: 'cron',
       metadata: {
         action: 'mcp_guide_url_analysis',
+        source: 'cron',
         intakeId: row.id,
         businessId: row.business_id,
         host: new URL(row.source_url).hostname,
@@ -191,8 +193,10 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       model: SITE_ANALYSIS_MODEL,
       success: false,
       errorMessage: message,
+      source: 'cron',
       metadata: {
         action: 'mcp_guide_url_analysis',
+        source: 'cron',
         intakeId: row.id,
         businessId: row.business_id,
         attempt: attempts,
