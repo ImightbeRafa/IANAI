@@ -733,6 +733,16 @@ type CampaignCheckpoint = {
   message: string
 }
 
+function campaignChunkLabel(cp: Pick<CampaignCheckpoint, 'phase' | 'nextIndex' | 'angles'>): string {
+  const kind = cp.phase === 'scripts' ? 'script' : 'image'
+  return `${kind} ${cp.nextIndex + 1}/${cp.angles.length}`
+}
+
+function campaignStatusMessage(cp: Pick<CampaignCheckpoint, 'phase' | 'nextIndex' | 'angles'>): string {
+  const label = campaignChunkLabel(cp)
+  return `Advance está generando ${label}… / Advance is generating ${label}…`
+}
+
 export function isCampaignCheckpoint(value: unknown): value is CampaignCheckpoint {
   if (!value || typeof value !== 'object') return false
   const row = value as Record<string, unknown>
@@ -773,12 +783,12 @@ function campaignRunning(options: {
     posts: [],
     expandedRefs: [],
     retryAfterMs: 2_000,
-    statusMessage: buildExecuteStatusMessage('execute_campaign_pack', 'running'),
+    statusMessage: campaignStatusMessage({ phase: 'scripts', nextIndex: 0, angles: options.angles }),
     message: 'Campaign pack is durable and resumes one generated artifact per poll.',
   }
 }
 
-async function runCampaignChunk(options: {
+export async function runCampaignChunk(options: {
   db: McpDbClient
   approvalStore: McpApprovalStore
   artifactStore: McpArtifactStore
@@ -893,35 +903,52 @@ async function runCampaignChunk(options: {
           styleDna: findStyleDna(runtime.styleDnas || [], styleDnaId),
           note: 'Durable campaign completed. Each artifact used a stable UUID; credits were charged once after its successful save.',
         }, toolName)
-        await finalizeIfSucceeded({
-          approvalStore: options.approvalStore,
+        const completed = await options.approvalStore.compareAndSwapRunningResult?.(
           approvalRequestId,
-          userId: options.user.id,
-          toolName,
-          input: options.args,
-          result: payload,
-          succeeded: cp.scripts.length + posts.length,
-        })
+          cp.startedAtMs,
+          payload,
+          Date.now()
+        )
+        if (completed) {
+          const consumed = await consumeMcpApprovalRequest(options.approvalStore, {
+            approvalRequestId,
+            userId: options.user.id,
+            toolName,
+            input: options.args,
+          })
+          if (!consumed.ok) throw new Error(consumed.reason)
+        }
         return
       }
     }
-    await storeMcpApprovalResult(options.approvalStore, { approvalRequestId, result: next })
+    next.statusMessage = campaignStatusMessage(next)
+    next.message = `Campaign checkpoint saved; next chunk is ${campaignChunkLabel(next)}. `
+    await options.approvalStore.compareAndSwapRunningResult?.(
+      approvalRequestId,
+      cp.startedAtMs,
+      next,
+      next.startedAtMs
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Campaign pack failed'
-    await storeMcpApprovalResult(options.approvalStore, {
+    const failed = buildFailedJobResult({
       approvalRequestId,
-      result: buildFailedJobResult({
-        approvalRequestId,
-        toolName,
-        error: message,
-        quotedCreditCost: options.checkpoint.quotedCreditCost,
-      }),
+      toolName,
+      error: message,
+      quotedCreditCost: options.checkpoint.quotedCreditCost,
     })
+    failed.statusMessage = `${buildExecuteStatusMessage(toolName, 'failed')} ${campaignChunkLabel(options.checkpoint)}: ${message}`
+    await options.approvalStore.compareAndSwapRunningResult?.(
+      approvalRequestId,
+      options.checkpoint.startedAtMs,
+      failed,
+      Date.now()
+    )
     console.error('mcp execute_campaign_pack chunk', message)
   }
 }
 
-/** Poll hook: atomically leases and schedules exactly one durable campaign artifact. */
+/** Poll hook: atomically leases and runs exactly one durable campaign artifact. */
 export async function resumeMcpCampaignPack(options: {
   db: McpDbClient
   approvalStore: McpApprovalStore
@@ -929,6 +956,7 @@ export async function resumeMcpCampaignPack(options: {
   user: McpAuthUser
   jobId: string
   appOrigin?: string
+  runChunk?: typeof runCampaignChunk
 }): Promise<void> {
   const row = await options.approvalStore.findById(options.jobId)
   if (!row || row.userId !== options.user.id || !isCampaignCheckpoint(row.resultJson)) return
@@ -946,7 +974,11 @@ export async function resumeMcpCampaignPack(options: {
   const args = row.inputJson && typeof row.inputJson === 'object' && !Array.isArray(row.inputJson)
     ? row.inputJson as Record<string, unknown>
     : {}
-  scheduleMcpExecuteWork(() => runCampaignChunk({ ...options, args, checkpoint: working }))
+  // Run inside the current request. Scheduling another waitUntil from a poll/continuation
+  // can be dropped by the host before it starts, leaving only a stale `working` lease.
+  // One artifact is intentionally bounded to the MCP request duration and every exit
+  // below CAS-persists either the next checkpoint or the real failure.
+  await (options.runChunk || runCampaignChunk)({ ...options, args, checkpoint: working })
 }
 
 export async function mcpExecuteCampaignPack(options: {
@@ -987,7 +1019,12 @@ export async function mcpExecuteCampaignPack(options: {
   const checkpoint = campaignRunning({ approvalRequestId, quote: quote.totalCredits, angles })
   await storeMcpApprovalResult(options.approvalStore, { approvalRequestId, result: checkpoint })
   await resumeMcpCampaignPack({ ...options, jobId: approvalRequestId })
-  return checkpoint as unknown as Record<string, unknown>
+  const started = await options.approvalStore.findById(approvalRequestId)
+  return (asJobHandleFromStored(
+    approvalRequestId,
+    started?.resultJson,
+    'execute_campaign_pack'
+  ) || checkpoint) as Record<string, unknown>
 }
 
 export type { StyleDna } from '../bulk/types.js'
