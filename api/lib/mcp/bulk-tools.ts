@@ -43,7 +43,7 @@ import {
   withStatusMessage,
 } from './execute-job.js'
 import { assertMcpBulkCount } from './limits.js'
-import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
+import { assertProductReferenceGate, parseReferenceMode, resolveGrokAspectRatio } from './reference-gate.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 
 function resolveOfferId(
@@ -237,6 +237,39 @@ function selectedIds(args: Record<string, unknown>): string[] | undefined {
   return args.angleIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
 }
 
+/** Resolve owned product/reference image ids to HTTPS URLs; fail before approval on foreign ids. */
+async function resolveConfirmedProductRefUrls(options: {
+  artifactStore: McpArtifactStore
+  userId: string
+  brandId: string
+  offerId: string
+  productImageId?: string
+  referenceImageIds: string[]
+}): Promise<string[]> {
+  const ids = [...new Set([
+    ...(options.productImageId ? [options.productImageId] : []),
+    ...options.referenceImageIds,
+  ])]
+  if (!ids.length) return []
+  const urls: string[] = []
+  for (const id of ids) {
+    const owned = await options.artifactStore.getOwnedProductImage({
+      userId: options.userId,
+      brandId: options.brandId,
+      offerId: options.offerId,
+      imageId: id,
+    })
+    if (!owned?.imageUrl) {
+      throw new Error(
+        `Product image not found or not owned for this brand/offer: ${id}. ` +
+          'Call list_assets(kind=product) and pass ids the user confirmed.'
+      )
+    }
+    urls.push(owned.imageUrl)
+  }
+  return urls
+}
+
 async function hydrateBulkApprovalArgs(options: {
   approvalStore: McpApprovalStore
   userId: string
@@ -303,6 +336,8 @@ async function buildRuntime(options: {
   offerId: string
   args: Record<string, unknown>
   packId?: string
+  productRefUrls?: string[]
+  aspectRatioFallback?: boolean
 }): Promise<BulkRunContext> {
   const ctx = await mcpGetBrandContext(options.db, options.user, options.brandId)
   const style = await listStyleDnasForBrand(options.user.id, options.brandId)
@@ -320,6 +355,8 @@ async function buildRuntime(options: {
     guidePrompt: typeof options.args.guidePrompt === 'string' ? options.args.guidePrompt.trim() : undefined,
     scene: typeof options.args.scene === 'string' ? options.args.scene.trim() : undefined,
     aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : undefined,
+    aspectRatioFallback: options.aspectRatioFallback === true,
+    productRefUrls: options.productRefUrls,
     recentSummaries: await recentSummariesFor(options.user.id, options.offerId),
     styleDnas: style.styleDnas,
   }
@@ -537,17 +574,32 @@ export async function mcpExecuteBulkPosts(options: {
   const confirmedRefIds = Array.isArray(args.referenceImageIds)
     ? args.referenceImageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     : []
+  const productImageId = typeof args.productImageId === 'string' ? args.productImageId : undefined
   assertProductReferenceGate({
     toolName: 'execute_bulk_posts',
     productRefCount: existingRefs.length,
     referenceMode,
     referenceImageIds: confirmedRefIds,
-    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
+    productImageId,
+    allowImplicitOfferRefs: true,
+  })
+  const aspectRatio = typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16'
+  const aspectRatioFallback = args.aspectRatioFallback === true
+  resolveGrokAspectRatio(aspectRatio, { allowFallback: aspectRatioFallback })
+  const confirmedRefUrls = await resolveConfirmedProductRefUrls({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId,
+    offerId,
+    productImageId,
+    referenceImageIds: confirmedRefIds,
   })
   const quote = quoteBulkPosts({
     count,
     imageModel,
-    expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(existingRefs.length),
+    expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(
+      confirmedRefUrls.length || existingRefs.length
+    ),
   })
   const boundInput = {
     brandId,
@@ -557,13 +609,15 @@ export async function mcpExecuteBulkPosts(options: {
     styleDnaId,
     language: languageOf(args.language),
     angleIds: selectedIds(args),
-    aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16',
+    aspectRatio,
+    aspectRatioFallback,
     scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
     referenceMode,
     referenceImageIds: confirmedRefIds,
-    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
+    productImageId,
+    productRefUrls: confirmedRefUrls.length ? confirmedRefUrls : existingRefs,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string'
     ? args.approvalRequestId
@@ -615,6 +669,8 @@ export async function mcpExecuteBulkPosts(options: {
         offerId,
         args,
         packId: approvalRequestId,
+        productRefUrls: boundInput.productRefUrls,
+        aspectRatioFallback: boundInput.aspectRatioFallback,
       })
       runtime.appOrigin = options.appOrigin
       const result = await runBulkPosts({
@@ -836,6 +892,10 @@ export async function runCampaignChunk(options: {
       offerId,
       args: { ...options.args, sessionId: options.checkpoint.sessionId },
       packId: approvalRequestId,
+      productRefUrls: Array.isArray(options.args.productRefUrls)
+        ? options.args.productRefUrls.filter((u): u is string => typeof u === 'string' && u.length > 0)
+        : undefined,
+      aspectRatioFallback: options.args.aspectRatioFallback === true,
     })
     runtime.appOrigin = options.appOrigin
     const cp = options.checkpoint
@@ -1068,26 +1128,48 @@ export async function mcpExecuteCampaignPack(options: {
   const confirmedRefIds = Array.isArray(args.referenceImageIds)
     ? args.referenceImageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     : []
+  const productImageId = typeof args.productImageId === 'string' ? args.productImageId : undefined
   assertProductReferenceGate({
     toolName: 'execute_campaign_pack',
     productRefCount: existingRefs.length,
     referenceMode,
     referenceImageIds: confirmedRefIds,
-    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
+    productImageId,
+    allowImplicitOfferRefs: true,
   })
-  const quote = quoteCampaignPack({ scriptCount: count, imageCount: count, imageModel, expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(existingRefs.length) })
+  const aspectRatio = typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16'
+  const aspectRatioFallback = args.aspectRatioFallback === true
+  resolveGrokAspectRatio(aspectRatio, { allowFallback: aspectRatioFallback })
+  const confirmedRefUrls = await resolveConfirmedProductRefUrls({
+    artifactStore: options.artifactStore,
+    userId: options.user.id,
+    brandId,
+    offerId,
+    productImageId,
+    referenceImageIds: confirmedRefIds,
+  })
+  const quote = quoteCampaignPack({
+    scriptCount: count,
+    imageCount: count,
+    imageModel,
+    expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(
+      confirmedRefUrls.length || existingRefs.length
+    ),
+  })
   const boundInput = {
     brandId, offerId, count, imageModel,
     styleDnaId: typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined,
     language: languageOf(args.language),
     angleIds: selectedIds(args),
-    aspectRatio: typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16',
+    aspectRatio,
+    aspectRatioFallback,
     scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
     referenceMode,
     referenceImageIds: confirmedRefIds,
-    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
+    productImageId,
+    productRefUrls: confirmedRefUrls.length ? confirmedRefUrls : existingRefs,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
   const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language })

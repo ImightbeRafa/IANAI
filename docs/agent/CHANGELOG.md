@@ -1,3 +1,18 @@
+## 2026-08-25 — MCP prod regression fix (0.9.5)
+
+**Area:** mcp
+**Files:** `supabase-adapter.ts`, `protocol.ts`, `bulk-tools.ts`, `run-bulk.ts`, `expand-product-refs.ts`, `grok-image-generate.ts`, `execute-job.ts`, `artifact-store.ts`, `reference-gate.ts`, `tool-registry.ts`, tests
+
+- **Root cause (#31):** `listOffersForBrand` selected nonexistent `products.do_not_claim` → PostgREST error → `list_brands` / `list_offers` / `get_brand_context` / GUIDE / EXECUTE all returned bare `Tool failed`.
+- Removed invalid column; claims stay on kit `forbidden_phrases`.
+- Structured MCP tool error JSON (`status/error/toolName`) so hosts surface a real body.
+- Bulk/campaign: schema refs + `allowImplicitOfferRefs`; resolve owned ids before approval; MCP runs do not silently union kit logo / Style DNA URLs.
+- `expandProductRefs` opts into 4:5→3:4 (internal); user EXECUTE stays fail-closed unless `aspectRatioFallback`.
+- Failed poll preserves partial `chargedCredits`; `listOwnedScripts` authorizes session before reading rows.
+- Registry **0.9.5**.
+
+---
+
 ## 2026-08-25 — MCP chat-shell fat PR (0.9.4)
 
 **Area:** mcp + guiones + admin

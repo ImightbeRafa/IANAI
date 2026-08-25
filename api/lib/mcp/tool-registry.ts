@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.9.4'
+export const MCP_REGISTRY_VERSION = '0.9.5'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string

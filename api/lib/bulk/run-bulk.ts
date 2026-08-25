@@ -39,6 +39,13 @@ export type BulkRunContext = {
   guidePrompt?: string
   scene?: string
   aspectRatio?: string
+  /** Opt-in closest-ratio map for Grok (e.g. 4:5→3:4). Default false. */
+  aspectRatioFallback?: boolean
+  /**
+   * Confirmed product/reference image URLs from MCP (resolved owned ids).
+   * When set, MCP runs prefer these and do not silently union kit logo / Style DNA urls.
+   */
+  productRefUrls?: string[]
   recentSummaries?: string[]
   styleDnas?: StyleDna[]
 }
@@ -216,12 +223,17 @@ export async function runBulkPosts(options: {
     packId,
     imageModel,
     apiKey: xaiKey(),
+    existingUrls: runtime.productRefUrls?.length ? runtime.productRefUrls : undefined,
   })
-  const refs = [
-    ...expandedPack.refs,
-    ...(dna?.referenceUrls || []),
-    runtime.ctx.brandKit?.logoUrl || '',
-  ].filter(Boolean)
+  // MCP: confirmed (or offer) product refs only — no silent kit-logo / Style DNA URL union.
+  // Web: keep legacy union for chat-shell bulk UX.
+  const refs = runtime.source === 'mcp'
+    ? expandedPack.refs.filter(Boolean)
+    : [
+        ...expandedPack.refs,
+        ...(dna?.referenceUrls || []),
+        runtime.ctx.brandKit?.logoUrl || '',
+      ].filter(Boolean)
 
   const items: BulkPostItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
@@ -260,6 +272,7 @@ export async function runBulkPosts(options: {
         apiKey: xaiKey(),
         prompt,
         aspectRatio: runtime.aspectRatio || '9:16',
+        aspectRatioFallback: runtime.aspectRatioFallback === true,
         referenceImageUrls: rotated.slice(0, 3),
       })
       const saved = await runtime.artifactStore.saveImageArtifact({

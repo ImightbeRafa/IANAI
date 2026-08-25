@@ -257,17 +257,20 @@ export function asJobHandleFromStored(
     }
   }
   if (status === 'failed') {
+    // Preserve partial charges from multi-item jobs (bulk/campaign/carousel).
+    const charged = readChargedCredits(stored)
+    const quoted =
+      typeof stored.quotedCreditCost === 'number' ? stored.quotedCreditCost : null
     const base = {
       ...stored,
       status: 'failed' as const,
       jobId: approvalRequestId,
       approvalRequestId,
       toolName,
-      chargedCredits: 0,
+      chargedCredits: charged,
       usage: {
-        quotedCredits:
-          typeof stored.quotedCreditCost === 'number' ? stored.quotedCreditCost : null,
-        chargedCredits: 0,
+        quotedCredits: quoted,
+        chargedCredits: charged,
       },
       error: typeof stored.error === 'string' ? stored.error : 'Execute failed',
       message:

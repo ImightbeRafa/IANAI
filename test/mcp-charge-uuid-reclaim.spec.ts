@@ -55,6 +55,19 @@ describe('charge-failure reclaim + poll', () => {
     expect(formatted.artifactsSaved).toBe(true)
   })
 
+  it('failed poll keeps nonzero partial chargedCredits', () => {
+    const formatted = asJobHandleFromStored('appr-partial', {
+      status: 'failed',
+      toolName: 'execute_bulk_posts',
+      chargedCredits: 24,
+      quotedCreditCost: 72,
+      items: [{ imageUrl: 'https://cdn.example/a.jpg' }],
+      error: 'later item failed',
+    }, 'execute_bulk_posts') as Record<string, unknown>
+    expect(formatted.chargedCredits).toBe(24)
+    expect((formatted.usage as { chargedCredits: number }).chargedCredits).toBe(24)
+  })
+
   it('CAS reclaim does not overwrite a completed result with running', async () => {
     const store = createMemoryMcpApprovalStore()
     const issued = await issueMcpApprovalRequest(store, {

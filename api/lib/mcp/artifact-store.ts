@@ -513,6 +513,36 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
 
     async listOwnedScripts(options) {
       const limit = Math.min(Math.max(options.limit ?? 25, 1), 50)
+
+      // Authorize session ownership before reading any script rows.
+      if (options.sessionId) {
+        const { data: session, error: sessionErr } = await db
+          .from('chat_sessions')
+          .select('id')
+          .eq('id', options.sessionId)
+          .eq('business_id', options.brandId)
+          .eq('user_id', options.userId)
+          .maybeSingle()
+        if (sessionErr) throw sessionErr
+        if (!session) return []
+
+        const { data, error } = await db
+          .from('scripts')
+          .select('id, content, title, product_id, session_id, created_at')
+          .eq('session_id', options.sessionId)
+          .order('created_at', { ascending: false })
+          .limit(limit)
+        if (error) throw error
+        return (data || []).map((row) => ({
+          id: row.id as string,
+          content: String(row.content || ''),
+          title: (row.title as string | null) ?? null,
+          offerId: (row.product_id as string | null) ?? null,
+          sessionId: (row.session_id as string | null) ?? null,
+          createdAt: (row.created_at as string | null) ?? null,
+        }))
+      }
+
       let productQuery = db
         .from('products')
         .select('id')
@@ -522,6 +552,7 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
       const { data: products, error: productErr } = await productQuery
       if (productErr) throw productErr
       const offerIds = (products || []).map((row) => row.id as string)
+      if (!offerIds.length) return []
 
       let query = db
         .from('scripts')
@@ -529,33 +560,16 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         .order('created_at', { ascending: false })
         .limit(limit)
 
-      if (options.sessionId) {
-        query = query.eq('session_id', options.sessionId)
-      } else if (options.offerId) {
-        if (!offerIds.length) return []
+      if (options.offerId) {
         query = query.eq('product_id', options.offerId)
-      } else if (offerIds.length) {
-        query = query.in('product_id', offerIds)
       } else {
-        return []
+        query = query.in('product_id', offerIds)
       }
 
       const { data, error } = await query
       if (error) throw error
 
-      const rows = data || []
-      if (options.sessionId) {
-        const { data: session } = await db
-          .from('chat_sessions')
-          .select('id')
-          .eq('id', options.sessionId)
-          .eq('business_id', options.brandId)
-          .eq('user_id', options.userId)
-          .maybeSingle()
-        if (!session) return []
-      }
-
-      return rows.map((row) => ({
+      return (data || []).map((row) => ({
         id: row.id as string,
         content: String(row.content || ''),
         title: (row.title as string | null) ?? null,

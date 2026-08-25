@@ -49,6 +49,10 @@ function mapBrandKitRow(data: Record<string, unknown>): McpBrandKitContext {
 const BRAND_KIT_SELECT =
   'id, name, business_id, is_default, is_active, is_primary_for_business, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, must_use_phrases, forbidden_phrases, target_audience, visual_style_notes, font_primary, font_secondary, industry, reference_images, style_dnas, created_at'
 
+/** Columns selected for MCP offer facts — must match public.products on AIIAN. */
+export const MCP_PRODUCTS_OFFER_SELECT =
+  'id, name, type, price_range, re_price, product_description, differentiation, main_problem, result, utility, technical_specs'
+
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
   if (!db) return null
@@ -146,11 +150,12 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
 
     async listOffersForBrand(userId: string, brandId: string) {
       if (!userId || !brandId) return []
+      // Only select columns that exist on public.products (AIIAN).
+      // #31 regression: selecting `do_not_claim` (no such column) made PostgREST
+      // fail every list_brands / list_offers / get_brand_context / GUIDE / EXECUTE path.
       const { data, error } = await db
         .from('products')
-        .select(
-          'id, name, type, price_range, re_price, product_description, differentiation, main_problem, result, utility, technical_specs, do_not_claim'
-        )
+        .select(MCP_PRODUCTS_OFFER_SELECT)
         .eq('business_id', brandId)
         .eq('owner_id', userId)
         .order('created_at', { ascending: false })
@@ -181,9 +186,8 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
           result: (row.result as string | null) ?? null,
           utility: (row.utility as string | null) ?? null,
           technicalSpecs: (row.technical_specs as string | null) ?? null,
-          doNotClaim: Array.isArray(row.do_not_claim)
-            ? (row.do_not_claim as string[])
-            : undefined,
+          // Claims stay on brand_kit.forbidden_phrases — there is no products.do_not_claim column.
+          doNotClaim: undefined,
         }
       })
     },

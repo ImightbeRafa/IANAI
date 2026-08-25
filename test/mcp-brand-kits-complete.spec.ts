@@ -209,8 +209,8 @@ describe('mcp caps + audit + registry 0.9', () => {
     expect(() => assertMcpCarouselSlideCount(6, 10)).toThrow(/max is 5/i)
   })
 
-  it('keeps brand kit tools exposed at 0.9.4', () => {
-    expect(MCP_SERVER_INFO.version).toBe('0.9.4')
+  it('keeps brand kit tools exposed at 0.9.5', () => {
+    expect(MCP_SERVER_INFO.version).toBe('0.9.5')
     const names = listEnabledMcpTools().map((t) => t.name)
     expect(names).toContain('list_brand_kits')
     expect(names).toContain('create_brand_kit')
