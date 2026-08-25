@@ -44,7 +44,7 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.7\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.8\./)
     expect(listEnabledMcpTools().some((t) => t.name.startsWith('admin_'))).toBe(false)
     expect(listEnabledMcpTools({ isAdmin: true }).map((t) => t.name)).toEqual(
       expect.arrayContaining([
@@ -59,6 +59,8 @@ describe('mcp tool registry', () => {
     const names = enabled.map((t) => t.name).sort()
     expect(names).toContain('list_brands')
     expect(names).toContain('guide_script')
+    expect(names).toContain('guide_bulk_angles')
+    expect(names).toContain('execute_bulk_scripts')
     expect(names).toContain('execute_image_generate')
     expect(names).not.toContain('execute_carousel_generate')
     expect(names).not.toContain('delete_brand')

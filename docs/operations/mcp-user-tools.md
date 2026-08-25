@@ -31,11 +31,15 @@ Enabled tools now:
 
 **Reads:** `list_brands`, `get_brand_context`, `list_offers`
 
-**GUIDE (no Advance credits):** `guide_script`, `guide_image`, `guide_brand_pack`
+**GUIDE (no Advance credits):** `guide_script`, `guide_image`, `guide_brand_pack`, `guide_bulk_angles`
 
 **Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`
 
-**EXECUTE (credits + web approval):** `execute_script_generate`, `execute_image_generate` — first call returns `/mcp/approve/:id`; after approve + retry, Advance generates, charges credits once, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging.
+**EXECUTE (credits + web approval):** `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack` — first call returns `/mcp/approve/:id`; after approve + retry, Advance generates, charges credits per succeeded item, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging.
+
+**Style DNA:** `list_style_dnas`, `set_style_dna` — JSON on `brand_kits.style_dnas` (`organic` | `ads`). Bulk posts accept `styleDnaId`.
+
+ChatShell shares the same libs via `POST /api/bulk-angles`, `/api/bulk-scripts`, `/api/bulk-posts`, `/api/bulk-campaign`.
 
 ## Operator step (required for Grok OAuth)
 In **Supabase Dashboard → Authentication → OAuth Server** (AIIAN `lstzfxsdmggkoaxfawny`):

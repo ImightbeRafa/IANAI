@@ -13,6 +13,7 @@ import type {
 import type { McpUrlIntakeStore } from './url-intake.js'
 import type { McpWorkspaceStore } from './workspace-ops.js'
 import type { McpAdminStore, McpAdminTicket, McpAdminUsageRow } from './admin-tools.js'
+import { parseStyleDnas } from '../bulk/style-dna.js'
 
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
@@ -78,15 +79,29 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
       brandId: string
     ): Promise<McpBrandKitContext | null> {
       if (!userId || !brandId) return null
-      const { data, error } = await db
+      const kitSelect = 'id, name, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, target_audience, visual_style_notes, font_primary, reference_images, style_dnas'
+      let { data, error } = await db
         .from('brand_kits')
-        .select('id, name, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, target_audience, visual_style_notes, font_primary, reference_images')
+        .select(kitSelect)
         .eq('business_id', brandId)
         .eq('user_id', userId)
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle()
+      if (error && /style_dnas/i.test(error.message || '')) {
+        const retry = await db
+          .from('brand_kits')
+          .select('id, name, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, target_audience, visual_style_notes, font_primary, reference_images')
+          .eq('business_id', brandId)
+          .eq('user_id', userId)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle()
+        data = retry.data
+        error = retry.error
+      }
       if (error) throw error
       if (!data) return null
       return {
@@ -103,6 +118,7 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         visualStyleNotes: (data.visual_style_notes as string | null) ?? null,
         fontPrimary: (data.font_primary as string | null) ?? null,
         referenceImages: Array.isArray(data.reference_images) ? data.reference_images as string[] : [],
+        styleDnas: parseStyleDnas((data as { style_dnas?: unknown }).style_dnas),
       }
     },
 

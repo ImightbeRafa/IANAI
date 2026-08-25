@@ -13,6 +13,9 @@ describe('parseShellCommand', () => {
     expect(parseShellCommand('/post')?.id).toBe('post')
     expect(parseShellCommand('/producto')?.id).toBe('product')
     expect(parseShellCommand('/descripciones')?.href).toBe('/descriptions')
+    expect(parseShellCommand('/bulk 12')?.id).toBe('bulk')
+    expect(parseShellCommand('/pack')?.id).toBe('bulk')
+    expect(parseShellCommand('/lote')?.id).toBe('bulk')
   })
 
   it('does not treat settings or admin as slash commands', () => {
@@ -32,12 +35,14 @@ describe('slash command palette', () => {
   it('lists all commands for a bare slash', () => {
     expect(slashPaletteQuery('/')).toBe('')
     expect(matchSlashCommands('/').map((c) => c.id)).toEqual([
-      'script', 'post', 'product', 'logo', 'brand', 'descriptions', 'replies',
+      'script', 'post', 'product', 'logo', 'brand', 'bulk', 'descriptions', 'replies',
     ])
   })
 
   it('filters by alias prefix and hides once args start', () => {
     expect(matchSlashCommands('/gu').map((c) => c.id)).toEqual(['script'])
+    expect(matchSlashCommands('/bu').map((c) => c.id)).toEqual(['bulk'])
+    expect(parseShellCommand('/bulk 12')?.rest).toBe('12')
     expect(matchSlashCommands('/post').map((c) => c.insert)).toEqual(['/post '])
     expect(matchSlashCommands('/guion 2 de venta')).toEqual([])
     expect(matchSlashCommands('hola')).toEqual([])

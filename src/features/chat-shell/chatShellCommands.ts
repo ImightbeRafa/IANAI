@@ -4,6 +4,7 @@ export type ShellCommandId =
   | 'product'
   | 'logo'
   | 'brand'
+  | 'bulk'
   | 'descriptions'
   | 'replies'
 
@@ -57,6 +58,13 @@ export const SHELL_COMMANDS: ShellCommandOption[] = [
     insert: '/marca ',
     label: { es: 'Marca', en: 'Brand' },
     hint: { es: 'Abrir el perfil de marca', en: 'Open the brand profile' },
+  },
+  {
+    id: 'bulk',
+    aliases: ['bulk', 'pack', 'lote', 'paquete'],
+    insert: '/bulk ',
+    label: { es: 'Bulk / Pack', en: 'Bulk / Pack' },
+    hint: { es: 'Tablero de ángulos y pack diverso', en: 'Angle board and diverse pack' },
   },
   {
     id: 'descriptions',

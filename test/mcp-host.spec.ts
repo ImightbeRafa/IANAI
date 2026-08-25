@@ -164,6 +164,10 @@ describe('mcp protocol', () => {
     expect(tools).toContain('guide_brand_pack')
     expect(tools).toContain('execute_script_generate')
     expect(tools).toContain('execute_image_generate')
+    expect(tools).toContain('guide_bulk_angles')
+    expect(tools).toContain('execute_bulk_scripts')
+    expect(tools).toContain('execute_bulk_posts')
+    expect(tools).toContain('execute_campaign_pack')
     expect(tools).not.toContain('execute_carousel_generate')
     expect(tools).not.toContain('delete_brand')
 

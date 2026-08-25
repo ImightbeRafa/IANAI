@@ -24,19 +24,38 @@ import {
   mcpWorkspaceImportAsset,
   mcpWorkspaceIngestFile,
   mcpWorkspaceNoteGeneratedOutside,
+  mcpWorkspaceSaveArtifact,
   type McpWorkspaceStore,
 } from './workspace-ops.js'
 import {
+  mcpExecuteCarouselGenerate,
+  mcpExecuteImageEdit,
+  mcpExecuteImageEnhance,
   mcpExecuteImageGenerate,
   mcpExecuteScriptGenerate,
 } from './execute-tools.js'
+import {
+  mcpExecuteBulkPosts,
+  mcpExecuteBulkScripts,
+  mcpExecuteCampaignPack,
+  mcpGuideBulkAngles,
+  mcpListStyleDnas,
+  mcpSetStyleDna,
+} from './bulk-tools.js'
 import type { McpApprovalStore } from './approval.js'
 import type { McpArtifactStore } from './artifact-store.js'
+import {
+  mcpArchiveBrand,
+  mcpDeleteAsset,
+  mcpDeleteBrand,
+  mcpDeleteOffer,
+  type McpDeleteStore,
+} from './delete-tools.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.7.0',
+  version: '0.8.1',
 }
 
 export type McpJsonRpcRequest = {
@@ -121,6 +140,53 @@ function toolInputSchema(name: string): Record<string, unknown> {
           language: { type: 'string', enum: ['es', 'en'] },
           sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'guide_bulk_angles':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          count: { type: 'number' },
+          language: { type: 'string', enum: ['es', 'en'] },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'list_style_dnas':
+      return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'set_style_dna':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          id: { type: 'string' },
+          name: { type: 'string' },
+          kind: { type: 'string', enum: ['organic', 'ads'] },
+          referenceUrls: { type: 'array', items: { type: 'string' } },
+          notes: { type: 'string' },
+        },
+        required: ['brandId', 'name'],
+        additionalProperties: false,
+      }
+    case 'execute_bulk_scripts':
+    case 'execute_bulk_posts':
+    case 'execute_campaign_pack':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          count: { type: 'number' },
+          language: { type: 'string', enum: ['es', 'en'] },
+          angleIds: { type: 'array', items: { type: 'string' } },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string' },
+          imageModel: { type: 'string' },
+          styleDnaId: { type: 'string' },
         },
         required: ['brandId'],
         additionalProperties: false,
@@ -227,6 +293,7 @@ export async function handleMcpJsonRpc(options: {
   approvalStore?: McpApprovalStore | null
   artifactStore?: McpArtifactStore | null
   adminStore?: McpAdminStore | null
+  deleteStore?: McpDeleteStore | null
   isAdmin?: boolean
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
@@ -308,6 +375,7 @@ async function dispatchEnabledTool(options: {
   approvalStore?: McpApprovalStore | null
   artifactStore?: McpArtifactStore | null
   adminStore?: McpAdminStore | null
+  deleteStore?: McpDeleteStore | null
   isAdmin?: boolean
   appOrigin?: string
 }): Promise<unknown> {
@@ -412,6 +480,142 @@ async function dispatchEnabledTool(options: {
         db: options.db,
         approvalStore: options.approvalStore,
         artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'guide_bulk_angles':
+      return mcpGuideBulkAngles(options.db, options.user, options.args)
+    case 'list_style_dnas':
+      return mcpListStyleDnas(options.db, options.user, brandId)
+    case 'set_style_dna':
+      return mcpSetStyleDna(options.db, options.user, options.args)
+    case 'execute_bulk_scripts': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteBulkScripts({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_bulk_posts': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteBulkPosts({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_campaign_pack': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteCampaignPack({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_image_edit': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteImageEdit({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_image_enhance': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteImageEnhance({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'execute_carousel_generate': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpExecuteCarouselGenerate({
+        db: options.db,
+        approvalStore: options.approvalStore,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'workspace_save_artifact': {
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      return mcpWorkspaceSaveArtifact({
+        db: options.db,
+        artifactStore: options.artifactStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'archive_brand': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpArchiveBrand({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'delete_offer': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpDeleteOffer({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'delete_brand': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpDeleteBrand({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
+    case 'delete_asset': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      if (!options.deleteStore) throw new Error('Delete store not configured')
+      return mcpDeleteAsset({
+        db: options.db,
+        deleteStore: options.deleteStore,
+        approvalStore: options.approvalStore,
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,

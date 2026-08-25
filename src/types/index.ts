@@ -882,6 +882,13 @@ export interface BrandKit {
   forbidden_phrases: string[]
   visual_style_notes: string | null
   reference_images: string[]
+  style_dnas?: Array<{
+    id: string
+    name: string
+    kind: 'organic' | 'ads'
+    referenceUrls: string[]
+    notes: string
+  }>
   is_active: boolean
   is_default: boolean
   client_id: string | null
