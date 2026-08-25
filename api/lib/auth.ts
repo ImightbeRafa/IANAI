@@ -274,7 +274,13 @@ export async function incrementUsage(
   action: 'script' | 'image' | 'description' | 'enhance' | 'reply',
   options?: { generationId?: string; imageModel?: string | null; units?: number }
 ): Promise<{ creditsError?: string; creditsCharged?: number } | void> {
-  if (!supabaseAdmin) return
+  if (!supabaseAdmin) {
+    if (isCreditsV1Enabled()) {
+      console.error('Increment usage: Supabase not configured — denying credit charge')
+      return { creditsError: 'not_configured', creditsCharged: 0 }
+    }
+    return
+  }
 
   if (isCreditsV1Enabled()) {
     try {
@@ -295,7 +301,7 @@ export async function incrementUsage(
       return { creditsCharged: result.credits }
     } catch (err) {
       console.error('Credit consume error:', err)
-      return { creditsError: err instanceof Error ? err.message : 'credit_error' }
+      return { creditsError: err instanceof Error ? err.message : 'credit_error', creditsCharged: 0 }
     }
   }
 

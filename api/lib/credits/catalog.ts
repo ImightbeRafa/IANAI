@@ -129,8 +129,7 @@ export const PLAN_CATALOG: Record<PlanId, PlanCatalogEntry> = {
     productsPerKitMax: 100,
     publicUpgrade: true,
     hidden: false,
-    // TODO(human): paste TiloPay Business $149/mo link
-    paymentLink: null,
+    paymentLink: 'https://tp.cr/l/TmpreE9BPT18MQ==',
     billing: 'monthly',
   },
   meta_advanze: {
@@ -170,7 +169,7 @@ export const CREDIT_PACK = {
   priceUsd: 25,
   credits: 500,
   ttlMonths: 12,
-  // TODO(human): paste TiloPay $25 / 500 créditos one-time link
+  /** One-time via TiloPay processPayment API — no static link. */
   paymentLink: null as string | null,
   /** Legacy boost link — stop selling; convert leftover bonus_images on migrate. */
   legacyBoostLink: 'https://tp.cr/l/MTg3NTc5',

@@ -1,13 +1,24 @@
 /**
  * MCP EXECUTE — script + image generation behind web approval, auto-saved to library.
+ *
+ * Charge order: check limit → generate → save → incrementUsage (fail closed)
+ * → storeMcpApprovalResult → consumeMcpApprovalRequest.
+ * If generate fails, the approval stays approved and reusable.
  */
 
-import { checkUsageLimit, incrementUsage, deductBonusImage } from '../auth.js'
+import {
+  checkUsageLimit,
+  incrementUsage,
+  deductBonusImage,
+  quoteLegacyActionCredits,
+} from '../auth.js'
+import { isCreditsV1Enabled } from '../credits/catalog.js'
 import { logApiUsage, estimateTokens } from '../usage-logger.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import { runGrokImageGenerate } from '../grok-image-generate.js'
 import {
+  assertMcpApprovalReady,
   consumeMcpApprovalRequest,
   issueMcpApprovalRequest,
   replayMcpApprovalResult,
@@ -18,6 +29,66 @@ import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-t
 import { mcpGuideImage } from './guide-packs.js'
 import type { McpArtifactStore } from './artifact-store.js'
 import type { ProductType, SalesChannel, ScriptSettings } from '../guiones/types.js'
+
+const APPROVAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function generationIdFromApproval(approvalRequestId: string, fallbackSuffix: string): string {
+  if (APPROVAL_UUID_RE.test(approvalRequestId)) return approvalRequestId
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${fallbackSuffix}`
+}
+
+async function chargeMcpCredits(options: {
+  userId: string
+  action: 'script' | 'image'
+  generationId: string
+  imageModel?: string | null
+}): Promise<number> {
+  const incrementResult = await incrementUsage(options.userId, options.action, {
+    generationId: options.generationId,
+    imageModel: options.imageModel,
+  })
+  if (incrementResult?.creditsError) {
+    throw new Error(`Credit charge failed: ${incrementResult.creditsError}`)
+  }
+  return incrementResult?.creditsCharged ?? 0
+}
+
+async function requireApprovedMcpRequest(options: {
+  approvalStore: McpApprovalStore
+  approvalRequestId: string
+  userId: string
+  toolName: string
+  input: unknown
+}): Promise<void> {
+  const ready = await assertMcpApprovalReady(options.approvalStore, {
+    approvalRequestId: options.approvalRequestId,
+    userId: options.userId,
+    toolName: options.toolName,
+    input: options.input,
+  })
+  if (!ready.ok) throw new Error(ready.reason)
+}
+
+async function finalizeMcpApproval(options: {
+  approvalStore: McpApprovalStore
+  approvalRequestId: string
+  userId: string
+  toolName: string
+  input: unknown
+  result: Record<string, unknown>
+}): Promise<void> {
+  await storeMcpApprovalResult(options.approvalStore, {
+    approvalRequestId: options.approvalRequestId,
+    result: options.result,
+  })
+  const consumed = await consumeMcpApprovalRequest(options.approvalStore, {
+    approvalRequestId: options.approvalRequestId,
+    userId: options.userId,
+    toolName: options.toolName,
+    input: options.input,
+  })
+  if (!consumed.ok) throw new Error(consumed.reason)
+}
 
 function xaiKey(): string {
   const key = process.env.XAI_API_KEY || process.env.GROK_API_KEY || ''
@@ -63,13 +134,13 @@ export async function mcpExecuteScriptGenerate(options: {
     sessionId: sessionIdArg,
   }
 
-  // Validate brand/offer before issuing or consuming approval
+  // Validate brand/offer before issuing approval or running generate
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctxPreview, boundInput.offerId)
   const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
-    const quote = 3
+    const quote = quoteLegacyActionCredits('script')
     const req = await issueMcpApprovalRequest(options.approvalStore, {
       userId: options.user.id,
       toolName: 'execute_script_generate',
@@ -100,20 +171,18 @@ export async function mcpExecuteScriptGenerate(options: {
     }
   }
 
-  const consumed = await consumeMcpApprovalRequest(options.approvalStore, {
+  await requireApprovedMcpRequest({
+    approvalStore: options.approvalStore,
     approvalRequestId,
     userId: options.user.id,
     toolName: 'execute_script_generate',
     input: boundWithOffer,
   })
-  if (!consumed.ok) throw new Error(consumed.reason)
 
   const limit = await checkUsageLimit(options.user.id, 'script')
   if (!limit.allowed) throw new Error('Script credit limit reached')
 
-  const scriptGenerationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalRequestId)
-    ? approvalRequestId
-    : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-script`)
+  const scriptGenerationId = generationIdFromApproval(approvalRequestId, 'script')
 
   const ctx = ctxPreview
   const offer = ctx.offers.find((o) => o.id === offerId)!
@@ -165,15 +234,26 @@ export async function mcpExecuteScriptGenerate(options: {
     inputTokens: estimateTokens(text),
     outputTokens: estimateTokens(text),
     success: true,
-    metadata: { action: 'mcp_execute_script_generate', brandId, approvalRequestId, sessionId },
+    generationId: scriptGenerationId,
+    metadata: {
+      action: 'mcp_execute_script_generate',
+      source: 'mcp',
+      brandId,
+      approvalRequestId,
+      sessionId,
+    },
   })
-  await incrementUsage(options.user.id, 'script', { generationId: scriptGenerationId })
+  const charged = await chargeMcpCredits({
+    userId: options.user.id,
+    action: 'script',
+    generationId: scriptGenerationId,
+  })
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
   const result = {
     status: 'completed',
     consumesAdvanceCredits: true,
-    charged: 1,
+    charged,
     brandId,
     offerId,
     sessionId,
@@ -183,8 +263,12 @@ export async function mcpExecuteScriptGenerate(options: {
     content: text,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
   }
-  await storeMcpApprovalResult(options.approvalStore, {
+  await finalizeMcpApproval({
+    approvalStore: options.approvalStore,
     approvalRequestId,
+    userId: options.user.id,
+    toolName: 'execute_script_generate',
+    input: boundWithOffer,
     result,
   })
   return result
@@ -217,7 +301,7 @@ export async function mcpExecuteImageGenerate(options: {
   const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
-    const quote = 6
+    const quote = quoteLegacyActionCredits('image', 'grok-imagine')
     const req = await issueMcpApprovalRequest(options.approvalStore, {
       userId: options.user.id,
       toolName: 'execute_image_generate',
@@ -248,20 +332,18 @@ export async function mcpExecuteImageGenerate(options: {
     }
   }
 
-  const consumed = await consumeMcpApprovalRequest(options.approvalStore, {
+  await requireApprovedMcpRequest({
+    approvalStore: options.approvalStore,
     approvalRequestId,
     userId: options.user.id,
     toolName: 'execute_image_generate',
     input: boundWithOffer,
   })
-  if (!consumed.ok) throw new Error(consumed.reason)
 
   const limit = await checkUsageLimit(options.user.id, 'image', { imageModel: 'grok-imagine' })
   if (!limit.allowed) throw new Error('Image credit limit reached')
 
-  const imageGenerationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(approvalRequestId)
-    ? approvalRequestId
-    : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-image`)
+  const imageGenerationId = generationIdFromApproval(approvalRequestId, 'image')
 
   const guide = await mcpGuideImage(options.db, options.user, {
     brandId,
@@ -311,8 +393,10 @@ export async function mcpExecuteImageGenerate(options: {
     model: generated.providerModel,
     success: true,
     costOverrideUsd: generated.estimatedCostUsd,
+    generationId: imageGenerationId,
     metadata: {
       action: 'mcp_execute_image_generate',
+      source: 'mcp',
       brandId,
       approvalRequestId,
       sessionId,
@@ -320,17 +404,21 @@ export async function mcpExecuteImageGenerate(options: {
       quality: generated.quality,
     },
   })
-  await incrementUsage(options.user.id, 'image', {
+  const charged = await chargeMcpCredits({
+    userId: options.user.id,
+    action: 'image',
     generationId: imageGenerationId,
     imageModel: 'grok-imagine',
   })
-  await deductBonusImage(options.user.id)
+  if (!isCreditsV1Enabled()) {
+    await deductBonusImage(options.user.id)
+  }
 
   const origin = (options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')
   const result = {
     status: 'completed',
     consumesAdvanceCredits: true,
-    charged: 1,
+    charged,
     brandId,
     offerId,
     sessionId,
@@ -346,8 +434,12 @@ export async function mcpExecuteImageGenerate(options: {
     deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
     note: 'Image saved to Advance library at max Grok quality (2k/medium). Open deepLink to view in chat.',
   }
-  await storeMcpApprovalResult(options.approvalStore, {
+  await finalizeMcpApproval({
+    approvalStore: options.approvalStore,
     approvalRequestId,
+    userId: options.user.id,
+    toolName: 'execute_image_generate',
+    input: boundWithOffer,
     result,
   })
   return result

@@ -64,7 +64,7 @@ describe('credit catalog', () => {
     // Existing links wired; new SKUs placeholder
     expect(PLAN_CATALOG.starter.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
     expect(PLAN_CATALOG.pro.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
-    expect(PLAN_CATALOG.business.paymentLink).toBeNull()
+    expect(PLAN_CATALOG.business.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
     expect(CREDIT_PACK.paymentLink).toBeNull()
   })
 })
@@ -110,9 +110,10 @@ describe('credit FIFO', () => {
     expect(res.ok).toBe(false)
   })
 
-  it('caps monthly+rollover at 2× on grant', () => {
+  it('burns unused monthly on grant (no rollover)', () => {
     const lots = [
       lot({ id: 'm1', kind: 'monthly', remaining: 700, expiresAtMs: now + 100 }),
+      lot({ id: 'pack', kind: 'pack', remaining: 50 }),
     ]
     const next = applyMonthlyGrant({
       lots,
@@ -123,11 +124,10 @@ describe('credit FIFO', () => {
       newMonthlyLotId: 'm2',
       newRolloverLotId: 'r1',
     })
-    const pool = next
-      .filter((l) => l.kind === 'monthly' || l.kind === 'rollover')
-      .reduce((s, l) => s + l.remaining, 0)
-    expect(pool).toBeLessThanOrEqual(1500)
+    expect(next.find((l) => l.id === 'm1')?.remaining ?? 0).toBe(0)
+    expect(next.some((l) => l.kind === 'rollover' && l.remaining > 0)).toBe(false)
     expect(next.some((l) => l.id === 'm2' && l.remaining === 750)).toBe(true)
+    expect(next.some((l) => l.id === 'pack' && l.remaining === 50)).toBe(true)
   })
 
   it('converts bonus_images at 24 credits each', () => {
