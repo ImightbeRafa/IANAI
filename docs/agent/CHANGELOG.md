@@ -1,3 +1,15 @@
+## 2026-08-25 — MCP brand kits complete (0.9.0)
+
+**Area:** mcp
+**Files:** `brand-kit-tools.ts`, `tool-registry.ts`, `protocol.ts`, `tool-audit.ts`, `limits.ts`, `mcp.ts`, admin compact tickets
+
+- Brand kit CRUD + PatchHouse `business_id` linking (`list/get/create/update/link/delete_brand_kit`).
+- `get_brand_context` accepts optional `brandKitId`; resolution prefers primary linked kit.
+- Central `auditMcpToolCall` on every `tools/call` (success + failure); MCP caps bulk ≤10 / carousel ≤5.
+- Admin ticket list compact + scrubbed Cursor brief; consent UI notes admin ticket/usage tools (Cursor never auto-called).
+
+---
+
 ## 2026-08-25 — MCP in-chat approval (0.8.2)
 
 **Area:** mcp

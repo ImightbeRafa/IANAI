@@ -28,7 +28,6 @@ import {
   GEMINI_CAROUSEL_IMAGE_MODEL,
   MCP_HOST_MAX_DURATION_SEC,
   VALID_CAROUSEL_ASPECT_RATIOS,
-  normalizeCarouselSlideCount,
   normalizeCarouselSubtype,
   quoteCarouselCredits,
   runOrganicCarouselGenerate,
@@ -42,6 +41,7 @@ import {
   type McpApprovalStore,
 } from './approval.js'
 import { issueMcpChatApproval } from './approval-prompt.js'
+import { assertMcpCarouselSlideCount } from './limits.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
 import type { McpArtifactStore } from './artifact-store.js'
@@ -834,7 +834,7 @@ export async function mcpExecuteCarouselGenerate(options: {
   const scriptContent = typeof options.args.scriptContent === 'string' ? options.args.scriptContent.trim() : ''
   if (!scriptContent) throw new Error('scriptContent is required')
   const slideCount = typeof options.args.slideCount === 'number' || typeof options.args.slideCount === 'string'
-    ? normalizeCarouselSlideCount(options.args.slideCount)
+    ? assertMcpCarouselSlideCount(Number(options.args.slideCount), 10)
     : 5
   const subtype = options.args.subtype
     ? normalizeCarouselSubtype(options.args.subtype)

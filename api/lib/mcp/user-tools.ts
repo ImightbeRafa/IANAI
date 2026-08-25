@@ -35,6 +35,9 @@ export type McpBrandKitContext = {
     referenceUrls: string[]
     notes: string
   }>
+  isPrimaryForBusiness?: boolean
+  isDefault?: boolean
+  businessId?: string | null
 }
 
 export type McpGuideIntakeSummary = {
@@ -57,6 +60,16 @@ export type McpBrandContext = {
   }
   offers: Array<{ id: string; name: string; type?: string | null }>
   brandKit?: McpBrandKitContext | null
+  brandKits?: Array<{
+    id: string
+    name: string
+    businessId: string | null
+    isPrimaryForBusiness: boolean
+    isDefault: boolean
+    isActive: boolean
+    hasLogo: boolean
+  }>
+  brandKitResolution?: string
   latestGuideIntake?: McpGuideIntakeSummary | null
 }
 
@@ -78,7 +91,29 @@ export type McpDbClient = {
     userId: string,
     brandId: string
   ) => Promise<Array<{ id: string; name: string; type?: string | null }>>
-  getBrandKitForBrand: (userId: string, brandId: string) => Promise<McpBrandKitContext | null>
+  getBrandKitForBrand: (
+    userId: string,
+    brandId: string,
+    brandKitId?: string
+  ) => Promise<McpBrandKitContext | null>
+  /** Optional richer resolution used by get_brand_context. */
+  resolveBrandKitsForBrand?: (
+    userId: string,
+    brandId: string,
+    brandKitId?: string
+  ) => Promise<{
+    brandKit: McpBrandKitContext | null
+    brandKits: Array<{
+      id: string
+      name: string
+      businessId: string | null
+      isPrimaryForBusiness: boolean
+      isDefault: boolean
+      isActive: boolean
+      hasLogo: boolean
+    }>
+    brandKitResolution: string
+  }>
   getLatestGuideIntakeForBrand?: (
     userId: string,
     brandId: string
@@ -103,7 +138,8 @@ export async function mcpListBrands(
 export async function mcpGetBrandContext(
   db: McpDbClient,
   user: McpAuthUser,
-  brandId: string
+  brandId: string,
+  brandKitId?: string
 ): Promise<McpBrandContext> {
   if (!user?.id) throw new Error('Authentication required')
   if (!brandId) throw new Error('brandId is required')
@@ -112,12 +148,40 @@ export async function mcpGetBrandContext(
   if (!brand) throw new Error('Brand not found')
   if (brand.userId !== user.id) throw new Error('Access denied')
 
+  const offersPromise = db.listOffersForBrand(user.id, brandId)
+  const intakePromise = db.getLatestGuideIntakeForBrand
+    ? db.getLatestGuideIntakeForBrand(user.id, brandId)
+    : Promise.resolve(null)
+
+  if (db.resolveBrandKitsForBrand) {
+    const [offers, kitBundle, latestGuideIntake] = await Promise.all([
+      offersPromise,
+      db.resolveBrandKitsForBrand(user.id, brandId, brandKitId),
+      intakePromise,
+    ])
+    return {
+      brand: {
+        id: brand.id,
+        name: brand.name,
+        type: brand.type ?? null,
+        location: brand.location ?? null,
+        salesChannels: brand.salesChannels ?? null,
+        doesShipping: brand.doesShipping ?? null,
+        shippingMethod: brand.shippingMethod ?? null,
+        icpDescription: brand.icpDescription ?? null,
+      },
+      offers,
+      brandKit: kitBundle.brandKit,
+      brandKits: kitBundle.brandKits,
+      brandKitResolution: kitBundle.brandKitResolution,
+      latestGuideIntake: latestGuideIntake || null,
+    }
+  }
+
   const [offers, brandKit, latestGuideIntake] = await Promise.all([
-    db.listOffersForBrand(user.id, brandId),
-    db.getBrandKitForBrand(user.id, brandId),
-    db.getLatestGuideIntakeForBrand
-      ? db.getLatestGuideIntakeForBrand(user.id, brandId)
-      : Promise.resolve(null),
+    offersPromise,
+    db.getBrandKitForBrand(user.id, brandId, brandKitId),
+    intakePromise,
   ])
 
   return {
@@ -133,6 +197,7 @@ export async function mcpGetBrandContext(
     },
     offers,
     brandKit: brandKit || null,
+    brandKitResolution: brandKit ? 'primary' : 'missing',
     latestGuideIntake: latestGuideIntake || null,
   }
 }

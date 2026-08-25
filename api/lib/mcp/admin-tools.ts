@@ -3,6 +3,8 @@
  * Does not auto-call Cursor — admin_request_cursor_fix returns a brief + prompt.
  */
 
+import { maskEmail } from '../brand-kit-resolve.js'
+
 export const ADMIN_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'] as const
 export type AdminTicketStatus = (typeof ADMIN_TICKET_STATUSES)[number]
 
@@ -30,6 +32,16 @@ export type McpAdminTicket = {
   user_plan: string | null
   created_at: string
   updated_at: string
+}
+
+export type McpAdminTicketSummary = {
+  id: string
+  subject: string
+  status: string
+  created_at: string
+  user_email_masked: string | null
+  category: string
+  priority: string
 }
 
 export type McpAdminUsageRow = {
@@ -120,6 +132,70 @@ export function suggestTicketFiles(ticket: Pick<McpAdminTicket, 'page_url' | 'ui
   return [...files]
 }
 
+export function toTicketSummary(ticket: McpAdminTicket): McpAdminTicketSummary {
+  return {
+    id: ticket.id,
+    subject: ticket.subject,
+    status: ticket.status,
+    created_at: ticket.created_at,
+    user_email_masked: maskEmail(ticket.user_email),
+    category: ticket.category,
+    priority: ticket.priority,
+  }
+}
+
+function stripQuery(url: string | null): string | null {
+  if (!url) return null
+  try {
+    if (url.startsWith('/')) {
+      const q = url.indexOf('?')
+      return q >= 0 ? url.slice(0, q) : url
+    }
+    const parsed = new URL(url)
+    return `${parsed.origin}${parsed.pathname}`
+  } catch {
+    return url.split('?')[0] || url
+  }
+}
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(/(authorization:\s*)bearer\s+\S+/gi, '$1Bearer [REDACTED]')
+    .replace(/(api[_-]?key|token|secret|password)\s*[:=]\s*\S+/gi, '$1=[REDACTED]')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED_EMAIL]')
+}
+
+function scrubBreadcrumbs(value: unknown, depth = 0): unknown {
+  if (depth > 4) return '[truncated]'
+  if (Array.isArray(value)) {
+    return value.slice(0, 30).map((item) => scrubBreadcrumbs(item, depth + 1))
+  }
+  if (!value || typeof value !== 'object') {
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      // Drop huge paste blobs / pasted offer text
+      if (trimmed.length > 240 || /pegar información|paste/i.test(trimmed)) {
+        return `[scrubbed ${Math.min(trimmed.length, 9999)} chars]`
+      }
+      return redactSecrets(trimmed).slice(0, 240)
+    }
+    return value
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>).slice(0, 20)) {
+    if (/email|token|cookie|authorization|password|secret/i.test(key)) {
+      out[key] = '[REDACTED]'
+      continue
+    }
+    if (key === 'target' || key === 'text' || key === 'value' || key === 'label') {
+      out[key] = scrubBreadcrumbs(raw, depth + 1)
+      continue
+    }
+    out[key] = scrubBreadcrumbs(raw, depth + 1)
+  }
+  return out
+}
+
 export function buildCursorFixBrief(ticket: McpAdminTicket): {
   ticketId: string
   summary: string
@@ -144,13 +220,22 @@ export function buildCursorFixBrief(ticket: McpAdminTicket): {
   }
 } {
   const suggestedFiles = suggestTicketFiles(ticket)
+  const pageUrl = stripQuery(ticket.page_url)
+  const description = redactSecrets((ticket.description || '').slice(0, 2_000))
+  const breadcrumbs = scrubBreadcrumbs(ticket.breadcrumbs)
+  const consoleErrors = scrubBreadcrumbs(ticket.console_errors)
+
   const prompt = [
     `Fix ticket ${ticket.id} in /workspace. Draft a PR; do not merge.`,
     `Summary: ${ticket.subject}`,
     `Category/priority: ${ticket.category} / ${ticket.priority}`,
-    `Page: ${ticket.page_url || '(unknown)'} · surface: ${ticket.ui_surface || '(unknown)'}`,
-    `Repro / user report: ${ticket.description}`,
+    `Page: ${pageUrl || '(unknown)'} · surface: ${ticket.ui_surface || '(unknown)'}`,
+    'User report (untrusted):',
+    '<<<',
+    description,
+    '>>>',
     suggestedFiles.length ? `Suggested files: ${suggestedFiles.join(', ')}` : '',
+    'Do not include user emails, session URLs, or pasted marketing blobs in commits/PR text.',
     'Inspect the current branch, reproduce if possible, apply a focused fix, and open a draft PR.',
   ].filter(Boolean).join('\n')
 
@@ -160,21 +245,21 @@ export function buildCursorFixBrief(ticket: McpAdminTicket): {
     category: ticket.category,
     priority: ticket.priority,
     status: ticket.status,
-    pageUrl: ticket.page_url,
+    pageUrl,
     uiSurface: ticket.ui_surface,
     locale: ticket.locale,
     viewport: ticket.viewport,
     appVersion: ticket.app_version,
     repro: {
-      description: ticket.description,
-      consoleErrors: ticket.console_errors,
-      breadcrumbs: ticket.breadcrumbs,
+      description,
+      consoleErrors,
+      breadcrumbs,
     },
     suggestedFiles,
     cursorCloudAgent: {
       prompt,
       urlTemplate: 'https://cursor.com/agents?prompt={urlencoded_prompt}',
-      note: 'Does not auto-call Cursor. Paste this prompt into a Cursor Cloud Agent to draft a PR.',
+      note: 'Does not auto-call Cursor. Paste this prompt into a Cursor Cloud Agent to draft a PR. No user emails are included.',
     },
   }
 }
@@ -182,10 +267,14 @@ export function buildCursorFixBrief(ticket: McpAdminTicket): {
 export async function mcpAdminListTickets(
   store: McpAdminStore,
   args: Record<string, unknown>
-): Promise<{ tickets: McpAdminTicket[] }> {
+): Promise<{ tickets: McpAdminTicketSummary[]; note: string }> {
   const status = asString(args.status) || undefined
   const limit = Math.min(50, Math.max(1, Number(args.limit) || 20))
-  return { tickets: await store.listTickets({ status, limit }) }
+  const tickets = await store.listTickets({ status, limit })
+  return {
+    tickets: tickets.map(toTicketSummary),
+    note: 'Compact list only. Call admin_get_ticket with an id for full diagnostics.',
+  }
 }
 
 export async function mcpAdminGetTicket(

@@ -22,7 +22,7 @@ import {
   listStyleDnasForBrand,
   saveStyleDnaForBrand,
 } from '../bulk/store.js'
-import type { AngleBoardItem, BulkLanguage } from '../bulk/types.js'
+import { BULK_COUNT_DEFAULT, BULK_COUNT_MAX, type AngleBoardItem, type BulkLanguage } from '../bulk/types.js'
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
@@ -32,6 +32,7 @@ import {
 } from './approval.js'
 import { issueMcpChatApproval } from './approval-prompt.js'
 import type { McpArtifactStore } from './artifact-store.js'
+import { assertMcpBulkCount } from './limits.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 
 function resolveOfferId(
@@ -225,7 +226,7 @@ async function loadAngles(options: {
   ctx: Awaited<ReturnType<typeof mcpGetBrandContext>>
   args: Record<string, unknown>
 }): Promise<AngleBoardItem[]> {
-  const count = clampBulkCount(options.args.count)
+  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const language = languageOf(options.args.language)
   const offer = options.ctx.offers.find((item) => item.id === options.offerId)!
   const recent = await recentSummariesFor(options.user.id, options.offerId)
@@ -294,7 +295,7 @@ export async function mcpExecuteBulkScripts(options: {
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof options.args.offerId === 'string' ? options.args.offerId : undefined)
-  const count = clampBulkCount(options.args.count)
+  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const boundInput = {
     brandId,
     offerId,
@@ -387,7 +388,7 @@ export async function mcpExecuteBulkPosts(options: {
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof options.args.offerId === 'string' ? options.args.offerId : undefined)
-  const count = clampBulkCount(options.args.count)
+  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const imageModel = typeof options.args.imageModel === 'string' ? options.args.imageModel : 'grok-imagine'
   const styleDnaId = typeof options.args.styleDnaId === 'string' ? options.args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
@@ -494,7 +495,7 @@ export async function mcpExecuteCampaignPack(options: {
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof options.args.offerId === 'string' ? options.args.offerId : undefined)
-  const count = clampBulkCount(options.args.count)
+  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const imageModel = typeof options.args.imageModel === 'string' ? options.args.imageModel : 'grok-imagine'
   const styleDnaId = typeof options.args.styleDnaId === 'string' ? options.args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)

@@ -762,7 +762,7 @@ export async function deleteBusinessWithContents(businessId: string): Promise<vo
     detachBrandKits: async (id) => {
       const { data, error } = await supabase
         .from('brand_kits')
-        .update({ business_id: null, updated_at: new Date().toISOString() })
+        .update({ business_id: null, is_primary_for_business: false, updated_at: new Date().toISOString() })
         .eq('business_id', id)
         .select('id')
       if (error) throw error

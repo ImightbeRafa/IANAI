@@ -29,15 +29,23 @@ Auth: `Authorization: Bearer <Supabase user access token>`.
 
 Enabled tools now:
 
-**Reads:** `list_brands`, `get_brand_context`, `list_offers`
+**Reads:** `list_brands`, `get_brand_context` (optional `brandKitId`), `list_offers`, `list_brand_kits`, `get_brand_kit`
+
+**Brand kits (sync write, no credits):** `create_brand_kit`, `update_brand_kit`, `link_brand_kit` (PatchHouse / explicit `business_id`; no cross-brand moves). `delete_brand_kit` requires typed name + in-chat `confirm_execute`.
 
 **GUIDE (no Advance credits):** `guide_script`, `guide_image`, `guide_brand_pack`, `guide_bulk_angles`
 
-**Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`
+**Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`, `workspace_save_artifact`
 
-**EXECUTE (credits + in-chat approval):** `confirm_execute`, `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack`, edit/enhance/carousel — first call returns `status: approval_required` with `userPrompt` (Grok shows this in chat; do **not** lead with a raw URL). After the user says yes, call `confirm_execute` then retry with `approvalRequestId`. Optional `optionalAdvancePage` exists only as fallback. After approve + retry, Advance generates, charges credits per succeeded item, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging.
+**EXECUTE (credits + in-chat approval):** `confirm_execute`, `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack`, edit/enhance/carousel — first call returns `status: approval_required` with `userPrompt` (Grok shows this in chat; do **not** lead with a raw URL). After the user says yes, call `confirm_execute` then retry with `approvalRequestId`. Optional `optionalAdvancePage` exists only as fallback. After approve + retry, Advance generates, charges credits per succeeded item, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging. **MCP caps:** bulk `count` ≤ 10; carousel `slideCount` ≤ 5.
 
 **Style DNA:** `list_style_dnas`, `set_style_dna` — JSON on `brand_kits.style_dnas` (`organic` | `ads`). Bulk posts accept `styleDnaId`.
+
+**Admin (JWT admin only):** compact `admin_list_tickets` / `admin_get_ticket` / `admin_update_ticket` / `admin_get_usage` / `admin_request_cursor_fix` (scrubbed brief; Cursor is never auto-called).
+
+Every `tools/call` is audited via `auditMcpToolCall` (`source=mcp`, lane from tool risk).
+
+Registry / server version: **0.9.0**.
 
 ChatShell shares the same libs via `POST /api/bulk-angles`, `/api/bulk-scripts`, `/api/bulk-posts`, `/api/bulk-campaign`.
 
@@ -57,7 +65,9 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts`
+- Registry: `api/lib/mcp/tool-registry.ts` (0.9.0)
+- Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
+- Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`
 - Approval: `api/lib/mcp/approval.ts`, `api/lib/mcp/approval-store.ts`, `api/mcp-approve.ts`, `src/pages/McpApprove.tsx` + migrations `070`, `073`
 - Workspace notes: `api/lib/mcp/workspace-ops.ts` + migration `074`
 - GUIDE packs: `api/lib/mcp/guide-packs.ts`
