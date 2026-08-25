@@ -79,7 +79,8 @@ async function postJson<T>(name: Parameters<typeof bulkApiUrl>[0], body: Record<
 }
 
 export function clampComposerBulkCount(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(String(value || '').trim())
+  if (value == null || value === '') return 10
+  const n = typeof value === 'number' ? value : Number(String(value).trim())
   if (!Number.isFinite(n)) return 10
   return Math.min(25, Math.max(2, Math.round(n)))
 }

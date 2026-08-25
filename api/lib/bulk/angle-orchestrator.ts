@@ -45,6 +45,7 @@ const FALLBACK_NICHES = [
 ] as const
 
 export function clampBulkCount(value: unknown, fallback = BULK_COUNT_DEFAULT): number {
+  if (value == null || value === '') return fallback
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return fallback
   return Math.min(BULK_COUNT_MAX, Math.max(BULK_COUNT_MIN, Math.round(n)))

@@ -851,7 +851,7 @@ export default function ChatShell({
           open={bulkOpen}
           language={language}
           brandId={workspace.activeBrand.id}
-          offerId={thread.activeProduct?.id || thread.offers[0]?.id}
+          offerId={thread.activeProduct?.id || thread.offers[0]?.product_id}
           sessionId={workspace.activeSession?.id}
           initialCount={bulkCount}
           onClose={() => setBulkOpen(false)}

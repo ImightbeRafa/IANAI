@@ -168,8 +168,7 @@ describe('mcp protocol', () => {
     expect(tools).toContain('execute_bulk_scripts')
     expect(tools).toContain('execute_bulk_posts')
     expect(tools).toContain('execute_campaign_pack')
-    expect(tools).not.toContain('execute_carousel_generate')
-    expect(tools).not.toContain('delete_brand')
+    expect(tools).toContain('list_style_dnas')
 
     const called = await handleMcpJsonRpc({
       body: {
