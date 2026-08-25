@@ -52,11 +52,21 @@ import {
   type McpDeleteStore,
 } from './delete-tools.js'
 import { mcpConfirmExecute } from './confirm-execute.js'
+import {
+  mcpCreateBrandKit,
+  mcpDeleteBrandKit,
+  mcpGetBrandKit,
+  mcpLinkBrandKit,
+  mcpListBrandKits,
+  mcpUpdateBrandKit,
+  type McpBrandKitStore,
+} from './brand-kit-tools.js'
+import { auditMcpToolCall } from './tool-audit.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.8.2',
+  version: '0.9.0',
 }
 
 export type McpJsonRpcRequest = {
@@ -88,11 +98,106 @@ function fail(
 
 function toolInputSchema(name: string): Record<string, unknown> {
   const brand = { brandId: { type: 'string' } }
+  const kitWritable = {
+    name: { type: 'string' },
+    logoUrl: { type: 'string' },
+    primaryColor: { type: 'string' },
+    secondaryColor: { type: 'string' },
+    accentColor: { type: 'string' },
+    fontPrimary: { type: 'string' },
+    fontSecondary: { type: 'string' },
+    tagline: { type: 'string' },
+    industry: { type: 'string' },
+    targetAudience: { type: 'string' },
+    brandVoice: { type: 'string' },
+    visualStyleNotes: { type: 'string' },
+    toneKeywords: { type: 'array', items: { type: 'string' } },
+    mustUsePhrases: { type: 'array', items: { type: 'string' } },
+    forbiddenPhrases: { type: 'array', items: { type: 'string' } },
+    referenceImageUrls: { type: 'array', items: { type: 'string' } },
+    isActive: { type: 'boolean' },
+    isDefault: { type: 'boolean' },
+    setAsPrimary: { type: 'boolean' },
+  }
   switch (name) {
     case 'get_brand_context':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          brandKitId: {
+            type: 'string',
+            description: 'Optional linked kit id; otherwise primary/default resolution.',
+          },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
     case 'list_offers':
     case 'guide_brand_pack':
       return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'list_brand_kits':
+      return {
+        type: 'object',
+        properties: {
+          brandId: { type: 'string' },
+          includeInactive: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      }
+    case 'get_brand_kit':
+      return {
+        type: 'object',
+        properties: {
+          kitId: { type: 'string' },
+          brandId: { type: 'string' },
+        },
+        required: ['kitId'],
+        additionalProperties: false,
+      }
+    case 'create_brand_kit':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          ...kitWritable,
+        },
+        required: ['brandId', 'name'],
+        additionalProperties: false,
+      }
+    case 'update_brand_kit':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          kitId: { type: 'string' },
+          ...kitWritable,
+        },
+        required: ['brandId', 'kitId'],
+        additionalProperties: false,
+      }
+    case 'link_brand_kit':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          kitId: { type: 'string' },
+          setAsPrimary: { type: 'boolean' },
+        },
+        required: ['brandId', 'kitId'],
+        additionalProperties: false,
+      }
+    case 'delete_brand_kit':
+      return {
+        type: 'object',
+        properties: {
+          kitId: { type: 'string' },
+          confirm: { type: 'string', description: 'Type the exact kit name.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['kitId', 'confirm'],
+        additionalProperties: false,
+      }
     case 'guide_script':
       return {
         type: 'object',
@@ -205,7 +310,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           offerId: { type: 'string' },
-          count: { type: 'number' },
+          count: { type: 'number', maximum: 10 },
           language: { type: 'string', enum: ['es', 'en'] },
           angleIds: { type: 'array', items: { type: 'string' } },
           sessionId: { type: 'string' },
@@ -324,7 +429,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           scriptContent: { type: 'string' },
           subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },
-          slideCount: { type: 'number', minimum: 2, maximum: 10 },
+          slideCount: { type: 'number', minimum: 2, maximum: 5 },
           aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
           language: { type: 'string', enum: ['es', 'en'] },
           designDirection: { type: 'string' },
@@ -437,6 +542,7 @@ export async function handleMcpJsonRpc(options: {
   artifactStore?: McpArtifactStore | null
   adminStore?: McpAdminStore | null
   deleteStore?: McpDeleteStore | null
+  brandKitStore?: McpBrandKitStore | null
   isAdmin?: boolean
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
@@ -477,6 +583,7 @@ export async function handleMcpJsonRpc(options: {
       if ((def.group === 'admin' || def.risk === 'admin' || isAdminToolName(name)) && !isAdmin) {
         return fail(body.id, -32601, `Unknown or disabled tool: ${name}`)
       }
+      const startedAt = Date.now()
       try {
         const payload = await dispatchEnabledTool({
           name,
@@ -489,8 +596,18 @@ export async function handleMcpJsonRpc(options: {
           artifactStore: options.artifactStore,
           adminStore: options.adminStore,
           deleteStore: options.deleteStore,
+          brandKitStore: options.brandKitStore,
           isAdmin,
           appOrigin: options.appOrigin,
+        })
+        await auditMcpToolCall({
+          userId: user.id,
+          userEmail: user.email,
+          toolName: name,
+          risk: def.risk,
+          durationMs: Date.now() - startedAt,
+          success: true,
+          resultPayload: payload,
         })
         return ok(body.id, {
           content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
@@ -498,6 +615,15 @@ export async function handleMcpJsonRpc(options: {
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Tool failed'
+        await auditMcpToolCall({
+          userId: user.id,
+          userEmail: user.email,
+          toolName: name,
+          risk: def.risk,
+          durationMs: Date.now() - startedAt,
+          success: false,
+          errorMessage: message,
+        })
         return ok(body.id, {
           content: [{ type: 'text', text: message }],
           isError: true,
@@ -520,6 +646,7 @@ async function dispatchEnabledTool(options: {
   artifactStore?: McpArtifactStore | null
   adminStore?: McpAdminStore | null
   deleteStore?: McpDeleteStore | null
+  brandKitStore?: McpBrandKitStore | null
   isAdmin?: boolean
   appOrigin?: string
 }): Promise<unknown> {
@@ -534,6 +661,7 @@ async function dispatchEnabledTool(options: {
   }
 
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
+  const brandKitId = typeof options.args.brandKitId === 'string' ? options.args.brandKitId : undefined
 
   switch (options.name) {
     case 'list_brands':
@@ -545,7 +673,59 @@ async function dispatchEnabledTool(options: {
       return { offers: await options.db.listOffersForBrand(options.user.id, brandId) }
     }
     case 'get_brand_context':
-      return mcpGetBrandContext(options.db, options.user, brandId)
+      return mcpGetBrandContext(options.db, options.user, brandId, brandKitId)
+    case 'list_brand_kits': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpListBrandKits({
+        store: options.brandKitStore,
+        user: options.user,
+        args: options.args,
+      })
+    }
+    case 'get_brand_kit': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpGetBrandKit({
+        store: options.brandKitStore,
+        user: options.user,
+        args: options.args,
+      })
+    }
+    case 'create_brand_kit': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpCreateBrandKit({
+        store: options.brandKitStore,
+        db: options.db,
+        user: options.user,
+        args: options.args,
+      })
+    }
+    case 'update_brand_kit': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpUpdateBrandKit({
+        store: options.brandKitStore,
+        user: options.user,
+        args: options.args,
+      })
+    }
+    case 'link_brand_kit': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpLinkBrandKit({
+        store: options.brandKitStore,
+        user: options.user,
+        args: options.args,
+      })
+    }
+    case 'delete_brand_kit': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      return mcpDeleteBrandKit({
+        store: options.brandKitStore,
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
+        appOrigin: options.appOrigin,
+      })
+    }
     case 'guide_brand_pack':
       return mcpGuideBrandPack(options.db, options.user, brandId)
     case 'guide_script':

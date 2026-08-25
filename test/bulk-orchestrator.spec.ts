@@ -158,7 +158,7 @@ describe('style dna parse', () => {
 
 describe('mcp registry bulk tools', () => {
   it('lists guide + execute bulk tools on 0.8.x', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.8\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.9\./)
     const names = listEnabledMcpTools().map((tool) => tool.name)
     expect(names).toContain('guide_bulk_angles')
     expect(names).toContain('execute_bulk_scripts')

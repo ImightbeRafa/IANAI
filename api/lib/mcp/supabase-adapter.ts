@@ -16,10 +16,84 @@ import type { McpAdminStore, McpAdminTicket, McpAdminUsageRow } from './admin-to
 import { parseStyleDnas } from '../bulk/style-dna.js'
 import type { McpDeleteStore } from './delete-tools.js'
 import { MCP_BRAND_ARCHIVED_NOTE_KIND } from './delete-tools.js'
+import {
+  resolveBrandKitForBusiness,
+  type BrandKitRowLike,
+} from '../brand-kit-resolve.js'
+import type { McpBrandKitStore } from './brand-kit-tools.js'
+
+function mapBrandKitRow(data: Record<string, unknown>): McpBrandKitContext {
+  return {
+    id: data.id as string,
+    name: data.name as string,
+    primaryColor: (data.primary_color as string | null) ?? null,
+    secondaryColor: (data.secondary_color as string | null) ?? null,
+    accentColor: (data.accent_color as string | null) ?? null,
+    logoUrl: (data.logo_url as string | null) ?? null,
+    tagline: (data.tagline as string | null) ?? null,
+    brandVoice: (data.brand_voice as string | null) ?? null,
+    toneKeywords: Array.isArray(data.tone_keywords) ? data.tone_keywords as string[] : [],
+    targetAudience: (data.target_audience as string | null) ?? null,
+    visualStyleNotes: (data.visual_style_notes as string | null) ?? null,
+    fontPrimary: (data.font_primary as string | null) ?? null,
+    referenceImages: Array.isArray(data.reference_images) ? data.reference_images as string[] : [],
+    styleDnas: parseStyleDnas(data.style_dnas),
+    isPrimaryForBusiness: data.is_primary_for_business === true,
+    isDefault: data.is_default === true,
+    businessId: (data.business_id as string | null) ?? null,
+  }
+}
+
+const BRAND_KIT_SELECT =
+  'id, name, business_id, is_default, is_active, is_primary_for_business, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, must_use_phrases, forbidden_phrases, target_audience, visual_style_notes, font_primary, font_secondary, industry, reference_images, style_dnas, created_at'
 
 export function createMcpSupabaseAdapter(): McpDbClient | null {
   const db = getSupabaseAdmin()
   if (!db) return null
+
+  async function resolveBrandKitsForBrand(
+    userId: string,
+    brandId: string,
+    brandKitId?: string
+  ) {
+    if (!userId || !brandId) {
+      return { brandKit: null, brandKits: [], brandKitResolution: 'missing' as const }
+    }
+    let { data, error } = await db
+      .from('brand_kits')
+      .select(BRAND_KIT_SELECT)
+      .eq('business_id', brandId)
+      .eq('user_id', userId)
+      .order('is_primary_for_business', { ascending: false })
+      .order('created_at', { ascending: true })
+    if (error && /is_primary_for_business|style_dnas/i.test(error.message || '')) {
+      const retry = await db
+        .from('brand_kits')
+        .select('id, name, business_id, is_default, is_active, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, must_use_phrases, forbidden_phrases, target_audience, visual_style_notes, font_primary, font_secondary, industry, reference_images, created_at')
+        .eq('business_id', brandId)
+        .eq('user_id', userId)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: true })
+      data = (retry.data || []).map((row) => ({ ...row, is_primary_for_business: false, style_dnas: [] }))
+      error = retry.error
+    }
+    if (error) throw error
+    const linked = (data || []) as BrandKitRowLike[]
+    const resolved = resolveBrandKitForBusiness({ linkedKits: linked, brandKitId })
+    return {
+      brandKit: resolved.kit ? mapBrandKitRow(resolved.kit as unknown as Record<string, unknown>) : null,
+      brandKits: linked.map((row) => ({
+        id: row.id,
+        name: row.name,
+        businessId: row.business_id ?? null,
+        isPrimaryForBusiness: row.is_primary_for_business === true,
+        isDefault: row.is_default === true,
+        isActive: row.is_active !== false,
+        hasLogo: Boolean(row.logo_url),
+      })),
+      brandKitResolution: resolved.resolution,
+    }
+  }
 
   return {
     async listBusinessesForUser(userId: string): Promise<McpBrandSummary[]> {
@@ -86,51 +160,14 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
 
     async getBrandKitForBrand(
       userId: string,
-      brandId: string
+      brandId: string,
+      brandKitId?: string
     ): Promise<McpBrandKitContext | null> {
-      if (!userId || !brandId) return null
-      const kitSelect = 'id, name, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, target_audience, visual_style_notes, font_primary, reference_images, style_dnas'
-      let { data, error } = await db
-        .from('brand_kits')
-        .select(kitSelect)
-        .eq('business_id', brandId)
-        .eq('user_id', userId)
-        .order('is_default', { ascending: false })
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle()
-      if (error && /style_dnas/i.test(error.message || '')) {
-        const retry = await db
-          .from('brand_kits')
-          .select('id, name, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, target_audience, visual_style_notes, font_primary, reference_images')
-          .eq('business_id', brandId)
-          .eq('user_id', userId)
-          .order('is_default', { ascending: false })
-          .order('created_at', { ascending: true })
-          .limit(1)
-          .maybeSingle()
-        data = retry.data
-        error = retry.error
-      }
-      if (error) throw error
-      if (!data) return null
-      return {
-        id: data.id as string,
-        name: data.name as string,
-        primaryColor: (data.primary_color as string | null) ?? null,
-        secondaryColor: (data.secondary_color as string | null) ?? null,
-        accentColor: (data.accent_color as string | null) ?? null,
-        logoUrl: (data.logo_url as string | null) ?? null,
-        tagline: (data.tagline as string | null) ?? null,
-        brandVoice: (data.brand_voice as string | null) ?? null,
-        toneKeywords: Array.isArray(data.tone_keywords) ? data.tone_keywords as string[] : [],
-        targetAudience: (data.target_audience as string | null) ?? null,
-        visualStyleNotes: (data.visual_style_notes as string | null) ?? null,
-        fontPrimary: (data.font_primary as string | null) ?? null,
-        referenceImages: Array.isArray(data.reference_images) ? data.reference_images as string[] : [],
-        styleDnas: parseStyleDnas((data as { style_dnas?: unknown }).style_dnas),
-      }
+      const bundle = await resolveBrandKitsForBrand(userId, brandId, brandKitId)
+      return bundle.brandKit
     },
+
+    resolveBrandKitsForBrand,
 
     async getLatestGuideIntakeForBrand(
       userId: string,
@@ -481,7 +518,7 @@ export function createMcpDeleteStore(): McpDeleteStore | null {
     async detachBrandKits(brandId) {
       const { data, error } = await db
         .from('brand_kits')
-        .update({ business_id: null, updated_at: new Date().toISOString() })
+        .update({ business_id: null, is_primary_for_business: false, updated_at: new Date().toISOString() })
         .eq('business_id', brandId)
         .select('id')
       if (error) throw error
@@ -586,6 +623,106 @@ export function createMcpDeleteStore(): McpDeleteStore | null {
       if (error) throw error
       if (!data || data.length === 0) throw new Error('Asset was not deleted')
       return { imageUrl: asset.imageUrl }
+    },
+  }
+}
+
+export function createMcpBrandKitStore(): McpBrandKitStore | null {
+  const db = getSupabaseAdmin()
+  if (!db) return null
+
+  async function fetchKit(userId: string, kitId: string): Promise<BrandKitRowLike | null> {
+    const { data, error } = await db
+      .from('brand_kits')
+      .select(BRAND_KIT_SELECT)
+      .eq('id', kitId)
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error) throw error
+    return (data as BrandKitRowLike | null) || null
+  }
+
+  return {
+    async listKits({ userId, brandId, includeInactive }) {
+      if (!userId) return []
+      let q = db.from('brand_kits').select(BRAND_KIT_SELECT).eq('user_id', userId)
+      if (brandId) q = q.eq('business_id', brandId)
+      if (!includeInactive) q = q.neq('is_active', false)
+      const { data, error } = await q
+        .order('is_primary_for_business', { ascending: false })
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return (data || []) as BrandKitRowLike[]
+    },
+
+    async getKit({ userId, kitId }) {
+      return fetchKit(userId, kitId)
+    },
+
+    async countKits(userId) {
+      const { count, error } = await db
+        .from('brand_kits')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+      if (error) throw error
+      return count || 0
+    },
+
+    async insertKit({ userId, row }) {
+      const { data, error } = await db
+        .from('brand_kits')
+        .insert({ ...row, user_id: userId })
+        .select(BRAND_KIT_SELECT)
+        .single()
+      if (error) throw error
+      return data as BrandKitRowLike
+    },
+
+    async updateKit({ userId, kitId, patch }) {
+      const { data, error } = await db
+        .from('brand_kits')
+        .update(patch)
+        .eq('id', kitId)
+        .eq('user_id', userId)
+        .select(BRAND_KIT_SELECT)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) throw new Error('Brand kit not found')
+      return data as BrandKitRowLike
+    },
+
+    async clearPrimaryForBusiness({ userId, businessId, exceptKitId }) {
+      let q = db
+        .from('brand_kits')
+        .update({ is_primary_for_business: false, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .eq('business_id', businessId)
+        .eq('is_primary_for_business', true)
+      if (exceptKitId) q = q.neq('id', exceptKitId)
+      const { error } = await q
+      if (error) throw error
+    },
+
+    async deleteKit({ userId, kitId }) {
+      const { data, error } = await db
+        .from('brand_kits')
+        .delete()
+        .eq('id', kitId)
+        .eq('user_id', userId)
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('Brand kit was not deleted')
+    },
+
+    async assertOwnsBrand(userId, brandId) {
+      const { data, error } = await db
+        .from('businesses')
+        .select('id')
+        .eq('id', brandId)
+        .eq('owner_id', userId)
+        .maybeSingle()
+      if (error) throw error
+      return Boolean(data)
     },
   }
 }

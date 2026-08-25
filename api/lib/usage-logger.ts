@@ -49,6 +49,7 @@ export type FeatureType =
   | 'script_enhance'
   | 'script_hook'
   | 'script_consciousness'
+  | 'mcp_tool'
 
 export type UsageSource = 'mcp' | 'web' | 'cron'
 

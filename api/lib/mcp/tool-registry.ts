@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.8.2'
+export const MCP_REGISTRY_VERSION = '0.9.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -36,7 +36,8 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
 }> = {
   brand_workspace: {
     title: 'Brand Workspace',
-    summary: 'Brands, offers, brand kits — shared with the web app.',
+    summary:
+      'Brands, offers, and brand kits (CRUD + explicit business linking / PatchHouse) — shared with the web app.',
     defaultEnabled: true,
   },
   guide_studio: {
@@ -46,7 +47,8 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   },
   execute_studio: {
     title: 'Execute Studio',
-    summary: 'Advance-run scripts/images (credits + in-chat confirmation via confirm_execute).',
+    summary:
+      'Advance-run scripts/images (credits + in-chat confirm_execute). MCP caps: bulk ≤10, carousel ≤5 slides.',
     defaultEnabled: true,
   },
   library_sessions: {
@@ -86,7 +88,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'get_brand_context',
     group: 'brand_workspace',
     risk: 'read',
-    description: 'Get one brand with offers and brand kit for GUIDE or EXECUTE.',
+    description:
+      'Get one brand with offers and brand kit for GUIDE or EXECUTE. Optional brandKitId selects among linked kits.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -96,6 +99,53 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'read',
     description: 'List offers for an owned brand.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'list_brand_kits',
+    group: 'brand_workspace',
+    risk: 'read',
+    description: 'List brand kits (optionally filtered by brand). Free sync read.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'get_brand_kit',
+    group: 'brand_workspace',
+    risk: 'read',
+    description: 'Get one brand kit detail by kitId (voice, palette, refs, Style DNAs).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'create_brand_kit',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Create a brand kit linked to a brand (business_id). Free sync write — no Advance credits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'update_brand_kit',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description: 'Update brand kit fields (colors, voice, refs). Free sync write.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'link_brand_kit',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Link an unlinked kit to a brand (PatchHouse / business_id). Does not move kits between brands.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -335,6 +385,16 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     risk: 'delete',
     description:
       'Permanently delete a product/context/generated image after typed confirm + in-chat confirm_execute.',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'delete_brand_kit',
+    group: 'deletes',
+    risk: 'delete',
+    description:
+      'Permanently delete a brand kit after typed kit-name confirm + in-chat confirm_execute (no Advance credits).',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,

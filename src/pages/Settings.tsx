@@ -8,8 +8,8 @@ import Layout from '../components/Layout'
 import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info, Loader2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUsageLimits } from '../hooks/useUsageLimits'
-import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments } from '../services/database'
-import type { BrandKit, BrandKitFormData, Subscription, Payment } from '../types'
+import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments, getBusinesses, linkBrandKitToBusiness } from '../services/database'
+import type { BrandKit, BrandKitFormData, Subscription, Payment, Business } from '../types'
 import { CHANGELOG, ROADMAP, STATUS_ALERT, type ChangeCategory, type RoadmapStatus } from '../data/changelog'
 import { uploadBrandKitAsset } from '../services/imageStorage'
 import {
@@ -78,6 +78,9 @@ export function SettingsContent({
   const [bkReferenceImages, setBkReferenceImages] = useState<string[]>([])
   const [bkLogoUrl, setBkLogoUrl] = useState<string | null>(null)
   const [bkActive, setBkActive] = useState(true)
+  const [bkBusinessId, setBkBusinessId] = useState<string>('')
+  const [bkSetPrimaryForBusiness, setBkSetPrimaryForBusiness] = useState(true)
+  const [businesses, setBusinesses] = useState<Business[]>([])
   const [bkSaving, setBkSaving] = useState(false)
   const [bkAnalyzing, setBkAnalyzing] = useState(false)
   const [bkMessage, setBkMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -105,8 +108,12 @@ export function SettingsContent({
   const loadBrandKitsData = async () => {
     if (!user) return
     try {
-      const kits = await getBrandKits(user.id)
+      const [kits, biz] = await Promise.all([
+        getBrandKits(user.id),
+        getBusinesses(user.id),
+      ])
       setBrandKits(kits)
+      setBusinesses(biz)
     } catch (err) {
       console.warn('Failed to load brand kits:', err)
     }
@@ -153,6 +160,8 @@ export function SettingsContent({
     setBkReferenceImages([])
     setBkLogoUrl(null)
     setBkActive(true)
+    setBkBusinessId('')
+    setBkSetPrimaryForBusiness(true)
     setBkSection('identity')
     setBkMessage(null)
     setBkUrlInput('')
@@ -176,6 +185,8 @@ export function SettingsContent({
     setBkReferenceImages(kit.reference_images || [])
     setBkLogoUrl(kit.logo_url || null)
     setBkActive(kit.is_active)
+    setBkBusinessId(kit.business_id || '')
+    setBkSetPrimaryForBusiness(kit.is_primary_for_business !== false)
     setBkSection('identity')
     setBkMessage(null)
   }
@@ -300,12 +311,21 @@ export function SettingsContent({
         forbidden_phrases: bkForbidden,
         visual_style_notes: bkVisualStyleNotes || null,
         reference_images: bkReferenceImages,
-        is_active: bkActive
+        is_active: bkActive,
+        business_id: bkBusinessId || null,
       }
       if (editingKit) {
         await updateBrandKit(editingKit.id, data)
+        await linkBrandKitToBusiness(editingKit.id, bkBusinessId || null, {
+          setAsPrimary: Boolean(bkBusinessId) && bkSetPrimaryForBusiness,
+        })
       } else {
-        await createBrandKit(user.id, data)
+        const created = await createBrandKit(user.id, data)
+        if (bkBusinessId) {
+          await linkBrandKitToBusiness(created.id, bkBusinessId, {
+            setAsPrimary: bkSetPrimaryForBusiness,
+          })
+        }
       }
       await loadBrandKitsData()
       setShowEditor(false)
@@ -596,8 +616,8 @@ export function SettingsContent({
 
           <p className="text-xs text-dark-400 mb-4">
             {language === 'es'
-              ? 'Crea y gestiona múltiples Brand Kits. Selecciona cuál usar en cada workspace.'
-              : 'Create and manage multiple Brand Kits. Select which to use in each workspace.'}
+              ? 'Vinculá cada kit a una carpeta de marca (business). Eso es lo que usa Grok/MCP — “Principal” solo es el default de la cuenta.'
+              : 'Link each kit to a brand folder (business). That is what Grok/MCP uses — “Default” is only the account-wide Principal.'}
           </p>
 
           {/* Kit Cards Grid */}
@@ -639,7 +659,17 @@ export function SettingsContent({
                         {kit.is_default && (
                           <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full font-medium flex items-center gap-0.5">
                             <Sparkles className="w-2.5 h-2.5" />
-                            {language === 'es' ? 'Principal' : 'Default'}
+                            {language === 'es' ? 'Principal (cuenta)' : 'Account default'}
+                          </span>
+                        )}
+                        {kit.is_primary_for_business && kit.business_id && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-primary-100 text-primary-700 rounded-full font-medium">
+                            {language === 'es' ? 'Primary carpeta' : 'Folder primary'}
+                          </span>
+                        )}
+                        {!kit.business_id && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full font-medium">
+                            {language === 'es' ? 'Sin carpeta' : 'Unlinked'}
                           </span>
                         )}
                         {!kit.is_active && (
@@ -655,6 +685,11 @@ export function SettingsContent({
                             <div key={i} className="w-3.5 h-3.5 rounded-full border-2 border-white" style={{ backgroundColor: c || '#ccc' }} />
                           ))}
                         </div>
+                        {kit.business_id && (
+                          <span className="text-[10px] text-dark-500 truncate">
+                            → {businesses.find((b) => b.id === kit.business_id)?.name || kit.business_id.slice(0, 8)}
+                          </span>
+                        )}
                         {kit.tagline && <span className="text-[10px] text-dark-400 truncate">{kit.tagline}</span>}
                       </div>
                     </div>
@@ -760,6 +795,41 @@ export function SettingsContent({
                       {language === 'es' ? 'Nombre de Marca' : 'Brand Name'}
                     </label>
                     <input type="text" value={bkName} onChange={(e) => setBkName(e.target.value)} className="input-field" placeholder="My Brand" />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-dark-700 mb-1.5">
+                      {language === 'es' ? 'Carpeta de marca (MCP)' : 'Brand folder (MCP)'}
+                    </label>
+                    <select
+                      className="input-field"
+                      value={bkBusinessId}
+                      onChange={(e) => setBkBusinessId(e.target.value)}
+                    >
+                      <option value="">
+                        {language === 'es' ? '— Sin vincular —' : '— Unlinked —'}
+                      </option>
+                      {businesses.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-dark-400 mt-1">
+                      {language === 'es'
+                        ? 'Obligatorio para que Grok vea este kit en get_brand_context.'
+                        : 'Required for Grok to see this kit via get_brand_context.'}
+                    </p>
+                    {bkBusinessId && (
+                      <label className="mt-2 flex items-center gap-2 text-xs text-dark-600">
+                        <input
+                          type="checkbox"
+                          checked={bkSetPrimaryForBusiness}
+                          onChange={(e) => setBkSetPrimaryForBusiness(e.target.checked)}
+                        />
+                        {language === 'es'
+                          ? 'Usar como primary de esta carpeta'
+                          : 'Use as primary kit for this folder'}
+                      </label>
+                    )}
                   </div>
 
                   {/* Logo Upload */}

@@ -22,6 +22,7 @@ function scopeLines(scope: string | undefined): string[] {
       'Read your Advance brands and offers',
       'Read brand kit colors and voice',
       'Act as you inside Advance MCP tools you approve',
+      'If you are an Advance admin, ticket diagnostics and usage tools are available; Cursor is never auto-called',
     ]
   }
   return scope.split(/\s+/).filter(Boolean).map((item) => {

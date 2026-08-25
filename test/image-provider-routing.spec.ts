@@ -44,7 +44,7 @@ describe('grok edit helpers', () => {
 
 describe('mcp tool registry', () => {
   it('exposes versioned brand reads only by default (dual-mode guide/execute)', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.8\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.9\./)
     expect(listEnabledMcpTools().some((t) => t.name.startsWith('admin_'))).toBe(false)
     expect(listEnabledMcpTools({ isAdmin: true }).map((t) => t.name)).toEqual(
       expect.arrayContaining([

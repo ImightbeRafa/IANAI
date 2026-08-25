@@ -891,6 +891,8 @@ export interface BrandKit {
   }>
   is_active: boolean
   is_default: boolean
+  /** When true, this kit is the default for the linked brand folder (MCP/web resolution). */
+  is_primary_for_business?: boolean
   client_id: string | null
   business_id?: string | null
   created_at: string
@@ -916,6 +918,7 @@ export interface BrandKitFormData {
   reference_images?: string[]
   is_active?: boolean
   is_default?: boolean
+  is_primary_for_business?: boolean
   client_id?: string | null
   business_id?: string | null
 }
