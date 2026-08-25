@@ -6,8 +6,11 @@ import {
 import { mcpConfirmExecute } from '../api/lib/mcp/confirm-execute'
 import {
   mcpExecuteCarouselGenerate,
+  mcpExecuteImageGenerate,
+  mcpExecuteScriptGenerate,
   resolveMcpSourceImage,
 } from '../api/lib/mcp/execute-tools'
+import { mcpGuideImage, mcpGuideScript } from '../api/lib/mcp/guide-packs'
 import type { McpArtifactStore } from '../api/lib/mcp/artifact-store'
 import type { McpDbClient } from '../api/lib/mcp/user-tools'
 
@@ -48,8 +51,15 @@ function artifactStore(): McpArtifactStore {
     async linkExistingProductImage() {
       return { messageId: 'm1', productImageId: 'img-existing', imageUrl: 'https://cdn.example/existing.jpg' }
     },
-    async getOwnedProductImage() {
-      return null
+    async getOwnedProductImage({ imageId }) {
+      return imageId === 'img-product'
+        ? {
+            id: imageId,
+            imageUrl: 'https://cdn.example/product.webp',
+            offerId: 'o1',
+            kind: 'product',
+          }
+        : null
     },
     async getOwnedScript({ scriptId }) {
       return scriptId === 'script-1'
@@ -153,5 +163,93 @@ describe('CreativeDirector MCP must-haves', () => {
       angleIds: ['angle-2', 'angle-4'],
       aspectRatio: '4:5',
     })
+  })
+
+  it('binds existing script and image settings plus guidePrompt before approval', async () => {
+    const scriptApprovals = createMemoryMcpApprovalStore()
+    const scriptResult = await mcpExecuteScriptGenerate({
+      db,
+      approvalStore: scriptApprovals,
+      artifactStore: artifactStore(),
+      user: { id: 'u1' },
+      args: {
+        brandId: 'b1',
+        framework: 'educativo',
+        variations: 3,
+        generationMode: 'mixed',
+        ctaStrength: 'soft',
+        buyerStage: 'warm',
+        language: 'en',
+        guidePrompt: 'Lead with a practical checklist.',
+      },
+    })
+    const scriptRecord = await scriptApprovals.findById(String(scriptResult.approvalRequestId))
+    expect(scriptRecord?.inputJson).toMatchObject({
+      framework: 'educativo',
+      variations: 3,
+      generationMode: 'mixed',
+      ctaStrength: 'soft',
+      buyerStage: 'warm',
+      language: 'en',
+      guidePrompt: 'Lead with a practical checklist.',
+    })
+
+    const imageApprovals = createMemoryMcpApprovalStore()
+    const imageResult = await mcpExecuteImageGenerate({
+      db,
+      approvalStore: imageApprovals,
+      artifactStore: artifactStore(),
+      user: { id: 'u1' },
+      args: {
+        brandId: 'b1',
+        productImageId: 'img-product',
+        scene: 'Bright kitchen counter',
+        aspectRatio: '4:5',
+        imageModel: 'grok-imagine',
+        guidePrompt: 'Keep packaging text legible.',
+      },
+    })
+    const imageRecord = await imageApprovals.findById(String(imageResult.approvalRequestId))
+    expect(imageRecord?.inputJson).toMatchObject({
+      productImageId: 'img-product',
+      referenceImageIds: ['img-product'],
+      scene: 'Bright kitchen counter',
+      aspectRatio: '4:5',
+      imageModel: 'grok-imagine',
+      guidePrompt: 'Keep packaging text legible.',
+    })
+  })
+
+  it('includes known offer price and do-not-claim guidance, with product refs before logo', async () => {
+    const guideDb: McpDbClient = {
+      ...db,
+      async getBrandKitForBrand() {
+        return {
+          id: 'k1',
+          name: 'Kit',
+          logoUrl: 'https://cdn.example/logo.png',
+          forbiddenPhrases: ['guaranteed cure'],
+        }
+      },
+      async listOfferReferenceImages() {
+        return ['https://cdn.example/product.webp']
+      },
+    }
+    const script = await mcpGuideScript(guideDb, { id: 'u1' }, {
+      brandId: 'b1',
+      language: 'en',
+    })
+    expect(script).toMatchObject({
+      price: '$29',
+      doNotClaim: ['guaranteed cure'],
+    })
+    expect(String(script.prompt)).toContain('Known price: $29')
+    expect(String(script.prompt)).toContain('Do not claim: guaranteed cure')
+
+    const image = await mcpGuideImage(guideDb, { id: 'u1' }, { brandId: 'b1' })
+    expect(image.referenceUrls).toEqual([
+      'https://cdn.example/product.webp',
+      'https://cdn.example/logo.png',
+    ])
   })
 })

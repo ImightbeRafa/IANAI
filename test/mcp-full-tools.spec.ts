@@ -128,6 +128,10 @@ describe('mcp 0.8 remaining tools', () => {
       { required: ['scriptId'] },
       { required: ['scriptContent'] },
     ])
+    expect(schemaByName.execute_bulk_scripts.properties).not.toHaveProperty('imageModel')
+    expect(schemaByName.execute_bulk_scripts.properties).not.toHaveProperty('aspectRatio')
+    expect(schemaByName.execute_bulk_posts.properties).toHaveProperty('scene')
+    expect(schemaByName.execute_bulk_posts.properties).toHaveProperty('aspectRatio')
     expect(schemaByName.delete_brand.required).toEqual(expect.arrayContaining(['brandId', 'confirm']))
     expect(schemaByName.delete_asset.required).toEqual(expect.arrayContaining(['brandId', 'confirm']))
     expect(JSON.stringify(schemaByName.archive_brand.properties)).toContain('confirm')
