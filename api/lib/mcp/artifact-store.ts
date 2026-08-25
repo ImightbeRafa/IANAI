@@ -89,6 +89,13 @@ export type McpArtifactStore = {
     brandId: string
     scriptId: string
   }) => Promise<McpOwnedScript | null>
+  listOwnedScripts: (options: {
+    userId: string
+    brandId: string
+    offerId?: string
+    sessionId?: string
+    limit?: number
+  }) => Promise<Array<McpOwnedScript & { createdAt?: string | null }>>
   listLatestGeneratedImage: (options: {
     userId: string
     brandId: string
@@ -502,6 +509,60 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         offerId: (data.product_id as string | null) ?? null,
         sessionId: (data.session_id as string | null) ?? null,
       }
+    },
+
+    async listOwnedScripts(options) {
+      const limit = Math.min(Math.max(options.limit ?? 25, 1), 50)
+      let productQuery = db
+        .from('products')
+        .select('id')
+        .eq('business_id', options.brandId)
+        .eq('owner_id', options.userId)
+      if (options.offerId) productQuery = productQuery.eq('id', options.offerId)
+      const { data: products, error: productErr } = await productQuery
+      if (productErr) throw productErr
+      const offerIds = (products || []).map((row) => row.id as string)
+
+      let query = db
+        .from('scripts')
+        .select('id, content, title, product_id, session_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+
+      if (options.sessionId) {
+        query = query.eq('session_id', options.sessionId)
+      } else if (options.offerId) {
+        if (!offerIds.length) return []
+        query = query.eq('product_id', options.offerId)
+      } else if (offerIds.length) {
+        query = query.in('product_id', offerIds)
+      } else {
+        return []
+      }
+
+      const { data, error } = await query
+      if (error) throw error
+
+      const rows = data || []
+      if (options.sessionId) {
+        const { data: session } = await db
+          .from('chat_sessions')
+          .select('id')
+          .eq('id', options.sessionId)
+          .eq('business_id', options.brandId)
+          .eq('user_id', options.userId)
+          .maybeSingle()
+        if (!session) return []
+      }
+
+      return rows.map((row) => ({
+        id: row.id as string,
+        content: String(row.content || ''),
+        title: (row.title as string | null) ?? null,
+        offerId: (row.product_id as string | null) ?? null,
+        sessionId: (row.session_id as string | null) ?? null,
+        createdAt: (row.created_at as string | null) ?? null,
+      }))
     },
 
     async listLatestGeneratedImage(options) {

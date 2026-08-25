@@ -12,8 +12,10 @@ function ctaDirection(strength: CTAStrength, channel?: SalesChannel): string {
 }
 
 function defaultFacts(candidate: AngleCandidate): string[] {
-  const facts = [...candidate.proofToUse, ...candidate.logisticsToUse].filter(Boolean)
-  return facts.length > 0 ? facts.slice(0, 5) : ['[DATO CONCRETO]', '[PRUEBA]', '[LOGISTICA]', '[DIFERENCIADOR]']
+  const facts = [...candidate.proofToUse, ...candidate.logisticsToUse]
+    .filter(Boolean)
+    .filter((fact) => !fact.includes('['))
+  return facts.slice(0, 5)
 }
 
 export function selectScriptBriefs(
@@ -46,8 +48,8 @@ export function selectScriptBriefs(
         buyerStage: selected.length % 3 === 0 ? 'cold' : selected.length % 3 === 1 ? 'warm' : 'hot',
         audienceSegment: 'primary audience',
         coreDoubt: 'why this is worth buying',
-        proofToUse: ['[PRUEBA CONCRETA]'],
-        logisticsToUse: ['[LOGISTICA]'],
+        proofToUse: [],
+        logisticsToUse: [],
         hookDraft: '',
         whyItCouldWin: 'fallback brief',
         score: 5,
@@ -66,14 +68,16 @@ export function selectScriptBriefs(
       openingPromise: chosen.hookDraft || chosen.coreDoubt,
       developmentBeats: [
         `Resolve doubt: ${chosen.coreDoubt}`,
-        `Use proof: ${chosen.proofToUse.join(' | ') || '[PRUEBA]'}`,
-        `Use logistics: ${chosen.logisticsToUse.join(' | ') || '[LOGISTICA]'}`,
+        `Use proof: ${chosen.proofToUse.filter((f) => !f.includes('[')).join(' | ') || 'only proven offer facts'}`,
+        `Use logistics: ${chosen.logisticsToUse.filter((f) => !f.includes('[')).join(' | ') || 'only proven logistics'}`,
       ],
       mustIncludeFacts: defaultFacts(chosen),
       mustAvoid: [
         'generic filler: alta calidad, mejor opcion, rapido y facil, solucion ideal',
         'invented prices, claims, quantities, cases, locations, dishes, guarantees',
         'same hook mechanism as another script in this batch',
+        'unresolved bracket placeholders like [PRECIO EXACTO] or [DIFERENCIADOR TANGIBLE]',
+        'internal enums as sales copy: economico, medio, premium, opción económica',
       ],
       cta: {
         strength: ctaStrength,

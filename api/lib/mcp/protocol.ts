@@ -68,7 +68,7 @@ import { auditMcpToolCall } from './tool-audit.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.9.3',
+  version: '0.9.4',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -141,6 +141,17 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'list_offers':
     case 'guide_brand_pack':
       return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'list_brands':
+      return {
+        type: 'object',
+        properties: {
+          includeIncomplete: {
+            type: 'boolean',
+            description: 'When true, include brands without a ready brand kit. Default false.',
+          },
+        },
+        additionalProperties: false,
+      }
     case 'list_assets':
       return {
         type: 'object',
@@ -148,6 +159,18 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ...brand,
           offerId: { type: 'string' },
           kind: { type: 'string', enum: ['product', 'context', 'generated'] },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'list_scripts':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string' },
+          sessionId: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 50 },
         },
         required: ['brandId'],
         additionalProperties: false,
@@ -166,9 +189,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
         type: 'object',
         properties: {
           kitId: { type: 'string' },
-          brandId: { type: 'string' },
+          brandId: { type: 'string', description: 'When kitId is omitted, resolves the primary kit for this brand.' },
         },
-        required: ['kitId'],
         additionalProperties: false,
       }
     case 'create_brand_kit':
@@ -246,9 +268,14 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           scene: { type: 'string' },
           aspectRatio: { type: 'string' },
+          aspectRatioFallback: {
+            type: 'boolean',
+            description: 'Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed.',
+          },
           imageModel: { type: 'string', enum: ['grok-imagine'] },
           productImageId: { type: 'string' },
-          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 3 },
+          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+          referenceMode: { type: 'string', enum: ['use', 'none'] },
           guidePrompt: { type: 'string' },
           sessionId: { type: 'string' },
           approvalRequestId: { type: 'string' },
@@ -738,9 +765,11 @@ async function dispatchEnabledTool(options: {
   switch (options.name) {
     case 'list_brands':
       return {
-        brands: await mcpListBrands(options.db, options.user),
+        brands: await mcpListBrands(options.db, options.user, {
+          includeIncomplete: options.args.includeIncomplete === true,
+        }),
         defaultOfferPolicy:
-          'defaultOfferId is the first owned offer; defaultOfferResolution reports whether a resolved brand kit is available. Duplicate names are never merged or deleted—select by id.',
+          'Always select by brandId (never by name). Default list hides kitReady:false; pass includeIncomplete:true for the full list. Duplicate names are never merged or deleted.',
       }
     case 'list_offers': {
       if (!brandId) throw new Error('brandId is required')
@@ -774,6 +803,33 @@ async function dispatchEnabledTool(options: {
           kind: asset.kind,
           label: asset.label || null,
           createdAt: asset.createdAt || null,
+        })),
+      }
+    }
+    case 'list_scripts': {
+      if (!brandId) throw new Error('brandId is required')
+      if (!options.artifactStore) throw new Error('Artifact store not configured')
+      const brand = await options.db.getBusinessForUser(options.user.id, brandId)
+      if (!brand) throw new Error('Brand not found')
+      const scripts = await options.artifactStore.listOwnedScripts({
+        userId: options.user.id,
+        brandId,
+        offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
+        sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
+        limit: typeof options.args.limit === 'number' ? options.args.limit : undefined,
+      })
+      return {
+        brandId,
+        offerId: typeof options.args.offerId === 'string' ? options.args.offerId : null,
+        sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : null,
+        scripts: scripts.map((script) => ({
+          id: script.id,
+          scriptId: script.id,
+          title: script.title,
+          content: script.content,
+          offerId: script.offerId,
+          sessionId: script.sessionId,
+          createdAt: script.createdAt || null,
         })),
       }
     }
@@ -846,7 +902,7 @@ async function dispatchEnabledTool(options: {
         offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
         scene: typeof options.args.scene === 'string' ? options.args.scene : undefined,
         aspectRatio: typeof options.args.aspectRatio === 'string' ? options.args.aspectRatio : undefined,
-      })
+      }, options.artifactStore)
     case 'workspace_save_url_context': {
       if (!options.urlIntakeStore) throw new Error('URL intake store not configured')
       return saveMcpUrlContext({

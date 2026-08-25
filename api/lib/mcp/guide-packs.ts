@@ -116,7 +116,13 @@ export async function mcpGuideImage(
     offerId?: string
     scene?: string
     aspectRatio?: string
-  }
+  },
+  artifactStore?: { listOwnedAssets: (opts: {
+    userId: string
+    brandId: string
+    offerId?: string
+    kind?: 'product' | 'context' | 'generated'
+  }) => Promise<Array<{ id: string; kind?: string | null; label?: string | null; imageUrl: string }>> } | null
 ): Promise<Record<string, unknown>> {
   const ctx = await mcpGetBrandContext(db, user, args.brandId)
   const offer = args.offerId
@@ -124,15 +130,23 @@ export async function mcpGuideImage(
     : ctx.offers[0]
   const aspectRatio = args.aspectRatio || '9:16'
   const scene = (args.scene || 'lifestyle product hero, natural light, premium but real').trim()
-  const offerRefs = offer && db.listOfferReferenceImages
-    ? await db.listOfferReferenceImages(user.id, args.brandId, offer.id)
+  const productAssets = artifactStore && offer
+    ? await artifactStore.listOwnedAssets({
+      userId: user.id,
+      brandId: args.brandId,
+      offerId: offer.id,
+      kind: 'product',
+    })
     : []
-  const refs = [
-    ...offerRefs,
-    ctx.brandKit?.logoUrl,
-    ...(ctx.brandKit?.referenceImages || []),
-  ].filter(Boolean).slice(0, 5)
-
+  const contextAssets = artifactStore && offer
+    ? await artifactStore.listOwnedAssets({
+      userId: user.id,
+      brandId: args.brandId,
+      offerId: offer.id,
+      kind: 'context',
+    })
+    : []
+  const needsProductConfirm = productAssets.length === 0
   const prompt = [
     `Photoreal lifestyle ad still for ${ctx.brand.name}`,
     offer ? `featuring ${offer.name}` : '',
@@ -145,16 +159,29 @@ export async function mcpGuideImage(
   return {
     mode: 'GUIDE',
     consumesAdvanceCredits: false,
-    instruction: 'Use YOUR Grok Imagine with this prompt + refs. Do not call Advance execute_*. After generating outside Advance, call workspace_note_generated_outside (no binary upload).',
+    instruction: needsProductConfirm
+      ? 'STOP: no product reference images. Ask the user to attach a product shot (workspace_save_artifact kind=product + https URL, or /chat?intake=asset) or pick from list_assets. Do NOT call execute_image_generate until productImageId/referenceImageIds are confirmed.'
+      : 'Present the proposed product/scene/style refs + aspect/density/style to the user. After they confirm ids, call execute_image_generate with those exact referenceImageIds (do not silently add kit logo refs).',
     brandId: ctx.brand.id,
     offerId: offer?.id || null,
     aspectRatio,
+    aspectRatioNote:
+      aspectRatio === '4:5'
+        ? 'Grok Imagine does not natively support 4:5 — EXECUTE will fail unless aspectRatioFallback:true (maps to 3:4) or user picks 9:16 / 1:1 / 3:4.'
+        : 'Pass this exact aspectRatio to execute_image_generate.',
     prompt,
-    referenceUrls: refs,
+    clarify: {
+      needed: true,
+      steps: ['confirm product refs', 'optional scene/style refs', 'aspect', 'text density', 'post style'],
+      productRefs: productAssets.map((a) => ({ id: a.id, imageUrl: a.imageUrl, kind: 'product', label: a.label || null })),
+      contextRefs: contextAssets.map((a) => ({ id: a.id, imageUrl: a.imageUrl, kind: 'context', label: a.label || null })),
+      needsProductAttach: needsProductConfirm,
+    },
     fidelityRules: [
-      'Prefer real product/lifestyle photography look',
-      'Do not invent brand marks not in refs',
-      'Keep aspect ratio exact',
+      'Require at least one kind=product ref for product/ad posts',
+      'Confirm exact referenceImageIds — never silent-union kit logos',
+      'Keep aspect ratio exact (or fail closed)',
+      'Match brand kit palette / voice',
     ],
   }
 }

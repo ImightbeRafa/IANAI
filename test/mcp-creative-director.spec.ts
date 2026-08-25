@@ -72,6 +72,16 @@ function artifactStore(): McpArtifactStore {
           }
         : null
     },
+    async listOwnedScripts() {
+      return [{
+        id: 'script-1',
+        content: 'Hook\nDevelopment\nCTA',
+        title: 'Owned script',
+        offerId: 'o1',
+        sessionId: 's1',
+        createdAt: null,
+      }]
+    },
     async listLatestGeneratedImage() {
       return {
         id: 'img-latest',
@@ -81,8 +91,16 @@ function artifactStore(): McpArtifactStore {
         createdAt: '2026-08-25T01:00:00.000Z',
       }
     },
-    async listOwnedAssets() {
-      return []
+    async listOwnedAssets(options) {
+      if (options.kind === 'generated') return []
+      return [{
+        id: 'img-product',
+        imageUrl: 'https://cdn.example/product.jpg',
+        offerId: 'o1',
+        kind: 'product',
+        label: 'Front',
+        createdAt: '2026-08-25T00:00:00.000Z',
+      }]
     },
     async saveCarouselSlides() {
       return []
@@ -102,6 +120,7 @@ describe('CreativeDirector MCP must-haves', () => {
         brandId: 'b1',
         scriptId: 'script-1',
         slideCount: 5,
+        productImageId: 'img-product',
       },
     })
     expect(result.status).toBe('approval_required')
@@ -112,6 +131,7 @@ describe('CreativeDirector MCP must-haves', () => {
       scriptId: 'script-1',
       scriptContent: 'Hook\nDevelopment\nCTA',
       slideCount: 5,
+      productImageId: 'img-product',
     })
 
     await expect(mcpExecuteCarouselGenerate({
@@ -123,6 +143,7 @@ describe('CreativeDirector MCP must-haves', () => {
         brandId: 'b1',
         scriptId: 'script-1',
         slideCount: 6,
+        productImageId: 'img-product',
       },
     })).rejects.toThrow(/slideCount/i)
   })
@@ -205,6 +226,7 @@ describe('CreativeDirector MCP must-haves', () => {
         productImageId: 'img-product',
         scene: 'Bright kitchen counter',
         aspectRatio: '4:5',
+        aspectRatioFallback: true,
         imageModel: 'grok-imagine',
         guidePrompt: 'Keep packaging text legible.',
       },
@@ -215,12 +237,13 @@ describe('CreativeDirector MCP must-haves', () => {
       referenceImageIds: ['img-product'],
       scene: 'Bright kitchen counter',
       aspectRatio: '4:5',
+      aspectRatioFallback: true,
       imageModel: 'grok-imagine',
       guidePrompt: 'Keep packaging text legible.',
     })
   })
 
-  it('includes known offer price and do-not-claim guidance, with product refs before logo', async () => {
+  it('includes known offer price and do-not-claim guidance, with product-ref clarify board', async () => {
     const guideDb: McpDbClient = {
       ...db,
       async getBrandKitForBrand() {
@@ -246,10 +269,12 @@ describe('CreativeDirector MCP must-haves', () => {
     expect(String(script.prompt)).toContain('Known price: $29')
     expect(String(script.prompt)).toContain('Do not claim: guaranteed cure')
 
-    const image = await mcpGuideImage(guideDb, { id: 'u1' }, { brandId: 'b1' })
-    expect(image.referenceUrls).toEqual([
-      'https://cdn.example/product.webp',
-      'https://cdn.example/logo.png',
-    ])
+    const image = await mcpGuideImage(guideDb, { id: 'u1' }, { brandId: 'b1' }, artifactStore())
+    expect(image.clarify).toMatchObject({
+      needed: true,
+      needsProductAttach: false,
+    })
+    expect((image.clarify as { productRefs: Array<{ id: string }> }).productRefs[0]?.id).toBe('img-product')
+    expect(String(image.instruction)).toMatch(/confirm/i)
   })
 })

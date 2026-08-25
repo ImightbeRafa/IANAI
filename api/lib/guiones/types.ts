@@ -79,6 +79,8 @@ export interface ProductContextLike {
   has_guarantee?: boolean
   guarantee_details?: string
   price_range?: string
+  /** Exact sticker price when known (e.g. ₡9.900). Never an enum bucket. */
+  exact_price?: string
   stock_limited?: boolean
   main_problem?: string
   differentiation?: string
@@ -218,6 +220,8 @@ export interface ScriptQualityReport {
   repetitionRisk: number
   inventedClaimRisk: number
   genericPhrases: string[]
+  unresolvedPlaceholders?: string[]
+  forbiddenPhrases?: string[]
   repairInstruction?: string
 }
 

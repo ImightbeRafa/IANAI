@@ -1,11 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   isCampaignCheckpoint,
   isCampaignChunkLeasable,
+  MCP_CAMPAIGN_MAX_STALE_RECLAIMS,
   resumeMcpCampaignPack,
 } from '../api/lib/mcp/bulk-tools'
 import { createMemoryMcpApprovalStore, type McpApprovalRecord } from '../api/lib/mcp/approval'
-import { MCP_EXECUTE_STALE_MS } from '../api/lib/mcp/execute-job'
+import {
+  MCP_EXECUTE_STALE_MS,
+  setMcpExecuteScheduler,
+} from '../api/lib/mcp/execute-job'
 
 function checkpoint(overrides: Record<string, unknown> = {}) {
   return {
@@ -17,6 +21,7 @@ function checkpoint(overrides: Record<string, unknown> = {}) {
     chunkState: 'ready',
     phase: 'scripts',
     nextIndex: 0,
+    reclaimCount: 0,
     quotedCreditCost: 36,
     chargedCredits: 0,
     usage: { quotedCredits: 36, chargedCredits: 0 },
@@ -32,6 +37,12 @@ function checkpoint(overrides: Record<string, unknown> = {}) {
 }
 
 describe('durable campaign chunk leases', () => {
+  afterEach(() => {
+    setMcpExecuteScheduler((work) => {
+      void work().catch(() => {})
+    })
+  })
+
   it('leases a persisted ready chunk immediately', () => {
     expect(isCampaignCheckpoint(checkpoint())).toBe(true)
     expect(isCampaignChunkLeasable(checkpoint(), 10_001)).toBe(true)
@@ -69,8 +80,35 @@ describe('durable campaign chunk leases', () => {
     jobId: 'approval-1',
   }
 
-  it('a leased chunk runs inline and persists either a script checkpoint or failure', async () => {
+  it('schedules a leased chunk off-request and persists the checkpoint without awaiting generate', async () => {
     const store = await stored(checkpoint())
+    let scheduled = 0
+    let runStarted = false
+    setMcpExecuteScheduler((work) => {
+      scheduled += 1
+      // Do not run work inline — proves resume returns without awaiting generate.
+      void work
+    })
+    await resumeMcpCampaignPack({
+      ...dependencies,
+      approvalStore: store,
+      runChunk: async () => {
+        runStarted = true
+      },
+    })
+    expect(scheduled).toBe(1)
+    expect(runStarted).toBe(false)
+    expect((await store.findById('approval-1'))?.resultJson).toMatchObject({
+      chunkState: 'working',
+      reclaimCount: 0,
+    })
+  })
+
+  it('a scheduled chunk persists either a script checkpoint or failure when work runs', async () => {
+    const store = await stored(checkpoint())
+    setMcpExecuteScheduler((work) => {
+      void work()
+    })
     await resumeMcpCampaignPack({
       ...dependencies,
       approvalStore: store,
@@ -82,26 +120,34 @@ describe('durable campaign chunk leases', () => {
             ...leased,
             chunkState: 'ready',
             nextIndex: 1,
-            scripts: [{ angleId: 'a1', scriptId: 'script-1', charged: 3 }],
+            scripts: [{ angleId: 'a1', scriptId: 'script-1', content: 'full script', charged: 3 }],
+            chargedCredits: 3,
           },
           leased.startedAtMs + 1
         )
       },
     })
+    // Allow microtask flush for scheduled work
+    await Promise.resolve()
+    await Promise.resolve()
     const result = (await store.findById('approval-1'))?.resultJson
-    expect(result).toMatchObject({ chunkState: 'ready', nextIndex: 1 })
+    expect(result).toMatchObject({ chunkState: 'ready', nextIndex: 1, chargedCredits: 3 })
     expect((result as { scripts: unknown[] }).scripts).toHaveLength(1)
   })
 
-  it('reclaims a stale lease and retries generation instead of no-op', async () => {
-    const stale = checkpoint({ chunkState: 'working', startedAtMs: 1 })
+  it('reclaims a stale lease and reschedules generation', async () => {
+    const stale = checkpoint({ chunkState: 'working', startedAtMs: 1, reclaimCount: 0 })
     const store = await stored(stale)
     let runs = 0
+    setMcpExecuteScheduler((work) => {
+      void work()
+    })
     await resumeMcpCampaignPack({
       ...dependencies,
       approvalStore: store,
       runChunk: async ({ approvalStore, checkpoint: leased }) => {
         runs += 1
+        expect(leased.reclaimCount).toBe(1)
         await approvalStore.compareAndSwapRunningResult?.(
           leased.approvalRequestId,
           leased.startedAtMs,
@@ -110,6 +156,8 @@ describe('durable campaign chunk leases', () => {
         )
       },
     })
+    await Promise.resolve()
+    await Promise.resolve()
     expect(runs).toBe(1)
     expect((await store.findById('approval-1'))?.resultJson).toMatchObject({
       status: 'failed',
@@ -117,9 +165,36 @@ describe('durable campaign chunk leases', () => {
     })
   })
 
+  it('terminal-fails after too many stale reclaim attempts', async () => {
+    const stale = checkpoint({
+      chunkState: 'working',
+      startedAtMs: 1,
+      reclaimCount: MCP_CAMPAIGN_MAX_STALE_RECLAIMS,
+    })
+    const store = await stored(stale)
+    let runs = 0
+    setMcpExecuteScheduler((work) => {
+      void work()
+    })
+    await resumeMcpCampaignPack({
+      ...dependencies,
+      approvalStore: store,
+      runChunk: async () => {
+        runs += 1
+      },
+    })
+    expect(runs).toBe(0)
+    expect((await store.findById('approval-1'))?.resultJson).toMatchObject({
+      status: 'failed',
+    })
+  })
+
   it('does not clobber a completed result while attempting to lease', async () => {
     const store = await stored({ ...checkpoint(), status: 'completed' })
     let runs = 0
+    setMcpExecuteScheduler((work) => {
+      void work()
+    })
     await resumeMcpCampaignPack({
       ...dependencies,
       approvalStore: store,

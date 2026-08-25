@@ -29,15 +29,31 @@ Auth: `Authorization: Bearer <Supabase user access token>`.
 
 Enabled tools now:
 
-**Reads:** `list_brands`, `get_brand_context` (optional `brandKitId`), `list_offers`, `list_brand_kits`, `get_brand_kit`
+**Reads:** `list_brands` (default hides `kitReady:false`; `includeIncomplete:true` for full list — always select by `brandId`), `get_brand_context` (optional `brandKitId`), `list_offers`, `list_assets`, **`list_scripts`** (full `content`), `list_brand_kits`, `get_brand_kit` (`kitId` **or** `brandId` → primary kit)
 
 **Brand kits (sync write, no credits):** `create_brand_kit`, `update_brand_kit`, `link_brand_kit` (PatchHouse / explicit `business_id`; no cross-brand moves). `delete_brand_kit` requires typed name + in-chat `confirm_execute`.
 
-**GUIDE (no Advance credits):** `guide_script`, `guide_image`, `guide_brand_pack`, `guide_bulk_angles`
+**GUIDE (no Advance credits):** `guide_script`, `guide_image` (clarify board for product/scene refs — do not quote EXECUTE until confirmed), `guide_brand_pack`, `guide_bulk_angles`
 
-**Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`, `workspace_save_artifact`
+**Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`, `workspace_save_artifact` (`kind=product|context` + https URL for product-shot ingest)
 
-**EXECUTE (credits + in-chat approval):** `confirm_execute`, `get_execute_result`, `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack`, edit/enhance/carousel — first call returns `status: approval_required` with `userPrompt` (Grok shows this in chat; do **not** lead with a raw URL). After the user says yes, call `confirm_execute` then retry with `approvalRequestId`. **Script/image EXECUTE** return `status: running` + `jobId` immediately (background `waitUntil`); poll `get_execute_result` until `completed` (script text / `imageUrl`). Campaign packs run one leased artifact inline on the initial execute and on each poll, then CAS-persist the next checkpoint or a real chunk error before responding; stale leases retry the same artifact without allowing a late worker to clobber a terminal result. Running messages identify `script N/total` or `image N/total`. Completed packs contain script text and stored JPEG HTTPS URLs, never base64. Same `approvalRequestId` and stable per-artifact generation UUIDs prevent double charge. `chargedCredits` is always a number. Optional `optionalAdvancePage` exists only as fallback. Auto-saves to a chat session/library. **MCP caps:** bulk `count` ≤ 10; carousel `slideCount` ≤ 5. Host `maxDuration` for `/api/mcp` is **180s**.
+**EXECUTE (credits + in-chat approval):** `confirm_execute`, `get_execute_result`, `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack`, edit/enhance/carousel — first call returns `status: approval_required` with `userPrompt` (Grok shows this in chat; do **not** lead with a raw URL). After the user says yes, call `confirm_execute` then retry with `approvalRequestId`. **Script/image/bulk/carousel EXECUTE** return `status: running` + `jobId` immediately (background `waitUntil`); poll `get_execute_result` until `completed` (script text / `imageUrl` / slides). **Campaign packs** also schedule chunks off-request: poll is cheap (seconds) with `script N/total` / `image N/total` + partial scripts/posts; generate runs in `waitUntil` + CAS. Stale leases reclaim up to 3 times then terminal-fail. Image/post/pack/carousel **require confirmed product refs** (`productImageId` / `referenceImageIds`) unless `referenceMode:"none"`. Grok `aspectRatio` is fail-closed (no silent `4:5`→`3:4`; opt-in `aspectRatioFallback`). Bulk scripts return full `content`. Carousel returns per-slide `headline`/`body`/`copy` + `imageUrl`; preview binds billed slide count. Same `approvalRequestId` and stable per-artifact generation UUIDs prevent double charge. `chargedCredits` is always a number. **MCP caps:** bulk `count` ≤ 10; carousel `slideCount` ≤ 5. Host `maxDuration` for `/api/mcp` is **180s**. Registry **0.9.4**.
+
+**Style DNA:** `list_style_dnas`, `set_style_dna` — JSON on `brand_kits.style_dnas` (`organic` | `ads`). Bulk posts accept `styleDnaId`.
+
+**Admin (JWT admin only):** compact `admin_list_tickets` / `admin_get_ticket` / `admin_update_ticket` / `admin_get_usage` / `admin_request_cursor_fix` (scrubbed brief; Cursor is never auto-called).
+
+Every `tools/call` is audited via `auditMcpToolCall` (`source=mcp`, lane from tool risk).
+
+Registry / server version: **0.9.4**.
+
+ChatShell shares the same libs via `POST /api/bulk-angles`, `/api/bulk-scripts`, `/api/bulk-posts`, `/api/bulk-campaign`.
+
+### Chat-shell parity ladder (Grok must mirror)
+1. Script clarify → GENERATE with full offer facts + brand voice (exact price e.g. ₡9.900; no `[PRECIO EXACTO]` / enum leaks)
+2. Optional hook/enhance edits
+3. Post: pick script → confirm product + scene/style refs → style/aspect/density → GENERATE
+4. Credit `confirm_execute` is **in addition to** product confirms — never instead of them
 
 **Style DNA:** `list_style_dnas`, `set_style_dna` — JSON on `brand_kits.style_dnas` (`organic` | `ads`). Bulk posts accept `styleDnaId`.
 

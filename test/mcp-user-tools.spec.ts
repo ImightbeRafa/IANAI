@@ -61,12 +61,14 @@ describe('mcp user read tools', () => {
         return null
       },
     }
-    const brands = await mcpListBrands(duplicateDb, { id: 'user-a' })
+    const brands = await mcpListBrands(duplicateDb, { id: 'user-a' }, { includeIncomplete: true })
     expect(brands[0]).toMatchObject({
       siblingBrandIds: ['b2'],
       nameCollisionWarning: expect.stringContaining('Duplicate brand name'),
     })
     expect(brands[1]).toMatchObject({ siblingBrandIds: ['b1'] })
+    const readyOnly = await mcpListBrands(duplicateDb, { id: 'user-a' })
+    expect(readyOnly).toHaveLength(0)
   })
 
   it('returns brand context for an owned brand and denies others', async () => {

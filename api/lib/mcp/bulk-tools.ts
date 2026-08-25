@@ -43,6 +43,7 @@ import {
   withStatusMessage,
 } from './execute-job.js'
 import { assertMcpBulkCount } from './limits.js'
+import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 
 function resolveOfferId(
@@ -434,6 +435,7 @@ export async function mcpExecuteBulkScripts(options: {
             items: result.items.map((item) => ({
               angleId: item.angleId,
               title: item.title,
+              content: item.content,
               scriptId: item.scriptId,
               messageId: item.messageId,
               charged: item.charged,
@@ -472,6 +474,7 @@ export async function mcpExecuteBulkScripts(options: {
         items: result.items.map((item) => ({
           angleId: item.angleId,
           title: item.title,
+          content: item.content,
           scriptId: item.scriptId,
           messageId: item.messageId,
           charged: item.charged,
@@ -530,10 +533,21 @@ export async function mcpExecuteBulkPosts(options: {
   const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
   const styleDnaId = typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
+  const referenceMode = parseReferenceMode(args.referenceMode) || 'use'
+  const confirmedRefIds = Array.isArray(args.referenceImageIds)
+    ? args.referenceImageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    : []
+  assertProductReferenceGate({
+    toolName: 'execute_bulk_posts',
+    productRefCount: existingRefs.length,
+    referenceMode,
+    referenceImageIds: confirmedRefIds,
+    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
+  })
   const quote = quoteBulkPosts({
     count,
     imageModel,
-    expandCount: countExpandNeeded(existingRefs.length),
+    expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(existingRefs.length),
   })
   const boundInput = {
     brandId,
@@ -547,6 +561,9 @@ export async function mcpExecuteBulkPosts(options: {
     scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
+    referenceMode,
+    referenceImageIds: confirmedRefIds,
+    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string'
     ? args.approvalRequestId
@@ -711,6 +728,9 @@ export async function mcpExecuteBulkPosts(options: {
   return claim.handle as unknown as Record<string, unknown>
 }
 
+/** After this many stale reclaim cycles on the same lease, fail the pack instead of looping forever. */
+export const MCP_CAMPAIGN_MAX_STALE_RECLAIMS = 3
+
 type CampaignCheckpoint = {
   status: 'running'
   jobId: string
@@ -720,6 +740,8 @@ type CampaignCheckpoint = {
   chunkState: 'ready' | 'working'
   phase: 'scripts' | 'posts'
   nextIndex: number
+  /** How many times a stale `working` lease was reclaimed for this pack. */
+  reclaimCount: number
   quotedCreditCost: number
   chargedCredits: number
   usage: { quotedCredits: number; chargedCredits: number }
@@ -775,6 +797,7 @@ function campaignRunning(options: {
     chunkState: 'ready',
     phase: 'scripts',
     nextIndex: 0,
+    reclaimCount: 0,
     quotedCreditCost: options.quote,
     chargedCredits: 0,
     usage: { quotedCredits: options.quote, chargedCredits: 0 },
@@ -784,7 +807,8 @@ function campaignRunning(options: {
     expandedRefs: [],
     retryAfterMs: 2_000,
     statusMessage: campaignStatusMessage({ phase: 'scripts', nextIndex: 0, angles: options.angles }),
-    message: 'Campaign pack is durable and resumes one generated artifact per poll.',
+    message:
+      'Campaign pack is durable. Poll get_execute_result for cheap status; each chunk runs off-request via waitUntil.',
   }
 }
 
@@ -833,6 +857,7 @@ export async function runCampaignChunk(options: {
         chunkState: 'ready',
         phase: finished ? 'posts' : 'scripts',
         nextIndex: finished ? 0 : cp.nextIndex + 1,
+        reclaimCount: 0,
         sessionId: result.sessionId,
         scripts,
         chargedCredits: cp.chargedCredits + item.charged,
@@ -861,6 +886,7 @@ export async function runCampaignChunk(options: {
           startedAtMs: Date.now(),
           chunkState: 'ready',
           nextIndex: cp.nextIndex + 1,
+          reclaimCount: 0,
           sessionId: result.sessionId,
           posts,
           expandedRefs: [...cp.expandedRefs, ...result.expanded],
@@ -948,7 +974,11 @@ export async function runCampaignChunk(options: {
   }
 }
 
-/** Poll hook: atomically leases and runs exactly one durable campaign artifact. */
+/**
+ * Poll hook: atomically leases one durable campaign artifact and schedules it off-request.
+ * Never awaits Grok/Gemini on the MCP request — that caused host -32001 timeouts.
+ * If waitUntil drops a lease, the next poll reclaims after MCP_EXECUTE_STALE_MS.
+ */
 export async function resumeMcpCampaignPack(options: {
   db: McpDbClient
   approvalStore: McpApprovalStore
@@ -963,7 +993,44 @@ export async function resumeMcpCampaignPack(options: {
   const cp = row.resultJson
   if (!isCampaignChunkLeasable(cp)) return
   if (!options.approvalStore.compareAndSwapRunningResult) return
-  const working: CampaignCheckpoint = { ...cp, chunkState: 'working', startedAtMs: Date.now() }
+
+  const priorReclaims = typeof cp.reclaimCount === 'number' ? cp.reclaimCount : 0
+  const isStaleReclaim = cp.chunkState === 'working'
+  const reclaimCount = isStaleReclaim ? priorReclaims + 1 : priorReclaims
+
+  if (isStaleReclaim && reclaimCount > MCP_CAMPAIGN_MAX_STALE_RECLAIMS) {
+    const message =
+      `Campaign chunk lease stayed stale after ${MCP_CAMPAIGN_MAX_STALE_RECLAIMS} reclaim attempts ` +
+      `(${campaignChunkLabel(cp)}). Background work likely never started — try again with a new approval.`
+    const failed = buildFailedJobResult({
+      approvalRequestId: cp.approvalRequestId,
+      toolName: 'execute_campaign_pack',
+      error: message,
+      quotedCreditCost: cp.quotedCreditCost,
+    })
+    failed.statusMessage = `${buildExecuteStatusMessage('execute_campaign_pack', 'failed')} ${campaignChunkLabel(cp)}: ${message}`
+    failed.chargedCredits = cp.chargedCredits
+    failed.scripts = cp.scripts
+    failed.posts = cp.posts
+    await options.approvalStore.compareAndSwapRunningResult(
+      row.id,
+      cp.startedAtMs,
+      failed,
+      Date.now()
+    )
+    return
+  }
+
+  const working: CampaignCheckpoint = {
+    ...cp,
+    chunkState: 'working',
+    startedAtMs: Date.now(),
+    reclaimCount,
+    statusMessage: campaignStatusMessage(cp),
+    message: isStaleReclaim
+      ? `Reclaimed stale lease for ${campaignChunkLabel(cp)}; regenerating off-request (reclaim ${reclaimCount}/${MCP_CAMPAIGN_MAX_STALE_RECLAIMS}).`
+      : `Chunk ${campaignChunkLabel(cp)} leased; generating off-request. Poll again for progress.`,
+  }
   const claimed = await options.approvalStore.compareAndSwapRunningResult(
     row.id,
     cp.startedAtMs,
@@ -974,11 +1041,11 @@ export async function resumeMcpCampaignPack(options: {
   const args = row.inputJson && typeof row.inputJson === 'object' && !Array.isArray(row.inputJson)
     ? row.inputJson as Record<string, unknown>
     : {}
-  // Run inside the current request. Scheduling another waitUntil from a poll/continuation
-  // can be dropped by the host before it starts, leaving only a stale `working` lease.
-  // One artifact is intentionally bounded to the MCP request duration and every exit
-  // below CAS-persists either the next checkpoint or the real failure.
-  await (options.runChunk || runCampaignChunk)({ ...options, args, checkpoint: working })
+  // Schedule only — never await generate on the poll/execute request (Grok MCP client ~60–120s).
+  // Chunk CAS-persists the next checkpoint or a real failure when background work finishes.
+  scheduleMcpExecuteWork(async () => {
+    await (options.runChunk || runCampaignChunk)({ ...options, args, checkpoint: working })
+  })
 }
 
 export async function mcpExecuteCampaignPack(options: {
@@ -997,7 +1064,18 @@ export async function mcpExecuteCampaignPack(options: {
   const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
   const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
-  const quote = quoteCampaignPack({ scriptCount: count, imageCount: count, imageModel, expandCount: countExpandNeeded(existingRefs.length) })
+  const referenceMode = parseReferenceMode(args.referenceMode) || 'use'
+  const confirmedRefIds = Array.isArray(args.referenceImageIds)
+    ? args.referenceImageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    : []
+  assertProductReferenceGate({
+    toolName: 'execute_campaign_pack',
+    productRefCount: existingRefs.length,
+    referenceMode,
+    referenceImageIds: confirmedRefIds,
+    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
+  })
+  const quote = quoteCampaignPack({ scriptCount: count, imageCount: count, imageModel, expandCount: referenceMode === 'none' ? 0 : countExpandNeeded(existingRefs.length) })
   const boundInput = {
     brandId, offerId, count, imageModel,
     styleDnaId: typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined,
@@ -1007,6 +1085,9 @@ export async function mcpExecuteCampaignPack(options: {
     scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
+    referenceMode,
+    referenceImageIds: confirmedRefIds,
+    productImageId: typeof args.productImageId === 'string' ? args.productImageId : undefined,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
   const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language })

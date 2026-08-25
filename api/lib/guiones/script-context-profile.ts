@@ -65,6 +65,17 @@ function buildAlternatives(product?: ProductContextLike): Array<{ name: string; 
   }))
 }
 
+function mapPriceRangeFact(priceRange: string | null | undefined): string | null {
+  const key = cleanText(priceRange).toLowerCase()
+  if (!key) return null
+  const map: Record<string, string> = {
+    economico: 'Posicionamiento de precio accesible (valor por dinero). Nunca imprimas enums de precio internos.',
+    medio: 'Posicionamiento de precio medio (equilibrio calidad/precio).',
+    premium: 'Posicionamiento de precio premium (exclusividad y calidad superior).',
+  }
+  return map[key] || null
+}
+
 function missingFor(product?: ProductContextLike, business?: BusinessContextLike): string[] {
   const missing: string[] = []
   if (!cleanText(product?.name)) missing.push('[NOMBRE DEL PRODUCTO/SERVICIO]')
@@ -72,7 +83,7 @@ function missingFor(product?: ProductContextLike, business?: BusinessContextLike
   if (!cleanText(product?.differentiation) && !cleanText(product?.svc_differentiation) && !cleanText(product?.technical_specs)) missing.push('[DIFERENCIADOR TANGIBLE]')
   if (!cleanText(business?.name)) missing.push('[NOMBRE DEL NEGOCIO]')
   if (!business?.sales_channels?.length) missing.push('[CANAL DE COMPRA]')
-  if (product?.type === 'real_estate' && !cleanText(product.re_price)) missing.push('[PRECIO]')
+  if (product?.type === 'real_estate' && !cleanText(product.re_price) && !cleanText(product.exact_price)) missing.push('[PRECIO]')
   if (product?.type === 'restaurant' && !cleanText(product.menu_text)) missing.push('[PLATILLO REAL DEL MENU]')
   if (product?.type === 'service' && !cleanText(product.svc_process_steps)) missing.push('[PASOS DEL PROCESO]')
   return missing
@@ -142,7 +153,8 @@ export function buildScriptContextProfile(input: BuildProfileInput): ScriptConte
   const offerFacts = compactLines([
     product?.product_description,
     product?.product_category,
-    product?.price_range,
+    product?.exact_price ? `Precio exacto: ${product.exact_price}` : '',
+    mapPriceRangeFact(product?.price_range),
     product?.product_variations?.join(', '),
     product?.svc_service_type,
     product?.svc_service_format,
@@ -152,7 +164,7 @@ export function buildScriptContextProfile(input: BuildProfileInput): ScriptConte
     product?.ind_variations_description,
     product?.ind_sizes,
     product?.menu_text,
-    product?.re_price,
+    product?.re_price ? `Precio: ${product.re_price}` : '',
   ], 18)
 
   const sensoryFacts = compactLines([
@@ -190,6 +202,11 @@ export function buildScriptContextProfile(input: BuildProfileInput): ScriptConte
     bannedClaims: [
       'No inventar precios, cantidades, garantias, resultados, platos, ubicaciones ni casos de exito.',
       'No atacar competidores especificos; contrastar alternativas comunes de forma etica.',
+      'Nunca imprimas enums internos (economico, medio, premium, cold, warm, hot) como copy de venta.',
+      'Nunca dejes placeholders como [PRECIO EXACTO], [DIFERENCIADOR TANGIBLE] u otros corchetes en el guion final.',
+      product?.exact_price
+        ? `Si mencionas precio, usa exactamente: ${product.exact_price}.`
+        : 'Si no hay precio exacto en los hechos, no inventes uno ni uses [PRECIO EXACTO].',
     ],
     activeSalesChannel: input.activeSalesChannel,
     ctaStrength: input.ctaStrength,

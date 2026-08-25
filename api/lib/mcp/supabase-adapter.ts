@@ -38,6 +38,7 @@ function mapBrandKitRow(data: Record<string, unknown>): McpBrandKitContext {
     fontPrimary: (data.font_primary as string | null) ?? null,
     referenceImages: Array.isArray(data.reference_images) ? data.reference_images as string[] : [],
     forbiddenPhrases: Array.isArray(data.forbidden_phrases) ? data.forbidden_phrases as string[] : [],
+    mustUsePhrases: Array.isArray(data.must_use_phrases) ? data.must_use_phrases as string[] : [],
     styleDnas: parseStyleDnas(data.style_dnas),
     isPrimaryForBusiness: data.is_primary_for_business === true,
     isDefault: data.is_default === true,
@@ -147,17 +148,44 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
       if (!userId || !brandId) return []
       const { data, error } = await db
         .from('products')
-        .select('id, name, type, price_range, re_price')
+        .select(
+          'id, name, type, price_range, re_price, product_description, differentiation, main_problem, result, utility, technical_specs, do_not_claim'
+        )
         .eq('business_id', brandId)
         .eq('owner_id', userId)
         .order('created_at', { ascending: false })
       if (error) throw error
-      return (data || []).map((row) => ({
-        id: row.id as string,
-        name: row.name as string,
-        type: (row.type as string | null) ?? null,
-        price: (row.re_price as string | null) || (row.price_range as string | null) || null,
-      }))
+      return (data || []).map((row) => {
+        const priceRange = (row.price_range as string | null) ?? null
+        const rePrice = (row.re_price as string | null) ?? null
+        const description = (row.product_description as string | null) ?? null
+        // Prefer explicit re_price; also accept a literal price embedded in description (e.g. ₡9.900).
+        const priceFromDesc = description && /[₡$€]\s?\d/.test(description)
+          ? (description.match(/[₡$€]\s?[\d.,]+/) || [])[0] || null
+          : null
+        const exactPrice =
+          (rePrice && !/^(economico|medio|premium)$/i.test(rePrice.trim()) ? rePrice : null) ||
+          priceFromDesc
+        return {
+          id: row.id as string,
+          name: row.name as string,
+          type: (row.type as string | null) ?? null,
+          price: exactPrice,
+          priceRange:
+            priceRange && /^(economico|medio|premium)$/i.test(priceRange.trim())
+              ? priceRange.trim().toLowerCase()
+              : null,
+          productDescription: description,
+          differentiation: (row.differentiation as string | null) ?? null,
+          mainProblem: (row.main_problem as string | null) ?? null,
+          result: (row.result as string | null) ?? null,
+          utility: (row.utility as string | null) ?? null,
+          technicalSpecs: (row.technical_specs as string | null) ?? null,
+          doNotClaim: Array.isArray(row.do_not_claim)
+            ? (row.do_not_claim as string[])
+            : undefined,
+        }
+      })
     },
 
     async getBrandKitForBrand(

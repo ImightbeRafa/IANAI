@@ -226,18 +226,30 @@ export function asJobHandleFromStored(
       typeof stored.quotedCreditCost === 'number'
         ? stored.quotedCreditCost
         : null
+    const charged = readChargedCredits(stored)
+    const statusMessage =
+      typeof stored.statusMessage === 'string' && stored.statusMessage.trim()
+        ? stored.statusMessage
+        : buildExecuteStatusMessage(toolName, status)
     return {
+      ...stored,
       status: status as McpExecuteJobStatus,
       jobId: typeof stored.jobId === 'string' ? stored.jobId : approvalRequestId,
       approvalRequestId,
       toolName,
-      retryAfterMs: MCP_EXECUTE_RETRY_AFTER_MS,
+      retryAfterMs:
+        typeof stored.retryAfterMs === 'number'
+          ? stored.retryAfterMs
+          : MCP_EXECUTE_RETRY_AFTER_MS,
       quotedCreditCost: quoted,
-      chargedCredits: 0,
-      usage: { quotedCredits: quoted, chargedCredits: 0 },
+      chargedCredits: charged,
+      usage: {
+        quotedCredits: quoted,
+        chargedCredits: charged,
+      },
       startedAtMs:
         typeof stored.startedAtMs === 'number' ? stored.startedAtMs : undefined,
-      statusMessage: buildExecuteStatusMessage(toolName, status),
+      statusMessage,
       message:
         typeof stored.message === 'string'
           ? stored.message

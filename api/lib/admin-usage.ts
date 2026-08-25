@@ -105,6 +105,11 @@ export function resolveUsageLogSource(row: {
   return 'web'
 }
 
+/** $0 MCP tools/call audit rows — exclude from cost/call totals; real EXECUTE costs use feature≠mcp_tool. */
+export function isMcpToolAuditRow(row: Pick<AdminUsageLogRow, 'feature'>): boolean {
+  return row.feature === 'mcp_tool'
+}
+
 function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
   return {
     id: row.id,
@@ -125,6 +130,7 @@ export function aggregateUsageSummary(rows: AdminUsageLogRow[]): UsageSummaryRow
   const grouped = new Map<string, UsageSummaryRow>()
 
   for (const row of rows) {
+    if (isMcpToolAuditRow(row)) continue
     const model = row.model || 'unknown'
     const feature = row.feature || 'unknown'
     const key = `${model}\0${feature}`
@@ -160,6 +166,7 @@ export function aggregateDailyUsage(rows: AdminUsageLogRow[]): DailyUsageRow[] {
   const grouped = new Map<string, DailyUsageRow>()
 
   for (const row of rows) {
+    if (isMcpToolAuditRow(row)) continue
     const day = utcDay(row.created_at)
     const model = row.model || 'unknown'
     const key = `${day}\0${model}`
@@ -180,6 +187,7 @@ export function aggregateUserUsageStats(rows: AdminUsageLogRow[]): UserUsageStat
 
   for (const row of rows) {
     if (row.success !== true) continue
+    if (isMcpToolAuditRow(row)) continue
     const userId = row.user_id || row.user_email || 'unknown'
     const existing = grouped.get(userId)
     const bucket = existing || {

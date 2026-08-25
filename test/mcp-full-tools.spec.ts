@@ -41,6 +41,7 @@ const db: McpDbClient = {
 
 const NEW_ENABLED = [
   'list_assets',
+  'list_scripts',
   'workspace_save_artifact',
   'execute_image_edit',
   'execute_image_enhance',
@@ -67,6 +68,16 @@ function artifactStore(): McpArtifactStore {
     },
     async getOwnedProductImage() { return null },
     async getOwnedScript() { return null },
+    async listOwnedScripts() {
+      return [{
+        id: 'sc1',
+        content: 'Hook.\nDevelopment with ₡9.900.\nCTA.',
+        title: 'Sample',
+        offerId: 'p1',
+        sessionId: 's1',
+        createdAt: '2026-08-25T00:00:00.000Z',
+      }]
+    },
     async listLatestGeneratedImage() { return null },
     async listOwnedAssets() {
       return [{
