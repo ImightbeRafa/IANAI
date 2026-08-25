@@ -2884,6 +2884,66 @@ export async function setDefaultBrandKit(userId: string, kitId: string): Promise
   if (error) throw error
 }
 
+/** Link kit to a brand folder and mark it primary for that folder (MCP resolution). */
+export async function linkBrandKitToBusiness(
+  kitId: string,
+  businessId: string | null,
+  options?: { setAsPrimary?: boolean }
+): Promise<BrandKit> {
+  if (!businessId) {
+    const { data, error } = await supabase
+      .from('brand_kits')
+      .update({
+        business_id: null,
+        is_primary_for_business: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', kitId)
+      .select()
+      .single()
+    if (!error && data) return data
+    return saveBrandKitViaApi({
+      id: kitId,
+      business_id: null,
+      is_primary_for_business: false,
+    })
+  }
+
+  const setAsPrimary = options?.setAsPrimary !== false
+  if (setAsPrimary) {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('set_primary_brand_kit', {
+      p_kit_id: kitId,
+      p_business_id: businessId,
+    })
+    if (!rpcError && rpcData) {
+      const row = Array.isArray(rpcData) ? rpcData[0] : rpcData
+      if (row) return row as BrandKit
+    }
+    await supabase
+      .from('brand_kits')
+      .update({ is_primary_for_business: false, updated_at: new Date().toISOString() })
+      .eq('business_id', businessId)
+      .eq('is_primary_for_business', true)
+  }
+
+  const { data, error } = await supabase
+    .from('brand_kits')
+    .update({
+      business_id: businessId,
+      is_primary_for_business: setAsPrimary,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', kitId)
+    .select()
+    .single()
+  if (!error && data) return data
+  return saveBrandKitViaApi({
+    id: kitId,
+    business_id: businessId,
+    is_primary_for_business: setAsPrimary,
+  })
+}
+
 // =============================================
 // SUBSCRIPTION & PAYMENTS
 // =============================================

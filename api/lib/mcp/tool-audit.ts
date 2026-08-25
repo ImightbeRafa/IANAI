@@ -69,6 +69,10 @@ export async function auditMcpToolCall(options: {
   errorMessage?: string
   resultPayload?: unknown
 }): Promise<void> {
+  // Skip non-UUID test stubs so local vitest does not spam Supabase UUID errors
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.userId)) {
+    return
+  }
   const summary = summarizeResult(options.resultPayload)
   const lane = laneFromRisk(options.risk)
   const meta: Record<string, unknown> = {
