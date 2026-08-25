@@ -13,6 +13,37 @@ type ApprovalDetails = {
   input_json: unknown
 }
 
+function humanToolLabel(toolName: string): string {
+  switch (toolName) {
+    case 'execute_script_generate':
+      return 'Generar guion'
+    case 'execute_image_generate':
+      return 'Generar imagen'
+    case 'execute_image_edit':
+      return 'Editar imagen'
+    case 'execute_image_enhance':
+      return 'Mejorar imagen'
+    case 'execute_carousel_generate':
+      return 'Generar carrusel'
+    case 'execute_bulk_scripts':
+      return 'Guiones en lote'
+    case 'execute_bulk_posts':
+      return 'Posts en lote'
+    case 'execute_campaign_pack':
+      return 'Campaign pack'
+    case 'archive_brand':
+      return 'Archivar marca'
+    case 'delete_offer':
+      return 'Eliminar oferta'
+    case 'delete_brand':
+      return 'Eliminar marca'
+    case 'delete_asset':
+      return 'Eliminar asset'
+    default:
+      return toolName
+  }
+}
+
 export default function McpApprove() {
   const { approvalId } = useParams<{ approvalId: string }>()
   const navigate = useNavigate()
@@ -22,6 +53,7 @@ export default function McpApprove() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<'approved' | 'denied' | null>(null)
+  const [showDetails, setShowDetails] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -84,6 +116,13 @@ export default function McpApprove() {
     )
   }
 
+  const toolLabel = details ? humanToolLabel(details.tool_name) : 'acción'
+  const creditLabel = details?.quoted_credit_cost == null
+    ? '—'
+    : details.quoted_credit_cost === 0
+      ? 'Sin costo de créditos'
+      : `${details.quoted_credit_cost} créditos IA`
+
   return (
     <div className="min-h-screen bg-dark-50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
@@ -92,7 +131,9 @@ export default function McpApprove() {
             <AdvanceLogo size={44} />
             <span className="text-2xl font-bold text-dark-900">Advance AI</span>
           </div>
-          <p className="text-dark-500 text-sm">Approve an Advance MCP action from Grok</p>
+          <p className="text-dark-500 text-sm">
+            Fallback de aprobación (preferí confirmar en el chat de Grok)
+          </p>
         </div>
 
         <div className="card space-y-5">
@@ -101,9 +142,10 @@ export default function McpApprove() {
               <Shield className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-dark-900">Confirm EXECUTE</h1>
+              <h1 className="text-lg font-semibold text-dark-900">Confirmar acción</h1>
               <p className="text-sm text-dark-500 mt-1">
-                This spends Advance credits. Review carefully — approval lasts one hour and is single-use.
+                Esta página es opcional. En Grok podés responder sí/no y el bot usa{' '}
+                <code className="text-xs">confirm_execute</code>.
               </p>
             </div>
           </div>
@@ -116,33 +158,47 @@ export default function McpApprove() {
           )}
 
           {done === 'approved' && (
-            <div className="rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-4 text-sm text-emerald-300">
-              Approved. Return to Grok and retry the same tool with this approvalRequestId:
-              <code className="block mt-2 break-all text-emerald-200">{approvalId}</code>
+            <div className="rounded-lg border border-emerald-700/40 bg-emerald-900/20 p-4 text-sm text-emerald-300 space-y-2">
+              <p className="font-medium">Aprobado.</p>
+              <p>
+                Volvé a Grok y pedile que reintente la misma herramienta. Ya no hace falta pegar ningún ID.
+              </p>
             </div>
           )}
 
           {done === 'denied' && (
             <div className="rounded-lg border border-dark-200 bg-dark-50/60 p-4 text-sm text-dark-600">
-              Denied. Tell Grok the action was cancelled.
+              Cancelado. Decile a Grok que no continúe con esta acción.
             </div>
           )}
 
           {details && !done && (
             <div className="rounded-lg border border-dark-200 bg-dark-50/60 p-4 space-y-2 text-sm">
-              <p><span className="font-medium text-dark-700">Tool:</span> {details.tool_name}</p>
-              <p><span className="font-medium text-dark-700">Status:</span> {details.status}</p>
               <p>
-                <span className="font-medium text-dark-700">Créditos IA:</span>{' '}
-                {details.quoted_credit_cost ?? '—'}
+                <span className="font-medium text-dark-700">Acción:</span> {toolLabel}
               </p>
               <p>
-                <span className="font-medium text-dark-700">Expires:</span>{' '}
+                <span className="font-medium text-dark-700">Estado:</span> {details.status}
+              </p>
+              <p>
+                <span className="font-medium text-dark-700">Costo:</span> {creditLabel}
+              </p>
+              <p>
+                <span className="font-medium text-dark-700">Expira:</span>{' '}
                 {new Date(details.expires_at).toLocaleString()}
               </p>
-              <pre className="mt-2 max-h-48 overflow-auto rounded bg-dark-100/80 p-2 text-xs text-dark-600">
-                {JSON.stringify(details.input_json, null, 2)}
-              </pre>
+              <button
+                type="button"
+                className="text-xs text-primary-600 hover:text-primary-700 font-medium mt-1"
+                onClick={() => setShowDetails((v) => !v)}
+              >
+                {showDetails ? 'Ocultar detalle técnico' : 'Ver detalle técnico'}
+              </button>
+              {showDetails && (
+                <pre className="mt-2 max-h-48 overflow-auto rounded bg-dark-100/80 p-2 text-xs text-dark-600">
+                  {JSON.stringify(details.input_json, null, 2)}
+                </pre>
+              )}
             </div>
           )}
 
@@ -155,7 +211,7 @@ export default function McpApprove() {
                 className="btn-primary flex-1 justify-center gap-1.5"
               >
                 <Check className="w-4 h-4" />
-                {submitting ? 'Working…' : 'Approve & spend credits'}
+                {submitting ? 'Procesando…' : 'Aprobar'}
               </button>
               <button
                 type="button"
@@ -164,14 +220,14 @@ export default function McpApprove() {
                 className="btn-secondary flex-1 justify-center gap-1.5"
               >
                 <X className="w-4 h-4" />
-                Deny
+                Cancelar
               </button>
             </div>
           )}
 
           <p className="text-center text-sm text-dark-500">
             <Link to="/chat" className="text-primary-600 hover:text-primary-700 font-medium">
-              Back to chat
+              Volver al chat
             </Link>
           </p>
         </div>

@@ -51,11 +51,12 @@ import {
   mcpDeleteOffer,
   type McpDeleteStore,
 } from './delete-tools.js'
+import { mcpConfirmExecute } from './confirm-execute.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.8.1',
+  version: '0.8.2',
 }
 
 export type McpJsonRpcRequest = {
@@ -139,9 +140,33 @@ function toolInputSchema(name: string): Record<string, unknown> {
           goal: { type: 'string' },
           language: { type: 'string', enum: ['es', 'en'] },
           sessionId: { type: 'string' },
-          approvalRequestId: { type: 'string' },
+          approvalRequestId: {
+            type: 'string',
+            description: 'After in-chat confirm_execute approve. Do not invent. Do not ask the user to open a URL.',
+          },
         },
         required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'confirm_execute':
+      return {
+        type: 'object',
+        properties: {
+          approvalRequestId: {
+            type: 'string',
+            description: 'UUID from the previous approval_required response',
+          },
+          action: {
+            type: 'string',
+            enum: ['approve', 'deny'],
+            description: 'approve after the user clearly says yes in this chat; deny if they cancel',
+          },
+          decision: {
+            type: 'string',
+            description: 'Alias for action (approve|deny|yes|no|sí|cancelar)',
+          },
+        },
+        required: ['approvalRequestId'],
         additionalProperties: false,
       }
     case 'guide_bulk_angles':
@@ -590,6 +615,14 @@ async function dispatchEnabledTool(options: {
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,
+      })
+    }
+    case 'confirm_execute': {
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      return mcpConfirmExecute({
+        approvalStore: options.approvalStore,
+        user: options.user,
+        args: options.args,
       })
     }
     case 'execute_image_generate': {

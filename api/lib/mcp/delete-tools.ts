@@ -1,15 +1,15 @@
 /**
- * MCP archive/delete tools — web approval, typed confirm, no Advance credits.
+ * MCP archive/delete tools — in-chat approval, typed confirm, no Advance credits.
  */
 
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
-  issueMcpApprovalRequest,
   replayMcpApprovalResult,
   storeMcpApprovalResult,
   type McpApprovalStore,
 } from './approval.js'
+import { issueMcpChatApproval } from './approval-prompt.js'
 import {
   assertTypedArchiveConfirm,
   assertTypedAssetDeleteConfirm,
@@ -80,20 +80,15 @@ async function gateDeleteTool(options: {
   preview: Record<string, unknown>
 }): Promise<Record<string, unknown> | null> {
   if (!options.approvalRequestId) {
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
-      userId: options.userId,
-      toolName: options.toolName,
-      input: options.input,
-      quotedCreditCost: 0,
-      appOrigin: options.appOrigin,
-    })
     return {
-      ...req,
-      toolName: options.toolName,
-      quotedCreditCost: 0,
-      creditUnit: 'credits',
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: options.input,
+      ...(await issueMcpChatApproval({
+        approvalStore: options.approvalStore,
+        userId: options.userId,
+        toolName: options.toolName,
+        input: options.input,
+        quotedCreditCost: 0,
+        appOrigin: options.appOrigin,
+      })),
       ...options.preview,
     }
   }

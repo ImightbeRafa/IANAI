@@ -6,7 +6,7 @@ Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`
 | Topic | Decision |
 |---|---|
 | Modes | GUIDE = free (Grok’s own usage); EXECUTE = Advance credits |
-| Approval | Advance web page `/mcp/approve/:id`; **TTL = 1 hour**; single-use; input-bound; result replay after consume |
+| Approval | **In-chat** via `confirm_execute` (show `userPrompt`, user says sí/no). Optional fallback `/mcp/approve/:id`. **TTL = 1 hour**; single-use; input-bound; result replay after consume |
 | Intake | HTTPS URL + up to **5** PDF/image files → Chat upload dialog via `?intake=files\|asset` |
 | External Grok images | Not imported; session `generated_outside` only |
 | Advance images | Auto-saved to session/library at max API quality (`2k`/`medium`) |
@@ -20,7 +20,7 @@ Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`
 | `POST /api/mcp` | MCP JSON-RPC (`initialize`, `tools/list`, `tools/call`) |
 | `GET /api/mcp` | Health / discovery blurb |
 | `GET/POST /api/mcp-approve` | Load / approve / deny EXECUTE requests (Bearer Supabase JWT) |
-| `/mcp/approve/:id` | Advance web consent UI for EXECUTE |
+| `/mcp/approve/:id` | Optional Advance web consent fallback (prefer in-chat `confirm_execute`) |
 | `GET /.well-known/oauth-protected-resource` | OAuth PRM → `/api/mcp-oauth-metadata` (AS = Supabase `/auth/v1`) |
 | `/oauth/consent` | Advance consent UI (Supabase OAuth Server path) |
 
@@ -35,7 +35,7 @@ Enabled tools now:
 
 **Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`
 
-**EXECUTE (credits + web approval):** `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack` — first call returns `/mcp/approve/:id`; after approve + retry, Advance generates, charges credits per succeeded item, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging.
+**EXECUTE (credits + in-chat approval):** `confirm_execute`, `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack`, edit/enhance/carousel — first call returns `status: approval_required` with `userPrompt` (Grok shows this in chat; do **not** lead with a raw URL). After the user says yes, call `confirm_execute` then retry with `approvalRequestId`. Optional `optionalAdvancePage` exists only as fallback. After approve + retry, Advance generates, charges credits per succeeded item, auto-saves to a chat session/library, and returns a `/chat?brand=&session=` deep link (compact result; no huge base64). Lost MCP responses can replay the stored result without re-charging.
 
 **Style DNA:** `list_style_dnas`, `set_style_dna` — JSON on `brand_kits.style_dnas` (`organic` | `ads`). Bulk posts accept `styleDnaId`.
 
