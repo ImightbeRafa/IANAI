@@ -1,3 +1,14 @@
+## 2026-08-25 — MCP in-chat approval (0.8.2)
+
+**Area:** mcp
+**Files:** `approval-prompt.ts`, `confirm-execute.ts`, execute/bulk/delete tools, `McpApprove.tsx`, protocol/registry
+
+- Primary UX: Grok shows `userPrompt` in chat → user says sí/no → `confirm_execute` → retry EXECUTE.
+- Raw `/mcp/approve/:id` links demoted to `optionalAdvancePage` only (Grok instructed not to paste them).
+- Web approve page remains as bilingual fallback, less UUID-dumpy.
+
+---
+
 ## 2026-08-25 — Fat product complete (branch, no PR yet)
 
 **Area:** credits / mcp / chat-shell / bulk / admin

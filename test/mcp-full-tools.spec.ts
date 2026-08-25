@@ -232,6 +232,10 @@ describe('mcp 0.8 remaining tools', () => {
     expect(issued.result).toMatchObject({ isError: false })
     const text = (issued.result as { content: Array<{ text: string }> }).content[0].text
     expect(text).toContain('approval_required')
-    expect(text).toContain('/mcp/approve/')
+    expect(text).toContain('confirm_execute')
+    expect(text).toContain('userPrompt')
+    expect(text).toContain('grok_chat')
+    expect(text).not.toContain('Open deepLink')
+    expect(text).toContain('optionalAdvancePage')
   })
 })

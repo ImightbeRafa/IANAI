@@ -26,11 +26,11 @@ import type { AngleBoardItem, BulkLanguage } from '../bulk/types.js'
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
-  issueMcpApprovalRequest,
   replayMcpApprovalResult,
   storeMcpApprovalResult,
   type McpApprovalStore,
 } from './approval.js'
+import { issueMcpChatApproval } from './approval-prompt.js'
 import type { McpArtifactStore } from './artifact-store.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 
@@ -154,23 +154,18 @@ async function requireOrIssueApproval(options: {
   input: unknown
   quotedCreditCost: number
   appOrigin?: string
+  language?: 'es' | 'en'
 }): Promise<Record<string, unknown> | null> {
   if (!options.approvalRequestId) {
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
       userId: options.userId,
       toolName: options.toolName,
       input: options.input,
       quotedCreditCost: options.quotedCreditCost,
       appOrigin: options.appOrigin,
+      language: options.language,
     })
-    return {
-      ...req,
-      toolName: options.toolName,
-      quotedCreditCost: options.quotedCreditCost,
-      creditUnit: 'credits',
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: options.input,
-    }
   }
   const replay = await replayMcpApprovalResult(options.approvalStore, {
     approvalRequestId: options.approvalRequestId,
@@ -320,6 +315,7 @@ export async function mcpExecuteBulkScripts(options: {
     input: boundInput,
     quotedCreditCost: quote.totalCredits,
     appOrigin: options.appOrigin,
+    language: boundInput.language,
   })
   if (pending) return { ...pending, quote }
 
@@ -420,6 +416,7 @@ export async function mcpExecuteBulkPosts(options: {
     input: boundInput,
     quotedCreditCost: quote.totalCredits,
     appOrigin: options.appOrigin,
+    language: boundInput.language,
   })
   if (pending) return { ...pending, quote }
 
@@ -527,6 +524,7 @@ export async function mcpExecuteCampaignPack(options: {
     input: boundInput,
     quotedCreditCost: quote.totalCredits,
     appOrigin: options.appOrigin,
+    language: boundInput.language,
   })
   if (pending) return { ...pending, quote }
 

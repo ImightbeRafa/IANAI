@@ -1,9 +1,10 @@
 /**
- * MCP EXECUTE approval — web consent then single-use consume.
+ * MCP EXECUTE approval — in-chat consent (primary) then single-use consume.
  *
  * Flow:
- * 1) execute_* without approvalRequestId → create pending request, return deep link
- * 2) User opens /mcp/approve/:id and Approves → status=approved
+ * 1) execute_* without approvalRequestId → create pending request, return grok_chat prompt
+ * 2) User says yes in Grok → confirm_execute(approve) → status=approved
+ *    (optional fallback: /mcp/approve/:id web page)
  * 3) Grok retries with same args + approvalRequestId → validate (do not consume)
  * 4) check limit → generate → save → charge → store result → consume
  *    If generate fails, approval stays approved and reusable.

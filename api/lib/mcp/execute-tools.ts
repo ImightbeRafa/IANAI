@@ -1,5 +1,5 @@
 /**
- * MCP EXECUTE — script + image generation behind web approval, auto-saved to library.
+ * MCP EXECUTE — script + image generation behind in-chat approval, auto-saved to library.
  *
  * Charge order: check limit → generate → save → incrementUsage (fail closed)
  * → storeMcpApprovalResult → consumeMcpApprovalRequest.
@@ -37,11 +37,11 @@ import {
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
-  issueMcpApprovalRequest,
   replayMcpApprovalResult,
   storeMcpApprovalResult,
   type McpApprovalStore,
 } from './approval.js'
+import { issueMcpChatApproval } from './approval-prompt.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
 import type { McpArtifactStore } from './artifact-store.js'
@@ -158,21 +158,15 @@ export async function mcpExecuteScriptGenerate(options: {
 
   if (!approvalRequestId) {
     const quote = quoteLegacyActionCredits('script')
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
       userId: options.user.id,
       toolName: 'execute_script_generate',
       input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
+      language,
     })
-    return {
-      ...req,
-      toolName: 'execute_script_generate',
-      quotedCreditCost: quote,
-      creditUnit: 'credits',
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: boundWithOffer,
-    }
   }
 
   const replay = await replayMcpApprovalResult(options.approvalStore, {
@@ -320,21 +314,14 @@ export async function mcpExecuteImageGenerate(options: {
 
   if (!approvalRequestId) {
     const quote = quoteLegacyActionCredits('image', 'grok-imagine')
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
       userId: options.user.id,
       toolName: 'execute_image_generate',
       input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
     })
-    return {
-      ...req,
-      toolName: 'execute_image_generate',
-      quotedCreditCost: quote,
-      creditUnit: 'credits',
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: boundWithOffer,
-    }
   }
 
   const replay = await replayMcpApprovalResult(options.approvalStore, {
@@ -531,21 +518,14 @@ export async function mcpExecuteImageEdit(options: {
   const quote = quoteLegacyActionCredits('edit')
 
   if (!approvalRequestId) {
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
       userId: options.user.id,
       toolName: 'execute_image_edit',
       input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
     })
-    return {
-      ...req,
-      toolName: 'execute_image_edit',
-      quotedCreditCost: quote,
-      creditUnit: 'credits',
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: boundWithOffer,
-    }
   }
 
   const replay = await replayMcpApprovalResult(options.approvalStore, {
@@ -706,21 +686,15 @@ export async function mcpExecuteImageEnhance(options: {
   const quote = quoteLegacyActionCredits('enhance')
 
   if (!approvalRequestId) {
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
       userId: options.user.id,
       toolName: 'execute_image_enhance',
       input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
+      language: boundInput.language,
     })
-    return {
-      ...req,
-      toolName: 'execute_image_enhance',
-      quotedCreditCost: quote,
-      creditUnit: 'credits',
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: boundWithOffer,
-    }
   }
 
   const replay = await replayMcpApprovalResult(options.approvalStore, {
@@ -894,22 +868,18 @@ export async function mcpExecuteCarouselGenerate(options: {
   const boundWithOffer = { ...boundInput, offerId }
 
   if (!approvalRequestId) {
-    const req = await issueMcpApprovalRequest(options.approvalStore, {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
       userId: options.user.id,
       toolName: 'execute_carousel_generate',
       input: boundWithOffer,
       quotedCreditCost: quote,
       appOrigin: options.appOrigin,
+      language: boundInput.language === 'en' ? 'en' : 'es',
+      extra: {
+        durationNote: `MCP host maxDuration is ${MCP_HOST_MAX_DURATION_SEC}s; carousel API allows 240s. Prefer slideCount ≤ 5 if the host times out.`,
+      },
     })
-    return {
-      ...req,
-      toolName: 'execute_carousel_generate',
-      quotedCreditCost: quote,
-      creditUnit: 'credits',
-      durationNote: `MCP host maxDuration is ${MCP_HOST_MAX_DURATION_SEC}s; carousel API allows 240s. Prefer slideCount ≤ 5 if the host times out.`,
-      message: 'Open deepLink, Approve, then retry this tool with the same arguments plus approvalRequestId.',
-      boundInput: boundWithOffer,
-    }
   }
 
   const replay = await replayMcpApprovalResult(options.approvalStore, {

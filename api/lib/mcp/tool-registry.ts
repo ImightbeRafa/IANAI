@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.8.1'
+export const MCP_REGISTRY_VERSION = '0.8.2'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -46,7 +46,7 @@ export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   },
   execute_studio: {
     title: 'Execute Studio',
-    summary: 'Advance-run scripts/images (credits + Advance web approval page).',
+    summary: 'Advance-run scripts/images (credits + in-chat confirmation via confirm_execute).',
     defaultEnabled: true,
   },
   library_sessions: {
@@ -204,12 +204,25 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: false,
   },
 
-  // EXECUTE — Advance credits + Grok chat approval popup
+  // EXECUTE — Advance credits + in-chat confirm_execute (optional web fallback)
+  {
+    name: 'confirm_execute',
+    group: 'execute_studio',
+    risk: 'execute',
+    description:
+      'Approve or deny a pending Advance EXECUTE after the user confirms in THIS chat. ' +
+      'Pass approvalRequestId from the previous approval_required response. Prefer this over any optionalAdvancePage URL. ' +
+      'After status=approved, immediately retry the same EXECUTE tool with that approvalRequestId.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
   {
     name: 'execute_script_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate a script via Advance AI (credits; Advance web approval required).',
+    description:
+      'Generate a script via Advance AI (credits). Without approvalRequestId, returns a chat confirmation prompt — show userPrompt, then call confirm_execute after the user says yes.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -218,7 +231,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate an image via Advance at max Grok quality 2k/medium (credits; Advance web approval required).',
+    description:
+      'Generate an image via Advance at max Grok quality 2k/medium (credits). Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -227,7 +241,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_bulk_scripts',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate up to N diverse scripts from an angle board (3 credits each succeeded; one approval).',
+    description:
+      'Generate up to N diverse scripts from an angle board (3 credits each succeeded; one in-chat approval via confirm_execute).',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -236,7 +251,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_bulk_posts',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one approval).',
+    description:
+      'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute).',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -245,7 +261,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_campaign_pack',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Launch pack: angles → scripts → posts with one approval and a quoted total.',
+    description:
+      'Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -254,7 +271,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_edit',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Edit an image via Advance (Grok Imagine; 18 credits; Advance web approval required).',
+    description:
+      'Edit an image via Advance (Grok Imagine; 18 credits). Confirm in chat with userPrompt + confirm_execute.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -263,7 +281,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_image_enhance',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Enhance an image via Advance (Grok Imagine; 18 credits; Advance web approval required).',
+    description:
+      'Enhance an image via Advance (Grok Imagine; 18 credits). Confirm in chat with userPrompt + confirm_execute.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -272,7 +291,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'execute_carousel_generate',
     group: 'execute_studio',
     risk: 'execute',
-    description: 'Generate a carousel via Advance (Gemini Pro, 24 credits/slide; one approval for the batch). Host timeout is 180s — large carousels may need a smaller slideCount.',
+    description:
+      'Generate a carousel via Advance (Gemini Pro, 24 credits/slide; one in-chat approval). Host timeout is 180s — large carousels may need a smaller slideCount.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -283,7 +303,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'archive_brand',
     group: 'deletes',
     risk: 'delete',
-    description: 'Archive a brand/folder (recoverable; hidden from default MCP lists). Requires typed confirm + web approval.',
+    description:
+      'Archive a brand/folder (recoverable; hidden from default MCP lists). Requires typed confirm + in-chat confirm_execute.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
@@ -292,7 +313,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_offer',
     group: 'deletes',
     risk: 'delete',
-    description: 'Permanently delete an offer after typed confirm + web approval (same rules as web).',
+    description:
+      'Permanently delete an offer after typed confirm + in-chat confirm_execute (same rules as web).',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
@@ -301,7 +323,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_brand',
     group: 'deletes',
     risk: 'delete',
-    description: 'Permanently delete a brand/folder after typed brand-name confirm + impact warning (no recovery).',
+    description:
+      'Permanently delete a brand/folder after typed brand-name confirm + impact warning + in-chat confirm_execute (no recovery).',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,
@@ -310,7 +333,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'delete_asset',
     group: 'deletes',
     risk: 'delete',
-    description: 'Permanently delete a product/context/generated image after typed confirm + web approval.',
+    description:
+      'Permanently delete a product/context/generated image after typed confirm + in-chat confirm_execute.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,

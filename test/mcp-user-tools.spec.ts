@@ -48,7 +48,7 @@ describe('mcp user read tools', () => {
     expect(MCP_MUTATION_POLICY.archiveTools).toBe(true)
     expect(MCP_MUTATION_POLICY.permanentDeleteRequiresTypedConfirm).toBe(true)
     expect(MCP_MUTATION_POLICY.brandDeletePreservesBrandKits).toBe(true)
-    expect(MCP_MUTATION_POLICY.executeApprovalSurface).toBe('grok_chat_popup')
+    expect(MCP_MUTATION_POLICY.executeApprovalSurface).toBe('grok_chat')
     expect(MCP_MUTATION_POLICY.executeApprovalTtlMs).toBe(60 * 60 * 1000)
     expect(MCP_MUTATION_POLICY.guideIntakeMaxFiles).toBe(5)
     expect(MCP_MUTATION_POLICY.generateRequiresApprovalToken).toBe(true)

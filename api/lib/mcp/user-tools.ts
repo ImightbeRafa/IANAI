@@ -164,7 +164,7 @@ export const MCP_MUTATION_POLICY = {
   /** Brand folder delete removes sessions/offers/assets; brand_kits are detached and kept. */
   brandDeletePreservesBrandKits: true,
   generateRequiresApprovalToken: true,
-  executeApprovalSurface: 'grok_chat_popup' as const,
+  executeApprovalSurface: 'grok_chat' as const,
   executeApprovalTtlMs: 60 * 60 * 1000,
   guideIntakeMaxFiles: 5,
   guideIntakeAllowUrl: true,
