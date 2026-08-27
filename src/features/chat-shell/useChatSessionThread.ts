@@ -51,6 +51,10 @@ import {
   parseChatShellScriptIntent,
   type ChatShellLanguage,
 } from './chatShellScriptIntent'
+import {
+  brandHasRealOffer,
+  buildChatShellConversationalReply,
+} from './chatShellConversationalReply'
 import { getTextModelPreference } from './textModelPreference'
 import {
   assignGlobalScriptOrdinals,
@@ -1096,17 +1100,38 @@ export function useChatSessionThread(options: {
       ...DEFAULT_SCRIPT_SETTINGS,
       model: getTextModelPreference(),
     })
+
+    const hasOffer =
+      planOfferGenerationWalk(offers).length > 0
+      || Boolean(session.product_id)
+      || brandHasRealOffer(brandProducts)
+
+    // Greetings / chitchat — reply in-thread, never auto-generate scripts.
+    if (!options?.forceSettings && !parsedScriptIntent.matched) {
+      const reply = buildChatShellConversationalReply({
+        text,
+        language,
+        hasOffer,
+      })
+      await persistTurn('user', text)
+      await persistTurn('assistant', reply)
+      setNotice(null)
+      setError(null)
+      setScriptClarify(null)
+      setImageClarify(null)
+      return hasOffer ? undefined : { needOffers: true }
+    }
+
     if (!options?.forceSettings && !options?.bypassScriptClarify && parsedScriptIntent.matched) {
-      const hasOffer =
-        planOfferGenerationWalk(offers).length > 0
-        || Boolean(session.product_id)
-        || brandProducts.some((product) => product.name !== 'Quick Use Image Studio')
       if (!hasOffer) {
         setScriptClarify(null)
         setImageClarify(null)
-        setNotice(language === 'es'
-          ? 'Primero necesitás una oferta. Creala en el panel Ofertas o confirmá el setup.'
-          : 'You need an offer first. Create one in Offers or confirm setup.')
+        const reply = language === 'es'
+          ? 'Primero necesitás una oferta. Creala en el panel Ofertas (a la derecha) o confirmá el setup en el chat — sin oferta no puedo generar guiones.'
+          : 'You need an offer first. Create one in the Offers panel (right) or confirm setup in chat — I can’t generate scripts without an offer.'
+        await persistTurn('user', text)
+        await persistTurn('assistant', reply)
+        setNotice(reply)
         return { needOffers: true }
       }
       const ctaChannel = explicitCtaChannel(text)
@@ -1199,18 +1224,24 @@ export function useChatSessionThread(options: {
         )
         return
       } else if (resolved.action === 'none') {
-        setNotice(language === 'es'
-          ? 'Todavía no hay una oferta en esta marca. Confirmá el setup en el chat.'
-          : 'This brand has no offer yet. Confirm setup in chat first.')
-        return
+        const reply = language === 'es'
+          ? 'Todavía no hay una oferta en esta marca. Abrí Ofertas a la derecha o confirmá el setup en el chat.'
+          : 'This brand has no offer yet. Open Offers on the right or confirm setup in chat.'
+        await persistTurn('user', text)
+        await persistTurn('assistant', reply)
+        setNotice(reply)
+        return { needOffers: true }
       }
     }
 
     if (walk.length === 0) {
-      setNotice(language === 'es'
-        ? 'Todavía no hay una oferta en esta marca. Confirmá el setup en el chat.'
-        : 'This brand has no offer yet. Confirm setup in chat first.')
-      return
+      const reply = language === 'es'
+        ? 'Todavía no hay una oferta en esta marca. Abrí Ofertas a la derecha o confirmá el setup en el chat.'
+        : 'This brand has no offer yet. Open Offers on the right or confirm setup in chat.'
+      await persistTurn('user', text)
+      await persistTurn('assistant', reply)
+      setNotice(reply)
+      return { needOffers: true }
     }
 
     const originSessionId = session.id

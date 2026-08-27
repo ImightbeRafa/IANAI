@@ -1,4 +1,18 @@
-## 2026-08-25 — MCP prod regression fix (0.9.5)
+## 2026-08-27 — Chat-shell open for all users (Preview-first)
+
+**Area:** chat-shell + credits + guiones
+**Files:** `chatShellRollout.ts`, `chat-shell-access.ts`, `chat-shell-open.ts`, `chat-shell-gift.ts`, welcome/tour/home-preview UI, `Settings.tsx`, `chatShellBrandSetup.ts`, `useChatSessionThread.ts`, `api/chat.ts`, `type-lenses.ts`, tests
+
+- Kill switch alone grants `/chat` (invite gate dropped); `preferred_ui` still defaults classic.
+- First `/chat` open: idempotent +100 pack credits (12mo) + Spanish gift popup + informative tour (skip forever via user_metadata).
+- Usar Chat como inicio shows animated preview before confirming.
+- Preferencias de IA hidden; Plan y facturación shows clearer usage + improvement disclaimer.
+- Greetings no longer auto-generate scripts; missing-offer asks clearly and opens Ofertas.
+- Tracker Oferta = named product exists; light-mode inputs override global dark color-scheme.
+- Venta directa legacy few-shot + type lens less robotic.
+
+---
+
 
 **Area:** mcp
 **Files:** `supabase-adapter.ts`, `protocol.ts`, `bulk-tools.ts`, `run-bulk.ts`, `expand-product-refs.ts`, `grok-image-generate.ts`, `execute-job.ts`, `artifact-store.ts`, `reference-gate.ts`, `tool-registry.ts`, tests

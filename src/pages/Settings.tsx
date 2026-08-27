@@ -486,6 +486,23 @@ export function SettingsContent({
               {loading ? t.saving : t.saveChanges}
             </button>
           </form>
+          <div className="mt-6 pt-6 border-t border-dark-200">
+            <label htmlFor="language-general" className="block text-sm font-medium text-dark-700 mb-1.5">
+              {language === 'es' ? 'Idioma' : 'Language'}
+            </label>
+            <div className="relative">
+              <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
+              <select
+                id="language-general"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value as Language)}
+                className="input-field pl-10 appearance-none cursor-pointer"
+              >
+                <option value="en">English</option>
+                <option value="es">Español</option>
+              </select>
+            </div>
+          </div>
         </div>
         )}
 
@@ -520,7 +537,8 @@ export function SettingsContent({
         </div>
         )}
 
-        {show('ai') && (
+        {/* Preferencias de IA hidden for now — defaults only */}
+        {false && show('ai') && (
         <div className="card mt-6">
           <h2 className="text-lg font-semibold text-dark-900 mb-6">{t.aiPreferences}</h2>
           <div>
@@ -1151,21 +1169,30 @@ export function SettingsContent({
                     </div>
                     <div className="text-2xl font-bold text-dark-900">{usageLimits.creditsRemaining}</div>
                   </div>
-                  <p className="text-xs text-dark-500">{CREDITS_PITCH[language]}</p>
+                  <p className="text-xs text-dark-500">
+                    {language === 'es'
+                      ? `Saldo actual disponible para generar. Guion 3 · Imagen 6 · Pro 24. ${CREDITS_PITCH.es}`
+                      : `Current balance available for generation. Script 3 · Image 6 · Pro 24. ${CREDITS_PITCH.en}`}
+                  </p>
                 </div>
               ) : (
                 <div className="p-4 bg-dark-50 rounded-xl space-y-2 text-sm text-dark-700">
                   <p>
-                    {language === 'es' ? 'Guiones' : 'Scripts'}: {usageLimits.scriptsUsed}
+                    {language === 'es' ? 'Guiones este mes' : 'Scripts this month'}: {usageLimits.scriptsUsed}
                     {usageLimits.scriptsLimit === -1 ? '' : ` / ${usageLimits.scriptsLimit}`}
                   </p>
                   <p>
-                    {language === 'es' ? 'Imágenes' : 'Images'}: {usageLimits.imagesUsed}
+                    {language === 'es' ? 'Imágenes este mes' : 'Images this month'}: {usageLimits.imagesUsed}
                     {usageLimits.imagesLimit === -1 ? '' : ` / ${usageLimits.imagesLimit}`}
                   </p>
                   <p className="text-xs text-dark-500">{CREDITS_PITCH[language]}</p>
                 </div>
               )}
+              <p className="text-xs text-dark-400 leading-relaxed px-1">
+                {language === 'es'
+                  ? 'Estamos mejorando esta sección para que el uso y la facturación sean más claros. Gracias por tu paciencia.'
+                  : 'We’re improving this section so usage and billing are clearer. Thanks for your patience.'}
+              </p>
             </div>
           )}
 

@@ -15,31 +15,31 @@ describe('resolveChatShellRollout', () => {
     }
   })
 
-  it('keeps classic home when the flag is on but the user is not invited', () => {
+  it('opens chat to all users when the flag is on, even without beta invite', () => {
     const row = resolveChatShellRollout({
       killSwitch: 'enabled',
       betaAccess: false,
       preferredUi: 'chat',
     })
-    expect(row.canAccessChat).toBe(false)
-    expect(row.showSwitch).toBe(false)
-    expect(row.effectiveHome).toBe('classic')
+    expect(row.canAccessChat).toBe(true)
+    expect(row.showSwitch).toBe(true)
+    expect(row.effectiveHome).toBe('chat')
   })
 
-  it('treats missing beta as not invited', () => {
+  it('treats missing beta as irrelevant when the kill switch is on', () => {
     const row = resolveChatShellRollout({
       killSwitch: 'enabled',
       betaAccess: null,
       preferredUi: 'chat',
     })
-    expect(row.canAccessChat).toBe(false)
-    expect(row.effectiveHome).toBe('classic')
+    expect(row.canAccessChat).toBe(true)
+    expect(row.effectiveHome).toBe('chat')
   })
 
-  it('lets invited testers stay on classic until they opt in', () => {
+  it('keeps classic home until the user opts into chat', () => {
     const row = resolveChatShellRollout({
       killSwitch: 'enabled',
-      betaAccess: true,
+      betaAccess: false,
       preferredUi: 'classic',
     })
     expect(row.canAccessChat).toBe(true)
@@ -47,7 +47,7 @@ describe('resolveChatShellRollout', () => {
     expect(row.effectiveHome).toBe('classic')
   })
 
-  it('sends invited testers to chat only when they prefer it', () => {
+  it('sends opted-in users to chat when the flag is on', () => {
     const row = resolveChatShellRollout({
       killSwitch: 'enabled',
       betaAccess: true,

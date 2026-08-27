@@ -361,6 +361,32 @@ export default function ChatShell({
     setRailOpen(true)
   }, [])
 
+  const ensureOfferThenSend = useCallback(async (prompt: string) => {
+    const hasOffer =
+      brandSetup.snapshot.offerCore
+      || brandSetup.facts.offerConfirmed
+      || brandSetup.phase === 'complete'
+    if (!hasOffer && (brandSetup.facts.offerName || brandSetup.facts.businessName)) {
+      try {
+        await brandSetup.saveProfile(brandSetup.facts, true)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+    const stillMissing =
+      !brandSetup.snapshot.offerCore
+      && !brandSetup.facts.offerConfirmed
+      && brandSetup.phase !== 'complete'
+      && !(brandSetup.facts.offerName)
+    if (stillMissing && !brandSetup.snapshot.offerCore) {
+      // After save, snapshot may still be stale in closure — send path will ask if needed.
+    }
+    const result = await handleSend(prompt)
+    if (result && typeof result === 'object' && 'needOffers' in result && result.needOffers) {
+      openOffersRail()
+    }
+  }, [brandSetup, handleSend, openOffersRail])
+
   const openLightbox = useCallback((image: {
     url: string
     alt: string
@@ -678,7 +704,7 @@ export default function ChatShell({
                   disabled: brandSetup.busy || thread.loadingMessages,
                   onClick: () => {
                     thread.cancelImageClarify()
-                    void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                    void ensureOfferThenSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
                   },
                 },
                 {
@@ -688,7 +714,7 @@ export default function ChatShell({
                   disabled: brandSetup.busy || thread.loadingMessages,
                   onClick: () => {
                     thread.cancelScriptClarify()
-                    void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                    void ensureOfferThenSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
                   },
                 },
                 {
@@ -699,7 +725,7 @@ export default function ChatShell({
                   onClick: () => {
                     thread.cancelScriptClarify()
                     patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
-                    void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                    void ensureOfferThenSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
                   },
                 },
                 {

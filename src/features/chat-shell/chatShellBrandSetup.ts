@@ -168,38 +168,8 @@ export function resolveBusinessBrandKitId(
 
 function isOfferCoreComplete(product: Product): boolean {
   if (!nonempty(product.name) || product.name === 'Quick Use Image Studio') return false
-  if (nonempty(product.product_description) || nonempty(product.utility) || nonempty(product.result)) {
-    return true
-  }
-  switch (product.type) {
-    case 'product':
-      return false
-    case 'service':
-      return (
-        nonempty(product.main_problem || product.svc_problem)
-        && nonempty(product.expected_result || product.svc_concrete_result)
-        && nonempty(product.differentiation || product.svc_differentiation)
-      )
-    case 'restaurant':
-      return nonempty(product.menu_text) && nonempty(product.location) && nonempty(product.schedule)
-    case 'real_estate':
-      return (
-        nonempty(product.re_price)
-        && nonempty(product.re_location)
-        && nonempty(product.re_highlights)
-        && nonempty(product.re_cta)
-      )
-    case 'indumentaria':
-      return (
-        nonempty(product.ind_article_type)
-        && nonempty(product.ind_variations_description)
-        && nonempty(product.ind_main_material)
-      )
-    default: {
-      const _never: never = product.type
-      return _never
-    }
-  }
+  // Tracker Oferta = offer exists. Richer fields stay soft guidance (offerDepth).
+  return true
 }
 
 function isOfferDepthComplete(product: Product): boolean {
