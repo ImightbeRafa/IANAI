@@ -295,6 +295,19 @@ function applyGrokThreeReferenceBudget(imageParams: Record<string, unknown>): vo
   )
 }
 
+
+function grokUserFacingError(language: unknown, kind: 'missing_key' | 'failed'): string {
+  const es = language !== 'en'
+  if (kind === 'missing_key') {
+    return es
+      ? 'La generación de imágenes no está configurada en este entorno (falta la clave del proveedor). Avisá al equipo o reintentá más tarde.'
+      : 'Image generation is not configured in this environment (provider key missing). Contact the team or try again later.'
+  }
+  return es
+    ? 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.'
+    : 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.'
+}
+
 function normalizePostTextDensity(value: unknown): PostTextDensity {
   return value === 'hard' || value === 'standard' || value === 'medium' ? value : 'medium'
 }
@@ -774,7 +787,12 @@ Edit instruction: ${editPrompt}`
 
       if (selectedModel === 'grok-imagine') {
         const xaiApiKey = process.env.GROK_API_KEY
-        if (!xaiApiKey) return res.status(500).json({ error: 'xAI API key not configured' })
+        if (!xaiApiKey) {
+          return res.status(500).json({
+            error: grokUserFacingError(imageParams.language, 'missing_key'),
+            code: 'provider_key_missing',
+          })
+        }
         try {
           const supportUrls = editRefImages.slice(0, 2)
           if (brandKit?.logo_url || logoFallbackUrl) {
@@ -1117,7 +1135,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
       if (selectedModel === 'grok-imagine') {
         const xaiApiKey = process.env.GROK_API_KEY
-        if (!xaiApiKey) return res.status(500).json({ error: 'xAI API key not configured' })
+        if (!xaiApiKey) {
+          return res.status(500).json({
+            error: grokUserFacingError(imageParams.language, 'missing_key'),
+            code: 'provider_key_missing',
+          })
+        }
         try {
           const supportUrls: string[] = []
           if (hasProductRef) {
@@ -2390,7 +2413,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     if (selectedModel === 'grok-imagine') {
       const xaiApiKey = process.env.GROK_API_KEY
       if (!xaiApiKey) {
-        return res.status(500).json({ error: 'xAI API key not configured' })
+        return res.status(500).json({
+          error: grokUserFacingError(imageParams.language, 'missing_key'),
+          code: 'provider_key_missing',
+        })
       }
 
       const providerModel = GROK_IMAGE_PROVIDER_MODEL
@@ -2488,7 +2514,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           })
 
           return res.status(response.status).json({
-            error: 'Grok Imagine generation failed',
+            error: grokUserFacingError(imageParams.language, 'failed'),
+            code: 'grok_failed',
             details: errorText,
             model: selectedModel,
             providerModel,
@@ -2568,7 +2595,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         return res.status(500).json({
-          error: 'Grok Imagine generation failed',
+          error: grokUserFacingError(imageParams.language, 'failed'),
+          code: 'grok_failed',
           details: grokError instanceof Error ? grokError.message : 'Unknown error',
           model: selectedModel,
           providerModel,

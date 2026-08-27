@@ -1114,9 +1114,16 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   color: var(--text-faint);
   font-size: 0.68rem;
   letter-spacing: var(--chat-ui-track);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.25;
+  overflow: visible;
+}
+
+.chat-shell__modal-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  line-height: 1.35;
 }
 
 .chat-shell__avatar {

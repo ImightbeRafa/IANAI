@@ -1,9 +1,45 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
+
+const labels = {
+  es: {
+    subtitle: 'Iniciá sesión para crear guiones que venden',
+    google: 'Continuar con Google',
+    googleConnecting: 'Conectando…',
+    orEmail: 'o iniciá con tu correo',
+    email: 'Correo',
+    emailPlaceholder: 'vos@ejemplo.com',
+    password: 'Contraseña',
+    forgot: '¿Olvidaste tu contraseña?',
+    signIn: 'Iniciar sesión',
+    signingIn: 'Iniciando…',
+    noAccount: '¿No tenés cuenta?',
+    signUp: 'Registrate',
+    googleFail: 'No se pudo iniciar con Google',
+    signInFail: 'No se pudo iniciar sesión',
+  },
+  en: {
+    subtitle: 'Sign in to create winning ad scripts',
+    google: 'Continue with Google',
+    googleConnecting: 'Connecting...',
+    orEmail: 'or sign in with email',
+    email: 'Email',
+    emailPlaceholder: 'you@example.com',
+    password: 'Password',
+    forgot: 'Forgot your password?',
+    signIn: 'Sign In',
+    signingIn: 'Signing in...',
+    noAccount: "Don't have an account?",
+    signUp: 'Sign up',
+    googleFail: 'Failed to sign in with Google',
+    signInFail: 'Failed to sign in',
+  },
+} as const
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -12,10 +48,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
   const { signIn, signInWithGoogle } = useAuth()
+  const { language } = useLanguage()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [referralCode, setReferralCode] = useState<string | null>(null)
   const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/dashboard'
+  const t = labels[language === 'en' ? 'en' : 'es']
 
   // Capture referral code from URL and persist in localStorage
   useEffect(() => {
@@ -35,7 +73,7 @@ export default function Login() {
     try {
       await signInWithGoogle({ redirectPath: returnPath })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sign in with Google')
+      setError(err instanceof Error ? err.message : t.googleFail)
       setGoogleLoading(false)
     }
   }
@@ -49,7 +87,7 @@ export default function Login() {
       await signIn(email, password)
       navigate(returnPath)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sign in')
+      setError(err instanceof Error ? err.message : t.signInFail)
     } finally {
       setLoading(false)
     }
@@ -64,7 +102,7 @@ export default function Login() {
             <AdvanceLogo size={48} />
             <span className="text-2xl font-bold text-dark-900">Advance AI</span>
           </div>
-          <p className="text-dark-500">Sign in to create winning ad scripts</p>
+          <p className="text-dark-500">{t.subtitle}</p>
         </div>
 
         {/* Form */}
@@ -82,7 +120,7 @@ export default function Login() {
               <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
               <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
             </svg>
-            {googleLoading ? 'Connecting...' : 'Continue with Google'}
+            {googleLoading ? t.googleConnecting : t.google}
           </button>
 
           <div className="relative mb-6">
@@ -90,7 +128,7 @@ export default function Login() {
               <div className="w-full border-t border-dark-200"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-dark-100 text-dark-500">or sign in with email</span>
+              <span className="px-2 bg-dark-100 text-dark-500">{t.orEmail}</span>
             </div>
           </div>
 
@@ -104,7 +142,7 @@ export default function Login() {
 
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-dark-700 mb-1.5">
-                Email
+                {t.email}
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
@@ -114,7 +152,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="input-field pl-10"
-                  placeholder="you@example.com"
+                  placeholder={t.emailPlaceholder}
                   required
                 />
               </div>
@@ -122,7 +160,7 @@ export default function Login() {
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-dark-700 mb-1.5">
-                Password
+                {t.password}
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
@@ -140,7 +178,7 @@ export default function Login() {
 
             <div className="flex justify-end">
               <Link to="/forgot-password" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-                ¿Olvidaste tu contraseña?
+                {t.forgot}
               </Link>
             </div>
 
@@ -149,14 +187,14 @@ export default function Login() {
               disabled={loading}
               className="btn-primary w-full py-2.5"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? t.signingIn : t.signIn}
             </button>
           </form>
 
           <p className="text-center text-sm text-dark-500 mt-6">
-            Don't have an account?{' '}
+            {t.noAccount}{' '}
             <Link to={referralCode ? `/signup?ref=${referralCode}` : '/signup'} className="text-primary-600 hover:text-primary-700 font-medium">
-              Sign up
+              {t.signUp}
             </Link>
           </p>
         </div>

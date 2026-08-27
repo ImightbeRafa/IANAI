@@ -95,6 +95,13 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '2026-08-27',
     items: [
       {
+        category: 'fix',
+        text: {
+          es: 'Login en español, cotización de créditos antes de generar, Nueva marca con URL, Ofertas creadas al analizar la web, errores de imagen en español, y el modal de bienvenida cierra al primer clic.',
+          en: 'Spanish login, credit quote before generate, New brand with URL, Offers created on site analysis, Spanish image errors, and welcome modal dismisses on first click.',
+        },
+      },
+      {
         category: 'feature',
         text: {
           es: 'Chat nuevo disponible para todos: un chat para guiones, posts y fotos. Podés seguir en el panel clásico o elegir Chat como inicio cuando quieras.',

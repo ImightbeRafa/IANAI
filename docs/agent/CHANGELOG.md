@@ -1,3 +1,14 @@
+## 2026-08-27 — Preview QA fixes (PR #33 CoS findings)
+
+**Area:** chat-shell + auth + images + credits
+**Files:** `Login.tsx`, `useUsageLimits.ts`, `ChatShellPage.tsx`, brand create/setup, `generate-image.ts`, image/credit helpers, a11y labels, tests
+
+- **Confirmed:** bilingual login (A); usage refresh + readable balance + pre-generate credit quote (B); Nueva marca URL field (C); ingest materializes offer + product JPEG/PNG refs (D); Spanish Grok/image errors (E); gift modal dismisses on first click (F); Spanish sidebar/rail aria-labels (G).
+- **Discarded:** script quality rewrite / “Simple 3 pasos” (H).
+- **Env-only:** Preview must keep `VITE_CREDITS_V1` / `CREDITS_V1` aligned; missing `GROK_API_KEY` is deployment config (UX now explains in Spanish). Gift lot for TestAccount already existed — no regrant.
+
+---
+
 ## 2026-08-27 — Chat-shell open for all users (Preview-first)
 
 **Area:** chat-shell + credits + guiones

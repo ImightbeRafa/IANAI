@@ -64,6 +64,7 @@ export default function ChatShell({
   const [railTab, setRailTab] = useState<RailTab>('context')
   const [railPane, setRailPane] = useState<RailPane>('index')
   const [brandCreateOpen, setBrandCreateOpen] = useState(false)
+  const pendingWebsiteIngestRef = useRef<{ sessionId: string; url: string } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [lightbox, setLightbox] = useState<{
     url: string
@@ -456,10 +457,30 @@ export default function ChatShell({
     setBrandCreateOpen(false)
   }, [workspace.busy])
 
-  const submitBrandCreate = useCallback(async (name: string) => {
-    const ok = await workspace.createBrand(name)
-    if (ok) setBrandCreateOpen(false)
+  const submitBrandCreate = useCallback(async (payload: { name: string; websiteUrl: string | null }) => {
+    const result = await workspace.createBrand(payload.name)
+    if (!result.ok) return
+    setBrandCreateOpen(false)
+    if (payload.websiteUrl) {
+      pendingWebsiteIngestRef.current = {
+        sessionId: result.sessionId,
+        url: payload.websiteUrl,
+      }
+    }
   }, [workspace])
+
+  const brandSetupReplyRef = useRef(brandSetup.reply)
+  brandSetupReplyRef.current = brandSetup.reply
+
+  // After Nueva marca with URL: kick ingest once the new session is active.
+  useEffect(() => {
+    const pending = pendingWebsiteIngestRef.current
+    const sessionId = workspace.activeSession?.id
+    if (!pending || !sessionId || pending.sessionId !== sessionId) return
+    if (brandSetup.busy) return
+    pendingWebsiteIngestRef.current = null
+    void brandSetupReplyRef.current(pending.url)
+  }, [workspace.activeSession?.id, brandSetup.busy])
 
   const handleCreateOffer = useCallback(async (name: string, type: ProductType) => {
     const brand = workspace.activeBrand
@@ -667,6 +688,9 @@ export default function ChatShell({
           onLatestVersionChange={thread.registerScriptSnapshot}
           onAnswerScriptClarify={(answer) => void thread.answerScriptClarify(answer)}
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
+          creditQuote={thread.creditQuote}
+          onConfirmCreditQuote={() => void thread.confirmCreditQuote()}
+          onCancelCreditQuote={() => thread.cancelCreditQuote()}
           onOpenImagesRail={() => selectRailTab('images')}
           onUploadOfferReference={(file, kind, productId) => thread.uploadOfferImage(file, productId, kind)}
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}

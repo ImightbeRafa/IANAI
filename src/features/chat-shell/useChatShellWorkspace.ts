@@ -538,16 +538,16 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
   /**
    * O3: in-shell New brand — createBusiness + first session, stay on /chat.
-   * Never navigates to /dashboard. Returns true on success.
+   * Never navigates to /dashboard. Returns session id on success for optional URL ingest.
    */
-  const createBrand = useCallback(async (name: string): Promise<boolean> => {
-    if (!userId) return false
+  const createBrand = useCallback(async (name: string): Promise<{ ok: true; sessionId: string; brandId: string } | { ok: false }> => {
+    if (!userId) return { ok: false }
     const validation = validateBrandCreateName(name)
     if (validation) {
       setError(validation)
-      return false
+      return { ok: false }
     }
-    if (createLockRef.current || busy) return false
+    if (createLockRef.current || busy) return { ok: false }
     createLockRef.current = true
     const epoch = bumpSelectionEpoch()
     setBusy(true)
@@ -555,7 +555,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
     setNotice(null)
     try {
       const brand = await createBusiness(userId, buildMinimalBrandFormData(name))
-      if (selectionEpochRef.current !== epoch) return false
+      if (selectionEpochRef.current !== epoch) return { ok: false }
 
       setBusinesses((prev) => [brand, ...prev.filter((b) => b.id !== brand.id)])
       setSessionCounts((prev) => ({ ...prev, [brand.id]: 0 }))
@@ -570,7 +570,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
         userId,
         defaultSessionTitle()
       )
-      if (selectionEpochRef.current !== epoch) return false
+      if (selectionEpochRef.current !== epoch) return { ok: false }
 
       writeBrandSessions(brand.id, [session])
       setSessionCounts((prev) => ({ ...prev, [brand.id]: 1 }))
@@ -578,11 +578,11 @@ export function useChatShellWorkspace(userId: string | undefined) {
       syncUrlAndStorage(brand.id, session.id)
       setNotice(null)
       invalidateDashboardCache()
-      return true
+      return { ok: true, sessionId: session.id, brandId: brand.id }
     } catch (err) {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Failed to create brand')
-      return false
+      return { ok: false }
     } finally {
       createLockRef.current = false
       setBusy(false)

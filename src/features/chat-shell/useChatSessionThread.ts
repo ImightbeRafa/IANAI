@@ -40,6 +40,13 @@ import type {
   ScriptGenerationSettings,
 } from '../../types'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
+import { useUsageLimits, invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
+import {
+  buildCreditQuote,
+  quoteImageCredits,
+  type CreditQuote,
+} from './chatShellCreditQuote'
+import { friendlyImageError } from './chatShellImageErrors'
 import {
   collectBrandGenerateVisual,
   resolveBrandKitIdForSession,
@@ -380,6 +387,35 @@ export function useChatSessionThread(options: {
   )
   const [imageClarify, setImageClarify] = useState<ImageClarifyState | null>(null)
   const [scriptClarify, setScriptClarify] = useState<ScriptClarifyState | null>(null)
+  const [creditQuote, setCreditQuote] = useState<CreditQuote | null>(null)
+  const creditPendingRef = useRef<null | {
+    kind: 'scripts' | 'image'
+    text?: string
+    sendOptions?: {
+      forceSettings?: ScriptGenerationSettings
+      skipImage?: boolean
+      bypassScriptClarify?: boolean
+      channelOverride?: 'website' | 'messages'
+      creditConfirmed?: boolean
+    }
+    imageOptions?: Record<string, unknown>
+  }>(null)
+  const usage = useUsageLimits()
+  const runImageGenerateRef = useRef<(options: {
+    productId: string
+    preferences: ShellImagePreferences
+    prompt: string
+    userText: string
+    scriptText?: string
+    scriptTitle?: string | null
+    source: string
+    referenceMode?: 'use' | 'none'
+    referenceImageIds?: string[]
+    alreadyOptimized?: boolean
+    askStyleRef?: boolean
+    skipStyleRef?: boolean
+    creditConfirmed?: boolean
+  }) => Promise<void>>(async () => {})
   const latestScriptByKeyRef = useRef<Map<string, string>>(new Map())
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(() => ({
     ...DEFAULT_SCRIPT_SETTINGS,
@@ -396,21 +432,6 @@ export function useChatSessionThread(options: {
     explicit?: Partial<ShellImagePreferences>
     alreadyOptimized?: boolean
     referenceImageIds?: string[]
-  }) => Promise<void>>(async () => {})
-
-  const runImageGenerateRef = useRef<(options: {
-    productId: string
-    preferences: ShellImagePreferences
-    prompt: string
-    userText: string
-    scriptText?: string
-    scriptTitle?: string | null
-    source: string
-    referenceMode?: 'use' | 'none'
-    referenceImageIds?: string[]
-    alreadyOptimized?: boolean
-    askStyleRef?: boolean
-    skipStyleRef?: boolean
   }) => Promise<void>>(async () => {})
 
   const loadRequestRef = useRef(0)
@@ -1073,6 +1094,7 @@ export function useChatSessionThread(options: {
       skipImage?: boolean
       bypassScriptClarify?: boolean
       channelOverride?: 'website' | 'messages'
+      creditConfirmed?: boolean
     }
   ): Promise<{ needOffers?: boolean } | void> => {
     const text = rawText.trim()
@@ -1244,6 +1266,22 @@ export function useChatSessionThread(options: {
       return { needOffers: true }
     }
 
+    if (
+      (usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true')
+      && !options?.creditConfirmed
+    ) {
+      const quote = buildCreditQuote({
+        kind: 'scripts',
+        units: walk.length,
+        remaining: usage.creditsRemaining,
+      })
+      creditPendingRef.current = { kind: 'scripts', text, sendOptions: options }
+      setCreditQuote(quote)
+      setError(null)
+      setNotice(null)
+      return
+    }
+
     const originSessionId = session.id
     const originGen = sessionGenRef.current
     const optimisticId = `optimistic-user-${Date.now()}`
@@ -1325,6 +1363,8 @@ export function useChatSessionThread(options: {
         return
       }
 
+      invalidateUsageLimitsCache()
+
       if (failures.length > 0) {
         setFailedBatch({
           productIds: failures.map((f) => f.step.productId),
@@ -1368,7 +1408,45 @@ export function useChatSessionThread(options: {
     brandProducts,
     persistOffers,
     persistTurn,
+    usage.creditsEnabled,
+    usage.creditsRemaining,
   ])
+
+  const confirmCreditQuote = useCallback(async () => {
+    const pending = creditPendingRef.current
+    setCreditQuote(null)
+    creditPendingRef.current = null
+    if (!pending) return
+    if (pending.kind === 'scripts' && pending.text) {
+      await send(pending.text, { ...pending.sendOptions, creditConfirmed: true })
+      return
+    }
+    if (pending.kind === 'image' && pending.imageOptions) {
+      await runImageGenerateRef.current({
+        ...(pending.imageOptions as {
+          productId: string
+          preferences: ShellImagePreferences
+          prompt: string
+          userText: string
+          scriptText?: string
+          scriptTitle?: string | null
+          source: string
+          referenceMode?: 'use' | 'none'
+          referenceImageIds?: string[]
+          alreadyOptimized?: boolean
+          askStyleRef?: boolean
+          skipStyleRef?: boolean
+        }),
+        creditConfirmed: true,
+      })
+    }
+  }, [send])
+
+  const cancelCreditQuote = useCallback(() => {
+    creditPendingRef.current = null
+    setCreditQuote(null)
+    setNotice(null)
+  }, [])
 
   const answerScriptClarify = useCallback(async (answer: {
     type?: ScriptFramework | 'mixed'
@@ -1736,6 +1814,7 @@ export function useChatSessionThread(options: {
     alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
+    creditConfirmed?: boolean
   }) => {
     if (!session || imageBusyRef.current) return
     const originSessionId = session.id
@@ -1870,6 +1949,22 @@ export function useChatSessionThread(options: {
         scriptText = stripUnresolvedPlaceholders(scriptText)
         if (prompt === options.scriptText) prompt = scriptText
       }
+
+      if (
+        (usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true')
+        && !options.creditConfirmed
+      ) {
+        const cost = quoteImageCredits(prefs.model)
+        const quote = buildCreditQuote({
+          kind: cost >= 24 ? 'image_pro' : 'image_standard',
+          remaining: usage.creditsRemaining,
+        })
+        creditPendingRef.current = { kind: 'image', imageOptions: { ...options, prompt, scriptText } }
+        setCreditQuote(quote)
+        setError(null)
+        return
+      }
+
       generating = true
       imageBusyRef.current = true
       setImageBusy(true)
@@ -1908,6 +2003,7 @@ export function useChatSessionThread(options: {
       setImageClarify(null)
       setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
       await refreshOfferImages(originSessionId, options.productId, loadRequestRef.current)
+      invalidateUsageLimitsCache()
     } catch (err) {
       console.error(err)
       if (isLiveThread(
@@ -1916,7 +2012,10 @@ export function useChatSessionThread(options: {
         originSessionId,
         originGen
       )) {
-        setError(err instanceof Error ? err.message : 'Image generate failed')
+        setError(friendlyImageError(
+          err instanceof Error ? err.message : 'Image generate failed',
+          language
+        ))
       }
     } finally {
       if (generating) {
@@ -1934,6 +2033,8 @@ export function useChatSessionThread(options: {
     refreshOfferImages,
     offers,
     brandProducts,
+    usage.creditsEnabled,
+    usage.creditsRemaining,
   ])
 
   runImageGenerateRef.current = runImageGenerate
@@ -2776,6 +2877,9 @@ export function useChatSessionThread(options: {
       setScriptClarify(null)
       setNotice(null)
     },
+    creditQuote,
+    confirmCreditQuote,
+    cancelCreditQuote,
     registerScriptSnapshot: (key: string, content: string) => {
       if (!key || !content.trim()) return
       latestScriptByKeyRef.current.set(key, content)

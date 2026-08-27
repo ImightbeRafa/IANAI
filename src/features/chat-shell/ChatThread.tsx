@@ -27,6 +27,7 @@ import {
   type ScriptClarifyState,
   type ScriptCtaChannel,
 } from './useChatSessionThread'
+import { creditQuoteCopy, type CreditQuote } from './chatShellCreditQuote'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import { catalogOfferReferences, hasSelectedProductReference } from './chatShellReferenceSelection'
 import {
@@ -95,6 +96,9 @@ interface ChatThreadProps {
     ctaChannel?: ScriptCtaChannel
   }) => void
   onCancelScriptClarify?: () => void
+  creditQuote?: CreditQuote | null
+  onConfirmCreditQuote?: () => void
+  onCancelCreditQuote?: () => void
   onOpenImagesRail?: () => void
   onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
@@ -227,6 +231,9 @@ export default memo(function ChatThread({
   onLatestVersionChange,
   onAnswerScriptClarify,
   onCancelScriptClarify,
+  creditQuote = null,
+  onConfirmCreditQuote,
+  onCancelCreditQuote,
   onOpenImagesRail,
   onUploadOfferReference,
   onRemoveOfferReference,
@@ -748,6 +755,20 @@ export default memo(function ChatThread({
               )}
               <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelScriptClarify?.()}>
                 {language === 'es' ? 'Cancelar' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        ) : creditQuote ? (
+          <div className="chat-shell__clarify" role="group" aria-label={language === 'es' ? 'Cotización de créditos' : 'Credit quote'}>
+            <p className="chat-shell__clarify-question">
+              {creditQuoteCopy(creditQuote, language).question}
+            </p>
+            <div className="chat-shell__clarify-chips">
+              <button type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onConfirmCreditQuote?.()}>
+                {creditQuoteCopy(creditQuote, language).confirm}
+              </button>
+              <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelCreditQuote?.()}>
+                {creditQuoteCopy(creditQuote, language).cancel}
               </button>
             </div>
           </div>

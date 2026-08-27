@@ -31,6 +31,8 @@ import {
   type ReferenceRole,
 } from './chatShellReferenceSelection'
 
+import { friendlyImageError } from './chatShellImageErrors'
+
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
   : 'http://localhost:3000/api/generate-image'
@@ -46,6 +48,7 @@ interface ImageApiResult {
   result?: { sample?: string }
   imageUrl?: string
   error?: string
+  code?: string
   model?: string
   providerModel?: string
   generationId?: string
@@ -68,10 +71,14 @@ async function callGenerateImageDetailed(body: Record<string, unknown>): Promise
   })
   const json = (await res.json()) as ImageApiResult
   if (!res.ok) {
-    throw new Error(json.error || 'Image generation failed')
+    const language = body.language === 'en' ? 'en' : 'es'
+    throw new Error(friendlyImageError(json.error || json.code || 'Image generation failed', language))
   }
   const sample = json.result?.sample || json.imageUrl
-  if (!sample) throw new Error('No image returned')
+  if (!sample) {
+    const language = body.language === 'en' ? 'en' : 'es'
+    throw new Error(friendlyImageError('No image returned', language))
+  }
   return {
     sample,
     model: json.model,

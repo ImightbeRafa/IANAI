@@ -199,7 +199,7 @@ export default function ChatSidebar({
   }
 
   return (
-    <aside className="chat-shell__sidebar" aria-label="Chat navigation">
+    <aside className="chat-shell__sidebar" aria-label={t.navLabel}>
       <div className="chat-shell__brand">
         <AdvanceWordmark size={22} />
       </div>
@@ -299,7 +299,7 @@ export default function ChatSidebar({
                 <button
                   type="button"
                   className="chat-shell__brand-chevron"
-                  aria-label={isOpen ? `Collapse ${brand.name}` : `Expand ${brand.name}`}
+                  aria-label={isOpen ? `${t.collapseBrand} ${brand.name}` : `${t.expandBrand} ${brand.name}`}
                   aria-expanded={isOpen}
                   onClick={() => toggleBrandOpen(brand.id)}
                 >
@@ -311,7 +311,7 @@ export default function ChatSidebar({
                   onClick={() => selectBrand(brand.id)}
                 >
                   <span className="chat-shell__nav-item-label">{brand.name}</span>
-                  <span className="chat-shell__brand-count" aria-label={`${count} chats`}>
+                  <span className="chat-shell__brand-count" aria-label={`${count} ${t.chatsCount}`}>
                     {count}
                   </span>
                 </button>
@@ -426,7 +426,7 @@ export default function ChatSidebar({
                           <button
                             type="button"
                             className="chat-shell__session-more"
-                            aria-label={`Session actions for ${label}`}
+                            aria-label={`${t.sessionActionsFor} ${label}`}
                             aria-haspopup="menu"
                             aria-expanded={moreExpanded}
                             disabled={busy}
@@ -555,7 +555,9 @@ export default function ChatSidebar({
             {usage.loading
               ? ''
               : usage.creditsEnabled
-                ? `${t.creditsRemaining} ${usage.creditsRemaining}`
+                ? (language === 'es'
+                    ? `${usage.creditsRemaining} créditos IA`
+                    : `${usage.creditsRemaining} AI credits`)
                 : `${t.scriptsUsed} ${usage.scriptsUsed}/${usage.scriptsLimit === -1 ? '∞' : usage.scriptsLimit} · ${t.imagesUsed} ${usage.imagesUsed}/${usage.imagesLimit === -1 ? '∞' : usage.imagesLimit}`}
           </div>
         </div>

@@ -11,6 +11,7 @@ import {
   markChatShellWelcomeSeenClient,
   type ChatShellOpenEnsureResult,
 } from '../features/chat-shell/chatShellOpenApi'
+import { invalidateUsageLimitsCache } from '../hooks/useUsageLimits'
 import {
   applyChatShellTheme,
   clearChatShellTheme,
@@ -60,6 +61,9 @@ export default function ChatShellPage() {
       .then((result) => {
         if (cancelled) return
         setGift(result)
+        if (result.granted || result.creditsRemaining > 0) {
+          invalidateUsageLimitsCache()
+        }
         if (result.tourDone) {
           setPhase('done')
           return
@@ -89,29 +93,18 @@ export default function ChatShellPage() {
     applyTheme(theme === 'obsidian-dark' ? 'obsidian-light' : 'obsidian-dark')
   }
 
-  const dismissGift = async (continueToTour: boolean) => {
-    try {
-      await markChatShellWelcomeSeenClient()
-    } catch (err) {
-      console.error(err)
-    }
+  const dismissGift = (continueToTour: boolean) => {
+    // Phase first so "Empezar ya" dismisses on the first click (F).
     setPhase(continueToTour ? 'tour' : 'done')
+    void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
     if (!continueToTour) {
-      try {
-        await markChatShellTourDoneClient()
-      } catch (err) {
-        console.error(err)
-      }
+      void markChatShellTourDoneClient().catch((err) => console.error(err))
     }
   }
 
-  const finishTour = async () => {
-    try {
-      await markChatShellTourDoneClient()
-    } catch (err) {
-      console.error(err)
-    }
+  const finishTour = () => {
     setPhase('done')
+    void markChatShellTourDoneClient().catch((err) => console.error(err))
   }
 
   const metaName =
@@ -175,15 +168,15 @@ export default function ChatShellPage() {
           credits={gift.credits || 100}
           granted={gift.granted}
           language={lang}
-          onContinue={() => void dismissGift(true)}
-          onDismiss={() => void dismissGift(false)}
+          onContinue={() => dismissGift(true)}
+          onDismiss={() => dismissGift(false)}
         />
       ) : null}
       {phase === 'tour' ? (
         <ChatShellTourWizard
           language={lang}
-          onFinish={() => void finishTour()}
-          onSkipForever={() => void finishTour()}
+          onFinish={() => finishTour()}
+          onSkipForever={() => finishTour()}
         />
       ) : null}
     </>

@@ -411,7 +411,7 @@ export default function ChatContextRail({
                             className="chat-shell__offer-btn"
                             disabled={offerBusy || index === 0}
                             onClick={() => void onMoveOffer?.(offer.product_id, -1)}
-                            aria-label={`Move ${label} up`}
+                            aria-label={`${t.moveImageUp} ${label}`}
                           >
                             ↑
                           </button>
@@ -420,7 +420,7 @@ export default function ChatContextRail({
                             className="chat-shell__offer-btn"
                             disabled={offerBusy || index === displayOffers.length - 1}
                             onClick={() => void onMoveOffer?.(offer.product_id, 1)}
-                            aria-label={`Move ${label} down`}
+                            aria-label={`${t.moveImageDown} ${label}`}
                           >
                             ↓
                           </button>
@@ -430,7 +430,7 @@ export default function ChatContextRail({
                             disabled={offerBusy || Boolean(linkedOfferIds?.has(offer.product_id))}
                             title={linkedOfferIds?.has(offer.product_id) ? t.linkedOffer : undefined}
                             onClick={() => void onRemoveOffer?.(offer.product_id)}
-                            aria-label={`Remove ${label}`}
+                            aria-label={`${t.removeImageRef} ${label}`}
                           >
                             ✕
                           </button>
@@ -535,7 +535,7 @@ export default function ChatContextRail({
                 hasOffer={displayOffers.length > 0}
               />
               <p className="chat-shell__rail-hint">{t.imagesHint}</p>
-              <div className="chat-shell__image-offer-chips" role="tablist" aria-label="Image offer">
+              <div className="chat-shell__image-offer-chips" role="tablist" aria-label={t.imageOfferTablist}>
                 {displayOffers.map((offer) => {
                   const product =
                     ('product' in offer ? offer.product : undefined)
