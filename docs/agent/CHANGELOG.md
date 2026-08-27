@@ -1,3 +1,14 @@
+## 2026-08-27 — Grok slim prompt + UTF-8 byte cap (PR #33 retest)
+
+**Area:** images / Grok Imagine
+**Files:** `api/lib/grok-image-prompt.ts`, `generate-image.ts`, `chatShellImageErrors.ts`, tests
+
+- Retest still failed square 1:1 venta-directa (short script, 0 refs) with `grok_prompt_too_long` after ~60–90s.
+- Root cause: `venta-directa` used `buildPostPrompt` (~26KB essays); code-point truncate left mangled system text and still could exceed Grok’s 8000 if counted as UTF-8 bytes.
+- Grok post path now uses `buildSlimGrokPostPrompt` (user copy + short fidelity); enforce **7200 UTF-8 bytes** with margin; log code-point + byte lengths; canvas via `aspect_ratio` only.
+
+---
+
 ## 2026-08-27 — Grok Imagine prompt 8000 cap + aspect_ratio-only (PR #33)
 
 **Area:** images / Grok Imagine

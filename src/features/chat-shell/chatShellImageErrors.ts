@@ -7,10 +7,10 @@ const KNOWN: Array<{
   en: string
 }> = [
   {
-    match: /prompt length exceeds|maximum allowed length of\s*8000|grok_prompt_too_long|el texto del prompt es demasiado largo/i,
+    match: /prompt length exceeds|maximum allowed length of\s*8000|grok_prompt_too_long|no pudimos adaptar el prompt para grok|demasiado largo para grok/i,
     code: 'grok_prompt_too_long',
-    es: 'El texto del prompt es demasiado largo para Grok (máximo 8000 caracteres). Acortá el guion o las instrucciones e intentá de nuevo.',
-    en: 'The image prompt is too long for Grok (max 8000 characters). Shorten the script or instructions and try again.',
+    es: 'No pudimos adaptar el prompt para Grok (límite de longitud). Reintentá; si sigue fallando, acortá el copy o las instrucciones de marca.',
+    en: 'We could not fit the prompt under Grok’s length limit. Retry; if it keeps failing, shorten the copy or brand instructions.',
   },
   {
     match: /xai api key not configured|grok[_ ]?api[_ ]?key|api key not configured/i,

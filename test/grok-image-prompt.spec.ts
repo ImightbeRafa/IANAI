@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
-  GROK_IMAGE_MAX_PROMPT_LENGTH,
+  GROK_IMAGE_MAX_PROMPT_BYTES,
+  buildSlimGrokPostPrompt,
   grokPromptCodePointLength,
+  grokPromptUtf8ByteLength,
   isGrokPromptLengthError,
   prepareGrokImagePrompt,
   stripGrokFormatDirectives,
 } from '../api/lib/grok-image-prompt'
 import { friendlyImageError } from '../src/features/chat-shell/chatShellImageErrors'
+
+const SHORT_ES_SCRIPT = [
+  '¿Granito la noche antes de un evento importante?',
+  'Actuá mientras dormís: sin dolor y no se nota.',
+  'Son 9 parches por ₡9.900 para emergencias de piel.',
+  'Dale click a este anuncio y hacé tu pedido.',
+].join('\n')
 
 describe('grok-image-prompt', () => {
   it('strips FORMATO OBLIGATORIO directives', () => {
@@ -20,46 +29,75 @@ describe('grok-image-prompt', () => {
     expect(stripped).toMatch(/parches para acné/)
   })
 
-  it('caps at 8000 Unicode code points and prefers user tail', () => {
-    const userCopy = 'TEXTO USUARIO: oferta Bloom dermal patch ₡9900'
-    const essays = `${'BRAND ESSAY '.repeat(900)}\n${'PRESET FILL '.repeat(900)}`
+  it('builds a slim venta-directa prompt well under the byte budget and keeps user copy', () => {
+    const slim = buildSlimGrokPostPrompt({
+      language: 'es',
+      postStyle: 'venta-directa',
+      textDensity: 'hard',
+      userCopy: SHORT_ES_SCRIPT,
+      palette: '#111, #eee',
+      brandVoice: 'Cercana, clara, costa rica.',
+      businessContext: 'Bloom vende parches de micro-agujas para acné.',
+      hasProductRefs: false,
+    })
+    expect(slim).toContain('Granito')
+    expect(slim).toContain('₡9.900')
+    expect(slim).not.toMatch(/FORMATO OBLIGATORIO/i)
+    expect(slim).not.toMatch(/1080×1920|9:16/)
+    expect(grokPromptUtf8ByteLength(slim)).toBeLessThan(3_500)
+  })
+
+  it('caps on UTF-8 bytes with safety margin and prefers user tail', () => {
+    const userCopy = SHORT_ES_SCRIPT
+    // Fat Spanish-heavy essays (multi-byte) that would blow a naive 8000 code-point cap in bytes.
+    const essays = `${'BRAND ESSAY ñáéíóú '.repeat(900)}\n${'PRESET FILL ¿¡ '.repeat(900)}`
     const raw = `FORMATO OBLIGATORIO: 9:16 vertical (1080×1920).\n\n${essays}\n\n${userCopy}`
-    expect(grokPromptCodePointLength(raw)).toBeGreaterThan(GROK_IMAGE_MAX_PROMPT_LENGTH)
+    expect(grokPromptUtf8ByteLength(raw)).toBeGreaterThan(GROK_IMAGE_MAX_PROMPT_BYTES)
 
     const prepared = prepareGrokImagePrompt(raw, { preferTail: userCopy })
-    expect(prepared.preparedLength).toBeLessThanOrEqual(GROK_IMAGE_MAX_PROMPT_LENGTH)
-    expect(prepared.prompt).toContain(userCopy)
+    expect(prepared.preparedByteLength).toBeLessThanOrEqual(GROK_IMAGE_MAX_PROMPT_BYTES)
+    expect(prepared.preparedByteLength).toBe(grokPromptUtf8ByteLength(prepared.prompt))
+    expect(prepared.originalByteLength).toBeGreaterThan(prepared.preparedByteLength)
+    expect(prepared.lengthUnit).toBe('utf8_bytes')
+    expect(prepared.prompt).toContain('Granito')
     expect(prepared.prompt).not.toMatch(/FORMATO OBLIGATORIO/i)
     expect(prepared.trimmed).toBe(true)
   })
 
-  it('does not split emoji code points at the boundary', () => {
+  it('does not split emoji / multi-byte chars at the byte boundary', () => {
     const emoji = '🙂'
-    const pad = 'x'.repeat(GROK_IMAGE_MAX_PROMPT_LENGTH - 1)
+    const pad = 'á'.repeat(8000)
     const prepared = prepareGrokImagePrompt(pad + emoji + 'TAIL')
-    expect(grokPromptCodePointLength(prepared.prompt)).toBe(GROK_IMAGE_MAX_PROMPT_LENGTH)
-    // Last char should be a complete code point (either x or 🙂), never a lone surrogate.
+    expect(prepared.preparedByteLength).toBeLessThanOrEqual(GROK_IMAGE_MAX_PROMPT_BYTES)
     expect(() => Array.from(prepared.prompt)).not.toThrow()
+    // No lone surrogates — full string is valid UTF-8 round-trip
+    expect(Buffer.from(prepared.prompt, 'utf8').toString('utf8')).toBe(prepared.prompt)
   })
 
-  it('detects xAI prompt-length invalid-argument', () => {
+  it('detects xAI prompt-length invalid-argument narrowly', () => {
     expect(
       isGrokPromptLengthError(
         'invalid-argument: Prompt length exceeds the maximum allowed length of 8000'
       )
     ).toBe(true)
     expect(isGrokPromptLengthError('Grok Imagine generation failed')).toBe(false)
+    // Unrelated invalid-argument that happens to mention 8000 must NOT match
+    expect(isGrokPromptLengthError('invalid-argument: width must be <= 8000')).toBe(false)
+  })
+
+  it('code-point helper still works for logging', () => {
+    expect(grokPromptCodePointLength('ab🙂')).toBe(3)
   })
 })
 
 describe('friendlyImageError prompt length', () => {
-  it('maps 8000 invalid-argument to Spanish by default', () => {
+  it('maps 8000 prompt-length error to Spanish by default', () => {
     expect(
       friendlyImageError(
         'invalid-argument: Prompt length exceeds the maximum allowed length of 8000',
         'es'
       )
-    ).toMatch(/demasiado largo para Grok/)
+    ).toMatch(/adaptar el prompt para Grok/i)
   })
 
   it('maps to English only when language is en', () => {
@@ -68,6 +106,6 @@ describe('friendlyImageError prompt length', () => {
         'Prompt length exceeds the maximum allowed length of 8000',
         'en'
       )
-    ).toMatch(/too long for Grok/)
+    ).toMatch(/length limit/i)
   })
 })

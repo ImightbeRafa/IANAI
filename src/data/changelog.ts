@@ -97,6 +97,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         category: 'fix',
         text: {
+          es: 'Posts cuadrados con Grok: prompt corto y útil (sin ensayos largos del sistema) para que un guion breve genere la imagen. Si falla por longitud, el aviso es en español.',
+          en: 'Square Grok posts: short useful prompts (no giant system essays) so a brief script can generate an image. Length failures stay in Spanish.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
           es: 'Posts con Grok: el formato va por aspect ratio (incluye 1:1) y el prompt se limita a 8000 caracteres para evitar fallos. Si se pasa del límite, el error sale en español.',
           en: 'Grok posts: format uses aspect ratio (including 1:1) and prompts are capped at 8000 characters to avoid failures. Over-limit errors show in Spanish.',
         },

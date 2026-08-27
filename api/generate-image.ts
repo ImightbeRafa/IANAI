@@ -36,6 +36,7 @@ import {
 } from './lib/grok-models.js'
 import { runGrokImageEdit } from './lib/grok-image-edit.js'
 import {
+  buildSlimGrokPostPrompt,
   isGrokPromptLengthError,
   prepareGrokImagePrompt,
 } from './lib/grok-image-prompt.js'
@@ -312,8 +313,8 @@ function grokUserFacingError(
   }
   if (kind === 'prompt_too_long') {
     return es
-      ? 'El texto del prompt es demasiado largo para Grok (máximo 8000 caracteres). Acortá el guion o las instrucciones e intentá de nuevo.'
-      : 'The image prompt is too long for Grok (max 8000 characters). Shorten the script or instructions and try again.'
+      ? 'No pudimos adaptar el prompt para Grok (límite de longitud). Reintentá; si sigue fallando, acortá el copy o las instrucciones de marca.'
+      : 'We could not fit the prompt under Grok’s length limit. Retry; if it keeps failing, shorten the copy or brand instructions.'
   }
   return es
     ? 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.'
@@ -2490,7 +2491,31 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
       const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
 
-      const preparedGrokPrompt = prepareGrokImagePrompt(enhancedPrompt, {
+      // Venta-directa / anuncio presets are ~26KB essays — do not truncate those for Grok.
+      // Build a slim useful prompt (user copy + short fidelity) then byte-cap with margin.
+      const useSlimPostPrompt = isPostMode && !isProductMode && !isLogoMode
+      const paletteForSlim = Array.isArray(imageParams.customColors)
+        ? (imageParams.customColors as string[]).slice(0, 3).join(', ')
+        : [brandKit?.primary_color, brandKit?.secondary_color, brandKit?.accent_color]
+          .filter(Boolean)
+          .join(', ')
+      const grokSourcePrompt = useSlimPostPrompt
+        ? buildSlimGrokPostPrompt({
+          language: typeof imageParams.language === 'string' ? imageParams.language : 'es',
+          postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
+          textDensity: typeof imageParams.textDensity === 'string' ? imageParams.textDensity : 'hard',
+          userCopy: typeof userPrompt === 'string' ? userPrompt : '',
+          palette: paletteForSlim,
+          brandVoice: brandKit?.brand_voice || null,
+          brandVisual: brandKit?.visual_style_notes || null,
+          businessContext: typeof imageParams.businessContext === 'string'
+            ? imageParams.businessContext
+            : null,
+          hasProductRefs: referenceUrls.length > 0,
+        })
+        : enhancedPrompt
+
+      const preparedGrokPrompt = prepareGrokImagePrompt(grokSourcePrompt, {
         preferTail: typeof userPrompt === 'string' ? userPrompt : '',
       })
       const grokPrompt = preparedGrokPrompt.prompt
@@ -2499,9 +2524,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         prompt: grokPrompt.substring(0, 100) + '...',
         promptLength: preparedGrokPrompt.preparedLength,
         originalPromptLength: preparedGrokPrompt.originalLength,
+        preparedByteLength: preparedGrokPrompt.preparedByteLength,
+        originalByteLength: preparedGrokPrompt.originalByteLength,
+        lengthUnit: preparedGrokPrompt.lengthUnit,
+        slimPostPrompt: useSlimPostPrompt,
         trimmed: preparedGrokPrompt.trimmed,
         providerModel,
         referenceCount: referenceUrls.length,
+        aspectHint: getAspectRatio(imageParams.width || 1080, imageParams.height || 1080),
       })
 
       try {
