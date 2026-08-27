@@ -91,6 +91,33 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.10',
+    date: '2026-08-27',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'Chat nuevo disponible para todos: un chat para guiones, posts y fotos. Podés seguir en el panel clásico o elegir Chat como inicio cuando quieras.',
+          en: 'New Chat is available for everyone: one chat for scripts, posts, and photos. Stay on classic or make Chat your home whenever you want.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Al abrir el Chat por primera vez te regalamos 100 Créditos IA (válidos 12 meses) y un recorrido corto en español. Feedback bienvenido.',
+          en: 'The first time you open Chat we gift 100 AI credits (valid 12 months) and a short tour. Feedback welcome.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El chat responde saludos y te avisa si falta una oferta antes de generar. Venta directa más natural. Modo claro con inputs corregidos.',
+          en: 'Chat answers greetings and tells you if an offer is missing before generating. More natural direct-sale scripts. Light mode input fixes.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.9',
     date: '2026-08-23',
     items: [
