@@ -35,6 +35,10 @@ import {
   GROK_IMAGE_PROVIDER_MODEL,
 } from './lib/grok-models.js'
 import { runGrokImageEdit } from './lib/grok-image-edit.js'
+import {
+  isGrokPromptLengthError,
+  prepareGrokImagePrompt,
+} from './lib/grok-image-prompt.js'
 import { resolveImageModelForAction } from './lib/image-provider-routing.js'
 import {
   buildExplicitReferenceRoleContract,
@@ -296,12 +300,20 @@ function applyGrokThreeReferenceBudget(imageParams: Record<string, unknown>): vo
 }
 
 
-function grokUserFacingError(language: unknown, kind: 'missing_key' | 'failed'): string {
+function grokUserFacingError(
+  language: unknown,
+  kind: 'missing_key' | 'failed' | 'prompt_too_long'
+): string {
   const es = language !== 'en'
   if (kind === 'missing_key') {
     return es
       ? 'La generación de imágenes no está configurada en este entorno (falta la clave del proveedor). Avisá al equipo o reintentá más tarde.'
       : 'Image generation is not configured in this environment (provider key missing). Contact the team or try again later.'
+  }
+  if (kind === 'prompt_too_long') {
+    return es
+      ? 'El texto del prompt es demasiado largo para Grok (máximo 8000 caracteres). Acortá el guion o las instrucciones e intentá de nuevo.'
+      : 'The image prompt is too long for Grok (max 8000 characters). Shorten the script or instructions and try again.'
   }
   return es
     ? 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.'
@@ -807,7 +819,9 @@ Edit instruction: ${editPrompt}`
           }
           const grokEdit = await runGrokImageEdit({
             apiKey: xaiApiKey,
-            prompt: systemEditPrompt,
+            prompt: prepareGrokImagePrompt(systemEditPrompt, {
+              preferTail: typeof editPrompt === 'string' ? editPrompt : '',
+            }).prompt,
             baseImageUrl: editImage,
             supportImageUrls: supportUrls,
             aspectRatio: editAR,
@@ -853,7 +867,19 @@ Edit instruction: ${editPrompt}`
             metadata: { action: 'edit', provider: 'xai', costSource: 'unavailable' },
           })
           return res.status(500).json({
-            error: 'Image edit failed',
+            error: grokUserFacingError(
+              imageParams.language,
+              isGrokPromptLengthError(
+                editError instanceof Error ? editError.message : String(editError)
+              )
+                ? 'prompt_too_long'
+                : 'failed'
+            ),
+            code: isGrokPromptLengthError(
+              editError instanceof Error ? editError.message : String(editError)
+            )
+              ? 'grok_prompt_too_long'
+              : 'grok_failed',
             details: editError instanceof Error ? editError.message : 'Unknown error',
             retryable: false,
           })
@@ -1163,7 +1189,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
           const grokEnhance = await runGrokImageEdit({
             apiKey: xaiApiKey,
-            prompt: ENHANCE_SYSTEM_PROMPT,
+            prompt: prepareGrokImagePrompt(ENHANCE_SYSTEM_PROMPT, {
+              preferTail: resolveEnhanceUserDirection(imageParams.editPrompt, imageParams.originalPrompt),
+            }).prompt,
             baseImageUrl: enhanceImage,
             supportImageUrls: supportUrls,
             aspectRatio: typeof imageParams.aspectRatio === 'string' ? imageParams.aspectRatio : '9:16',
@@ -1209,7 +1237,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             metadata: { action: 'enhance', provider: 'xai', enhanceTier, costSource: 'unavailable' },
           })
           return res.status(500).json({
-            error: 'Image enhance failed',
+            error: grokUserFacingError(
+              imageParams.language,
+              isGrokPromptLengthError(
+                enhanceError instanceof Error ? enhanceError.message : String(enhanceError)
+              )
+                ? 'prompt_too_long'
+                : 'failed'
+            ),
+            code: isGrokPromptLengthError(
+              enhanceError instanceof Error ? enhanceError.message : String(enhanceError)
+            )
+              ? 'grok_prompt_too_long'
+              : 'grok_failed',
             details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error',
             retryable: false,
           })
@@ -1563,7 +1603,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         imageParams.height = 1440
       }
 
-      // Explicit aspect ratio enforcement prefix (canvas, not layout fallback)
+      // Explicit aspect ratio enforcement prefix (canvas, not layout fallback).
+      // Grok Imagine uses native `aspect_ratio` — do not prefix FORMATO OBLIGATORIO
+      // (it is redundant and can force 9:16 when the user asked for 1:1).
+      const isGrokModel = selectedModel === 'grok-imagine'
       const arLabel = aspectResolved.canvas === '1:1'
         ? '1:1 cuadrado (1080×1080)'
         : aspectResolved.canvas === '9:16'
@@ -1571,7 +1614,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           : aspectResolved.canvas === '4:5'
             ? '4:5 post vertical (1080×1350)'
             : '3:4 vertical (1080×1440)'
-      const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
+      const aspectRatioPrefix = isGrokModel
+        ? ''
+        : `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
       const productReferenceStrategyPrefix = buildProductReferenceStrategyPrefix(
         postLanguage,
         productReferenceCount,
@@ -1745,8 +1790,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           language: postLanguage
         })
 
-        // Force 1:1 formatting prefix (overrides the aspectRatioPrefix built earlier)
-        const logoFormatPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrada (1024×1024 o mayor). No uses otro aspect ratio.\n\n`
+        // Force 1:1 formatting prefix (overrides the aspectRatioPrefix built earlier).
+        // Grok uses aspect_ratio only — skip textual FORMATO.
+        const logoFormatPrefix = isGrokModel
+          ? ''
+          : `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrada (1024×1024 o mayor). No uses otro aspect ratio.\n\n`
         // Logos: respect user colors if provided; ignore brand kit visual style/logo injection (we're DESIGNING a logo, not placing an existing one)
         // Also skip visual memory (learned post styles don't apply to logo design)
         // Skip tail user prompt concatenation — buildLogoPrompt is self-contained.
@@ -1792,10 +1840,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           } catch { /* fallback: no context */ }
         }
 
-        // Force 1:1 format prefix (supersedes aspectRatioPrefix) or fall back to the standard prefix
-        const productFormatPrefix = imageParams.aspectRatio === '1:1'
-          ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
-          : aspectRatioPrefix
+        // Force 1:1 format prefix (supersedes aspectRatioPrefix) or fall back to the standard prefix.
+        // Grok uses aspect_ratio only — skip textual FORMATO.
+        const productFormatPrefix = isGrokModel
+          ? ''
+          : imageParams.aspectRatio === '1:1'
+            ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
+            : aspectRatioPrefix
 
         // Filter out the generic frontend fallback string so it doesn't become "user instructions"
         const rawUserPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
@@ -1845,9 +1896,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           imageParams.width = 1080
           imageParams.height = 1080
         }
-        const anuncioFormatPrefix = imageParams.aspectRatio === '1:1'
-          ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
-          : aspectRatioPrefix
+        const anuncioFormatPrefix = isGrokModel
+          ? ''
+          : imageParams.aspectRatio === '1:1'
+            ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
+            : aspectRatioPrefix
         const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
         enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
@@ -2437,8 +2490,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
       const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
 
+      const preparedGrokPrompt = prepareGrokImagePrompt(enhancedPrompt, {
+        preferTail: typeof userPrompt === 'string' ? userPrompt : '',
+      })
+      const grokPrompt = preparedGrokPrompt.prompt
+
       console.log('Submitting to Grok Imagine 2.0 API:', {
-        prompt: enhancedPrompt.substring(0, 100) + '...',
+        prompt: grokPrompt.substring(0, 100) + '...',
+        promptLength: preparedGrokPrompt.preparedLength,
+        originalPromptLength: preparedGrokPrompt.originalLength,
+        trimmed: preparedGrokPrompt.trimmed,
         providerModel,
         referenceCount: referenceUrls.length,
       })
@@ -2461,7 +2522,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         const isEdit = referenceUrls.length > 0
         const grokRequest: Record<string, unknown> = {
           model: providerModel,
-          prompt: enhancedPrompt,
+          prompt: grokPrompt,
           n: 1,
           response_format: 'b64_json',
           aspect_ratio: grokAspectRatio,
@@ -2514,8 +2575,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           })
 
           return res.status(response.status).json({
-            error: grokUserFacingError(imageParams.language, 'failed'),
-            code: 'grok_failed',
+            error: grokUserFacingError(
+              imageParams.language,
+              isGrokPromptLengthError(errorText) ? 'prompt_too_long' : 'failed'
+            ),
+            code: isGrokPromptLengthError(errorText) ? 'grok_prompt_too_long' : 'grok_failed',
             details: errorText,
             model: selectedModel,
             providerModel,
@@ -2595,8 +2659,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         return res.status(500).json({
-          error: grokUserFacingError(imageParams.language, 'failed'),
-          code: 'grok_failed',
+          error: grokUserFacingError(
+            imageParams.language,
+            isGrokPromptLengthError(
+              grokError instanceof Error ? grokError.message : String(grokError)
+            )
+              ? 'prompt_too_long'
+              : 'failed'
+          ),
+          code: isGrokPromptLengthError(
+            grokError instanceof Error ? grokError.message : String(grokError)
+          )
+            ? 'grok_prompt_too_long'
+            : 'grok_failed',
           details: grokError instanceof Error ? grokError.message : 'Unknown error',
           model: selectedModel,
           providerModel,

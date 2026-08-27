@@ -97,6 +97,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         category: 'fix',
         text: {
+          es: 'Posts con Grok: el formato va por aspect ratio (incluye 1:1) y el prompt se limita a 8000 caracteres para evitar fallos. Si se pasa del límite, el error sale en español.',
+          en: 'Grok posts: format uses aspect ratio (including 1:1) and prompts are capped at 8000 characters to avoid failures. Over-limit errors show in Spanish.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
           es: 'Login en español, cotización de créditos antes de generar, Nueva marca con URL, Ofertas creadas al analizar la web, errores de imagen en español, y el modal de bienvenida cierra al primer clic.',
           en: 'Spanish login, credit quote before generate, New brand with URL, Offers created on site analysis, Spanish image errors, and welcome modal dismisses on first click.',
         },

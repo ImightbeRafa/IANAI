@@ -7,6 +7,12 @@ const KNOWN: Array<{
   en: string
 }> = [
   {
+    match: /prompt length exceeds|maximum allowed length of\s*8000|grok_prompt_too_long|el texto del prompt es demasiado largo/i,
+    code: 'grok_prompt_too_long',
+    es: 'El texto del prompt es demasiado largo para Grok (máximo 8000 caracteres). Acortá el guion o las instrucciones e intentá de nuevo.',
+    en: 'The image prompt is too long for Grok (max 8000 characters). Shorten the script or instructions and try again.',
+  },
+  {
     match: /xai api key not configured|grok[_ ]?api[_ ]?key|api key not configured/i,
     code: 'provider_key_missing',
     es: 'La generación de imágenes no está configurada en este entorno (falta la clave del proveedor). Avisá al equipo o reintentá más tarde.',

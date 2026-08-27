@@ -1,3 +1,15 @@
+## 2026-08-27 — Grok Imagine prompt 8000 cap + aspect_ratio-only (PR #33)
+
+**Area:** images / Grok Imagine
+**Files:** `api/lib/grok-image-prompt.ts`, `generate-image.ts`, `grok-image-generate.ts`, `grok-image-edit.ts`, `chatShellImageErrors.ts`, tests
+
+- Root cause: Grok `invalid-argument` “Prompt length exceeds … 8000” — API allowed 50k and prefixed `FORMATO OBLIGATORIO` (often 9:16) on top of native `aspect_ratio`.
+- Before every Grok generate/edit/enhance: strip FORMATO directives, prefer user copy, hard-cap 8000 Unicode code points; log `promptLength`.
+- Grok post modes skip textual format prefixes; canvas via `aspect_ratio` (honors 1:1 square).
+- Spanish user error for prompt-too-long (`grok_prompt_too_long`).
+
+---
+
 ## 2026-08-27 — Preview QA fixes (PR #33 CoS findings)
 
 **Area:** chat-shell + auth + images + credits

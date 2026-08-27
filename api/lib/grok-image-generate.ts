@@ -10,6 +10,7 @@ import {
   estimateGrokImageCostUsd,
 } from './grok-models.js'
 import { resolveGrokAspectRatio } from './grok-image-edit.js'
+import { prepareGrokImagePrompt } from './grok-image-prompt.js'
 
 export type GrokImageGenerateResult = {
   imageDataUrl: string
@@ -31,10 +32,11 @@ export async function runGrokImageGenerate(options: {
   const aspectRatio = resolveGrokAspectRatio(options.aspectRatio, {
     allowFallback: options.aspectRatioFallback === true,
   })
+  const prepared = prepareGrokImagePrompt(options.prompt)
   const refs = (options.referenceImageUrls || []).filter(Boolean).slice(0, 3)
   const body: Record<string, unknown> = {
     model: GROK_IMAGE_PROVIDER_MODEL,
-    prompt: options.prompt,
+    prompt: prepared.prompt,
     n: 1,
     response_format: 'b64_json',
     aspect_ratio: aspectRatio,
