@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   brandHasRealOffer,
   buildChatShellConversationalReply,
+  isCasualChatMessage,
 } from '../src/features/chat-shell/chatShellConversationalReply'
 
 describe('chatShellConversationalReply', () => {
@@ -22,6 +23,12 @@ describe('chatShellConversationalReply', () => {
       hasOffer: false,
     })
     expect(reply.toLowerCase()).toContain('oferta')
+  })
+
+  it('detects casual greetings', () => {
+    expect(isCasualChatMessage('hey')).toBe(true)
+    expect(isCasualChatMessage('hola')).toBe(true)
+    expect(isCasualChatMessage('generame 2 guiones')).toBe(false)
   })
 
   it('detects real offers', () => {

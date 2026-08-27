@@ -2,6 +2,15 @@ import type { Product } from '../../types'
 import type { ChatShellLanguage } from './chatShellScriptIntent'
 
 /** Short assistant replies when the user chats without asking to generate. */
+export function isCasualChatMessage(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  if (/^(hey|hi|hello|hola|buenas|buen[oa]s|qué tal|que tal|sup|gracias|thanks|ok|dale|listo)\b/i.test(trimmed)) {
+    return true
+  }
+  return trimmed.length <= 12 && !/\b(genera|guion|script|post|foto|logo|http|www\.)\b/i.test(trimmed)
+}
+
 export function buildChatShellConversationalReply(options: {
   text: string
   language: ChatShellLanguage
@@ -11,8 +20,7 @@ export function buildChatShellConversationalReply(options: {
 }): string {
   const es = options.language !== 'en'
   const trimmed = options.text.trim()
-  const greeting = /^(hey|hi|hello|hola|buenas|buen[oa]s|qué tal|que tal|sup)\b/i.test(trimmed)
-    || trimmed.length <= 12
+  const greeting = isCasualChatMessage(trimmed)
 
   const missing: string[] = []
   if (!options.hasOffer) missing.push(es ? 'la oferta' : 'an offer')

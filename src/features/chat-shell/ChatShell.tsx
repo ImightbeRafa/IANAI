@@ -24,6 +24,7 @@ import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
 import { mapEnhanceModeToTier } from './chatShellImageEnhance'
 import { isBrandContextEditRequest, isBrandRuleRequest, isExplicitGenerationRequest, SETUP_COMPOSER_PLACEHOLDER } from './chatShellBrandSetupFlow'
+import { isCasualChatMessage } from './chatShellConversationalReply'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import type { ProductImage } from '../../services/database'
 import { useChatShellRollout } from './ChatShellRolloutContext'
@@ -340,6 +341,10 @@ export default function ChatShell({
       return brandSetup.changeContext(text)
     }
     if (brandSetup.visible && brandSetup.phase !== 'complete' && brandSetup.phase !== 'paused' && !isExplicitGenerationRequest(text)) {
+      // Greetings stay conversational — don't treat "hey" as brand ingest.
+      if (isCasualChatMessage(text)) {
+        return send(text)
+      }
       return brandSetup.reply(text)
     }
     return send(text)
