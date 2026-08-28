@@ -127,8 +127,16 @@ function isValidStyle(style: ShellImageStyle | undefined): style is ShellImageSt
   return _exhaustive
 }
 
+/** Sub-styles that can generate from offer context alone (0 uploaded refs). */
+export const PRODUCT_ZERO_REF_SUBSTYLES = new Set(['studio-hero', 'podium'])
+
 export function requiresProductReferences(style: ShellImageStyle | undefined): boolean {
-  return style?.kind === 'product'
+  if (style?.kind !== 'product') return false
+  return !PRODUCT_ZERO_REF_SUBSTYLES.has(style.productSubStyle)
+}
+
+export function productStyleAllowsZeroReferences(style: ShellImageStyle | undefined): boolean {
+  return style?.kind === 'product' && PRODUCT_ZERO_REF_SUBSTYLES.has(style.productSubStyle)
 }
 
 export function imagePrefsStorageKey(sessionId: string): string {
@@ -538,6 +546,7 @@ export function buildShellImageGenerateBody(options: {
   if (prefs.style.kind === 'product') {
     body.postStyle = 'product'
     body.productSubStyle = prefs.style.productSubStyle
+    body.prompt = ''
     return body
   }
 
@@ -624,7 +633,29 @@ export function looksLikeSalesScript(text?: string | null, title?: string | null
 }
 
 /** Organic script signals — prefer Orgánico clarify path (not venta-directa). */
-/** User-visible action text + API prompt for shell image flows (rail / chat). */
+/** Meta phrases that must never become Grok on-image copy or API userPrompt tails. */
+export const SHELL_META_IMAGE_PROMPTS = new Set([
+  'generar post',
+  'generate post',
+  'generar foto de producto',
+  'generate product photo',
+  'professional product photograph',
+  'generar logo',
+  'generate logo',
+  'generar post orgánico',
+  'generate organic post',
+  'post publicitario',
+  'ad post',
+  'ad image',
+])
+
+export function isShellMetaImagePrompt(text?: string | null): boolean {
+  const normalized = (text || '').trim().toLowerCase()
+  if (!normalized) return false
+  return SHELL_META_IMAGE_PROMPTS.has(normalized)
+}
+
+/** User-visible chat label + API prompt for shell image flows (rail / chat). */
 export function shellImageFlowCopy(
   prefs: Partial<ShellImagePreferences>,
   language: 'en' | 'es' = 'es',
@@ -632,9 +663,14 @@ export function shellImageFlowCopy(
 ): { userText: string; prompt: string } {
   const style = prefs.style
   if (style?.kind === 'product') {
+    const sub = PRODUCT_SUB_STYLES.find((row) => row.id === style.productSubStyle)
+    const subLabel = language === 'es' ? (sub?.nameEs || style.productSubStyle) : (sub?.name || style.productSubStyle)
+    const aspect = prefs.aspectRatio || '1:1'
     return {
-      userText: language === 'es' ? 'Generar foto de producto' : 'Generate product photo',
-      prompt: 'Professional product photograph',
+      userText: language === 'es'
+        ? `Foto de producto · ${subLabel} · ${aspect}`
+        : `Product photo · ${subLabel} · ${aspect}`,
+      prompt: '',
     }
   }
   if (style?.kind === 'logo') {

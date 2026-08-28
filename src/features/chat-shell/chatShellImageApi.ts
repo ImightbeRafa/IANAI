@@ -18,6 +18,7 @@ import {
   aspectRatioFromImageUrl,
   buildShellImageGenerateBody,
   formatImageAssumptions,
+  requiresProductReferences,
   type ShellImageAspect,
   type ShellImagePreferences,
 } from './chatShellImageIntent'
@@ -295,17 +296,21 @@ export async function generateShellOfferImage(options: {
     throw new Error('Choose an image style before Generate.')
   }
 
-  if (prefs.style.kind === 'product' && !options.productImageIds.length) {
+  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length) {
     throw new Error(
       'Upload at least one product reference image for this offer before Generate.'
     )
   }
 
+  const apiPrompt = prefs.style.kind === 'product'
+    ? ''
+    : (options.prompt || options.scriptText || 'Ad image')
+
   const body = buildShellImageGenerateBody({
     preferences: prefs,
     productId: options.productId,
     sessionId: options.sessionId,
-    prompt: options.prompt || options.scriptText || 'Ad image',
+    prompt: apiPrompt,
     language,
     brandKitId: options.brandKitId,
     productImageIds: options.productImageIds,

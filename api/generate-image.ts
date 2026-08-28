@@ -38,6 +38,7 @@ import { runGrokImageEdit } from './lib/grok-image-edit.js'
 import {
   buildSlimGrokPostPrompt,
   isGrokPromptLengthError,
+  isShellMetaImagePrompt,
   prepareGrokImagePrompt,
 } from './lib/grok-image-prompt.js'
 import { resolveImageModelForAction } from './lib/image-provider-routing.js'
@@ -1803,12 +1804,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         enhancedPrompt = logoFormatPrefix + colorPrefix + logoPrompt + userExtra
       } else if (isProductMode) {
         // PRODUCT PHOTOGRAPHY MODE: high-quality product images without text overlays
-        if (!hasProductImages) {
-          return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
-        }
         const VALID_SUB_STYLES = ['studio-hero', 'lifestyle', 'background-swap', 'pure-enhance', 'splash-action', 'podium']
         const rawSubStyle = (imageParams.productSubStyle as string) || 'studio-hero'
         const productSubStyle = VALID_SUB_STYLES.includes(rawSubStyle) ? rawSubStyle : 'studio-hero'
+        const ZERO_REF_OK = new Set(['studio-hero', 'podium'])
+        if (!hasProductImages && !ZERO_REF_OK.has(productSubStyle)) {
+          return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
+        }
         const productAR = imageParams.aspectRatio === '1:1' ? '1:1' : postAspectRatio
         const bgDesc = typeof imageParams.backgroundDescription === 'string'
           ? imageParams.backgroundDescription.slice(0, 500)
@@ -1851,9 +1853,21 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         // Filter out the generic frontend fallback string so it doesn't become "user instructions"
         const rawUserPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
-        const PRODUCT_FALLBACK_PROMPTS = new Set(['Professional product photograph', 'professional product photograph'])
+        const PRODUCT_FALLBACK_PROMPTS = new Set([
+          'Professional product photograph',
+          'professional product photograph',
+          'Generar foto de producto',
+          'Generate product photo',
+          'Generar post',
+          'Generate post',
+        ])
         const userInstr = PRODUCT_FALLBACK_PROMPTS.has(rawUserPrompt) ? '' : rawUserPrompt
-        const productOpts = { backgroundDescription: bgDesc, productContext, userInstructions: userInstr }
+        const productOpts = {
+          backgroundDescription: bgDesc,
+          productContext,
+          userInstructions: userInstr,
+          hasReferenceImages: hasProductImages,
+        }
 
         const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
           || buildProductPrompt('studio-hero', productAR, postLanguage, productOpts)!
@@ -1963,10 +1977,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const paletteList = clientColors.length
       ? clientColors.slice(0, 3).join(', ')
       : [brandKit?.primary_color, brandKit?.secondary_color, brandKit?.accent_color].filter(Boolean).join(', ')
-    enhancedPrompt += `\n\nCONTRATO FINAL (NO RENDERIZAR ESTE BLOQUE):
+    if (!isProductMode && !isLogoMode) {
+      enhancedPrompt += `\n\nCONTRATO FINAL (NO RENDERIZAR ESTE BLOQUE):
 - COLORES: ${paletteList || 'usar solo la paleta de marca si existe'}. PROHIBIDO azul genérico de redes salvo que esté en esa paleta.
 - TEXTO VISIBLE: únicamente el copy condensado del usuario. Estructura gancho → desarrollo (1-2 puntos) → CTA. PROHIBIDO volcar el guion, el contexto de negocio o placeholders como [TIEMPO DE ENTREGA].
 - LOGO: si hay una imagen de logo adjunta, debe aparecer fielmente y visible.\n`
+    }
 
     // =============================================
     // OPENAI GPT IMAGE GENERATION (admin only)
@@ -2499,12 +2515,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         : [brandKit?.primary_color, brandKit?.secondary_color, brandKit?.accent_color]
           .filter(Boolean)
           .join(', ')
+      const grokUserCopy = typeof userPrompt === 'string' && !isShellMetaImagePrompt(userPrompt)
+        ? userPrompt
+        : ''
       const grokSourcePrompt = useSlimPostPrompt
         ? buildSlimGrokPostPrompt({
           language: typeof imageParams.language === 'string' ? imageParams.language : 'es',
           postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
           textDensity: typeof imageParams.textDensity === 'string' ? imageParams.textDensity : 'hard',
-          userCopy: typeof userPrompt === 'string' ? userPrompt : '',
+          userCopy: grokUserCopy,
           palette: paletteForSlim,
           brandVoice: brandKit?.brand_voice || null,
           brandVisual: brandKit?.visual_style_notes || null,
@@ -2516,7 +2535,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         : enhancedPrompt
 
       const preparedGrokPrompt = prepareGrokImagePrompt(grokSourcePrompt, {
-        preferTail: typeof userPrompt === 'string' ? userPrompt : '',
+        preferTail: isProductMode || isLogoMode || isShellMetaImagePrompt(userPrompt)
+          ? ''
+          : grokUserCopy,
       })
       const grokPrompt = preparedGrokPrompt.prompt
 

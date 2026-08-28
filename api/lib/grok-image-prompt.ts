@@ -82,6 +82,31 @@ export function isGrokPromptLengthError(text: string | null | undefined): boolea
     || /maximum allowed length of\s*8000/i.test(raw)
 }
 
+const SHELL_META_IMAGE_PROMPTS = new Set([
+  'generar post',
+  'generate post',
+  'generar foto de producto',
+  'generate product photo',
+  'professional product photograph',
+  'generar logo',
+  'generate logo',
+  'generar post orgánico',
+  'generate organic post',
+  'post publicitario',
+  'ad post',
+  'ad image',
+  'foto de producto',
+  'product photo',
+])
+
+/** Shell UI labels / meta prompts — never use as Grok visible copy. */
+export function isShellMetaImagePrompt(text?: string | null): boolean {
+  const normalized = (text || '').trim().toLowerCase()
+  if (!normalized) return true
+  if (SHELL_META_IMAGE_PROMPTS.has(normalized)) return true
+  return /^foto de producto ·|^product photo ·/i.test(normalized)
+}
+
 function clampBlock(text: string | null | undefined, maxBytes: number): string {
   const trimmed = (text || '').trim()
   if (!trimmed) return ''
@@ -175,8 +200,8 @@ export function buildSlimGrokPostPrompt(options: SlimGrokPostPromptOptions): str
   }
 
   parts.push(es
-    ? `COPY DEL USUARIO (única fuente de texto visible):\n${userCopy || '(sin copy — inventá un gancho corto genérico de la marca)'}`
-    : `USER COPY (only visible text source):\n${userCopy || '(no copy — invent a short generic brand hook)'}`)
+    ? `COPY DEL USUARIO (única fuente de texto visible):\n${userCopy && !isShellMetaImagePrompt(userCopy) ? userCopy : '(sin copy — inventá un gancho corto genérico de la marca)'}`
+    : `USER COPY (only visible text source):\n${userCopy && !isShellMetaImagePrompt(userCopy) ? userCopy : '(no copy — invent a short generic brand hook)'}`)
 
   return parts.join('\n\n')
 }

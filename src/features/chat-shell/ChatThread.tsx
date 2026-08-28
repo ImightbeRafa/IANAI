@@ -474,7 +474,13 @@ export default memo(function ChatThread({
                 (a.artifact_type === 'script' && a.script?.content)
                 || (a.artifact_type === 'image'
                   && a.product_image?.image_url
-                  && isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces))
+                  && (
+                    isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces)
+                    || (
+                      (a.action_type === 'edit' || a.action_type === 'enhance')
+                      && a.message_id === message.id
+                    )
+                  ))
             )
 
             if (artifacts.length > 0) {
@@ -920,7 +926,9 @@ export default memo(function ChatThread({
                   <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onOpenImagesRail?.()}>
                     {language === 'es' ? 'Administrar biblioteca' : 'Manage library'}
                   </button>
-                  {imageClarify.referencesRequired && (imageClarify.availableReferenceCount || 0) === 0 ? <button
+                  {imageClarify.referencesRequired
+                    && (imageClarify.availableReferenceCount || 0) === 0
+                    && imageClarify.preferences?.style?.kind !== 'product' ? <button
                     type="button"
                     className="chat-shell__btn chat-shell__btn--pill"
                     disabled={imageBusy}

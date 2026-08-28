@@ -5,6 +5,7 @@ import {
   grokPromptCodePointLength,
   grokPromptUtf8ByteLength,
   isGrokPromptLengthError,
+  isShellMetaImagePrompt,
   prepareGrokImagePrompt,
   stripGrokFormatDirectives,
 } from '../api/lib/grok-image-prompt'
@@ -107,5 +108,11 @@ describe('friendlyImageError prompt length', () => {
         'en'
       )
     ).toMatch(/length limit/i)
+  })
+
+  it('treats shell meta prompts as non-copy', () => {
+    expect(isShellMetaImagePrompt('Professional product photograph')).toBe(true)
+    expect(isShellMetaImagePrompt('Foto de producto · Estudio Hero · 1:1')).toBe(true)
+    expect(isShellMetaImagePrompt('¿Granito la noche antes de un evento importante?')).toBe(false)
   })
 })

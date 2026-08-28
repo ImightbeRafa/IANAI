@@ -1,3 +1,15 @@
+## 2026-08-28 — Product foto: skip refs re-ask, no meta copy on image (PR #33)
+
+**Area:** chat-shell product images + Grok API
+**Files:** `chatShellImageIntent.ts`, `useChatSessionThread.ts`, `generate-image.ts`, `image-presets.ts`, `grok-image-prompt.ts`, `ChatThread.tsx`, tests
+
+- **Studio-hero/podium:** 0 uploaded refs allowed; rail “Crear en el chat” skips reference picker; API builds from offer context.
+- **No Anuncio hijack:** hide “Usar Anuncio” when panel is Producto; meta prompts filtered from Grok copy (`Professional product photograph`, etc.).
+- **Product API prompt:** empty `prompt` for product mode; CONTRATO FINAL text-overlay rules skipped for product/logo.
+- **Edit bubble:** edits/enhances on their own message show in chat thread (not only Original/Última tabs).
+
+---
+
 ## 2026-08-28 — Preview blockers: download, product foto, edit quote (PR #33)
 
 **Area:** chat-shell images + credits + i18n

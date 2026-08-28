@@ -629,19 +629,30 @@ export type ProductSubStyle = 'studio-hero' | 'lifestyle' | 'background-swap' | 
 
 type ProductLayoutBuilder = (aspectRatio: PostAspectRatio, backgroundDescription?: string) => string
 
-function buildProductFoundation(aspectRatio: PostAspectRatio, originalAR?: string): string {
+function buildProductFoundation(
+  aspectRatio: PostAspectRatio,
+  originalAR?: string,
+  hasReferenceImages = true
+): string {
   const isVertical = aspectRatio === '9:16'
   const isSquare = originalAR === '1:1'
   const formatLabel = isSquare ? 'cuadrado (1:1)' : isVertical ? 'vertical (9:16)' : 'vertical (3:4)'
 
-  return `═══════════════════════════════════════════════
-REGLA ABSOLUTA — FIDELIDAD DEL PRODUCTO (NO NEGOCIABLE)
-═══════════════════════════════════════════════
-Se adjuntan fotos del PRODUCTO REAL del usuario.
+  const fidelityBlock = hasReferenceImages
+    ? `Se adjuntan fotos del PRODUCTO REAL del usuario.
 - El producto DEBE verse EXACTAMENTE como en las fotos de referencia: misma forma, silueta, color, textura, proporciones, detalles y acabados.
 - NO inventes, NO rediseñes, NO reimagines, NO estilices el producto. Usa la referencia como fuente de verdad absoluta.
 - NO cartoon, NO 3D fake, NO ilustración, NO vectorización. El resultado debe ser FOTORREALISTA.
-- La forma del producto NO se modifica bajo ninguna circunstancia.
+- La forma del producto NO se modifica bajo ninguna circunstancia.`
+    : `No hay fotos de referencia adjuntas.
+- Generá el producto FOTORREALISTA descrito en CONTEXTO DEL PRODUCTO (nombre, categoría, descripción).
+- Debe verse como empaque/foto de catálogo premium coherente con esa descripción — NO un cartel tipográfico ni UI de app.
+- NO cartoon, NO 3D fake, NO ilustración. Fotografía real de producto.`
+
+  return `═══════════════════════════════════════════════
+REGLA ABSOLUTA — FIDELIDAD DEL PRODUCTO (NO NEGOCIABLE)
+═══════════════════════════════════════════════
+${fidelityBlock}
 ═══════════════════════════════════════════════
 
 ═══════════════════════════════════════════════
@@ -1026,6 +1037,7 @@ export interface ProductPromptOptions {
   backgroundDescription?: string
   productContext?: ProductPromptContext
   userInstructions?: string
+  hasReferenceImages?: boolean
 }
 
 export function buildProductPrompt(
@@ -1043,7 +1055,8 @@ export function buildProductPrompt(
     : (options || {})
 
   const normalizedAR: PostAspectRatio = aspectRatio === '1:1' ? '3:4' : aspectRatio
-  const foundation = buildProductFoundation(normalizedAR, aspectRatio)
+  const hasReferenceImages = opts.hasReferenceImages !== false
+  const foundation = buildProductFoundation(normalizedAR, aspectRatio, hasReferenceImages)
   const contextBlock = buildProductContextBlock(opts.productContext, language)
   const nicheOverlay = buildProductNicheOverlay(opts.productContext?.niche, language)
   const renderBlock = buildProductRenderBlock(language)

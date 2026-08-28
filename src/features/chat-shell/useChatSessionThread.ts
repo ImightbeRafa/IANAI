@@ -118,6 +118,7 @@ import {
   looksLikeSalesScript,
   parseChatShellImageIntent,
   planImageClarifications,
+  productStyleAllowsZeroReferences,
   readImagePreferences,
   requiresProductReferences,
   resolveImagePreferences,
@@ -1880,9 +1881,17 @@ export function useChatSessionThread(options: {
         options.referenceImageIds
       )
       const referencesRequired = requiresProductReferences(prefs.style)
+      let referenceMode = options.referenceMode
+      if (
+        !referenceMode
+        && productStyleAllowsZeroReferences(prefs.style)
+        && (options.source === 'rail' || options.source === 'composer')
+      ) {
+        referenceMode = 'none'
+      }
       if (shouldPromptImageReferences({
         styleKind: prefs.style.kind,
-        referenceMode: options.referenceMode,
+        referenceMode,
       })) {
         setImageOfferId(options.productId)
         setImageClarify({
@@ -1909,7 +1918,7 @@ export function useChatSessionThread(options: {
           : 'Confirm product, context, and references. There are several angles — pick the ones that match what you want.')
         return
       }
-      const productImageIds = options.referenceMode === 'none'
+      const productImageIds = referenceMode === 'none'
         ? []
         : (options.referenceImageIds || [])
       if (referencesRequired && productImageIds.length === 0) {
