@@ -1,3 +1,15 @@
+## 2026-08-28 — Preview blockers: download, product foto, edit quote (PR #33)
+
+**Area:** chat-shell images + credits + i18n
+**Files:** `chatShellDownload.ts`, `useChatSessionThread.ts`, `chatShellImageIntent.ts`, `chatShellImageApi.ts`, `ChatThread.tsx`, `PostWorkspace.tsx`, `LanguageContext.tsx`, tests
+
+- **Descargar:** fetch blob + Supabase storage client fallback; reliable anchor trigger (no silent `window.open`).
+- **Foto panel:** rail “Crear en el chat” passes full image prefs; product mode uses product prompt/userText (not “Generar post”); aspect/density clarify respects sticky panel choices; product skips copy-density ask.
+- **Pedir edición:** credit quote before charge; result as new chat bubble; usage chip refresh; Spanish action labels (`Editada`).
+- **i18n:** chat author `Tú`, Quick Use → `Generador rápido`, `html lang` sync, Posts dashboard accent.
+
+---
+
 ## 2026-08-27 — Grok slim prompt + UTF-8 byte cap (PR #33 retest)
 
 **Area:** images / Grok Imagine

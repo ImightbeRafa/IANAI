@@ -624,6 +624,37 @@ export function looksLikeSalesScript(text?: string | null, title?: string | null
 }
 
 /** Organic script signals — prefer Orgánico clarify path (not venta-directa). */
+/** User-visible action text + API prompt for shell image flows (rail / chat). */
+export function shellImageFlowCopy(
+  prefs: Partial<ShellImagePreferences>,
+  language: 'en' | 'es' = 'es',
+  businessContext?: string | null
+): { userText: string; prompt: string } {
+  const style = prefs.style
+  if (style?.kind === 'product') {
+    return {
+      userText: language === 'es' ? 'Generar foto de producto' : 'Generate product photo',
+      prompt: 'Professional product photograph',
+    }
+  }
+  if (style?.kind === 'logo') {
+    return {
+      userText: language === 'es' ? 'Generar logo' : 'Generate logo',
+      prompt: businessContext?.trim() || (language === 'es' ? 'Logo de marca' : 'Brand logo'),
+    }
+  }
+  if (style?.kind === 'organic') {
+    return {
+      userText: language === 'es' ? 'Generar post orgánico' : 'Generate organic post',
+      prompt: businessContext?.trim() || (language === 'es' ? 'Post orgánico' : 'Organic post'),
+    }
+  }
+  return {
+    userText: language === 'es' ? 'Generar post' : 'Generate post',
+    prompt: businessContext?.trim() || (language === 'es' ? 'Post publicitario' : 'Ad post'),
+  }
+}
+
 export function looksLikeOrganicScript(text?: string | null, title?: string | null): boolean {
   if (looksLikeSalesScript(text, title)) return false
   const hay = normalizeText(`${title || ''} ${text || ''}`)

@@ -122,6 +122,7 @@ import {
   requiresProductReferences,
   resolveImagePreferences,
   sanitizePartialPreferences,
+  shellImageFlowCopy,
   writeImagePreferences,
   type ImageClarifyMode,
   type ImageClarifyStep,
@@ -389,7 +390,7 @@ export function useChatSessionThread(options: {
   const [scriptClarify, setScriptClarify] = useState<ScriptClarifyState | null>(null)
   const [creditQuote, setCreditQuote] = useState<CreditQuote | null>(null)
   const creditPendingRef = useRef<null | {
-    kind: 'scripts' | 'image'
+    kind: 'scripts' | 'image' | 'edit'
     text?: string
     sendOptions?: {
       forceSettings?: ScriptGenerationSettings
@@ -399,6 +400,15 @@ export function useChatSessionThread(options: {
       creditConfirmed?: boolean
     }
     imageOptions?: Record<string, unknown>
+    editOptions?: {
+      productImageId: string
+      imageUrl: string
+      instruction: string
+      productId?: string
+      actionType: 'edit' | 'enhance'
+      attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>
+      enhanceTier?: ShellEnhanceTier
+    }
   }>(null)
   const usage = useUsageLimits()
   const runImageGenerateRef = useRef<(options: {
@@ -1439,6 +1449,20 @@ export function useChatSessionThread(options: {
         }),
         creditConfirmed: true,
       })
+      return
+    }
+    if (pending.kind === 'edit' && pending.editOptions) {
+      const o = pending.editOptions
+      await editOfferImageRef.current(
+        o.productImageId,
+        o.imageUrl,
+        o.instruction,
+        o.productId,
+        o.actionType,
+        o.attachments,
+        o.enhanceTier,
+        true
+      )
     }
   }, [send])
 
@@ -2039,6 +2063,140 @@ export function useChatSessionThread(options: {
 
   runImageGenerateRef.current = runImageGenerate
 
+  const editOfferImageRef = useRef<(
+    productImageId: string,
+    imageUrl: string,
+    instruction: string,
+    productId?: string,
+    actionType?: 'edit' | 'enhance',
+    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
+    enhanceTier?: ShellEnhanceTier,
+    creditConfirmed?: boolean
+  ) => Promise<void>>(async () => {})
+
+  const editOfferImage = useCallback(async (
+    productImageId: string,
+    imageUrl: string,
+    instruction: string,
+    productId?: string,
+    actionType: 'edit' | 'enhance' = 'edit',
+    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
+    enhanceTier?: ShellEnhanceTier,
+    creditConfirmed = false
+  ) => {
+    if (!session || imageBusy) return
+    const pid = productId || activeImageOfferId
+    if (!pid) return
+
+    if ((usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true') && !creditConfirmed) {
+      const cost = quoteImageCredits('grok-imagine')
+      const quote = buildCreditQuote({
+        kind: cost >= 24 ? 'image_pro' : 'image_standard',
+        remaining: usage.creditsRemaining,
+      })
+      creditPendingRef.current = {
+        kind: 'edit',
+        editOptions: {
+          productImageId,
+          imageUrl,
+          instruction,
+          productId: pid,
+          actionType,
+          attachments,
+          enhanceTier,
+        },
+      }
+      setCreditQuote(quote)
+      setError(null)
+      return
+    }
+
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    setImageBusy(true)
+    setError(null)
+    try {
+      const roleNotes = (attachments || [])
+        .map((item, index) => `${index + 1}. ${item.role === 'context' ? 'context/style' : 'product'} reference`)
+        .join('; ')
+      const editPrompt = roleNotes
+        ? `${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
+        : instruction
+      const brandKitId = resolveBrandKitIdForSession(
+        session.brand_kit_id,
+        pid,
+        brandKits,
+        storage
+      )
+      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
+      const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
+      const offerRefs = actionType === 'enhance'
+        ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
+        : { productUrls: [], contextUrls: [] }
+      const result = await editShellOfferImage({
+        userId,
+        sessionId: originSessionId,
+        productId: pid,
+        productImageId,
+        imageUrl,
+        editPrompt,
+        actionType,
+        userText: actionType === 'enhance'
+          ? (language === 'es' ? `Mejorar imagen: ${instruction}` : `Enhance image: ${instruction}`)
+          : (language === 'es' ? `Editar imagen: ${instruction}` : `Edit image: ${instruction}`),
+        language,
+        enhanceTier: actionType === 'enhance' ? (enhanceTier || 'modernize') : undefined,
+        editReferenceImages: actionType === 'edit'
+          ? (attachments || []).map((item) => item.dataUrl)
+          : undefined,
+        productReferenceUrls: offerRefs.productUrls,
+        contextReferenceUrls: offerRefs.contextUrls,
+        brandKitId,
+        brandLogoUrl: brandVisual.brandLogoUrl,
+        customColors: brandVisual.customColors,
+        originSessionId,
+        originGen,
+        activeThreadSessionId: activeThreadSessionIdRef.current,
+        sessionGen: sessionGenRef.current,
+      })
+      if (!result) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      if (result.userMessage && result.assistantMessage) {
+        setMessages((prev) => [...prev, result.userMessage!, result.assistantMessage!])
+      } else if (result.attachedToExisting && result.workspaceMessageId) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === result.workspaceMessageId
+            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
+            : message
+        )))
+      }
+      await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
+      invalidateUsageLimitsCache()
+    } catch (err) {
+      console.error(err)
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Image edit failed')
+      }
+      throw err
+    } finally {
+      setImageBusy(false)
+    }
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language, usage.creditsEnabled, usage.creditsRemaining])
+
+  editOfferImageRef.current = editOfferImage
+
   const beginImageFlow = useCallback(async (options: {
     productId?: string | null
     prompt?: string
@@ -2110,6 +2268,8 @@ export function useChatSessionThread(options: {
 
     const sticky = readImagePreferences(storage, session.id)
     const stickyMerged = resolveImagePreferences(sticky, imagePrefs)
+    const stickyPartial = sanitizePartialPreferences(sticky)
+    const explicitPartial = sanitizePartialPreferences(options.explicit)
     const resolved =
       options.source === 'script_card'
         // A script can become an ad, organic post, or product-led visual.
@@ -2122,11 +2282,14 @@ export function useChatSessionThread(options: {
             { ...options.explicit },
             stickyMerged
           )
-    const aspectUnset = !sanitizePartialPreferences(options.explicit).aspectRatio
+    const aspectUnset = !explicitPartial.aspectRatio && !stickyPartial.aspectRatio
     const densityUnset =
       options.source !== 'script_card'
+      && resolved.style?.kind !== 'product'
+      && resolved.style?.kind !== 'logo'
       && (Boolean(options.scriptText) || resolved.style?.kind === 'preset' || resolved.style?.kind === 'organic')
-      && !sanitizePartialPreferences(options.explicit).density
+      && !explicitPartial.density
+      && !stickyPartial.density
     const askStyleRef = !messages.some((message) =>
       message.artifacts?.some((artifact) => artifact.artifact_type === 'image')
     )
@@ -2544,27 +2707,31 @@ export function useChatSessionThread(options: {
     explicit: Partial<ShellImagePreferences>,
     prompt?: string
   ) => {
-    if (explicit.style) {
-      patchImagePreferences(explicit)
+    const merged = resolveImagePreferences(explicit, imagePrefs)
+    if (explicit.style || merged.style) {
+      patchImagePreferences({ ...explicit, style: explicit.style ?? merged.style })
     }
+    const flow = shellImageFlowCopy(merged, language, session?.context)
     await beginImageFlow({
       productId: activeImageOfferId || offerProductId,
-      prompt: prompt || session?.context || 'Ad image',
-      userText: prompt || (language === 'es' ? 'Generar post' : 'Generate post'),
+      prompt: prompt || flow.prompt,
+      userText: flow.userText,
       source: 'rail',
-      explicit,
+      explicit: merged,
     })
-  }, [beginImageFlow, activeImageOfferId, offerProductId, session, language, patchImagePreferences])
+  }, [beginImageFlow, activeImageOfferId, offerProductId, session, language, patchImagePreferences, imagePrefs])
 
   const generateOfferImage = useCallback(async () => {
+    const merged = imagePrefs
+    const flow = shellImageFlowCopy(merged, language, session?.context)
     await beginImageFlow({
-      productId: activeImageOfferId,
-      prompt: session?.context || 'Product hero image for ad',
-      userText: language === 'es' ? 'Generar post' : 'Generate post',
+      productId: activeImageOfferId || offerProductId,
+      prompt: flow.prompt,
+      userText: flow.userText,
       source: 'rail',
-      explicit: imagePrefs.style ? { style: imagePrefs.style } : undefined,
+      explicit: merged,
     })
-  }, [beginImageFlow, activeImageOfferId, session, imagePrefs.style, language])
+  }, [beginImageFlow, activeImageOfferId, offerProductId, session, imagePrefs, language])
 
   const prepareScriptForPost = useCallback(async (
     scriptText: string,
@@ -2619,112 +2786,6 @@ export function useChatSessionThread(options: {
       referenceImageIds: options?.referenceImageIds,
     })
   }, [beginImageFlow, activeImageOfferId, offerProductId, language])
-
-  const editOfferImage = useCallback(async (
-    productImageId: string,
-    imageUrl: string,
-    instruction: string,
-    productId?: string,
-    actionType: 'edit' | 'enhance' = 'edit',
-    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
-    enhanceTier?: ShellEnhanceTier
-  ) => {
-    if (!session || imageBusy) return
-    const pid = productId || activeImageOfferId
-    if (!pid) return
-    const originSessionId = session.id
-    const originGen = sessionGenRef.current
-    setImageBusy(true)
-    setError(null)
-    try {
-      const roleNotes = (attachments || [])
-        .map((item, index) => `${index + 1}. ${item.role === 'context' ? 'context/style' : 'product'} reference`)
-        .join('; ')
-      const editPrompt = roleNotes
-        ? `${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
-        : instruction
-      const brandKitId = resolveBrandKitIdForSession(
-        session.brand_kit_id,
-        pid,
-        brandKits,
-        storage
-      )
-      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
-      const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
-      const offerRefs = actionType === 'enhance'
-        ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
-        : { productUrls: [], contextUrls: [] }
-      const workspaces = buildImageWorkspaces(
-        offerImages,
-        messages.flatMap((message) => (message.artifacts || []).map((artifact) => ({
-          ...artifact,
-          message_id: message.id,
-        })))
-      )
-      const workspaceMessageId = workspaceForImage(workspaces, productImageId)?.messageId
-        || offerImages.find((image) => image.id === productImageId)?.message_id
-        || undefined
-      const result = await editShellOfferImage({
-        userId,
-        sessionId: originSessionId,
-        productId: pid,
-        productImageId,
-        imageUrl,
-        editPrompt,
-        actionType,
-        userText: `${actionType === 'enhance' ? 'Enhance' : 'Edit'} image: ${instruction}`,
-        language,
-        enhanceTier: actionType === 'enhance' ? (enhanceTier || 'modernize') : undefined,
-        editReferenceImages: actionType === 'edit'
-          ? (attachments || []).map((item) => item.dataUrl)
-          : undefined,
-        productReferenceUrls: offerRefs.productUrls,
-        contextReferenceUrls: offerRefs.contextUrls,
-        brandKitId,
-        brandLogoUrl: brandVisual.brandLogoUrl,
-        customColors: brandVisual.customColors,
-        workspaceMessageId,
-        originSessionId,
-        originGen,
-        activeThreadSessionId: activeThreadSessionIdRef.current,
-        sessionGen: sessionGenRef.current,
-      })
-      if (!result) return
-      if (!isLiveThread(
-        activeThreadSessionIdRef.current,
-        sessionGenRef.current,
-        originSessionId,
-        originGen
-      )) {
-        return
-      }
-      if (result.attachedToExisting && result.workspaceMessageId) {
-        setMessages((prev) => prev.map((message) => (
-          message.id === result.workspaceMessageId
-            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
-            : message
-        )))
-      } else if (result.userMessage && result.assistantMessage) {
-        const userMessage = result.userMessage
-        const assistantMessage = result.assistantMessage
-        setMessages((prev) => [...prev, userMessage, assistantMessage])
-      }
-      await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
-    } catch (err) {
-      console.error(err)
-      if (isLiveThread(
-        activeThreadSessionIdRef.current,
-        sessionGenRef.current,
-        originSessionId,
-        originGen
-      )) {
-        setError(err instanceof Error ? err.message : 'Image edit failed')
-      }
-      throw err
-    } finally {
-      setImageBusy(false)
-    }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language, messages])
 
   const optimizeOfferImage = useCallback(async (
     productImageId: string,

@@ -33,6 +33,22 @@ import {
 
 import { friendlyImageError } from './chatShellImageErrors'
 
+export function shellImageActionLabel(
+  actionType: MessageArtifact['action_type'],
+  language: 'en' | 'es' = 'es'
+): string {
+  if (actionType === 'optimize') {
+    return language === 'es' ? 'Optimizada para post' : 'Optimized for post'
+  }
+  if (actionType === 'enhance') {
+    return language === 'es' ? 'Mejorada' : 'Enhanced'
+  }
+  if (actionType === 'edit') {
+    return language === 'es' ? 'Editada' : 'Edited'
+  }
+  return language === 'es' ? 'Generada' : 'Generated'
+}
+
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
   : 'http://localhost:3000/api/generate-image'
@@ -465,7 +481,7 @@ export async function editShellOfferImage(options: {
     sessionId: options.sessionId,
     productId: options.productId,
     imageSource: sample,
-    label: options.actionType === 'optimize' ? 'Optimized for post' : options.actionType === 'enhance' ? 'Enhanced' : 'Edited',
+    label: shellImageActionLabel(options.actionType, options.language || 'es'),
     actionType: options.actionType,
     userText: options.userText,
     metadata: {

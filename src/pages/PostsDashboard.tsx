@@ -82,7 +82,7 @@ export default function PostsDashboard() {
       sharedBy: 'por',
       roleViewer: 'Lector',
       roleEditor: 'Editor',
-      quickTitle: 'Generador Rapido',
+      quickTitle: 'Generador rápido',
       quickSubtitle: 'Crea imagenes sin configurar un negocio o producto primero.',
       quickProduct: 'Foto de producto',
       quickProductDesc: 'Sube una foto y genera una version profesional lista para publicar.',

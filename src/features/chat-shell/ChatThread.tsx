@@ -462,7 +462,7 @@ export default memo(function ChatThread({
             if (message.role === 'user') {
               return (
                 <div key={message.id} className="chat-shell__msg chat-shell__msg--user">
-                  <span className="chat-shell__who">You</span>
+                  <span className="chat-shell__who">{t.you}</span>
                   <div className="chat-shell__bubble">{message.content}</div>
                 </div>
               )
@@ -653,7 +653,7 @@ export default memo(function ChatThread({
                 key={turn.id}
                 className={`chat-shell__msg ${turn.role === 'user' ? 'chat-shell__msg--user' : 'chat-shell__msg--ai'}`}
               >
-                <span className="chat-shell__who">{turn.role === 'user' ? 'You' : 'Advance AI'}</span>
+                <span className="chat-shell__who">{turn.role === 'user' ? t.you : 'Advance AI'}</span>
                 <div className={`chat-shell__bubble${turn.role === 'assistant' ? ' chat-shell__bubble--ai' : ''}`}>
                   {turn.content}
                 </div>

@@ -13,6 +13,7 @@ import {
   requiresProductReferences,
   resolveImagePreferences,
   resolveScriptPostPreferences,
+  shellImageFlowCopy,
   writeImagePreferences,
 } from '../src/features/chat-shell/chatShellImageIntent'
 import {
@@ -509,5 +510,14 @@ describe('brand visual + condensed post copy', () => {
     expect(shouldSkipPostCondense({ editSource: 'post_optimize', scriptText: raw })).toBe(true)
     expect(shouldSkipPostCondense({ scriptText: 'Gancho corto\nPrueba\nCTA' })).toBe(true)
     expect(shouldSkipPostCondense({ scriptText: raw })).toBe(false)
+  })
+
+  it('uses product-specific userText for rail product foto flows', () => {
+    const copy = shellImageFlowCopy(
+      { style: { kind: 'product', productSubStyle: 'studio-hero' }, aspectRatio: '1:1' },
+      'es'
+    )
+    expect(copy.userText).toBe('Generar foto de producto')
+    expect(copy.prompt).toBe('Professional product photograph')
   })
 })
