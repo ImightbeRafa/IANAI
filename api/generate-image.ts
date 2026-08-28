@@ -16,7 +16,7 @@ import { buildOrganicSinglePrompt, type OrganicSingleSubtype, type OrganicAspect
 import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
 import { resolvePostModeAspect } from './lib/post-aspect.js'
 import {
   appendEnhanceUserDirection,
@@ -49,6 +49,15 @@ import {
   selectGrokReferenceBudget,
   type ImageReferenceRole,
 } from './lib/image-prompt-context.js'
+import {
+  buildEditPatchConstraints,
+  buildEnhancePatchConstraints,
+  buildLogoStampRules,
+  buildPostCtaGuardrails,
+  resolveLockedOfferPrice,
+  resolveProductSilhouette,
+  type ProductCreativeRow,
+} from './lib/product-creative-rules.js'
 
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations'
 const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits'
@@ -651,10 +660,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const editRefImages: string[] = Array.isArray(imageParams.editReferenceImages) ? imageParams.editReferenceImages : []
       const hasRefs = editRefImages.length > 0
       const editAR = normalizeGeminiAspect(imageParams.aspectRatio, '9:16')
+      let editProductRow: ProductCreativeRow | null = null
+      if (imageParams.productId && imgMemSupabase) {
+        try {
+          const { data: prod } = await imgMemSupabase
+            .from('products')
+            .select('name, product_description, description, technical_specs, product_category, product_category_custom, offer, price_range')
+            .eq('id', imageParams.productId)
+            .single()
+          if (prod) editProductRow = prod as ProductCreativeRow
+        } catch { /* optional */ }
+      }
+      const editLang = imageParams.language === 'en' ? 'en' : 'es'
+      const hasEditLogo = !!(brandKit?.logo_url || logoFallbackUrl)
       const brandEditRules = [
         brandKit ? buildBrandColorOverride(brandKit) : null,
         brandKit ? buildBrandVisualPrompt(brandKit) : null,
-        brandKit ? buildBrandLogoPrompt(brandKit) : null,
+        buildLogoStampRules(editLang, hasEditLogo),
+        buildEditPatchConstraints(editProductRow, editLang, brandKit?.name),
       ].filter(Boolean).join('\n\n')
 
       const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images - use them as visual guidance for the requested change.' : ''}
@@ -1021,6 +1044,26 @@ Edit instruction: ${editPrompt}`
       const enhanceTier: 'polish' | 'modernize' | 'rebuild' =
         rawTier === 'polish' || rawTier === 'rebuild' ? rawTier : 'modernize'
 
+      let enhanceProductRow: ProductCreativeRow | null = null
+      if (imageParams.productId && imgMemSupabase) {
+        try {
+          const { data: prod } = await imgMemSupabase
+            .from('products')
+            .select('name, product_description, description, technical_specs, product_category, product_category_custom, offer, price_range')
+            .eq('id', imageParams.productId)
+            .single()
+          if (prod) enhanceProductRow = prod as ProductCreativeRow
+        } catch { /* optional */ }
+      }
+      const enhancePatchConstraints = buildEnhancePatchConstraints(
+        enhanceProductRow,
+        enhanceLang === 'en' ? 'en' : 'es',
+        brandKit?.name,
+        { hasProductRef: hasProductRef }
+      )
+      const enhanceHasLogo = !!(brandKit?.logo_url || logoFallbackUrl)
+      const enhanceLogoRules = buildLogoStampRules(enhanceLang === 'en' ? 'en' : 'es', enhanceHasLogo)
+
       const productRefRule = hasProductRef
         ? `\n═══════════════════════════════════════════════
 REGLA #0 — IMAGEN DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
@@ -1034,7 +1077,7 @@ Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
         : ''
 
       // Shared non-negotiable header for all tiers
-      const HARD_CONSTRAINTS = `${productRefRule}
+      const HARD_CONSTRAINTS = `${productRefRule}${enhancePatchConstraints}${enhanceLogoRules}
 ═══════════════════════════════════════════════
 REGLA #1 — TEXTO Y LENGUAJE (NO NEGOCIABLE)
 ═══════════════════════════════════════════════
@@ -1684,14 +1727,18 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           : `=== CONTEXTO VERIFICADO DEL NEGOCIO Y LA OFERTA (NO RENDERIZAR ESTE BLOQUE) ===\n${imageParams.businessContext.trim()}\nUsalo solo para precisión factual, afinidad con el público y coherencia de la oferta. Nunca inventes un producto, precio, promesa o marca que lo contradiga.\n\n`
       }
 
-      // Brand Kit: inject logo prompt for image generation
-      let brandLogoPrefix = ''
-      if (brandKit) {
-        const blp = buildBrandLogoPrompt(brandKit)
-        if (blp) brandLogoPrefix = blp + '\n\n'
-      } else if (logoFallbackUrl) {
-        brandLogoPrefix = `REGLA — LOGO DE MARCA: se adjunta el logotipo oficial. Incluyelo fielmente, visible, sin redibujarlo.\n\n`
+      // Brand Kit: stamp uploaded logo — never redraw wordmark/lockup with AI
+      const hasBrandLogo = !!(brandKit?.logo_url || logoFallbackUrl)
+      const brandLogoPrefix = buildLogoStampRules(postLanguage === 'en' ? 'en' : 'es', hasBrandLogo)
+
+      const resolvePostCtaPrefix = (): string => {
+        const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
+        const strength = (['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).includes(raw as CTAStrength)
+          ? raw
+          : 'sales'
+        return buildPostCtaGuardrails(postLanguage === 'en' ? 'en' : 'es', strength)
       }
+      const postCtaPrefix = resolvePostCtaPrefix()
 
       // Language enforcement prefix for preset mode (presets lack built-in language rules)
       const langLabel = postLanguage === 'es' ? 'ESPAÑOL' : 'ENGLISH'
@@ -1827,7 +1874,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           priceOffer?: string
           differentiation?: string
           market?: string
+          productSilhouette?: string
         } = {}
+        let productCreativeRow: ProductCreativeRow | null = null
         if (brandKit?.name) {
           productContext.brandName = brandKit.name
         }
@@ -1835,10 +1884,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           try {
             const { data: prod } = await imgMemSupabase
               .from('products')
-              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom, price_range, offer, differentiation, shipping_info, location')
+              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom, price_range, offer, differentiation, shipping_info, location, technical_specs')
               .eq('id', imageParams.productId)
               .single()
             if (prod) {
+              productCreativeRow = prod as ProductCreativeRow
+              const lang = postLanguage === 'en' ? 'en' : 'es'
+              const lockedPrice = resolveLockedOfferPrice(productCreativeRow, brandKit?.name)
+              const silhouette = resolveProductSilhouette(productCreativeRow, lang, brandKit?.name)
               productContext = {
                 ...productContext,
                 name: prod.name || undefined,
@@ -1846,9 +1899,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
                 description: prod.product_description || prod.description || undefined,
                 targetAudience: prod.target_audience || undefined,
                 niche: detectProductNiche(prod),
-                priceOffer: prod.price_range || prod.offer || undefined,
+                priceOffer: lockedPrice || undefined,
                 differentiation: prod.differentiation || undefined,
                 market: prod.location || undefined,
+                productSilhouette: silhouette || undefined,
               }
             }
           } catch { /* fallback: no context */ }
@@ -1878,6 +1932,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           productContext,
           userInstructions: userInstr,
           hasReferenceImages: hasProductImages,
+          productSilhouette: productContext.productSilhouette,
         }
 
         const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
@@ -1896,13 +1951,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
-            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
           }
         } catch {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'anuncio-conversion') {
         // ANUNCIO DE CONVERSIÓN MODE: high-conversion Instagram ad with niche-adaptive prompt
@@ -1928,14 +1983,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
             : aspectRatioPrefix
         const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
-        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
+        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
         const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
         if (presetPrompt) {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + presetPrompt + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'organic-single' && imageParams.organicSubtype) {
         // ORGANIC SINGLE IMAGE MODE — top-of-funnel aesthetic post (quote, infographic, showcase, aesthetic).
@@ -1975,10 +2030,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         // Organic builds its own language / aspect-ratio rules internally; skip the sales aspectRatioPrefix.
-        enhancedPrompt = productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
+        enhancedPrompt = productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + organicPrompt + userPrompt
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
@@ -1992,7 +2047,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       enhancedPrompt += `\n\nCONTRATO FINAL (NO RENDERIZAR ESTE BLOQUE):
 - COLORES: ${paletteList || 'usar solo la paleta de marca si existe'}. PROHIBIDO azul genérico de redes salvo que esté en esa paleta.
 - TEXTO VISIBLE: únicamente el copy condensado del usuario. Estructura gancho → desarrollo (1-2 puntos) → CTA. PROHIBIDO volcar el guion, el contexto de negocio o placeholders como [TIEMPO DE ENTREGA].
-- LOGO: si hay una imagen de logo adjunta, debe aparecer fielmente y visible.\n`
+- CTA: no usar "Dale click a este anuncio" salvo que el guión lo traiga literal; respetar CTA orgánico vs venta según el modo.
+- LOGO: si hay una imagen de logo adjunta, estamparla tal cual — no redibujar wordmark ni lockup con IA.\n`
     }
 
     // =============================================

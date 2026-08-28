@@ -1,5 +1,4 @@
-// =============================================
-// VENTA DIRECTA — Master Post Prompt
+import { buildProductSilhouetteBlock } from '../lib/product-creative-rules.js'
 // Director de Arte + Diseñador Gráfico + Copywriter
 // Built dynamically based on aspect ratio.
 // CRITICAL: No pixel values, no dimension annotations — the AI renders them.
@@ -689,11 +688,12 @@ export interface ProductPromptContext {
   priceOffer?: string
   differentiation?: string
   market?: string
+  productSilhouette?: string
 }
 
 function buildProductContextBlock(ctx: ProductPromptContext | undefined, language: string): string {
   if (!ctx) return ''
-  const hasAny = !!(ctx.name || ctx.brandName || ctx.category || ctx.description || ctx.targetAudience || ctx.niche || ctx.priceOffer || ctx.differentiation)
+  const hasAny = !!(ctx.name || ctx.brandName || ctx.category || ctx.description || ctx.targetAudience || ctx.niche || ctx.priceOffer || ctx.differentiation || ctx.productSilhouette)
   if (!hasAny) return ''
   const isES = language === 'es'
   const lines: string[] = []
@@ -706,6 +706,9 @@ function buildProductContextBlock(ctx: ProductPromptContext | undefined, languag
   if (ctx.targetAudience) lines.push(isES ? `- AUDIENCIA: ${ctx.targetAudience}` : `- AUDIENCE: ${ctx.targetAudience}`)
   if (ctx.market) lines.push(isES ? `- MERCADO: ${ctx.market}` : `- MARKET: ${ctx.market}`)
   if (ctx.niche) lines.push(isES ? `- NICHO DETECTADO: ${ctx.niche}` : `- DETECTED NICHE: ${ctx.niche}`)
+  if (ctx.productSilhouette) {
+    lines.push(isES ? `- SILUETA / FORMA (OBLIGATORIA SIN REFS): ${ctx.productSilhouette.slice(0, 320)}` : `- SILHOUETTE / SHAPE (MANDATORY WITHOUT REFS): ${ctx.productSilhouette.slice(0, 320)}`)
+  }
   const header = isES
     ? '═══════════════════════════════════════════════\nCONTEXTO DEL PRODUCTO (USA ESTA INFORMACIÓN PARA CALIBRAR TODAS LAS DECISIONES VISUALES)\n═══════════════════════════════════════════════'
     : '═══════════════════════════════════════════════\nPRODUCT CONTEXT (USE THIS TO CALIBRATE EVERY VISUAL DECISION)\n═══════════════════════════════════════════════'
@@ -1047,6 +1050,7 @@ export interface ProductPromptOptions {
   productContext?: ProductPromptContext
   userInstructions?: string
   hasReferenceImages?: boolean
+  productSilhouette?: string
 }
 
 export function buildProductPrompt(
@@ -1081,11 +1085,18 @@ export function buildProductPrompt(
     ? `FORMATO OBLIGATORIO: Cuadrado 1:1 (1080×1080). La imagen DEBE ser perfectamente cuadrada.\n\n`
     : ''
 
+  const silhouetteSource = opts.productSilhouette || opts.productContext?.productSilhouette
+  const silhouetteBlock = buildProductSilhouetteBlock(
+    silhouetteSource,
+    language === 'es' ? 'es' : 'en',
+    { hasReferenceImages }
+  )
+
   const closing = isES
     ? 'GENERA LA IMAGEN. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.'
     : 'GENERATE THE IMAGE. Do NOT output descriptive text or justification. Return ONLY the resulting image.'
 
-  return `${formatOverride}${foundation}${contextBlock}${nicheOverlay}${layout}
+  return `${formatOverride}${foundation}${silhouetteBlock}${contextBlock}${nicheOverlay}${layout}
 
 ${renderBlock}${userBlock}${closing}`
 }

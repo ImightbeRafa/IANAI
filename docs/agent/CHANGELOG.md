@@ -1,3 +1,17 @@
+## 2026-08-28 — Bloom CD creative rules: hojita silhouette, logo stamp, locked price (PR #33)
+
+**Area:** product image prompts + Bloom TestAccount kit data
+**Files:** `product-creative-rules.ts`, `generate-image.ts`, `image-presets.ts`, `brand-kit.ts`, tests
+
+- **Product silhouette (no-ref):** Dermal patch offers render as transparent 3×3 hojita de 9 parches (~12 mm); never generic box/jar/tube.
+- **Logo stamp:** Composite uploaded logo; forbid AI redraw of BLOOM wordmark / DERMAL MICRO-INFUSION PATCH lockup; omit lockup when no logo file.
+- **Locked price:** Fallback `₡9.900` for Bloom patch SKU when `offer` is null; user-set prices preserved.
+- **Enhance / Pedir edición:** Same hojita constraints; improve crop/contrast/floral; no SKU/packaging/box swap or gibberish type.
+- **Posts CTA:** Guardrails against Ads Manager “Dale click a este anuncio”; organic Escribime/Pedilo vs paid button via `ctaStrength`.
+- **Data (AIIAN):** Patched Bloom kit `f07339f1` + product `be543866` — offer, SILUETA in specs, visual_style_notes, forbidden_phrases, style_dnas.
+
+---
+
 ## 2026-08-28 — Ingredients soft-skip, logo upload, no-ref product quality (PR #33)
 
 **Area:** chat-shell UX + product image prompts
