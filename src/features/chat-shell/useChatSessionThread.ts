@@ -1471,6 +1471,7 @@ export function useChatSessionThread(options: {
           alreadyOptimized?: boolean
           askStyleRef?: boolean
           skipStyleRef?: boolean
+          skippedIngredients?: IngredientKind[]
         }),
         creditConfirmed: true,
       })
