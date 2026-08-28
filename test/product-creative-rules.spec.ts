@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BLOOM_DERMAL_PATCH_PRICE,
   buildEnhancePatchConstraints,
+  buildLockedPriceRules,
   buildLogoStampRules,
   buildPostCtaGuardrails,
   buildProductSilhouetteBlock,
@@ -71,6 +72,13 @@ describe('product creative rules — Bloom dermal patch', () => {
     expect(block).toMatch(/9 parches|3×3|3x3/i)
     expect(block).toMatch(/conservá exactamente esta silueta/i)
     expect(block).toMatch(/PROHIBIDO.*caja|empaque/i)
+  })
+
+  it('G3: enhance constraints forbid strikethrough on locked list price', () => {
+    const block = buildEnhancePatchConstraints(BLOOM_PATCH_ROW, 'es', 'Bloom', { hasProductRef: false })
+    expect(block).toMatch(/PROHIBIDO tachado|strikethrough/i)
+    expect(buildLockedPriceRules('es', BLOOM_DERMAL_PATCH_PRICE)).toMatch(/₡9\.900/)
+    expect(buildLockedPriceRules('es', BLOOM_DERMAL_PATCH_PRICE)).toMatch(/tachado|strikethrough/i)
   })
 
   it('post CTA guardrails block Ads Manager default', () => {

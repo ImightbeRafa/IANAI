@@ -1,3 +1,14 @@
+## 2026-08-28 — CoS retest fixes: ingredients ask, Grok first-pass hojita, no price strikethrough (PR #33)
+
+**Area:** chat-shell ingredients + Grok venta-directa first generate + enhance
+**Files:** `chatShellIngredientsCheck.ts`, `useChatSessionThread.ts`, `grok-image-prompt.ts`, `generate-image.ts`, `product-creative-rules.ts`, tests
+
+- **A/C:** `Crear sin referencias` now always triggers ingredients ask (kit/rail files unused for this generate don't skip it).
+- **E:** `buildSlimGrokPostPrompt` applies hojita silhouette + logo stamp + locked ₡9.900 + non-Ads-Manager CTA on first-pass Grok venta-directa; kit logo injected on generate when refs skipped.
+- **G3:** Enhance/edit forbids strikethrough on list price (₡9.900).
+
+---
+
 ## 2026-08-28 — Bloom CD creative rules: hojita silhouette, logo stamp, locked price (PR #33)
 
 **Area:** product image prompts + Bloom TestAccount kit data

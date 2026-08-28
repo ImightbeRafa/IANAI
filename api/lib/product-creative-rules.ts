@@ -130,6 +130,15 @@ export function buildLogoStampRules(language: 'es' | 'en', hasLogo: boolean): st
 - On conflict, the attached logo wins; adjust background/composition, not the logo.\n\n`
 }
 
+export function buildLockedPriceRules(language: 'es' | 'en', price?: string | null): string {
+  const locked = typeof price === 'string' ? price.trim() : ''
+  if (!locked) return ''
+  const isES = language === 'es'
+  return isES
+    ? `PRECIO LISTADO (${locked}): mostralo tal cual en el diseño. PROHIBIDO tachado/strikethrough, "antes/ahora" inventado, descuento ficticio o precio rebajado sin respaldo en el copy.\n\n`
+    : `LIST PRICE (${locked}): show exactly as listed. FORBIDDEN strikethrough, invented before/after sale, fake discount, or reduced price unless the copy states it.\n\n`
+}
+
 export function buildEnhancePatchConstraints(
   row: ProductCreativeRow | null | undefined,
   language: 'es' | 'en',
@@ -144,6 +153,8 @@ export function buildEnhancePatchConstraints(
     hasReferenceImages: options?.hasProductRef ?? false,
     forEnhance: true,
   })
+  const lockedPrice = resolveLockedOfferPrice(row, brandName)
+  const priceRules = buildLockedPriceRules(language, lockedPrice)
   const improveNote = isES
     ? `MEJORA PERMITIDA: crop, contraste, luz, ambiente floral/púrpura nocturno coherente con la marca.
 PROHIBIDO EN EDICIÓN: texto gibberish, cambiar SKU, agregar empaque/caja, reemplazar la hojita por cartón sellado.
@@ -151,7 +162,7 @@ PROHIBIDO EN EDICIÓN: texto gibberish, cambiar SKU, agregar empaque/caja, reemp
     : `ALLOWED IMPROVEMENTS: crop, contrast, light, floral/purple night mood aligned with the brand.
 FORBIDDEN ON EDIT: gibberish text, SKU change, add packaging/box, replace the patch sheet with a sealed carton.
 `
-  return `${silhouetteBlock}${improveNote}`
+  return `${silhouetteBlock}${priceRules}${improveNote}`
 }
 
 export function buildEditPatchConstraints(

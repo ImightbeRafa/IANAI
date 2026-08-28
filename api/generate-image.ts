@@ -52,6 +52,7 @@ import {
 import {
   buildEditPatchConstraints,
   buildEnhancePatchConstraints,
+  buildLockedPriceRules,
   buildLogoStampRules,
   buildPostCtaGuardrails,
   resolveLockedOfferPrice,
@@ -1106,6 +1107,12 @@ REGLA #4 — FORMATO (NO NEGOCIABLE)
 - La imagen de salida debe mantener EXACTAMENTE el mismo aspect ratio que la imagen de entrada.
 - NO cambies de vertical a horizontal ni viceversa.
 ═══════════════════════════════════════════════
+
+REGLA #5 — PRECIO / OFERTA (NO NEGOCIABLE)
+- Si el copy o la imagen muestran un precio (ej. ₡9.900), mostralo SIN tachado/strikethrough.
+- PROHIBIDO inventar descuentos, precio "antes", oferta rebajada o tachado rojo sobre el precio listado.
+- VIOLACIÓN = RESULTADO INVÁLIDO.
+═══════════════════════════════════════════════
 `
 
       // Tier-specific creative direction
@@ -1616,6 +1623,24 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const hasProductImages = productReferenceCount > 0
     const postLanguage: string = imageParams.language || 'es'
     const postTextDensity = normalizePostTextDensity(imageParams.textDensity)
+    let postProductCreativeRow: ProductCreativeRow | null = null
+    if (imageParams.productId && imgMemSupabase) {
+      try {
+        const { data: prod } = await imgMemSupabase
+          .from('products')
+          .select('name, product_description, description, technical_specs, product_category, product_category_custom, offer, price_range')
+          .eq('id', imageParams.productId)
+          .single()
+        if (prod) postProductCreativeRow = prod as ProductCreativeRow
+      } catch { /* optional */ }
+    }
+    const postLangCode = postLanguage === 'en' ? 'en' : 'es'
+    const postProductSilhouette = postProductCreativeRow
+      ? resolveProductSilhouette(postProductCreativeRow, postLangCode, brandKit?.name)
+      : null
+    const postLockedOfferPrice = postProductCreativeRow
+      ? resolveLockedOfferPrice(postProductCreativeRow, brandKit?.name)
+      : null
 
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
@@ -2574,6 +2599,25 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
       const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
 
+      let grokLogoDataUrl: string | null = null
+      if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
+        try {
+          const logoData = await resolveInlineLogo()
+          if (logoData) {
+            grokLogoDataUrl = `data:${logoData.mimeType};base64,${logoData.data}`
+          }
+        } catch (logoErr) {
+          console.warn('Failed to inject brand logo for Grok post generate:', logoErr)
+        }
+      }
+
+      const grokCtaStrength = ((): string => {
+        const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
+        return (['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).includes(raw as CTAStrength)
+          ? raw
+          : 'sales'
+      })()
+
       // Venta-directa / anuncio presets are ~26KB essays — do not truncate those for Grok.
       // Build a slim useful prompt (user copy + short fidelity) then byte-cap with margin.
       const useSlimPostPrompt = isPostMode && !isProductMode && !isLogoMode
@@ -2598,6 +2642,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             ? imageParams.businessContext
             : null,
           hasProductRefs: referenceUrls.length > 0,
+          productSilhouette: postProductSilhouette,
+          lockedOfferPrice: postLockedOfferPrice,
+          logoStampRules: buildLogoStampRules(postLangCode, Boolean(grokLogoDataUrl)),
+          ctaGuardrails: buildPostCtaGuardrails(postLangCode, grokCtaStrength),
+          hasBrandLogo: Boolean(grokLogoDataUrl),
         })
         : enhancedPrompt
 
@@ -2657,6 +2706,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           } else {
             grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
           }
+        } else if (grokLogoDataUrl) {
+          // No product refs: still stamp kit logo via generations `image` reference.
+          grokRequest.image = { url: grokLogoDataUrl, type: 'image_url' }
         }
 
         const response = await fetch(endpoint, {

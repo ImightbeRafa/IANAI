@@ -16,6 +16,32 @@ describe('chatShellIngredientsCheck', () => {
     })).toEqual(['productPhoto', 'logo', 'style'])
   })
 
+  it('treats Crear sin referencias as all three missing even when kit/rail has files', () => {
+    expect(detectMissingIngredients({
+      offerImages: [
+        { id: '1', product_id: 'p1', kind: 'product', label: 'Producto' },
+        { id: '2', product_id: 'p1', kind: 'context', label: 'Estilo · post ref' },
+      ],
+      productId: 'p1',
+      brandLogoUrl: 'https://cdn/logo.png',
+      referenceMode: 'none',
+    })).toEqual(['productPhoto', 'logo', 'style'])
+  })
+
+  it('checks only selected refs when referenceMode is use', () => {
+    expect(detectMissingIngredients({
+      offerImages: [
+        { id: '1', product_id: 'p1', kind: 'product', label: 'Producto' },
+        { id: '2', product_id: 'p1', kind: 'context', label: 'Estilo · post ref' },
+        { id: '3', product_id: 'p1', kind: 'product', label: 'Otro ángulo' },
+      ],
+      productId: 'p1',
+      brandLogoUrl: 'https://cdn/logo.png',
+      referenceMode: 'use',
+      selectedReferenceImageIds: ['1'],
+    })).toEqual(['style'])
+  })
+
   it('detects only missing logo when product and style exist', () => {
     expect(detectMissingIngredients({
       offerImages: [

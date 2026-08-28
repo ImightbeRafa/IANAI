@@ -2028,6 +2028,8 @@ export function useChatSessionThread(options: {
           offerImages: images,
           productId: options.productId,
           brandLogoUrl: brandVisual.brandLogoUrl,
+          referenceMode: referenceMode === 'use' || referenceMode === 'none' ? referenceMode : undefined,
+          selectedReferenceImageIds: productImageIds,
         })
         const stillMissing = remainingIngredients(missing, skippedSet)
         if (stillMissing.length > 0) {

@@ -123,6 +123,12 @@ export type SlimGrokPostPromptOptions = {
   brandVisual?: string | null
   businessContext?: string | null
   hasProductRefs?: boolean
+  /** Mandatory product shape when generating without product photo refs. */
+  productSilhouette?: string | null
+  lockedOfferPrice?: string | null
+  logoStampRules?: string | null
+  ctaGuardrails?: string | null
+  hasBrandLogo?: boolean
 }
 
 /**
@@ -171,10 +177,36 @@ export function buildSlimGrokPostPrompt(options: SlimGrokPostPromptOptions): str
     parts.push(es
       ? 'Hay fotos de referencia adjuntas: usá el producto con fidelidad; no inventes otro producto.'
       : 'Reference photos are attached: keep product fidelity; do not invent another product.')
+  } else if (options.productSilhouette?.trim()) {
+    parts.push(es
+      ? `Sin foto de producto adjunta: renderizá el producto FOTORREALISTA visible en el diseño (no solo tipografía). Silueta obligatoria:\n${options.productSilhouette.trim()}\nNUNCA caja sellada genérica, cartón, frasco, tubo ni pump.`
+      : `No product photo attached: render a VISIBLE photoreal product in the design (not typography-only). Mandatory silhouette:\n${options.productSilhouette.trim()}\nNEVER a generic sealed box, carton, jar, tube, or pump.`)
   } else {
     parts.push(es
       ? 'Sin foto de producto: diseñá un anuncio tipográfico/editorial limpio (sin inventar un producto fotorealista falso).'
       : 'No product photo: design a clean typographic/editorial ad (do not invent a fake photoreal product).')
+  }
+
+  if (options.logoStampRules?.trim()) {
+    parts.push(options.logoStampRules.trim())
+  } else if (options.hasBrandLogo) {
+    parts.push(es
+      ? 'Hay logo de marca adjunto como imagen: estampalo tal cual en esquina superior. PROHIBIDO redibujar wordmark o lockup con IA.'
+      : 'Brand logo attached as image: stamp it as-is in a top corner. FORBIDDEN to redraw wordmark or lockup with AI.')
+  }
+
+  if (options.lockedOfferPrice?.trim()) {
+    parts.push(es
+      ? `Precio listado ${options.lockedOfferPrice.trim()}: mostralo tal cual. PROHIBIDO tachado/strikethrough, descuento inventado o "antes/ahora" ficticio.`
+      : `List price ${options.lockedOfferPrice.trim()}: show as-is. FORBIDDEN strikethrough, invented discount, or fake before/after pricing.`)
+  }
+
+  if (options.ctaGuardrails?.trim()) {
+    parts.push(options.ctaGuardrails.trim())
+  } else {
+    parts.push(es
+      ? 'CTA: si el copy trae "Dale click a este anuncio" u otro boilerplate de Ads Manager, reemplazalo por un CTA corto de venta ("Comprá ahora.", "Pedilo acá.") — no copies el boilerplate.'
+      : 'CTA: if copy includes "Click this ad" or Ads Manager boilerplate, replace with a short sales CTA ("Buy now.", "Order here.") — do not copy boilerplate.')
   }
 
   const palette = clampBlock(options.palette, 120)

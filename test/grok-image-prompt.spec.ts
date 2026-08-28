@@ -48,6 +48,29 @@ describe('grok-image-prompt', () => {
     expect(grokPromptUtf8ByteLength(slim)).toBeLessThan(3_500)
   })
 
+  it('first-pass no-ref venta-directa uses hojita silhouette instead of typographic-only', () => {
+    const silhouette =
+      'Hojita de 9 parches: lámina cuadrada transparente con 9 parches circulares en grilla 3×3.'
+    const slim = buildSlimGrokPostPrompt({
+      language: 'es',
+      postStyle: 'venta-directa',
+      textDensity: 'hard',
+      userCopy: SHORT_ES_SCRIPT,
+      hasProductRefs: false,
+      productSilhouette: silhouette,
+      lockedOfferPrice: '₡9.900',
+      hasBrandLogo: true,
+      logoStampRules: 'REGLA — LOGO: estampar tal cual.',
+      ctaGuardrails: 'CTA: Comprá ahora.',
+    })
+    expect(slim).toMatch(/hojita|9 parches/i)
+    expect(slim).toMatch(/FOTORREALISTA visible/i)
+    expect(slim).not.toMatch(/anuncio tipográfico\/editorial limpio/i)
+    expect(slim).toMatch(/PROHIBIDO tachado|strikethrough/i)
+    expect(slim).toMatch(/Comprá ahora|Dale click a este anuncio/i)
+    expect(slim).toMatch(/ESTAMPADO|estampar/i)
+  })
+
   it('caps on UTF-8 bytes with safety margin and prefers user tail', () => {
     const userCopy = SHORT_ES_SCRIPT
     // Fat Spanish-heavy essays (multi-byte) that would blow a naive 8000 code-point cap in bytes.

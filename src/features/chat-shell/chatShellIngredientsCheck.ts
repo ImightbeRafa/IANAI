@@ -7,18 +7,32 @@ export function detectMissingIngredients(options: {
   offerImages: ShellImageLike[]
   productId: string
   brandLogoUrl?: string | null
+  /** When 'none', all three count as missing even if the kit/rail already has unused files. */
+  referenceMode?: 'use' | 'none'
+  /** Product/style refs selected for this generate (ignored when referenceMode is 'none'). */
+  selectedReferenceImageIds?: string[]
 }): IngredientKind[] {
-  const refs = options.offerImages.filter(
+  if (options.referenceMode === 'none') {
+    return ['productPhoto', 'logo', 'style']
+  }
+
+  const selectedIds = new Set(options.selectedReferenceImageIds || [])
+  const refsForOffer = options.offerImages.filter(
     (img) => img.product_id === options.productId && !isGeneratedOfferImage(img)
   )
-  const hasProductPhoto = refs.some(
+  const selectedRefs = selectedIds.size > 0
+    ? refsForOffer.filter((img) => selectedIds.has(img.id))
+    : refsForOffer
+
+  const hasProductPhoto = selectedRefs.some(
     (img) => referenceRoleFromStored({ kind: img.kind, label: img.label }) === 'product'
   )
-  const hasStyle = refs.some((img) => {
+  const hasStyle = selectedRefs.some((img) => {
     const role = referenceRoleFromStored({ kind: img.kind, label: img.label })
     return role === 'style'
   })
   const hasLogo = Boolean(options.brandLogoUrl?.trim())
+
   const missing: IngredientKind[] = []
   if (!hasProductPhoto) missing.push('productPhoto')
   if (!hasLogo) missing.push('logo')
