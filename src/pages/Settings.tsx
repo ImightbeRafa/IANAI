@@ -8,6 +8,7 @@ import Layout from '../components/Layout'
 import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info, Loader2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUsageLimits } from '../hooks/useUsageLimits'
+import CreditsChip from '../components/CreditsChip'
 import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments, getBusinesses, linkBrandKitToBusiness } from '../services/database'
 import type { BrandKit, BrandKitFormData, Subscription, Payment, Business } from '../types'
 import { CHANGELOG, ROADMAP, STATUS_ALERT, type ChangeCategory, type RoadmapStatus } from '../data/changelog'
@@ -417,9 +418,12 @@ export function SettingsContent({
   return (
       <div className={surface === 'dialog' ? 'chat-shell__settings-content' : 'p-6 lg:p-8 max-w-2xl mx-auto'}>
         {surface === 'page' && (
-        <div className="mb-8">
+        <div className="mb-8 flex items-start justify-between gap-3">
+          <div>
           <h1 className="text-2xl font-bold text-dark-900">{t.settings}</h1>
           <p className="text-dark-500 mt-1">{t.manageAccount}</p>
+          </div>
+          <CreditsChip usage={usageLimits} />
         </div>
         )}
 

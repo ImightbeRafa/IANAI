@@ -1819,25 +1819,36 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Load product context + detect niche so the prompt adapts to the actual product
         let productContext: {
           name?: string
+          brandName?: string
           category?: string
           description?: string
           targetAudience?: string
           niche?: 'physical' | 'food' | 'service' | 'fashion' | 'digital'
+          priceOffer?: string
+          differentiation?: string
+          market?: string
         } = {}
+        if (brandKit?.name) {
+          productContext.brandName = brandKit.name
+        }
         if (imageParams.productId && imgMemSupabase) {
           try {
             const { data: prod } = await imgMemSupabase
               .from('products')
-              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom')
+              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom, price_range, offer, differentiation, shipping_info, location')
               .eq('id', imageParams.productId)
               .single()
             if (prod) {
               productContext = {
+                ...productContext,
                 name: prod.name || undefined,
                 category: prod.product_category_custom || prod.product_category || prod.svc_service_type_custom || prod.svc_service_type || prod.type || undefined,
                 description: prod.product_description || prod.description || undefined,
                 targetAudience: prod.target_audience || undefined,
                 niche: detectProductNiche(prod),
+                priceOffer: prod.price_range || prod.offer || undefined,
+                differentiation: prod.differentiation || undefined,
+                market: prod.location || undefined,
               }
             }
           } catch { /* fallback: no context */ }

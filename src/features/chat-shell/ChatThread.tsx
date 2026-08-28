@@ -28,6 +28,7 @@ import {
   type ScriptCtaChannel,
 } from './useChatSessionThread'
 import { creditQuoteCopy, type CreditQuote } from './chatShellCreditQuote'
+import { ingredientsPromptCopy, skipIngredientLabel, type IngredientKind } from './chatShellIngredientsCheck'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import { catalogOfferReferences, hasSelectedProductReference } from './chatShellReferenceSelection'
 import {
@@ -82,6 +83,7 @@ interface ChatThreadProps {
     aspectRatio?: ShellImageAspect
     density?: ShellImageDensity
     skipStyleRef?: boolean
+    skipIngredient?: IngredientKind
     useReferences?: boolean
     switchToAnuncio?: boolean
     toggleReferenceId?: string
@@ -112,6 +114,7 @@ interface ChatThreadProps {
       density?: 'hard' | 'medium'
       referenceImageIds?: string[]
       alreadyOptimized?: boolean
+      aspectRatio?: ShellImageAspect
     }
   ) => void | Promise<void>
   onSaveScript: (
@@ -797,8 +800,38 @@ export default memo(function ChatThread({
                 onRemove={onRemoveOfferReference}
               />
             ) : null}
+            {imageClarify.step === 'ingredients' ? (
+              <p className="chat-shell__clarify-question">
+                {ingredientsPromptCopy(imageClarify.missingIngredients || [], language)}
+              </p>
+            ) : null}
             <div className="chat-shell__clarify-chips">
-              {imageClarify.step === 'script' ? (
+              {imageClarify.step === 'ingredients' ? (
+                <>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--ghost"
+                    disabled={imageBusy}
+                    onClick={() => onOpenImagesRail?.()}
+                  >
+                    {language === 'es' ? 'Subir en el rail' : 'Upload in rail'}
+                  </button>
+                  {(imageClarify.missingIngredients || []).map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      className="chat-shell__btn chat-shell__btn--pill"
+                      disabled={imageBusy}
+                      onClick={() => onAnswerImageClarify?.({ skipIngredient: kind })}
+                    >
+                      {skipIngredientLabel(kind, language)}
+                    </button>
+                  ))}
+                  <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelImageClarify?.()}>
+                    {language === 'es' ? 'Cancelar' : 'Cancel'}
+                  </button>
+                </>
+              ) : imageClarify.step === 'script' ? (
                 <div className="chat-shell__script-picker">
                   <p className="chat-shell__script-picker-lead">
                     {language === 'es' ? 'Elegí el guion que querés convertir en post.' : 'Choose the script you want to turn into a post.'}

@@ -645,8 +645,9 @@ function buildProductFoundation(
 - NO cartoon, NO 3D fake, NO ilustración, NO vectorización. El resultado debe ser FOTORREALISTA.
 - La forma del producto NO se modifica bajo ninguna circunstancia.`
     : `No hay fotos de referencia adjuntas.
-- Generá el producto FOTORREALISTA descrito en CONTEXTO DEL PRODUCTO (nombre, categoría, descripción).
-- Debe verse como empaque/foto de catálogo premium coherente con esa descripción — NO un cartel tipográfico ni UI de app.
+- Generá el producto FOTORREALISTA descrito en CONTEXTO DEL PRODUCTO (nombre, categoría, descripción, oferta).
+- Mostrá la forma real del producto (ej. lámina/plancha de parches, frasco, prenda) — NO una caja sellada genérica si la descripción no es una caja.
+- Debe verse como foto de catálogo premium coherente con la marca y la oferta — NO cartel tipográfico, NO UI de app, NO texto "Generar post" ni "Professional product photograph".
 - NO cartoon, NO 3D fake, NO ilustración. Fotografía real de producto.`
 
   return `═══════════════════════════════════════════════
@@ -680,29 +681,37 @@ RESOLUCIÓN: Máxima calidad disponible, detalles nítidos, sin artefactos.
 
 export interface ProductPromptContext {
   name?: string
+  brandName?: string
   category?: string
   description?: string
   targetAudience?: string
   niche?: AnuncioNiche
+  priceOffer?: string
+  differentiation?: string
+  market?: string
 }
 
 function buildProductContextBlock(ctx: ProductPromptContext | undefined, language: string): string {
   if (!ctx) return ''
-  const hasAny = !!(ctx.name || ctx.category || ctx.description || ctx.targetAudience || ctx.niche)
+  const hasAny = !!(ctx.name || ctx.brandName || ctx.category || ctx.description || ctx.targetAudience || ctx.niche || ctx.priceOffer || ctx.differentiation)
   if (!hasAny) return ''
   const isES = language === 'es'
   const lines: string[] = []
+  if (ctx.brandName) lines.push(isES ? `- MARCA: ${ctx.brandName}` : `- BRAND: ${ctx.brandName}`)
   if (ctx.name) lines.push(isES ? `- PRODUCTO: ${ctx.name}` : `- PRODUCT: ${ctx.name}`)
   if (ctx.category) lines.push(isES ? `- CATEGORÍA: ${ctx.category}` : `- CATEGORY: ${ctx.category}`)
   if (ctx.description) lines.push(isES ? `- DESCRIPCIÓN: ${ctx.description.slice(0, 400)}` : `- DESCRIPTION: ${ctx.description.slice(0, 400)}`)
+  if (ctx.priceOffer) lines.push(isES ? `- OFERTA / PRECIO: ${ctx.priceOffer.slice(0, 120)}` : `- OFFER / PRICE: ${ctx.priceOffer.slice(0, 120)}`)
+  if (ctx.differentiation) lines.push(isES ? `- DIFERENCIADOR: ${ctx.differentiation.slice(0, 200)}` : `- DIFFERENTIATOR: ${ctx.differentiation.slice(0, 200)}`)
   if (ctx.targetAudience) lines.push(isES ? `- AUDIENCIA: ${ctx.targetAudience}` : `- AUDIENCE: ${ctx.targetAudience}`)
+  if (ctx.market) lines.push(isES ? `- MERCADO: ${ctx.market}` : `- MARKET: ${ctx.market}`)
   if (ctx.niche) lines.push(isES ? `- NICHO DETECTADO: ${ctx.niche}` : `- DETECTED NICHE: ${ctx.niche}`)
   const header = isES
     ? '═══════════════════════════════════════════════\nCONTEXTO DEL PRODUCTO (USA ESTA INFORMACIÓN PARA CALIBRAR TODAS LAS DECISIONES VISUALES)\n═══════════════════════════════════════════════'
     : '═══════════════════════════════════════════════\nPRODUCT CONTEXT (USE THIS TO CALIBRATE EVERY VISUAL DECISION)\n═══════════════════════════════════════════════'
   const footer = isES
-    ? 'Adaptá superficies, props, iluminación, paleta y mood a la naturaleza específica de este producto — NO uses defaults genéricos.'
-    : 'Adapt surfaces, props, lighting, palette and mood to the specific nature of this product — do NOT use generic defaults.'
+    ? 'Adaptá superficies, props, iluminación, paleta y mood a la naturaleza específica de este producto — NO uses defaults genéricos ni empaques/cajas que no correspondan a la descripción.'
+    : 'Adapt surfaces, props, lighting, palette and mood to the specific nature of this product — do NOT use generic defaults or packaging/boxes that do not match the description.'
   return `${header}\n${lines.join('\n')}\n\n${footer}\n═══════════════════════════════════════════════\n\n`
 }
 

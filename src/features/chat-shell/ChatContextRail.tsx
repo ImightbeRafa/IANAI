@@ -78,6 +78,7 @@ interface ChatContextRailProps {
   imagePrefs?: ShellImagePreferences
   onPatchImagePreferences?: (patch: Partial<ShellImagePreferences>) => void
   onStartLogo?: (archetype?: string) => void
+  onUploadBrandLogo?: (file: File) => void | Promise<void>
   scriptSettings?: ScriptGenerationSettings
   onScriptSettingsChange?: (settings: ScriptGenerationSettings) => void
   onGenerateScripts?: () => void
@@ -129,6 +130,7 @@ export default function ChatContextRail({
   imagePrefs,
   onPatchImagePreferences,
   onStartLogo,
+  onUploadBrandLogo,
   scriptSettings,
   onScriptSettingsChange,
   onGenerateScripts,
@@ -786,13 +788,30 @@ export default function ChatContextRail({
                 {t.settings}
               </Link>
             )}
-            <button
-              type="button"
-              className="chat-shell__setup-btn"
-              onClick={() => onStartLogo?.('auto')}
-            >
-              {t.logo}
-            </button>
+            {onUploadBrandLogo ? (
+              <label className="chat-shell__setup-btn">
+                {t.logo}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  hidden
+                  disabled={imageBusy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) void onUploadBrandLogo(file)
+                  }}
+                />
+              </label>
+            ) : (
+              <button
+                type="button"
+                className="chat-shell__setup-btn"
+                onClick={() => onStartLogo?.('auto')}
+              >
+                {t.logo}
+              </button>
+            )}
           </div>
         </div>
       )}

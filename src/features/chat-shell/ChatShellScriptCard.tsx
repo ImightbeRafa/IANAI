@@ -4,7 +4,7 @@ import type { ParsedScript } from '../../utils/scriptParser'
 import type { ProductType } from '../../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../../services/database'
 import { parseScriptSections } from './parseScriptSections'
-import { IMAGE_DENSITY_CHOICES } from './chatShellImageIntent'
+import { IMAGE_DENSITY_CHOICES, type ShellImageAspect } from './chatShellImageIntent'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import {
   confirmedReferenceImageIds,
@@ -85,6 +85,7 @@ interface ChatShellScriptCardProps {
   onPreparePost?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
   onGenerateImage?: (scriptText: string, options?: {
     density?: 'hard' | 'medium'
+    aspectRatio?: ShellImageAspect
     referenceImageIds?: string[]
     alreadyOptimized?: boolean
   }) => void | Promise<void>
@@ -196,6 +197,7 @@ export default function ChatShellScriptCard({
   const [postPreviewOpen, setPostPreviewOpen] = useState(false)
   const [postDrafts, setPostDrafts] = useState<Partial<Record<'hard' | 'medium', string>>>({})
   const [postDensity, setPostDensity] = useState<'hard' | 'medium'>('hard')
+  const [postAspect, setPostAspect] = useState<ShellImageAspect>('1:1')
   const [preparingPost, setPreparingPost] = useState(false)
   const [savingPost, setSavingPost] = useState(false)
   const [previewRefs, setPreviewRefs] = useState<OfferReferenceImage[]>([])
@@ -521,6 +523,7 @@ export default function ChatShellScriptCard({
         .filter((id) => !id.startsWith('url-'))
       await onGenerateImage?.(draft, {
         density: postDensity,
+        aspectRatio: postAspect,
         referenceImageIds,
         alreadyOptimized: true,
       })
@@ -613,6 +616,26 @@ export default function ChatShellScriptCard({
                   }}
                 >
                   {es ? choice.labelEs : choice.labelEn}
+                </button>
+              )
+            })}
+          </div>
+          <div className="chat-shell__post-preview-density" role="radiogroup" aria-label={es ? 'Formato' : 'Format'}>
+            {(['1:1', '9:16'] as const).map((ratio) => {
+              const selected = postAspect === ratio
+              return (
+                <button
+                  key={ratio}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  className={selected ? 'is-on' : ''}
+                  disabled={imageBusy || savingPost}
+                  onClick={() => setPostAspect(ratio)}
+                >
+                  {ratio === '1:1'
+                    ? (es ? 'Post 1:1' : '1:1 post')
+                    : (es ? 'Reel 9:16' : '9:16 reel')}
                 </button>
               )
             })}

@@ -30,7 +30,7 @@ export interface ShellImageIntent {
   wantsImage: boolean
 }
 
-export type ImageClarifyStep = 'script' | 'mode' | 'style' | 'aspect' | 'density' | 'styleRef' | 'refs'
+export type ImageClarifyStep = 'script' | 'mode' | 'style' | 'aspect' | 'density' | 'styleRef' | 'refs' | 'ingredients'
 export type ImageClarifyMode = 'anuncio' | 'product' | 'organic'
 
 export interface ImageClarifyPlan {

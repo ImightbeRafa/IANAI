@@ -854,6 +854,7 @@ export default function ChatShell({
         imagePrefs={thread.imagePrefs}
         onPatchImagePreferences={thread.patchImagePreferences}
         onStartLogo={startLogo}
+        onUploadBrandLogo={(file) => void brandSetup.uploadBrandAsset(file, 'logo')}
         scriptSettings={thread.scriptSettings}
         onScriptSettingsChange={thread.setScriptSettings}
         onGenerateScripts={() => void generateScripts()}

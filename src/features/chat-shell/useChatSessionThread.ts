@@ -150,6 +150,13 @@ import {
   type OfferReferenceImage,
 } from './chatShellReferenceSelection'
 import { collectOfferEnhanceReferences, type ShellEnhanceTier } from './chatShellImageEnhance'
+import {
+  detectMissingIngredients,
+  ingredientsPromptCopy,
+  remainingIngredients,
+  shouldCheckImageIngredients,
+  type IngredientKind,
+} from './chatShellIngredientsCheck'
 
 export type ImageClarifyState = {
   sessionId: string
@@ -172,6 +179,22 @@ export type ImageClarifyState = {
   preferredReferenceIds?: string[]
   alreadyOptimized?: boolean
   askStyleRef?: boolean
+  missingIngredients?: IngredientKind[]
+  skippedIngredients?: IngredientKind[]
+  pendingGenerate?: {
+    productId: string
+    preferences: ShellImagePreferences
+    prompt: string
+    userText: string
+    scriptText?: string
+    scriptTitle?: string | null
+    source: string
+    referenceMode?: 'use' | 'none'
+    referenceImageIds?: string[]
+    alreadyOptimized?: boolean
+    askStyleRef?: boolean
+    skipStyleRef?: boolean
+  }
 }
 
 export type ImageScriptChoice = {
@@ -426,6 +449,7 @@ export function useChatSessionThread(options: {
     askStyleRef?: boolean
     skipStyleRef?: boolean
     creditConfirmed?: boolean
+    skippedIngredients?: IngredientKind[]
   }) => Promise<void>>(async () => {})
   const latestScriptByKeyRef = useRef<Map<string, string>>(new Map())
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(() => ({
@@ -1723,8 +1747,8 @@ export function useChatSessionThread(options: {
     const pendingRefs =
       imageClarify
       && imageClarify.sessionId === session.id
-      && (imageClarify.step === 'refs' || imageClarify.step === 'styleRef')
-      && imageClarify.preferences
+      && (imageClarify.step === 'refs' || imageClarify.step === 'styleRef' || imageClarify.step === 'ingredients')
+      && (imageClarify.preferences || imageClarify.pendingGenerate)
         ? imageClarify
         : null
     const originSessionId = session.id
@@ -1755,8 +1779,12 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
+      setOfferImages((prev) => [uploaded, ...prev.filter((item) => item.id !== uploaded.id)])
       await refreshOfferImages(originSessionId, targetProductId, loadRequestRef.current)
-      if (pendingRefs) {
+      if (
+        pendingRefs
+        && (pendingRefs.step === 'refs' || pendingRefs.step === 'styleRef')
+      ) {
         setImageClarify((current) => {
           if (
             !current
@@ -1785,6 +1813,16 @@ export function useChatSessionThread(options: {
             referenceImages,
             availableReferenceCount: referenceImages.length,
           }
+        })
+      } else if (
+        pendingRefs?.step === 'ingredients'
+        && pendingRefs.pendingGenerate
+        && pendingRefs.sessionId === originSessionId
+      ) {
+        const skipped = pendingRefs.skippedIngredients || []
+        await runImageGenerateRef.current?.({
+          ...pendingRefs.pendingGenerate,
+          skippedIngredients: skipped,
         })
       }
       setNotice(
@@ -1840,6 +1878,7 @@ export function useChatSessionThread(options: {
     askStyleRef?: boolean
     skipStyleRef?: boolean
     creditConfirmed?: boolean
+    skippedIngredients?: IngredientKind[]
   }) => {
     if (!session || imageBusyRef.current) return
     const originSessionId = session.id
@@ -1981,6 +2020,51 @@ export function useChatSessionThread(options: {
       } else if (scriptText) {
         scriptText = stripUnresolvedPlaceholders(scriptText)
         if (prompt === options.scriptText) prompt = scriptText
+      }
+
+      const skippedSet = new Set(options.skippedIngredients || [])
+      if (shouldCheckImageIngredients(prefs.style.kind)) {
+        const missing = detectMissingIngredients({
+          offerImages: images,
+          productId: options.productId,
+          brandLogoUrl: brandVisual.brandLogoUrl,
+        })
+        const stillMissing = remainingIngredients(missing, skippedSet)
+        if (stillMissing.length > 0) {
+          setImageOfferId(options.productId)
+          setImageClarify({
+            sessionId: originSessionId,
+            step: 'ingredients',
+            mode: prefs.style.kind === 'product' ? 'product' : prefs.style.kind === 'organic' ? 'organic' : 'anuncio',
+            originText: options.userText,
+            productId: options.productId,
+            scriptText: options.scriptText,
+            scriptTitle: options.scriptTitle,
+            source: clarifySource,
+            partial: { style: prefs.style },
+            preferences: prefs,
+            prompt,
+            userText: options.userText,
+            missingIngredients: stillMissing,
+            skippedIngredients: [...skippedSet],
+            pendingGenerate: {
+              productId: options.productId,
+              preferences: prefs,
+              prompt,
+              userText: options.userText,
+              scriptText,
+              scriptTitle: options.scriptTitle,
+              source: options.source,
+              referenceMode: options.referenceMode,
+              referenceImageIds: productImageIds,
+              alreadyOptimized: options.alreadyOptimized,
+              askStyleRef: options.askStyleRef,
+              skipStyleRef: options.skipStyleRef,
+            },
+          })
+          setNotice(ingredientsPromptCopy(stillMissing, language))
+          return
+        }
       }
 
       if (
@@ -2128,9 +2212,12 @@ export function useChatSessionThread(options: {
       const roleNotes = (attachments || [])
         .map((item, index) => `${index + 1}. ${item.role === 'context' ? 'context/style' : 'product'} reference`)
         .join('; ')
+      const onBrandPrefix = language === 'es'
+        ? 'Mejorá iluminación, composición, fidelidad del logo y exactitud del producto según referencias si las hay. Mantené la marca y el producto; no inventes escenas nuevas.\n\n'
+        : 'Improve lighting, composition, logo fidelity, and product accuracy from refs if present. Stay on-brand; do not invent unrelated scenes.\n\n'
       const editPrompt = roleNotes
-        ? `${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
-        : instruction
+        ? `${onBrandPrefix}${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
+        : `${onBrandPrefix}${instruction.trim()}`
       const brandKitId = resolveBrandKitIdForSession(
         session.brand_kit_id,
         pid,
@@ -2411,6 +2498,7 @@ export function useChatSessionThread(options: {
       aspectRatio?: ShellImageAspect
       density?: ShellImagePreferences['density']
       skipStyleRef?: boolean
+      skipIngredient?: IngredientKind
       useReferences?: boolean
       toggleReferenceId?: string
       /** From refs sticky: switch Producto → Anuncio without requiring a Ref. */
@@ -2418,6 +2506,15 @@ export function useChatSessionThread(options: {
     }
   ) => {
     if (!imageClarify || !session || imageClarify.sessionId !== session.id) return
+
+    if (imageClarify.step === 'ingredients' && answer.skipIngredient && imageClarify.pendingGenerate) {
+      const skipped = [...(imageClarify.skippedIngredients || []), answer.skipIngredient]
+      await runImageGenerate({
+        ...imageClarify.pendingGenerate,
+        skippedIngredients: skipped,
+      })
+      return
+    }
 
     if (imageClarify.step === 'script' && answer.scriptChoiceId) {
       const choice = imageClarify.scriptChoices?.find((item) => item.id === answer.scriptChoiceId)
@@ -2779,6 +2876,7 @@ export function useChatSessionThread(options: {
     scriptTitle?: string | null,
     options?: {
       density?: 'hard' | 'medium'
+      aspectRatio?: ShellImageAspect
       referenceImageIds?: string[]
       alreadyOptimized?: boolean
     }
@@ -2790,7 +2888,10 @@ export function useChatSessionThread(options: {
       scriptText,
       scriptTitle,
       source: 'script_card',
-      explicit: options?.density ? { density: options.density } : { density: 'hard' },
+      explicit: {
+        ...(options?.density ? { density: options.density } : { density: 'hard' }),
+        ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+      },
       alreadyOptimized: options?.alreadyOptimized,
       referenceImageIds: options?.referenceImageIds,
     })

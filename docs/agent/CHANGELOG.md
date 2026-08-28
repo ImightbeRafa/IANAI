@@ -1,3 +1,18 @@
+## 2026-08-28 — Ingredients soft-skip, logo upload, no-ref product quality (PR #33)
+
+**Area:** chat-shell UX + product image prompts
+**Files:** `chatShellIngredientsCheck.ts`, `useChatSessionThread.ts`, `ChatThread.tsx`, `ChatContextRail.tsx`, `ChatBrandProfileCard.tsx`, `ChatShellScriptCard.tsx`, `image-presets.ts`, `generate-image.ts`, `CreditsChip.tsx`, tests
+
+- **Soft-skip ingredients:** Before paid post/foto, Spanish voseo names each missing product photo / logo / style; per-item `Seguir sin …` confirm; generate proceeds when skipped.
+- **Logo upload (0 credits):** Marca tab + brand profile quick upload; no 6-credit logo generate from Marca.
+- **Rail thumbs:** Optimistic offer image list after upload.
+- **No-ref product:** Offer + brand context in prompt; anti–generic-box when refs missing.
+- **Edit:** On-brand improvement prefix on Pedir edición; quote-before-charge unchanged.
+- **Script card:** 1:1 / 9:16 on guion post preview.
+- **Credits chip:** `/scripts`, `/posts`, `/settings`.
+
+---
+
 ## 2026-08-28 — Product foto: skip refs re-ask, no meta copy on image (PR #33)
 
 **Area:** chat-shell product images + Grok API
