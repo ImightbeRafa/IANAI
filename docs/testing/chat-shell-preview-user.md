@@ -2,6 +2,27 @@
 
 Do **not** use Rafael’s admin account for chat-shell authorization QA.
 
+## AIIAN-backed Vercel Preview QA (policy 2026-08-22)
+
+Preview deployments share **AIIAN** (`lstzfxsdmggkoaxfawny`). Chat access stays invite-gated:
+
+1. Kill switch `app_feature_flags.chat_shell` must be `enabled` (already on for AIIAN).
+2. Ops invite (service role only — clients cannot self-grant):
+   ```sql
+   UPDATE public.profiles
+   SET chat_beta_access = true, preferred_ui = 'chat'
+   WHERE email = 'sup.rafa0412@gmail.com';
+   ```
+   Or equivalent REST PATCH with the service-role key (same `protect_chat_beta_access` path as `docs/operations/chat-shell-aiian-canary.md`).
+3. CoS / WebDesigner login: **`sup.rafa0412@gmail.com`** → open `/chat`.
+4. Demo folder for idle-bar / Pack-sheet after-shots (seeded for that account when missing): brand **IdleBar Demo**, session **Quiero crear guiones**, offer **Arnes Demo**.
+
+Deep-link form (fill brand/session ids from the live sidebar if the query params drift):
+
+`/chat?brand=<IdleBar Demo id>&session=<Quiero crear guiones id>`
+
+Do **not** invent a second auth model or email allowlist in code. Do not disable the invite gate.
+
 ## Create user (preview project only)
 
 Via Supabase Admin API (service role on **preview**):

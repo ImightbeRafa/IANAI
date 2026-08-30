@@ -1,3 +1,14 @@
+## 2026-08-30 — Preview QA invite for idle-bar CoS shots (PR #34)
+
+**Area:** chat-shell / ops
+**Files:** `docs/testing/chat-shell-preview-user.md` (+ AIIAN profile invite, no auth model change)
+
+- CoS blocked on Preview: `sup.rafa0412@gmail.com` hit “Chat es por invitación” because `chat_beta_access=false`.
+- Matched existing invite gate: service-role set `chat_beta_access=true` + `preferred_ui=chat` (kill switch already on). No new allowlist.
+- Seeded **IdleBar Demo** / session **Quiero crear guiones** / **Arnes Demo** for that QA account so after-shots (idle glass row + four Pack sheets) are reachable on `/chat`.
+
+---
+
 ## 2026-08-30 — Chat-shell idle bar glass row + Pack-family flow sheets
 
 **Area:** chat-shell
