@@ -1,10 +1,16 @@
 /**
- * Grok Imagine 2.0 text-to-image generations (max quality pair: 2k + medium).
+ * Grok Imagine 2.0 text-to-image generations + product-lock scene routing.
+ *
+ * With a real product photo: use /images/edits (product_lock_scene) so the SKU
+ * stays pixel-faithful while SCENE RECIPE replaces the packshot void.
+ * Without product photos: /images/generations compose (silhouette / typography).
+ * User edit + enhance stay on /edits.
  */
 
 import {
   GROK_IMAGE_DEFAULT_QUALITY,
   GROK_IMAGE_DEFAULT_RESOLUTION,
+  GROK_IMAGE_EDITS_URL,
   GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
   estimateGrokImageCostUsd,
@@ -19,6 +25,47 @@ export type GrokImageGenerateResult = {
   resolution: typeof GROK_IMAGE_DEFAULT_RESOLUTION
   quality: typeof GROK_IMAGE_DEFAULT_QUALITY
   aspectRatio: string
+}
+
+export type GrokImageApiMode = 'compose' | 'edit' | 'product_lock_scene'
+
+/**
+ * Route Grok first-gen:
+ * - product refs → /edits product_lock_scene (pixel lock + scene replace)
+ * - no product refs → /generations compose
+ * - enhance/user edit → /edits
+ */
+export function resolveGrokImageApiMode(options: {
+  action: 'generate' | 'edit' | 'enhance'
+  /** Count of product-role references (not scene/style alone). */
+  productReferenceCount: number
+  /** Total attached refs (product + scene + style). */
+  referenceCount?: number
+}): {
+  endpoint: typeof GROK_IMAGE_GENERATIONS_URL | typeof GROK_IMAGE_EDITS_URL
+  mode: GrokImageApiMode
+  attachReferences: boolean
+} {
+  const refs = options.referenceCount ?? options.productReferenceCount
+  if (options.action === 'edit' || options.action === 'enhance') {
+    return {
+      endpoint: GROK_IMAGE_EDITS_URL,
+      mode: 'edit',
+      attachReferences: refs > 0,
+    }
+  }
+  if (options.productReferenceCount > 0) {
+    return {
+      endpoint: GROK_IMAGE_EDITS_URL,
+      mode: 'product_lock_scene',
+      attachReferences: true,
+    }
+  }
+  return {
+    endpoint: GROK_IMAGE_GENERATIONS_URL,
+    mode: 'compose',
+    attachReferences: refs > 0,
+  }
 }
 
 export async function runGrokImageGenerate(options: {

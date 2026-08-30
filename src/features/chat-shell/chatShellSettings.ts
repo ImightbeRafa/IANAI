@@ -29,7 +29,8 @@ const ADMIN_CATEGORIES: SettingsCategory[] = [
 ]
 
 export function settingsCategories(isAdmin: boolean, adminResolved = true): SettingsCategory[] {
-  return isAdmin && adminResolved ? [...USER_CATEGORIES, ...ADMIN_CATEGORIES] : USER_CATEGORIES
+  const user = USER_CATEGORIES.filter((category) => category.id !== 'ai')
+  return isAdmin && adminResolved ? [...user, ...ADMIN_CATEGORIES] : user
 }
 
 export function defaultSettingsCategory(): SettingsCategoryId {

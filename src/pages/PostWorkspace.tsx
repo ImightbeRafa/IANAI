@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost, deletePost } from '../services/database'
+import { getProduct, getProductPostsPaginated, createPost, updatePostStatus, getScripts, getProductImages, createProductImage, deleteProductImage, recordAiSignal, ratePost, deletePost, QUICK_POST_PRODUCT_NAME } from '../services/database'
 import type { ProductImage, CarouselSlideInsert } from '../services/database'
 import { createCarouselPosts } from '../services/database'
 import type { Product, Script, ImageModel, OrganicSingleSubtype, OrganicCarouselSubtype, CTAStrength } from '../types'
@@ -1814,7 +1814,11 @@ export default function PostWorkspace() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <h1 className="text-lg font-semibold text-dark-900">{product.name}</h1>
+            <h1 className="text-lg font-semibold text-dark-900">
+              {product.name === QUICK_POST_PRODUCT_NAME
+                ? (language === 'es' ? 'Generador rápido' : 'Quick generator')
+                : product.name}
+            </h1>
             <p className="text-xs text-dark-400 mt-0.5">{t.subtitle}</p>
           </div>
 

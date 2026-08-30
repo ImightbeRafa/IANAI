@@ -1,7 +1,17 @@
-import { useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { useLanguage } from '../contexts/LanguageContext'
 import ChatShell from '../features/chat-shell/ChatShell'
 import ChatShellGate from '../features/chat-shell/ChatShellGate'
+import ChatShellTourWizard from '../features/chat-shell/ChatShellTourWizard'
+import ChatShellWelcomeGiftModal from '../features/chat-shell/ChatShellWelcomeGiftModal'
+import {
+  ensureChatShellOpenGift,
+  markChatShellTourDoneClient,
+  markChatShellWelcomeSeenClient,
+  type ChatShellOpenEnsureResult,
+} from '../features/chat-shell/chatShellOpenApi'
+import { invalidateUsageLimitsCache } from '../hooks/useUsageLimits'
 import {
   applyChatShellTheme,
   clearChatShellTheme,
@@ -11,6 +21,7 @@ import {
 } from '../features/chat-shell/chatShellTheme'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
 import '../features/chat-shell/chat-shell.css'
+import '../features/chat-shell/chat-shell-feature-modals.css'
 
 function displayNameFromUser(email?: string | null, fullName?: string | null): string {
   if (fullName && fullName.trim()) return fullName.trim()
@@ -25,10 +36,15 @@ function initialsFromName(name: string): string {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
+type OnboardingPhase = 'loading' | 'gift' | 'tour' | 'done'
+
 export default function ChatShellPage() {
   const { user } = useAuth()
+  const { language } = useLanguage()
   const { loading, canAccessChat, killSwitch, refresh } = useChatShellRollout()
   const [theme, setTheme] = useState<ChatShellTheme>(() => getInitialChatShellTheme())
+  const [gift, setGift] = useState<ChatShellOpenEnsureResult | null>(null)
+  const [phase, setPhase] = useState<OnboardingPhase>('loading')
 
   useLayoutEffect(() => {
     applyChatShellTheme(theme)
@@ -36,6 +52,36 @@ export default function ChatShellPage() {
       clearChatShellTheme()
     }
   }, [theme])
+
+  useEffect(() => {
+    if (!canAccessChat || !user?.id) return
+    let cancelled = false
+    setPhase('loading')
+    void ensureChatShellOpenGift()
+      .then((result) => {
+        if (cancelled) return
+        setGift(result)
+        if (result.granted || result.creditsRemaining > 0) {
+          invalidateUsageLimitsCache()
+        }
+        if (result.tourDone) {
+          setPhase('done')
+          return
+        }
+        if (result.granted || result.showWelcome) {
+          setPhase('gift')
+          return
+        }
+        setPhase('tour')
+      })
+      .catch((err) => {
+        console.error('chat-shell open gift', err)
+        if (!cancelled) setPhase('done')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canAccessChat, user?.id])
 
   const applyTheme = (next: ChatShellTheme) => {
     persistChatShellTheme(next)
@@ -47,12 +93,27 @@ export default function ChatShellPage() {
     applyTheme(theme === 'obsidian-dark' ? 'obsidian-light' : 'obsidian-dark')
   }
 
+  const dismissGift = (continueToTour: boolean) => {
+    // Phase first so "Empezar ya" dismisses on the first click (F).
+    setPhase(continueToTour ? 'tour' : 'done')
+    void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
+    if (!continueToTour) {
+      void markChatShellTourDoneClient().catch((err) => console.error(err))
+    }
+  }
+
+  const finishTour = () => {
+    setPhase('done')
+    void markChatShellTourDoneClient().catch((err) => console.error(err))
+  }
+
   const metaName =
     (typeof user?.user_metadata?.full_name === 'string' && user.user_metadata.full_name)
     || (typeof user?.user_metadata?.name === 'string' && user.user_metadata.name)
     || null
   const displayName = displayNameFromUser(user?.email, metaName)
   const initials = initialsFromName(displayName)
+  const lang = language === 'en' ? 'en' : 'es'
 
   if (loading) {
     return (
@@ -94,12 +155,30 @@ export default function ChatShellPage() {
   }
 
   return (
-    <ChatShell
-      theme={theme}
-      onThemeChange={applyTheme}
-      displayName={displayName}
-      initials={initials}
-      userId={user.id}
-    />
+    <>
+      <ChatShell
+        theme={theme}
+        onThemeChange={applyTheme}
+        displayName={displayName}
+        initials={initials}
+        userId={user.id}
+      />
+      {phase === 'gift' && gift ? (
+        <ChatShellWelcomeGiftModal
+          credits={gift.credits || 100}
+          granted={gift.granted}
+          language={lang}
+          onContinue={() => dismissGift(true)}
+          onDismiss={() => dismissGift(false)}
+        />
+      ) : null}
+      {phase === 'tour' ? (
+        <ChatShellTourWizard
+          language={lang}
+          onFinish={() => finishTour()}
+          onSkipForever={() => finishTour()}
+        />
+      ) : null}
+    </>
   )
 }

@@ -25,15 +25,16 @@ export function parsePreferredUi(value: unknown): PreferredUi | null {
 }
 
 /**
- * Three independent controls. Kill switch off or unreadable → classic.
- * Beta false/null → classic, no switch. Preference never grants access.
+ * Kill switch gates access for everyone. Preference never grants access and
+ * never redirects home unless the user opted into chat (`preferred_ui`).
+ * `chat_beta_access` is retained for ops/reporting but no longer required.
  */
 export function resolveChatShellRollout(input: ChatShellRolloutInput): ChatShellRollout {
   const killSwitch = input.killSwitch
   const betaAccess = input.betaAccess === true
   const preferredUi = input.preferredUi === 'chat' ? 'chat' : 'classic'
   const killOn = killSwitch === 'enabled'
-  const canAccessChat = killOn && betaAccess
+  const canAccessChat = killOn
   const showSwitch = canAccessChat
   const effectiveHome: PreferredUi = canAccessChat && preferredUi === 'chat' ? 'chat' : 'classic'
 

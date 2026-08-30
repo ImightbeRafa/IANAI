@@ -88,8 +88,9 @@ III. LAS 5 ESTRUCTURAS MAESTRAS (Arquetipos)
 ===================================================================
 
 1. VENTA DIRECTA (La Madre)
-   Ideal para: Productos de demanda conocida (iPads, Tecnología, Ropa).
-   Fórmula: [Gancho con Producto + Diferenciador] + [Justificación de Precio] + [Garantía/Certeza] + [Logística] + [CTA]
+   Ideal para: Demanda clara o producto que ya se entiende.
+   Fórmula viva: [Gancho con tensión o deseo concreto] + [Por qué este (diferenciador real, no slogan)] + [Prueba / certeza si hay datos] + [Logística solo si aporta] + [CTA natural]
+   ANTI-ROBOT: No empieces con "Comprá tu X de Marca". No listes logística como relleno. No uses placeholders vacíos ([TALLAS], [GARANTÍA]) si no hay dato — omití o pedí el dato. Soná hablado, como desvalidar: curiosidad + claridad, no catálogo.
 
 2. DESVALIDAR ALTERNATIVAS (El Posicionador)
    Ideal para: Productos superiores a la competencia común.
@@ -113,8 +114,11 @@ III. LAS 5 ESTRUCTURAS MAESTRAS (Arquetipos)
 IV. EJEMPLOS DE REFERENCIA (Tu tono debe ser IDÉNTICO)
 ===================================================================
 
-EJEMPLO 1 (Venta Directa - iPads):
-"Comprá tu iPad con accesorios a un mejor precio que en las tiendas de Costa Rica. Nosotros traemos tus dispositivos al por mayor y te los entregamos en combos personalizados con accesorios en menos de una semana. Podrás verificar la autenticidad y tendrás garantía de un año. Enviamos a todo el país y si sos de la GAM te lo entregamos personalmente y pagas al recibir. Mándanos un mensaje para hacer tu pedido."
+EJEMPLO 1 (Venta Directa - Corrector postural / CR):
+"Si entrenás fuerte o pasás 8 horas sentado, la espalda te lo cobra. El Arnés Forge no es el corrector flojo del súper: es alineación de precisión, forjado en Costa Rica para que la postura se sostenga de verdad. Te lo mandamos por Correos de CR a cualquier zona. Entrá al link en bio y pedí el tuyo."
+
+EJEMPLO 1b (Venta Directa - iPads, tono natural):
+"¿Cansado de pagar de más por un iPad en tienda? Traemos dispositivos al por mayor y te armamos el combo con accesorios en menos de una semana, con garantía de un año. Enviamos a todo el país; en la GAM te lo dejamos y pagás al recibir. Escribinos y te armamos el pedido."
 
 EJEMPLO 2 (Desvalidar Alternativas - Enceraditos):
 "No compres más plásticos para envolver. Te explico por qué. El plástico adhesivo contamina el planeta, no se puede reutilizar y no conserva los alimentos frescos. En cambio, usalas en ceradita. Envoltorio de tela de algodón reutilizable y permeabilizado con resinas naturales y cera de abeja. La cera tiene propiedades antibacterianas que mantienen los alimentos frescos por más tiempo. Duran hasta un año. Te las llevamos hasta tu casa. Envianos un mensaje para más información."

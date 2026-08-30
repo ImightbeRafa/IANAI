@@ -15,6 +15,11 @@ import {
   type ShellImageDensity,
 } from './chatShellImageIntent'
 import { hasSelectedProductReference } from './chatShellReferenceSelection'
+import {
+  ingredientsPromptCopy,
+  skipIngredientLabel,
+  type IngredientKind,
+} from './chatShellIngredientsCheck'
 import type {
   ImageClarifyState,
   ScriptClarifyState,
@@ -41,6 +46,7 @@ interface ChatShellClarifySheetProps {
     aspectRatio?: ShellImageAspect
     density?: ShellImageDensity
     skipStyleRef?: boolean
+    skipIngredient?: IngredientKind
     useReferences?: boolean
     switchToAnuncio?: boolean
     toggleReferenceId?: string
@@ -101,6 +107,9 @@ function imageStepMeta(state: ImageClarifyState): { step: number; total: number 
     case 'refs':
       remainingAfter = 0
       break
+    case 'ingredients':
+      remainingAfter = 0
+      break
     default: {
       const _never: never = state.step
       void _never
@@ -127,6 +136,8 @@ function imageCopy(state: ImageClarifyState, language: ChatShellLanguage): strin
       return language === 'es' ? 'Subí un estilo de post o continuá sin referencia.' : 'Upload a post style or continue without a reference.'
     case 'refs':
       return t.flowPickRefs
+    case 'ingredients':
+      return ingredientsPromptCopy(state.missingIngredients || [], language)
     default: {
       const _never: never = state.step
       return _never
@@ -380,6 +391,28 @@ export default function ChatShellClarifySheet({
               >
                 {es ? 'Subir estilo de post' : 'Upload post style'}
               </button>
+            ) : imageClarify.step === 'ingredients' ? (
+              <>
+                <button
+                  type="button"
+                  className="chat-shell__btn chat-shell__btn--ghost"
+                  disabled={imageBusy}
+                  onClick={() => onOpenImagesRail?.()}
+                >
+                  {es ? 'Subir en el rail' : 'Upload in rail'}
+                </button>
+                {(imageClarify.missingIngredients || []).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--pill"
+                    disabled={imageBusy}
+                    onClick={() => onAnswerImageClarify?.({ skipIngredient: kind })}
+                  >
+                    {skipIngredientLabel(kind, language)}
+                  </button>
+                ))}
+              </>
             ) : imageClarify.step === 'refs' ? (
               <>
                 <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onOpenImagesRail?.()}>

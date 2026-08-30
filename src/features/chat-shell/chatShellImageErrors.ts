@@ -7,7 +7,7 @@ const KNOWN: Array<{
   en: string
 }> = [
   {
-    match: /prompt length exceeds|maximum allowed length of\s*8000|grok_prompt_too_long|el texto del prompt es demasiado largo/i,
+    match: /prompt length exceeds|maximum allowed length of\s*8000|grok_prompt_too_long|el texto del prompt es demasiado largo|no pudimos adaptar el prompt para grok|demasiado largo para grok|acort[aá]/i,
     code: 'grok_failed',
     es: 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.',
     en: 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.',
