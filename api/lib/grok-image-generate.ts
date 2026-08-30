@@ -1,10 +1,14 @@
 /**
  * Grok Imagine 2.0 text-to-image generations (max quality pair: 2k + medium).
+ *
+ * First-gen with product refs must COMPOSÉ via /images/generations (+ image/images).
+ * Packshot-edit via /images/edits is reserved for enhance polish and user "change this".
  */
 
 import {
   GROK_IMAGE_DEFAULT_QUALITY,
   GROK_IMAGE_DEFAULT_RESOLUTION,
+  GROK_IMAGE_EDITS_URL,
   GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
   estimateGrokImageCostUsd,
@@ -19,6 +23,32 @@ export type GrokImageGenerateResult = {
   resolution: typeof GROK_IMAGE_DEFAULT_RESOLUTION
   quality: typeof GROK_IMAGE_DEFAULT_QUALITY
   aspectRatio: string
+}
+
+/**
+ * First-gen always composes on /generations (even with product refs).
+ * Edit/enhance keep /edits.
+ */
+export function resolveGrokImageApiMode(options: {
+  action: 'generate' | 'edit' | 'enhance'
+  referenceCount: number
+}): {
+  endpoint: typeof GROK_IMAGE_GENERATIONS_URL | typeof GROK_IMAGE_EDITS_URL
+  mode: 'compose' | 'edit'
+  attachReferences: boolean
+} {
+  if (options.action === 'edit' || options.action === 'enhance') {
+    return {
+      endpoint: GROK_IMAGE_EDITS_URL,
+      mode: 'edit',
+      attachReferences: options.referenceCount > 0,
+    }
+  }
+  return {
+    endpoint: GROK_IMAGE_GENERATIONS_URL,
+    mode: 'compose',
+    attachReferences: options.referenceCount > 0,
+  }
 }
 
 export async function runGrokImageGenerate(options: {

@@ -30,11 +30,10 @@ import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
   GROK_IMAGE_DEFAULT_RESOLUTION,
-  GROK_IMAGE_EDITS_URL,
-  GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
 } from './lib/grok-models.js'
 import { runGrokImageEdit } from './lib/grok-image-edit.js'
+import { resolveGrokImageApiMode } from './lib/grok-image-generate.js'
 import {
   buildSlimGrokPostPrompt,
   isGrokPromptLengthError,
@@ -49,6 +48,7 @@ import {
   selectGrokReferenceBudget,
   type ImageReferenceRole,
 } from './lib/image-prompt-context.js'
+import { buildSceneRecipe } from './lib/image-scene-recipe.js'
 import {
   buildEditPatchConstraints,
   buildEnhancePatchConstraints,
@@ -1116,84 +1116,84 @@ REGLA #5 — PRECIO / OFERTA (NO NEGOCIABLE)
 `
 
       // Tier-specific creative direction
-      const POLISH_BODY = `
-MODO: POLISH (pulido quirúrgico — cambio mínimo, máxima fidelidad).
+      const enhanceSceneRecipe = buildSceneRecipe({
+        language: enhanceLang === 'en' ? 'en' : 'es',
+        postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
+        productSubStyle: typeof imageParams.productSubStyle === 'string' ? imageParams.productSubStyle : null,
+        hasSceneRef: Array.isArray(imageParams.contextReferenceImages)
+          && imageParams.contextReferenceImages.length > 0,
+        category: enhanceProductRow?.product_category_custom
+          || enhanceProductRow?.product_category
+          || null,
+        offerName: enhanceProductRow?.name || null,
+        scriptContext: resolveEnhanceUserDirection(imageParams.editPrompt, imageParams.originalPrompt),
+      })
 
-Tu tarea NO es rediseñar. Es PULIR ejecución conservando el diseño original al 100%.
+      const POLISH_BODY = `
+MODO: POLISH (pulido quirúrgico — lock de composición).
+
+Tu tarea NO es rediseñar ni inventar un set nuevo. Es PULIR ejecución conservando el diseño y el set original al 100%.
 
 PERMITIDO (y esperado):
 - Refinar tipografía (kerning, tracking, jerarquía sutil, eliminar rarezas).
 - Mejorar espaciado y alineación (grillas más limpias, márgenes consistentes).
 - Ajustar contraste, balance de color, saturación, luminosidad (mantener paleta original).
-- Limpiar fondo (eliminar artefactos, ruido, suciedad de IA).
-- Mejorar iluminación y sombras sutiles del producto (manteniendo su apariencia).
+- Limpiar artefactos, ruido, suciedad de IA en el fondo EXISTENTE (no reemplazar el lugar).
+- Mejorar iluminación y sombras sutiles del producto DENTRO del set actual.
 - Corregir imperfecciones de renderizado (bordes sucios, halos, compresión).
 
 PROHIBIDO:
 - Cambiar composición, layout, jerarquía o distribución de elementos.
 - Mover, redimensionar o reorganizar elementos.
-- Agregar, eliminar o reemplazar elementos.
+- Agregar, eliminar o reemplazar el set / lugar / props (NO new set).
 - Cambiar la dirección de arte, el mood o el concepto.
 - Cambiar familias tipográficas (solo refinar las existentes).
 - Cambiar la paleta de colores (solo ajustar balance).
 - Reinterpretar el producto, el logo o las imágenes.
 
-OBJETIVO: El usuario debe poder comparar antes/después y decir "es el mismo diseño, pero mejor ejecutado".
+OBJETIVO: El usuario debe poder comparar antes/después y decir "es el mismo diseño y el mismo lugar, pero mejor ejecutado".
 `
 
       const MODERNIZE_BODY = `
-MODO: MODERNIZE (actualización significativa conservando identidad).
+MODO: MODERNIZE / MEJORA MÁGICA (scene pass suave + identidad).
 
-Tu tarea es llevar el diseño a un nivel de ejecución actual, preservando su concepto, mensaje y elementos clave.
+Si el fondo actual es un vacío de estudio / podio en void / papel seamless, REEMPLAZALO por un lugar fotografiado completo (SCENE RECIPE abajo) manteniendo producto, texto, logo y layout de copy.
+Si ya hay un lugar real, mejorá ejecución sin inventar otro concepto.
 
 PERMITIDO:
-- Refinar composición sin alterar la jerarquía principal (ajustes de balance, ritmo, respiración).
-- Actualizar tipografía (cambiar una familia si la actual es genérica/dated; máximo 2 familias total).
-- Mejorar jerarquía visual y punto focal.
-- Ajustar paleta para mayor carácter (mismo mood, mejor ejecución).
-- Mejorar tratamiento de fondo, sombras, iluminación.
-- Refinar tratamiento de texto (peso, tracking, escala).
-- Modernizar estilos dated (degradados genéricos, biseles, efectos 2010).
+- Sustituir void/estudio vacío por entorno fotografiado completo coherente con el nicho.
+- Refinar composición sin romper la jerarquía de copy.
+- Mejorar tipografía, sombras de contacto, y luz del producto para que COINCIDA con el entorno.
+- Actualizar acabado premium sin "Canva vibes".
 
 PROHIBIDO:
-- Cambiar el concepto, el mensaje o la intención del diseño.
-- Eliminar elementos clave (producto, CTA, título principal, logo).
+- Cambiar el mensaje o el texto (cada palabra idéntica).
 - Redibujar o reinterpretar el producto o el logo.
-- Cambiar el texto (cada palabra se copia idéntica).
 - Cambiar el aspect ratio.
-- "Canva vibes" — todo debe sentirse intencional.
+- Dejar el producto en un vacío de estudio "más bonito".
 
-OBJETIVO: El resultado debe sentirse "fresco pero familiar" — el mismo diseño, traducido al lenguaje de diseño actual.
+${enhanceSceneRecipe ? `${enhanceSceneRecipe}\n` : ''}OBJETIVO: mismo anuncio, producto lock-accurate, en un lugar real (o el mismo lugar mejor iluminado).
 `
 
       const REBUILD_BODY = `
-MODO: REBUILD (reinterpretación creativa agresiva).
+MODO: REBUILD (scene pass completo + producto lock).
 
-ACTÚA COMO: Director Creativo + Director de Arte Senior de marcas globales (Apple / Aesop / Jacquemus / Nike Campaign Level).
+ACTÚA COMO: Director Creativo + fotógrafo de producto en set real.
 
-Vas a REINTERPRETAR el diseño. Llevalo a una versión más inteligente, más conceptual, con mayor impacto creativo.
+Reconstruí la pieza en un LUGAR FOTOGRAFIADO COMPLETO según la SCENE RECIPE. Producto, logo, texto y precio quedan lock-accurate. Luz del producto = luz del set.
 
-PERMITIDO (con los límites de las reglas #1-4 arriba):
-- Cambiar composición, estructura visual, jerarquía, distribución de elementos.
-- Cambiar dirección de arte, mood, narrativa visual.
-- Eliminar elementos decorativos que no aporten.
-- Convertir bullets en bloques visuales; usar texto como elemento gráfico.
-- Romper la cuadrícula con intención; crear tensión entre bloques.
-- Simplificar a monocromático o usar contraste dramático.
-- Explorar tipografía (serif moderna, sans ultra bold, condensed, tracking intencional).
+PERMITIDO (con reglas #1-4):
+- Nuevo set / composición / jerarquía visual alrededor del mismo producto y copy.
+- Props, planos de profundidad, sombras de contacto, mood coherente con el nicho.
+- Dirección de arte premium (no vacío de estudio).
 
 PROHIBIDO (sin excepción):
-- Cambiar, traducir, parafrasear o reescribir CUALQUIER texto (Regla #1).
-- Rediseñar, estilizar o reinterpretar el producto (Regla #2).
-- Modificar el logo en forma, color o estilo (Regla #3).
+- Cambiar, traducir o reescribir CUALQUIER texto (Regla #1).
+- Rediseñar el producto (Regla #2) o el logo (Regla #3).
 - Cambiar el aspect ratio (Regla #4).
+- Fondo limpio / seamless / podio en void / bokeh de stock solo.
 
-ENFOQUE:
-1) Analizá qué quiere comunicar la pieza (aspiracional / técnico / emocional / agresivo).
-2) Elegí UNA dirección creativa clara (editorial de lujo / minimalismo brutalista / high-fashion / tech futurista / conceptual con espacio negativo / asimétrica dinámica / tipográfica dominante / cinematográfica).
-3) El diseño debe sentirse intencional. Nada centrado por default. Nada "Canva vibes".
-
-OBJETIVO: Una campaña real de marca grande. Algo que alguien guardaría en Pinterest o en Behance.
+${enhanceSceneRecipe ? `${enhanceSceneRecipe}\n` : ''}OBJETIVO: campaña en un lugar real; SKU intocable.
 `
 
       const TIER_BODY = enhanceTier === 'polish' ? POLISH_BODY : enhanceTier === 'rebuild' ? REBUILD_BODY : MODERNIZE_BODY
@@ -1708,6 +1708,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         scriptContext: typeof imageParams.scriptContext === 'string'
           ? imageParams.scriptContext
           : (typeof imageParams.prompt === 'string' ? imageParams.prompt : null),
+        category: postProductCreativeRow?.product_category_custom
+          || postProductCreativeRow?.product_category
+          || null,
+        offerName: postProductCreativeRow?.name || null,
+        businessContext: typeof imageParams.businessContext === 'string'
+          ? imageParams.businessContext
+          : null,
       })
 
       // Resolve color palette override (if any)
@@ -2633,6 +2640,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         ? buildSlimGrokPostPrompt({
           language: typeof imageParams.language === 'string' ? imageParams.language : 'es',
           postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
+          productSubStyle: typeof imageParams.productSubStyle === 'string' ? imageParams.productSubStyle : null,
           textDensity: typeof imageParams.textDensity === 'string' ? imageParams.textDensity : 'hard',
           userCopy: grokUserCopy,
           palette: paletteForSlim,
@@ -2642,11 +2650,17 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             ? imageParams.businessContext
             : null,
           hasProductRefs: referenceUrls.length > 0,
+          hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
           productSilhouette: postProductSilhouette,
           lockedOfferPrice: postLockedOfferPrice,
           logoStampRules: buildLogoStampRules(postLangCode, Boolean(grokLogoDataUrl)),
           ctaGuardrails: buildPostCtaGuardrails(postLangCode, grokCtaStrength),
           hasBrandLogo: Boolean(grokLogoDataUrl),
+          category: postProductCreativeRow?.product_category_custom
+            || postProductCreativeRow?.product_category
+            || null,
+          offerName: postProductCreativeRow?.name || null,
+          scriptContext: grokUserCopy,
         })
         : enhancedPrompt
 
@@ -2686,7 +2700,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           grokAspectRatio = GROK_RATIO_FALLBACK[grokAspectRatio] || '1:1'
         }
 
-        const isEdit = referenceUrls.length > 0
+        const grokApi = resolveGrokImageApiMode({
+          action: 'generate',
+          referenceCount: referenceUrls.length,
+        })
         const grokRequest: Record<string, unknown> = {
           model: providerModel,
           prompt: grokPrompt,
@@ -2697,15 +2714,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           quality: GROK_IMAGE_DEFAULT_QUALITY,
         }
 
-        let endpoint = GROK_IMAGE_GENERATIONS_URL
-        if (isEdit) {
-          endpoint = GROK_IMAGE_EDITS_URL
-          // Official edit shape: one `image` or multi `images` with { url, type }
-          if (referenceUrls.length === 1) {
-            grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
-          } else {
-            grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
-          }
+        // First-gen always COMPOSÉS on /generations. Product refs attach as
+        // image/images for fidelity — never packshot-edit via /edits.
+        const endpoint = grokApi.endpoint
+        if (referenceUrls.length === 1) {
+          grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
+        } else if (referenceUrls.length > 1) {
+          grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
         } else if (grokLogoDataUrl) {
           // No product refs: still stamp kit logo via generations `image` reference.
           grokRequest.image = { url: grokLogoDataUrl, type: 'image_url' }
@@ -2735,8 +2750,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             metadata: {
               provider: 'xai',
               providerModel,
-              action: isEdit ? 'edit' : 'generate',
-              hasInputImage: isEdit,
+              action: 'generate',
+              grokMode: grokApi.mode,
+              hasInputImage: referenceUrls.length > 0,
               referenceCount: referenceUrls.length,
               resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
               quality: GROK_IMAGE_DEFAULT_QUALITY,
@@ -2770,7 +2786,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         const costOverrideUsd = estimateGrokImageCostUsd({
           outputImages: 1,
-          referenceCount: isEdit ? referenceUrls.length : 0,
+          referenceCount: referenceUrls.length,
         })
 
         await logApiUsage({
@@ -2785,7 +2801,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           metadata: {
             provider: 'xai',
             providerModel,
-            action: isEdit ? 'edit' : 'generate',
+            action: 'generate',
+            grokMode: grokApi.mode,
             width: imageParams.width,
             height: imageParams.height,
             aspectRatio: grokAspectRatio,

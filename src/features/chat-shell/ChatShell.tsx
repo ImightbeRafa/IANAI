@@ -431,11 +431,11 @@ export default function ChatShell({
     if (!lightbox) return
     const instruction = mode === 'rebuild'
       ? (language === 'es'
-        ? 'Reconstruye el diseño con una composición premium y jerarquía más clara. Conserva exactamente el producto, la marca, el logo, los colores, el texto correcto y todas las reglas guardadas.'
-        : 'Rebuild the design with a premium composition and clearer hierarchy. Preserve the exact product, brand, logo, correct copy, colors, and every saved rule.')
+        ? 'Reconstruye el anuncio en un lugar fotografiado completo (no vacío de estudio). Conserva exactamente el producto, la marca, el logo, el texto y el precio. La luz del producto debe coincidir con el entorno.'
+        : 'Rebuild the ad in a complete photographed place (not a studio void). Preserve the exact product, brand, logo, copy, and price. Product light must match the environment.')
       : (language === 'es'
-        ? 'Mejora la composición, iluminación, tipografía y acabado profesional sin cambiar el producto, la marca, el mensaje ni las reglas guardadas.'
-        : 'Improve composition, lighting, typography, and professional finish without changing the product, brand, message, or saved rules.')
+        ? 'Mejora mágica: si el fondo es un vacío de estudio o podio, reemplazalo por un lugar real coherente con el producto. Conserva producto, marca, logo, texto y precio; alineá la luz del producto al entorno.'
+        : 'Magic enhance: if the background is a studio void or podium, replace it with a real place that fits the product. Keep product, brand, logo, copy, and price; match product light to the environment.')
     await thread.editOfferImage(
       lightbox.productImageId,
       lightbox.url,

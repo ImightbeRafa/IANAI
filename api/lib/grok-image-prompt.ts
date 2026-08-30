@@ -8,6 +8,8 @@
  * Canvas goes via `aspect_ratio` only — never FORMATO OBLIGATORIO.
  */
 
+import { buildSceneRecipe } from './image-scene-recipe.js'
+
 /** Hard send budget (UTF-8 bytes), under Grok's observed 8000 ceiling. */
 export const GROK_IMAGE_MAX_PROMPT_BYTES = 7_200
 
@@ -116,6 +118,7 @@ function clampBlock(text: string | null | undefined, maxBytes: number): string {
 export type SlimGrokPostPromptOptions = {
   language?: string | null
   postStyle?: string | null
+  productSubStyle?: string | null
   textDensity?: 'hard' | 'medium' | 'standard' | string | null
   userCopy: string
   palette?: string | null
@@ -123,12 +126,19 @@ export type SlimGrokPostPromptOptions = {
   brandVisual?: string | null
   businessContext?: string | null
   hasProductRefs?: boolean
+  hasSceneRef?: boolean
   /** Mandatory product shape when generating without product photo refs. */
   productSilhouette?: string | null
   lockedOfferPrice?: string | null
   logoStampRules?: string | null
   ctaGuardrails?: string | null
   hasBrandLogo?: boolean
+  niche?: string | null
+  category?: string | null
+  offerName?: string | null
+  scriptContext?: string | null
+  /** Prebuilt recipe; when omitted, derived from niche/offer/script for ads. */
+  sceneRecipe?: string | null
 }
 
 /**
@@ -175,8 +185,8 @@ export function buildSlimGrokPostPrompt(options: SlimGrokPostPromptOptions): str
 
   if (options.hasProductRefs) {
     parts.push(es
-      ? 'Hay fotos de referencia adjuntas: usá el producto con fidelidad; no inventes otro producto.'
-      : 'Reference photos are attached: keep product fidelity; do not invent another product.')
+      ? 'Hay fotos de referencia adjuntas: COMPOSÉ un anuncio nuevo (generations/reference). Usá el producto con fidelidad de píxeles (forma, color, label, pack). NO edites el packshot ni conserves su fondo vacío.'
+      : 'Reference photos attached: COMPOSE a new ad (generations/reference). Keep lock-accurate product pixels (shape, color, label, pack). Do NOT edit the packshot or keep its empty background.')
   } else if (options.productSilhouette?.trim()) {
     parts.push(es
       ? `Sin foto de producto adjunta: renderizá el producto FOTORREALISTA visible en el diseño (no solo tipografía). Silueta obligatoria:\n${options.productSilhouette.trim()}\nNUNCA caja sellada genérica, cartón, frasco, tubo ni pump.`
@@ -185,6 +195,24 @@ export function buildSlimGrokPostPrompt(options: SlimGrokPostPromptOptions): str
     parts.push(es
       ? 'Sin foto de producto: diseñá un anuncio tipográfico/editorial limpio (sin inventar un producto fotorealista falso).'
       : 'No product photo: design a clean typographic/editorial ad (do not invent a fake photoreal product).')
+  }
+
+  const recipe = (options.sceneRecipe || '').trim() || buildSceneRecipe({
+    language: options.language,
+    postStyle: options.postStyle || style,
+    productSubStyle: options.productSubStyle,
+    hasSceneRef: options.hasSceneRef === true,
+    niche: options.niche,
+    category: options.category,
+    offerName: options.offerName,
+    scriptContext: options.scriptContext || options.userCopy,
+    businessContext: options.businessContext,
+  })
+  if (recipe) {
+    parts.push(recipe.trim())
+    parts.push(es
+      ? 'Entorno: lugar fotografiado completo según la SCENE RECIPE. Luz del producto = luz del set. PROHIBIDO vacío de estudio / podio en void / fondo limpio.'
+      : 'Environment: complete photographed place per SCENE RECIPE. Product light = set light. FORBIDDEN studio void / podium void / seamless paper.')
   }
 
   if (options.logoStampRules?.trim()) {

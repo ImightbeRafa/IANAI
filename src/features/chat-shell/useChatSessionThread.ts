@@ -43,6 +43,7 @@ import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import { useUsageLimits, invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
 import {
   buildCreditQuote,
+  quoteEditEnhanceCredits,
   quoteImageCredits,
   type CreditQuote,
 } from './chatShellCreditQuote'
@@ -2185,11 +2186,14 @@ export function useChatSessionThread(options: {
     if (!pid) return
 
     if ((usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true') && !creditConfirmed) {
-      const cost = quoteImageCredits('grok-imagine')
       const quote = buildCreditQuote({
-        kind: cost >= 24 ? 'image_pro' : 'image_standard',
+        kind: actionType === 'enhance' ? 'image_enhance' : 'image_edit',
         remaining: usage.creditsRemaining,
       })
+      // Guard: UI quote must equal catalog charge (18 for edit/enhance).
+      if (quote.cost !== quoteEditEnhanceCredits(actionType)) {
+        console.error('credit quote mismatch', { quote, actionType })
+      }
       creditPendingRef.current = {
         kind: 'edit',
         editOptions: {

@@ -1,3 +1,15 @@
+## 2026-08-30 — Gourmet scene + enhance credit quote (PR #33)
+
+**Area:** chat-shell image first-gen / enhance + Créditos IA quote
+**Files:** `image-scene-recipe.ts`, `image-prompt-context.ts`, `grok-image-prompt.ts`, `grok-image-generate.ts`, `generate-image.ts`, `image-enhance.ts`, `chatShellCreditQuote.ts`, `useChatSessionThread.ts`, `ChatShell.tsx`, tests
+
+- **Scene:** Ads always emit a SCENE RECIPE (place, lights, 3–6 props, depth, contact shadows; ban seamless/void/podium void), including no-ref path from niche/offer/script. Slim Grok posts include the recipe.
+- **Compose:** Grok first-gen with product refs uses `/images/generations` (compose), not packshot `/edits`. Edits stay for enhance + user “change this.”
+- **Enhance:** Polish locks composition (no new set). Magic/rebuild are scene passes with recipe + product lock; product light matches environment.
+- **Credits:** Mejora mágica / edit quote uses `image_enhance` / `image_edit` (18), matching server charge — was wrongly quoting `image_standard` (6).
+
+---
+
 ## 2026-08-28 — CoS retest fixes: ingredients ask, Grok first-pass hojita, no price strikethrough (PR #33)
 
 **Area:** chat-shell ingredients + Grok venta-directa first generate + enhance
