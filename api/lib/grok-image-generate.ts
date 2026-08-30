@@ -1,8 +1,10 @@
 /**
- * Grok Imagine 2.0 text-to-image generations (max quality pair: 2k + medium).
+ * Grok Imagine 2.0 text-to-image generations + product-lock scene routing.
  *
- * First-gen with product refs must COMPOSÉ via /images/generations (+ image/images).
- * Packshot-edit via /images/edits is reserved for enhance polish and user "change this".
+ * With a real product photo: use /images/edits (product_lock_scene) so the SKU
+ * stays pixel-faithful while SCENE RECIPE replaces the packshot void.
+ * Without product photos: /images/generations compose (silhouette / typography).
+ * User edit + enhance stay on /edits.
  */
 
 import {
@@ -25,29 +27,44 @@ export type GrokImageGenerateResult = {
   aspectRatio: string
 }
 
+export type GrokImageApiMode = 'compose' | 'edit' | 'product_lock_scene'
+
 /**
- * First-gen always composes on /generations (even with product refs).
- * Edit/enhance keep /edits.
+ * Route Grok first-gen:
+ * - product refs → /edits product_lock_scene (pixel lock + scene replace)
+ * - no product refs → /generations compose
+ * - enhance/user edit → /edits
  */
 export function resolveGrokImageApiMode(options: {
   action: 'generate' | 'edit' | 'enhance'
-  referenceCount: number
+  /** Count of product-role references (not scene/style alone). */
+  productReferenceCount: number
+  /** Total attached refs (product + scene + style). */
+  referenceCount?: number
 }): {
   endpoint: typeof GROK_IMAGE_GENERATIONS_URL | typeof GROK_IMAGE_EDITS_URL
-  mode: 'compose' | 'edit'
+  mode: GrokImageApiMode
   attachReferences: boolean
 } {
+  const refs = options.referenceCount ?? options.productReferenceCount
   if (options.action === 'edit' || options.action === 'enhance') {
     return {
       endpoint: GROK_IMAGE_EDITS_URL,
       mode: 'edit',
-      attachReferences: options.referenceCount > 0,
+      attachReferences: refs > 0,
+    }
+  }
+  if (options.productReferenceCount > 0) {
+    return {
+      endpoint: GROK_IMAGE_EDITS_URL,
+      mode: 'product_lock_scene',
+      attachReferences: true,
     }
   }
   return {
     endpoint: GROK_IMAGE_GENERATIONS_URL,
     mode: 'compose',
-    attachReferences: options.referenceCount > 0,
+    attachReferences: refs > 0,
   }
 }
 

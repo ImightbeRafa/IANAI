@@ -1,3 +1,15 @@
+## 2026-08-30 — Product pixel-lock scene (PR #33)
+
+**Area:** Grok first-gen product fidelity + scene
+**Files:** `product-pixel-lock.ts`, `grok-image-generate.ts`, `grok-image-prompt.ts`, `generate-image.ts`, `image-enhance.ts`, tests
+
+- **Finding:** `/images/generations` with product refs soft-references the packshot → Grok redraws/manipulates the SKU. Scene was good; product lock failed.
+- **Fix:** With product photos, first-gen uses `/images/edits` mode `product_lock_scene` (pixel-identical SKU + SCENE RECIPE replaces void). No-product path stays `/generations` compose. Scene recipe unchanged (no podium regression).
+- **Crear sin referencias:** auto-hydrate offer `product` photos for post/ad sessions when no explicit `productImageIds`, so kit product truth still locks.
+- **Enhance:** same PRODUCT LOCK contract; polish locks set; magic/rebuild may replace void only.
+
+---
+
 ## 2026-08-30 — Gourmet scene + enhance credit quote (PR #33)
 
 **Area:** chat-shell image first-gen / enhance + Créditos IA quote

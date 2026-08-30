@@ -1,3 +1,5 @@
+import { buildProductPixelLockContract } from './product-pixel-lock.js'
+
 const GENERIC_BLUE_BAN = 'PROHIBIDO azul genérico (#0000FF, #0066FF, #1877F2, Facebook/Instagram blue) salvo que esté en esta paleta. Ignora cualquier otro color mencionado en las instrucciones siguientes.'
 
 export function normalizeEnhanceColors(colors: unknown): string[] {
@@ -72,6 +74,7 @@ export function buildEnhanceSystemPrompt(options: {
 ═══════════════════════════════════════════════
 REGLA #0 — IMAGEN DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
 ═══════════════════════════════════════════════
+${buildProductPixelLockContract({ language: options.language, sceneReplace: options.tier !== 'polish' })}
 Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
 - El producto en el diseño mejorado DEBE verse EXACTAMENTE como en las imágenes de referencia.
 - NO inventes, rediseñes ni reimagines el producto.

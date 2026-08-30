@@ -16,6 +16,10 @@ import {
   buildEnhanceSystemPrompt,
   resolveEnhanceTier,
 } from '../api/lib/image-enhance'
+import {
+  buildProductPixelLockContract,
+  hasProductPixelLockLanguage,
+} from '../api/lib/product-pixel-lock'
 
 describe('scene recipe — ad defaults (no scene ref)', () => {
   it('infers skincare niche from Bloom patch offer/script', () => {
@@ -92,28 +96,46 @@ describe('scene recipe — ad defaults (no scene ref)', () => {
   })
 })
 
-describe('Grok first-gen compose (not packshot-edit)', () => {
-  it('uses generations/compose when product refs are present on generate', () => {
-    const withRefs = resolveGrokImageApiMode({ action: 'generate', referenceCount: 2 })
-    expect(withRefs.mode).toBe('compose')
-    expect(withRefs.endpoint).toBe(GROK_IMAGE_GENERATIONS_URL)
-    expect(withRefs.attachReferences).toBe(true)
+describe('Grok product-lock scene (not soft compose)', () => {
+  it('routes product-ref first-gen to /edits product_lock_scene', () => {
+    const withProduct = resolveGrokImageApiMode({
+      action: 'generate',
+      productReferenceCount: 2,
+      referenceCount: 2,
+    })
+    expect(withProduct.mode).toBe('product_lock_scene')
+    expect(withProduct.endpoint).toBe(GROK_IMAGE_EDITS_URL)
+    expect(withProduct.attachReferences).toBe(true)
+  })
 
-    const noRefs = resolveGrokImageApiMode({ action: 'generate', referenceCount: 0 })
-    expect(noRefs.mode).toBe('compose')
-    expect(noRefs.endpoint).toBe(GROK_IMAGE_GENERATIONS_URL)
+  it('keeps /generations compose only when no product photo', () => {
+    const noProduct = resolveGrokImageApiMode({
+      action: 'generate',
+      productReferenceCount: 0,
+      referenceCount: 0,
+    })
+    expect(noProduct.mode).toBe('compose')
+    expect(noProduct.endpoint).toBe(GROK_IMAGE_GENERATIONS_URL)
   })
 
   it('keeps edits endpoint for enhance and user edit', () => {
-    expect(resolveGrokImageApiMode({ action: 'enhance', referenceCount: 1 })).toEqual({
+    expect(resolveGrokImageApiMode({
+      action: 'enhance',
+      productReferenceCount: 1,
+      referenceCount: 1,
+    })).toEqual({
       endpoint: GROK_IMAGE_EDITS_URL,
       mode: 'edit',
       attachReferences: true,
     })
-    expect(resolveGrokImageApiMode({ action: 'edit', referenceCount: 1 }).mode).toBe('edit')
+    expect(resolveGrokImageApiMode({
+      action: 'edit',
+      productReferenceCount: 1,
+      referenceCount: 1,
+    }).mode).toBe('edit')
   })
 
-  it('slim prompt with product refs says compose not packshot-edit', () => {
+  it('slim prompt with product refs keeps PRODUCT LOCK and scene replace (no soft compose)', () => {
     const slim = buildSlimGrokPostPrompt({
       language: 'es',
       postStyle: 'venta-directa',
@@ -122,13 +144,23 @@ describe('Grok first-gen compose (not packshot-edit)', () => {
       offerName: 'Bloom patches',
       category: 'skincare',
     })
-    expect(slim).toMatch(/COMPOSÉ|compose/i)
-    expect(slim).toMatch(/NO edites el packshot|Do NOT edit the packshot/i)
+    expect(hasProductPixelLockLanguage(slim)).toBe(true)
+    expect(slim).toMatch(/REEMPLAZÁ el fondo|REPLACE the packshot/i)
+    expect(slim).toMatch(/SCENE RECIPE/)
+    expect(slim).not.toMatch(/COMPOSÉ un anuncio nuevo \(generations/i)
+    expect(slim).not.toMatch(/Compose a new ad \(generations/i)
+  })
+
+  it('product lock contract forbids redraw / recolor / invent SKU', () => {
+    const lock = buildProductPixelLockContract({ language: 'es', sceneReplace: true })
+    expect(hasProductPixelLockLanguage(lock)).toBe(true)
+    expect(lock).toMatch(/recolorear|recolor/i)
+    expect(lock).toMatch(/añadir\/quitar|add\/remove/i)
   })
 })
 
 describe('enhance polish vs scene pass', () => {
-  it('polish does not claim a new set', () => {
+  it('polish does not claim a new set but still pixel-locks product refs', () => {
     const polish = buildEnhanceSystemPrompt({
       language: 'es',
       tier: resolveEnhanceTier('polish'),
@@ -136,16 +168,17 @@ describe('enhance polish vs scene pass', () => {
     })
     expect(polish).toMatch(/POLISH/)
     expect(polish).toMatch(/set original|NO new set|no inventes un set nuevo|set nuevo/i)
-    expect(polish).not.toMatch(/SCENE RECIPE/)
-    expect(polish).not.toMatch(/Reconstruí la pieza en un LUGAR/)
+    expect(hasProductPixelLockLanguage(polish)).toBe(true)
+    expect(polish).not.toMatch(/REEMPLAZÁ el fondo|REPLACE the packshot/)
   })
 
-  it('rebuild / modernize allow scene upgrade language', () => {
+  it('rebuild / modernize allow scene upgrade language with product lock', () => {
     const rebuild = buildEnhanceSystemPrompt({
       language: 'es',
       tier: 'rebuild',
       hasProductRef: true,
     })
-    expect(rebuild).toMatch(/SCENE|lugar fotografiado|scene pass/i)
+    expect(rebuild).toMatch(/SCENE|lugar fotografiado|scene pass|REEMPLAZÁ|REPLACE/i)
+    expect(hasProductPixelLockLanguage(rebuild)).toBe(true)
   })
 })

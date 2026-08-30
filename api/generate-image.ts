@@ -49,6 +49,7 @@ import {
   type ImageReferenceRole,
 } from './lib/image-prompt-context.js'
 import { buildSceneRecipe } from './lib/image-scene-recipe.js'
+import { buildProductPixelLockContract } from './lib/product-pixel-lock.js'
 import {
   buildEditPatchConstraints,
   buildEnhancePatchConstraints,
@@ -1069,6 +1070,7 @@ Edit instruction: ${editPrompt}`
         ? `\n═══════════════════════════════════════════════
 REGLA #0 — IMAGEN DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
 ═══════════════════════════════════════════════
+${buildProductPixelLockContract({ language: enhanceLang === 'en' ? 'en' : 'es', sceneReplace: enhanceTier !== 'polish' })}
 Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
 - El producto en el diseño mejorado DEBE verse EXACTAMENTE como en las imágenes de referencia.
 - Usa las imágenes de referencia para preservar la forma, silueta, color, textura, ángulo y detalles reales del producto.
@@ -1603,7 +1605,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           (typeof imageParams.productId === 'string' ? imageParams.productId : null)
           || authoritativeProductId
           || null,
-        autoLoadOfferRefs: isProductMode && !hasExplicitRefList,
+        autoLoadOfferRefs: !hasExplicitRefList && !isLogoMode && (isProductMode || isPostMode),
       })
       if (!hydrate.ok) {
         return res.status(hydrate.status).json({ error: hydrate.error })
@@ -2604,7 +2606,21 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           return { url, role }
         })
         .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
-      const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
+      const productRefUrls = grokRefCandidates
+        .filter((row) => row.role === 'product')
+        .map((row) => row.url)
+      const supportRefUrls = grokRefCandidates
+        .filter((row) => row.role !== 'product')
+        .map((row) => row.url)
+      // Prefer product photos first so edits API treats SKU as source of truth.
+      const referenceUrls = selectGrokReferenceBudget(
+        [
+          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
+          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
+        ],
+        3
+      ).map((row) => row.url)
+      const productReferenceCount = productRefUrls.length
 
       let grokLogoDataUrl: string | null = null
       if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
@@ -2649,7 +2665,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           businessContext: typeof imageParams.businessContext === 'string'
             ? imageParams.businessContext
             : null,
-          hasProductRefs: referenceUrls.length > 0,
+          hasProductRefs: productReferenceCount > 0,
           hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
           productSilhouette: postProductSilhouette,
           lockedOfferPrice: postLockedOfferPrice,
@@ -2702,6 +2718,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         const grokApi = resolveGrokImageApiMode({
           action: 'generate',
+          productReferenceCount,
           referenceCount: referenceUrls.length,
         })
         const grokRequest: Record<string, unknown> = {
@@ -2714,15 +2731,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           quality: GROK_IMAGE_DEFAULT_QUALITY,
         }
 
-        // First-gen always COMPOSÉS on /generations. Product refs attach as
-        // image/images for fidelity — never packshot-edit via /edits.
+        // Product refs → /edits product_lock_scene (pixel-faithful SKU + scene replace).
+        // No product refs → /generations compose (silhouette / typography + scene recipe).
+        // Never attach logo as the only edit base when product photos exist.
         const endpoint = grokApi.endpoint
         if (referenceUrls.length === 1) {
           grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
         } else if (referenceUrls.length > 1) {
           grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
-        } else if (grokLogoDataUrl) {
-          // No product refs: still stamp kit logo via generations `image` reference.
+        } else if (grokLogoDataUrl && grokApi.mode === 'compose') {
           grokRequest.image = { url: grokLogoDataUrl, type: 'image_url' }
         }
 

@@ -9,6 +9,7 @@
  */
 
 import { buildSceneRecipe } from './image-scene-recipe.js'
+import { buildProductPixelLockContract } from './product-pixel-lock.js'
 
 /** Hard send budget (UTF-8 bytes), under Grok's observed 8000 ceiling. */
 export const GROK_IMAGE_MAX_PROMPT_BYTES = 7_200
@@ -184,9 +185,11 @@ export function buildSlimGrokPostPrompt(options: SlimGrokPostPromptOptions): str
   ]
 
   if (options.hasProductRefs) {
-    parts.push(es
-      ? 'Hay fotos de referencia adjuntas: COMPOSÉ un anuncio nuevo (generations/reference). Usá el producto con fidelidad de píxeles (forma, color, label, pack). NO edites el packshot ni conserves su fondo vacío.'
-      : 'Reference photos attached: COMPOSE a new ad (generations/reference). Keep lock-accurate product pixels (shape, color, label, pack). Do NOT edit the packshot or keep its empty background.')
+    // Edits API + hard lock: same physical SKU; scene recipe replaces void only.
+    parts.push(buildProductPixelLockContract({
+      language: options.language,
+      sceneReplace: true,
+    }))
   } else if (options.productSilhouette?.trim()) {
     parts.push(es
       ? `Sin foto de producto adjunta: renderizá el producto FOTORREALISTA visible en el diseño (no solo tipografía). Silueta obligatoria:\n${options.productSilhouette.trim()}\nNUNCA caja sellada genérica, cartón, frasco, tubo ni pump.`
