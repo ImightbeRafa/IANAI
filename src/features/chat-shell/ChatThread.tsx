@@ -27,6 +27,8 @@ import {
   type ScriptClarifyState,
   type ScriptCtaChannel,
 } from './useChatSessionThread'
+import { creditQuoteCopy, type CreditQuote } from './chatShellCreditQuote'
+import { ingredientsPromptCopy, skipIngredientLabel, type IngredientKind } from './chatShellIngredientsCheck'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import { catalogOfferReferences, hasSelectedProductReference } from './chatShellReferenceSelection'
 import {
@@ -81,6 +83,7 @@ interface ChatThreadProps {
     aspectRatio?: ShellImageAspect
     density?: ShellImageDensity
     skipStyleRef?: boolean
+    skipIngredient?: IngredientKind
     useReferences?: boolean
     switchToAnuncio?: boolean
     toggleReferenceId?: string
@@ -95,6 +98,9 @@ interface ChatThreadProps {
     ctaChannel?: ScriptCtaChannel
   }) => void
   onCancelScriptClarify?: () => void
+  creditQuote?: CreditQuote | null
+  onConfirmCreditQuote?: () => void
+  onCancelCreditQuote?: () => void
   onOpenImagesRail?: () => void
   onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
@@ -108,6 +114,7 @@ interface ChatThreadProps {
       density?: 'hard' | 'medium'
       referenceImageIds?: string[]
       alreadyOptimized?: boolean
+      aspectRatio?: ShellImageAspect
     }
   ) => void | Promise<void>
   onSaveScript: (
@@ -227,6 +234,9 @@ export default memo(function ChatThread({
   onLatestVersionChange,
   onAnswerScriptClarify,
   onCancelScriptClarify,
+  creditQuote = null,
+  onConfirmCreditQuote,
+  onCancelCreditQuote,
   onOpenImagesRail,
   onUploadOfferReference,
   onRemoveOfferReference,
@@ -455,7 +465,7 @@ export default memo(function ChatThread({
             if (message.role === 'user') {
               return (
                 <div key={message.id} className="chat-shell__msg chat-shell__msg--user">
-                  <span className="chat-shell__who">You</span>
+                  <span className="chat-shell__who">{t.you}</span>
                   <div className="chat-shell__bubble">{message.content}</div>
                 </div>
               )
@@ -467,7 +477,13 @@ export default memo(function ChatThread({
                 (a.artifact_type === 'script' && a.script?.content)
                 || (a.artifact_type === 'image'
                   && a.product_image?.image_url
-                  && isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces))
+                  && (
+                    isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces)
+                    || (
+                      (a.action_type === 'edit' || a.action_type === 'enhance')
+                      && a.message_id === message.id
+                    )
+                  ))
             )
 
             if (artifacts.length > 0) {
@@ -646,7 +662,7 @@ export default memo(function ChatThread({
                 key={turn.id}
                 className={`chat-shell__msg ${turn.role === 'user' ? 'chat-shell__msg--user' : 'chat-shell__msg--ai'}`}
               >
-                <span className="chat-shell__who">{turn.role === 'user' ? 'You' : 'Advance AI'}</span>
+                <span className="chat-shell__who">{turn.role === 'user' ? t.you : 'Advance AI'}</span>
                 <div className={`chat-shell__bubble${turn.role === 'assistant' ? ' chat-shell__bubble--ai' : ''}`}>
                   {turn.content}
                 </div>
@@ -751,6 +767,20 @@ export default memo(function ChatThread({
               </button>
             </div>
           </div>
+        ) : creditQuote ? (
+          <div className="chat-shell__clarify" role="group" aria-label={language === 'es' ? 'Cotización de créditos' : 'Credit quote'}>
+            <p className="chat-shell__clarify-question">
+              {creditQuoteCopy(creditQuote, language).question}
+            </p>
+            <div className="chat-shell__clarify-chips">
+              <button type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onConfirmCreditQuote?.()}>
+                {creditQuoteCopy(creditQuote, language).confirm}
+              </button>
+              <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelCreditQuote?.()}>
+                {creditQuoteCopy(creditQuote, language).cancel}
+              </button>
+            </div>
+          </div>
         ) : imageClarify && !imageBusy ? (
           <div className="chat-shell__clarify" role="group" aria-label="Image options">
             {imageClarify.scriptTitle ? (
@@ -770,8 +800,38 @@ export default memo(function ChatThread({
                 onRemove={onRemoveOfferReference}
               />
             ) : null}
+            {imageClarify.step === 'ingredients' ? (
+              <p className="chat-shell__clarify-question">
+                {ingredientsPromptCopy(imageClarify.missingIngredients || [], language)}
+              </p>
+            ) : null}
             <div className="chat-shell__clarify-chips">
-              {imageClarify.step === 'script' ? (
+              {imageClarify.step === 'ingredients' ? (
+                <>
+                  <button
+                    type="button"
+                    className="chat-shell__btn chat-shell__btn--ghost"
+                    disabled={imageBusy}
+                    onClick={() => onOpenImagesRail?.()}
+                  >
+                    {language === 'es' ? 'Subir en el rail' : 'Upload in rail'}
+                  </button>
+                  {(imageClarify.missingIngredients || []).map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      className="chat-shell__btn chat-shell__btn--pill"
+                      disabled={imageBusy}
+                      onClick={() => onAnswerImageClarify?.({ skipIngredient: kind })}
+                    >
+                      {skipIngredientLabel(kind, language)}
+                    </button>
+                  ))}
+                  <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelImageClarify?.()}>
+                    {language === 'es' ? 'Cancelar' : 'Cancel'}
+                  </button>
+                </>
+              ) : imageClarify.step === 'script' ? (
                 <div className="chat-shell__script-picker">
                   <p className="chat-shell__script-picker-lead">
                     {language === 'es' ? 'Elegí el guion que querés convertir en post.' : 'Choose the script you want to turn into a post.'}
@@ -899,7 +959,9 @@ export default memo(function ChatThread({
                   <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onOpenImagesRail?.()}>
                     {language === 'es' ? 'Administrar biblioteca' : 'Manage library'}
                   </button>
-                  {imageClarify.referencesRequired && (imageClarify.availableReferenceCount || 0) === 0 ? <button
+                  {imageClarify.referencesRequired
+                    && (imageClarify.availableReferenceCount || 0) === 0
+                    && imageClarify.preferences?.style?.kind !== 'product' ? <button
                     type="button"
                     className="chat-shell__btn chat-shell__btn--pill"
                     disabled={imageBusy}

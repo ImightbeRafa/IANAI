@@ -16,7 +16,7 @@ import { buildOrganicSinglePrompt, type OrganicSingleSubtype, type OrganicAspect
 import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, buildBrandLogoPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
 import { resolvePostModeAspect } from './lib/post-aspect.js'
 import {
   appendEnhanceUserDirection,
@@ -30,11 +30,16 @@ import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
   GROK_IMAGE_DEFAULT_RESOLUTION,
-  GROK_IMAGE_EDITS_URL,
-  GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
 } from './lib/grok-models.js'
 import { runGrokImageEdit } from './lib/grok-image-edit.js'
+import { resolveGrokImageApiMode } from './lib/grok-image-generate.js'
+import {
+  buildSlimGrokPostPrompt,
+  isGrokPromptLengthError,
+  isShellMetaImagePrompt,
+  prepareGrokImagePrompt,
+} from './lib/grok-image-prompt.js'
 import { resolveImageModelForAction } from './lib/image-provider-routing.js'
 import {
   buildExplicitReferenceRoleContract,
@@ -43,6 +48,18 @@ import {
   selectGrokReferenceBudget,
   type ImageReferenceRole,
 } from './lib/image-prompt-context.js'
+import { buildSceneRecipe } from './lib/image-scene-recipe.js'
+import { buildProductPixelLockContract } from './lib/product-pixel-lock.js'
+import {
+  buildEditPatchConstraints,
+  buildEnhancePatchConstraints,
+  buildLockedPriceRules,
+  buildLogoStampRules,
+  buildPostCtaGuardrails,
+  resolveLockedOfferPrice,
+  resolveProductSilhouette,
+  type ProductCreativeRow,
+} from './lib/product-creative-rules.js'
 
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations'
 const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits'
@@ -293,6 +310,27 @@ function applyGrokThreeReferenceBudget(imageParams: Record<string, unknown>): vo
   imageParams.referenceImageKinds = picked.map((row) =>
     (row.role === 'product' ? 'product' : 'context')
   )
+}
+
+
+function grokUserFacingError(
+  language: unknown,
+  kind: 'missing_key' | 'failed' | 'prompt_too_long'
+): string {
+  const es = language !== 'en'
+  if (kind === 'missing_key') {
+    return es
+      ? 'La generación de imágenes no está configurada en este entorno (falta la clave del proveedor). Avisá al equipo o reintentá más tarde.'
+      : 'Image generation is not configured in this environment (provider key missing). Contact the team or try again later.'
+  }
+  if (kind === 'prompt_too_long') {
+    return es
+      ? 'No pudimos adaptar el prompt para Grok (límite de longitud). Reintentá; si sigue fallando, acortá el copy o las instrucciones de marca.'
+      : 'We could not fit the prompt under Grok’s length limit. Retry; if it keeps failing, shorten the copy or brand instructions.'
+  }
+  return es
+    ? 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.'
+    : 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.'
 }
 
 function normalizePostTextDensity(value: unknown): PostTextDensity {
@@ -624,10 +662,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const editRefImages: string[] = Array.isArray(imageParams.editReferenceImages) ? imageParams.editReferenceImages : []
       const hasRefs = editRefImages.length > 0
       const editAR = normalizeGeminiAspect(imageParams.aspectRatio, '9:16')
+      let editProductRow: ProductCreativeRow | null = null
+      if (imageParams.productId && imgMemSupabase) {
+        try {
+          const { data: prod } = await imgMemSupabase
+            .from('products')
+            .select('name, product_description, description, technical_specs, product_category, product_category_custom, offer, price_range')
+            .eq('id', imageParams.productId)
+            .single()
+          if (prod) editProductRow = prod as ProductCreativeRow
+        } catch { /* optional */ }
+      }
+      const editLang = imageParams.language === 'en' ? 'en' : 'es'
+      const hasEditLogo = !!(brandKit?.logo_url || logoFallbackUrl)
       const brandEditRules = [
         brandKit ? buildBrandColorOverride(brandKit) : null,
         brandKit ? buildBrandVisualPrompt(brandKit) : null,
-        brandKit ? buildBrandLogoPrompt(brandKit) : null,
+        buildLogoStampRules(editLang, hasEditLogo),
+        buildEditPatchConstraints(editProductRow, editLang, brandKit?.name),
       ].filter(Boolean).join('\n\n')
 
       const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images - use them as visual guidance for the requested change.' : ''}
@@ -774,7 +826,12 @@ Edit instruction: ${editPrompt}`
 
       if (selectedModel === 'grok-imagine') {
         const xaiApiKey = process.env.GROK_API_KEY
-        if (!xaiApiKey) return res.status(500).json({ error: 'xAI API key not configured' })
+        if (!xaiApiKey) {
+          return res.status(500).json({
+            error: grokUserFacingError(imageParams.language, 'missing_key'),
+            code: 'provider_key_missing',
+          })
+        }
         try {
           const supportUrls = editRefImages.slice(0, 2)
           if (brandKit?.logo_url || logoFallbackUrl) {
@@ -789,7 +846,9 @@ Edit instruction: ${editPrompt}`
           }
           const grokEdit = await runGrokImageEdit({
             apiKey: xaiApiKey,
-            prompt: systemEditPrompt,
+            prompt: prepareGrokImagePrompt(systemEditPrompt, {
+              preferTail: typeof editPrompt === 'string' ? editPrompt : '',
+            }).prompt,
             baseImageUrl: editImage,
             supportImageUrls: supportUrls,
             aspectRatio: editAR,
@@ -835,7 +894,19 @@ Edit instruction: ${editPrompt}`
             metadata: { action: 'edit', provider: 'xai', costSource: 'unavailable' },
           })
           return res.status(500).json({
-            error: 'Image edit failed',
+            error: grokUserFacingError(
+              imageParams.language,
+              isGrokPromptLengthError(
+                editError instanceof Error ? editError.message : String(editError)
+              )
+                ? 'prompt_too_long'
+                : 'failed'
+            ),
+            code: isGrokPromptLengthError(
+              editError instanceof Error ? editError.message : String(editError)
+            )
+              ? 'grok_prompt_too_long'
+              : 'grok_failed',
             details: editError instanceof Error ? editError.message : 'Unknown error',
             retryable: false,
           })
@@ -975,10 +1046,31 @@ Edit instruction: ${editPrompt}`
       const enhanceTier: 'polish' | 'modernize' | 'rebuild' =
         rawTier === 'polish' || rawTier === 'rebuild' ? rawTier : 'modernize'
 
+      let enhanceProductRow: ProductCreativeRow | null = null
+      if (imageParams.productId && imgMemSupabase) {
+        try {
+          const { data: prod } = await imgMemSupabase
+            .from('products')
+            .select('name, product_description, description, technical_specs, product_category, product_category_custom, offer, price_range')
+            .eq('id', imageParams.productId)
+            .single()
+          if (prod) enhanceProductRow = prod as ProductCreativeRow
+        } catch { /* optional */ }
+      }
+      const enhancePatchConstraints = buildEnhancePatchConstraints(
+        enhanceProductRow,
+        enhanceLang === 'en' ? 'en' : 'es',
+        brandKit?.name,
+        { hasProductRef: hasProductRef }
+      )
+      const enhanceHasLogo = !!(brandKit?.logo_url || logoFallbackUrl)
+      const enhanceLogoRules = buildLogoStampRules(enhanceLang === 'en' ? 'en' : 'es', enhanceHasLogo)
+
       const productRefRule = hasProductRef
         ? `\n═══════════════════════════════════════════════
 REGLA #0 — IMAGEN DE PRODUCTO DE REFERENCIA (MÁXIMA PRIORIDAD)
 ═══════════════════════════════════════════════
+${buildProductPixelLockContract({ language: enhanceLang === 'en' ? 'en' : 'es', sceneReplace: enhanceTier !== 'polish' })}
 Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
 - El producto en el diseño mejorado DEBE verse EXACTAMENTE como en las imágenes de referencia.
 - Usa las imágenes de referencia para preservar la forma, silueta, color, textura, ángulo y detalles reales del producto.
@@ -988,7 +1080,7 @@ Se adjuntan imágenes de referencia del PRODUCTO REAL del usuario.
         : ''
 
       // Shared non-negotiable header for all tiers
-      const HARD_CONSTRAINTS = `${productRefRule}
+      const HARD_CONSTRAINTS = `${productRefRule}${enhancePatchConstraints}${enhanceLogoRules}
 ═══════════════════════════════════════════════
 REGLA #1 — TEXTO Y LENGUAJE (NO NEGOCIABLE)
 ═══════════════════════════════════════════════
@@ -1017,87 +1109,93 @@ REGLA #4 — FORMATO (NO NEGOCIABLE)
 - La imagen de salida debe mantener EXACTAMENTE el mismo aspect ratio que la imagen de entrada.
 - NO cambies de vertical a horizontal ni viceversa.
 ═══════════════════════════════════════════════
+
+REGLA #5 — PRECIO / OFERTA (NO NEGOCIABLE)
+- Si el copy o la imagen muestran un precio (ej. ₡9.900), mostralo SIN tachado/strikethrough.
+- PROHIBIDO inventar descuentos, precio "antes", oferta rebajada o tachado rojo sobre el precio listado.
+- VIOLACIÓN = RESULTADO INVÁLIDO.
+═══════════════════════════════════════════════
 `
 
       // Tier-specific creative direction
-      const POLISH_BODY = `
-MODO: POLISH (pulido quirúrgico — cambio mínimo, máxima fidelidad).
+      const enhanceSceneRecipe = buildSceneRecipe({
+        language: enhanceLang === 'en' ? 'en' : 'es',
+        postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
+        productSubStyle: typeof imageParams.productSubStyle === 'string' ? imageParams.productSubStyle : null,
+        hasSceneRef: Array.isArray(imageParams.contextReferenceImages)
+          && imageParams.contextReferenceImages.length > 0,
+        category: enhanceProductRow?.product_category_custom
+          || enhanceProductRow?.product_category
+          || null,
+        offerName: enhanceProductRow?.name || null,
+        scriptContext: resolveEnhanceUserDirection(imageParams.editPrompt, imageParams.originalPrompt),
+      })
 
-Tu tarea NO es rediseñar. Es PULIR ejecución conservando el diseño original al 100%.
+      const POLISH_BODY = `
+MODO: POLISH (pulido quirúrgico — lock de composición).
+
+Tu tarea NO es rediseñar ni inventar un set nuevo. Es PULIR ejecución conservando el diseño y el set original al 100%.
 
 PERMITIDO (y esperado):
 - Refinar tipografía (kerning, tracking, jerarquía sutil, eliminar rarezas).
 - Mejorar espaciado y alineación (grillas más limpias, márgenes consistentes).
 - Ajustar contraste, balance de color, saturación, luminosidad (mantener paleta original).
-- Limpiar fondo (eliminar artefactos, ruido, suciedad de IA).
-- Mejorar iluminación y sombras sutiles del producto (manteniendo su apariencia).
+- Limpiar artefactos, ruido, suciedad de IA en el fondo EXISTENTE (no reemplazar el lugar).
+- Mejorar iluminación y sombras sutiles del producto DENTRO del set actual.
 - Corregir imperfecciones de renderizado (bordes sucios, halos, compresión).
 
 PROHIBIDO:
 - Cambiar composición, layout, jerarquía o distribución de elementos.
 - Mover, redimensionar o reorganizar elementos.
-- Agregar, eliminar o reemplazar elementos.
+- Agregar, eliminar o reemplazar el set / lugar / props (NO new set).
 - Cambiar la dirección de arte, el mood o el concepto.
 - Cambiar familias tipográficas (solo refinar las existentes).
 - Cambiar la paleta de colores (solo ajustar balance).
 - Reinterpretar el producto, el logo o las imágenes.
 
-OBJETIVO: El usuario debe poder comparar antes/después y decir "es el mismo diseño, pero mejor ejecutado".
+OBJETIVO: El usuario debe poder comparar antes/después y decir "es el mismo diseño y el mismo lugar, pero mejor ejecutado".
 `
 
       const MODERNIZE_BODY = `
-MODO: MODERNIZE (actualización significativa conservando identidad).
+MODO: MODERNIZE / MEJORA MÁGICA (scene pass suave + identidad).
 
-Tu tarea es llevar el diseño a un nivel de ejecución actual, preservando su concepto, mensaje y elementos clave.
+Si el fondo actual es un vacío de estudio / podio en void / papel seamless, REEMPLAZALO por un lugar fotografiado completo (SCENE RECIPE abajo) manteniendo producto, texto, logo y layout de copy.
+Si ya hay un lugar real, mejorá ejecución sin inventar otro concepto.
 
 PERMITIDO:
-- Refinar composición sin alterar la jerarquía principal (ajustes de balance, ritmo, respiración).
-- Actualizar tipografía (cambiar una familia si la actual es genérica/dated; máximo 2 familias total).
-- Mejorar jerarquía visual y punto focal.
-- Ajustar paleta para mayor carácter (mismo mood, mejor ejecución).
-- Mejorar tratamiento de fondo, sombras, iluminación.
-- Refinar tratamiento de texto (peso, tracking, escala).
-- Modernizar estilos dated (degradados genéricos, biseles, efectos 2010).
+- Sustituir void/estudio vacío por entorno fotografiado completo coherente con el nicho.
+- Refinar composición sin romper la jerarquía de copy.
+- Mejorar tipografía, sombras de contacto, y luz del producto para que COINCIDA con el entorno.
+- Actualizar acabado premium sin "Canva vibes".
 
 PROHIBIDO:
-- Cambiar el concepto, el mensaje o la intención del diseño.
-- Eliminar elementos clave (producto, CTA, título principal, logo).
+- Cambiar el mensaje o el texto (cada palabra idéntica).
 - Redibujar o reinterpretar el producto o el logo.
-- Cambiar el texto (cada palabra se copia idéntica).
 - Cambiar el aspect ratio.
-- "Canva vibes" — todo debe sentirse intencional.
+- Dejar el producto en un vacío de estudio "más bonito".
 
-OBJETIVO: El resultado debe sentirse "fresco pero familiar" — el mismo diseño, traducido al lenguaje de diseño actual.
+${enhanceSceneRecipe ? `${enhanceSceneRecipe}\n` : ''}OBJETIVO: mismo anuncio, producto lock-accurate, en un lugar real (o el mismo lugar mejor iluminado).
 `
 
       const REBUILD_BODY = `
-MODO: REBUILD (reinterpretación creativa agresiva).
+MODO: REBUILD (scene pass completo + producto lock).
 
-ACTÚA COMO: Director Creativo + Director de Arte Senior de marcas globales (Apple / Aesop / Jacquemus / Nike Campaign Level).
+ACTÚA COMO: Director Creativo + fotógrafo de producto en set real.
 
-Vas a REINTERPRETAR el diseño. Llevalo a una versión más inteligente, más conceptual, con mayor impacto creativo.
+Reconstruí la pieza en un LUGAR FOTOGRAFIADO COMPLETO según la SCENE RECIPE. Producto, logo, texto y precio quedan lock-accurate. Luz del producto = luz del set.
 
-PERMITIDO (con los límites de las reglas #1-4 arriba):
-- Cambiar composición, estructura visual, jerarquía, distribución de elementos.
-- Cambiar dirección de arte, mood, narrativa visual.
-- Eliminar elementos decorativos que no aporten.
-- Convertir bullets en bloques visuales; usar texto como elemento gráfico.
-- Romper la cuadrícula con intención; crear tensión entre bloques.
-- Simplificar a monocromático o usar contraste dramático.
-- Explorar tipografía (serif moderna, sans ultra bold, condensed, tracking intencional).
+PERMITIDO (con reglas #1-4):
+- Nuevo set / composición / jerarquía visual alrededor del mismo producto y copy.
+- Props, planos de profundidad, sombras de contacto, mood coherente con el nicho.
+- Dirección de arte premium (no vacío de estudio).
 
 PROHIBIDO (sin excepción):
-- Cambiar, traducir, parafrasear o reescribir CUALQUIER texto (Regla #1).
-- Rediseñar, estilizar o reinterpretar el producto (Regla #2).
-- Modificar el logo en forma, color o estilo (Regla #3).
+- Cambiar, traducir o reescribir CUALQUIER texto (Regla #1).
+- Rediseñar el producto (Regla #2) o el logo (Regla #3).
 - Cambiar el aspect ratio (Regla #4).
+- Fondo limpio / seamless / podio en void / bokeh de stock solo.
 
-ENFOQUE:
-1) Analizá qué quiere comunicar la pieza (aspiracional / técnico / emocional / agresivo).
-2) Elegí UNA dirección creativa clara (editorial de lujo / minimalismo brutalista / high-fashion / tech futurista / conceptual con espacio negativo / asimétrica dinámica / tipográfica dominante / cinematográfica).
-3) El diseño debe sentirse intencional. Nada centrado por default. Nada "Canva vibes".
-
-OBJETIVO: Una campaña real de marca grande. Algo que alguien guardaría en Pinterest o en Behance.
+${enhanceSceneRecipe ? `${enhanceSceneRecipe}\n` : ''}OBJETIVO: campaña en un lugar real; SKU intocable.
 `
 
       const TIER_BODY = enhanceTier === 'polish' ? POLISH_BODY : enhanceTier === 'rebuild' ? REBUILD_BODY : MODERNIZE_BODY
@@ -1117,7 +1215,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
       if (selectedModel === 'grok-imagine') {
         const xaiApiKey = process.env.GROK_API_KEY
-        if (!xaiApiKey) return res.status(500).json({ error: 'xAI API key not configured' })
+        if (!xaiApiKey) {
+          return res.status(500).json({
+            error: grokUserFacingError(imageParams.language, 'missing_key'),
+            code: 'provider_key_missing',
+          })
+        }
         try {
           const supportUrls: string[] = []
           if (hasProductRef) {
@@ -1140,7 +1243,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           }
           const grokEnhance = await runGrokImageEdit({
             apiKey: xaiApiKey,
-            prompt: ENHANCE_SYSTEM_PROMPT,
+            prompt: prepareGrokImagePrompt(ENHANCE_SYSTEM_PROMPT, {
+              preferTail: resolveEnhanceUserDirection(imageParams.editPrompt, imageParams.originalPrompt),
+            }).prompt,
             baseImageUrl: enhanceImage,
             supportImageUrls: supportUrls,
             aspectRatio: typeof imageParams.aspectRatio === 'string' ? imageParams.aspectRatio : '9:16',
@@ -1186,7 +1291,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             metadata: { action: 'enhance', provider: 'xai', enhanceTier, costSource: 'unavailable' },
           })
           return res.status(500).json({
-            error: 'Image enhance failed',
+            error: grokUserFacingError(
+              imageParams.language,
+              isGrokPromptLengthError(
+                enhanceError instanceof Error ? enhanceError.message : String(enhanceError)
+              )
+                ? 'prompt_too_long'
+                : 'failed'
+            ),
+            code: isGrokPromptLengthError(
+              enhanceError instanceof Error ? enhanceError.message : String(enhanceError)
+            )
+              ? 'grok_prompt_too_long'
+              : 'grok_failed',
             details: enhanceError instanceof Error ? enhanceError.message : 'Unknown error',
             retryable: false,
           })
@@ -1488,7 +1605,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           (typeof imageParams.productId === 'string' ? imageParams.productId : null)
           || authoritativeProductId
           || null,
-        autoLoadOfferRefs: isProductMode && !hasExplicitRefList,
+        autoLoadOfferRefs: !hasExplicitRefList && !isLogoMode && (isProductMode || isPostMode),
       })
       if (!hydrate.ok) {
         return res.status(hydrate.status).json({ error: hydrate.error })
@@ -1508,6 +1625,24 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const hasProductImages = productReferenceCount > 0
     const postLanguage: string = imageParams.language || 'es'
     const postTextDensity = normalizePostTextDensity(imageParams.textDensity)
+    let postProductCreativeRow: ProductCreativeRow | null = null
+    if (imageParams.productId && imgMemSupabase) {
+      try {
+        const { data: prod } = await imgMemSupabase
+          .from('products')
+          .select('name, product_description, description, technical_specs, product_category, product_category_custom, offer, price_range')
+          .eq('id', imageParams.productId)
+          .single()
+        if (prod) postProductCreativeRow = prod as ProductCreativeRow
+      } catch { /* optional */ }
+    }
+    const postLangCode = postLanguage === 'en' ? 'en' : 'es'
+    const postProductSilhouette = postProductCreativeRow
+      ? resolveProductSilhouette(postProductCreativeRow, postLangCode, brandKit?.name)
+      : null
+    const postLockedOfferPrice = postProductCreativeRow
+      ? resolveLockedOfferPrice(postProductCreativeRow, brandKit?.name)
+      : null
 
     if (isPostMode) {
       // POST MODE: Use the appropriate master prompt based on postStyle
@@ -1540,7 +1675,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         imageParams.height = 1440
       }
 
-      // Explicit aspect ratio enforcement prefix (canvas, not layout fallback)
+      // Explicit aspect ratio enforcement prefix (canvas, not layout fallback).
+      // Grok Imagine uses native `aspect_ratio` — do not prefix FORMATO OBLIGATORIO
+      // (it is redundant and can force 9:16 when the user asked for 1:1).
+      const isGrokModel = selectedModel === 'grok-imagine'
       const arLabel = aspectResolved.canvas === '1:1'
         ? '1:1 cuadrado (1080×1080)'
         : aspectResolved.canvas === '9:16'
@@ -1548,7 +1686,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           : aspectResolved.canvas === '4:5'
             ? '4:5 post vertical (1080×1350)'
             : '3:4 vertical (1080×1440)'
-      const aspectRatioPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
+      const aspectRatioPrefix = isGrokModel
+        ? ''
+        : `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente ${arLabel}. No uses otro aspect ratio.\n\n`
       const productReferenceStrategyPrefix = buildProductReferenceStrategyPrefix(
         postLanguage,
         productReferenceCount,
@@ -1570,6 +1710,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         scriptContext: typeof imageParams.scriptContext === 'string'
           ? imageParams.scriptContext
           : (typeof imageParams.prompt === 'string' ? imageParams.prompt : null),
+        category: postProductCreativeRow?.product_category_custom
+          || postProductCreativeRow?.product_category
+          || null,
+        offerName: postProductCreativeRow?.name || null,
+        businessContext: typeof imageParams.businessContext === 'string'
+          ? imageParams.businessContext
+          : null,
       })
 
       // Resolve color palette override (if any)
@@ -1614,14 +1761,18 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           : `=== CONTEXTO VERIFICADO DEL NEGOCIO Y LA OFERTA (NO RENDERIZAR ESTE BLOQUE) ===\n${imageParams.businessContext.trim()}\nUsalo solo para precisión factual, afinidad con el público y coherencia de la oferta. Nunca inventes un producto, precio, promesa o marca que lo contradiga.\n\n`
       }
 
-      // Brand Kit: inject logo prompt for image generation
-      let brandLogoPrefix = ''
-      if (brandKit) {
-        const blp = buildBrandLogoPrompt(brandKit)
-        if (blp) brandLogoPrefix = blp + '\n\n'
-      } else if (logoFallbackUrl) {
-        brandLogoPrefix = `REGLA — LOGO DE MARCA: se adjunta el logotipo oficial. Incluyelo fielmente, visible, sin redibujarlo.\n\n`
+      // Brand Kit: stamp uploaded logo — never redraw wordmark/lockup with AI
+      const hasBrandLogo = !!(brandKit?.logo_url || logoFallbackUrl)
+      const brandLogoPrefix = buildLogoStampRules(postLanguage === 'en' ? 'en' : 'es', hasBrandLogo)
+
+      const resolvePostCtaPrefix = (): string => {
+        const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
+        const strength = (['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).includes(raw as CTAStrength)
+          ? raw
+          : 'sales'
+        return buildPostCtaGuardrails(postLanguage === 'en' ? 'en' : 'es', strength)
       }
+      const postCtaPrefix = resolvePostCtaPrefix()
 
       // Language enforcement prefix for preset mode (presets lack built-in language rules)
       const langLabel = postLanguage === 'es' ? 'ESPAÑOL' : 'ENGLISH'
@@ -1722,8 +1873,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           language: postLanguage
         })
 
-        // Force 1:1 formatting prefix (overrides the aspectRatioPrefix built earlier)
-        const logoFormatPrefix = `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrada (1024×1024 o mayor). No uses otro aspect ratio.\n\n`
+        // Force 1:1 formatting prefix (overrides the aspectRatioPrefix built earlier).
+        // Grok uses aspect_ratio only — skip textual FORMATO.
+        const logoFormatPrefix = isGrokModel
+          ? ''
+          : `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrada (1024×1024 o mayor). No uses otro aspect ratio.\n\n`
         // Logos: respect user colors if provided; ignore brand kit visual style/logo injection (we're DESIGNING a logo, not placing an existing one)
         // Also skip visual memory (learned post styles don't apply to logo design)
         // Skip tail user prompt concatenation — buildLogoPrompt is self-contained.
@@ -1731,12 +1885,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         enhancedPrompt = logoFormatPrefix + colorPrefix + logoPrompt + userExtra
       } else if (isProductMode) {
         // PRODUCT PHOTOGRAPHY MODE: high-quality product images without text overlays
-        if (!hasProductImages) {
-          return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
-        }
         const VALID_SUB_STYLES = ['studio-hero', 'lifestyle', 'background-swap', 'pure-enhance', 'splash-action', 'podium']
         const rawSubStyle = (imageParams.productSubStyle as string) || 'studio-hero'
         const productSubStyle = VALID_SUB_STYLES.includes(rawSubStyle) ? rawSubStyle : 'studio-hero'
+        const ZERO_REF_OK = new Set(['studio-hero', 'podium'])
+        if (!hasProductImages && !ZERO_REF_OK.has(productSubStyle)) {
+          return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
+        }
         const productAR = imageParams.aspectRatio === '1:1' ? '1:1' : postAspectRatio
         const bgDesc = typeof imageParams.backgroundDescription === 'string'
           ? imageParams.backgroundDescription.slice(0, 500)
@@ -1745,40 +1900,74 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         // Load product context + detect niche so the prompt adapts to the actual product
         let productContext: {
           name?: string
+          brandName?: string
           category?: string
           description?: string
           targetAudience?: string
           niche?: 'physical' | 'food' | 'service' | 'fashion' | 'digital'
+          priceOffer?: string
+          differentiation?: string
+          market?: string
+          productSilhouette?: string
         } = {}
+        let productCreativeRow: ProductCreativeRow | null = null
+        if (brandKit?.name) {
+          productContext.brandName = brandKit.name
+        }
         if (imageParams.productId && imgMemSupabase) {
           try {
             const { data: prod } = await imgMemSupabase
               .from('products')
-              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom')
+              .select('name, type, product_category, product_category_custom, product_description, description, target_audience, svc_service_type, svc_service_type_custom, price_range, offer, differentiation, shipping_info, location, technical_specs')
               .eq('id', imageParams.productId)
               .single()
             if (prod) {
+              productCreativeRow = prod as ProductCreativeRow
+              const lang = postLanguage === 'en' ? 'en' : 'es'
+              const lockedPrice = resolveLockedOfferPrice(productCreativeRow, brandKit?.name)
+              const silhouette = resolveProductSilhouette(productCreativeRow, lang, brandKit?.name)
               productContext = {
+                ...productContext,
                 name: prod.name || undefined,
                 category: prod.product_category_custom || prod.product_category || prod.svc_service_type_custom || prod.svc_service_type || prod.type || undefined,
                 description: prod.product_description || prod.description || undefined,
                 targetAudience: prod.target_audience || undefined,
                 niche: detectProductNiche(prod),
+                priceOffer: lockedPrice || undefined,
+                differentiation: prod.differentiation || undefined,
+                market: prod.location || undefined,
+                productSilhouette: silhouette || undefined,
               }
             }
           } catch { /* fallback: no context */ }
         }
 
-        // Force 1:1 format prefix (supersedes aspectRatioPrefix) or fall back to the standard prefix
-        const productFormatPrefix = imageParams.aspectRatio === '1:1'
-          ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
-          : aspectRatioPrefix
+        // Force 1:1 format prefix (supersedes aspectRatioPrefix) or fall back to the standard prefix.
+        // Grok uses aspect_ratio only — skip textual FORMATO.
+        const productFormatPrefix = isGrokModel
+          ? ''
+          : imageParams.aspectRatio === '1:1'
+            ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
+            : aspectRatioPrefix
 
         // Filter out the generic frontend fallback string so it doesn't become "user instructions"
         const rawUserPrompt = typeof userPrompt === 'string' ? userPrompt.trim() : ''
-        const PRODUCT_FALLBACK_PROMPTS = new Set(['Professional product photograph', 'professional product photograph'])
+        const PRODUCT_FALLBACK_PROMPTS = new Set([
+          'Professional product photograph',
+          'professional product photograph',
+          'Generar foto de producto',
+          'Generate product photo',
+          'Generar post',
+          'Generate post',
+        ])
         const userInstr = PRODUCT_FALLBACK_PROMPTS.has(rawUserPrompt) ? '' : rawUserPrompt
-        const productOpts = { backgroundDescription: bgDesc, productContext, userInstructions: userInstr }
+        const productOpts = {
+          backgroundDescription: bgDesc,
+          productContext,
+          userInstructions: userInstr,
+          hasReferenceImages: hasProductImages,
+          productSilhouette: productContext.productSilhouette,
+        }
 
         const productPrompt = buildProductPrompt(productSubStyle, productAR, postLanguage, productOpts)
           || buildProductPrompt('studio-hero', productAR, postLanguage, productOpts)!
@@ -1796,13 +1985,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
           if (customType) {
             const customMasterPrompt = postLanguage === 'es' ? customType.master_prompt_es : customType.master_prompt_en
-            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
+            enhancedPrompt = presetLangPrefix + presetProductPrefix + aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + customMasterPrompt + '\n\nProducto/servicio del usuario:\n' + userPrompt
           } else {
             // Fallback to venta directa if custom type not found
-            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+            enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
           }
         } catch {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'anuncio-conversion') {
         // ANUNCIO DE CONVERSIÓN MODE: high-conversion Instagram ad with niche-adaptive prompt
@@ -1822,18 +2011,20 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           imageParams.width = 1080
           imageParams.height = 1080
         }
-        const anuncioFormatPrefix = imageParams.aspectRatio === '1:1'
-          ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
-          : aspectRatioPrefix
+        const anuncioFormatPrefix = isGrokModel
+          ? ''
+          : imageParams.aspectRatio === '1:1'
+            ? `FORMATO OBLIGATORIO: La imagen DEBE ser exactamente 1:1 cuadrado (1080×1080). No uses otro aspect ratio.\n\n`
+            : aspectRatioPrefix
         const anuncioPrompt = buildAnuncioPrompt(anuncioAR, postLanguage, hasProductImages, niche)
-        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + anuncioPrompt + userPrompt
+        enhancedPrompt = anuncioFormatPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + anuncioPrompt + userPrompt
       } else if (postStyle === 'preset' && imageParams.presetId) {
         // PRESET MODE: uses buildPresetPrompt (same assembly pattern as Venta Directa — language/product rules built into the prompt)
         const presetPrompt = buildPresetPrompt(imageParams.presetId as string, postAspectRatio, postLanguage, hasProductImages)
         if (presetPrompt) {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + presetPrompt + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + presetPrompt + userPrompt
         } else {
-          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+          enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
         }
       } else if (postStyle === 'organic-single' && imageParams.organicSubtype) {
         // ORGANIC SINGLE IMAGE MODE — top-of-funnel aesthetic post (quote, infographic, showcase, aesthetic).
@@ -1873,10 +2064,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         // Organic builds its own language / aspect-ratio rules internally; skip the sales aspectRatioPrefix.
-        enhancedPrompt = productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + organicPrompt + userPrompt
+        enhancedPrompt = productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + organicPrompt + userPrompt
       } else {
         // VENTA DIRECTA (default)
-        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
+        enhancedPrompt = aspectRatioPrefix + productReferenceStrategyPrefix + lifestyleBriefPrefix + textDensityPrefix + colorPrefix + visualMemoryPrefix + brandVoicePrefix + brandVisualPrefix + brandLogoPrefix + postCtaPrefix + buildPostPrompt(postAspectRatio, postLanguage, hasProductImages) + userPrompt
       }
     } else {
       // GENERIC IMAGE MODE: Use Gemini prefix (all models now support text)
@@ -1886,10 +2077,13 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const paletteList = clientColors.length
       ? clientColors.slice(0, 3).join(', ')
       : [brandKit?.primary_color, brandKit?.secondary_color, brandKit?.accent_color].filter(Boolean).join(', ')
-    enhancedPrompt += `\n\nCONTRATO FINAL (NO RENDERIZAR ESTE BLOQUE):
+    if (!isProductMode && !isLogoMode) {
+      enhancedPrompt += `\n\nCONTRATO FINAL (NO RENDERIZAR ESTE BLOQUE):
 - COLORES: ${paletteList || 'usar solo la paleta de marca si existe'}. PROHIBIDO azul genérico de redes salvo que esté en esa paleta.
 - TEXTO VISIBLE: únicamente el copy condensado del usuario. Estructura gancho → desarrollo (1-2 puntos) → CTA. PROHIBIDO volcar el guion, el contexto de negocio o placeholders como [TIEMPO DE ENTREGA].
-- LOGO: si hay una imagen de logo adjunta, debe aparecer fielmente y visible.\n`
+- CTA: no usar "Dale click a este anuncio" salvo que el guión lo traiga literal; respetar CTA orgánico vs venta según el modo.
+- LOGO: si hay una imagen de logo adjunta, estamparla tal cual — no redibujar wordmark ni lockup con IA.\n`
+    }
 
     // =============================================
     // OPENAI GPT IMAGE GENERATION (admin only)
@@ -2390,7 +2584,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     if (selectedModel === 'grok-imagine') {
       const xaiApiKey = process.env.GROK_API_KEY
       if (!xaiApiKey) {
-        return res.status(500).json({ error: 'xAI API key not configured' })
+        return res.status(500).json({
+          error: grokUserFacingError(imageParams.language, 'missing_key'),
+          code: 'provider_key_missing',
+        })
       }
 
       const providerModel = GROK_IMAGE_PROVIDER_MODEL
@@ -2409,12 +2606,99 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           return { url, role }
         })
         .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
-      const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
+      const productRefUrls = grokRefCandidates
+        .filter((row) => row.role === 'product')
+        .map((row) => row.url)
+      const supportRefUrls = grokRefCandidates
+        .filter((row) => row.role !== 'product')
+        .map((row) => row.url)
+      // Prefer product photos first so edits API treats SKU as source of truth.
+      const referenceUrls = selectGrokReferenceBudget(
+        [
+          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
+          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
+        ],
+        3
+      ).map((row) => row.url)
+      const productReferenceCount = productRefUrls.length
+
+      let grokLogoDataUrl: string | null = null
+      if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
+        try {
+          const logoData = await resolveInlineLogo()
+          if (logoData) {
+            grokLogoDataUrl = `data:${logoData.mimeType};base64,${logoData.data}`
+          }
+        } catch (logoErr) {
+          console.warn('Failed to inject brand logo for Grok post generate:', logoErr)
+        }
+      }
+
+      const grokCtaStrength = ((): string => {
+        const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
+        return (['none', 'soft', 'brand_mention', 'sales'] as CTAStrength[]).includes(raw as CTAStrength)
+          ? raw
+          : 'sales'
+      })()
+
+      // Venta-directa / anuncio presets are ~26KB essays — do not truncate those for Grok.
+      // Build a slim useful prompt (user copy + short fidelity) then byte-cap with margin.
+      const useSlimPostPrompt = isPostMode && !isProductMode && !isLogoMode
+      const paletteForSlim = Array.isArray(imageParams.customColors)
+        ? (imageParams.customColors as string[]).slice(0, 3).join(', ')
+        : [brandKit?.primary_color, brandKit?.secondary_color, brandKit?.accent_color]
+          .filter(Boolean)
+          .join(', ')
+      const grokUserCopy = typeof userPrompt === 'string' && !isShellMetaImagePrompt(userPrompt)
+        ? userPrompt
+        : ''
+      const grokSourcePrompt = useSlimPostPrompt
+        ? buildSlimGrokPostPrompt({
+          language: typeof imageParams.language === 'string' ? imageParams.language : 'es',
+          postStyle: typeof imageParams.postStyle === 'string' ? imageParams.postStyle : 'venta-directa',
+          productSubStyle: typeof imageParams.productSubStyle === 'string' ? imageParams.productSubStyle : null,
+          textDensity: typeof imageParams.textDensity === 'string' ? imageParams.textDensity : 'hard',
+          userCopy: grokUserCopy,
+          palette: paletteForSlim,
+          brandVoice: brandKit?.brand_voice || null,
+          brandVisual: brandKit?.visual_style_notes || null,
+          businessContext: typeof imageParams.businessContext === 'string'
+            ? imageParams.businessContext
+            : null,
+          hasProductRefs: productReferenceCount > 0,
+          hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
+          productSilhouette: postProductSilhouette,
+          lockedOfferPrice: postLockedOfferPrice,
+          logoStampRules: buildLogoStampRules(postLangCode, Boolean(grokLogoDataUrl)),
+          ctaGuardrails: buildPostCtaGuardrails(postLangCode, grokCtaStrength),
+          hasBrandLogo: Boolean(grokLogoDataUrl),
+          category: postProductCreativeRow?.product_category_custom
+            || postProductCreativeRow?.product_category
+            || null,
+          offerName: postProductCreativeRow?.name || null,
+          scriptContext: grokUserCopy,
+        })
+        : enhancedPrompt
+
+      const preparedGrokPrompt = prepareGrokImagePrompt(grokSourcePrompt, {
+        preferTail: isProductMode || isLogoMode || isShellMetaImagePrompt(userPrompt)
+          ? ''
+          : grokUserCopy,
+      })
+      const grokPrompt = preparedGrokPrompt.prompt
 
       console.log('Submitting to Grok Imagine 2.0 API:', {
-        prompt: enhancedPrompt.substring(0, 100) + '...',
+        prompt: grokPrompt.substring(0, 100) + '...',
+        promptLength: preparedGrokPrompt.preparedLength,
+        originalPromptLength: preparedGrokPrompt.originalLength,
+        preparedByteLength: preparedGrokPrompt.preparedByteLength,
+        originalByteLength: preparedGrokPrompt.originalByteLength,
+        lengthUnit: preparedGrokPrompt.lengthUnit,
+        slimPostPrompt: useSlimPostPrompt,
+        trimmed: preparedGrokPrompt.trimmed,
         providerModel,
         referenceCount: referenceUrls.length,
+        aspectHint: getAspectRatio(imageParams.width || 1080, imageParams.height || 1080),
       })
 
       try {
@@ -2432,10 +2716,14 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           grokAspectRatio = GROK_RATIO_FALLBACK[grokAspectRatio] || '1:1'
         }
 
-        const isEdit = referenceUrls.length > 0
+        const grokApi = resolveGrokImageApiMode({
+          action: 'generate',
+          productReferenceCount,
+          referenceCount: referenceUrls.length,
+        })
         const grokRequest: Record<string, unknown> = {
           model: providerModel,
-          prompt: enhancedPrompt,
+          prompt: grokPrompt,
           n: 1,
           response_format: 'b64_json',
           aspect_ratio: grokAspectRatio,
@@ -2443,15 +2731,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           quality: GROK_IMAGE_DEFAULT_QUALITY,
         }
 
-        let endpoint = GROK_IMAGE_GENERATIONS_URL
-        if (isEdit) {
-          endpoint = GROK_IMAGE_EDITS_URL
-          // Official edit shape: one `image` or multi `images` with { url, type }
-          if (referenceUrls.length === 1) {
-            grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
-          } else {
-            grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
-          }
+        // Product refs → /edits product_lock_scene (pixel-faithful SKU + scene replace).
+        // No product refs → /generations compose (silhouette / typography + scene recipe).
+        // Never attach logo as the only edit base when product photos exist.
+        const endpoint = grokApi.endpoint
+        if (referenceUrls.length === 1) {
+          grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
+        } else if (referenceUrls.length > 1) {
+          grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
+        } else if (grokLogoDataUrl && grokApi.mode === 'compose') {
+          grokRequest.image = { url: grokLogoDataUrl, type: 'image_url' }
         }
 
         const response = await fetch(endpoint, {
@@ -2478,8 +2767,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             metadata: {
               provider: 'xai',
               providerModel,
-              action: isEdit ? 'edit' : 'generate',
-              hasInputImage: isEdit,
+              action: 'generate',
+              grokMode: grokApi.mode,
+              hasInputImage: referenceUrls.length > 0,
               referenceCount: referenceUrls.length,
               resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
               quality: GROK_IMAGE_DEFAULT_QUALITY,
@@ -2488,7 +2778,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           })
 
           return res.status(response.status).json({
-            error: 'Grok Imagine generation failed',
+            error: grokUserFacingError(
+              imageParams.language,
+              isGrokPromptLengthError(errorText) ? 'prompt_too_long' : 'failed'
+            ),
+            code: isGrokPromptLengthError(errorText) ? 'grok_prompt_too_long' : 'grok_failed',
             details: errorText,
             model: selectedModel,
             providerModel,
@@ -2509,7 +2803,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         const costOverrideUsd = estimateGrokImageCostUsd({
           outputImages: 1,
-          referenceCount: isEdit ? referenceUrls.length : 0,
+          referenceCount: referenceUrls.length,
         })
 
         await logApiUsage({
@@ -2524,7 +2818,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           metadata: {
             provider: 'xai',
             providerModel,
-            action: isEdit ? 'edit' : 'generate',
+            action: 'generate',
+            grokMode: grokApi.mode,
             width: imageParams.width,
             height: imageParams.height,
             aspectRatio: grokAspectRatio,
@@ -2568,7 +2863,19 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         return res.status(500).json({
-          error: 'Grok Imagine generation failed',
+          error: grokUserFacingError(
+            imageParams.language,
+            isGrokPromptLengthError(
+              grokError instanceof Error ? grokError.message : String(grokError)
+            )
+              ? 'prompt_too_long'
+              : 'failed'
+          ),
+          code: isGrokPromptLengthError(
+            grokError instanceof Error ? grokError.message : String(grokError)
+          )
+            ? 'grok_prompt_too_long'
+            : 'grok_failed',
           details: grokError instanceof Error ? grokError.message : 'Unknown error',
           model: selectedModel,
           providerModel,

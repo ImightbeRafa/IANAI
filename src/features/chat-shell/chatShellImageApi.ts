@@ -18,6 +18,7 @@ import {
   aspectRatioFromImageUrl,
   buildShellImageGenerateBody,
   formatImageAssumptions,
+  requiresProductReferences,
   type ShellImageAspect,
   type ShellImagePreferences,
 } from './chatShellImageIntent'
@@ -30,6 +31,24 @@ import {
   labelForReferenceRole,
   type ReferenceRole,
 } from './chatShellReferenceSelection'
+
+import { friendlyImageError } from './chatShellImageErrors'
+
+export function shellImageActionLabel(
+  actionType: MessageArtifact['action_type'],
+  language: 'en' | 'es' = 'es'
+): string {
+  if (actionType === 'optimize') {
+    return language === 'es' ? 'Optimizada para post' : 'Optimized for post'
+  }
+  if (actionType === 'enhance') {
+    return language === 'es' ? 'Mejorada' : 'Enhanced'
+  }
+  if (actionType === 'edit') {
+    return language === 'es' ? 'Editada' : 'Edited'
+  }
+  return language === 'es' ? 'Generada' : 'Generated'
+}
 
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
@@ -46,6 +65,7 @@ interface ImageApiResult {
   result?: { sample?: string }
   imageUrl?: string
   error?: string
+  code?: string
   model?: string
   providerModel?: string
   generationId?: string
@@ -68,10 +88,14 @@ async function callGenerateImageDetailed(body: Record<string, unknown>): Promise
   })
   const json = (await res.json()) as ImageApiResult
   if (!res.ok) {
-    throw new Error(json.error || 'Image generation failed')
+    const language = body.language === 'en' ? 'en' : 'es'
+    throw new Error(friendlyImageError(json.error || json.code || 'Image generation failed', language))
   }
   const sample = json.result?.sample || json.imageUrl
-  if (!sample) throw new Error('No image returned')
+  if (!sample) {
+    const language = body.language === 'en' ? 'en' : 'es'
+    throw new Error(friendlyImageError('No image returned', language))
+  }
   return {
     sample,
     model: json.model,
@@ -272,17 +296,21 @@ export async function generateShellOfferImage(options: {
     throw new Error('Choose an image style before Generate.')
   }
 
-  if (prefs.style.kind === 'product' && !options.productImageIds.length) {
+  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length) {
     throw new Error(
       'Upload at least one product reference image for this offer before Generate.'
     )
   }
 
+  const apiPrompt = prefs.style.kind === 'product'
+    ? ''
+    : (options.prompt || options.scriptText || 'Ad image')
+
   const body = buildShellImageGenerateBody({
     preferences: prefs,
     productId: options.productId,
     sessionId: options.sessionId,
-    prompt: options.prompt || options.scriptText || 'Ad image',
+    prompt: apiPrompt,
     language,
     brandKitId: options.brandKitId,
     productImageIds: options.productImageIds,
@@ -458,7 +486,7 @@ export async function editShellOfferImage(options: {
     sessionId: options.sessionId,
     productId: options.productId,
     imageSource: sample,
-    label: options.actionType === 'optimize' ? 'Optimized for post' : options.actionType === 'enhance' ? 'Enhanced' : 'Edited',
+    label: shellImageActionLabel(options.actionType, options.language || 'es'),
     actionType: options.actionType,
     userText: options.userText,
     metadata: {

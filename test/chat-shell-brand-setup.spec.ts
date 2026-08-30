@@ -120,6 +120,16 @@ describe('chatShellBrandSetup completeness', () => {
     expect(located.operations).toBe(true)
   })
 
+  it('treats a named product as offer core even without rich fields', () => {
+    const snapshot = buildBrandSetupSnapshot({
+      business: business({ name: 'Forge', sales_channels: ['messages'] }),
+      products: [product({ name: 'Arness Forge', type: 'product' })],
+      linkedKit: null,
+    })
+    expect(snapshot.offerCore).toBe(true)
+    expect(stepComplete(snapshot, 'offer')).toBe(true)
+  })
+
   it('evaluates offer core per product type', () => {
     const productOffer = product({
       name: 'Serum',
@@ -318,14 +328,15 @@ describe('strict autofill sanitizer', () => {
 })
 
 describe('settings categories', () => {
-  it('hides admin categories for regular users', () => {
+  it('hides admin categories and Preferencias de IA for regular users', () => {
     expect(settingsCategories(false).map((c) => c.id)).toEqual([
-      'general', 'ai', 'brand', 'billing', 'updates',
+      'general', 'brand', 'billing', 'updates',
     ])
     expect(settingsCategories(true).some((c) => c.id === 'admin')).toBe(true)
     expect(settingsCategories(true).some((c) => c.id === 'tickets')).toBe(true)
+    expect(settingsCategories(true).map((c) => c.id)).not.toContain('ai')
     expect(settingsCategories(true, false).map((c) => c.id)).toEqual([
-      'general', 'ai', 'brand', 'billing', 'updates',
+      'general', 'brand', 'billing', 'updates',
     ])
   })
 })

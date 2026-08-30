@@ -147,6 +147,48 @@ html.chat-shell-route *::-webkit-scrollbar {
   font: inherit;
 }
 
+/* Chat-shell form controls: override app-wide dark color-scheme */
+.chat-shell input,
+.chat-shell select,
+.chat-shell textarea,
+.chat-shell option {
+  color-scheme: inherit;
+}
+
+.chat-shell[data-theme="obsidian-light"] input,
+.chat-shell[data-theme="obsidian-light"] select,
+.chat-shell[data-theme="obsidian-light"] textarea,
+.chat-shell[data-theme="obsidian-light"] option,
+html[data-theme="obsidian-light"] .chat-shell input,
+html[data-theme="obsidian-light"] .chat-shell select,
+html[data-theme="obsidian-light"] .chat-shell textarea,
+html[data-theme="obsidian-light"] .chat-shell option {
+  color-scheme: light;
+}
+
+.chat-shell[data-theme="obsidian-dark"] input,
+.chat-shell[data-theme="obsidian-dark"] select,
+.chat-shell[data-theme="obsidian-dark"] textarea,
+.chat-shell[data-theme="obsidian-dark"] option,
+html[data-theme="obsidian-dark"] .chat-shell input,
+html[data-theme="obsidian-dark"] .chat-shell select,
+html[data-theme="obsidian-dark"] .chat-shell textarea,
+html[data-theme="obsidian-dark"] .chat-shell option {
+  color-scheme: dark;
+}
+
+.chat-shell[data-theme="obsidian-light"] option,
+html[data-theme="obsidian-light"] .chat-shell option {
+  background-color: var(--bg-elevated, #ffffff);
+  color: var(--text, #0f172a);
+}
+
+.chat-shell[data-theme="obsidian-dark"] option,
+html[data-theme="obsidian-dark"] .chat-shell option {
+  background-color: var(--bg-elevated, #151d28);
+  color: var(--text, #e2e8f0);
+}
+
 .chat-shell,
 .chat-shell * {
   scrollbar-width: none;
@@ -1072,9 +1114,16 @@ html.chat-shell-route *::-webkit-scrollbar {
   color: var(--text-faint);
   font-size: 0.68rem;
   letter-spacing: var(--chat-ui-track);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.25;
+  overflow: visible;
+}
+
+.chat-shell__modal-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  line-height: 1.35;
 }
 
 .chat-shell__avatar {

@@ -78,6 +78,7 @@ interface ChatContextRailProps {
   imagePrefs?: ShellImagePreferences
   onPatchImagePreferences?: (patch: Partial<ShellImagePreferences>) => void
   onStartLogo?: (archetype?: string) => void
+  onUploadBrandLogo?: (file: File) => void | Promise<void>
   scriptSettings?: ScriptGenerationSettings
   onScriptSettingsChange?: (settings: ScriptGenerationSettings) => void
   onGenerateScripts?: () => void
@@ -129,6 +130,7 @@ export default function ChatContextRail({
   imagePrefs,
   onPatchImagePreferences,
   onStartLogo,
+  onUploadBrandLogo,
   scriptSettings,
   onScriptSettingsChange,
   onGenerateScripts,
@@ -411,7 +413,7 @@ export default function ChatContextRail({
                             className="chat-shell__offer-btn"
                             disabled={offerBusy || index === 0}
                             onClick={() => void onMoveOffer?.(offer.product_id, -1)}
-                            aria-label={`Move ${label} up`}
+                            aria-label={`${t.moveImageUp} ${label}`}
                           >
                             ↑
                           </button>
@@ -420,7 +422,7 @@ export default function ChatContextRail({
                             className="chat-shell__offer-btn"
                             disabled={offerBusy || index === displayOffers.length - 1}
                             onClick={() => void onMoveOffer?.(offer.product_id, 1)}
-                            aria-label={`Move ${label} down`}
+                            aria-label={`${t.moveImageDown} ${label}`}
                           >
                             ↓
                           </button>
@@ -430,7 +432,7 @@ export default function ChatContextRail({
                             disabled={offerBusy || Boolean(linkedOfferIds?.has(offer.product_id))}
                             title={linkedOfferIds?.has(offer.product_id) ? t.linkedOffer : undefined}
                             onClick={() => void onRemoveOffer?.(offer.product_id)}
-                            aria-label={`Remove ${label}`}
+                            aria-label={`${t.removeImageRef} ${label}`}
                           >
                             ✕
                           </button>
@@ -535,7 +537,7 @@ export default function ChatContextRail({
                 hasOffer={displayOffers.length > 0}
               />
               <p className="chat-shell__rail-hint">{t.imagesHint}</p>
-              <div className="chat-shell__image-offer-chips" role="tablist" aria-label="Image offer">
+              <div className="chat-shell__image-offer-chips" role="tablist" aria-label={t.imageOfferTablist}>
                 {displayOffers.map((offer) => {
                   const product =
                     ('product' in offer ? offer.product : undefined)
@@ -786,13 +788,30 @@ export default function ChatContextRail({
                 {t.settings}
               </Link>
             )}
-            <button
-              type="button"
-              className="chat-shell__setup-btn"
-              onClick={() => onStartLogo?.('auto')}
-            >
-              {t.logo}
-            </button>
+            {onUploadBrandLogo ? (
+              <label className="chat-shell__setup-btn">
+                {t.logo}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  hidden
+                  disabled={imageBusy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) void onUploadBrandLogo(file)
+                  }}
+                />
+              </label>
+            ) : (
+              <button
+                type="button"
+                className="chat-shell__setup-btn"
+                onClick={() => onStartLogo?.('auto')}
+              >
+                {t.logo}
+              </button>
+            )}
           </div>
         </div>
       )}

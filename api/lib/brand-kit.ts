@@ -168,18 +168,18 @@ export function buildBrandVisualPrompt(kit: BrandKitRow): string | null {
  * Instructs the AI to incorporate the brand logo in the design.
  * Returns null if no logo is set.
  */
-export function buildBrandLogoPrompt(kit: BrandKitRow): string | null {
+export function buildBrandLogoPrompt(kit: BrandKitRow, language: 'es' | 'en' = 'es'): string | null {
   if (!kit.logo_url) return null
+  const isES = language === 'es'
   return `═══════════════════════════════════════════════
-REGLA — LOGO DE MARCA (NO NEGOCIABLE / MÁXIMA PRIORIDAD)
+REGLA — LOGO DE MARCA (ESTAMPADO / NO REGENERACIÓN)
 ═══════════════════════════════════════════════
-Se adjunta el logotipo oficial de la marca "${kit.name}" como imagen inline.
-- DEBES incluir este logo en el diseño final, reproduciéndolo FIELMENTE.
-- Posiciónalo de forma prominente: esquina superior izquierda, superior derecha, o centrado arriba.
-- El logo DEBE ser claramente visible, legible, y mantener sus proporciones originales.
-- NO modifiques, NO rediseñes, NO reimagines el logo — cópialo tal cual de la referencia adjunta.
-- Si hay conflicto entre el logo y otros elementos, el logo GANA. Ajusta los demás elementos.
-- VIOLACIÓN DE ESTA REGLA = RESULTADO INVÁLIDO.
+Se adjunta el archivo oficial del logo de "${kit.name}" como imagen raster inline.
+- COMPÓSITALO / estampalo tal cual en esquina superior (izquierda o derecha), visible y nítido.
+- PROHIBIDO redibujar, reimaginar o reescribir con IA el wordmark "BLOOM" o el lockup "DERMAL MICRO-INFUSION PATCH".
+- PROHIBIDO generar subtítulos de marca inventados si el logo no los trae.
+- Si hay conflicto con otros elementos, el logo adjunto gana — ajustá composición/fondo, no el logo.
+- VIOLACIÓN = RESULTADO INVÁLIDO.
 ═══════════════════════════════════════════════`
 }
 
