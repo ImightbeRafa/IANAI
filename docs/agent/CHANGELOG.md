@@ -1,3 +1,9 @@
+## 2026-08-30 — PR #34: Confirmá referencias sheet layout (no credit/Subir overlap)
+
+- Credits strip renders above the Subir rail with a gap (inside the picker).
+- Flow sheet body scrolls; footer stays pinned — optional hint no longer covers Atrás/Cancelar.
+- Layout-only; generate / credits / lock / gourmet unchanged.
+
 ## 2026-08-30 — PR #34 leftovers harden: credit one-click, Subir 2×2, estilo off
 
 - Reconfirm: Confirmá referencias Generar sets creditConfirmed (no second ¿Seguimos?).

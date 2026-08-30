@@ -11,6 +11,8 @@ interface ChatShellReferencePickerProps {
   language?: 'en' | 'es'
   busy?: boolean
   compact?: boolean
+  /** Shown above the Subir rail (e.g. credits) — never overlapping the buttons. */
+  creditsLine?: string | null
   onToggle: (id: string) => void
   onUpload?: (file: File, kind: ReferenceRole) => void | Promise<void>
   onRemove?: (id: string) => void | Promise<void>
@@ -29,6 +31,7 @@ export default function ChatShellReferencePicker({
   language = 'es',
   busy = false,
   compact = false,
+  creditsLine = null,
   onToggle,
   onUpload,
   onRemove,
@@ -124,6 +127,11 @@ export default function ChatShellReferencePicker({
           {es
             ? 'Todavía no hay fotos. Subí producto, escena, estilo o logo.'
             : 'No photos yet. Upload a product, scene, style, or logo.'}
+        </p>
+      ) : null}
+      {creditsLine ? (
+        <p className="chat-shell__modal-credits chat-shell__ref-picker-credits" role="status">
+          {creditsLine}
         </p>
       ) : null}
       {onUpload ? (

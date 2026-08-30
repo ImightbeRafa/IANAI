@@ -2630,11 +2630,13 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 }
 
 .chat-shell__clarify-soft-hint {
-  margin: 10px 0 0;
+  margin: 4px 0 8px;
   color: var(--muted, #8a93a6);
   font-size: 0.78rem;
   font-weight: 500;
   line-height: 1.35;
+  position: relative;
+  z-index: 0;
 }
 
 .chat-shell__btn--pill.is-on {
@@ -3449,8 +3451,10 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   gap: 8px;
   width: 100%;
   max-width: 100%;
-  margin-top: 4px;
+  margin-top: 10px;
   box-sizing: border-box;
+  position: relative;
+  z-index: 0;
 }
 
 .chat-shell__ref-picker-actions .chat-shell__btn--pill {
@@ -4611,10 +4615,11 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 .chat-shell__modal--flow {
   width: min(480px, calc(100vw - 32px));
   max-height: min(86vh, 720px);
-  overflow: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding-bottom: 12px;
 }
 
 .chat-shell__modal--flow.is-wide {
@@ -4625,6 +4630,7 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .chat-shell__modal-step {
@@ -4634,11 +4640,21 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   font-weight: 600;
 }
 
+.chat-shell__modal--flow > .chat-shell__modal-copy {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
 .chat-shell__modal-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chat-shell__modal-credits {
@@ -4650,6 +4666,26 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   color: var(--text);
   font-size: 0.82rem;
   font-weight: 600;
+  flex-shrink: 0;
+}
+
+.chat-shell__modal--flow > .chat-shell__modal-credits {
+  /* When credits sit between body and footer (non-refs), keep them out of the scroll clash. */
+  margin-top: 2px;
+}
+
+.chat-shell__modal--flow > .chat-shell__modal-actions {
+  flex-shrink: 0;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated, var(--sidebar));
+  flex-wrap: wrap;
+  z-index: 2;
+}
+
+.chat-shell__ref-picker-credits {
+  margin: 8px 0 0;
 }
 
 .chat-shell__flow-chips {

@@ -285,7 +285,7 @@ export default function ChatShellClarifySheet({
         copy={imageCopy(imageClarify, language)}
         step={meta.step}
         stepTotal={meta.total}
-        creditsLine={creditsLine}
+        creditsLine={isRefs ? null : creditsLine}
         wide={imageClarify.step === 'script'}
         onCancel={() => onCancelImageClarify?.()}
         onBack={imageClarify.history?.length ? () => onBackImageClarify?.() : null}
@@ -328,6 +328,7 @@ export default function ChatShellClarifySheet({
             currentProductId={imageClarify.productId}
             language={language}
             busy={Boolean(imageBusy)}
+            creditsLine={creditsLine}
             onToggle={(id) => onAnswerImageClarify?.({ toggleReferenceId: id })}
             onUpload={(file, kind) => void onUploadOfferReference?.(file, kind, imageClarify.productId)}
             onRemove={onRemoveOfferReference}
