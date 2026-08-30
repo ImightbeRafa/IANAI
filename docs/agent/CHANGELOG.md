@@ -1,3 +1,10 @@
+## 2026-08-30 — PR #34 Preview QA: one Generar, Subir 2×2, estilo opt-in
+
+- Confirmá referencias Generar spends on that click — no second “¿Seguimos?” credit Paso after spinner.
+- Subir producto/escena/estilo/logo: even 2×2 (4-up on wider) so logo is not an orphan row.
+- Preselect product angles only; scene/style/logo default No usar (opt-in).
+- Hide Setup de marca tracker while Pack/Post/Foto (or credit) sheet is open.
+
 ## 2026-08-30 — PR #34: no ingredients gate after Confirmá referencias Generar
 
 - Clicking Generar / Crear sin referencias on Confirmá referencias soft-skips style/logo (and all three when sin refs) so generate runs — never “falta estilo” after the spinner.

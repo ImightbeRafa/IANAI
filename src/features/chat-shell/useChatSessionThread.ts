@@ -2180,6 +2180,8 @@ export function useChatSessionThread(options: {
       if (
         (usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true')
         && !options.creditConfirmed
+        // Confirmá referencias already disclosed cost on Generar — never a second continue after spinner.
+        && options.priorClarify?.step !== 'refs'
       ) {
         const cost = quoteImageCredits(prefs.model)
         const quote = buildCreditQuote({
@@ -2717,6 +2719,8 @@ export function useChatSessionThread(options: {
             skippedIngredients: ingredientsSkippedAfterRefsConfirm(
               answer.useReferences ? 'use' : 'none'
             ),
+            // Refs sheet already showed “N créditos · imagen estándar” — same click spends, no second Paso.
+            creditConfirmed: true,
           })
           return
         } catch (err) {

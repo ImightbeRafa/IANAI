@@ -407,7 +407,7 @@ export default memo(function ChatThread({
 
   return (
     <div className="chat-shell__stage">
-      {setupCard}
+      {setupCard && !imageClarify && !scriptClarify && !creditQuote ? setupCard : null}
       <div
         className={`chat-shell__thread${loadingMessages ? ' is-busy' : ''}`}
         role="log"

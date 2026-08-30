@@ -33,8 +33,11 @@ describe('chat-shell reference selection', () => {
     expect(shouldPromptImageReferences({ styleKind: 'preset', referenceMode: 'none' })).toBe(false)
   })
 
-  it('preselects up to 3 current product angles plus one context and skips generated', () => {
-    expect(preselectOfferReferenceIds(images, 'offer-a')).toEqual(['p1', 'p2', 'p3', 'c1'])
+  it('preselects up to 3 current product angles only — scene/style/logo stay off', () => {
+    expect(preselectOfferReferenceIds(images, 'offer-a')).toEqual(['p1', 'p2', 'p3'])
+    const catalog = withPreselectedReferences(images, 'offer-a')
+    expect(catalog.find((row) => row.id === 'c1')?.selected).toBe(false)
+    expect(catalog.filter((row) => row.selected).map((row) => row.id)).toEqual(['p1', 'p2', 'p3'])
   })
 
   it('uses exact confirmed IDs without silently adding extra product photos', () => {
@@ -50,9 +53,10 @@ describe('chat-shell reference selection', () => {
     )).toEqual({ keepIds: ['p1'], copyIds: ['other'] })
   })
 
-  it('caps selection at 4 and labels saved post copy', () => {
+  it('caps selection at 4 when user opts in to more refs', () => {
     const catalog = withPreselectedReferences(images, 'offer-a')
-    const extra = toggleReferenceSelection(catalog, 'p4')
+    const withStyle = toggleReferenceSelection(catalog, 'c1')
+    const extra = toggleReferenceSelection(withStyle, 'p4')
     expect(confirmedReferenceImageIds(extra)).toHaveLength(4)
     expect(postOptimizeVersionLabel('hard', 'es')).toBe('Post · Poco texto')
     expect(shouldPersistPostOptimizeVersion({
