@@ -119,7 +119,6 @@ import {
   looksLikeSalesScript,
   parseChatShellImageIntent,
   planImageClarifications,
-  productStyleAllowsZeroReferences,
   readImagePreferences,
   requiresProductReferences,
   resolveImagePreferences,
@@ -2024,14 +2023,11 @@ export function useChatSessionThread(options: {
         options.referenceImageIds
       )
       const referencesRequired = requiresProductReferences(prefs.style)
-      let referenceMode = options.referenceMode
-      if (
-        !referenceMode
-        && productStyleAllowsZeroReferences(prefs.style)
-        && (options.source === 'rail' || options.source === 'composer')
-      ) {
-        referenceMode = 'none'
-      }
+      const referenceMode = options.referenceMode
+      // Always open Confirmá referencias for product/post/organic until the user
+      // clicks Generar / Crear sin referencias on that sheet (sets referenceMode).
+      // Do NOT auto-force 'none' for studio-hero — that skipped the sheet and
+      // dumped Foto into the ingredients gate + chat credit confirm.
       if (shouldPromptImageReferences({
         styleKind: prefs.style.kind,
         referenceMode,

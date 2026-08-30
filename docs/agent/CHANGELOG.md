@@ -1,3 +1,9 @@
+## 2026-08-30 — PR #34: Foto last step = Confirmá referencias (same as Post)
+
+- Stopped auto-forcing referenceMode=none for studio-hero/podium Foto, which skipped the refs sheet and opened the ingredients gate + chat credit confirm.
+- Foto now ends on the same Confirmá referencias sheet (Subir rail, credits above, estilo No usar, one Generar).
+- Pack already shows credits on confirm step — unchanged.
+
 ## 2026-08-30 — PR #34: Confirmá referencias sheet layout (no credit/Subir overlap)
 
 - Credits strip renders above the Subir rail with a gap (inside the picker).

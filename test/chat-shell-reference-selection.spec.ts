@@ -31,6 +31,8 @@ describe('chat-shell reference selection', () => {
     expect(shouldPromptImageReferences({ styleKind: 'logo' })).toBe(false)
     expect(shouldPromptImageReferences({ styleKind: 'preset', referenceMode: 'use' })).toBe(false)
     expect(shouldPromptImageReferences({ styleKind: 'preset', referenceMode: 'none' })).toBe(false)
+    // Foto studio-hero must still open Confirmá referencias until Generar sets mode.
+    expect(shouldPromptImageReferences({ styleKind: 'product', referenceMode: undefined })).toBe(true)
   })
 
   it('preselects up to 3 current product angles only — scene/style/logo stay off', () => {
