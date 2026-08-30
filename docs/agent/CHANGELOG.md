@@ -1,3 +1,9 @@
+## 2026-08-30 — PR #34: no ingredients gate after Confirmá referencias Generar
+
+- Clicking Generar / Crear sin referencias on Confirmá referencias soft-skips style/logo (and all three when sin refs) so generate runs — never “falta estilo” after the spinner.
+- Soft optional hint stays on the refs sheet before Generar; Subir estilo still available.
+- Keeps product_lock_scene, gourmet recipe, 8000 clamp, one-click lock.
+
 ## 2026-08-30 — PR #34 fat Preview: merge #33 gourmet + product_lock + enhance-18
 
 - Merged `cursor/chat-shell-open-all-a84d` (@0b70ff8) into #34 idle-bar Pack sheets branch (same PR, no master).

@@ -155,6 +155,7 @@ import { collectOfferEnhanceReferences, type ShellEnhanceTier } from './chatShel
 import {
   detectMissingIngredients,
   ingredientsPromptCopy,
+  ingredientsSkippedAfterRefsConfirm,
   remainingIngredients,
   shouldCheckImageIngredients,
   type IngredientKind,
@@ -2123,11 +2124,18 @@ export function useChatSessionThread(options: {
       }
 
       const skippedSet = new Set(options.skippedIngredients || [])
+      // Confirmá referencias already decided soft skips (style/logo). Never gate after spinner.
+      if (options.priorClarify?.step === 'refs') {
+        const mode = options.referenceMode === 'none' ? 'none' : 'use'
+        for (const kind of ingredientsSkippedAfterRefsConfirm(mode)) {
+          skippedSet.add(kind)
+        }
+      }
       if (shouldCheckImageIngredients(prefs.style.kind)) {
         const missing = detectMissingIngredients({
           offerImages: images,
           productId: options.productId,
-          brandLogoUrl: brandVisual.brandLogoUrl,
+          brandLogoUrl: options.brandLogoUrlOverride || brandVisual.brandLogoUrl,
           referenceMode: referenceMode === 'use' || referenceMode === 'none' ? referenceMode : undefined,
           selectedReferenceImageIds: productImageIds,
         })
@@ -2705,6 +2713,10 @@ export function useChatSessionThread(options: {
             brandLogoUrlOverride: logoUrl,
             alreadyOptimized: imageClarify.alreadyOptimized,
             priorClarify: imageClarify,
+            // Generar / Crear sin referencias on Confirmá referencias = soft-skip style/logo (never post-spinner gate).
+            skippedIngredients: ingredientsSkippedAfterRefsConfirm(
+              answer.useReferences ? 'use' : 'none'
+            ),
           })
           return
         } catch (err) {

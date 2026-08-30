@@ -17,6 +17,7 @@ import {
 import { hasSelectedProductReference } from './chatShellReferenceSelection'
 import {
   ingredientsPromptCopy,
+  refsSoftMissingHint,
   skipIngredientLabel,
   type IngredientKind,
 } from './chatShellIngredientsCheck'
@@ -268,6 +269,13 @@ export default function ChatShellClarifySheet({
     const canContinueRefs =
       !imageClarify.referencesRequired
       || hasSelectedProductReference(imageClarify.referenceImages || [])
+    const selectedRefs = (imageClarify.referenceImages || []).filter((img) => img.selected === true)
+    const hasSelectedStyle = selectedRefs.some((img) => img.kind === 'style')
+    const hasSelectedLogo = selectedRefs.some((img) => img.kind === 'logo')
+    const softMissing: Array<'logo' | 'style'> = []
+    if (isRefs && !hasSelectedStyle) softMissing.push('style')
+    if (isRefs && !hasSelectedLogo) softMissing.push('logo')
+    const softHint = isRefs ? refsSoftMissingHint(softMissing, language) : null
 
     return (
       <ChatShellFlowSheet
@@ -324,6 +332,12 @@ export default function ChatShellClarifySheet({
             onUpload={(file, kind) => void onUploadOfferReference?.(file, kind, imageClarify.productId)}
             onRemove={onRemoveOfferReference}
           />
+        ) : null}
+
+        {softHint ? (
+          <p className="chat-shell__clarify-soft-hint" role="note">
+            {softHint}
+          </p>
         ) : null}
 
         {imageClarify.step === 'script' ? (

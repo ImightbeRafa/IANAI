@@ -99,3 +99,40 @@ export function remainingIngredients(
 ): IngredientKind[] {
   return missing.filter((kind) => !skipped.has(kind))
 }
+
+/**
+ * After Confirmá referencias → Generar / Crear sin referencias, soft pieces
+ * (style, logo) are implicitly skipped. Never re-ask them post-click.
+ * Crear sin referencias also skips productPhoto.
+ */
+export function ingredientsSkippedAfterRefsConfirm(
+  referenceMode: 'use' | 'none'
+): IngredientKind[] {
+  if (referenceMode === 'none') {
+    return ['productPhoto', 'logo', 'style']
+  }
+  return ['logo', 'style']
+}
+
+/** Soft reminder copy for the refs sheet (before Generar) — never after spinner. */
+export function refsSoftMissingHint(
+  missingSoft: Array<'logo' | 'style'>,
+  language: 'en' | 'es'
+): string | null {
+  if (missingSoft.length === 0) return null
+  const es = language === 'es'
+  if (missingSoft.length === 2) {
+    return es
+      ? 'Opcional: subí estilo o logo, o Generá igual — saldrá bien con el producto.'
+      : 'Optional: upload style or logo, or Generar anyway — product alone is fine.'
+  }
+  if (missingSoft[0] === 'style') {
+    return es
+      ? 'Opcional: subí un estilo de post, o Generá sin estilo.'
+      : 'Optional: upload a post style, or Generar without style.'
+  }
+  return es
+    ? 'Opcional: subí un logo, o Generá sin logo.'
+    : 'Optional: upload a logo, or Generar without logo.'
+}
+

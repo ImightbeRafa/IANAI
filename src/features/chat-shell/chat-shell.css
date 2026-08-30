@@ -2629,6 +2629,14 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   font-weight: 650;
 }
 
+.chat-shell__clarify-soft-hint {
+  margin: 10px 0 0;
+  color: var(--muted, #8a93a6);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .chat-shell__btn--pill.is-on {
   border-color: var(--accent, #5b8def);
   color: var(--text);

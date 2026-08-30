@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   detectMissingIngredients,
   ingredientsPromptCopy,
+  ingredientsSkippedAfterRefsConfirm,
   remainingIngredients,
+  refsSoftMissingHint,
   shouldCheckImageIngredients,
   skipIngredientLabel,
 } from '../src/features/chat-shell/chatShellIngredientsCheck'
@@ -72,5 +74,36 @@ describe('chatShellIngredientsCheck', () => {
 
   it('filters skipped ingredients', () => {
     expect(remainingIngredients(['productPhoto', 'logo'], new Set(['productPhoto']))).toEqual(['logo'])
+  })
+
+  it('after Confirmá referencias Generar, soft-skips style and logo (not product)', () => {
+    expect(ingredientsSkippedAfterRefsConfirm('use')).toEqual(['logo', 'style'])
+  })
+
+  it('after Crear sin referencias, soft-skips all three so generate proceeds', () => {
+    expect(ingredientsSkippedAfterRefsConfirm('none')).toEqual(['productPhoto', 'logo', 'style'])
+  })
+
+  it('product-only use mode + soft skips leaves nothing to gate', () => {
+    const missing = detectMissingIngredients({
+      offerImages: [
+        { id: '1', product_id: 'p1', kind: 'product', label: 'Producto' },
+        { id: '2', product_id: 'p1', kind: 'context', label: 'Estilo · post ref' },
+      ],
+      productId: 'p1',
+      brandLogoUrl: null,
+      referenceMode: 'use',
+      selectedReferenceImageIds: ['1'],
+    })
+    expect(missing).toEqual(['logo', 'style'])
+    expect(
+      remainingIngredients(missing, new Set(ingredientsSkippedAfterRefsConfirm('use')))
+    ).toEqual([])
+  })
+
+  it('refs soft hint is optional copy before Generar', () => {
+    expect(refsSoftMissingHint(['style'], 'es')).toMatch(/estilo/i)
+    expect(refsSoftMissingHint(['style', 'logo'], 'es')).toMatch(/Generá/i)
+    expect(refsSoftMissingHint([], 'es')).toBeNull()
   })
 })
