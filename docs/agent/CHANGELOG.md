@@ -1,3 +1,16 @@
+## 2026-08-30 — Chat-shell idle bar glass row + Pack-family flow sheets
+
+**Area:** chat-shell
+**Files:** `ChatComposerCreateDock.tsx`, `ChatShellFlowSheet.tsx`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, `ChatThread.tsx`, `ChatShell.tsx`, `useChatSessionThread.ts`, `chatShellLabels.ts`, `chat-shell.css`, tests
+
+- Lift Brand Kit chip + Guiones/Post/Foto/Pack into one navy+cyan Apple-glass row **above** the typing card (no 3+1 wrap inside the input).
+- Typing row is placeholder + attach + mic + send only.
+- Guiones / Post / Foto / Pack share the Pack sheet family: center overlay, dim, step n/n, Back, footer Cancel (closes with nothing left in the transcript), credits line before generate primary.
+- Guiones types live in the sheet (not chat chips). Post script picker is a sheet grid (no Optimizar texto divert / empty third Cancel card). Foto sizes (Reel 9:16 / 1:1 / 4:5) use the same sheet.
+- Copy-only rename: Pack sheet title `Bulk / Pack` → `Pack`.
+
+---
+
 ## 2026-08-25 — MCP prod regression fix (0.9.5)
 
 **Area:** mcp

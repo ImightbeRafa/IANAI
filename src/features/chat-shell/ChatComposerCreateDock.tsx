@@ -41,6 +41,9 @@ function actionIcon(id: ComposerCreateActionId) {
   }
 }
 
+/**
+ * Idle-bar glass row: Brand Kit chip + Guiones/Post/Foto/Pack in one horizontal row ABOVE the typing card.
+ */
 export default function ChatComposerCreateDock({
   language,
   available,
@@ -84,7 +87,7 @@ export default function ChatComposerCreateDock({
 
   if (hidden) {
     return (
-      <div className="chat-shell__composer-lead is-collapsed" ref={rootRef}>
+      <div className="chat-shell__idle-glass is-collapsed" ref={rootRef}>
         <button
           type="button"
           className="chat-shell__composer-show"
@@ -99,14 +102,14 @@ export default function ChatComposerCreateDock({
   }
 
   return (
-    <div className="chat-shell__composer-lead is-kit" ref={rootRef}>
+    <div className="chat-shell__idle-glass" ref={rootRef}>
       {reviewOpen ? (
         <div className="chat-shell__create-popover is-rail" role="dialog" aria-label={t.reviewKit}>
           {reviewPanel}
         </div>
       ) : null}
-      <div className="chat-shell__composer-kit">
-        <div className="chat-shell__composer-kit-head">
+      <div className="chat-shell__idle-glass-row">
+        <div className="chat-shell__idle-kit">
           <button
             type="button"
             className={`chat-shell__composer-create${reviewOpen ? ' is-open' : ''}`}
@@ -118,7 +121,7 @@ export default function ChatComposerCreateDock({
           >
             <IconAdvanceMark size={16} />
           </button>
-          <p className="chat-shell__composer-kit-title">
+          <p className="chat-shell__idle-kit-title">
             <strong>{title}</strong>
           </p>
           <button
@@ -134,7 +137,7 @@ export default function ChatComposerCreateDock({
             <PanelLeftClose size={15} strokeWidth={2} aria-hidden />
           </button>
         </div>
-        <div className="chat-shell__composer-kit-actions">
+        <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle}>
           {actions.map((action) => (
             <button
               key={action.id}

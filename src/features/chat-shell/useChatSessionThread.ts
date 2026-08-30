@@ -159,6 +159,8 @@ export type ImageClarifyState = {
   preferredReferenceIds?: string[]
   alreadyOptimized?: boolean
   askStyleRef?: boolean
+  /** Prior sheet steps for Pack-family Back (no transcript). */
+  history?: ImageClarifyState[]
 }
 
 export type ImageScriptChoice = {
@@ -240,6 +242,18 @@ export type ScriptClarifyState = {
   settings: ScriptGenerationSettings
   ctaChannel?: ScriptCtaChannel
   remaining: Array<'type' | 'count' | 'cta'>
+  /** Prior sheet steps for Pack-family Back (no transcript). */
+  history?: ScriptClarifyState[]
+}
+
+function pushScriptHistory(current: ScriptClarifyState): ScriptClarifyState[] {
+  const { history: _drop, ...snapshot } = current
+  return [...(current.history || []), snapshot]
+}
+
+function pushImageHistory(current: ImageClarifyState): ImageClarifyState[] {
+  const { history: _drop, ...snapshot } = current
+  return [...(current.history || []), snapshot]
 }
 
 function explicitCtaChannel(text: string): ScriptCtaChannel | null {
@@ -1124,6 +1138,7 @@ export function useChatSessionThread(options: {
           settings: parsedScriptIntent.settings,
           ctaChannel: ctaChannel || undefined,
           remaining: missing.slice(1),
+          history: [],
         })
         setError(null)
         setNotice(null)
@@ -1343,6 +1358,7 @@ export function useChatSessionThread(options: {
     type?: ScriptFramework | 'mixed'
     count?: number
     ctaChannel?: ScriptCtaChannel
+    confirm?: boolean
   }) => {
     if (!scriptClarify || !session || scriptClarify.sessionId !== session.id) return
     const finish = async (settings: ScriptGenerationSettings, ctaChannel?: ScriptCtaChannel) => {
@@ -1361,7 +1377,23 @@ export function useChatSessionThread(options: {
         await finish(settings, ctaChannel)
         return
       }
-      setScriptClarify({ ...scriptClarify, step: next, remaining, settings, ctaChannel })
+      setScriptClarify({
+        ...scriptClarify,
+        step: next,
+        remaining,
+        settings,
+        ctaChannel,
+        history: pushScriptHistory(scriptClarify),
+      })
+    }
+    if (answer.confirm && scriptClarify.step === 'cta' && scriptClarify.ctaChannel) {
+      const channel = scriptClarify.ctaChannel
+      const settings = {
+        ...scriptClarify.settings,
+        ctaStrength: channel === 'none' ? 'none' as const : scriptClarify.settings.ctaStrength || 'sales' as const,
+      }
+      await finish(settings, channel)
+      return
     }
     if (scriptClarify.step === 'type' && answer.type) {
       await advance(settingsForScriptType(scriptClarify.settings, answer.type), scriptClarify.ctaChannel)
@@ -1377,9 +1409,56 @@ export function useChatSessionThread(options: {
         ...scriptClarify.settings,
         ctaStrength: channel === 'none' ? 'none' as const : scriptClarify.settings.ctaStrength || 'sales' as const,
       }
+      // Last step: select CTA only; primary Generar confirms (credits line visible).
+      if (scriptClarify.remaining.length === 0) {
+        setScriptClarify({
+          ...scriptClarify,
+          settings,
+          ctaChannel: channel,
+        })
+        return
+      }
       await advance(settings, channel)
     }
   }, [scriptClarify, session, send])
+
+  const backScriptClarify = useCallback(() => {
+    if (!scriptClarify?.history?.length) return
+    const prev = scriptClarify.history[scriptClarify.history.length - 1]
+    const history = scriptClarify.history.slice(0, -1)
+    setScriptClarify({ ...prev, history })
+    setNotice(null)
+  }, [scriptClarify])
+
+  const startScriptsFlow = useCallback(() => {
+    if (!session) return
+    const hasOffer =
+      planOfferGenerationWalk(offers).length > 0
+      || Boolean(session.product_id)
+      || brandProducts.some((product) => product.name !== 'Quick Use Image Studio')
+    if (!hasOffer) {
+      setScriptClarify(null)
+      setImageClarify(null)
+      setNotice(language === 'es'
+        ? 'Primero necesitás una oferta. Creala en el panel Ofertas o confirmá el setup.'
+        : 'You need an offer first. Create one in Offers or confirm setup.')
+      return
+    }
+    setImageClarify(null)
+    setNotice(null)
+    setError(null)
+    setScriptClarify({
+      sessionId: session.id,
+      step: 'type',
+      originText: language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts',
+      settings: {
+        ...DEFAULT_SCRIPT_SETTINGS,
+        model: getTextModelPreference(),
+      },
+      remaining: ['count', 'cta'],
+      history: [],
+    })
+  }, [session, offers, brandProducts, language])
 
   const retryFailedOffers = useCallback(async () => {
     if (!session || !failedBatch || sending) return
@@ -1705,6 +1784,7 @@ export function useChatSessionThread(options: {
     alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
+    priorClarify?: ImageClarifyState | null
   }) => {
     if (!session || imageBusyRef.current) return
     const originSessionId = session.id
@@ -1769,6 +1849,7 @@ export function useChatSessionThread(options: {
           referenceImages: catalog,
           preferredReferenceIds: options.referenceImageIds,
           alreadyOptimized: options.alreadyOptimized,
+          history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
         })
         setNotice(language === 'es'
           ? 'Confirmá producto, contexto y referencias. Hay varios ángulos — elegí los que retratan lo que querés.'
@@ -1797,6 +1878,7 @@ export function useChatSessionThread(options: {
           referencesRequired: true,
           referenceImages: catalog,
           alreadyOptimized: options.alreadyOptimized,
+          history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
         })
         setNotice(
           language === 'es'
@@ -1969,6 +2051,7 @@ export function useChatSessionThread(options: {
         source: options.source,
         partial: options.explicit || {},
         scriptChoices,
+        history: [],
       })
       setNotice(language === 'es'
         ? 'Elegí el guion exacto que querés convertir en post.'
@@ -2018,6 +2101,7 @@ export function useChatSessionThread(options: {
         askStyleRef,
         alreadyOptimized: options.alreadyOptimized,
         preferredReferenceIds: options.referenceImageIds,
+        history: [],
       })
       setNotice(
         preferOrganic
@@ -2044,6 +2128,7 @@ export function useChatSessionThread(options: {
         askStyleRef,
         alreadyOptimized: options.alreadyOptimized,
         preferredReferenceIds: options.referenceImageIds,
+        history: [],
       })
       setNotice(language === 'es'
         ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
@@ -2066,6 +2151,7 @@ export function useChatSessionThread(options: {
         askStyleRef,
         alreadyOptimized: options.alreadyOptimized,
         preferredReferenceIds: options.referenceImageIds,
+        history: [],
       })
       setNotice(language === 'es'
         ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
@@ -2128,6 +2214,7 @@ export function useChatSessionThread(options: {
         scriptText: choice.scriptText,
         scriptTitle: choice.title,
         scriptChoices: undefined,
+        history: pushImageHistory(imageClarify),
       })
       setNotice(preferOrganic
         ? (language === 'es' ? `Guion seleccionado: ${choice.title}. Elegí el estilo orgánico.` : `Selected script: ${choice.title}. Pick the organic style.`)
@@ -2190,6 +2277,7 @@ export function useChatSessionThread(options: {
           referenceMode: answer.useReferences ? 'use' : 'none',
           referenceImageIds: answer.useReferences ? referenceImageIds : [],
           alreadyOptimized: imageClarify.alreadyOptimized,
+          priorClarify: imageClarify,
         })
         return
       }
@@ -2218,6 +2306,7 @@ export function useChatSessionThread(options: {
           scriptTitle: imageClarify.scriptTitle,
           source: imageClarify.source,
           referenceMode: 'none',
+          priorClarify: imageClarify,
         })
       }
       return
@@ -2236,6 +2325,7 @@ export function useChatSessionThread(options: {
           skipStyleRef: true,
           alreadyOptimized: imageClarify.alreadyOptimized,
           referenceImageIds: imageClarify.preferredReferenceIds,
+          priorClarify: imageClarify,
         })
       }
       return
@@ -2258,6 +2348,7 @@ export function useChatSessionThread(options: {
           step: 'density',
           partial: { ...imageClarify.partial, aspectRatio: answer.aspectRatio },
           preferences: resolved,
+          history: pushImageHistory(imageClarify),
         })
         setNotice(language === 'es'
           ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
@@ -2275,6 +2366,7 @@ export function useChatSessionThread(options: {
         askStyleRef: imageClarify.askStyleRef,
         alreadyOptimized: imageClarify.alreadyOptimized,
         referenceImageIds: imageClarify.preferredReferenceIds,
+        priorClarify: imageClarify,
       })
       return
     }
@@ -2295,6 +2387,7 @@ export function useChatSessionThread(options: {
         askStyleRef: imageClarify.askStyleRef,
         alreadyOptimized: imageClarify.alreadyOptimized,
         referenceImageIds: imageClarify.preferredReferenceIds,
+        priorClarify: imageClarify,
       })
       return
     }
@@ -2304,6 +2397,7 @@ export function useChatSessionThread(options: {
         ...imageClarify,
         step: 'style',
         mode: answer.mode,
+        history: pushImageHistory(imageClarify),
       })
       setNotice(
         answer.mode === 'product'
@@ -2335,6 +2429,7 @@ export function useChatSessionThread(options: {
           step: 'aspect',
           partial: { ...imageClarify.partial, style },
           preferences: resolved,
+          history: pushImageHistory(imageClarify),
         })
         setNotice(language === 'es'
           ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
@@ -2351,6 +2446,7 @@ export function useChatSessionThread(options: {
           step: 'density',
           partial: { ...imageClarify.partial, style },
           preferences: resolved,
+          history: pushImageHistory(imageClarify),
         })
         setNotice(language === 'es'
           ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
@@ -2368,9 +2464,47 @@ export function useChatSessionThread(options: {
         askStyleRef: imageClarify.askStyleRef,
         alreadyOptimized: imageClarify.alreadyOptimized,
         referenceImageIds: imageClarify.preferredReferenceIds,
+        priorClarify: imageClarify,
       })
     }
   }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate, userId, refreshOfferImages])
+
+  const backImageClarify = useCallback(() => {
+    if (!imageClarify?.history?.length) return
+    const prev = imageClarify.history[imageClarify.history.length - 1]
+    const history = imageClarify.history.slice(0, -1)
+    setImageClarify({ ...prev, history })
+    setNotice(null)
+  }, [imageClarify])
+
+  const startPostFlow = useCallback(() => {
+    setScriptClarify(null)
+    setNotice(null)
+    void beginImageFlowRef.current({
+      productId: activeImageOfferId || offerProductId,
+      prompt: language === 'es' ? 'Quiero crear un post' : 'I want to create a post',
+      userText: language === 'es' ? 'Quiero crear un post' : 'I want to create a post',
+      source: 'composer',
+    })
+  }, [activeImageOfferId, offerProductId, language])
+
+  const startProductFotoFlow = useCallback(() => {
+    setScriptClarify(null)
+    setNotice(null)
+    const explicit = { style: { kind: 'product' as const, productSubStyle: 'studio-hero' } }
+    setImagePrefs((prev) => {
+      const next = resolveImagePreferences(explicit, prev)
+      if (sessionId) writeImagePreferences(storage, sessionId, next)
+      return next
+    })
+    void beginImageFlowRef.current({
+      productId: activeImageOfferId || offerProductId,
+      prompt: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
+      userText: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
+      source: 'composer',
+      explicit,
+    })
+  }, [activeImageOfferId, offerProductId, language, sessionId, storage])
 
   const removeOfferImage = useCallback(async (imageId: string) => {
     if (!session || !activeImageOfferId || imageBusyRef.current) return
@@ -2735,12 +2869,17 @@ export function useChatSessionThread(options: {
     patchImagePreferences,
     imageClarify,
     answerImageClarify,
+    backImageClarify,
     cancelImageClarify: () => {
       setImageClarify(null)
       setNotice(null)
     },
     scriptClarify,
     answerScriptClarify,
+    backScriptClarify,
+    startScriptsFlow,
+    startPostFlow,
+    startProductFotoFlow,
     cancelScriptClarify: () => {
       setScriptClarify(null)
       setNotice(null)

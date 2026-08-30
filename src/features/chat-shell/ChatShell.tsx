@@ -631,11 +631,13 @@ export default function ChatShell({
           imageClarify={thread.imageClarify}
           onAnswerImageClarify={(answer) => void thread.answerImageClarify(answer)}
           onCancelImageClarify={() => thread.cancelImageClarify()}
+          onBackImageClarify={() => thread.backImageClarify()}
           scriptClarify={thread.scriptClarify}
           onSelectImageOffer={thread.selectImageOffer}
           onLatestVersionChange={thread.registerScriptSnapshot}
           onAnswerScriptClarify={(answer) => void thread.answerScriptClarify(answer)}
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
+          onBackScriptClarify={() => thread.backScriptClarify()}
           onOpenImagesRail={() => selectRailTab('images')}
           onUploadOfferReference={(file, kind, productId) => thread.uploadOfferImage(file, productId, kind)}
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
@@ -678,7 +680,7 @@ export default function ChatShell({
                   disabled: brandSetup.busy || thread.loadingMessages,
                   onClick: () => {
                     thread.cancelImageClarify()
-                    void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                    thread.startScriptsFlow()
                   },
                 },
                 {
@@ -688,7 +690,7 @@ export default function ChatShell({
                   disabled: brandSetup.busy || thread.loadingMessages,
                   onClick: () => {
                     thread.cancelScriptClarify()
-                    void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                    thread.startPostFlow()
                   },
                 },
                 {
@@ -698,8 +700,7 @@ export default function ChatShell({
                   disabled: brandSetup.busy || thread.loadingMessages,
                   onClick: () => {
                     thread.cancelScriptClarify()
-                    patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
-                    void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                    thread.startProductFotoFlow()
                   },
                 },
                 {
@@ -727,16 +728,15 @@ export default function ChatShell({
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
                 thread.cancelImageClarify()
-                void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                thread.startScriptsFlow()
               }}
               onCreatePost={() => {
                 thread.cancelScriptClarify()
-                void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                thread.startPostFlow()
               }}
               onCreateProductPhoto={() => {
                 thread.cancelScriptClarify()
-                patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
-                void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                thread.startProductFotoFlow()
               }}
               onCreateOther={() => void thread.persistTurn(
                 'assistant',

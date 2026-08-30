@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   clampComposerBulkCount,
   fetchBulkAngles,
@@ -8,6 +8,7 @@ import {
   type BulkAnglesResponse,
   type StyleDna,
 } from './chatShellBulk'
+import ChatShellFlowSheet from './ChatShellFlowSheet'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 
 interface ChatShellBulkDialogProps {
@@ -32,7 +33,6 @@ export default function ChatShellBulkDialog({
   onDone,
 }: ChatShellBulkDialogProps) {
   const t = shellT(language)
-  const titleId = useId()
   const es = language === 'es'
   const [count, setCount] = useState(clampComposerBulkCount(initialCount))
   const [mode, setMode] = useState<'scripts' | 'campaign'>('scripts')
@@ -42,6 +42,7 @@ export default function ChatShellBulkDialog({
   const [busy, setBusy] = useState<'angles' | 'run' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
+  const [step, setStep] = useState<1 | 2>(1)
 
   useEffect(() => {
     if (!open) return
@@ -51,25 +52,17 @@ export default function ChatShellBulkDialog({
     setError(null)
     setProgress(null)
     setBusy(null)
+    setStep(1)
   }, [open, initialCount])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) {
-        event.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [busy, onClose, open])
 
   if (!open) return null
 
   const selectedAngles: AngleBoardItem[] = (board?.angles || []).filter((angle) => selected.includes(angle.id))
   const quote = mode === 'campaign' ? board?.quoteCampaign : board?.quoteScripts
   const styleDnas: StyleDna[] = board?.styleDnas || []
+  const creditsLine = quote
+    ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
+    : null
 
   async function loadAngles() {
     setBusy('angles')
@@ -84,6 +77,7 @@ export default function ChatShellBulkDialog({
       })
       setBoard(next)
       setSelected(next.angles.map((angle) => angle.id))
+      setStep(2)
     } catch (err) {
       setError(err instanceof Error ? err.message : t.bulkFailed)
     } finally {
@@ -134,138 +128,114 @@ export default function ChatShellBulkDialog({
   }
 
   return (
-    <div className="chat-shell__modal-root" role="presentation">
-      <button
-        type="button"
-        className="chat-shell__modal-backdrop"
-        aria-label={t.cancel}
-        disabled={busy === 'run'}
-        onClick={() => {
-          if (!busy) onClose()
-        }}
+    <ChatShellFlowSheet
+      open={open}
+      language={language}
+      title={t.bulkTitle}
+      copy={t.bulkCopy}
+      step={step}
+      stepTotal={2}
+      creditsLine={step === 2 ? creditsLine : null}
+      wide
+      onCancel={onClose}
+      onBack={step === 2 ? () => { setStep(1); setError(null) } : null}
+      cancelDisabled={busy === 'run'}
+      secondary={{
+        label: busy === 'angles' ? t.generating : t.bulkPropose,
+        disabled: Boolean(busy),
+        onClick: () => void loadAngles(),
+      }}
+      primary={{
+        label: busy === 'run' ? t.generating : t.bulkConfirm,
+        disabled: Boolean(busy) || selectedAngles.length === 0,
+        onClick: () => void confirmRun(),
+      }}
+    >
+      <label className="chat-shell__modal-label" htmlFor="chat-shell-bulk-count">
+        {t.bulkCount}
+      </label>
+      <input
+        id="chat-shell-bulk-count"
+        className="chat-shell__modal-input"
+        type="number"
+        min={2}
+        max={25}
+        value={count}
+        disabled={Boolean(busy)}
+        onChange={(event) => setCount(clampComposerBulkCount(event.target.value))}
       />
-      <div
-        className="chat-shell__modal chat-shell__modal--bulk"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-      >
-        <h2 id={titleId} className="chat-shell__modal-title">{t.bulkTitle}</h2>
-        <p className="chat-shell__modal-copy">{t.bulkCopy}</p>
 
-        <label className="chat-shell__modal-label" htmlFor={`${titleId}-count`}>
-          {t.bulkCount}
-        </label>
-        <input
-          id={`${titleId}-count`}
-          className="chat-shell__modal-input"
-          type="number"
-          min={2}
-          max={25}
-          value={count}
+      <div className="chat-shell__bulk-modes">
+        <button
+          type="button"
+          className={`chat-shell__btn chat-shell__btn--pill${mode === 'scripts' ? ' is-on' : ''}`}
           disabled={Boolean(busy)}
-          onChange={(event) => setCount(clampComposerBulkCount(event.target.value))}
-        />
-
-        <div className="chat-shell__bulk-modes">
-          <button
-            type="button"
-            className={`chat-shell__btn chat-shell__btn--pill${mode === 'scripts' ? ' is-on' : ''}`}
-            disabled={Boolean(busy)}
-            onClick={() => setMode('scripts')}
-          >
-            {t.bulkScriptsOnly}
-          </button>
-          <button
-            type="button"
-            className={`chat-shell__btn chat-shell__btn--pill${mode === 'campaign' ? ' is-on' : ''}`}
-            disabled={Boolean(busy)}
-            onClick={() => setMode('campaign')}
-          >
-            {t.bulkCampaign}
-          </button>
-        </div>
-
-        {styleDnas.length > 0 ? (
-          <>
-            <label className="chat-shell__modal-label" htmlFor={`${titleId}-dna`}>
-              {t.bulkStyleDna}
-            </label>
-            <select
-              id={`${titleId}-dna`}
-              className="chat-shell__modal-input"
-              value={styleDnaId}
-              disabled={Boolean(busy)}
-              onChange={(event) => setStyleDnaId(event.target.value)}
-            >
-              <option value="">{t.bulkStyleDnaNone}</option>
-              {styleDnas.map((dna) => (
-                <option key={dna.id} value={dna.id}>{dna.name} ({dna.kind})</option>
-              ))}
-            </select>
-          </>
-        ) : null}
-
-        {board ? (
-          <ul className="chat-shell__bulk-angles">
-            {board.angles.map((angle) => (
-              <li key={angle.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(angle.id)}
-                    disabled={Boolean(busy)}
-                    onChange={() => {
-                      setSelected((prev) => (
-                        prev.includes(angle.id)
-                          ? prev.filter((id) => id !== angle.id)
-                          : [...prev, angle.id]
-                      ))
-                    }}
-                  />
-                  <span>
-                    <strong>{angle.title}</strong>
-                    <small>{angle.niche} · {angle.hookStyle}</small>
-                    <em>{angle.whyItBuys}</em>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="chat-shell__modal-copy">{t.bulkNeedBoard}</p>
-        )}
-
-        {quote ? (
-          <p className="chat-shell__bulk-quote">
-            {t.bulkQuote}: {quote.totalCredits} · {quote.note}
-          </p>
-        ) : null}
-        {progress ? <p className="chat-shell__modal-copy">{progress}</p> : null}
-        {error ? <p className="chat-shell__modal-error">{error}</p> : null}
-
-        <div className="chat-shell__modal-actions">
-          <button type="button" className="chat-shell__modal-btn" disabled={busy === 'run'} onClick={onClose}>
-            {t.cancel}
-          </button>
-          <button
-            type="button"
-            className="chat-shell__modal-btn"
-            disabled={Boolean(busy)}
-            onClick={() => void loadAngles()}
-          >
-            {busy === 'angles' ? t.generating : t.bulkPropose}
-          </button>
-          <button
-            type="button"
-            className="chat-shell__modal-btn is-primary"
-            disabled={Boolean(busy) || selectedAngles.length === 0}
-            onClick={() => void confirmRun()}
-          >
-            {busy === 'run' ? t.generating : t.bulkConfirm}
-          </button>
-        </div>
+          onClick={() => setMode('scripts')}
+        >
+          {t.bulkScriptsOnly}
+        </button>
+        <button
+          type="button"
+          className={`chat-shell__btn chat-shell__btn--pill${mode === 'campaign' ? ' is-on' : ''}`}
+          disabled={Boolean(busy)}
+          onClick={() => setMode('campaign')}
+        >
+          {t.bulkCampaign}
+        </button>
       </div>
-    </div>
+
+      {styleDnas.length > 0 ? (
+        <>
+          <label className="chat-shell__modal-label" htmlFor="chat-shell-bulk-dna">
+            {t.bulkStyleDna}
+          </label>
+          <select
+            id="chat-shell-bulk-dna"
+            className="chat-shell__modal-input"
+            value={styleDnaId}
+            disabled={Boolean(busy)}
+            onChange={(event) => setStyleDnaId(event.target.value)}
+          >
+            <option value="">{t.bulkStyleDnaNone}</option>
+            {styleDnas.map((dna) => (
+              <option key={dna.id} value={dna.id}>{dna.name} ({dna.kind})</option>
+            ))}
+          </select>
+        </>
+      ) : null}
+
+      {board ? (
+        <ul className="chat-shell__bulk-angles">
+          {board.angles.map((angle) => (
+            <li key={angle.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(angle.id)}
+                  disabled={Boolean(busy)}
+                  onChange={() => {
+                    setSelected((prev) => (
+                      prev.includes(angle.id)
+                        ? prev.filter((id) => id !== angle.id)
+                        : [...prev, angle.id]
+                    ))
+                  }}
+                />
+                <span>
+                  <strong>{angle.title}</strong>
+                  <small>{angle.niche} · {angle.hookStyle}</small>
+                  <em>{angle.whyItBuys}</em>
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="chat-shell__modal-copy">{t.bulkNeedBoard}</p>
+      )}
+
+      {progress ? <p className="chat-shell__modal-copy">{progress}</p> : null}
+      {error ? <p className="chat-shell__modal-error">{error}</p> : null}
+    </ChatShellFlowSheet>
   )
 }
