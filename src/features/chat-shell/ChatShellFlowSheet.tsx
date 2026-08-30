@@ -27,7 +27,8 @@ interface ChatShellFlowSheetProps {
 }
 
 /**
- * Pack-family center overlay: dim backdrop, title, step n/n, body, footer Cancel / Back / secondary / primary.
+ * Pack-family center overlay: dim backdrop, title, step n/n, body,
+ * footer order Atrás · Cancelar · secondary · primary (when present).
  * Cancel must close with no transcript side effects (caller owns cleanup).
  */
 export default function ChatShellFlowSheet({
@@ -99,14 +100,6 @@ export default function ChatShellFlowSheet({
           </p>
         ) : null}
         <div className="chat-shell__modal-actions">
-          <button
-            type="button"
-            className="chat-shell__modal-btn"
-            disabled={cancelDisabled}
-            onClick={onCancel}
-          >
-            {t.cancel}
-          </button>
           {onBack ? (
             <button
               type="button"
@@ -117,6 +110,14 @@ export default function ChatShellFlowSheet({
               {t.flowBack}
             </button>
           ) : null}
+          <button
+            type="button"
+            className="chat-shell__modal-btn"
+            disabled={cancelDisabled}
+            onClick={onCancel}
+          >
+            {t.cancel}
+          </button>
           {secondary ? (
             <button
               type="button"

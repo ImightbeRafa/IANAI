@@ -156,7 +156,8 @@ export default function ChatShellClarifySheet({
     const meta = scriptStepIndex(scriptClarify)
     const count = Math.max(1, scriptClarify.settings.variations || 1)
     const credits = CREDIT_WEIGHTS.guion_oferta * count
-    const creditsLine = scriptClarify.step === 'cta'
+    const isCtaStep = scriptClarify.step === 'cta'
+    const creditsLine = isCtaStep
       ? t.flowCreditsScript.replace('{n}', String(credits)).replace('{count}', String(count))
       : null
     const question =
@@ -165,6 +166,8 @@ export default function ChatShellClarifySheet({
         : scriptClarify.step === 'count'
           ? t.flowPickCount
           : t.flowPickCta
+    // CTA chips only select; Generar primary confirms. Show primary once a chip is picked.
+    const ctaPicked = Boolean(scriptClarify.ctaChannel)
 
     return (
       <ChatShellFlowSheet
@@ -178,7 +181,7 @@ export default function ChatShellClarifySheet({
         onCancel={() => onCancelScriptClarify?.()}
         onBack={scriptClarify.history?.length ? () => onBackScriptClarify?.() : null}
         primary={
-          scriptClarify.step === 'cta' && scriptClarify.ctaChannel
+          isCtaStep && ctaPicked
             ? {
                 label: t.flowGenerate,
                 onClick: () => onAnswerScriptClarify?.({ confirm: true }),

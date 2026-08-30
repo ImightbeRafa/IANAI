@@ -64,6 +64,49 @@ describe('ChatShellClarifySheet', () => {
     expect(screen.getByRole('button', { name: 'Atrás' })).toBeTruthy()
   })
 
+  it('keeps credits on Guiones Paso 3 and shows Generar only after CTA pick', async () => {
+    const user = userEvent.setup()
+    const onAnswer = vi.fn()
+    const { rerender } = render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={scriptState({
+          step: 'cta',
+          remaining: [],
+          history: [scriptState()],
+        })}
+        imageClarify={null}
+        onAnswerScriptClarify={onAnswer}
+        onBackScriptClarify={vi.fn()}
+      />
+    )
+    expect(screen.getByText(/créditos/i)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Generar' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Comprar en web' }))
+    expect(onAnswer).toHaveBeenCalledWith({ ctaChannel: 'website' })
+
+    rerender(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={scriptState({
+          step: 'cta',
+          remaining: [],
+          ctaChannel: 'website',
+          history: [scriptState()],
+        })}
+        imageClarify={null}
+        onAnswerScriptClarify={onAnswer}
+        onBackScriptClarify={vi.fn()}
+      />
+    )
+    expect(screen.getByText(/créditos/i)).toBeTruthy()
+    const generar = screen.getByRole('button', { name: 'Generar' })
+    expect(generar).toBeTruthy()
+    const footer = generar.closest('.chat-shell__modal-actions')
+    const labels = Array.from(footer?.querySelectorAll('button') || []).map((btn) => btn.textContent)
+    expect(labels).toEqual(['Atrás', 'Cancelar', 'Generar'])
+  })
+
   it('renders Post script picker as a sheet grid with footer Cancel only', () => {
     render(
       <ChatShellClarifySheet
@@ -145,5 +188,9 @@ describe('ChatShellClarifySheet', () => {
     expect(screen.getByText(/Paso 2 de/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Atrás' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Reel/ })).toBeTruthy()
+    const atras = screen.getByRole('button', { name: 'Atrás' })
+    const footer = atras.closest('.chat-shell__modal-actions')
+    const labels = Array.from(footer?.querySelectorAll('button') || []).map((btn) => btn.textContent)
+    expect(labels).toEqual(['Atrás', 'Cancelar'])
   })
 })

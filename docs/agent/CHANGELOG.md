@@ -1,3 +1,14 @@
+## 2026-08-30 — Pack-sheet footer / CTA primary / Pack credits (Rafael GO)
+
+**Area:** chat-shell
+**Files:** `ChatShellFlowSheet.tsx`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, tests
+
+- Footer order: Atrás · Cancelar · primary (when present).
+- Guiones Paso 3: CTA chip selects only; Generar primary appears after pick; credits stay visible.
+- Pack Confirmar y generar only with a credits line (step 2 quote / estimate).
+
+---
+
 ## 2026-08-30 — Pack-sheet nits (leak / one-card / Back / glass)
 
 **Area:** chat-shell

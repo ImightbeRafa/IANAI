@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { CREDIT_WEIGHTS } from '../../lib/creditsCatalog'
 import {
   clampComposerBulkCount,
   fetchBulkAngles,
@@ -60,8 +61,17 @@ export default function ChatShellBulkDialog({
   const selectedAngles: AngleBoardItem[] = (board?.angles || []).filter((angle) => selected.includes(angle.id))
   const quote = mode === 'campaign' ? board?.quoteCampaign : board?.quoteScripts
   const styleDnas: StyleDna[] = board?.styleDnas || []
-  const creditsLine = quote
-    ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
+  const units = selectedAngles.length > 0 ? selectedAngles.length : count
+  const estimatedCredits = mode === 'campaign'
+    ? units * (CREDIT_WEIGHTS.guion_oferta + CREDIT_WEIGHTS.image_standard)
+    : units * CREDIT_WEIGHTS.guion_oferta
+  // Confirmar y generar only with a credits line visible (same family as Guiones last step).
+  const creditsLine = step === 2 && board
+    ? (quote
+      ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
+      : (es
+        ? `${estimatedCredits} créditos · máximo estimado`
+        : `${estimatedCredits} credits · estimated maximum`))
     : null
 
   async function loadAngles() {
@@ -86,7 +96,7 @@ export default function ChatShellBulkDialog({
   }
 
   async function confirmRun() {
-    if (!board || selectedAngles.length === 0) return
+    if (!board || selectedAngles.length === 0 || !creditsLine) return
     setBusy('run')
     setError(null)
     setProgress(es ? 'Generando…' : 'Generating…')
@@ -135,7 +145,7 @@ export default function ChatShellBulkDialog({
       copy={t.bulkCopy}
       step={step}
       stepTotal={2}
-      creditsLine={step === 2 ? creditsLine : null}
+      creditsLine={creditsLine}
       wide
       onCancel={onClose}
       onBack={step === 2 ? () => { setStep(1); setError(null) } : null}
@@ -145,11 +155,15 @@ export default function ChatShellBulkDialog({
         disabled: Boolean(busy),
         onClick: () => void loadAngles(),
       }}
-      primary={{
-        label: busy === 'run' ? t.generating : t.bulkConfirm,
-        disabled: Boolean(busy) || selectedAngles.length === 0,
-        onClick: () => void confirmRun(),
-      }}
+      primary={
+        creditsLine
+          ? {
+              label: busy === 'run' ? t.generating : t.bulkConfirm,
+              disabled: Boolean(busy) || selectedAngles.length === 0,
+              onClick: () => void confirmRun(),
+            }
+          : null
+      }
     >
       <label className="chat-shell__modal-label" htmlFor="chat-shell-bulk-count">
         {t.bulkCount}
