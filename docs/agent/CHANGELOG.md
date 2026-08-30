@@ -1,3 +1,14 @@
+## 2026-08-30 — Post Generar: never fail-closed on 8000 (PR #34 P0)
+
+**Area:** chat-shell / generate-image
+**Files:** `api/lib/grok-image-prompt.ts`, `api/generate-image.ts`, `chatShellImageErrors.ts`, tests
+
+- SAFE clamp 7500 + drop business-context dumps / format essays; keep product-fidelity + short copy.
+- On Grok prompt-too-long: auto-retry at 6000 once. Never UI “Acortá el guion”.
+- Cap injected `businessContext` to 1200 chars at assembly.
+
+---
+
 ## 2026-08-30 — Post Generar: Grok 8000 cap + single-flight (PR #34 P0)
 
 **Area:** chat-shell / generate-image

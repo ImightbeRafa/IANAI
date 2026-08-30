@@ -36,6 +36,7 @@ import {
 } from './lib/grok-models.js'
 import { runGrokImageEdit } from './lib/grok-image-edit.js'
 import {
+  GROK_IMAGE_RETRY_PROMPT_LENGTH,
   isGrokPromptLengthError,
   prepareGrokImagePrompt,
 } from './lib/grok-image-prompt.js'
@@ -1618,9 +1619,11 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         if (voice) brandVoicePrefix = voice + '\n\n'
       }
       if (typeof imageParams.businessContext === 'string' && imageParams.businessContext.trim()) {
+        // Cap session context dump — full dumps blow Grok's 8000 budget; fidelity is in product refs.
+        const ctx = imageParams.businessContext.trim().slice(0, 1_200)
         brandVoicePrefix += postLanguage === 'en'
-          ? `=== VERIFIED BUSINESS AND OFFER CONTEXT (DO NOT RENDER THIS BLOCK) ===\n${imageParams.businessContext.trim()}\nUse this only for factual accuracy, audience fit, and offer consistency. Never invent a conflicting product, price, promise, or brand.\n\n`
-          : `=== CONTEXTO VERIFICADO DEL NEGOCIO Y LA OFERTA (NO RENDERIZAR ESTE BLOQUE) ===\n${imageParams.businessContext.trim()}\nUsalo solo para precisión factual, afinidad con el público y coherencia de la oferta. Nunca inventes un producto, precio, promesa o marca que lo contradiga.\n\n`
+          ? `=== VERIFIED BUSINESS AND OFFER CONTEXT (DO NOT RENDER THIS BLOCK) ===\n${ctx}\nUse this only for factual accuracy, audience fit, and offer consistency. Never invent a conflicting product, price, promise, or brand.\n\n`
+          : `=== CONTEXTO VERIFICADO DEL NEGOCIO Y LA OFERTA (NO RENDERIZAR ESTE BLOQUE) ===\n${ctx}\nUsalo solo para precisión factual, afinidad con el público y coherencia de la oferta. Nunca inventes un producto, precio, promesa o marca que lo contradiga.\n\n`
       }
 
       // Brand Kit: inject logo prompt for image generation
@@ -2428,10 +2431,9 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         .filter((row): row is { url: string; role: ImageReferenceRole } => Boolean(row))
       const referenceUrls = selectGrokReferenceBudget(grokRefCandidates, 3).map((row) => row.url)
 
-      const preparedGrokPrompt = prepareGrokImagePrompt(enhancedPrompt, {
-        preferTail: typeof userPrompt === 'string' ? userPrompt : '',
-      })
-      const grokPrompt = preparedGrokPrompt.prompt
+      const preferTail = typeof userPrompt === 'string' ? userPrompt : ''
+      let preparedGrokPrompt = prepareGrokImagePrompt(enhancedPrompt, { preferTail })
+      let grokPrompt = preparedGrokPrompt.prompt
 
       console.log('Submitting to Grok Imagine 2.0 API:', {
         prompt: grokPrompt.substring(0, 100) + '...',
@@ -2458,38 +2460,58 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         }
 
         const isEdit = referenceUrls.length > 0
-        const grokRequest: Record<string, unknown> = {
-          model: providerModel,
-          prompt: grokPrompt,
-          n: 1,
-          response_format: 'b64_json',
-          aspect_ratio: grokAspectRatio,
-          resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
-          quality: GROK_IMAGE_DEFAULT_QUALITY,
-        }
-
-        let endpoint = GROK_IMAGE_GENERATIONS_URL
-        if (isEdit) {
-          endpoint = GROK_IMAGE_EDITS_URL
-          // Official edit shape: one `image` or multi `images` with { url, type }
-          if (referenceUrls.length === 1) {
-            grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
-          } else {
-            grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
+        const buildGrokRequest = (prompt: string): Record<string, unknown> => {
+          const grokRequest: Record<string, unknown> = {
+            model: providerModel,
+            prompt,
+            n: 1,
+            response_format: 'b64_json',
+            aspect_ratio: grokAspectRatio,
+            resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
+            quality: GROK_IMAGE_DEFAULT_QUALITY,
           }
+          if (isEdit) {
+            if (referenceUrls.length === 1) {
+              grokRequest.image = { url: referenceUrls[0], type: 'image_url' }
+            } else {
+              grokRequest.images = referenceUrls.map((url) => ({ url, type: 'image_url' }))
+            }
+          }
+          return grokRequest
         }
 
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${xaiApiKey}`
-          },
-          body: JSON.stringify(grokRequest)
-        })
+        const endpoint = isEdit ? GROK_IMAGE_EDITS_URL : GROK_IMAGE_GENERATIONS_URL
+
+        const postGrok = async (prompt: string) => {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${xaiApiKey}`
+            },
+            body: JSON.stringify(buildGrokRequest(prompt))
+          })
+          const errorText = response.ok ? '' : await response.text()
+          return { response, errorText }
+        }
+
+        let { response, errorText } = await postGrok(grokPrompt)
+
+        // If Grok still rejects length after SAFE clamp, auto-retry harder — never ask user to shorten.
+        if (!response.ok && isGrokPromptLengthError(errorText)) {
+          preparedGrokPrompt = prepareGrokImagePrompt(enhancedPrompt, {
+            preferTail,
+            maxLength: GROK_IMAGE_RETRY_PROMPT_LENGTH,
+          })
+          grokPrompt = preparedGrokPrompt.prompt
+          console.warn('Grok prompt-too-long; retrying with aggressive clamp:', {
+            promptLength: preparedGrokPrompt.preparedLength,
+            referenceCount: referenceUrls.length,
+          })
+          ;({ response, errorText } = await postGrok(grokPrompt))
+        }
 
         if (!response.ok) {
-          const errorText = await response.text()
           console.error('Grok Imagine API error:', errorText)
 
           await logApiUsage({
@@ -2509,18 +2531,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
               resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
               quality: GROK_IMAGE_DEFAULT_QUALITY,
               costSource: 'unavailable',
+              promptLength: preparedGrokPrompt.preparedLength,
             }
           })
 
+          // Never tell the user to shorten the guion — clamp already ran.
           return res.status(response.status).json({
-            error: isGrokPromptLengthError(errorText)
-              ? (imageParams.language === 'en'
-                ? 'The image prompt is too long for Grok (max 8000 characters). Shorten the script or instructions and try again.'
-                : 'El texto del prompt es demasiado largo para Grok (máximo 8000 caracteres). Acortá el guion o las instrucciones e intentá de nuevo.')
-              : (imageParams.language === 'en'
-                ? 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.'
-                : 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.'),
-            code: isGrokPromptLengthError(errorText) ? 'grok_prompt_too_long' : 'grok_failed',
+            error: imageParams.language === 'en'
+              ? 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.'
+              : 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.',
+            code: isGrokPromptLengthError(errorText) ? 'grok_failed' : 'grok_failed',
             details: errorText,
             model: selectedModel,
             providerModel,
@@ -2601,20 +2621,10 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         })
 
         return res.status(500).json({
-          error: isGrokPromptLengthError(
-            grokError instanceof Error ? grokError.message : String(grokError)
-          )
-            ? (imageParams.language === 'en'
-              ? 'The image prompt is too long for Grok (max 8000 characters). Shorten the script or instructions and try again.'
-              : 'El texto del prompt es demasiado largo para Grok (máximo 8000 caracteres). Acortá el guion o las instrucciones e intentá de nuevo.')
-            : (imageParams.language === 'en'
-              ? 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.'
-              : 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.'),
-          code: isGrokPromptLengthError(
-            grokError instanceof Error ? grokError.message : String(grokError)
-          )
-            ? 'grok_prompt_too_long'
-            : 'grok_failed',
+          error: imageParams.language === 'en'
+            ? 'We could not generate the image with Grok. Retry in a few seconds, or upload a product photo and try again.'
+            : 'No pudimos generar la imagen con Grok. Reintentá en unos segundos o subí una foto del producto y probá de nuevo.',
+          code: 'grok_failed',
           details: grokError instanceof Error ? grokError.message : 'Unknown error',
           model: selectedModel,
           providerModel,
