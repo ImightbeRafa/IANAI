@@ -1851,9 +1851,7 @@ export function useChatSessionThread(options: {
           alreadyOptimized: options.alreadyOptimized,
           history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
         })
-        setNotice(language === 'es'
-          ? 'Confirmá producto, contexto y referencias. Hay varios ángulos — elegí los que retratan lo que querés.'
-          : 'Confirm product, context, and references. There are several angles — pick the ones that match what you want.')
+        setNotice(null)
         return
       }
       const productImageIds = options.referenceMode === 'none'
@@ -1880,11 +1878,7 @@ export function useChatSessionThread(options: {
           alreadyOptimized: options.alreadyOptimized,
           history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
         })
-        setNotice(
-          language === 'es'
-            ? 'Elegí al menos una foto de producto, o cambiá a Anuncio.'
-            : 'Pick at least one product photo, or switch to Ad.'
-        )
+        setNotice(null)
         return
       }
 
@@ -2053,9 +2047,7 @@ export function useChatSessionThread(options: {
         scriptChoices,
         history: [],
       })
-      setNotice(language === 'es'
-        ? 'Elegí el guion exacto que querés convertir en post.'
-        : 'Choose the exact script you want to turn into a post.')
+      setNotice(null)
       return
     }
 
@@ -2103,13 +2095,7 @@ export function useChatSessionThread(options: {
         preferredReferenceIds: options.referenceImageIds,
         history: [],
       })
-      setNotice(
-        preferOrganic
-          ? (language === 'es' ? 'Elige subtipo orgánico:' : 'Pick an organic subtype:')
-          : (language === 'es'
-            ? '¿Anuncio, producto u orgánico?'
-            : 'Ad, product, or organic?')
-      )
+      setNotice(null)
       return
     }
 
@@ -2130,9 +2116,7 @@ export function useChatSessionThread(options: {
         preferredReferenceIds: options.referenceImageIds,
         history: [],
       })
-      setNotice(language === 'es'
-        ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
-        : 'What size? Reel, square, or vertical post.')
+      setNotice(null)
       return
     }
 
@@ -2153,9 +2137,7 @@ export function useChatSessionThread(options: {
         preferredReferenceIds: options.referenceImageIds,
         history: [],
       })
-      setNotice(language === 'es'
-        ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
-        : 'How much copy on the post? Keep hook, development, and CTA readable.')
+      setNotice(null)
       return
     }
 
@@ -2216,9 +2198,7 @@ export function useChatSessionThread(options: {
         scriptChoices: undefined,
         history: pushImageHistory(imageClarify),
       })
-      setNotice(preferOrganic
-        ? (language === 'es' ? `Guion seleccionado: ${choice.title}. Elegí el estilo orgánico.` : `Selected script: ${choice.title}. Pick the organic style.`)
-        : (language === 'es' ? `Guion seleccionado: ${choice.title}. Ahora elegí el tipo de post.` : `Selected script: ${choice.title}. Now choose the post type.`))
+      setNotice(null)
       return
     }
 
@@ -2350,9 +2330,7 @@ export function useChatSessionThread(options: {
           preferences: resolved,
           history: pushImageHistory(imageClarify),
         })
-        setNotice(language === 'es'
-          ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
-          : 'How much copy on the post? Keep hook, development, and CTA readable.')
+        setNotice(null)
         return
       }
       await runImageGenerate({
@@ -2399,13 +2377,7 @@ export function useChatSessionThread(options: {
         mode: answer.mode,
         history: pushImageHistory(imageClarify),
       })
-      setNotice(
-        answer.mode === 'product'
-          ? (language === 'es' ? 'Elige estilo de producto:' : 'Pick a product style:')
-          : answer.mode === 'organic'
-            ? (language === 'es' ? 'Elige subtipo orgánico:' : 'Pick an organic subtype:')
-            : (language === 'es' ? 'Elige estilo de anuncio:' : 'Pick an ad style:')
-      )
+      setNotice(null)
       return
     }
 
@@ -2431,9 +2403,7 @@ export function useChatSessionThread(options: {
           preferences: resolved,
           history: pushImageHistory(imageClarify),
         })
-        setNotice(language === 'es'
-          ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
-          : 'What size? Reel, square, or vertical post.')
+        setNotice(null)
         return
       }
       const densityUnset =
@@ -2448,9 +2418,7 @@ export function useChatSessionThread(options: {
           preferences: resolved,
           history: pushImageHistory(imageClarify),
         })
-        setNotice(language === 'es'
-          ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
-          : 'How much copy on the post? Keep hook, development, and CTA readable.')
+        setNotice(null)
         return
       }
       await runImageGenerate({
@@ -2489,22 +2457,30 @@ export function useChatSessionThread(options: {
   }, [activeImageOfferId, offerProductId, language])
 
   const startProductFotoFlow = useCallback(() => {
+    if (!session) return
+    const productId = activeImageOfferId || offerProductId
     setScriptClarify(null)
     setNotice(null)
-    const explicit = { style: { kind: 'product' as const, productSubStyle: 'studio-hero' } }
-    setImagePrefs((prev) => {
-      const next = resolveImagePreferences(explicit, prev)
-      if (sessionId) writeImagePreferences(storage, sessionId, next)
-      return next
-    })
-    void beginImageFlowRef.current({
-      productId: activeImageOfferId || offerProductId,
-      prompt: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
-      userText: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
+    if (!productId) {
+      setNotice(
+        language === 'es'
+          ? 'Elige una oferta en el rail antes de generar imagen.'
+          : 'Choose an offer in the rail before generating an image.'
+      )
+      return
+    }
+    // Open Pack-family sheet on product style (Paso 1) so aspect/refs get Back on step 2+.
+    setImageClarify({
+      sessionId: session.id,
+      step: 'style',
+      mode: 'product',
+      originText: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
+      productId,
       source: 'composer',
-      explicit,
+      partial: {},
+      history: [],
     })
-  }, [activeImageOfferId, offerProductId, language, sessionId, storage])
+  }, [session, activeImageOfferId, offerProductId, language])
 
   const removeOfferImage = useCallback(async (imageId: string) => {
     if (!session || !activeImageOfferId || imageBusyRef.current) return

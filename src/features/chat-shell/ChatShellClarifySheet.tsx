@@ -71,25 +71,43 @@ function imageFlowTitle(state: ImageClarifyState, language: ChatShellLanguage): 
 }
 
 function imageStepMeta(state: ImageClarifyState): { step: number; total: number } {
-  const path: Array<ImageClarifyState['step']> = []
-  if (state.scriptChoices || state.step === 'script') path.push('script')
-  if (!state.partial?.style?.kind || state.partial.style.kind !== 'product') {
-    if (state.step === 'mode' || state.mode || state.step === 'style' || state.step === 'aspect' || state.step === 'density' || state.step === 'refs' || state.step === 'styleRef') {
-      if (state.mode !== 'organic' || state.step === 'mode') path.push('mode')
+  const historyLen = state.history?.length || 0
+  const step = historyLen + 1
+  let remainingAfter = 0
+  switch (state.step) {
+    case 'script':
+      remainingAfter = 4
+      break
+    case 'mode':
+      remainingAfter = 3
+      break
+    case 'style':
+      remainingAfter = 2
+      break
+    case 'aspect':
+      remainingAfter =
+        Boolean(state.scriptText)
+        || state.preferences?.style?.kind === 'preset'
+        || state.preferences?.style?.kind === 'organic'
+          ? 2
+          : 1
+      break
+    case 'density':
+      remainingAfter = 1
+      break
+    case 'styleRef':
+      remainingAfter = 1
+      break
+    case 'refs':
+      remainingAfter = 0
+      break
+    default: {
+      const _never: never = state.step
+      void _never
+      remainingAfter = 0
     }
   }
-  path.push('style', 'aspect')
-  if (state.scriptText || state.step === 'density' || state.preferences?.style?.kind === 'preset' || state.preferences?.style?.kind === 'organic') {
-    path.push('density')
-  }
-  if (state.askStyleRef || state.step === 'styleRef') path.push('styleRef')
-  path.push('refs')
-  const unique = [...new Set(path)]
-  const idx = unique.indexOf(state.step)
-  return {
-    step: idx >= 0 ? idx + 1 : Math.max(1, unique.length),
-    total: Math.max(unique.length, 1),
-  }
+  return { step, total: Math.max(step + remainingAfter, step) }
 }
 
 function imageCopy(state: ImageClarifyState, language: ChatShellLanguage): string {

@@ -683,7 +683,7 @@ export default memo(function ChatThread({
             e.target.value = ''
           }}
         />
-        {(error || threadNotice || voice.error) && (
+        {(error || voice.error || (threadNotice && !scriptClarify && !(imageClarify && !imageBusy))) && (
           <div className={`chat-shell__thread-alert${error || voice.error ? ' is-error' : ''}`} role="status">
             {error || voice.error || threadNotice}
           </div>

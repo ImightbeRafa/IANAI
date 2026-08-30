@@ -101,13 +101,14 @@ describe('ChatShellClarifySheet', () => {
     expect(screen.getByRole('dialog', { name: 'Post' })).toBeTruthy()
     expect(screen.getByText('Hook A')).toBeTruthy()
     expect(screen.getByText('Hook B')).toBeTruthy()
+    expect(screen.queryByText(/## Guion/)).toBeNull()
     const footerCancel = screen.getAllByRole('button', { name: 'Cancelar' })
       .filter((btn) => btn.className.includes('chat-shell__modal-btn'))
     expect(footerCancel).toHaveLength(1)
     expect(screen.queryByText('Optimizar texto')).toBeNull()
   })
 
-  it('renders Foto aspect choices in the same sheet family', () => {
+  it('shows Back on Foto step 2+ (aspect after style)', () => {
     render(
       <ChatShellClarifySheet
         language="es"
@@ -126,14 +127,23 @@ describe('ChatShellClarifySheet', () => {
             model: 'grok-imagine',
             density: 'hard',
           },
-          history: [],
+          history: [{
+            sessionId: 's1',
+            step: 'style',
+            mode: 'product',
+            originText: 'foto',
+            productId: 'p1',
+            source: 'composer',
+            partial: {},
+          }],
         }}
         onCancelImageClarify={vi.fn()}
+        onBackImageClarify={vi.fn()}
       />
     )
     expect(screen.getByRole('dialog', { name: 'Foto' })).toBeTruthy()
+    expect(screen.getByText(/Paso 2 de/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Atrás' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Reel/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Post cuadrado/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Post vertical/ })).toBeTruthy()
   })
 })

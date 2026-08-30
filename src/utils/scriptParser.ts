@@ -19,8 +19,8 @@ export function parseScripts(text: string): ParsedScript[] {
   if (!trimmed) return []
 
   // Try pattern-based splitting first
-  // Match: GUION/GUIÓN/SCRIPT/OPCIÓN/OPCION + number + optional separator + optional title
-  const scriptHeaderRegex = /^(?:\*{0,2})(?:GUI[OÓ]N|SCRIPT|Gui[oó]n|Script|OPCI[OÓ]N|Opci[oó]n)\s*#?\s*(\d+)\s*[:\-—–.]?\s*(.*?)(?:\*{0,2})$/gm
+  // Match: optional markdown heading hashes, then GUION/SCRIPT/OPCIÓN + number + title
+  const scriptHeaderRegex = /^(?:\*{0,2})(?:#{1,6}\s*)?(?:\*{0,2})(?:GUI[OÓ]N|SCRIPT|Gui[oó]n|Script|OPCI[OÓ]N|Opci[oó]n)\s*#?\s*(\d+)\s*[:\-—–.]?\s*(.*?)(?:\*{0,2})$/gm
 
   const headers: { index: number; pos: number; title: string }[] = []
   let match: RegExpExecArray | null

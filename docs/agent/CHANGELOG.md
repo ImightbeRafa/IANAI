@@ -1,3 +1,15 @@
+## 2026-08-30 — Pack-sheet nits (leak / one-card / Back / glass)
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `ChatShellClarifySheet.tsx`, `ChatThread.tsx`, `chat-shell.css`, `scriptParser.ts`, tests
+
+- Sheet copy no longer dual-writes into the transcript alert while the Pack sheet is open; navy dim overlay ~46%.
+- `## Guion N` markdown splits into one Post picker card per script.
+- Foto opens on style (Paso 1) so aspect/refs get Back on step 2+; step n/n follows history length.
+- Idle glass: more blur, cyan ~20% stroke, lift shadow, less solid fill (light theme).
+
+---
+
 ## 2026-08-30 — Preview QA invite for idle-bar CoS shots (PR #34)
 
 **Area:** chat-shell / ops
