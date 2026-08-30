@@ -88,7 +88,7 @@ interface ChatShellScriptCardProps {
     referenceImageIds?: string[]
     alreadyOptimized?: boolean
   }) => void | Promise<void>
-  onUploadPostReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style') => void | Promise<void>
+  onUploadPostReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style' | 'logo') => void | Promise<void>
   onOpenPostPreview?: () => void
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
   snapshotKey?: string

@@ -47,7 +47,7 @@ interface ChatShellClarifySheetProps {
   }) => void
   onCancelImageClarify?: () => void
   onBackImageClarify?: () => void
-  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style', productId?: string) => void | Promise<void>
+  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style' | 'logo', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
   onOpenImagesRail?: () => void
 }

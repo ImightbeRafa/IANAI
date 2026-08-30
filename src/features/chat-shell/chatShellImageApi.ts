@@ -508,18 +508,20 @@ export async function uploadShellOfferImage(options: {
   productId: string
   dataUrl: string
   filename?: string
-  kind?: 'product' | 'context' | 'scene' | 'style'
+  kind?: 'product' | 'context' | 'scene' | 'style' | 'logo'
 }): Promise<ProductImage> {
   const role: ReferenceRole =
     options.kind === 'style'
       ? 'style'
-      : options.kind === 'scene' || options.kind === 'context'
-        ? 'scene'
-        : 'product'
+      : options.kind === 'logo'
+        ? 'logo'
+        : options.kind === 'scene' || options.kind === 'context'
+          ? 'scene'
+          : 'product'
   const dbKind = dbKindForReferenceRole(role)
   const label = labelForReferenceRole(role, 'es')
   // uploadProductImage always unique-ifies the storage object name.
-  // Keep the role label as the product_images label for scene/style classification.
+  // Keep the role label as the product_images label for scene/style/logo classification.
   const publicUrl = await uploadProductImage(
     options.userId,
     options.productId,
@@ -542,16 +544,18 @@ export async function copyShellOfferImageToProduct(options: {
     id: string
     image_url: string
     label?: string | null
-    kind: 'product' | 'context' | 'scene' | 'style'
+    kind: 'product' | 'context' | 'scene' | 'style' | 'logo'
   }
   targetProductId: string
 }): Promise<ProductImage> {
   const role: ReferenceRole =
     options.source.kind === 'style'
       ? 'style'
-      : options.source.kind === 'scene' || options.source.kind === 'context'
-        ? 'scene'
-        : 'product'
+      : options.source.kind === 'logo'
+        ? 'logo'
+        : options.source.kind === 'scene' || options.source.kind === 'context'
+          ? 'scene'
+          : 'product'
   const dataUrl = await compressBase64ForApi(await urlToBase64(options.source.image_url))
   const publicUrl = await uploadProductImage(
     options.userId,

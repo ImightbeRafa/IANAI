@@ -1,3 +1,14 @@
+## 2026-08-30 — Subir logo on Confirmá referencias (PR #34)
+
+**Area:** chat-shell
+**Files:** `ChatShellReferencePicker.tsx`, `chatShellReferenceSelection.ts`, `useChatSessionThread.ts`, `chatShellImageApi.ts`, `ChatContextRail.tsx`, labels, tests
+
+- Confirmá referencias rail: Subir logo alongside producto/escena/estilo; empty copy mentions logo.
+- Logo upload auto-selects and attaches as `brandLogoUrl` for this generate (not only skip); excluded from productImageIds.
+- Same Subir logo control on the images rail for consistency.
+
+---
+
 ## 2026-08-30 — Pack-sheet footer / CTA primary / Pack credits (Rafael GO)
 
 **Area:** chat-shell

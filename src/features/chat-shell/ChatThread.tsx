@@ -93,7 +93,7 @@ interface ChatThreadProps {
   onCancelScriptClarify?: () => void
   onBackScriptClarify?: () => void
   onOpenImagesRail?: () => void
-  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style', productId?: string) => void | Promise<void>
+  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style' | 'logo', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
   offerProductNames?: Record<string, string>
   onPreparePostFromScript?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>

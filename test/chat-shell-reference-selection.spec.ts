@@ -6,6 +6,7 @@ import {
   partitionReferenceCopies,
   postOptimizeVersionLabel,
   preselectOfferReferenceIds,
+  selectedBrandLogoUrl,
   shouldPersistPostOptimizeVersion,
   shouldPromptImageReferences,
   toggleReferenceSelection,
@@ -73,5 +74,16 @@ describe('chat-shell reference selection', () => {
     expect(catalog.find((row) => row.id === 'c1')?.kind).toBe('scene')
     expect(catalog.find((row) => row.id === 's1')?.kind).toBe('style')
     expect(catalog.find((row) => row.id === 'legacy')?.kind).toBe('scene')
+  })
+
+  it('classifies logo labels and excludes logo from productImageIds', () => {
+    const catalog = catalogOfferReferences([
+      { id: 'p1', product_id: 'offer-a', kind: 'product', image_url: 'https://cdn/p1.webp', label: 'Producto' },
+      { id: 'logo1', product_id: 'offer-a', kind: 'context', image_url: 'https://cdn/logo.webp', label: 'Logo · marca' },
+    ])
+    expect(catalog.find((row) => row.id === 'logo1')?.kind).toBe('logo')
+    const selected = withPreselectedReferences(catalog, 'offer-a', ['p1', 'logo1'])
+    expect(confirmedReferenceImageIds(selected)).toEqual(['p1'])
+    expect(selectedBrandLogoUrl(selected)).toBe('https://cdn/logo.webp')
   })
 })

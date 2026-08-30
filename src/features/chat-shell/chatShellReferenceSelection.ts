@@ -1,7 +1,7 @@
 import { isGeneratedOfferImage } from './chatShellImages'
 
 /** Upload / UI roles. DB `kind` stays product|context|generated. */
-export type ReferenceRole = 'product' | 'scene' | 'style'
+export type ReferenceRole = 'product' | 'scene' | 'style' | 'logo'
 
 /** @deprecated Prefer ReferenceRole; kept for call sites that still pass DB kind. */
 export type ReferenceDbKind = 'product' | 'context'
@@ -25,12 +25,14 @@ export const MAX_PRODUCT_ANGLE_PRESELECT = 3
 
 const SCENE_LABEL_RE = /\b(scene|escena|contexto)\b/i
 const STYLE_LABEL_RE = /\b(style|estilo|layout|formato|post\s*ref)\b/i
+const LOGO_LABEL_RE = /\b(logo|marca|brand\s*mark|wordmark)\b/i
 
 export function referenceRoleFromStored(options: {
   kind?: string | null
   label?: string | null
 }): ReferenceRole {
   if (options.kind === 'product') return 'product'
+  if (LOGO_LABEL_RE.test(options.label || '')) return 'logo'
   if (STYLE_LABEL_RE.test(options.label || '')) return 'style'
   if (SCENE_LABEL_RE.test(options.label || '')) return 'scene'
   // Legacy context rows default to scene inspiration.
@@ -44,7 +46,25 @@ export function dbKindForReferenceRole(role: ReferenceRole): ReferenceDbKind {
 export function labelForReferenceRole(role: ReferenceRole, language: 'en' | 'es' = 'es'): string {
   if (role === 'product') return language === 'es' ? 'Producto' : 'Product'
   if (role === 'style') return language === 'es' ? 'Estilo · post ref' : 'Style · post ref'
+  if (role === 'logo') return language === 'es' ? 'Logo · marca' : 'Logo · brand'
   return language === 'es' ? 'Escena · contexto' : 'Scene · context'
+}
+
+/** Logo attaches via brandLogoUrl — exclude from productImageIds so it is not mis-roled. */
+export function confirmedProductReferenceImageIds(
+  images: Array<{ id: string; selected?: boolean; kind?: string | null }>
+): string[] {
+  return images
+    .filter((img) => img.selected === true && img.kind !== 'logo')
+    .map((img) => img.id)
+    .slice(0, MAX_POST_REFERENCE_IMAGES)
+}
+
+export function selectedBrandLogoUrl(
+  images: Array<{ url: string; selected?: boolean; kind?: string | null }>
+): string | undefined {
+  const logo = images.find((img) => img.selected === true && img.kind === 'logo' && Boolean(img.url))
+  return logo?.url || undefined
 }
 
 export function shouldPromptImageReferences(options: {
@@ -139,14 +159,11 @@ export function withPreselectedReferences(
   return catalog.map((img) => ({ ...img, selected: selectedIds.has(img.id) }))
 }
 
-/** Exact confirmed IDs only — no silent union with extra product photos. */
+/** Exact confirmed IDs only — no silent union with extra product photos. Logo uses brandLogoUrl. */
 export function confirmedReferenceImageIds(
-  images: Array<{ id: string; selected?: boolean }>
+  images: Array<{ id: string; selected?: boolean; kind?: string | null }>
 ): string[] {
-  return images
-    .filter((img) => img.selected === true)
-    .map((img) => img.id)
-    .slice(0, MAX_POST_REFERENCE_IMAGES)
+  return confirmedProductReferenceImageIds(images)
 }
 
 export function hasSelectedProductReference(
@@ -222,6 +239,7 @@ export function groupOfferReferences(
   currentProduct: OfferReferenceImage[]
   currentScene: OfferReferenceImage[]
   currentStyle: OfferReferenceImage[]
+  currentLogo: OfferReferenceImage[]
   /** @deprecated alias of scene+style for older UI */
   currentContext: OfferReferenceImage[]
   otherOffers: OfferReferenceImage[]
@@ -229,10 +247,12 @@ export function groupOfferReferences(
   const currentProduct = images.filter((img) => img.productId === currentProductId && img.kind === 'product')
   const currentScene = images.filter((img) => img.productId === currentProductId && img.kind === 'scene')
   const currentStyle = images.filter((img) => img.productId === currentProductId && img.kind === 'style')
+  const currentLogo = images.filter((img) => img.productId === currentProductId && img.kind === 'logo')
   return {
     currentProduct,
     currentScene,
     currentStyle,
+    currentLogo,
     currentContext: [...currentScene, ...currentStyle],
     otherOffers: images.filter((img) => img.productId !== currentProductId),
   }

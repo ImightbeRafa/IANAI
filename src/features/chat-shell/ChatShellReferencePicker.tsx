@@ -19,6 +19,7 @@ interface ChatShellReferencePickerProps {
 function roleBadge(kind: ReferenceRole, es: boolean): string {
   if (kind === 'product') return es ? 'Producto' : 'Product'
   if (kind === 'style') return es ? 'Estilo' : 'Style'
+  if (kind === 'logo') return es ? 'Logo' : 'Logo'
   return es ? 'Escena' : 'Scene'
 }
 
@@ -36,6 +37,7 @@ export default function ChatShellReferencePicker({
   const productInputRef = useRef<HTMLInputElement>(null)
   const sceneInputRef = useRef<HTMLInputElement>(null)
   const styleInputRef = useRef<HTMLInputElement>(null)
+  const logoInputRef = useRef<HTMLInputElement>(null)
   const groups = groupOfferReferences(images, currentProductId || '')
   const selectedCount = images.filter((img) => img.selected === true).length
 
@@ -74,8 +76,8 @@ export default function ChatShellReferencePicker({
     <div className={`chat-shell__ref-picker${compact ? ' is-compact' : ''}`}>
       <p className="chat-shell__ref-picker-lead">
         {es
-          ? `Elegí hasta ${MAX_POST_REFERENCE_IMAGES} fotos: producto (verdad visual), escena (gimnasio/oficina) o estilo (post que te gusta). ${selectedCount} seleccionada${selectedCount === 1 ? '' : 's'}.`
-          : `Pick up to ${MAX_POST_REFERENCE_IMAGES} photos: product (visual truth), scene (gym/office), or style (a post you like). ${selectedCount} selected.`}
+          ? `Elegí hasta ${MAX_POST_REFERENCE_IMAGES} fotos: producto (verdad visual), escena, estilo o logo. ${selectedCount} seleccionada${selectedCount === 1 ? '' : 's'}.`
+          : `Pick up to ${MAX_POST_REFERENCE_IMAGES} photos: product (visual truth), scene, style, or logo. ${selectedCount} selected.`}
       </p>
       {groups.currentProduct.length > 0 ? (
         <section className="chat-shell__ref-picker-group" aria-label={es ? 'Producto' : 'Product'}>
@@ -101,6 +103,14 @@ export default function ChatShellReferencePicker({
           </div>
         </section>
       ) : null}
+      {groups.currentLogo.length > 0 ? (
+        <section className="chat-shell__ref-picker-group" aria-label={es ? 'Logo' : 'Logo'}>
+          <h4>{es ? 'Logo · marca' : 'Logo · brand'}</h4>
+          <div className="chat-shell__ref-picker-grid">
+            {groups.currentLogo.map((image) => renderTile(image))}
+          </div>
+        </section>
+      ) : null}
       {groups.otherOffers.length > 0 ? (
         <section className="chat-shell__ref-picker-group" aria-label={es ? 'Otras ofertas' : 'Other offers'}>
           <h4>{es ? 'Otras ofertas de la marca' : 'Other brand offers'}</h4>
@@ -112,8 +122,8 @@ export default function ChatShellReferencePicker({
       {images.length === 0 ? (
         <p className="chat-shell__ref-picker-empty">
           {es
-            ? 'Todavía no hay fotos. Subí producto, una escena, o un post de estilo que te guste.'
-            : 'No photos yet. Upload a product, a scene, or a style post you like.'}
+            ? 'Todavía no hay fotos. Subí producto, escena, estilo o logo.'
+            : 'No photos yet. Upload a product, scene, style, or logo.'}
         </p>
       ) : null}
       {onUpload ? (
@@ -151,6 +161,17 @@ export default function ChatShellReferencePicker({
               event.target.value = ''
             }}
           />
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void onUpload(file, 'logo')
+              event.target.value = ''
+            }}
+          />
           <button
             type="button"
             className="chat-shell__btn chat-shell__btn--pill"
@@ -174,6 +195,14 @@ export default function ChatShellReferencePicker({
             onClick={() => styleInputRef.current?.click()}
           >
             {es ? 'Subir estilo' : 'Upload style'}
+          </button>
+          <button
+            type="button"
+            className="chat-shell__btn chat-shell__btn--pill"
+            disabled={busy}
+            onClick={() => logoInputRef.current?.click()}
+          >
+            {es ? 'Subir logo' : 'Upload logo'}
           </button>
         </div>
       ) : null}

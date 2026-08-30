@@ -131,6 +131,7 @@ import {
   confirmedReferenceImageIds,
   hasSelectedProductReference,
   partitionReferenceCopies,
+  selectedBrandLogoUrl,
   shouldPromptImageReferences,
   toggleReferenceSelection,
   withPreselectedReferences,
@@ -1661,7 +1662,7 @@ export function useChatSessionThread(options: {
   const uploadOfferImage = useCallback(async (
     file: File,
     productIdOverride?: string | null,
-    kind: 'product' | 'context' | 'scene' | 'style' = 'product'
+    kind: 'product' | 'context' | 'scene' | 'style' | 'logo' = 'product'
   ) => {
     const targetProductId = productIdOverride || activeImageOfferId
     if (!session || !targetProductId || imageBusyRef.current) return
@@ -1701,6 +1702,19 @@ export function useChatSessionThread(options: {
         return
       }
       await refreshOfferImages(originSessionId, targetProductId, loadRequestRef.current)
+      const roleKind = (kind === 'logo'
+        ? 'logo'
+        : kind === 'style'
+          ? 'style'
+          : kind === 'scene' || kind === 'context'
+            ? 'scene'
+            : 'product') as 'product' | 'scene' | 'style' | 'logo'
+      if (kind === 'logo' && brandVisualRef) {
+        brandVisualRef.current = {
+          ...brandVisualRef.current,
+          logo_url: uploaded.image_url,
+        }
+      }
       if (pendingRefs) {
         setImageClarify((current) => {
           if (
@@ -1708,16 +1722,19 @@ export function useChatSessionThread(options: {
             || current.sessionId !== originSessionId
             || (current.step !== 'refs' && current.step !== 'styleRef')
           ) return current
+          const withoutDup = (current.referenceImages || []).filter((item) => item.id !== uploaded.id)
+          // Logo: keep at most one selected logo so generate uses this upload as brandLogoUrl.
+          const clearedLogos = roleKind === 'logo'
+            ? withoutDup.map((item) => (
+              item.kind === 'logo' ? { ...item, selected: false } : item
+            ))
+            : withoutDup
           const referenceImages = [
-            ...(current.referenceImages || []).filter((item) => item.id !== uploaded.id),
+            ...clearedLogos,
             {
               id: uploaded.id,
               url: uploaded.image_url,
-              kind: (kind === 'style'
-                ? 'style'
-                : kind === 'scene' || kind === 'context'
-                  ? 'scene'
-                  : 'product') as 'product' | 'scene' | 'style',
+              kind: roleKind,
               dbKind: (kind === 'product' ? 'product' : 'context') as 'product' | 'context',
               label: uploaded.label,
               selected: true,
@@ -1734,8 +1751,8 @@ export function useChatSessionThread(options: {
       }
       setNotice(
         language === 'es'
-          ? 'Foto de referencia lista.'
-          : 'Reference photo ready.'
+          ? (kind === 'logo' ? 'Logo listo para este generate.' : 'Foto de referencia lista.')
+          : (kind === 'logo' ? 'Logo ready for this generate.' : 'Reference photo ready.')
       )
     } catch (err) {
       console.error(err)
@@ -1761,6 +1778,7 @@ export function useChatSessionThread(options: {
     userId,
     refreshOfferImages,
     language,
+    brandVisualRef,
   ])
 
   const patchImagePreferences = useCallback((patch: Partial<ShellImagePreferences>) => {
@@ -1781,6 +1799,8 @@ export function useChatSessionThread(options: {
     source: string
     referenceMode?: 'use' | 'none'
     referenceImageIds?: string[]
+    /** Selected Subir logo on Confirmá referencias — overrides kit logo for this generate. */
+    brandLogoUrlOverride?: string
     alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
@@ -1890,6 +1910,7 @@ export function useChatSessionThread(options: {
       )
       const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
       const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
+      const brandLogoUrl = options.brandLogoUrlOverride || brandVisual.brandLogoUrl
       let prompt = options.prompt
       let scriptText = options.scriptText
       if (scriptText && !shouldSkipPostCondense({
@@ -1928,7 +1949,7 @@ export function useChatSessionThread(options: {
         productImageIds,
         brandKitId,
         customColors: brandVisual.customColors,
-        brandLogoUrl: brandVisual.brandLogoUrl,
+        brandLogoUrl,
         language,
         scriptText,
         businessContext: session.context || undefined,
@@ -2223,8 +2244,12 @@ export function useChatSessionThread(options: {
           return
         }
         let referenceImageIds = confirmedReferenceImageIds(imageClarify.referenceImages || [])
+        const logoUrl = answer.useReferences
+          ? selectedBrandLogoUrl(imageClarify.referenceImages || [])
+          : undefined
         if (answer.useReferences && selected.length) {
-          const { keepIds, copyIds } = partitionReferenceCopies(selected, imageClarify.productId)
+          const nonLogoSelected = selected.filter((item) => item.kind !== 'logo')
+          const { keepIds, copyIds } = partitionReferenceCopies(nonLogoSelected, imageClarify.productId)
           const copiedIds: string[] = []
           for (const id of copyIds) {
             const source = selected.find((item) => item.id === id)
@@ -2246,6 +2271,12 @@ export function useChatSessionThread(options: {
             await refreshOfferImages(session.id, imageClarify.productId, loadRequestRef.current)
           }
         }
+        if (logoUrl && brandVisualRef) {
+          brandVisualRef.current = {
+            ...brandVisualRef.current,
+            logo_url: logoUrl,
+          }
+        }
         await runImageGenerate({
           productId: imageClarify.productId,
           preferences: imageClarify.preferences,
@@ -2256,6 +2287,7 @@ export function useChatSessionThread(options: {
           source: imageClarify.source,
           referenceMode: answer.useReferences ? 'use' : 'none',
           referenceImageIds: answer.useReferences ? referenceImageIds : [],
+          brandLogoUrlOverride: logoUrl,
           alreadyOptimized: imageClarify.alreadyOptimized,
           priorClarify: imageClarify,
         })
@@ -2435,7 +2467,7 @@ export function useChatSessionThread(options: {
         priorClarify: imageClarify,
       })
     }
-  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate, userId, refreshOfferImages])
+  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate, userId, refreshOfferImages, brandVisualRef])
 
   const backImageClarify = useCallback(() => {
     if (!imageClarify?.history?.length) return

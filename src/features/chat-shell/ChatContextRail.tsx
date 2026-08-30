@@ -70,7 +70,7 @@ interface ChatContextRailProps {
   offerImages?: ProductImage[]
   imageBusy?: boolean
   onSelectImageOffer?: (productId: string) => void
-  onUploadOfferImage?: (file: File, kind?: 'product' | 'context' | 'scene' | 'style') => void | Promise<void>
+  onUploadOfferImage?: (file: File, kind?: 'product' | 'context' | 'scene' | 'style' | 'logo') => void | Promise<void>
   onRemoveOfferImage?: (imageId: string) => void | Promise<void>
   onGenerateOfferImage?: () => void | Promise<void>
   onOpenOfferImage?: (image: ProductImage) => void
@@ -599,6 +599,20 @@ export default function ChatContextRail({
                       const file = e.target.files?.[0]
                       e.target.value = ''
                       if (file) void onUploadOfferImage?.(file, 'style')
+                    }}
+                  />
+                </label>
+                <label className="chat-shell__setup-btn">
+                  {language === 'es' ? 'Subir logo' : 'Upload logo'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    disabled={imageBusy || !activeImageOfferId}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (file) void onUploadOfferImage?.(file, 'logo')
                     }}
                   />
                 </label>
