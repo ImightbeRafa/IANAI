@@ -248,7 +248,7 @@ export default function ChatShellClarifySheet({
     )
   }
 
-  if (imageClarify && !imageBusy) {
+  if (imageClarify) {
     const meta = imageStepMeta(imageClarify)
     const isRefs = imageClarify.step === 'refs'
     const creditsLine = isRefs

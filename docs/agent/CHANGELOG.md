@@ -1,3 +1,14 @@
+## 2026-08-30 — Post Generar: Grok 8000 cap + single-flight (PR #34 P0)
+
+**Area:** chat-shell / generate-image
+**Files:** `api/lib/grok-image-prompt.ts`, `api/generate-image.ts`, `api/lib/grok-image-generate.ts`, `api/lib/grok-image-edit.ts`, `chatShellImageApi.ts`, `chatShellImageErrors.ts`, `useChatSessionThread.ts`, `ChatShellClarifySheet.tsx`, tests
+
+- Hard-cap Grok Imagine prompts at 8000 Unicode code points; strip FORMATO OBLIGATORIO (use aspect_ratio); prefer condensed user copy + keep product fidelity rules at head.
+- One Generar click = one in-flight generate (submit lock + busy disable); no retry loop on 400.
+- Spanish-friendly prompt-too-long / rate-limit errors.
+
+---
+
 ## 2026-08-30 — Subir logo on Confirmá referencias (PR #34)
 
 **Area:** chat-shell

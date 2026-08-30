@@ -386,6 +386,7 @@ export function useChatSessionThread(options: {
   const [imageOfferId, setImageOfferId] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
   const imageBusyRef = useRef(false)
+  const imageGenerateSubmitLockRef = useRef(false)
   const [imagePrefs, setImagePrefs] = useState<ShellImagePreferences>(() =>
     resolveImagePreferences({}, {})
   )
@@ -2236,62 +2237,78 @@ export function useChatSessionThread(options: {
       }
       if (typeof answer.useReferences === 'boolean' && imageClarify.preferences) {
         if (!answer.useReferences && imageClarify.referencesRequired) return
-        const selected = (imageClarify.referenceImages || []).filter((reference) => reference.selected === true)
-        if (answer.useReferences && imageClarify.referencesRequired && !hasSelectedProductReference(selected)) {
-          setNotice(language === 'es'
-            ? 'Elegí al menos una foto de producto.'
-            : 'Pick at least one product photo.')
+        // One Generar = one in-flight request. Ignore double-clicks before busy settles.
+        if (imageGenerateSubmitLockRef.current || imageBusyRef.current) return
+        imageGenerateSubmitLockRef.current = true
+        setImageBusy(true)
+        setError(null)
+        try {
+          const selected = (imageClarify.referenceImages || []).filter((reference) => reference.selected === true)
+          if (answer.useReferences && imageClarify.referencesRequired && !hasSelectedProductReference(selected)) {
+            setNotice(language === 'es'
+              ? 'Elegí al menos una foto de producto.'
+              : 'Pick at least one product photo.')
+            return
+          }
+          let referenceImageIds = confirmedReferenceImageIds(imageClarify.referenceImages || [])
+          const logoUrl = answer.useReferences
+            ? selectedBrandLogoUrl(imageClarify.referenceImages || [])
+            : undefined
+          if (answer.useReferences && selected.length) {
+            const nonLogoSelected = selected.filter((item) => item.kind !== 'logo')
+            const { keepIds, copyIds } = partitionReferenceCopies(nonLogoSelected, imageClarify.productId)
+            const copiedIds: string[] = []
+            for (const id of copyIds) {
+              const source = selected.find((item) => item.id === id)
+              if (!source) continue
+              const copied = await copyShellOfferImageToProduct({
+                userId,
+                source: {
+                  id: source.id,
+                  image_url: source.url,
+                  label: source.label,
+                  kind: source.kind,
+                },
+                targetProductId: imageClarify.productId,
+              })
+              copiedIds.push(copied.id)
+            }
+            referenceImageIds = [...keepIds, ...copiedIds]
+            if (copiedIds.length) {
+              await refreshOfferImages(session.id, imageClarify.productId, loadRequestRef.current)
+            }
+          }
+          if (logoUrl && brandVisualRef) {
+            brandVisualRef.current = {
+              ...brandVisualRef.current,
+              logo_url: logoUrl,
+            }
+          }
+          await runImageGenerate({
+            productId: imageClarify.productId,
+            preferences: imageClarify.preferences,
+            prompt: imageClarify.prompt || imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
+            userText: imageClarify.userText || imageClarify.originText,
+            scriptText: imageClarify.scriptText,
+            scriptTitle: imageClarify.scriptTitle,
+            source: imageClarify.source,
+            referenceMode: answer.useReferences ? 'use' : 'none',
+            referenceImageIds: answer.useReferences ? referenceImageIds : [],
+            brandLogoUrlOverride: logoUrl,
+            alreadyOptimized: imageClarify.alreadyOptimized,
+            priorClarify: imageClarify,
+          })
           return
-        }
-        let referenceImageIds = confirmedReferenceImageIds(imageClarify.referenceImages || [])
-        const logoUrl = answer.useReferences
-          ? selectedBrandLogoUrl(imageClarify.referenceImages || [])
-          : undefined
-        if (answer.useReferences && selected.length) {
-          const nonLogoSelected = selected.filter((item) => item.kind !== 'logo')
-          const { keepIds, copyIds } = partitionReferenceCopies(nonLogoSelected, imageClarify.productId)
-          const copiedIds: string[] = []
-          for (const id of copyIds) {
-            const source = selected.find((item) => item.id === id)
-            if (!source) continue
-            const copied = await copyShellOfferImageToProduct({
-              userId,
-              source: {
-                id: source.id,
-                image_url: source.url,
-                label: source.label,
-                kind: source.kind,
-              },
-              targetProductId: imageClarify.productId,
-            })
-            copiedIds.push(copied.id)
-          }
-          referenceImageIds = [...keepIds, ...copiedIds]
-          if (copiedIds.length) {
-            await refreshOfferImages(session.id, imageClarify.productId, loadRequestRef.current)
+        } catch (err) {
+          console.error(err)
+          setError(err instanceof Error ? err.message : 'Image generation failed')
+          return
+        } finally {
+          imageGenerateSubmitLockRef.current = false
+          if (!imageBusyRef.current) {
+            setImageBusy(false)
           }
         }
-        if (logoUrl && brandVisualRef) {
-          brandVisualRef.current = {
-            ...brandVisualRef.current,
-            logo_url: logoUrl,
-          }
-        }
-        await runImageGenerate({
-          productId: imageClarify.productId,
-          preferences: imageClarify.preferences,
-          prompt: imageClarify.prompt || imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
-          userText: imageClarify.userText || imageClarify.originText,
-          scriptText: imageClarify.scriptText,
-          scriptTitle: imageClarify.scriptTitle,
-          source: imageClarify.source,
-          referenceMode: answer.useReferences ? 'use' : 'none',
-          referenceImageIds: answer.useReferences ? referenceImageIds : [],
-          brandLogoUrlOverride: logoUrl,
-          alreadyOptimized: imageClarify.alreadyOptimized,
-          priorClarify: imageClarify,
-        })
-        return
       }
       if (answer.switchToAnuncio) {
         const anuncioStyle: ShellImageStyle = looksLikeSalesScript(
