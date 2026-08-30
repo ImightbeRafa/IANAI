@@ -40,9 +40,10 @@ describe('chat-shell reference selection', () => {
     expect(catalog.filter((row) => row.selected).map((row) => row.id)).toEqual(['p1', 'p2', 'p3'])
   })
 
-  it('uses exact confirmed IDs without silently adding extra product photos', () => {
+  it('uses exact confirmed product IDs; preferred style/logo stay off until opt-in', () => {
     const catalog = withPreselectedReferences(images, 'offer-a', ['p2', 'c1'])
-    expect(confirmedReferenceImageIds(catalog)).toEqual(['p2', 'c1'])
+    expect(confirmedReferenceImageIds(catalog)).toEqual(['p2'])
+    expect(catalog.find((row) => row.id === 'c1')?.selected).toBe(false)
     expect(hasSelectedProductReference(catalog)).toBe(true)
   })
 
@@ -80,14 +81,17 @@ describe('chat-shell reference selection', () => {
     expect(catalog.find((row) => row.id === 'legacy')?.kind).toBe('scene')
   })
 
-  it('classifies logo labels and excludes logo from productImageIds', () => {
+  it('classifies logo labels and excludes logo from productImageIds; logo stays off until opt-in', () => {
     const catalog = catalogOfferReferences([
       { id: 'p1', product_id: 'offer-a', kind: 'product', image_url: 'https://cdn/p1.webp', label: 'Producto' },
       { id: 'logo1', product_id: 'offer-a', kind: 'context', image_url: 'https://cdn/logo.webp', label: 'Logo · marca' },
     ])
     expect(catalog.find((row) => row.id === 'logo1')?.kind).toBe('logo')
-    const selected = withPreselectedReferences(catalog, 'offer-a', ['p1', 'logo1'])
-    expect(confirmedReferenceImageIds(selected)).toEqual(['p1'])
-    expect(selectedBrandLogoUrl(selected)).toBe('https://cdn/logo.webp')
+    const preselected = withPreselectedReferences(catalog, 'offer-a', ['p1', 'logo1'])
+    expect(confirmedReferenceImageIds(preselected)).toEqual(['p1'])
+    expect(selectedBrandLogoUrl(preselected)).toBeUndefined()
+    const optedIn = toggleReferenceSelection(preselected, 'logo1')
+    expect(confirmedReferenceImageIds(optedIn)).toEqual(['p1'])
+    expect(selectedBrandLogoUrl(optedIn)).toBe('https://cdn/logo.webp')
   })
 })

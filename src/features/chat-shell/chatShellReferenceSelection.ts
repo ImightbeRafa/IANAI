@@ -134,12 +134,13 @@ export function withPreselectedReferences(
   currentProductId: string,
   preferredIds?: string[]
 ): OfferReferenceImage[] {
-  const validPreferred = (preferredIds || [])
-    .filter((id) => catalog.some((img) => img.id === id))
+  // Only product angles may start selected — scene/style/logo require opt-in.
+  const preferredProducts = (preferredIds || [])
+    .filter((id) => catalog.some((img) => img.id === id && img.kind === 'product'))
     .slice(0, MAX_POST_REFERENCE_IMAGES)
   const selectedIds = new Set(
-    validPreferred.length > 0
-      ? validPreferred
+    preferredProducts.length > 0
+      ? preferredProducts
       : preselectOfferReferenceIds(catalog, currentProductId)
   )
   return catalog.map((img) => ({ ...img, selected: selectedIds.has(img.id) }))

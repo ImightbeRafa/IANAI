@@ -1,3 +1,9 @@
+## 2026-08-30 — PR #34 leftovers harden: credit one-click, Subir 2×2, estilo off
+
+- Reconfirm: Confirmá referencias Generar sets creditConfirmed (no second ¿Seguimos?).
+- Subir rail always even 2×2 with wrap-safe labels (no orphan logo / no overflow).
+- Preferred refs also strip non-product — estilo/scene/logo stay No usar until opt-in.
+
 ## 2026-08-30 — PR #34 Preview QA: one Generar, Subir 2×2, estilo opt-in
 
 - Confirmá referencias Generar spends on that click — no second “¿Seguimos?” credit Paso after spinner.
