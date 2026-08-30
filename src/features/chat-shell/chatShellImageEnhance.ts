@@ -83,6 +83,7 @@ export function buildShellImageEnhanceBody(options: {
   contextReferenceImages?: string[]
   aspectRatio?: string
   model?: string
+  generationId?: string
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     action: 'enhance',
@@ -106,6 +107,7 @@ export function buildShellImageEnhanceBody(options: {
     body.contextReferenceImages = options.contextReferenceImages.slice(0, MAX_ENHANCE_REFS_PER_ROLE)
   }
   if (options.aspectRatio) body.aspectRatio = options.aspectRatio
+  if (options.generationId) body.generationId = options.generationId
 
   return body
 }

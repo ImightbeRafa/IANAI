@@ -65,14 +65,13 @@ export default function ChatShellBulkDialog({
   const estimatedCredits = mode === 'campaign'
     ? units * (CREDIT_WEIGHTS.guion_oferta + CREDIT_WEIGHTS.image_standard)
     : units * CREDIT_WEIGHTS.guion_oferta
-  // Confirmar y generar only with a credits line visible (same family as Guiones last step).
-  const creditsLine = step === 2 && board
-    ? (quote
-      ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
-      : (es
-        ? `${estimatedCredits} créditos · máximo estimado`
-        : `${estimatedCredits} credits · estimated maximum`))
-    : null
+  // Credits visible from step 1 (count/mode) and again on confirm with quote when ready.
+  const creditsLine = step === 2 && board && quote
+    ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
+    : (es
+      ? `${estimatedCredits} créditos · máximo estimado`
+      : `${estimatedCredits} credits · estimated maximum`)
+  const canConfirm = step === 2 && Boolean(board) && selectedAngles.length > 0
 
   async function loadAngles() {
     setBusy('angles')
@@ -96,7 +95,7 @@ export default function ChatShellBulkDialog({
   }
 
   async function confirmRun() {
-    if (!board || selectedAngles.length === 0 || !creditsLine) return
+    if (!board || selectedAngles.length === 0 || !canConfirm) return
     setBusy('run')
     setError(null)
     setProgress(es ? 'Generando…' : 'Generating…')
@@ -156,7 +155,7 @@ export default function ChatShellBulkDialog({
         onClick: () => void loadAngles(),
       }}
       primary={
-        creditsLine
+        canConfirm
           ? {
               label: busy === 'run' ? t.generating : t.bulkConfirm,
               disabled: Boolean(busy) || selectedAngles.length === 0,

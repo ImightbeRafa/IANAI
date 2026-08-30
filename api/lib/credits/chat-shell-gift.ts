@@ -35,6 +35,14 @@ function readUserMetaFlag(
   return value === true || value === 'true' || value === 1
 }
 
+/** Vercel Preview (and local preview aliases) must not mint the +100 pack gift. */
+export function shouldSkipChatShellOpenGift(): boolean {
+  const vercelEnv = (process.env.VERCEL_ENV || '').toLowerCase()
+  if (vercelEnv === 'preview') return true
+  // Local `vercel dev` against Preview linkage still uses development — only skip true preview.
+  return false
+}
+
 export async function ensureChatShellOpenGift(userId: string): Promise<ChatShellOpenGiftResult> {
   const empty: ChatShellOpenGiftResult = {
     ok: true,
@@ -74,6 +82,19 @@ export async function ensureChatShellOpenGift(userId: string): Promise<ChatShell
       creditsRemaining: remainingBefore || (await getCreditRemaining(userId)),
       showWelcome: !welcomeSeen,
       tourDone,
+    }
+  }
+
+  // Preview: never insert a new +100 lot (do not claw existing production lots).
+  if (shouldSkipChatShellOpenGift()) {
+    return {
+      ok: true,
+      granted: false,
+      already: false,
+      credits: CHAT_SHELL_OPEN_GIFT_CREDITS,
+      creditsRemaining: remainingBefore,
+      showWelcome: false,
+      tourDone: true,
     }
   }
 

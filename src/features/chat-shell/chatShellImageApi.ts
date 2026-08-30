@@ -33,6 +33,17 @@ import {
 } from './chatShellReferenceSelection'
 import { friendlyImageError } from './chatShellImageErrors'
 
+function mintShellGenerationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const n = (Math.random() * 16) | 0
+    const v = ch === 'x' ? n : (n & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 export function shellImageActionLabel(
   actionType: MessageArtifact['action_type'],
   language: 'en' | 'es' = 'es'
@@ -285,6 +296,7 @@ export async function generateShellOfferImage(options: {
   businessContext?: string
   userText?: string
   source?: string
+  referenceMode?: 'use' | 'none'
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
@@ -306,6 +318,8 @@ export async function generateShellOfferImage(options: {
     ? ''
     : (options.prompt || options.scriptText || 'Ad image')
 
+  const generationId = mintShellGenerationId()
+
   const body = buildShellImageGenerateBody({
     preferences: prefs,
     productId: options.productId,
@@ -318,16 +332,18 @@ export async function generateShellOfferImage(options: {
     businessContext: options.businessContext,
     customColors: options.customColors,
     brandLogoUrl: options.brandLogoUrl,
+    generationId,
+    referenceMode: options.referenceMode,
   })
 
   let sample: string
   let actualModel = prefs.model
-  let generationId: string | undefined
   let providerModel: string | undefined
+  let returnedGenerationId: string | undefined
   try {
     const result = await callGenerateImageDetailed(body)
     sample = result.sample
-    generationId = result.generationId
+    returnedGenerationId = result.generationId
     providerModel = result.providerModel
     if (result.model) actualModel = result.model as typeof prefs.model
   } catch (err) {
@@ -367,7 +383,7 @@ export async function generateShellOfferImage(options: {
       aspectRatio: prefs.aspectRatio,
       model: actualModel,
       providerModel: providerModel || null,
-      generationId: generationId || null,
+      generationId: returnedGenerationId || generationId,
       density: prefs.density,
       brandKitId: options.brandKitId || null,
     },
@@ -441,6 +457,7 @@ export async function editShellOfferImage(options: {
   const contextReferenceImages = isEnhance
     ? await compressReferenceUrls(options.contextReferenceUrls)
     : []
+  const generationId = mintShellGenerationId()
   const sample = await callGenerateImage(
     isEnhance
       ? buildShellImageEnhanceBody({
@@ -456,6 +473,7 @@ export async function editShellOfferImage(options: {
           productReferenceImages,
           contextReferenceImages,
           aspectRatio: inferredAspect,
+          generationId,
         })
       : {
           action: 'edit',
@@ -465,6 +483,7 @@ export async function editShellOfferImage(options: {
           productImageId: options.productImageId,
           editPrompt: options.editPrompt,
           editImage: base64,
+          generationId,
           ...(compressedRefs.length ? { editReferenceImages: compressedRefs } : {}),
           ...(inferredAspect ? { aspectRatio: inferredAspect } : {}),
           ...(options.brandKitId ? { brandKitId: options.brandKitId } : {}),

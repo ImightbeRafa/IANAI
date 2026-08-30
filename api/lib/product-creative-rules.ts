@@ -1,6 +1,7 @@
 /**
  * Offer-level product silhouette + locked price rules for image generate/edit/enhance.
- * Used when reference images are missing or to keep patch SKUs on-brand.
+ * Bloom ₡9.900 / 9-patch / BLOOM logo rules apply only to known kit/product ids —
+ * never keyword heuristics on brand name or copy.
  */
 
 export type ProductCreativeRow = {
@@ -14,6 +15,25 @@ export type ProductCreativeRow = {
   price_range?: string | null
 }
 
+export type BloomSkuScope = {
+  productId?: string | null
+  brandKitId?: string | null
+}
+
+/** AIIAN Bloom dermal patch product rows (do not match by name). */
+export const BLOOM_DERMAL_PATCH_PRODUCT_IDS = new Set<string>([
+  '0e4e8639-bd1f-41d8-b7e7-f957143907c1',
+  'ec5c911a-2f7f-4ec4-be45-ca1527d37d87',
+  '8ccaf955-eeb1-4d68-bc8d-5c6da2611a32',
+  'be543866-110c-4729-9d8f-aae5924357f2',
+])
+
+/** AIIAN Bloom brand kit rows. */
+export const BLOOM_DERMAL_PATCH_BRAND_KIT_IDS = new Set<string>([
+  'a1112c05-fff2-4988-bc5b-b2a63b0504c4',
+  'f07339f1-2d48-49b1-97e1-dc2e23f736cf',
+])
+
 export const BLOOM_DERMAL_PATCH_PRICE = '₡9.900'
 
 export const DERMAL_PATCH_SILHOUETTE_ES =
@@ -24,30 +44,24 @@ export const DERMAL_PATCH_SILHOUETTE_EN =
 
 const SILUETA_PREFIX = /^SILUETA(?:\s+PRODUCTO)?:\s*/i
 
-function productText(row: ProductCreativeRow): string {
-  return [
-    row.name,
-    row.product_description,
-    row.description,
-    row.technical_specs,
-    row.product_category,
-    row.product_category_custom,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
+export function isBloomDermalPatchSku(scope?: BloomSkuScope | null): boolean {
+  const productId = typeof scope?.productId === 'string' ? scope.productId : ''
+  const brandKitId = typeof scope?.brandKitId === 'string' ? scope.brandKitId : ''
+  if (productId && BLOOM_DERMAL_PATCH_PRODUCT_IDS.has(productId)) return true
+  if (brandKitId && BLOOM_DERMAL_PATCH_BRAND_KIT_IDS.has(brandKitId)) return true
+  return false
 }
 
-export function isDermalMicroPatchOffer(row: ProductCreativeRow, brandName?: string | null): boolean {
-  const text = productText(row)
-  const brand = (brandName || row.name || '').toLowerCase()
-  const patchLike =
-    /micro[- ]?aguj|micro[- ]?infusi|dermal|parche|patch|pimple|acne|granito/.test(text)
-    || /bloom/.test(brand)
-  const ninePack = /9\s*parche|nine\s*patch|3\s*[x×]\s*3|12\s*mm/.test(text)
-  return patchLike && (ninePack || /hojita|sheet|lamina|plancha/.test(text))
+/**
+ * @deprecated Prefer isBloomDermalPatchSku({ productId, brandKitId }).
+ * Kept for call-site compatibility; brandName/row text are ignored.
+ */
+export function isDermalMicroPatchOffer(
+  _row: ProductCreativeRow,
+  _brandName?: string | null,
+  scope?: BloomSkuScope | null
+): boolean {
+  return isBloomDermalPatchSku(scope)
 }
 
 export function parseSilhouetteFromTechnicalSpecs(technicalSpecs?: string | null): string | null {
@@ -64,11 +78,12 @@ export function parseSilhouetteFromTechnicalSpecs(technicalSpecs?: string | null
 export function resolveProductSilhouette(
   row: ProductCreativeRow,
   language: 'es' | 'en',
-  brandName?: string | null
+  _brandName?: string | null,
+  scope?: BloomSkuScope | null
 ): string | null {
   const fromSpecs = parseSilhouetteFromTechnicalSpecs(row.technical_specs)
   if (fromSpecs) return fromSpecs
-  if (isDermalMicroPatchOffer(row, brandName)) {
+  if (isBloomDermalPatchSku(scope)) {
     return language === 'es' ? DERMAL_PATCH_SILHOUETTE_ES : DERMAL_PATCH_SILHOUETTE_EN
   }
   return null
@@ -77,11 +92,12 @@ export function resolveProductSilhouette(
 /** Exact display price for prompts — never invent from price_range enum alone. */
 export function resolveLockedOfferPrice(
   row: ProductCreativeRow,
-  brandName?: string | null
+  _brandName?: string | null,
+  scope?: BloomSkuScope | null
 ): string | null {
   const explicit = typeof row.offer === 'string' ? row.offer.trim() : ''
   if (explicit) return explicit
-  if (isDermalMicroPatchOffer(row, brandName)) return BLOOM_DERMAL_PATCH_PRICE
+  if (isBloomDermalPatchSku(scope)) return BLOOM_DERMAL_PATCH_PRICE
   return null
 }
 
@@ -110,12 +126,35 @@ export function buildProductSilhouetteBlock(
   return `${header}\n${silhouette.trim()}\n${refNote}${enhanceNote ? `\n${enhanceNote}` : ''}\n═══════════════════════════════════════════════\n\n`
 }
 
-export function buildLogoStampRules(language: 'es' | 'en', hasLogo: boolean): string {
+export function buildLogoStampRules(
+  language: 'es' | 'en',
+  hasLogo: boolean,
+  options?: { bloomSku?: boolean }
+): string {
   const isES = language === 'es'
+  const bloomSku = options?.bloomSku === true
   if (!hasLogo) {
+    if (!bloomSku) {
+      return isES
+        ? `REGLA — LOGO: no hay archivo de logo adjunto. NO inventes wordmark ni subtítulos de marca con IA.\n\n`
+        : `LOGO RULE: no logo file attached. Do NOT invent a wordmark or brand subtitles with AI.\n\n`
+    }
     return isES
       ? `REGLA — LOGO: no hay archivo de logo adjunto. NO inventes wordmark, NO escribas "BLOOM", NO generes el lockup "DERMAL MICRO-INFUSION PATCH" ni subtítulos de marca con IA.\n\n`
       : `LOGO RULE: no logo file attached. Do NOT invent a wordmark, do NOT write "BLOOM", do NOT generate the "DERMAL MICRO-INFUSION PATCH" lockup or brand subtitles with AI.\n\n`
+  }
+  if (!bloomSku) {
+    return isES
+      ? `REGLA — LOGO (ESTAMPADO, NO REGENERACIÓN):
+- Se adjunta el archivo oficial del logo como imagen raster.
+- COMPÓSITALO / estampalo tal cual — placement en esquina superior (izq o der), proporciones intactas.
+- PROHIBIDO redibujar o reescribir el wordmark con IA.
+- Si hay conflicto, el logo adjunto gana; ajustá fondo/composición, no el logo.\n\n`
+      : `LOGO RULE (STAMP, DO NOT REDRAW):
+- The official logo file is attached as a raster image.
+- COMPOSITE / stamp it as-is — top corner placement, proportions intact.
+- FORBIDDEN to redraw or re-typeset the wordmark with AI.
+- On conflict, the attached logo wins; adjust background/composition, not the logo.\n\n`
   }
   return isES
     ? `REGLA — LOGO (ESTAMPADO, NO REGENERACIÓN):
@@ -143,17 +182,21 @@ export function buildEnhancePatchConstraints(
   row: ProductCreativeRow | null | undefined,
   language: 'es' | 'en',
   brandName?: string | null,
-  options?: { hasProductRef?: boolean }
+  options?: { hasProductRef?: boolean; productId?: string | null; brandKitId?: string | null }
 ): string {
   if (!row) return ''
-  const silhouette = resolveProductSilhouette(row, language, brandName)
+  const scope: BloomSkuScope = {
+    productId: options?.productId,
+    brandKitId: options?.brandKitId,
+  }
+  const silhouette = resolveProductSilhouette(row, language, brandName, scope)
   if (!silhouette) return ''
   const isES = language === 'es'
   const silhouetteBlock = buildProductSilhouetteBlock(silhouette, language, {
     hasReferenceImages: options?.hasProductRef ?? false,
     forEnhance: true,
   })
-  const lockedPrice = resolveLockedOfferPrice(row, brandName)
+  const lockedPrice = resolveLockedOfferPrice(row, brandName, scope)
   const priceRules = buildLockedPriceRules(language, lockedPrice)
   const improveNote = isES
     ? `MEJORA PERMITIDA: crop, contraste, luz, ambiente floral/púrpura nocturno coherente con la marca.
@@ -168,9 +211,14 @@ FORBIDDEN ON EDIT: gibberish text, SKU change, add packaging/box, replace the pa
 export function buildEditPatchConstraints(
   row: ProductCreativeRow | null | undefined,
   language: 'es' | 'en',
-  brandName?: string | null
+  brandName?: string | null,
+  options?: { productId?: string | null; brandKitId?: string | null }
 ): string {
-  return buildEnhancePatchConstraints(row, language, brandName, { hasProductRef: true })
+  return buildEnhancePatchConstraints(row, language, brandName, {
+    hasProductRef: true,
+    productId: options?.productId,
+    brandKitId: options?.brandKitId,
+  })
 }
 
 export function buildPostCtaGuardrails(language: 'es' | 'en', ctaStrength?: string): string {

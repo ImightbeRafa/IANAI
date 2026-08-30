@@ -2209,6 +2209,7 @@ export function useChatSessionThread(options: {
         businessContext: session.context || undefined,
         userText: options.userText,
         source: options.source,
+        referenceMode: referenceMode === 'none' ? 'none' : 'use',
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,

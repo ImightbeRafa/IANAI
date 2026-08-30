@@ -505,6 +505,8 @@ export function buildShellImageGenerateBody(options: {
   businessContext?: string
   customColors?: string[]
   brandLogoUrl?: string
+  generationId?: string
+  referenceMode?: 'use' | 'none'
 }): Record<string, unknown> {
   const prefs = options.preferences
   if (!prefs.style) {
@@ -529,6 +531,10 @@ export function buildShellImageGenerateBody(options: {
   if (options.businessContext) body.businessContext = options.businessContext
   if (options.customColors?.length) body.customColors = options.customColors.slice(0, 3)
   if (options.brandLogoUrl) body.brandLogoUrl = options.brandLogoUrl
+  if (options.generationId) body.generationId = options.generationId
+  if (options.referenceMode === 'none' || options.referenceMode === 'use') {
+    body.referenceMode = options.referenceMode
+  }
   body.productImageIds = productImageIds
   if (productImageIds[0]) body.productImageId = productImageIds[0]
 

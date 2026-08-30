@@ -25,16 +25,16 @@ export function parsePreferredUi(value: unknown): PreferredUi | null {
 }
 
 /**
- * Kill switch gates access for everyone. Preference never grants access and
- * never redirects home unless the user opted into chat (`preferred_ui`).
- * `chat_beta_access` is retained for ops/reporting but no longer required.
+ * Kill switch + invite. Preference never grants access and never redirects
+ * home unless the user opted into chat (`preferred_ui`). Flag-on without
+ * `chat_beta_access` is denied (frontend mirrors server gate).
  */
 export function resolveChatShellRollout(input: ChatShellRolloutInput): ChatShellRollout {
   const killSwitch = input.killSwitch
   const betaAccess = input.betaAccess === true
   const preferredUi = input.preferredUi === 'chat' ? 'chat' : 'classic'
   const killOn = killSwitch === 'enabled'
-  const canAccessChat = killOn
+  const canAccessChat = killOn && betaAccess
   const showSwitch = canAccessChat
   const effectiveHome: PreferredUi = canAccessChat && preferredUi === 'chat' ? 'chat' : 'classic'
 

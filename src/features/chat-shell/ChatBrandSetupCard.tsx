@@ -16,6 +16,7 @@ const STEP_LABEL = {
     hint: 'Tocá lo que falte — el chat te guía. Desaparece cuando esté completo.',
     open: 'Configurar',
     close: 'Cerrar',
+    missingPrefix: 'Falta',
   },
   en: {
     business: 'Business',
@@ -29,6 +30,7 @@ const STEP_LABEL = {
     hint: 'Tap what’s missing — chat guides you. This bar hides when it’s complete.',
     open: 'Configure',
     close: 'Close',
+    missingPrefix: 'Missing',
   },
 } as const
 
@@ -41,13 +43,22 @@ export default function ChatBrandSetupCard({ language = 'es', setup }: ChatBrand
   const t = STEP_LABEL[language]
   const [expanded, setExpanded] = useState(false)
   if (!setup.trackerVisible) return null
-  const doneCount = setup.steps.filter((step) => setup.stepComplete(setup.snapshot, step)).length
+  const missingSteps = setup.steps.filter((step) => !setup.stepComplete(setup.snapshot, step))
+  const missingLabel = missingSteps.length
+    ? `${t.missingPrefix}: ${missingSteps.slice(0, 3).map((step) => t[step]).join(', ')}${missingSteps.length > 3 ? '…' : ''}`
+    : null
 
   return (
     <div className={`chat-shell__setup-pin${expanded ? ' is-expanded' : ' is-collapsed'}`} aria-label={t.title}>
       <div className="chat-shell__setup-pin-bar">
         <Settings2 size={13} className="chat-shell__setup-pin-icon" />
-        <span className="chat-shell__setup-progress">{doneCount}/{setup.steps.length}</span>
+        {expanded ? (
+          <span className="chat-shell__setup-progress">
+            {setup.steps.length - missingSteps.length}/{setup.steps.length}
+          </span>
+        ) : missingLabel ? (
+          <span className="chat-shell__setup-progress chat-shell__setup-progress--missing">{missingLabel}</span>
+        ) : null}
         <strong className="chat-shell__setup-pin-title">{t.title}</strong>
         <span className="chat-shell__setup-pin-hint">{t.hint}</span>
         <button

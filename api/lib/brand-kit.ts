@@ -1,4 +1,5 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
+import { isBloomDermalPatchSku } from './product-creative-rules.js'
 
 export interface BrandKitRow {
   id: string
@@ -171,12 +172,20 @@ export function buildBrandVisualPrompt(kit: BrandKitRow): string | null {
 export function buildBrandLogoPrompt(kit: BrandKitRow, language: 'es' | 'en' = 'es'): string | null {
   if (!kit.logo_url) return null
   const isES = language === 'es'
+  const bloomSku = isBloomDermalPatchSku({ brandKitId: kit.id })
+  const bloomLine = bloomSku
+    ? (isES
+      ? '- PROHIBIDO redibujar, reimaginar o reescribir con IA el wordmark "BLOOM" o el lockup "DERMAL MICRO-INFUSION PATCH".'
+      : '- FORBIDDEN to redraw, reimagine, or re-typeset the "BLOOM" wordmark or "DERMAL MICRO-INFUSION PATCH" lockup with AI.')
+    : (isES
+      ? '- PROHIBIDO redibujar o reescribir el wordmark con IA.'
+      : '- FORBIDDEN to redraw or re-typeset the wordmark with AI.')
   return `═══════════════════════════════════════════════
 REGLA — LOGO DE MARCA (ESTAMPADO / NO REGENERACIÓN)
 ═══════════════════════════════════════════════
 Se adjunta el archivo oficial del logo de "${kit.name}" como imagen raster inline.
 - COMPÓSITALO / estampalo tal cual en esquina superior (izquierda o derecha), visible y nítido.
-- PROHIBIDO redibujar, reimaginar o reescribir con IA el wordmark "BLOOM" o el lockup "DERMAL MICRO-INFUSION PATCH".
+${bloomLine}
 - PROHIBIDO generar subtítulos de marca inventados si el logo no los trae.
 - Si hay conflicto con otros elementos, el logo adjunto gana — ajustá composición/fondo, no el logo.
 - VIOLACIÓN = RESULTADO INVÁLIDO.

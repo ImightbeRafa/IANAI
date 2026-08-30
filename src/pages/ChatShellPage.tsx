@@ -3,7 +3,6 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import ChatShell from '../features/chat-shell/ChatShell'
 import ChatShellGate from '../features/chat-shell/ChatShellGate'
-import ChatShellTourWizard from '../features/chat-shell/ChatShellTourWizard'
 import ChatShellWelcomeGiftModal from '../features/chat-shell/ChatShellWelcomeGiftModal'
 import {
   ensureChatShellOpenGift,
@@ -36,7 +35,7 @@ function initialsFromName(name: string): string {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
-type OnboardingPhase = 'loading' | 'gift' | 'tour' | 'done'
+type OnboardingPhase = 'loading' | 'gift' | 'done'
 
 export default function ChatShellPage() {
   const { user } = useAuth()
@@ -72,7 +71,8 @@ export default function ChatShellPage() {
           setPhase('gift')
           return
         }
-        setPhase('tour')
+        // First-run chrome is the empty composer CTA ("Empezá por tu marca") — not a multi-step tour.
+        setPhase('done')
       })
       .catch((err) => {
         console.error('chat-shell open gift', err)
@@ -93,17 +93,10 @@ export default function ChatShellPage() {
     applyTheme(theme === 'obsidian-dark' ? 'obsidian-light' : 'obsidian-dark')
   }
 
-  const dismissGift = (continueToTour: boolean) => {
-    // Phase first so "Empezar ya" dismisses on the first click (F).
-    setPhase(continueToTour ? 'tour' : 'done')
-    void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
-    if (!continueToTour) {
-      void markChatShellTourDoneClient().catch((err) => console.error(err))
-    }
-  }
-
-  const finishTour = () => {
+  const dismissGift = (_continueToTour: boolean) => {
+    // Skip multi-step tour — empty composer CTA covers first-run.
     setPhase('done')
+    void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
     void markChatShellTourDoneClient().catch((err) => console.error(err))
   }
 
@@ -170,13 +163,6 @@ export default function ChatShellPage() {
           language={lang}
           onContinue={() => dismissGift(true)}
           onDismiss={() => dismissGift(false)}
-        />
-      ) : null}
-      {phase === 'tour' ? (
-        <ChatShellTourWizard
-          language={lang}
-          onFinish={() => finishTour()}
-          onSkipForever={() => finishTour()}
         />
       ) : null}
     </>

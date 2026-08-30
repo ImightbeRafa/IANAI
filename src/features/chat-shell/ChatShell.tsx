@@ -654,6 +654,19 @@ export default function ChatShell({
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
           language={language}
+          kitReady={
+            brandSetup.facts.offerConfirmed
+            || brandSetup.phase === 'complete'
+            || brandSetup.snapshot.offerCore
+          }
+          onStartBrandKit={() => {
+            if (!workspace.activeBrand) {
+              openBrandCreate()
+              return
+            }
+            createWidget.show()
+            void brandSetup.askStep('business')
+          }}
           imageClarify={thread.imageClarify}
           onAnswerImageClarify={(answer) => void thread.answerImageClarify(answer)}
           onCancelImageClarify={() => thread.cancelImageClarify()}
@@ -697,52 +710,67 @@ export default function ChatShell({
               title={
                 (brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore)
                   ? t.kitReady
-                  : t.kitTitle
+                  : t.kitNotReady
               }
               onHide={createWidget.hide}
               onShow={createWidget.show}
-              actions={[
+              actions={(() => {
+                const kitListo = brandSetup.facts.offerConfirmed
+                  || brandSetup.phase === 'complete'
+                  || brandSetup.snapshot.offerCore
+                const blocked = !kitListo
+                const baseDisabled = brandSetup.busy || thread.loadingMessages
+                return [
                 {
-                  id: 'scripts',
+                  id: 'scripts' as const,
                   label: t.createScriptsShort,
                   active: activeCreateAction === 'scripts',
-                  disabled: brandSetup.busy || thread.loadingMessages,
+                  disabled: baseDisabled || blocked,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     thread.cancelImageClarify()
                     thread.startScriptsFlow()
                   },
                 },
                 {
-                  id: 'post',
+                  id: 'post' as const,
                   label: t.createPostShort,
                   active: activeCreateAction === 'post',
-                  disabled: brandSetup.busy || thread.loadingMessages,
+                  disabled: baseDisabled || blocked,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     thread.cancelScriptClarify()
                     thread.startPostFlow()
                   },
                 },
                 {
-                  id: 'product',
+                  id: 'product' as const,
                   label: t.createProductShort,
                   active: activeCreateAction === 'product',
-                  disabled: brandSetup.busy || thread.loadingMessages,
+                  disabled: baseDisabled || blocked,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     thread.cancelScriptClarify()
                     thread.startProductFotoFlow()
                   },
                 },
                 {
-                  id: 'bulk',
+                  id: 'bulk' as const,
                   label: t.createBulkShort,
                   active: false,
-                  disabled: brandSetup.busy || thread.loadingMessages || !workspace.activeBrand,
+                  disabled: baseDisabled || blocked || !workspace.activeBrand,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     setBulkCount(10)
                     setBulkOpen(true)
                   },
                 },
-              ]}
+              ]
+              })()}
               reviewPanel={(
             <ChatBrandProfileCard
               key={workspace.activeBrand?.id || 'no-brand'}

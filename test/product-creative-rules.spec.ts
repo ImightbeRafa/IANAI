@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import {
   BLOOM_DERMAL_PATCH_PRICE,
+  BLOOM_DERMAL_PATCH_PRODUCT_IDS,
   buildEnhancePatchConstraints,
   buildLockedPriceRules,
   buildLogoStampRules,
   buildPostCtaGuardrails,
   buildProductSilhouetteBlock,
+  isBloomDermalPatchSku,
   isDermalMicroPatchOffer,
   resolveLockedOfferPrice,
   resolveProductSilhouette,
 } from '../api/lib/product-creative-rules'
 import { buildProductPrompt } from '../api/data/image-presets'
+
+const BLOOM_PRODUCT_ID = [...BLOOM_DERMAL_PATCH_PRODUCT_IDS][0]
 
 const BLOOM_PATCH_ROW = {
   name: 'Bloom — Dermal Micro-Infusion Patch',
@@ -21,13 +25,18 @@ const BLOOM_PATCH_ROW = {
   price_range: 'economico',
 }
 
+const bloomScope = { productId: BLOOM_PRODUCT_ID }
+
 describe('product creative rules — Bloom dermal patch', () => {
-  it('detects dermal micro patch offers', () => {
-    expect(isDermalMicroPatchOffer(BLOOM_PATCH_ROW, 'Bloom')).toBe(true)
+  it('matches only known product/kit ids, not keyword heuristics', () => {
+    expect(isBloomDermalPatchSku(bloomScope)).toBe(true)
+    expect(isDermalMicroPatchOffer(BLOOM_PATCH_ROW, 'Bloom', bloomScope)).toBe(true)
+    expect(isDermalMicroPatchOffer(BLOOM_PATCH_ROW, 'Bloom')).toBe(false)
+    expect(isBloomDermalPatchSku({ productId: '00000000-0000-0000-0000-000000000000' })).toBe(false)
   })
 
   it('E2: resolves 3×3 hojita silhouette when refs are missing', () => {
-    const silhouette = resolveProductSilhouette(BLOOM_PATCH_ROW, 'es', 'Bloom')
+    const silhouette = resolveProductSilhouette(BLOOM_PATCH_ROW, 'es', 'Bloom', bloomScope)
     expect(silhouette).toMatch(/9 parches/i)
     expect(silhouette).toMatch(/3×3|3x3/i)
     expect(silhouette).toMatch(/caja sellada|cartón genérico/i)
@@ -51,31 +60,40 @@ describe('product creative rules — Bloom dermal patch', () => {
   })
 
   it('locks ₡9.900 when offer is null for patch SKU', () => {
-    expect(resolveLockedOfferPrice(BLOOM_PATCH_ROW, 'Bloom')).toBe(BLOOM_DERMAL_PATCH_PRICE)
-    expect(resolveLockedOfferPrice({ ...BLOOM_PATCH_ROW, offer: '₡12.500' }, 'Bloom')).toBe('₡12.500')
+    expect(resolveLockedOfferPrice(BLOOM_PATCH_ROW, 'Bloom', bloomScope)).toBe(BLOOM_DERMAL_PATCH_PRICE)
+    expect(resolveLockedOfferPrice({ ...BLOOM_PATCH_ROW, offer: '₡12.500' }, 'Bloom', bloomScope)).toBe('₡12.500')
     expect(resolveLockedOfferPrice({ name: 'Random soap', offer: null }, 'Acme')).toBeNull()
   })
 
-  it('E3: logo stamp rules forbid AI wordmark when logo is attached', () => {
-    const withLogo = buildLogoStampRules('es', true)
+  it('E3: logo stamp rules forbid AI wordmark when logo is attached (Bloom only)', () => {
+    const withLogo = buildLogoStampRules('es', true, { bloomSku: true })
     expect(withLogo).toMatch(/ESTAMPADO|COMPÓSITALO/i)
     expect(withLogo).toMatch(/PROHIBIDO.*BLOOM/i)
     expect(withLogo).toMatch(/DERMAL MICRO-INFUSION PATCH/i)
 
-    const withoutLogo = buildLogoStampRules('es', false)
+    const withoutLogo = buildLogoStampRules('es', false, { bloomSku: true })
     expect(withoutLogo).toMatch(/NO inventes wordmark/i)
     expect(withoutLogo).toMatch(/NO generes el lockup/i)
+
+    const generic = buildLogoStampRules('es', true, { bloomSku: false })
+    expect(generic).not.toMatch(/BLOOM/)
   })
 
   it('G2: enhance constraints keep 9-patch silhouette', () => {
-    const block = buildEnhancePatchConstraints(BLOOM_PATCH_ROW, 'es', 'Bloom', { hasProductRef: false })
+    const block = buildEnhancePatchConstraints(BLOOM_PATCH_ROW, 'es', 'Bloom', {
+      hasProductRef: false,
+      productId: BLOOM_PRODUCT_ID,
+    })
     expect(block).toMatch(/9 parches|3×3|3x3/i)
     expect(block).toMatch(/conservá exactamente esta silueta/i)
     expect(block).toMatch(/PROHIBIDO.*caja|empaque/i)
   })
 
   it('G3: enhance constraints forbid strikethrough on locked list price', () => {
-    const block = buildEnhancePatchConstraints(BLOOM_PATCH_ROW, 'es', 'Bloom', { hasProductRef: false })
+    const block = buildEnhancePatchConstraints(BLOOM_PATCH_ROW, 'es', 'Bloom', {
+      hasProductRef: false,
+      productId: BLOOM_PRODUCT_ID,
+    })
     expect(block).toMatch(/PROHIBIDO tachado|strikethrough/i)
     expect(buildLockedPriceRules('es', BLOOM_DERMAL_PATCH_PRICE)).toMatch(/₡9\.900/)
     expect(buildLockedPriceRules('es', BLOOM_DERMAL_PATCH_PRICE)).toMatch(/tachado|strikethrough/i)

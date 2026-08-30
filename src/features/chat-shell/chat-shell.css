@@ -1367,6 +1367,32 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   font-size: 0.84rem;
 }
 
+.chat-shell__empty-line {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.chat-shell__empty-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent, #c4a574) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent, #c4a574) 18%, var(--bg-elevated));
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-shell__empty-cta:hover {
+  background: color-mix(in srgb, var(--accent, #c4a574) 28%, var(--bg-elevated));
+}
+
 .chat-shell__bubble {
   margin-top: 2px;
   white-space: pre-wrap;
@@ -2401,6 +2427,18 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 .chat-shell__idle-actions button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.chat-shell__idle-action-block {
+  display: block;
+  margin: 0;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-muted, #9aa3b2);
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 .chat-shell__composer {

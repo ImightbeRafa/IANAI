@@ -4,7 +4,10 @@ import { supabaseAdmin } from './supabase-admin.js'
 export const CHAT_SHELL_UNAVAILABLE =
   'Chat is not available for this account'
 
-/** Kill switch only — preference / beta invite never grant access alone. */
+/**
+ * Kill switch + invite. Preference never grants access alone.
+ * Flag-on without `profiles.chat_beta_access` = denied (Preview shares AIIAN flag).
+ */
 export async function userHasChatShellAccess(userId: string): Promise<boolean> {
   if (!supabaseAdmin || !userId) return false
   try {
@@ -14,6 +17,13 @@ export async function userHasChatShellAccess(userId: string): Promise<boolean> {
       .eq('key', 'chat_shell')
       .maybeSingle()
     if (flagError || flag?.enabled !== true) return false
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('chat_beta_access')
+      .eq('id', userId)
+      .maybeSingle()
+    if (profileError || profile?.chat_beta_access !== true) return false
     return true
   } catch (err) {
     console.error('Chat-shell access check failed:', err)

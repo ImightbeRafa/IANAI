@@ -1,3 +1,12 @@
+## 2026-08-30 — PR #34 fat Preview: invite gate + no Preview gift + generationId + first-run chrome
+
+- Server `userHasChatShellAccess` requires `chat_shell` flag **and** `profiles.chat_beta_access` (frontend rollout mirrors).
+- Skip +100 open gift when `VERCEL_ENV=preview` (no clawback of existing lots).
+- `generate-image` rejects missing `generationId` (no server mint); shell client mints per Generar/edit/enhance.
+- Empty first-run: one line + “Empezá por tu marca”; skip multi-step tour; kit-not-ready blocks Guiones/Post/Foto/Pack with “Primero el kit”.
+- Setup pin names missing steps (no bare 3/6 until Configurar open); Pack step 1 shows credits.
+- `referenceMode: none` skips auto-hydrate; hydrate binds owner/collab; Bloom ₡9.900 / 9-patch / BLOOM logo only for known kit/product ids.
+
 ## 2026-08-30 — PR #34: Foto last step = Confirmá referencias (same as Post)
 
 - Stopped auto-forcing referenceMode=none for studio-hero/podium Foto, which skipped the refs sheet and opened the ingredients gate + chat credit confirm.

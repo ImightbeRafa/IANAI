@@ -57,6 +57,7 @@ import {
   buildLockedPriceRules,
   buildLogoStampRules,
   buildPostCtaGuardrails,
+  isBloomDermalPatchSku,
   resolveLockedOfferPrice,
   resolveProductSilhouette,
   type ProductCreativeRow,
@@ -154,6 +155,7 @@ async function fetchImageUrlAsDataUrl(url: string): Promise<string | null> {
 async function hydrateInputImagesFromProductImages(
   imageParams: Record<string, unknown>,
   options: {
+    userId: string
     sessionId: string | null
     productId: string | null
     autoLoadOfferRefs?: boolean
@@ -166,6 +168,11 @@ async function hydrateInputImagesFromProductImages(
   if (alreadyFilled > 0) return { ok: true }
 
   if (!options.productId || !imgMemSupabase) return { ok: true }
+
+  // Never load product_images via service role without owner/collab bind.
+  if (!(await userHasProductAccess(options.userId, options.productId))) {
+    return { ok: false, status: 403, error: 'Access denied to this product' }
+  }
 
   let ids = normalizeProductImageIdList(imageParams.productImageIds)
   // Also accept singular productImageId when array omitted
@@ -577,8 +584,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ error: 'Admin access required' })
     }
 
-    const incomingGenerationId = typeof imageParams.generationId === 'string' ? imageParams.generationId : ''
-    const generationId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(incomingGenerationId)
+    // Client must mint generationId per Generar click. Missing/invalid → reject
+    // (do not mint server-side — that lets curl double-tap mint fresh ids and double-charge).
+    const incomingGenerationId = typeof imageParams.generationId === 'string' ? imageParams.generationId.trim() : ''
+    const generationIdOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(incomingGenerationId)
+    if (action !== 'poll' && !generationIdOk) {
+      return res.status(400).json({
+        error: 'generationId is required',
+        code: 'generation_id_required',
+      })
+    }
+    const generationId = generationIdOk
       ? incomingGenerationId
       : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`)
 
@@ -672,11 +688,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const editLang = imageParams.language === 'en' ? 'en' : 'es'
       const hasEditLogo = !!(brandKit?.logo_url || logoFallbackUrl)
+      const bloomScope = {
+        productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
+        brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+      }
+      const bloomSku = isBloomDermalPatchSku(bloomScope)
       const brandEditRules = [
         brandKit ? buildBrandColorOverride(brandKit) : null,
         brandKit ? buildBrandVisualPrompt(brandKit) : null,
-        buildLogoStampRules(editLang, hasEditLogo),
-        buildEditPatchConstraints(editProductRow, editLang, brandKit?.name),
+        buildLogoStampRules(editLang, hasEditLogo, { bloomSku }),
+        buildEditPatchConstraints(editProductRow, editLang, brandKit?.name, bloomScope),
       ].filter(Boolean).join('\n\n')
 
       const systemEditPrompt = `You are an expert image editor. You will receive an image to edit and an edit instruction.${hasRefs ? ' You will also receive reference images - use them as visual guidance for the requested change.' : ''}
@@ -1058,10 +1079,22 @@ Edit instruction: ${editPrompt}`
         enhanceProductRow,
         enhanceLang === 'en' ? 'en' : 'es',
         brandKit?.name,
-        { hasProductRef: hasProductRef }
+        {
+          hasProductRef: hasProductRef,
+          productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
+          brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+        }
       )
       const enhanceHasLogo = !!(brandKit?.logo_url || logoFallbackUrl)
-      const enhanceLogoRules = buildLogoStampRules(enhanceLang === 'en' ? 'en' : 'es', enhanceHasLogo)
+      const enhanceBloomSku = isBloomDermalPatchSku({
+        productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
+        brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+      })
+      const enhanceLogoRules = buildLogoStampRules(
+        enhanceLang === 'en' ? 'en' : 'es',
+        enhanceHasLogo,
+        { bloomSku: enhanceBloomSku }
+      )
 
       const productRefRule = hasProductRef
         ? `\n═══════════════════════════════════════════════
@@ -1593,16 +1626,23 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
     // Producto / shell: hydrate input_image* from authorized offer product_images
     // (uploads write product_images — do not require a separate legacy source).
+    // referenceMode 'none' ("Crear sin referencias") must not auto-hydrate kit photos.
+    const referenceMode = imageParams.referenceMode === 'none' ? 'none' : 'use'
     if (isProductMode || rawSessionId) {
       const hasExplicitRefList = Array.isArray(imageParams.productImageIds)
         || (typeof imageParams.productImageId === 'string' && Boolean(imageParams.productImageId))
+      const wantAutoHydrate = referenceMode !== 'none'
+        && !hasExplicitRefList
+        && !isLogoMode
+        && (isProductMode || isPostMode)
       const hydrate = await hydrateInputImagesFromProductImages(imageParams, {
+        userId: user.id,
         sessionId: rawSessionId || null,
         productId:
           (typeof imageParams.productId === 'string' ? imageParams.productId : null)
           || authoritativeProductId
           || null,
-        autoLoadOfferRefs: !hasExplicitRefList && !isLogoMode && (isProductMode || isPostMode),
+        autoLoadOfferRefs: wantAutoHydrate,
       })
       if (!hydrate.ok) {
         return res.status(hydrate.status).json({ error: hydrate.error })
@@ -1634,11 +1674,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       } catch { /* optional */ }
     }
     const postLangCode = postLanguage === 'en' ? 'en' : 'es'
+    const bloomScope = {
+      productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
+      brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+    }
+    const bloomSku = isBloomDermalPatchSku(bloomScope)
     const postProductSilhouette = postProductCreativeRow
-      ? resolveProductSilhouette(postProductCreativeRow, postLangCode, brandKit?.name)
+      ? resolveProductSilhouette(postProductCreativeRow, postLangCode, brandKit?.name, bloomScope)
       : null
     const postLockedOfferPrice = postProductCreativeRow
-      ? resolveLockedOfferPrice(postProductCreativeRow, brandKit?.name)
+      ? resolveLockedOfferPrice(postProductCreativeRow, brandKit?.name, bloomScope)
       : null
 
     if (isPostMode) {
@@ -1760,7 +1805,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
       // Brand Kit: stamp uploaded logo — never redraw wordmark/lockup with AI
       const hasBrandLogo = !!(brandKit?.logo_url || logoFallbackUrl)
-      const brandLogoPrefix = buildLogoStampRules(postLanguage === 'en' ? 'en' : 'es', hasBrandLogo)
+      const brandLogoPrefix = buildLogoStampRules(postLanguage === 'en' ? 'en' : 'es', hasBrandLogo, { bloomSku })
 
       const resolvePostCtaPrefix = (): string => {
         const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
@@ -1921,8 +1966,8 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
             if (prod) {
               productCreativeRow = prod as ProductCreativeRow
               const lang = postLanguage === 'en' ? 'en' : 'es'
-              const lockedPrice = resolveLockedOfferPrice(productCreativeRow, brandKit?.name)
-              const silhouette = resolveProductSilhouette(productCreativeRow, lang, brandKit?.name)
+              const lockedPrice = resolveLockedOfferPrice(productCreativeRow, brandKit?.name, bloomScope)
+              const silhouette = resolveProductSilhouette(productCreativeRow, lang, brandKit?.name, bloomScope)
               productContext = {
                 ...productContext,
                 name: prod.name || undefined,
@@ -2666,7 +2711,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
           productSilhouette: postProductSilhouette,
           lockedOfferPrice: postLockedOfferPrice,
-          logoStampRules: buildLogoStampRules(postLangCode, Boolean(grokLogoDataUrl)),
+          logoStampRules: buildLogoStampRules(postLangCode, Boolean(grokLogoDataUrl), { bloomSku }),
           ctaGuardrails: buildPostCtaGuardrails(postLangCode, grokCtaStrength),
           hasBrandLogo: Boolean(grokLogoDataUrl),
           category: postProductCreativeRow?.product_category_custom

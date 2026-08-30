@@ -152,6 +152,9 @@ interface ChatThreadProps {
   setupPlaceholder?: string
   onUploadBrandAsset?: (file: File, kind: 'logo' | 'reference') => void | Promise<void>
   onUploadSetupDocument?: (file: File) => void | Promise<void>
+  /** First-run empty CTA — opens Brand Kit / brand create (not a multi-step tour). */
+  onStartBrandKit?: () => void
+  kitReady?: boolean
 }
 
 function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
@@ -253,6 +256,8 @@ export default memo(function ChatThread({
   setupPlaceholder,
   onUploadBrandAsset,
   onUploadSetupDocument,
+  onStartBrandKit,
+  kitReady = false,
 }: ChatThreadProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [attachOpen, setAttachOpen] = useState(false)
@@ -419,9 +424,20 @@ export default memo(function ChatThread({
           <div className="chat-shell__msg chat-shell__msg--ai">
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">
-              {brand
-                ? t.emptyNoSession.replace('{brand}', brand.name)
-                : t.emptyNoBrand}
+              <p className="chat-shell__empty-line">
+                {brand
+                  ? t.emptyNoSession.replace('{brand}', brand.name)
+                  : t.emptyFirstRunLine}
+              </p>
+              {onStartBrandKit ? (
+                <button
+                  type="button"
+                  className="chat-shell__empty-cta"
+                  onClick={onStartBrandKit}
+                >
+                  {t.emptyFirstRunCta}
+                </button>
+              ) : null}
             </div>
           </div>
         ) : showInitialLoader ? (
@@ -435,7 +451,20 @@ export default memo(function ChatThread({
               <div className="chat-shell__msg chat-shell__msg--ai">
                 <span className="chat-shell__who">Advance AI</span>
                 <div className="chat-shell__status-box">
-                  {offerProductId && activeProduct
+                  {!kitReady ? (
+                    <>
+                      <p className="chat-shell__empty-line">{t.emptyFirstRunLine}</p>
+                      {onStartBrandKit ? (
+                        <button
+                          type="button"
+                          className="chat-shell__empty-cta"
+                          onClick={onStartBrandKit}
+                        >
+                          {t.emptyFirstRunCta}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : offerProductId && activeProduct
                     ? t.emptyReadyWithOffer.replace(
                       '{detail}',
                       offerCount > 1

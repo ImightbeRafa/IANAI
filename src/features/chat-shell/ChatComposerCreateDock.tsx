@@ -11,6 +11,8 @@ export interface ComposerCreateAction {
   onClick: () => void
   active?: boolean
   disabled?: boolean
+  /** Shown in title when disabled (e.g. kit not ready). */
+  blockedReason?: string
 }
 
 interface ChatComposerCreateDockProps {
@@ -138,15 +140,19 @@ export default function ChatComposerCreateDock({
           </button>
         </div>
         <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle}>
-          {actions.map((action) => (
+          {actions.map((action) => {
+            const title = action.disabled && action.blockedReason
+              ? `${action.label} — ${action.blockedReason}`
+              : action.label
+            return (
             <button
               key={action.id}
               type="button"
               disabled={action.disabled}
               className={action.active ? 'is-on' : undefined}
               aria-pressed={action.active ? true : false}
-              aria-label={action.label}
-              title={action.label}
+              aria-label={title}
+              title={title}
               onClick={() => {
                 setReviewOpen(false)
                 action.onClick()
@@ -154,8 +160,12 @@ export default function ChatComposerCreateDock({
             >
               {actionIcon(action.id)}
               <span>{action.label}</span>
+              {action.disabled && action.blockedReason ? (
+                <em className="chat-shell__idle-action-block">{action.blockedReason}</em>
+              ) : null}
             </button>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>
