@@ -1,3 +1,9 @@
+## 2026-08-31 — PR #34: Chat nuevo one-click (WD FAIL fix)
+
+- Module-level `runCreateSessionSingleFlight` (survives Strict Mode remount); joins concurrent callers; 2s post-success coalesce against ghost clicks.
+- Sidebar disables on `workspace.busy` (was imageBusy-only); header ignores `detail > 1` double-click.
+- Admin credits-vs-$ unchanged.
+
 ## 2026-08-31 — PR #34: admin credits vs API $ + Chat nuevo single-flight
 
 - `/api/admin-usage` joins `credit_ledger` (credits charged) + sums `credit_lots.remaining` (circulation); returns `creditsEconomics` and per-model `total_credits` / `estimated_api_cost_usd`.

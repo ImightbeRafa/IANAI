@@ -17,6 +17,10 @@ import {
 import type { Business, ChatSession } from '../../types'
 import { planBrandSwitch, selectionsEqual } from './chatShellAsync'
 import {
+  createSessionFlightKey,
+  runCreateSessionSingleFlight,
+} from './chatShellCreateSessionGate'
+import {
   persistSelection,
   readStoredSelection,
   resolveInitialSelection,
@@ -89,8 +93,6 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const sessionsRequestByBrandRef = useRef<Record<string, number>>({})
   const businessesRequestIdRef = useRef(0)
   const createLockRef = useRef(false)
-  /** Dedupes concurrent Chat nuevo clicks onto one in-flight create. */
-  const createInFlightRef = useRef<Promise<string | null> | null>(null)
   /** Tombstones for optimistic deletes — prevent stale list fetch from restoring rows. */
   const pendingDeletedRef = useRef<Set<string>>(new Set())
   const pendingDeletedBrandRef = useRef<Set<string>>(new Set())
@@ -448,7 +450,7 @@ export function useChatShellWorkspace(userId: string | undefined) {
 
   /**
    * Create one empty session for the active (or explicit) brand.
-   * Shared in-flight promise: one click = one insert (no auto-duplicate).
+   * Module-level single-flight: one click = one insert (Strict Mode / remount / ghost click safe).
    */
   const createSession = useCallback(async (opts?: { title?: string; brandId?: string | null }) => {
     if (!userId) return null
@@ -457,28 +459,28 @@ export function useChatShellWorkspace(userId: string | undefined) {
       setNotice('Pick a brand first to create a session (Quick has no product, but needs a brand).')
       return null
     }
-    if (createInFlightRef.current) return createInFlightRef.current
-    if (createLockRef.current || busy) return null
-    createLockRef.current = true
-    const epoch = bumpSelectionEpoch()
-    setBusy(true)
-    setError(null)
-    setNotice(null)
-    const run = (async (): Promise<string | null> => {
+
+    const key = createSessionFlightKey(userId, brandId)
+    return runCreateSessionSingleFlight(key, async () => {
+      if (createLockRef.current) return null
+      createLockRef.current = true
+      const epoch = bumpSelectionEpoch()
+      setBusy(true)
+      setError(null)
+      setNotice(null)
       try {
         // Ensure ref matches explicit brand before insert (sidebar may switch brands).
         if (opts?.brandId && activeBrandIdRef.current !== opts.brandId) {
           activeBrandIdRef.current = opts.brandId
           setActiveBrandId(opts.brandId)
         }
+        const cachedForBrand = sessionsByBrandRef.current[brandId] || []
         const session = await createBrandChatSession(
           brandId,
           userId,
           opts?.title || defaultSessionTitle(),
           undefined,
-          resolveBusinessBrandKitId(
-            brandId === activeBrandIdRef.current ? sessions : (sessionsByBrandRef.current[brandId] || [])
-          )
+          resolveBusinessBrandKitId(cachedForBrand)
         )
         // Never mutate another brand's list (contamination). Same-brand can surface the row.
         if (activeBrandIdRef.current !== brandId) return session.id
@@ -498,14 +500,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
         createLockRef.current = false
         setBusy(false)
       }
-    })()
-    createInFlightRef.current = run
-    try {
-      return await run
-    } finally {
-      if (createInFlightRef.current === run) createInFlightRef.current = null
-    }
-  }, [userId, busy, sessions, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
+    })
+  }, [userId, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 
   const createQuickSession = useCallback(async () => {
     if (!userId) return

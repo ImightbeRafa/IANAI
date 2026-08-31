@@ -559,7 +559,7 @@ export default function ChatShell({
         activeSessionId={workspace.activeSessionId}
         loadingBusinesses={workspace.loadingBusinesses}
         loadingSessions={workspace.loadingSessions}
-        busy={thread.imageBusy}
+        busy={thread.imageBusy || workspace.busy}
         error={workspace.error}
         notice={workspace.notice}
         onSelectBrand={(brandId) => {

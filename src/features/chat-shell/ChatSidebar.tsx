@@ -208,7 +208,11 @@ export default function ChatSidebar({
         <button
           type="button"
           className="chat-shell__row-action chat-shell__row-action--primary"
-          onClick={onNewChat}
+          onClick={(e) => {
+            // Ignore synthetic double-click detail>1; single-flight still guards concurrent fires.
+            if (e.detail > 1) return
+            onNewChat()
+          }}
           disabled={!canCreate}
           aria-disabled={!canCreate}
           title={activeBrandId ? t.newChat : t.noBrand}
