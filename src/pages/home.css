@@ -269,10 +269,9 @@
   justify-content: center;
   align-items: flex-end;
   width: min(100%, 38rem);
-  flex: 1 1 auto;
-  min-height: 20rem;
-  height: auto;
-  margin: 0;
+  flex: 0 0 auto;
+  height: clamp(21rem, 54vh, 27rem);
+  margin: 0.15rem 0 0;
   overflow: hidden;
 }
 
@@ -282,8 +281,9 @@
     flex: 0 1 56rem;
     min-height: calc(100svh - 3.55rem);
     height: calc(100svh - 3.55rem);
+    margin: 0;
     overflow: visible;
-    align-items: flex-end;
+    align-items: center;
     padding-bottom: 0;
   }
 }
@@ -308,7 +308,7 @@
   --fan-i: 0;
   position: absolute;
   left: 50%;
-  bottom: 4%;
+  bottom: 0;
   width: clamp(9.25rem, 30vw, 12.25rem);
   aspect-ratio: 9 / 16;
   margin-left: calc(clamp(9.25rem, 30vw, 12.25rem) / -2);
@@ -317,23 +317,27 @@
   background: #111;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  transform-origin: 50% 100%;
-  transform: translate3d(0, 10%, 0) rotate(0deg) scale(0.78);
+  transform-origin: 50% 88%;
+  transform: translate3d(0, 8%, 0) rotate(0deg) scale(0.78);
   opacity: 0.92;
   transition:
-    transform 0.5s var(--home-fan-ease),
-    opacity 0.35s ease,
-    box-shadow 0.28s ease,
-    filter 0.28s ease;
-  transition-delay: calc(var(--fan-i) * 42ms);
+    transform 0.45s var(--home-fan-ease),
+    opacity 0.3s ease,
+    box-shadow 0.25s ease,
+    filter 0.25s ease;
+  transition-delay: calc(var(--fan-i) * 38ms);
   will-change: transform;
 }
 
 @media (min-width: 960px) {
   .home-fan__card {
-    bottom: 0;
+    top: 50%;
+    bottom: auto;
     width: clamp(12.25rem, 16.5vw, 15.25rem);
     margin-left: calc(clamp(12.25rem, 16.5vw, 15.25rem) / -2);
+    margin-top: calc(clamp(12.25rem, 16.5vw, 15.25rem) * 16 / 9 / -2);
+    transform-origin: 50% 55%;
+    transform: translate3d(0, 4%, 0) rotate(0deg) scale(0.78);
   }
 }
 
