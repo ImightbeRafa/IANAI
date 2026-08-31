@@ -1,19 +1,69 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { supabaseAdmin } from './lib/supabase-admin.js'
+import { CREDIT_COGS_USD } from './lib/credits/catalog.js'
 import {
   ADMIN_USAGE_MAX_ROWS,
   aggregateDailyUsage,
   aggregateUsageSummary,
   aggregateUserUsageStats,
+  buildCreditsByGenerationId,
+  buildCreditsEconomics,
+  filterUsageRowsBySource,
   paginateUsageLogs,
   resolveUsageLogSource,
   type AdminUsageLogRow,
+  type CreditLedgerRow,
 } from './lib/admin-usage.js'
 
 const LOG_SELECT = 'id, user_id, user_email, feature, model, generation_id, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata, source'
 
 function queryString(value: string | string[] | undefined): string {
   return typeof value === 'string' ? value : ''
+}
+
+async function fetchCreditLedger(
+  supabase: NonNullable<typeof supabaseAdmin>,
+  startIso: string,
+  endIso: string
+): Promise<CreditLedgerRow[]> {
+  const { data, error } = await supabase
+    .from('credit_ledger')
+    .select('generation_id, credits, action, created_at')
+    .gte('created_at', startIso)
+    .lte('created_at', endIso)
+    .limit(ADMIN_USAGE_MAX_ROWS)
+
+  if (error) {
+    console.warn('admin-usage credit_ledger read failed:', error.message)
+    return []
+  }
+  return (data || []) as CreditLedgerRow[]
+}
+
+async function fetchCreditsInCirculation(
+  supabase: NonNullable<typeof supabaseAdmin>
+): Promise<number> {
+  const nowIso = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('credit_lots')
+    .select('remaining, expires_at')
+    .gt('remaining', 0)
+    .limit(ADMIN_USAGE_MAX_ROWS)
+
+  if (error) {
+    console.warn('admin-usage credit_lots read failed:', error.message)
+    return 0
+  }
+
+  let total = 0
+  for (const row of data || []) {
+    const remaining = Number((row as { remaining?: number }).remaining || 0)
+    if (!Number.isFinite(remaining) || remaining <= 0) continue
+    const expiresAt = (row as { expires_at?: string | null }).expires_at
+    if (expiresAt && expiresAt <= nowIso) continue
+    total += remaining
+  }
+  return total
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -82,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (source === 'web') {
         query = query.or('source.eq.web,source.is.null')
-      } else if (source === 'mcp' || source === 'cron') {
+      } else if (source === 'mcp' || source === 'cron' || source === 'legacy_preview_qa') {
         query = query.or(`source.eq.${source},metadata->>source.eq.${source}`)
       }
 
@@ -119,12 +169,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error) return res.status(500).json({ error: 'Failed to fetch usage logs', details: error.message })
 
     const rows = (data || []) as AdminUsageLogRow[]
+    const scopedRows = filterUsageRowsBySource(rows, source)
+    const [ledger, creditsInCirculation] = await Promise.all([
+      fetchCreditLedger(supabase, startIso, endIso),
+      fetchCreditsInCirculation(supabase),
+    ])
+    const scopedGenIds = new Set(
+      scopedRows
+        .map((row) => (typeof row.generation_id === 'string' ? row.generation_id.trim() : ''))
+        .filter(Boolean)
+    )
+    const scopedLedger =
+      source && source !== 'all'
+        ? ledger.filter((row) => {
+            const gid = typeof row.generation_id === 'string' ? row.generation_id.trim() : ''
+            return Boolean(gid && scopedGenIds.has(gid))
+          })
+        : ledger
+    const creditsByGenerationId = buildCreditsByGenerationId(scopedLedger)
     const page = paginateUsageLogs(rows, { search, offset, limit, source })
 
     return res.status(200).json({
-      summary: aggregateUsageSummary(rows),
-      daily: aggregateDailyUsage(rows),
-      userStats: aggregateUserUsageStats(rows),
+      summary: aggregateUsageSummary(scopedRows, creditsByGenerationId),
+      daily: aggregateDailyUsage(scopedRows),
+      userStats: aggregateUserUsageStats(scopedRows),
+      creditsEconomics: buildCreditsEconomics({
+        rows: scopedRows,
+        ledger: scopedLedger,
+        creditsInCirculation,
+        creditCogsUsd: CREDIT_COGS_USD,
+      }),
       logs: page.logs,
       hasMore: page.hasMore,
       truncated: rows.length >= ADMIN_USAGE_MAX_ROWS,

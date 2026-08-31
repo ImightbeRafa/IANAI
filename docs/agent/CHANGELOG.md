@@ -1,3 +1,10 @@
+## 2026-08-31 — PR #34: admin credits vs API $ + Chat nuevo single-flight
+
+- `/api/admin-usage` joins `credit_ledger` (credits charged) + sums `credit_lots.remaining` (circulation); returns `creditsEconomics` and per-model `total_credits` / `estimated_api_cost_usd`.
+- Official-list estimates: Imagine 2.0 `$0.04/out + $0.01/input`; Grok text `$2/$6` per 1M; Banana from stored/~$0.12. UI labels estimates (not xAI invoice). Optional `legacy_preview_qa` source chip.
+- `estimateGrokImageCostUsd` matches official Imagine pricing for future logs.
+- Chat nuevo: one click = one session (in-flight dedupe + explicit `brandId`); empty “Sin chats aún” CTA selects brand and creates (no early return that left the old thread).
+
 ## 2026-08-31 — PR #34: gate in-thread Crear post with Primero el kit
 
 - Script card “Crear post” / “Optimizar para post” disabled with **Primero el kit** when kit not `stronglyComplete` (same gate as glass Post).
