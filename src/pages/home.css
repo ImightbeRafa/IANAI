@@ -311,18 +311,18 @@
   --fan-i: 0;
   position: absolute;
   left: 50%;
-  top: 0.2rem;
+  top: 0;
   bottom: auto;
-  width: clamp(10.75rem, 42vw, 14rem);
+  width: min(78vw, 17rem);
   aspect-ratio: 9 / 16;
-  margin-left: calc(clamp(10.75rem, 42vw, 14rem) / -2);
+  margin-left: calc(min(78vw, 17rem) / -2);
   border-radius: 1.05rem;
   overflow: hidden;
   background: #111;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  transform-origin: 50% 20%;
-  transform: translate3d(0, 4%, 0) rotate(0deg) scale(0.78);
+  transform-origin: 50% 12%;
+  transform: translate3d(0, 2%, 0) rotate(0deg) scale(0.82);
   opacity: 0.92;
   transition:
     transform 0.45s var(--home-fan-ease),
@@ -378,17 +378,17 @@
 
 /* Mobile 3-card spread */
 .home-fan.is-spread .home-fan__card[data-slot='mid-left'] {
-  transform: translate3d(-56%, 4%, 0) rotate(-13deg) scale(0.92);
+  transform: translate3d(-52%, 2%, 0) rotate(-12deg) scale(0.94);
   opacity: 1;
   z-index: 3;
 }
 .home-fan.is-spread .home-fan__card[data-slot='front'] {
-  transform: translate3d(0, 0, 48px) rotate(0deg) scale(1.04);
+  transform: translate3d(0, 0, 48px) rotate(0deg) scale(1.02);
   opacity: 1;
   z-index: 5;
 }
 .home-fan.is-spread .home-fan__card[data-slot='mid-right'] {
-  transform: translate3d(56%, 4%, 0) rotate(13deg) scale(0.92);
+  transform: translate3d(52%, 2%, 0) rotate(12deg) scale(0.94);
   opacity: 1;
   z-index: 3;
 }
