@@ -572,7 +572,7 @@ export default function ChatShell({
           setNavOpen(false)
         }}
         onNewChat={() => void workspace.createSession()}
-        onNewSession={() => void workspace.createSession()}
+        onNewSession={(brandId) => void workspace.createSession(brandId ? { brandId } : undefined)}
         onNewBrand={openBrandCreate}
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
         onDeleteBrand={(brandId) => void workspace.deleteBrand(brandId)}

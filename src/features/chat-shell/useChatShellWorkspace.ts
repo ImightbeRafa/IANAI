@@ -89,6 +89,8 @@ export function useChatShellWorkspace(userId: string | undefined) {
   const sessionsRequestByBrandRef = useRef<Record<string, number>>({})
   const businessesRequestIdRef = useRef(0)
   const createLockRef = useRef(false)
+  /** Dedupes concurrent Chat nuevo clicks onto one in-flight create. */
+  const createInFlightRef = useRef<Promise<string | null> | null>(null)
   /** Tombstones for optimistic deletes — prevent stale list fetch from restoring rows. */
   const pendingDeletedRef = useRef<Set<string>>(new Set())
   const pendingDeletedBrandRef = useRef<Set<string>>(new Set())
@@ -444,42 +446,64 @@ export function useChatShellWorkspace(userId: string | undefined) {
     void loadBrandSessions(activeBrandId, 'hydrate')
   }, [activeBrandId, loadBrandSessions])
 
-  const createSession = useCallback(async (title?: string) => {
-    if (!userId) return
-    const brandId = activeBrandIdRef.current
+  /**
+   * Create one empty session for the active (or explicit) brand.
+   * Shared in-flight promise: one click = one insert (no auto-duplicate).
+   */
+  const createSession = useCallback(async (opts?: { title?: string; brandId?: string | null }) => {
+    if (!userId) return null
+    const brandId = opts?.brandId ?? activeBrandIdRef.current
     if (!brandId) {
       setNotice('Pick a brand first to create a session (Quick has no product, but needs a brand).')
-      return
+      return null
     }
-    if (createLockRef.current || busy) return
+    if (createInFlightRef.current) return createInFlightRef.current
+    if (createLockRef.current || busy) return null
     createLockRef.current = true
     const epoch = bumpSelectionEpoch()
     setBusy(true)
     setError(null)
     setNotice(null)
+    const run = (async (): Promise<string | null> => {
+      try {
+        // Ensure ref matches explicit brand before insert (sidebar may switch brands).
+        if (opts?.brandId && activeBrandIdRef.current !== opts.brandId) {
+          activeBrandIdRef.current = opts.brandId
+          setActiveBrandId(opts.brandId)
+        }
+        const session = await createBrandChatSession(
+          brandId,
+          userId,
+          opts?.title || defaultSessionTitle(),
+          undefined,
+          resolveBusinessBrandKitId(
+            brandId === activeBrandIdRef.current ? sessions : (sessionsByBrandRef.current[brandId] || [])
+          )
+        )
+        // Never mutate another brand's list (contamination). Same-brand can surface the row.
+        if (activeBrandIdRef.current !== brandId) return session.id
+        // Always surface the created row in the list…
+        patchBrandSessions(brandId, (prev) => [session, ...prev.filter((s) => s.id !== session.id)])
+        // …but only select it if this create is still the live user action.
+        // Skip/pin bumps epoch so a deferred create cannot rewrite ?session= A→B.
+        if (!shouldCommitCreatedSession(epoch, selectionEpochRef.current)) return session.id
+        setAuthoritativeSession(session.id)
+        syncUrlAndStorage(brandId, session.id)
+        return session.id
+      } catch (err) {
+        console.error(err)
+        setError(err instanceof Error ? err.message : 'Failed to create session')
+        return null
+      } finally {
+        createLockRef.current = false
+        setBusy(false)
+      }
+    })()
+    createInFlightRef.current = run
     try {
-      const session = await createBrandChatSession(
-        brandId,
-        userId,
-        title || defaultSessionTitle(),
-        undefined,
-        resolveBusinessBrandKitId(sessions)
-      )
-      // Never mutate another brand's list (contamination). Same-brand can surface the row.
-      if (activeBrandIdRef.current !== brandId) return
-      // Always surface the created row in the list…
-      patchBrandSessions(brandId, (prev) => [session, ...prev.filter((s) => s.id !== session.id)])
-      // …but only select it if this create is still the live user action.
-      // Skip/pin bumps epoch so a deferred create cannot rewrite ?session= A→B.
-      if (!shouldCommitCreatedSession(epoch, selectionEpochRef.current)) return
-      setAuthoritativeSession(session.id)
-      syncUrlAndStorage(brandId, session.id)
-    } catch (err) {
-      console.error(err)
-      setError(err instanceof Error ? err.message : 'Failed to create session')
+      return await run
     } finally {
-      createLockRef.current = false
-      setBusy(false)
+      if (createInFlightRef.current === run) createInFlightRef.current = null
     }
   }, [userId, busy, sessions, bumpSelectionEpoch, syncUrlAndStorage, setAuthoritativeSession])
 

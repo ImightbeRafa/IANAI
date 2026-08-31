@@ -49,7 +49,7 @@ interface ChatSidebarProps {
   onPrefetchBrandSessions?: (brandId: string) => void
   onSelectSession: (session: ChatSession) => void
   onNewChat: () => void
-  onNewSession: () => void
+  onNewSession: (brandId?: string) => void
   onNewBrand: () => void
   onDeleteSession: (sessionId: string) => void | Promise<void>
   onDeleteBrand: (brandId: string) => void | Promise<void>
@@ -383,11 +383,8 @@ export default function ChatSidebar({
                         type="button"
                         className="chat-shell__nav-sub chat-shell__nav-button chat-shell__nav-empty-cta"
                         onClick={() => {
-                          if (!isActive) {
-                            selectBrand(brand.id)
-                            return
-                          }
-                          onNewSession()
+                          if (!isActive) selectBrand(brand.id)
+                          void onNewSession(brand.id)
                         }}
                         disabled={busy || loadingBusinesses}
                         aria-disabled={busy || loadingBusinesses}
@@ -471,7 +468,7 @@ export default function ChatSidebar({
                       className="chat-shell__nav-sub chat-shell__nav-button"
                       onClick={() => {
                         if (!isActive) selectBrand(brand.id)
-                        onNewSession()
+                        void onNewSession(brand.id)
                       }}
                       disabled={!canCreate}
                       aria-disabled={!canCreate}
