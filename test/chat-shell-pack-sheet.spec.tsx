@@ -42,6 +42,21 @@ describe('ChatShellBulkDialog Pack sheet', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('shows estimated credits on Pack step 1 before proposing angles', () => {
+    render(
+      <ChatShellBulkDialog
+        open
+        language="es"
+        brandId="b1"
+        onClose={vi.fn()}
+        onDone={vi.fn()}
+      />
+    )
+    expect(screen.getByText('Paso 1 de 2')).toBeTruthy()
+    expect(screen.getByText(/30 créditos · máximo estimado/)).toBeTruthy()
+    expect(document.querySelector('.chat-shell__modal-credits')).toBeTruthy()
+  })
+
   it('shows credits with Confirmar y generar on step 2 and footer Atrás · Cancelar · primary', async () => {
     const user = userEvent.setup()
     vi.mocked(fetchBulkAngles).mockResolvedValueOnce({

@@ -156,7 +156,8 @@ export async function sendMessageToGrok(
   aiMemoryEnabled?: boolean,
   brandKitId?: string,
   scriptTemplateIds?: string[],
-  sessionId?: string
+  sessionId?: string,
+  generationId?: string
 ): Promise<{ content: string; _debug?: { systemPrompt: string; contextProfile?: unknown; angleCandidates?: unknown[]; briefs?: unknown[]; qualityReports?: unknown[] } }> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
@@ -196,7 +197,8 @@ export async function sendMessageToGrok(
       ...(aiMemoryEnabled !== undefined ? { aiMemoryEnabled } : {}),
       ...(brandKitId ? { brandKitId } : {}),
       ...(scriptTemplateIds && scriptTemplateIds.length > 0 ? { scriptTemplateIds } : {}),
-      ...(sessionId ? { sessionId } : {})
+      ...(sessionId ? { sessionId } : {}),
+      ...(generationId ? { generationId } : {})
     })
   })
 

@@ -142,7 +142,7 @@ export default function ChatComposerCreateDock({
         <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle}>
           {actions.map((action) => {
             const title = action.disabled && action.blockedReason
-              ? `${action.label} — Primero el kit`
+              ? `${action.label} — ${t.kitBlockedHint}`
               : action.label
             return (
             <button
@@ -162,7 +162,7 @@ export default function ChatComposerCreateDock({
               {actionIcon(action.id)}
               <span>{action.label}</span>
               {action.disabled && action.blockedReason ? (
-                <em className="chat-shell__idle-action-block" data-kit-block="true">Primero el kit</em>
+                <em className="chat-shell__idle-action-block" data-kit-block="true">{t.kitBlockedHint}</em>
               ) : null}
             </button>
             )

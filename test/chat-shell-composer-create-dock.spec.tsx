@@ -89,4 +89,27 @@ describe('ChatComposerCreateDock', () => {
     await user.click(screen.getByRole('button', { name: 'Mostrar Brand Kit' }))
     expect(onShow).toHaveBeenCalledTimes(1)
   })
+
+  it('shows Primero el kit on glass verbs when the kit is blocked', () => {
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Brand Kit incompleto"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={[
+          { id: 'scripts', label: 'Guiones', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
+          { id: 'post', label: 'Post', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
+          { id: 'product', label: 'Foto', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
+          { id: 'bulk', label: 'Pack', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
+        ]}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    const blocked = screen.getAllByText('Primero el kit')
+    expect(blocked.length).toBe(4)
+    expect(screen.getByRole('button', { name: 'Guiones — Primero el kit' })).toBeTruthy()
+  })
 })

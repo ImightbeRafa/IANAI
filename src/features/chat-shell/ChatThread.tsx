@@ -43,6 +43,7 @@ import {
   type ShellImageAspect,
   type ShellImageDensity,
 } from './chatShellImageIntent'
+import { shouldShowFirstRunCta } from './chatShellFirstRun'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -371,7 +372,12 @@ export default memo(function ChatThread({
     })
   }, [visibleMessages])
   // First-run: kit incomplete + no real conversation → CTA (not Hola welcome).
-  const showFirstRunCta = Boolean(session) && !kitReady && !hasUserOrArtifactMessages && !showInitialLoader
+  const showFirstRunCta = shouldShowFirstRunCta({
+    hasSession: Boolean(session),
+    kitReady,
+    hasUserOrArtifactMessages,
+    showInitialLoader,
+  })
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -447,7 +453,7 @@ export default memo(function ChatThread({
                   data-cta="empezar-marca"
                   onClick={onStartBrandKit}
                 >
-                  Empezá por tu marca
+                  {t.emptyFirstRunCta}
                 </button>
               ) : null}
             </div>
@@ -471,7 +477,7 @@ export default memo(function ChatThread({
                       data-cta="empezar-marca"
                       onClick={onStartBrandKit}
                     >
-                      Empezá por tu marca
+                      {t.emptyFirstRunCta}
                     </button>
                   ) : null}
                 </div>

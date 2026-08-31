@@ -682,7 +682,7 @@ export default function ChatShell({
           offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
           onPreparePostFromScript={(scriptText, density) => {
             if (!brandSetup.snapshot.stronglyComplete) {
-              return Promise.reject(new Error('Primero el kit'))
+              return Promise.reject(new Error(t.kitBlockedHint))
             }
             return thread.prepareScriptForPost(scriptText, density)
           }}

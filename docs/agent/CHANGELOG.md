@@ -1,4 +1,16 @@
-## 2026-08-31 — PR #34: homepage denser + CTA ink + faster fan pop
+## 2026-08-31 — Production-ready nits (Preview → live)
+
+**Area:** chat-shell / credits / first-run
+**Files:** `api/chat.ts`, `api/lib/credits/chat-generation-id.ts`, `grokApi.ts`, `useChatSessionThread.ts`, `ChatThread.tsx`, `ChatComposerCreateDock.tsx`, `ChatShellScriptCard.tsx`, tests
+
+- Chat-shell `/api/chat` now **requires a client `generationId` UUID** when `sessionId` is present (same rule as generate-image). Classic `/scripts` still mints server-side. Stops retry/curl double-charge on guiones.
+- Pack sheet step 1 always shows estimated credits (`N créditos · máximo estimado`); locked with a test.
+- First-run CTA and glass “Primero el kit” use `labels.es` / `labels.en` (no hardcoded Spanish).
+- Empty-state CTA still only shows when the kit is **not** stronglyComplete — existing listo brands stay on the ready empty state (that was the WD recapture false FAIL).
+
+No merge. No `chat_shell` / invite / credit-gift / flag flips.
+
+
 
 - Fix Empezá hoy readability: dark ink on cyan (`.home-page a { color: inherit }` was forcing white).
 - Hero packed toward center, wider fan, less empty top/side/bottom; sections tighter/wider.

@@ -48,6 +48,7 @@ import {
   type CreditQuote,
 } from './chatShellCreditQuote'
 import { friendlyImageError } from './chatShellImageErrors'
+import { mintShellGenerationId } from './shellGenerationId'
 import {
   collectBrandGenerateVisual,
   resolveBrandKitIdForSession,
@@ -1099,7 +1100,8 @@ export function useChatSessionThread(options: {
           aiMemoryEnabled,
           brandKitId,
           undefined,
-          originSessionId
+          originSessionId,
+          mintShellGenerationId()
         )
 
         const savedAi = await persistOfferSuccess({

@@ -541,6 +541,7 @@ export default function ChatShellScriptCard({
   const busy = Boolean(operation) || saving || Boolean(savingScript) || savingPost
   const locked = readOnly
   const es = language === 'es'
+  const kitBlockedHint = es ? 'Primero el kit' : 'Kit first'
   const previewVersionLabel = (() => {
     const entry = versions[activeIndex]
     if (!entry || entry.source == null) return es ? 'Original' : 'Original'
@@ -828,12 +829,12 @@ export default function ChatShellScriptCard({
             className="chat-shell__artifact-action is-primary"
             disabled={busy || imageBusy || preparingPost || kitGenerateBlocked}
             onClick={() => void openPostPreview()}
-            title={kitGenerateBlocked ? 'Primero el kit' : (es ? 'Crear post' : 'Create post')}
+            title={kitGenerateBlocked ? kitBlockedHint : (es ? 'Crear post' : 'Create post')}
             data-kit-blocked={kitGenerateBlocked ? 'true' : undefined}
           >
             {imageBusy || preparingPost ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
             {kitGenerateBlocked
-              ? 'Primero el kit'
+              ? kitBlockedHint
               : preparingPost
                 ? (es ? 'Optimizando…' : 'Optimizing…')
                 : (es ? 'Crear post' : 'Create post')}
@@ -877,12 +878,12 @@ export default function ChatShellScriptCard({
                   type="button"
                   role="menuitem"
                   disabled={imageBusy || preparingPost || kitGenerateBlocked}
-                  title={kitGenerateBlocked ? 'Primero el kit' : undefined}
+                  title={kitGenerateBlocked ? kitBlockedHint : undefined}
                   onClick={() => { setMoreOpen(false); void openPostPreview() }}
                 >
                   <Wand2 size={13} />
                   {kitGenerateBlocked
-                    ? 'Primero el kit'
+                    ? kitBlockedHint
                     : (es ? 'Optimizar para post' : 'Optimize for post')}
                 </button>
               ) : null}
