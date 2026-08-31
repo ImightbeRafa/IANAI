@@ -1,3 +1,9 @@
+## 2026-08-30 — PR #34: first-run CTA + Primero el kit visible (WD FAIL fix)
+
+- Empty first-run: stop auto-Hola welcome; show one line + button **Empezá por tu marca** when kit not `stronglyComplete` (even if a legacy welcome row exists).
+- Glass Guiones/Post/Foto/Pack blocked until `stronglyComplete`; visible/disabled label **Primero el kit** (literal in DOM for WD grep).
+- Setup pin “Falta: …” unchanged.
+
 ## 2026-08-30 — PR #34 fat Preview: invite gate + no Preview gift + generationId + first-run chrome
 
 - Server `userHasChatShellAccess` requires `chat_shell` flag **and** `profiles.chat_beta_access` (frontend rollout mirrors).

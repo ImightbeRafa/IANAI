@@ -654,11 +654,7 @@ export default function ChatShell({
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
           language={language}
-          kitReady={
-            brandSetup.facts.offerConfirmed
-            || brandSetup.phase === 'complete'
-            || brandSetup.snapshot.offerCore
-          }
+          kitReady={brandSetup.snapshot.stronglyComplete}
           onStartBrandKit={() => {
             if (!workspace.activeBrand) {
               openBrandCreate()
@@ -708,16 +704,14 @@ export default function ChatShell({
               available={createWidget.available}
               hidden={createWidget.hidden}
               title={
-                (brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore)
+                brandSetup.snapshot.stronglyComplete
                   ? t.kitReady
                   : t.kitNotReady
               }
               onHide={createWidget.hide}
               onShow={createWidget.show}
               actions={(() => {
-                const kitListo = brandSetup.facts.offerConfirmed
-                  || brandSetup.phase === 'complete'
-                  || brandSetup.snapshot.offerCore
+                const kitListo = brandSetup.snapshot.stronglyComplete
                 const blocked = !kitListo
                 const baseDisabled = brandSetup.busy || thread.loadingMessages
                 return [
@@ -777,21 +771,24 @@ export default function ChatShell({
               language={language}
               facts={brandSetup.facts}
               busy={brandSetup.busy || thread.loadingMessages}
-              confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore}
+              confirmed={brandSetup.snapshot.stronglyComplete}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
               showCreateActions={false}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
+                if (!brandSetup.snapshot.stronglyComplete) return
                 thread.cancelImageClarify()
                 thread.startScriptsFlow()
               }}
               onCreatePost={() => {
+                if (!brandSetup.snapshot.stronglyComplete) return
                 thread.cancelScriptClarify()
                 thread.startPostFlow()
               }}
               onCreateProductPhoto={() => {
+                if (!brandSetup.snapshot.stronglyComplete) return
                 thread.cancelScriptClarify()
                 thread.startProductFotoFlow()
               }}

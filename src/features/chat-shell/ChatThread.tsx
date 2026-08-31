@@ -361,6 +361,17 @@ export default memo(function ChatThread({
   const canSend = Boolean(session) && !sending && !controlsLocked && Boolean(composer.trim())
   const keepMountedTranscript = shouldKeepMountedTranscript(loadingMessages, visibleMessages.length)
   const showInitialLoader = Boolean(session) && loadingMessages && !keepMountedTranscript && setupTurns.length === 0 && !inlineSetupCard
+  const hasUserOrArtifactMessages = useMemo(() => {
+    return visibleMessages.some((message) => {
+      if (message.role === 'user') return true
+      if (message.artifacts && message.artifacts.length > 0) return true
+      const content = (message.content || '').trim()
+      if (/^¡Hola! Bienvenido a Advance AI|^Hi! Welcome to Advance AI/i.test(content)) return false
+      return content.length > 0
+    })
+  }, [visibleMessages])
+  // First-run: kit incomplete + no real conversation → CTA (not Hola welcome).
+  const showFirstRunCta = Boolean(session) && !kitReady && !hasUserOrArtifactMessages && !showInitialLoader
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -421,7 +432,7 @@ export default memo(function ChatThread({
         ref={threadRef}
       >
         {!session ? (
-          <div className="chat-shell__msg chat-shell__msg--ai">
+          <div className="chat-shell__msg chat-shell__msg--ai" data-first-run="true">
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">
               <p className="chat-shell__empty-line">
@@ -433,9 +444,10 @@ export default memo(function ChatThread({
                 <button
                   type="button"
                   className="chat-shell__empty-cta"
+                  data-cta="empezar-marca"
                   onClick={onStartBrandKit}
                 >
-                  {t.emptyFirstRunCta}
+                  Empezá por tu marca
                 </button>
               ) : null}
             </div>
@@ -447,24 +459,29 @@ export default memo(function ChatThread({
           </div>
         ) : (
           <>
-            {visibleMessages.length === 0 && setupTurns.length === 0 && !setupCard ? (
+            {showFirstRunCta ? (
+              <div className="chat-shell__msg chat-shell__msg--ai" data-first-run="true">
+                <span className="chat-shell__who">Advance AI</span>
+                <div className="chat-shell__status-box">
+                  <p className="chat-shell__empty-line">{t.emptyFirstRunLine}</p>
+                  {onStartBrandKit ? (
+                    <button
+                      type="button"
+                      className="chat-shell__empty-cta"
+                      data-cta="empezar-marca"
+                      onClick={onStartBrandKit}
+                    >
+                      Empezá por tu marca
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {!showFirstRunCta && visibleMessages.length === 0 && setupTurns.length === 0 ? (
               <div className="chat-shell__msg chat-shell__msg--ai">
                 <span className="chat-shell__who">Advance AI</span>
                 <div className="chat-shell__status-box">
-                  {!kitReady ? (
-                    <>
-                      <p className="chat-shell__empty-line">{t.emptyFirstRunLine}</p>
-                      {onStartBrandKit ? (
-                        <button
-                          type="button"
-                          className="chat-shell__empty-cta"
-                          onClick={onStartBrandKit}
-                        >
-                          {t.emptyFirstRunCta}
-                        </button>
-                      ) : null}
-                    </>
-                  ) : offerProductId && activeProduct
+                  {offerProductId && activeProduct
                     ? t.emptyReadyWithOffer.replace(
                       '{detail}',
                       offerCount > 1
@@ -475,7 +492,7 @@ export default memo(function ChatThread({
                 </div>
               </div>
             ) : null}
-            {visibleMessages.map((message) => {
+            {!showFirstRunCta ? visibleMessages.map((message) => {
             if (message.role === 'user') {
               return (
                 <div key={message.id} className="chat-shell__msg chat-shell__msg--user">
@@ -670,7 +687,7 @@ export default memo(function ChatThread({
                 <div className="chat-shell__bubble chat-shell__bubble--ai">{message.content}</div>
               </div>
             )
-          })}
+          }) : null}
           {setupTurns.map((turn) => (
               <div
                 key={turn.id}

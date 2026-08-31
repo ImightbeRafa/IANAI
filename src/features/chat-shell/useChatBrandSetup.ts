@@ -41,7 +41,6 @@ import {
   emptySetupFacts,
   findBrandRuleToRemove,
   hasOfferHypothesis,
-  introPrompt,
   isAffirmative,
   isBrandRuleRemoval,
   isPauseSetup,
@@ -350,6 +349,8 @@ export function useChatBrandSetup(options: {
     linkedKit?.updated_at,
   ])
 
+  // First-run chrome: empty CTA replaces the long Hola welcome when kit is incomplete.
+  // (Welcome text stays available for createInitialFlow / conversational setup.)
   useEffect(() => {
     if (!visible || !session?.id) return
     if (messagesLoading) return
@@ -357,19 +358,12 @@ export function useChatBrandSetup(options: {
       welcomedSessionsRef.current.add(session.id)
       return
     }
-    const storageKey = `ianai.chat-welcome.${session.id}`
-    try {
-      if (sessionStorage.getItem(storageKey) === '1') {
-        welcomedSessionsRef.current.add(session.id)
-        return
-      }
-    } catch { /* private mode */ }
-    if (welcomedSessionsRef.current.has(session.id)) return
+    // Do not auto-persist ¡Hola! — ChatThread shows “Empezá por tu marca” instead.
     welcomedSessionsRef.current.add(session.id)
-    try { sessionStorage.setItem(storageKey, '1') } catch { /* ignore */ }
-    const intro = introPrompt(language, business?.name || '')
-    void onPersistTurn('assistant', intro)
-  }, [visible, session?.id, messageCount, messagesLoading, language, business?.name, onPersistTurn])
+    try {
+      sessionStorage.setItem(`ianai.chat-welcome.${session.id}`, '1')
+    } catch { /* private mode */ }
+  }, [visible, session?.id, messageCount, messagesLoading])
 
   const skip = useCallback(() => {
     if (!business) return
