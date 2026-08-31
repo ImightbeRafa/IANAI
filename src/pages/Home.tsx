@@ -29,10 +29,17 @@ export default function Home() {
       setFanReady(true)
       return
     }
+    // Let the stacked pose paint, then pop-spread (fast carousel feel).
+    let cancelled = false
     const id = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => setFanReady(true))
+      window.setTimeout(() => {
+        if (!cancelled) setFanReady(true)
+      }, 40)
     })
-    return () => window.cancelAnimationFrame(id)
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(id)
+    }
   }, [])
 
   const t = {

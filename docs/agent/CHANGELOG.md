@@ -1,3 +1,9 @@
+## 2026-08-31 — PR #34: homepage denser + CTA ink + faster fan pop
+
+- Fix Empezá hoy readability: dark ink on cyan (`.home-page a { color: inherit }` was forcing white).
+- Hero packed toward center, wider fan, less empty top/side/bottom; sections tighter/wider.
+- Fan pop: staggered ~0.5s spring ease (front → mids → far), hover still ~1.12.
+
 ## 2026-08-31 — PR #34: locked public homepage (CoS winner)
 
 - Replaces Recess/template landing with dark `#07090d` homepage: floating glass pill nav, hero copy + cyan CTA glow, 5-card CSS 3D fan (desktop) / 3-card (mobile), gallery “Lo que generan las agencias”, features 01–03 only, pricing Free/Starter/Premium/Enterprise (prices unchanged).
