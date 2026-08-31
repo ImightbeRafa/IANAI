@@ -1,3 +1,10 @@
+## 2026-08-31 — PR #34: locked public homepage (CoS winner)
+
+- Replaces Recess/template landing with dark `#07090d` homepage: floating glass pill nav, hero copy + cyan CTA glow, 5-card CSS 3D fan (desktop) / 3-card (mobile), gallery “Lo que generan las agencias”, features 01–03 only, pricing Free/Starter/Premium/Enterprise (prices unchanged).
+- Fan motion: CSS spread ~0.8s + hover scale ~1.12 / stronger glow. JPEG 9:16 ads under `public/home/ads/`.
+- CTAs → `/signup?redirect=/chat` / `/login?redirect=/chat` (chat-shell product; not classic `/posts` or `/scripts`).
+- No plan price / invite-gate / `chat_shell` flag / credit changes. PR stays draft.
+
 ## 2026-08-31 — PR #34: Preview-only /admin for invited QA
 
 - `VERCEL_ENV=preview`: allowlisted QA emails (`sup.rafa0412@gmail.com`, `ralauas@gmail.com`) can open `/admin` + admin read APIs without `profiles.is_admin`.
