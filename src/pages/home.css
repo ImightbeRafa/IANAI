@@ -240,9 +240,10 @@
 
 .home-hero__sub {
   margin: 0.65rem 0 0;
-  font-size: clamp(0.98rem, 1.45vw, 1.1rem);
+  font-size: clamp(1.02rem, 1.5vw, 1.125rem);
   line-height: 1.4;
-  color: rgba(244, 247, 251, 0.78);
+  font-weight: 500;
+  color: rgba(244, 247, 251, 0.88);
   max-width: 28rem;
 }
 
@@ -310,18 +311,18 @@
   --fan-i: 0;
   position: absolute;
   left: 50%;
-  top: 0.35rem;
+  top: 0.2rem;
   bottom: auto;
-  width: clamp(9.75rem, 32vw, 12.75rem);
+  width: clamp(10.75rem, 42vw, 14rem);
   aspect-ratio: 9 / 16;
-  margin-left: calc(clamp(9.75rem, 32vw, 12.75rem) / -2);
+  margin-left: calc(clamp(10.75rem, 42vw, 14rem) / -2);
   border-radius: 1.05rem;
   overflow: hidden;
   background: #111;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
   transform-origin: 50% 20%;
-  transform: translate3d(0, 6%, 0) rotate(0deg) scale(0.78);
+  transform: translate3d(0, 4%, 0) rotate(0deg) scale(0.78);
   opacity: 0.92;
   transition:
     transform 0.45s var(--home-fan-ease),
