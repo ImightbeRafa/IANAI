@@ -46,6 +46,8 @@ interface UsageSummary {
   total_output_tokens: number
   total_tokens: number
   total_cost_usd: number
+  estimated_api_cost_usd?: number
+  total_credits?: number
 }
 
 interface DailyUsage {
@@ -55,7 +57,16 @@ interface DailyUsage {
   total_cost_usd: number
 }
 
-type UsageSourceFilter = 'all' | 'web' | 'mcp' | 'cron'
+interface CreditsEconomics {
+  creditsConsumed: number
+  estimatedApiCostUsd: number
+  impliedUsdPerCredit: number | null
+  creditsInCirculation: number
+  creditCogsUsd: number
+  estimateNote: string
+}
+
+type UsageSourceFilter = 'all' | 'web' | 'mcp' | 'cron' | 'legacy_preview_qa'
 
 interface RecentLog {
   id: string
@@ -209,7 +220,7 @@ const MODEL_PRICING: Record<string, string> = {
   'nano-banana': '~$0.02/image',
   'nano-banana-pro': '~$0.134 (1K/2K) · ~$0.24 (4K) + tokens',
   'gpt-image-2': '$5/1M text in, $8/1M image in, $30/1M image out',
-  'grok-imagine': '$0.04/output · edits +$0.04/input',
+  'grok-imagine': '$0.04/output · +$0.01/input image',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
   'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
@@ -288,6 +299,7 @@ export default function AdminDashboard({
   const [usageSummary, setUsageSummary] = useState<UsageSummary[]>([])
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
   const [recentLogs, setRecentLogs] = useState<RecentLog[]>([])
+  const [creditsEconomics, setCreditsEconomics] = useState<CreditsEconomics | null>(null)
   const [imageModelPerformance, setImageModelPerformance] = useState<ImageModelPerformance[]>([])
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([])
@@ -314,7 +326,7 @@ export default function AdminDashboard({
       title: 'Panel de Administrador',
       subtitle: 'Monitoreo de uso y costos de API',
       unauthorized: 'No tienes permiso para ver esta página',
-      totalCost: 'Costo Total Estimado',
+      totalCost: 'Costo API estimado',
       totalCalls: 'Total de Llamadas',
       successRate: 'Tasa de Éxito',
       byModel: 'Uso por Modelo',
@@ -325,8 +337,13 @@ export default function AdminDashboard({
       feature: 'Función',
       calls: 'Llamadas',
       tokens: 'Tokens',
-      cost: 'Costo',
-      pricing: 'Precio',
+      cost: 'API $ est.',
+      creditsCol: 'Créditos',
+      pricing: 'Precio lista',
+      creditsConsumed: 'Créditos consumidos',
+      creditsCirculation: 'Créditos en circulación',
+      impliedPerCredit: '$ / crédito (implícito)',
+      estimateDisclaimer: 'Estimaciones con precios de lista — no es la factura de xAI.',
       refresh: 'Actualizar',
       last7days: 'Últimos 7 días',
       last30days: 'Últimos 30 días',
@@ -366,13 +383,14 @@ export default function AdminDashboard({
       sourceAll: 'Todos',
       sourceWeb: 'Web',
       sourceMcp: 'MCP',
-      sourceCron: 'Cron'
+      sourceCron: 'Cron',
+      sourceQa: 'QA preview'
     },
     en: {
       title: 'Admin Dashboard',
       subtitle: 'API usage and cost monitoring',
       unauthorized: 'You do not have permission to view this page',
-      totalCost: 'Total Estimated Cost',
+      totalCost: 'Estimated API cost',
       totalCalls: 'Total Calls',
       successRate: 'Success Rate',
       byModel: 'Usage by Model',
@@ -383,8 +401,13 @@ export default function AdminDashboard({
       feature: 'Feature',
       calls: 'Calls',
       tokens: 'Tokens',
-      cost: 'Cost',
-      pricing: 'Pricing',
+      cost: 'Est. API $',
+      creditsCol: 'Credits',
+      pricing: 'List price',
+      creditsConsumed: 'Credits consumed',
+      creditsCirculation: 'Credits in circulation',
+      impliedPerCredit: 'Implied $/credit',
+      estimateDisclaimer: 'Estimates from list prices — not an xAI invoice.',
       refresh: 'Refresh',
       last7days: 'Last 7 days',
       last30days: 'Last 30 days',
@@ -424,7 +447,8 @@ export default function AdminDashboard({
       sourceAll: 'All',
       sourceWeb: 'Web',
       sourceMcp: 'MCP',
-      sourceCron: 'Cron'
+      sourceCron: 'Cron',
+      sourceQa: 'QA preview'
     }
   }
 
@@ -465,6 +489,7 @@ export default function AdminDashboard({
       logs?: RecentLog[]
       hasMore?: boolean
       truncated?: boolean
+      creditsEconomics?: CreditsEconomics
     }
     if (!resp.ok) {
       throw new Error(body.error || (language === 'es'
@@ -489,6 +514,7 @@ export default function AdminDashboard({
         setDailyUsage(usageData.daily || [])
         setUserStats(usageData.userStats || [])
         setRecentLogs(usageData.logs || [])
+        setCreditsEconomics(usageData.creditsEconomics || null)
         setHasMoreLogs(Boolean(usageData.hasMore))
         setUsageTruncated(Boolean(usageData.truncated))
         setLogPage(0)
@@ -499,6 +525,7 @@ export default function AdminDashboard({
         setDailyUsage([])
         setUserStats([])
         setRecentLogs([])
+        setCreditsEconomics(null)
         setHasMoreLogs(false)
         setUsageTruncated(false)
         setError(usageErr instanceof Error ? usageErr.message : 'Failed to load usage data')
@@ -634,7 +661,11 @@ export default function AdminDashboard({
 
   // Calculate totals (mcp_tool $0 audits excluded server-side; skip if present)
   const billableSummary = usageSummary.filter((u) => u.feature !== 'mcp_tool')
-  const totalCost = billableSummary.reduce((sum, u) => sum + Number(u.total_cost_usd), 0)
+  const totalCost = billableSummary.reduce(
+    (sum, u) => sum + Number(u.estimated_api_cost_usd ?? u.total_cost_usd),
+    0
+  )
+  const totalCreditsCharged = billableSummary.reduce((sum, u) => sum + Number(u.total_credits || 0), 0)
   const totalCalls = billableSummary.reduce((sum, u) => sum + u.total_calls, 0)
   const successfulCalls = billableSummary.reduce((sum, u) => sum + u.successful_calls, 0)
   const successRate = totalCalls > 0 ? (successfulCalls / totalCalls * 100).toFixed(1) : '0'
@@ -642,13 +673,14 @@ export default function AdminDashboard({
   // Group by model
   const byModel = billableSummary.reduce((acc, u) => {
     if (!acc[u.model]) {
-      acc[u.model] = { calls: 0, tokens: 0, cost: 0 }
+      acc[u.model] = { calls: 0, tokens: 0, cost: 0, credits: 0 }
     }
     acc[u.model].calls += u.total_calls
     acc[u.model].tokens += u.total_tokens
-    acc[u.model].cost += Number(u.total_cost_usd)
+    acc[u.model].cost += Number(u.estimated_api_cost_usd ?? u.total_cost_usd)
+    acc[u.model].credits += Number(u.total_credits || 0)
     return acc
-  }, {} as Record<string, { calls: number; tokens: number; cost: number }>)
+  }, {} as Record<string, { calls: number; tokens: number; cost: number; credits: number }>)
 
   // Group by feature
   const byFeature = billableSummary.reduce((acc, u) => {
@@ -656,7 +688,7 @@ export default function AdminDashboard({
       acc[u.feature] = { calls: 0, cost: 0 }
     }
     acc[u.feature].calls += u.total_calls
-    acc[u.feature].cost += Number(u.total_cost_usd)
+    acc[u.feature].cost += Number(u.estimated_api_cost_usd ?? u.total_cost_usd)
     return acc
   }, {} as Record<string, { calls: number; cost: number }>)
 
@@ -798,7 +830,10 @@ export default function AdminDashboard({
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCost}</span>
                 </div>
-<p className="admin-dash__metric">${totalCost.toFixed(4)}</p>
+                <p className="admin-dash__metric">
+                  ${(creditsEconomics?.estimatedApiCostUsd ?? totalCost).toFixed(4)}
+                </p>
+                <p className="text-xs text-dark-400 mt-2">{t.estimateDisclaimer}</p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -808,7 +843,7 @@ export default function AdminDashboard({
                   </div>
                   <span className="text-dark-500 text-sm">{t.totalCalls}</span>
                 </div>
-<p className="admin-dash__metric">{totalCalls.toLocaleString()}</p>
+                <p className="admin-dash__metric">{totalCalls.toLocaleString()}</p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -818,7 +853,48 @@ export default function AdminDashboard({
                   </div>
                   <span className="text-dark-500 text-sm">{t.successRate}</span>
                 </div>
-<p className="admin-dash__metric">{successRate}%</p>
+                <p className="admin-dash__metric">{successRate}%</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-amber-900/20 rounded-lg">
+                    <CreditCard className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <span className="text-dark-500 text-sm">{t.creditsConsumed}</span>
+                </div>
+                <p className="admin-dash__metric">
+                  {(creditsEconomics?.creditsConsumed ?? totalCreditsCharged).toLocaleString()}
+                </p>
+              </div>
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-teal-900/20 rounded-lg">
+                    <Zap className="w-5 h-5 text-teal-600" />
+                  </div>
+                  <span className="text-dark-500 text-sm">{t.creditsCirculation}</span>
+                </div>
+                <p className="admin-dash__metric">
+                  {(creditsEconomics?.creditsInCirculation ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-rose-900/20 rounded-lg">
+                    <TrendingDown className="w-5 h-5 text-rose-600" />
+                  </div>
+                  <span className="text-dark-500 text-sm">{t.impliedPerCredit}</span>
+                </div>
+                <p className="admin-dash__metric">
+                  {creditsEconomics?.impliedUsdPerCredit != null
+                    ? `$${creditsEconomics.impliedUsdPerCredit.toFixed(4)}`
+                    : '—'}
+                </p>
+                <p className="text-xs text-dark-400 mt-2">
+                  COGS ref ${creditsEconomics?.creditCogsUsd?.toFixed(2) ?? '0.01'}
+                </p>
               </div>
             </div>
 
@@ -1401,6 +1477,7 @@ export default function AdminDashboard({
                   <Cpu className="w-5 h-5 text-primary-500" />
                   {t.byModel}
                 </h2>
+                <p className="text-xs text-dark-400 mt-1">{t.estimateDisclaimer}</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -1409,6 +1486,7 @@ export default function AdminDashboard({
                       <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
                       <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.calls}</th>
                       <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.tokens}</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.creditsCol}</th>
                       <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
                       <th className="px-3 sm:px-6 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.pricing}</th>
                     </tr>
@@ -1426,6 +1504,7 @@ export default function AdminDashboard({
                         </td>
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.calls.toLocaleString()}</td>
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.tokens.toLocaleString()}</td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.credits.toLocaleString()}</td>
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right font-medium text-dark-900 text-sm">${data.cost.toFixed(4)}</td>
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-500 text-xs sm:text-sm">{MODEL_PRICING[model] || '-'}</td>
                       </tr>
@@ -1658,6 +1737,7 @@ export default function AdminDashboard({
                     { id: 'web' as const, label: t.sourceWeb },
                     { id: 'mcp' as const, label: t.sourceMcp },
                     { id: 'cron' as const, label: t.sourceCron },
+                    { id: 'legacy_preview_qa' as const, label: t.sourceQa },
                   ]).map((chip) => (
                     <button
                       key={chip.id}

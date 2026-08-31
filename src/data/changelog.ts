@@ -91,6 +91,54 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.10',
+    date: '2026-08-27',
+    items: [
+      {
+        category: 'fix',
+        text: {
+          es: 'Posts cuadrados con Grok: prompt corto y útil (sin ensayos largos del sistema) para que un guion breve genere la imagen. Si falla por longitud, el aviso es en español.',
+          en: 'Square Grok posts: short useful prompts (no giant system essays) so a brief script can generate an image. Length failures stay in Spanish.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Posts con Grok: el formato va por aspect ratio (incluye 1:1) y el prompt se limita a 8000 caracteres para evitar fallos. Si se pasa del límite, el error sale en español.',
+          en: 'Grok posts: format uses aspect ratio (including 1:1) and prompts are capped at 8000 characters to avoid failures. Over-limit errors show in Spanish.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Login en español, cotización de créditos antes de generar, Nueva marca con URL, Ofertas creadas al analizar la web, errores de imagen en español, y el modal de bienvenida cierra al primer clic.',
+          en: 'Spanish login, credit quote before generate, New brand with URL, Offers created on site analysis, Spanish image errors, and welcome modal dismisses on first click.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Chat nuevo disponible para todos: un chat para guiones, posts y fotos. Podés seguir en el panel clásico o elegir Chat como inicio cuando quieras.',
+          en: 'New Chat is available for everyone: one chat for scripts, posts, and photos. Stay on classic or make Chat your home whenever you want.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'Al abrir el Chat por primera vez te regalamos 100 Créditos IA (válidos 12 meses) y un recorrido corto en español. Feedback bienvenido.',
+          en: 'The first time you open Chat we gift 100 AI credits (valid 12 months) and a short tour. Feedback welcome.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El chat responde saludos y te avisa si falta una oferta antes de generar. Venta directa más natural. Modo claro con inputs corregidos.',
+          en: 'Chat answers greetings and tells you if an offer is missing before generating. More natural direct-sale scripts. Light mode input fixes.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.9',
     date: '2026-08-23',
     items: [

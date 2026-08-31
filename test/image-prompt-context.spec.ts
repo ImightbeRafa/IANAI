@@ -44,8 +44,10 @@ describe('image prompt context', () => {
       hasSceneRef: false,
       hasStyleRef: false,
       scriptContext: 'Gancho: Sonrisa clínica\nCTA: Pedí el tuyo',
+      offerName: 'Kit dental',
+      category: 'salud',
     })
-    expect(brief).toMatch(/lifestyle/i)
+    expect(brief).toMatch(/lifestyle|LUGAR FOTOGRAFIADO|SCENE RECIPE/i)
     expect(brief).toMatch(/Prohibido/i)
     expect(brief).toContain('Pedí el tuyo')
   })

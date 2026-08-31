@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff, Gift } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 // Password validation
 function validatePassword(password: string): { valid: boolean; errors: string[] } {
@@ -28,6 +29,8 @@ export default function Signup() {
   const [referralCode, setReferralCode] = useState<string | null>(null)
   const { signUp, signInWithGoogle } = useAuth()
   const [searchParams] = useSearchParams()
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/chat'
+  const loginHref = `/login?redirect=${encodeURIComponent(returnPath)}`
 
   // Capture referral code from URL and persist in localStorage
   useEffect(() => {
@@ -81,7 +84,7 @@ export default function Signup() {
     setGoogleLoading(true)
     setError('')
     try {
-      await signInWithGoogle()
+      await signInWithGoogle({ redirectPath: returnPath })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al iniciar con Google')
       setGoogleLoading(false)
@@ -118,7 +121,7 @@ export default function Signup() {
               </div>
             </div>
             <Link 
-              to="/login" 
+              to={loginHref} 
               className="text-primary-600 hover:text-primary-700 font-medium text-sm"
             >
               Back to login
@@ -318,7 +321,7 @@ export default function Signup() {
 
           <p className="text-center text-sm text-dark-500 mt-6">
             ¿Ya tienes cuenta?{' '}
-            <Link to="/login" className="text-primary-600 hover:text-primary-700 font-medium">
+            <Link to={loginHref} className="text-primary-600 hover:text-primary-700 font-medium">
               Inicia sesión
             </Link>
           </p>

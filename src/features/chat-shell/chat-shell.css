@@ -147,6 +147,48 @@ html.chat-shell-route *::-webkit-scrollbar {
   font: inherit;
 }
 
+/* Chat-shell form controls: override app-wide dark color-scheme */
+.chat-shell input,
+.chat-shell select,
+.chat-shell textarea,
+.chat-shell option {
+  color-scheme: inherit;
+}
+
+.chat-shell[data-theme="obsidian-light"] input,
+.chat-shell[data-theme="obsidian-light"] select,
+.chat-shell[data-theme="obsidian-light"] textarea,
+.chat-shell[data-theme="obsidian-light"] option,
+html[data-theme="obsidian-light"] .chat-shell input,
+html[data-theme="obsidian-light"] .chat-shell select,
+html[data-theme="obsidian-light"] .chat-shell textarea,
+html[data-theme="obsidian-light"] .chat-shell option {
+  color-scheme: light;
+}
+
+.chat-shell[data-theme="obsidian-dark"] input,
+.chat-shell[data-theme="obsidian-dark"] select,
+.chat-shell[data-theme="obsidian-dark"] textarea,
+.chat-shell[data-theme="obsidian-dark"] option,
+html[data-theme="obsidian-dark"] .chat-shell input,
+html[data-theme="obsidian-dark"] .chat-shell select,
+html[data-theme="obsidian-dark"] .chat-shell textarea,
+html[data-theme="obsidian-dark"] .chat-shell option {
+  color-scheme: dark;
+}
+
+.chat-shell[data-theme="obsidian-light"] option,
+html[data-theme="obsidian-light"] .chat-shell option {
+  background-color: var(--bg-elevated, #ffffff);
+  color: var(--text, #0f172a);
+}
+
+.chat-shell[data-theme="obsidian-dark"] option,
+html[data-theme="obsidian-dark"] .chat-shell option {
+  background-color: var(--bg-elevated, #151d28);
+  color: var(--text, #e2e8f0);
+}
+
 .chat-shell,
 .chat-shell * {
   scrollbar-width: none;
@@ -1072,9 +1114,16 @@ html.chat-shell-route *::-webkit-scrollbar {
   color: var(--text-faint);
   font-size: 0.68rem;
   letter-spacing: var(--chat-ui-track);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.25;
+  overflow: visible;
+}
+
+.chat-shell__modal-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  line-height: 1.35;
 }
 
 .chat-shell__avatar {
@@ -1316,6 +1365,32 @@ html.chat-shell-route *::-webkit-scrollbar {
   padding: 8px 10px;
   color: var(--text-muted);
   font-size: 0.84rem;
+}
+
+.chat-shell__empty-line {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.chat-shell__empty-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent, #c4a574) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent, #c4a574) 18%, var(--bg-elevated));
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-shell__empty-cta:hover {
+  background: color-mix(in srgb, var(--accent, #c4a574) 28%, var(--bg-elevated));
 }
 
 .chat-shell__bubble {
@@ -2215,6 +2290,155 @@ html.chat-shell-route *::-webkit-scrollbar {
   flex-shrink: 0;
   padding: 8px 16px 14px;
   background: linear-gradient(180deg, transparent, var(--bg-stage) 36%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Idle glass row — Brand Kit + Guiones/Post/Foto/Pack above typing card */
+.chat-shell__idle-glass {
+  position: relative;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, #67e8f9 20%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #0b1a33 42%, transparent), color-mix(in srgb, #0e7490 12%, transparent)),
+    color-mix(in srgb, #0b1220 28%, transparent);
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  box-shadow:
+    0 10px 28px color-mix(in srgb, #020617 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #a5f3fc 22%, transparent);
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  transform: translateY(-2px);
+}
+
+.chat-shell[data-theme="obsidian-light"] .chat-shell__idle-glass {
+  border-color: color-mix(in srgb, #22d3ee 20%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #e0f2fe 32%, transparent), color-mix(in srgb, #cffafe 18%, transparent)),
+    color-mix(in srgb, #ffffff 22%, transparent);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow:
+    0 10px 26px color-mix(in srgb, #0b1a33 10%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 55%, transparent);
+}
+
+.chat-shell__idle-glass.is-collapsed {
+  width: auto;
+  align-self: flex-start;
+  padding: 4px;
+}
+
+.chat-shell__idle-glass-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.chat-shell__idle-kit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-shrink: 1;
+  padding-right: 8px;
+  border-right: 1px solid color-mix(in srgb, #67e8f9 18%, transparent);
+}
+
+.chat-shell__idle-kit-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  text-align: left;
+  padding: 0 2px;
+}
+
+.chat-shell__idle-kit-title strong {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-shell__idle-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-shell__idle-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-shell__idle-actions button {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 36px;
+  border: 1px solid color-mix(in srgb, #67e8f9 16%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, #082f49 35%, transparent);
+  color: var(--text);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-shell[data-theme="obsidian-light"] .chat-shell__idle-actions button {
+  background: color-mix(in srgb, #ffffff 70%, transparent);
+  border-color: color-mix(in srgb, #0891b2 18%, transparent);
+}
+
+.chat-shell__idle-actions button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-shell__idle-actions button.is-on,
+.chat-shell__idle-actions button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, #67e8f9 42%, transparent);
+  background: color-mix(in srgb, #22d3ee 18%, transparent);
+  color: var(--text);
+}
+
+.chat-shell__idle-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-shell__idle-action-block {
+  display: block;
+  margin: 0;
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-muted, #9aa3b2);
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 .chat-shell__composer {
@@ -2441,6 +2665,16 @@ html.chat-shell-route *::-webkit-scrollbar {
   color: var(--text);
   font-size: 0.82rem;
   font-weight: 650;
+}
+
+.chat-shell__clarify-soft-hint {
+  margin: 4px 0 8px;
+  color: var(--muted, #8a93a6);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  position: relative;
+  z-index: 0;
 }
 
 .chat-shell__btn--pill.is-on {
@@ -3243,11 +3477,37 @@ html.chat-shell-route *::-webkit-scrollbar {
   color: var(--text-muted);
 }
 
-.chat-shell__ref-picker-grid,
-.chat-shell__ref-picker-actions {
+.chat-shell__ref-picker-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.chat-shell__ref-picker-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 10px;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 0;
+}
+
+.chat-shell__ref-picker-actions .chat-shell__btn--pill {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: center;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.25;
+  font-size: 0.76rem;
+  padding: 8px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-shell__ref-picker-wrap {
@@ -4101,6 +4361,20 @@ html.chat-shell-route *::-webkit-scrollbar {
     max-width: 46vw;
   }
 
+  .chat-shell__idle-glass-row {
+    gap: 8px;
+  }
+
+  .chat-shell__idle-actions button {
+    min-height: 40px;
+    padding: 6px 8px;
+    font-size: 0.68rem;
+  }
+
+  .chat-shell__script-picker--sheet {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .chat-shell__create-toggle {
     min-height: 44px;
     padding: 0 12px;
@@ -4269,7 +4543,7 @@ html.chat-shell-route *::-webkit-scrollbar {
   border: 0;
   padding: 0;
   margin: 0;
-  background: color-mix(in srgb, var(--bg, #0b0d10) 55%, transparent);
+  background: color-mix(in srgb, #0b1a33 46%, transparent);
   cursor: pointer;
 }
 
@@ -4374,6 +4648,92 @@ html.chat-shell-route *::-webkit-scrollbar {
   width: min(100%, 560px);
   max-height: min(88vh, 760px);
   overflow: auto;
+}
+
+.chat-shell__modal--flow {
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(86vh, 720px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.chat-shell__modal--flow.is-wide {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.chat-shell__modal-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-shell__modal-step {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chat-shell__modal--flow > .chat-shell__modal-copy {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+.chat-shell__modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-shell__modal-credits {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.chat-shell__modal--flow > .chat-shell__modal-credits {
+  /* When credits sit between body and footer (non-refs), keep them out of the scroll clash. */
+  margin-top: 2px;
+}
+
+.chat-shell__modal--flow > .chat-shell__modal-actions {
+  flex-shrink: 0;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated, var(--sidebar));
+  flex-wrap: wrap;
+  z-index: 2;
+}
+
+.chat-shell__ref-picker-credits {
+  margin: 8px 0 0;
+}
+
+.chat-shell__flow-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-shell__script-picker--sheet {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .chat-shell__bulk-modes {

@@ -40,6 +40,14 @@ import type {
   ScriptGenerationSettings,
 } from '../../types'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
+import { useUsageLimits, invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
+import {
+  buildCreditQuote,
+  quoteEditEnhanceCredits,
+  quoteImageCredits,
+  type CreditQuote,
+} from './chatShellCreditQuote'
+import { friendlyImageError } from './chatShellImageErrors'
 import {
   collectBrandGenerateVisual,
   resolveBrandKitIdForSession,
@@ -51,6 +59,10 @@ import {
   parseChatShellScriptIntent,
   type ChatShellLanguage,
 } from './chatShellScriptIntent'
+import {
+  brandHasRealOffer,
+  buildChatShellConversationalReply,
+} from './chatShellConversationalReply'
 import { getTextModelPreference } from './textModelPreference'
 import {
   assignGlobalScriptOrdinals,
@@ -111,6 +123,7 @@ import {
   requiresProductReferences,
   resolveImagePreferences,
   sanitizePartialPreferences,
+  shellImageFlowCopy,
   writeImagePreferences,
   type ImageClarifyMode,
   type ImageClarifyStep,
@@ -131,12 +144,21 @@ import {
   confirmedReferenceImageIds,
   hasSelectedProductReference,
   partitionReferenceCopies,
+  selectedBrandLogoUrl,
   shouldPromptImageReferences,
   toggleReferenceSelection,
   withPreselectedReferences,
   type OfferReferenceImage,
 } from './chatShellReferenceSelection'
 import { collectOfferEnhanceReferences, type ShellEnhanceTier } from './chatShellImageEnhance'
+import {
+  detectMissingIngredients,
+  ingredientsPromptCopy,
+  ingredientsSkippedAfterRefsConfirm,
+  remainingIngredients,
+  shouldCheckImageIngredients,
+  type IngredientKind,
+} from './chatShellIngredientsCheck'
 
 export type ImageClarifyState = {
   sessionId: string
@@ -159,6 +181,24 @@ export type ImageClarifyState = {
   preferredReferenceIds?: string[]
   alreadyOptimized?: boolean
   askStyleRef?: boolean
+  /** Prior sheet steps for Pack-family Back (no transcript). */
+  history?: ImageClarifyState[]
+  missingIngredients?: IngredientKind[]
+  skippedIngredients?: IngredientKind[]
+  pendingGenerate?: {
+    productId: string
+    preferences: ShellImagePreferences
+    prompt: string
+    userText: string
+    scriptText?: string
+    scriptTitle?: string | null
+    source: string
+    referenceMode?: 'use' | 'none'
+    referenceImageIds?: string[]
+    alreadyOptimized?: boolean
+    askStyleRef?: boolean
+    skipStyleRef?: boolean
+  }
 }
 
 export type ImageScriptChoice = {
@@ -240,6 +280,18 @@ export type ScriptClarifyState = {
   settings: ScriptGenerationSettings
   ctaChannel?: ScriptCtaChannel
   remaining: Array<'type' | 'count' | 'cta'>
+  /** Prior sheet steps for Pack-family Back (no transcript). */
+  history?: ScriptClarifyState[]
+}
+
+function pushScriptHistory(current: ScriptClarifyState): ScriptClarifyState[] {
+  const { history: _drop, ...snapshot } = current
+  return [...(current.history || []), snapshot]
+}
+
+function pushImageHistory(current: ImageClarifyState): ImageClarifyState[] {
+  const { history: _drop, ...snapshot } = current
+  return [...(current.history || []), snapshot]
 }
 
 function explicitCtaChannel(text: string): ScriptCtaChannel | null {
@@ -371,11 +423,51 @@ export function useChatSessionThread(options: {
   const [imageOfferId, setImageOfferId] = useState<string | null>(null)
   const [imageBusy, setImageBusy] = useState(false)
   const imageBusyRef = useRef(false)
+  const imageGenerateSubmitLockRef = useRef(false)
   const [imagePrefs, setImagePrefs] = useState<ShellImagePreferences>(() =>
     resolveImagePreferences({}, {})
   )
   const [imageClarify, setImageClarify] = useState<ImageClarifyState | null>(null)
   const [scriptClarify, setScriptClarify] = useState<ScriptClarifyState | null>(null)
+  const [creditQuote, setCreditQuote] = useState<CreditQuote | null>(null)
+  const creditPendingRef = useRef<null | {
+    kind: 'scripts' | 'image' | 'edit'
+    text?: string
+    sendOptions?: {
+      forceSettings?: ScriptGenerationSettings
+      skipImage?: boolean
+      bypassScriptClarify?: boolean
+      channelOverride?: 'website' | 'messages'
+      creditConfirmed?: boolean
+    }
+    imageOptions?: Record<string, unknown>
+    editOptions?: {
+      productImageId: string
+      imageUrl: string
+      instruction: string
+      productId?: string
+      actionType: 'edit' | 'enhance'
+      attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>
+      enhanceTier?: ShellEnhanceTier
+    }
+  }>(null)
+  const usage = useUsageLimits()
+  const runImageGenerateRef = useRef<(options: {
+    productId: string
+    preferences: ShellImagePreferences
+    prompt: string
+    userText: string
+    scriptText?: string
+    scriptTitle?: string | null
+    source: string
+    referenceMode?: 'use' | 'none'
+    referenceImageIds?: string[]
+    alreadyOptimized?: boolean
+    askStyleRef?: boolean
+    skipStyleRef?: boolean
+    creditConfirmed?: boolean
+    skippedIngredients?: IngredientKind[]
+  }) => Promise<void>>(async () => {})
   const latestScriptByKeyRef = useRef<Map<string, string>>(new Map())
   const [scriptSettings, setScriptSettings] = useState<ScriptGenerationSettings>(() => ({
     ...DEFAULT_SCRIPT_SETTINGS,
@@ -392,21 +484,6 @@ export function useChatSessionThread(options: {
     explicit?: Partial<ShellImagePreferences>
     alreadyOptimized?: boolean
     referenceImageIds?: string[]
-  }) => Promise<void>>(async () => {})
-
-  const runImageGenerateRef = useRef<(options: {
-    productId: string
-    preferences: ShellImagePreferences
-    prompt: string
-    userText: string
-    scriptText?: string
-    scriptTitle?: string | null
-    source: string
-    referenceMode?: 'use' | 'none'
-    referenceImageIds?: string[]
-    alreadyOptimized?: boolean
-    askStyleRef?: boolean
-    skipStyleRef?: boolean
   }) => Promise<void>>(async () => {})
 
   const loadRequestRef = useRef(0)
@@ -1069,6 +1146,7 @@ export function useChatSessionThread(options: {
       skipImage?: boolean
       bypassScriptClarify?: boolean
       channelOverride?: 'website' | 'messages'
+      creditConfirmed?: boolean
     }
   ): Promise<{ needOffers?: boolean } | void> => {
     const text = rawText.trim()
@@ -1096,17 +1174,38 @@ export function useChatSessionThread(options: {
       ...DEFAULT_SCRIPT_SETTINGS,
       model: getTextModelPreference(),
     })
+
+    const hasOffer =
+      planOfferGenerationWalk(offers).length > 0
+      || Boolean(session.product_id)
+      || brandHasRealOffer(brandProducts)
+
+    // Greetings / chitchat — reply in-thread, never auto-generate scripts.
+    if (!options?.forceSettings && !parsedScriptIntent.matched) {
+      const reply = buildChatShellConversationalReply({
+        text,
+        language,
+        hasOffer,
+      })
+      await persistTurn('user', text)
+      await persistTurn('assistant', reply)
+      setNotice(null)
+      setError(null)
+      setScriptClarify(null)
+      setImageClarify(null)
+      return hasOffer ? undefined : { needOffers: true }
+    }
+
     if (!options?.forceSettings && !options?.bypassScriptClarify && parsedScriptIntent.matched) {
-      const hasOffer =
-        planOfferGenerationWalk(offers).length > 0
-        || Boolean(session.product_id)
-        || brandProducts.some((product) => product.name !== 'Quick Use Image Studio')
       if (!hasOffer) {
         setScriptClarify(null)
         setImageClarify(null)
-        setNotice(language === 'es'
-          ? 'Primero necesitás una oferta. Creala en el panel Ofertas o confirmá el setup.'
-          : 'You need an offer first. Create one in Offers or confirm setup.')
+        const reply = language === 'es'
+          ? 'Primero necesitás una oferta. Creala en el panel Ofertas (a la derecha) o confirmá el setup en el chat — sin oferta no puedo generar guiones.'
+          : 'You need an offer first. Create one in the Offers panel (right) or confirm setup in chat — I can’t generate scripts without an offer.'
+        await persistTurn('user', text)
+        await persistTurn('assistant', reply)
+        setNotice(reply)
         return { needOffers: true }
       }
       const ctaChannel = explicitCtaChannel(text)
@@ -1124,6 +1223,7 @@ export function useChatSessionThread(options: {
           settings: parsedScriptIntent.settings,
           ctaChannel: ctaChannel || undefined,
           remaining: missing.slice(1),
+          history: [],
         })
         setError(null)
         setNotice(null)
@@ -1199,17 +1299,39 @@ export function useChatSessionThread(options: {
         )
         return
       } else if (resolved.action === 'none') {
-        setNotice(language === 'es'
-          ? 'Todavía no hay una oferta en esta marca. Confirmá el setup en el chat.'
-          : 'This brand has no offer yet. Confirm setup in chat first.')
-        return
+        const reply = language === 'es'
+          ? 'Todavía no hay una oferta en esta marca. Abrí Ofertas a la derecha o confirmá el setup en el chat.'
+          : 'This brand has no offer yet. Open Offers on the right or confirm setup in chat.'
+        await persistTurn('user', text)
+        await persistTurn('assistant', reply)
+        setNotice(reply)
+        return { needOffers: true }
       }
     }
 
     if (walk.length === 0) {
-      setNotice(language === 'es'
-        ? 'Todavía no hay una oferta en esta marca. Confirmá el setup en el chat.'
-        : 'This brand has no offer yet. Confirm setup in chat first.')
+      const reply = language === 'es'
+        ? 'Todavía no hay una oferta en esta marca. Abrí Ofertas a la derecha o confirmá el setup en el chat.'
+        : 'This brand has no offer yet. Open Offers on the right or confirm setup in chat.'
+      await persistTurn('user', text)
+      await persistTurn('assistant', reply)
+      setNotice(reply)
+      return { needOffers: true }
+    }
+
+    if (
+      (usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true')
+      && !options?.creditConfirmed
+    ) {
+      const quote = buildCreditQuote({
+        kind: 'scripts',
+        units: walk.length,
+        remaining: usage.creditsRemaining,
+      })
+      creditPendingRef.current = { kind: 'scripts', text, sendOptions: options }
+      setCreditQuote(quote)
+      setError(null)
+      setNotice(null)
       return
     }
 
@@ -1294,6 +1416,8 @@ export function useChatSessionThread(options: {
         return
       }
 
+      invalidateUsageLimitsCache()
+
       if (failures.length > 0) {
         setFailedBatch({
           productIds: failures.map((f) => f.step.productId),
@@ -1337,12 +1461,66 @@ export function useChatSessionThread(options: {
     brandProducts,
     persistOffers,
     persistTurn,
+    usage.creditsEnabled,
+    usage.creditsRemaining,
   ])
+
+  const confirmCreditQuote = useCallback(async () => {
+    const pending = creditPendingRef.current
+    setCreditQuote(null)
+    creditPendingRef.current = null
+    if (!pending) return
+    if (pending.kind === 'scripts' && pending.text) {
+      await send(pending.text, { ...pending.sendOptions, creditConfirmed: true })
+      return
+    }
+    if (pending.kind === 'image' && pending.imageOptions) {
+      await runImageGenerateRef.current({
+        ...(pending.imageOptions as {
+          productId: string
+          preferences: ShellImagePreferences
+          prompt: string
+          userText: string
+          scriptText?: string
+          scriptTitle?: string | null
+          source: string
+          referenceMode?: 'use' | 'none'
+          referenceImageIds?: string[]
+          alreadyOptimized?: boolean
+          askStyleRef?: boolean
+          skipStyleRef?: boolean
+          skippedIngredients?: IngredientKind[]
+        }),
+        creditConfirmed: true,
+      })
+      return
+    }
+    if (pending.kind === 'edit' && pending.editOptions) {
+      const o = pending.editOptions
+      await editOfferImageRef.current(
+        o.productImageId,
+        o.imageUrl,
+        o.instruction,
+        o.productId,
+        o.actionType,
+        o.attachments,
+        o.enhanceTier,
+        true
+      )
+    }
+  }, [send])
+
+  const cancelCreditQuote = useCallback(() => {
+    creditPendingRef.current = null
+    setCreditQuote(null)
+    setNotice(null)
+  }, [])
 
   const answerScriptClarify = useCallback(async (answer: {
     type?: ScriptFramework | 'mixed'
     count?: number
     ctaChannel?: ScriptCtaChannel
+    confirm?: boolean
   }) => {
     if (!scriptClarify || !session || scriptClarify.sessionId !== session.id) return
     const finish = async (settings: ScriptGenerationSettings, ctaChannel?: ScriptCtaChannel) => {
@@ -1361,7 +1539,23 @@ export function useChatSessionThread(options: {
         await finish(settings, ctaChannel)
         return
       }
-      setScriptClarify({ ...scriptClarify, step: next, remaining, settings, ctaChannel })
+      setScriptClarify({
+        ...scriptClarify,
+        step: next,
+        remaining,
+        settings,
+        ctaChannel,
+        history: pushScriptHistory(scriptClarify),
+      })
+    }
+    if (answer.confirm && scriptClarify.step === 'cta' && scriptClarify.ctaChannel) {
+      const channel = scriptClarify.ctaChannel
+      const settings = {
+        ...scriptClarify.settings,
+        ctaStrength: channel === 'none' ? 'none' as const : scriptClarify.settings.ctaStrength || 'sales' as const,
+      }
+      await finish(settings, channel)
+      return
     }
     if (scriptClarify.step === 'type' && answer.type) {
       await advance(settingsForScriptType(scriptClarify.settings, answer.type), scriptClarify.ctaChannel)
@@ -1377,9 +1571,56 @@ export function useChatSessionThread(options: {
         ...scriptClarify.settings,
         ctaStrength: channel === 'none' ? 'none' as const : scriptClarify.settings.ctaStrength || 'sales' as const,
       }
+      // Last step: select CTA only; primary Generar confirms (credits line visible).
+      if (scriptClarify.remaining.length === 0) {
+        setScriptClarify({
+          ...scriptClarify,
+          settings,
+          ctaChannel: channel,
+        })
+        return
+      }
       await advance(settings, channel)
     }
   }, [scriptClarify, session, send])
+
+  const backScriptClarify = useCallback(() => {
+    if (!scriptClarify?.history?.length) return
+    const prev = scriptClarify.history[scriptClarify.history.length - 1]
+    const history = scriptClarify.history.slice(0, -1)
+    setScriptClarify({ ...prev, history })
+    setNotice(null)
+  }, [scriptClarify])
+
+  const startScriptsFlow = useCallback(() => {
+    if (!session) return
+    const hasOffer =
+      planOfferGenerationWalk(offers).length > 0
+      || Boolean(session.product_id)
+      || brandProducts.some((product) => product.name !== 'Quick Use Image Studio')
+    if (!hasOffer) {
+      setScriptClarify(null)
+      setImageClarify(null)
+      setNotice(language === 'es'
+        ? 'Primero necesitás una oferta. Creala en el panel Ofertas o confirmá el setup.'
+        : 'You need an offer first. Create one in Offers or confirm setup.')
+      return
+    }
+    setImageClarify(null)
+    setNotice(null)
+    setError(null)
+    setScriptClarify({
+      sessionId: session.id,
+      step: 'type',
+      originText: language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts',
+      settings: {
+        ...DEFAULT_SCRIPT_SETTINGS,
+        model: getTextModelPreference(),
+      },
+      remaining: ['count', 'cta'],
+      history: [],
+    })
+  }, [session, offers, brandProducts, language])
 
   const retryFailedOffers = useCallback(async () => {
     if (!session || !failedBatch || sending) return
@@ -1582,15 +1823,15 @@ export function useChatSessionThread(options: {
   const uploadOfferImage = useCallback(async (
     file: File,
     productIdOverride?: string | null,
-    kind: 'product' | 'context' | 'scene' | 'style' = 'product'
+    kind: 'product' | 'context' | 'scene' | 'style' | 'logo' = 'product'
   ) => {
     const targetProductId = productIdOverride || activeImageOfferId
     if (!session || !targetProductId || imageBusyRef.current) return
     const pendingRefs =
       imageClarify
       && imageClarify.sessionId === session.id
-      && (imageClarify.step === 'refs' || imageClarify.step === 'styleRef')
-      && imageClarify.preferences
+      && (imageClarify.step === 'refs' || imageClarify.step === 'styleRef' || imageClarify.step === 'ingredients')
+      && (imageClarify.preferences || imageClarify.pendingGenerate)
         ? imageClarify
         : null
     const originSessionId = session.id
@@ -1621,24 +1862,44 @@ export function useChatSessionThread(options: {
       )) {
         return
       }
+      setOfferImages((prev) => [uploaded, ...prev.filter((item) => item.id !== uploaded.id)])
       await refreshOfferImages(originSessionId, targetProductId, loadRequestRef.current)
-      if (pendingRefs) {
+      const roleKind = (kind === 'logo'
+        ? 'logo'
+        : kind === 'style'
+          ? 'style'
+          : kind === 'scene' || kind === 'context'
+            ? 'scene'
+            : 'product') as 'product' | 'scene' | 'style' | 'logo'
+      if (kind === 'logo' && brandVisualRef) {
+        brandVisualRef.current = {
+          ...brandVisualRef.current,
+          logo_url: uploaded.image_url,
+        }
+      }
+      if (
+        pendingRefs
+        && (pendingRefs.step === 'refs' || pendingRefs.step === 'styleRef')
+      ) {
         setImageClarify((current) => {
           if (
             !current
             || current.sessionId !== originSessionId
             || (current.step !== 'refs' && current.step !== 'styleRef')
           ) return current
+          const withoutDup = (current.referenceImages || []).filter((item) => item.id !== uploaded.id)
+          // Logo: keep at most one selected logo so generate uses this upload as brandLogoUrl.
+          const clearedLogos = roleKind === 'logo'
+            ? withoutDup.map((item) => (
+              item.kind === 'logo' ? { ...item, selected: false } : item
+            ))
+            : withoutDup
           const referenceImages = [
-            ...(current.referenceImages || []).filter((item) => item.id !== uploaded.id),
+            ...clearedLogos,
             {
               id: uploaded.id,
               url: uploaded.image_url,
-              kind: (kind === 'style'
-                ? 'style'
-                : kind === 'scene' || kind === 'context'
-                  ? 'scene'
-                  : 'product') as 'product' | 'scene' | 'style',
+              kind: roleKind,
               dbKind: (kind === 'product' ? 'product' : 'context') as 'product' | 'context',
               label: uploaded.label,
               selected: true,
@@ -1652,11 +1913,21 @@ export function useChatSessionThread(options: {
             availableReferenceCount: referenceImages.length,
           }
         })
+      } else if (
+        pendingRefs?.step === 'ingredients'
+        && pendingRefs.pendingGenerate
+        && pendingRefs.sessionId === originSessionId
+      ) {
+        const skipped = pendingRefs.skippedIngredients || []
+        await runImageGenerateRef.current?.({
+          ...pendingRefs.pendingGenerate,
+          skippedIngredients: skipped,
+        })
       }
       setNotice(
         language === 'es'
-          ? 'Foto de referencia lista.'
-          : 'Reference photo ready.'
+          ? (kind === 'logo' ? 'Logo listo para este generate.' : 'Foto de referencia lista.')
+          : (kind === 'logo' ? 'Logo ready for this generate.' : 'Reference photo ready.')
       )
     } catch (err) {
       console.error(err)
@@ -1682,6 +1953,7 @@ export function useChatSessionThread(options: {
     userId,
     refreshOfferImages,
     language,
+    brandVisualRef,
   ])
 
   const patchImagePreferences = useCallback((patch: Partial<ShellImagePreferences>) => {
@@ -1702,9 +1974,14 @@ export function useChatSessionThread(options: {
     source: string
     referenceMode?: 'use' | 'none'
     referenceImageIds?: string[]
+    /** Selected Subir logo on Confirmá referencias — overrides kit logo for this generate. */
+    brandLogoUrlOverride?: string
     alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
+    priorClarify?: ImageClarifyState | null
+    creditConfirmed?: boolean
+    skippedIngredients?: IngredientKind[]
   }) => {
     if (!session || imageBusyRef.current) return
     const originSessionId = session.id
@@ -1746,9 +2023,14 @@ export function useChatSessionThread(options: {
         options.referenceImageIds
       )
       const referencesRequired = requiresProductReferences(prefs.style)
+      const referenceMode = options.referenceMode
+      // Always open Confirmá referencias for product/post/organic until the user
+      // clicks Generar / Crear sin referencias on that sheet (sets referenceMode).
+      // Do NOT auto-force 'none' for studio-hero — that skipped the sheet and
+      // dumped Foto into the ingredients gate + chat credit confirm.
       if (shouldPromptImageReferences({
         styleKind: prefs.style.kind,
-        referenceMode: options.referenceMode,
+        referenceMode,
       })) {
         setImageOfferId(options.productId)
         setImageClarify({
@@ -1769,13 +2051,12 @@ export function useChatSessionThread(options: {
           referenceImages: catalog,
           preferredReferenceIds: options.referenceImageIds,
           alreadyOptimized: options.alreadyOptimized,
+          history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
         })
-        setNotice(language === 'es'
-          ? 'Confirmá producto, contexto y referencias. Hay varios ángulos — elegí los que retratan lo que querés.'
-          : 'Confirm product, context, and references. There are several angles — pick the ones that match what you want.')
+        setNotice(null)
         return
       }
-      const productImageIds = options.referenceMode === 'none'
+      const productImageIds = referenceMode === 'none'
         ? []
         : (options.referenceImageIds || [])
       if (referencesRequired && productImageIds.length === 0) {
@@ -1797,12 +2078,9 @@ export function useChatSessionThread(options: {
           referencesRequired: true,
           referenceImages: catalog,
           alreadyOptimized: options.alreadyOptimized,
+          history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
         })
-        setNotice(
-          language === 'es'
-            ? 'Elegí al menos una foto de producto, o cambiá a Anuncio.'
-            : 'Pick at least one product photo, or switch to Ad.'
-        )
+        setNotice(null)
         return
       }
 
@@ -1814,6 +2092,7 @@ export function useChatSessionThread(options: {
       )
       const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
       const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
+      const brandLogoUrl = options.brandLogoUrlOverride || brandVisual.brandLogoUrl
       let prompt = options.prompt
       let scriptText = options.scriptText
       if (scriptText && !shouldSkipPostCondense({
@@ -1839,6 +2118,78 @@ export function useChatSessionThread(options: {
         scriptText = stripUnresolvedPlaceholders(scriptText)
         if (prompt === options.scriptText) prompt = scriptText
       }
+
+      const skippedSet = new Set(options.skippedIngredients || [])
+      // Confirmá referencias already decided soft skips (style/logo). Never gate after spinner.
+      if (options.priorClarify?.step === 'refs') {
+        const mode = options.referenceMode === 'none' ? 'none' : 'use'
+        for (const kind of ingredientsSkippedAfterRefsConfirm(mode)) {
+          skippedSet.add(kind)
+        }
+      }
+      if (shouldCheckImageIngredients(prefs.style.kind)) {
+        const missing = detectMissingIngredients({
+          offerImages: images,
+          productId: options.productId,
+          brandLogoUrl: options.brandLogoUrlOverride || brandVisual.brandLogoUrl,
+          referenceMode: referenceMode === 'use' || referenceMode === 'none' ? referenceMode : undefined,
+          selectedReferenceImageIds: productImageIds,
+        })
+        const stillMissing = remainingIngredients(missing, skippedSet)
+        if (stillMissing.length > 0) {
+          setImageOfferId(options.productId)
+          setImageClarify({
+            sessionId: originSessionId,
+            step: 'ingredients',
+            mode: prefs.style.kind === 'product' ? 'product' : prefs.style.kind === 'organic' ? 'organic' : 'anuncio',
+            originText: options.userText,
+            productId: options.productId,
+            scriptText: options.scriptText,
+            scriptTitle: options.scriptTitle,
+            source: clarifySource,
+            partial: { style: prefs.style },
+            preferences: prefs,
+            prompt,
+            userText: options.userText,
+            missingIngredients: stillMissing,
+            skippedIngredients: [...skippedSet],
+            pendingGenerate: {
+              productId: options.productId,
+              preferences: prefs,
+              prompt,
+              userText: options.userText,
+              scriptText,
+              scriptTitle: options.scriptTitle,
+              source: options.source,
+              referenceMode: options.referenceMode,
+              referenceImageIds: productImageIds,
+              alreadyOptimized: options.alreadyOptimized,
+              askStyleRef: options.askStyleRef,
+              skipStyleRef: options.skipStyleRef,
+            },
+          })
+          setNotice(ingredientsPromptCopy(stillMissing, language))
+          return
+        }
+      }
+
+      if (
+        (usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true')
+        && !options.creditConfirmed
+        // Confirmá referencias already disclosed cost on Generar — never a second continue after spinner.
+        && options.priorClarify?.step !== 'refs'
+      ) {
+        const cost = quoteImageCredits(prefs.model)
+        const quote = buildCreditQuote({
+          kind: cost >= 24 ? 'image_pro' : 'image_standard',
+          remaining: usage.creditsRemaining,
+        })
+        creditPendingRef.current = { kind: 'image', imageOptions: { ...options, prompt, scriptText } }
+        setCreditQuote(quote)
+        setError(null)
+        return
+      }
+
       generating = true
       imageBusyRef.current = true
       setImageBusy(true)
@@ -1852,12 +2203,13 @@ export function useChatSessionThread(options: {
         productImageIds,
         brandKitId,
         customColors: brandVisual.customColors,
-        brandLogoUrl: brandVisual.brandLogoUrl,
+        brandLogoUrl,
         language,
         scriptText,
         businessContext: session.context || undefined,
         userText: options.userText,
         source: options.source,
+        referenceMode: referenceMode === 'none' ? 'none' : 'use',
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -1877,6 +2229,7 @@ export function useChatSessionThread(options: {
       setImageClarify(null)
       setMessages((prev) => [...prev, result.userMessage, result.assistantMessage])
       await refreshOfferImages(originSessionId, options.productId, loadRequestRef.current)
+      invalidateUsageLimitsCache()
     } catch (err) {
       console.error(err)
       if (isLiveThread(
@@ -1885,7 +2238,10 @@ export function useChatSessionThread(options: {
         originSessionId,
         originGen
       )) {
-        setError(err instanceof Error ? err.message : 'Image generate failed')
+        setError(friendlyImageError(
+          err instanceof Error ? err.message : 'Image generate failed',
+          language
+        ))
       }
     } finally {
       if (generating) {
@@ -1903,9 +2259,151 @@ export function useChatSessionThread(options: {
     refreshOfferImages,
     offers,
     brandProducts,
+    usage.creditsEnabled,
+    usage.creditsRemaining,
   ])
 
   runImageGenerateRef.current = runImageGenerate
+
+  const editOfferImageRef = useRef<(
+    productImageId: string,
+    imageUrl: string,
+    instruction: string,
+    productId?: string,
+    actionType?: 'edit' | 'enhance',
+    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
+    enhanceTier?: ShellEnhanceTier,
+    creditConfirmed?: boolean
+  ) => Promise<void>>(async () => {})
+
+  const editOfferImage = useCallback(async (
+    productImageId: string,
+    imageUrl: string,
+    instruction: string,
+    productId?: string,
+    actionType: 'edit' | 'enhance' = 'edit',
+    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
+    enhanceTier?: ShellEnhanceTier,
+    creditConfirmed = false
+  ) => {
+    if (!session || imageBusy) return
+    const pid = productId || activeImageOfferId
+    if (!pid) return
+
+    if ((usage.creditsEnabled || import.meta.env.VITE_CREDITS_V1 === 'true') && !creditConfirmed) {
+      const quote = buildCreditQuote({
+        kind: actionType === 'enhance' ? 'image_enhance' : 'image_edit',
+        remaining: usage.creditsRemaining,
+      })
+      // Guard: UI quote must equal catalog charge (18 for edit/enhance).
+      if (quote.cost !== quoteEditEnhanceCredits(actionType)) {
+        console.error('credit quote mismatch', { quote, actionType })
+      }
+      creditPendingRef.current = {
+        kind: 'edit',
+        editOptions: {
+          productImageId,
+          imageUrl,
+          instruction,
+          productId: pid,
+          actionType,
+          attachments,
+          enhanceTier,
+        },
+      }
+      setCreditQuote(quote)
+      setError(null)
+      return
+    }
+
+    const originSessionId = session.id
+    const originGen = sessionGenRef.current
+    setImageBusy(true)
+    setError(null)
+    try {
+      const roleNotes = (attachments || [])
+        .map((item, index) => `${index + 1}. ${item.role === 'context' ? 'context/style' : 'product'} reference`)
+        .join('; ')
+      const onBrandPrefix = language === 'es'
+        ? 'Mejorá iluminación, composición, fidelidad del logo y exactitud del producto según referencias si las hay. Mantené la marca y el producto; no inventes escenas nuevas.\n\n'
+        : 'Improve lighting, composition, logo fidelity, and product accuracy from refs if present. Stay on-brand; do not invent unrelated scenes.\n\n'
+      const editPrompt = roleNotes
+        ? `${onBrandPrefix}${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
+        : `${onBrandPrefix}${instruction.trim()}`
+      const brandKitId = resolveBrandKitIdForSession(
+        session.brand_kit_id,
+        pid,
+        brandKits,
+        storage
+      )
+      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
+      const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
+      const offerRefs = actionType === 'enhance'
+        ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
+        : { productUrls: [], contextUrls: [] }
+      const result = await editShellOfferImage({
+        userId,
+        sessionId: originSessionId,
+        productId: pid,
+        productImageId,
+        imageUrl,
+        editPrompt,
+        actionType,
+        userText: actionType === 'enhance'
+          ? (language === 'es' ? `Mejorar imagen: ${instruction}` : `Enhance image: ${instruction}`)
+          : (language === 'es' ? `Editar imagen: ${instruction}` : `Edit image: ${instruction}`),
+        language,
+        enhanceTier: actionType === 'enhance' ? (enhanceTier || 'modernize') : undefined,
+        editReferenceImages: actionType === 'edit'
+          ? (attachments || []).map((item) => item.dataUrl)
+          : undefined,
+        productReferenceUrls: offerRefs.productUrls,
+        contextReferenceUrls: offerRefs.contextUrls,
+        brandKitId,
+        brandLogoUrl: brandVisual.brandLogoUrl,
+        customColors: brandVisual.customColors,
+        originSessionId,
+        originGen,
+        activeThreadSessionId: activeThreadSessionIdRef.current,
+        sessionGen: sessionGenRef.current,
+      })
+      if (!result) return
+      if (!isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        return
+      }
+      if (result.userMessage && result.assistantMessage) {
+        setMessages((prev) => [...prev, result.userMessage!, result.assistantMessage!])
+      } else if (result.attachedToExisting && result.workspaceMessageId) {
+        setMessages((prev) => prev.map((message) => (
+          message.id === result.workspaceMessageId
+            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
+            : message
+        )))
+      }
+      await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
+      invalidateUsageLimitsCache()
+    } catch (err) {
+      console.error(err)
+      if (isLiveThread(
+        activeThreadSessionIdRef.current,
+        sessionGenRef.current,
+        originSessionId,
+        originGen
+      )) {
+        setError(err instanceof Error ? err.message : 'Image edit failed')
+      }
+      throw err
+    } finally {
+      setImageBusy(false)
+    }
+  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language, usage.creditsEnabled, usage.creditsRemaining])
+
+  editOfferImageRef.current = editOfferImage
 
   const beginImageFlow = useCallback(async (options: {
     productId?: string | null
@@ -1969,15 +2467,16 @@ export function useChatSessionThread(options: {
         source: options.source,
         partial: options.explicit || {},
         scriptChoices,
+        history: [],
       })
-      setNotice(language === 'es'
-        ? 'Elegí el guion exacto que querés convertir en post.'
-        : 'Choose the exact script you want to turn into a post.')
+      setNotice(null)
       return
     }
 
     const sticky = readImagePreferences(storage, session.id)
     const stickyMerged = resolveImagePreferences(sticky, imagePrefs)
+    const stickyPartial = sanitizePartialPreferences(sticky)
+    const explicitPartial = sanitizePartialPreferences(options.explicit)
     const resolved =
       options.source === 'script_card'
         // A script can become an ad, organic post, or product-led visual.
@@ -1990,11 +2489,14 @@ export function useChatSessionThread(options: {
             { ...options.explicit },
             stickyMerged
           )
-    const aspectUnset = !sanitizePartialPreferences(options.explicit).aspectRatio
+    const aspectUnset = !explicitPartial.aspectRatio && !stickyPartial.aspectRatio
     const densityUnset =
       options.source !== 'script_card'
+      && resolved.style?.kind !== 'product'
+      && resolved.style?.kind !== 'logo'
       && (Boolean(options.scriptText) || resolved.style?.kind === 'preset' || resolved.style?.kind === 'organic')
-      && !sanitizePartialPreferences(options.explicit).density
+      && !explicitPartial.density
+      && !stickyPartial.density
     const askStyleRef = !messages.some((message) =>
       message.artifacts?.some((artifact) => artifact.artifact_type === 'image')
     )
@@ -2018,14 +2520,9 @@ export function useChatSessionThread(options: {
         askStyleRef,
         alreadyOptimized: options.alreadyOptimized,
         preferredReferenceIds: options.referenceImageIds,
+        history: [],
       })
-      setNotice(
-        preferOrganic
-          ? (language === 'es' ? 'Elige subtipo orgánico:' : 'Pick an organic subtype:')
-          : (language === 'es'
-            ? '¿Anuncio, producto u orgánico?'
-            : 'Ad, product, or organic?')
-      )
+      setNotice(null)
       return
     }
 
@@ -2044,10 +2541,9 @@ export function useChatSessionThread(options: {
         askStyleRef,
         alreadyOptimized: options.alreadyOptimized,
         preferredReferenceIds: options.referenceImageIds,
+        history: [],
       })
-      setNotice(language === 'es'
-        ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
-        : 'What size? Reel, square, or vertical post.')
+      setNotice(null)
       return
     }
 
@@ -2066,10 +2562,9 @@ export function useChatSessionThread(options: {
         askStyleRef,
         alreadyOptimized: options.alreadyOptimized,
         preferredReferenceIds: options.referenceImageIds,
+        history: [],
       })
-      setNotice(language === 'es'
-        ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
-        : 'How much copy on the post? Keep hook, development, and CTA readable.')
+      setNotice(null)
       return
     }
 
@@ -2107,6 +2602,7 @@ export function useChatSessionThread(options: {
       aspectRatio?: ShellImageAspect
       density?: ShellImagePreferences['density']
       skipStyleRef?: boolean
+      skipIngredient?: IngredientKind
       useReferences?: boolean
       toggleReferenceId?: string
       /** From refs sticky: switch Producto → Anuncio without requiring a Ref. */
@@ -2114,6 +2610,15 @@ export function useChatSessionThread(options: {
     }
   ) => {
     if (!imageClarify || !session || imageClarify.sessionId !== session.id) return
+
+    if (imageClarify.step === 'ingredients' && answer.skipIngredient && imageClarify.pendingGenerate) {
+      const skipped = [...(imageClarify.skippedIngredients || []), answer.skipIngredient]
+      await runImageGenerate({
+        ...imageClarify.pendingGenerate,
+        skippedIngredients: skipped,
+      })
+      return
+    }
 
     if (imageClarify.step === 'script' && answer.scriptChoiceId) {
       const choice = imageClarify.scriptChoices?.find((item) => item.id === answer.scriptChoiceId)
@@ -2128,10 +2633,9 @@ export function useChatSessionThread(options: {
         scriptText: choice.scriptText,
         scriptTitle: choice.title,
         scriptChoices: undefined,
+        history: pushImageHistory(imageClarify),
       })
-      setNotice(preferOrganic
-        ? (language === 'es' ? `Guion seleccionado: ${choice.title}. Elegí el estilo orgánico.` : `Selected script: ${choice.title}. Pick the organic style.`)
-        : (language === 'es' ? `Guion seleccionado: ${choice.title}. Ahora elegí el tipo de post.` : `Selected script: ${choice.title}. Now choose the post type.`))
+      setNotice(null)
       return
     }
 
@@ -2148,50 +2652,84 @@ export function useChatSessionThread(options: {
       }
       if (typeof answer.useReferences === 'boolean' && imageClarify.preferences) {
         if (!answer.useReferences && imageClarify.referencesRequired) return
-        const selected = (imageClarify.referenceImages || []).filter((reference) => reference.selected === true)
-        if (answer.useReferences && imageClarify.referencesRequired && !hasSelectedProductReference(selected)) {
-          setNotice(language === 'es'
-            ? 'Elegí al menos una foto de producto.'
-            : 'Pick at least one product photo.')
+        // One Generar = one in-flight request. Ignore double-clicks before busy settles.
+        if (imageGenerateSubmitLockRef.current || imageBusyRef.current) return
+        imageGenerateSubmitLockRef.current = true
+        setImageBusy(true)
+        setError(null)
+        try {
+          const selected = (imageClarify.referenceImages || []).filter((reference) => reference.selected === true)
+          if (answer.useReferences && imageClarify.referencesRequired && !hasSelectedProductReference(selected)) {
+            setNotice(language === 'es'
+              ? 'Elegí al menos una foto de producto.'
+              : 'Pick at least one product photo.')
+            return
+          }
+          let referenceImageIds = confirmedReferenceImageIds(imageClarify.referenceImages || [])
+          const logoUrl = answer.useReferences
+            ? selectedBrandLogoUrl(imageClarify.referenceImages || [])
+            : undefined
+          if (answer.useReferences && selected.length) {
+            const nonLogoSelected = selected.filter((item) => item.kind !== 'logo')
+            const { keepIds, copyIds } = partitionReferenceCopies(nonLogoSelected, imageClarify.productId)
+            const copiedIds: string[] = []
+            for (const id of copyIds) {
+              const source = selected.find((item) => item.id === id)
+              if (!source) continue
+              const copied = await copyShellOfferImageToProduct({
+                userId,
+                source: {
+                  id: source.id,
+                  image_url: source.url,
+                  label: source.label,
+                  kind: source.kind,
+                },
+                targetProductId: imageClarify.productId,
+              })
+              copiedIds.push(copied.id)
+            }
+            referenceImageIds = [...keepIds, ...copiedIds]
+            if (copiedIds.length) {
+              await refreshOfferImages(session.id, imageClarify.productId, loadRequestRef.current)
+            }
+          }
+          if (logoUrl && brandVisualRef) {
+            brandVisualRef.current = {
+              ...brandVisualRef.current,
+              logo_url: logoUrl,
+            }
+          }
+          await runImageGenerate({
+            productId: imageClarify.productId,
+            preferences: imageClarify.preferences,
+            prompt: imageClarify.prompt || imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
+            userText: imageClarify.userText || imageClarify.originText,
+            scriptText: imageClarify.scriptText,
+            scriptTitle: imageClarify.scriptTitle,
+            source: imageClarify.source,
+            referenceMode: answer.useReferences ? 'use' : 'none',
+            referenceImageIds: answer.useReferences ? referenceImageIds : [],
+            brandLogoUrlOverride: logoUrl,
+            alreadyOptimized: imageClarify.alreadyOptimized,
+            priorClarify: imageClarify,
+            // Generar / Crear sin referencias on Confirmá referencias = soft-skip style/logo (never post-spinner gate).
+            skippedIngredients: ingredientsSkippedAfterRefsConfirm(
+              answer.useReferences ? 'use' : 'none'
+            ),
+            // Refs sheet already showed “N créditos · imagen estándar” — same click spends, no second Paso.
+            creditConfirmed: true,
+          })
           return
-        }
-        let referenceImageIds = confirmedReferenceImageIds(imageClarify.referenceImages || [])
-        if (answer.useReferences && selected.length) {
-          const { keepIds, copyIds } = partitionReferenceCopies(selected, imageClarify.productId)
-          const copiedIds: string[] = []
-          for (const id of copyIds) {
-            const source = selected.find((item) => item.id === id)
-            if (!source) continue
-            const copied = await copyShellOfferImageToProduct({
-              userId,
-              source: {
-                id: source.id,
-                image_url: source.url,
-                label: source.label,
-                kind: source.kind,
-              },
-              targetProductId: imageClarify.productId,
-            })
-            copiedIds.push(copied.id)
-          }
-          referenceImageIds = [...keepIds, ...copiedIds]
-          if (copiedIds.length) {
-            await refreshOfferImages(session.id, imageClarify.productId, loadRequestRef.current)
+        } catch (err) {
+          console.error(err)
+          setError(err instanceof Error ? err.message : 'Image generation failed')
+          return
+        } finally {
+          imageGenerateSubmitLockRef.current = false
+          if (!imageBusyRef.current) {
+            setImageBusy(false)
           }
         }
-        await runImageGenerate({
-          productId: imageClarify.productId,
-          preferences: imageClarify.preferences,
-          prompt: imageClarify.prompt || imageClarify.scriptText || imageClarify.originText || session.context || 'Ad image',
-          userText: imageClarify.userText || imageClarify.originText,
-          scriptText: imageClarify.scriptText,
-          scriptTitle: imageClarify.scriptTitle,
-          source: imageClarify.source,
-          referenceMode: answer.useReferences ? 'use' : 'none',
-          referenceImageIds: answer.useReferences ? referenceImageIds : [],
-          alreadyOptimized: imageClarify.alreadyOptimized,
-        })
-        return
       }
       if (answer.switchToAnuncio) {
         const anuncioStyle: ShellImageStyle = looksLikeSalesScript(
@@ -2218,6 +2756,7 @@ export function useChatSessionThread(options: {
           scriptTitle: imageClarify.scriptTitle,
           source: imageClarify.source,
           referenceMode: 'none',
+          priorClarify: imageClarify,
         })
       }
       return
@@ -2236,6 +2775,7 @@ export function useChatSessionThread(options: {
           skipStyleRef: true,
           alreadyOptimized: imageClarify.alreadyOptimized,
           referenceImageIds: imageClarify.preferredReferenceIds,
+          priorClarify: imageClarify,
         })
       }
       return
@@ -2258,10 +2798,9 @@ export function useChatSessionThread(options: {
           step: 'density',
           partial: { ...imageClarify.partial, aspectRatio: answer.aspectRatio },
           preferences: resolved,
+          history: pushImageHistory(imageClarify),
         })
-        setNotice(language === 'es'
-          ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
-          : 'How much copy on the post? Keep hook, development, and CTA readable.')
+        setNotice(null)
         return
       }
       await runImageGenerate({
@@ -2275,6 +2814,7 @@ export function useChatSessionThread(options: {
         askStyleRef: imageClarify.askStyleRef,
         alreadyOptimized: imageClarify.alreadyOptimized,
         referenceImageIds: imageClarify.preferredReferenceIds,
+        priorClarify: imageClarify,
       })
       return
     }
@@ -2295,6 +2835,7 @@ export function useChatSessionThread(options: {
         askStyleRef: imageClarify.askStyleRef,
         alreadyOptimized: imageClarify.alreadyOptimized,
         referenceImageIds: imageClarify.preferredReferenceIds,
+        priorClarify: imageClarify,
       })
       return
     }
@@ -2304,14 +2845,9 @@ export function useChatSessionThread(options: {
         ...imageClarify,
         step: 'style',
         mode: answer.mode,
+        history: pushImageHistory(imageClarify),
       })
-      setNotice(
-        answer.mode === 'product'
-          ? (language === 'es' ? 'Elige estilo de producto:' : 'Pick a product style:')
-          : answer.mode === 'organic'
-            ? (language === 'es' ? 'Elige subtipo orgánico:' : 'Pick an organic subtype:')
-            : (language === 'es' ? 'Elige estilo de anuncio:' : 'Pick an ad style:')
-      )
+      setNotice(null)
       return
     }
 
@@ -2335,10 +2871,9 @@ export function useChatSessionThread(options: {
           step: 'aspect',
           partial: { ...imageClarify.partial, style },
           preferences: resolved,
+          history: pushImageHistory(imageClarify),
         })
-        setNotice(language === 'es'
-          ? '¿Qué tamaño? Reel, post cuadrado o vertical.'
-          : 'What size? Reel, square, or vertical post.')
+        setNotice(null)
         return
       }
       const densityUnset =
@@ -2351,10 +2886,9 @@ export function useChatSessionThread(options: {
           step: 'density',
           partial: { ...imageClarify.partial, style },
           preferences: resolved,
+          history: pushImageHistory(imageClarify),
         })
-        setNotice(language === 'es'
-          ? '¿Cuánto texto en el post? Gancho, desarrollo y CTA claros.'
-          : 'How much copy on the post? Keep hook, development, and CTA readable.')
+        setNotice(null)
         return
       }
       await runImageGenerate({
@@ -2368,9 +2902,55 @@ export function useChatSessionThread(options: {
         askStyleRef: imageClarify.askStyleRef,
         alreadyOptimized: imageClarify.alreadyOptimized,
         referenceImageIds: imageClarify.preferredReferenceIds,
+        priorClarify: imageClarify,
       })
     }
-  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate, userId, refreshOfferImages])
+  }, [imageClarify, session, language, storage, imagePrefs, runImageGenerate, userId, refreshOfferImages, brandVisualRef])
+
+  const backImageClarify = useCallback(() => {
+    if (!imageClarify?.history?.length) return
+    const prev = imageClarify.history[imageClarify.history.length - 1]
+    const history = imageClarify.history.slice(0, -1)
+    setImageClarify({ ...prev, history })
+    setNotice(null)
+  }, [imageClarify])
+
+  const startPostFlow = useCallback(() => {
+    setScriptClarify(null)
+    setNotice(null)
+    void beginImageFlowRef.current({
+      productId: activeImageOfferId || offerProductId,
+      prompt: language === 'es' ? 'Quiero crear un post' : 'I want to create a post',
+      userText: language === 'es' ? 'Quiero crear un post' : 'I want to create a post',
+      source: 'composer',
+    })
+  }, [activeImageOfferId, offerProductId, language])
+
+  const startProductFotoFlow = useCallback(() => {
+    if (!session) return
+    const productId = activeImageOfferId || offerProductId
+    setScriptClarify(null)
+    setNotice(null)
+    if (!productId) {
+      setNotice(
+        language === 'es'
+          ? 'Elige una oferta en el rail antes de generar imagen.'
+          : 'Choose an offer in the rail before generating an image.'
+      )
+      return
+    }
+    // Open Pack-family sheet on product style (Paso 1) so aspect/refs get Back on step 2+.
+    setImageClarify({
+      sessionId: session.id,
+      step: 'style',
+      mode: 'product',
+      originText: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
+      productId,
+      source: 'composer',
+      partial: {},
+      history: [],
+    })
+  }, [session, activeImageOfferId, offerProductId, language])
 
   const removeOfferImage = useCallback(async (imageId: string) => {
     if (!session || !activeImageOfferId || imageBusyRef.current) return
@@ -2412,27 +2992,31 @@ export function useChatSessionThread(options: {
     explicit: Partial<ShellImagePreferences>,
     prompt?: string
   ) => {
-    if (explicit.style) {
-      patchImagePreferences(explicit)
+    const merged = resolveImagePreferences(explicit, imagePrefs)
+    if (explicit.style || merged.style) {
+      patchImagePreferences({ ...explicit, style: explicit.style ?? merged.style })
     }
+    const flow = shellImageFlowCopy(merged, language, session?.context)
     await beginImageFlow({
       productId: activeImageOfferId || offerProductId,
-      prompt: prompt || session?.context || 'Ad image',
-      userText: prompt || (language === 'es' ? 'Generar post' : 'Generate post'),
+      prompt: prompt || flow.prompt,
+      userText: flow.userText,
       source: 'rail',
-      explicit,
+      explicit: merged,
     })
-  }, [beginImageFlow, activeImageOfferId, offerProductId, session, language, patchImagePreferences])
+  }, [beginImageFlow, activeImageOfferId, offerProductId, session, language, patchImagePreferences, imagePrefs])
 
   const generateOfferImage = useCallback(async () => {
+    const merged = imagePrefs
+    const flow = shellImageFlowCopy(merged, language, session?.context)
     await beginImageFlow({
-      productId: activeImageOfferId,
-      prompt: session?.context || 'Product hero image for ad',
-      userText: language === 'es' ? 'Generar post' : 'Generate post',
+      productId: activeImageOfferId || offerProductId,
+      prompt: flow.prompt,
+      userText: flow.userText,
       source: 'rail',
-      explicit: imagePrefs.style ? { style: imagePrefs.style } : undefined,
+      explicit: merged,
     })
-  }, [beginImageFlow, activeImageOfferId, session, imagePrefs.style, language])
+  }, [beginImageFlow, activeImageOfferId, offerProductId, session, imagePrefs, language])
 
   const prepareScriptForPost = useCallback(async (
     scriptText: string,
@@ -2471,6 +3055,7 @@ export function useChatSessionThread(options: {
     scriptTitle?: string | null,
     options?: {
       density?: 'hard' | 'medium'
+      aspectRatio?: ShellImageAspect
       referenceImageIds?: string[]
       alreadyOptimized?: boolean
     }
@@ -2482,117 +3067,14 @@ export function useChatSessionThread(options: {
       scriptText,
       scriptTitle,
       source: 'script_card',
-      explicit: options?.density ? { density: options.density } : { density: 'hard' },
+      explicit: {
+        ...(options?.density ? { density: options.density } : { density: 'hard' }),
+        ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+      },
       alreadyOptimized: options?.alreadyOptimized,
       referenceImageIds: options?.referenceImageIds,
     })
   }, [beginImageFlow, activeImageOfferId, offerProductId, language])
-
-  const editOfferImage = useCallback(async (
-    productImageId: string,
-    imageUrl: string,
-    instruction: string,
-    productId?: string,
-    actionType: 'edit' | 'enhance' = 'edit',
-    attachments?: Array<{ dataUrl: string; role: 'product' | 'context' }>,
-    enhanceTier?: ShellEnhanceTier
-  ) => {
-    if (!session || imageBusy) return
-    const pid = productId || activeImageOfferId
-    if (!pid) return
-    const originSessionId = session.id
-    const originGen = sessionGenRef.current
-    setImageBusy(true)
-    setError(null)
-    try {
-      const roleNotes = (attachments || [])
-        .map((item, index) => `${index + 1}. ${item.role === 'context' ? 'context/style' : 'product'} reference`)
-        .join('; ')
-      const editPrompt = roleNotes
-        ? `${instruction.trim()}\n\nAttached references: ${roleNotes}. Use product refs as visual truth and context refs for scene or style.`
-        : instruction
-      const brandKitId = resolveBrandKitIdForSession(
-        session.brand_kit_id,
-        pid,
-        brandKits,
-        storage
-      )
-      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
-      const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
-      const offerRefs = actionType === 'enhance'
-        ? collectOfferEnhanceReferences(offerImages, pid, productImageId)
-        : { productUrls: [], contextUrls: [] }
-      const workspaces = buildImageWorkspaces(
-        offerImages,
-        messages.flatMap((message) => (message.artifacts || []).map((artifact) => ({
-          ...artifact,
-          message_id: message.id,
-        })))
-      )
-      const workspaceMessageId = workspaceForImage(workspaces, productImageId)?.messageId
-        || offerImages.find((image) => image.id === productImageId)?.message_id
-        || undefined
-      const result = await editShellOfferImage({
-        userId,
-        sessionId: originSessionId,
-        productId: pid,
-        productImageId,
-        imageUrl,
-        editPrompt,
-        actionType,
-        userText: `${actionType === 'enhance' ? 'Enhance' : 'Edit'} image: ${instruction}`,
-        language,
-        enhanceTier: actionType === 'enhance' ? (enhanceTier || 'modernize') : undefined,
-        editReferenceImages: actionType === 'edit'
-          ? (attachments || []).map((item) => item.dataUrl)
-          : undefined,
-        productReferenceUrls: offerRefs.productUrls,
-        contextReferenceUrls: offerRefs.contextUrls,
-        brandKitId,
-        brandLogoUrl: brandVisual.brandLogoUrl,
-        customColors: brandVisual.customColors,
-        workspaceMessageId,
-        originSessionId,
-        originGen,
-        activeThreadSessionId: activeThreadSessionIdRef.current,
-        sessionGen: sessionGenRef.current,
-      })
-      if (!result) return
-      if (!isLiveThread(
-        activeThreadSessionIdRef.current,
-        sessionGenRef.current,
-        originSessionId,
-        originGen
-      )) {
-        return
-      }
-      if (result.attachedToExisting && result.workspaceMessageId) {
-        setMessages((prev) => prev.map((message) => (
-          message.id === result.workspaceMessageId
-            ? { ...message, artifacts: [...(message.artifacts || []), result.artifact] }
-            : message
-        )))
-      } else if (result.userMessage && result.assistantMessage) {
-        const userMessage = result.userMessage
-        const assistantMessage = result.assistantMessage
-        setMessages((prev) => [...prev, userMessage, assistantMessage])
-      }
-      await refreshOfferImages(originSessionId, pid, loadRequestRef.current)
-    } catch (err) {
-      console.error(err)
-      if (isLiveThread(
-        activeThreadSessionIdRef.current,
-        sessionGenRef.current,
-        originSessionId,
-        originGen
-      )) {
-        setError(err instanceof Error ? err.message : 'Image edit failed')
-      }
-      throw err
-    } finally {
-      setImageBusy(false)
-    }
-  }, [session, imageBusy, activeImageOfferId, userId, refreshOfferImages, brandKits, storage, brandVisualRef, offerImages, language, messages])
 
   const optimizeOfferImage = useCallback(async (
     productImageId: string,
@@ -2735,16 +3217,24 @@ export function useChatSessionThread(options: {
     patchImagePreferences,
     imageClarify,
     answerImageClarify,
+    backImageClarify,
     cancelImageClarify: () => {
       setImageClarify(null)
       setNotice(null)
     },
     scriptClarify,
     answerScriptClarify,
+    backScriptClarify,
+    startScriptsFlow,
+    startPostFlow,
+    startProductFotoFlow,
     cancelScriptClarify: () => {
       setScriptClarify(null)
       setNotice(null)
     },
+    creditQuote,
+    confirmCreditQuote,
+    cancelCreditQuote,
     registerScriptSnapshot: (key: string, content: string) => {
       if (!key || !content.trim()) return
       latestScriptByKeyRef.current.set(key, content)

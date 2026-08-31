@@ -11,6 +11,8 @@ export interface ComposerCreateAction {
   onClick: () => void
   active?: boolean
   disabled?: boolean
+  /** Shown in title when disabled (e.g. kit not ready). */
+  blockedReason?: string
 }
 
 interface ChatComposerCreateDockProps {
@@ -41,6 +43,9 @@ function actionIcon(id: ComposerCreateActionId) {
   }
 }
 
+/**
+ * Idle-bar glass row: Brand Kit chip + Guiones/Post/Foto/Pack in one horizontal row ABOVE the typing card.
+ */
 export default function ChatComposerCreateDock({
   language,
   available,
@@ -84,7 +89,7 @@ export default function ChatComposerCreateDock({
 
   if (hidden) {
     return (
-      <div className="chat-shell__composer-lead is-collapsed" ref={rootRef}>
+      <div className="chat-shell__idle-glass is-collapsed" ref={rootRef}>
         <button
           type="button"
           className="chat-shell__composer-show"
@@ -99,14 +104,14 @@ export default function ChatComposerCreateDock({
   }
 
   return (
-    <div className="chat-shell__composer-lead is-kit" ref={rootRef}>
+    <div className="chat-shell__idle-glass" ref={rootRef}>
       {reviewOpen ? (
         <div className="chat-shell__create-popover is-rail" role="dialog" aria-label={t.reviewKit}>
           {reviewPanel}
         </div>
       ) : null}
-      <div className="chat-shell__composer-kit">
-        <div className="chat-shell__composer-kit-head">
+      <div className="chat-shell__idle-glass-row">
+        <div className="chat-shell__idle-kit">
           <button
             type="button"
             className={`chat-shell__composer-create${reviewOpen ? ' is-open' : ''}`}
@@ -118,7 +123,7 @@ export default function ChatComposerCreateDock({
           >
             <IconAdvanceMark size={16} />
           </button>
-          <p className="chat-shell__composer-kit-title">
+          <p className="chat-shell__idle-kit-title">
             <strong>{title}</strong>
           </p>
           <button
@@ -134,16 +139,21 @@ export default function ChatComposerCreateDock({
             <PanelLeftClose size={15} strokeWidth={2} aria-hidden />
           </button>
         </div>
-        <div className="chat-shell__composer-kit-actions">
-          {actions.map((action) => (
+        <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle}>
+          {actions.map((action) => {
+            const title = action.disabled && action.blockedReason
+              ? `${action.label} — Primero el kit`
+              : action.label
+            return (
             <button
               key={action.id}
               type="button"
               disabled={action.disabled}
               className={action.active ? 'is-on' : undefined}
               aria-pressed={action.active ? true : false}
-              aria-label={action.label}
-              title={action.label}
+              aria-label={title}
+              title={title}
+              data-kit-blocked={action.disabled && action.blockedReason ? 'true' : undefined}
               onClick={() => {
                 setReviewOpen(false)
                 action.onClick()
@@ -151,8 +161,12 @@ export default function ChatComposerCreateDock({
             >
               {actionIcon(action.id)}
               <span>{action.label}</span>
+              {action.disabled && action.blockedReason ? (
+                <em className="chat-shell__idle-action-block" data-kit-block="true">Primero el kit</em>
+              ) : null}
             </button>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>

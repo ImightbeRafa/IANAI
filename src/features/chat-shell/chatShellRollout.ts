@@ -25,8 +25,9 @@ export function parsePreferredUi(value: unknown): PreferredUi | null {
 }
 
 /**
- * Three independent controls. Kill switch off or unreadable → classic.
- * Beta false/null → classic, no switch. Preference never grants access.
+ * Kill switch + invite. Preference never grants access and never redirects
+ * home unless the user opted into chat (`preferred_ui`). Flag-on without
+ * `chat_beta_access` is denied (frontend mirrors server gate).
  */
 export function resolveChatShellRollout(input: ChatShellRolloutInput): ChatShellRollout {
   const killSwitch = input.killSwitch

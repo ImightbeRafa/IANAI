@@ -18,6 +18,7 @@ import {
   aspectRatioFromImageUrl,
   buildShellImageGenerateBody,
   formatImageAssumptions,
+  requiresProductReferences,
   type ShellImageAspect,
   type ShellImagePreferences,
 } from './chatShellImageIntent'
@@ -30,6 +31,34 @@ import {
   labelForReferenceRole,
   type ReferenceRole,
 } from './chatShellReferenceSelection'
+import { friendlyImageError } from './chatShellImageErrors'
+
+function mintShellGenerationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const n = (Math.random() * 16) | 0
+    const v = ch === 'x' ? n : (n & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
+export function shellImageActionLabel(
+  actionType: MessageArtifact['action_type'],
+  language: 'en' | 'es' = 'es'
+): string {
+  if (actionType === 'optimize') {
+    return language === 'es' ? 'Optimizada para post' : 'Optimized for post'
+  }
+  if (actionType === 'enhance') {
+    return language === 'es' ? 'Mejorada' : 'Enhanced'
+  }
+  if (actionType === 'edit') {
+    return language === 'es' ? 'Editada' : 'Edited'
+  }
+  return language === 'es' ? 'Generada' : 'Generated'
+}
 
 const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
@@ -41,11 +70,12 @@ async function getAccessToken(): Promise<string> {
   return session.access_token
 }
 
-interface ImageApiResult {
-  status?: string
+type ImageApiResult = {
   result?: { sample?: string }
   imageUrl?: string
   error?: string
+  details?: string
+  code?: string
   model?: string
   providerModel?: string
   generationId?: string
@@ -68,10 +98,15 @@ async function callGenerateImageDetailed(body: Record<string, unknown>): Promise
   })
   const json = (await res.json()) as ImageApiResult
   if (!res.ok) {
-    throw new Error(json.error || 'Image generation failed')
+    const language = body.language === 'en' ? 'en' : 'es'
+    const raw = [json.error, json.details, json.code].filter(Boolean).join(' ')
+    throw new Error(friendlyImageError(raw || 'Image generation failed', language))
   }
   const sample = json.result?.sample || json.imageUrl
-  if (!sample) throw new Error('No image returned')
+  if (!sample) {
+    const language = body.language === 'en' ? 'en' : 'es'
+    throw new Error(friendlyImageError('No image returned', language))
+  }
   return {
     sample,
     model: json.model,
@@ -261,6 +296,7 @@ export async function generateShellOfferImage(options: {
   businessContext?: string
   userText?: string
   source?: string
+  referenceMode?: 'use' | 'none'
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
@@ -272,17 +308,23 @@ export async function generateShellOfferImage(options: {
     throw new Error('Choose an image style before Generate.')
   }
 
-  if (prefs.style.kind === 'product' && !options.productImageIds.length) {
+  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length) {
     throw new Error(
       'Upload at least one product reference image for this offer before Generate.'
     )
   }
 
+  const apiPrompt = prefs.style.kind === 'product'
+    ? ''
+    : (options.prompt || options.scriptText || 'Ad image')
+
+  const generationId = mintShellGenerationId()
+
   const body = buildShellImageGenerateBody({
     preferences: prefs,
     productId: options.productId,
     sessionId: options.sessionId,
-    prompt: options.prompt || options.scriptText || 'Ad image',
+    prompt: apiPrompt,
     language,
     brandKitId: options.brandKitId,
     productImageIds: options.productImageIds,
@@ -290,16 +332,18 @@ export async function generateShellOfferImage(options: {
     businessContext: options.businessContext,
     customColors: options.customColors,
     brandLogoUrl: options.brandLogoUrl,
+    generationId,
+    referenceMode: options.referenceMode,
   })
 
   let sample: string
   let actualModel = prefs.model
-  let generationId: string | undefined
   let providerModel: string | undefined
+  let returnedGenerationId: string | undefined
   try {
     const result = await callGenerateImageDetailed(body)
     sample = result.sample
-    generationId = result.generationId
+    returnedGenerationId = result.generationId
     providerModel = result.providerModel
     if (result.model) actualModel = result.model as typeof prefs.model
   } catch (err) {
@@ -339,7 +383,7 @@ export async function generateShellOfferImage(options: {
       aspectRatio: prefs.aspectRatio,
       model: actualModel,
       providerModel: providerModel || null,
-      generationId: generationId || null,
+      generationId: returnedGenerationId || generationId,
       density: prefs.density,
       brandKitId: options.brandKitId || null,
     },
@@ -413,6 +457,7 @@ export async function editShellOfferImage(options: {
   const contextReferenceImages = isEnhance
     ? await compressReferenceUrls(options.contextReferenceUrls)
     : []
+  const generationId = mintShellGenerationId()
   const sample = await callGenerateImage(
     isEnhance
       ? buildShellImageEnhanceBody({
@@ -428,6 +473,7 @@ export async function editShellOfferImage(options: {
           productReferenceImages,
           contextReferenceImages,
           aspectRatio: inferredAspect,
+          generationId,
         })
       : {
           action: 'edit',
@@ -437,6 +483,7 @@ export async function editShellOfferImage(options: {
           productImageId: options.productImageId,
           editPrompt: options.editPrompt,
           editImage: base64,
+          generationId,
           ...(compressedRefs.length ? { editReferenceImages: compressedRefs } : {}),
           ...(inferredAspect ? { aspectRatio: inferredAspect } : {}),
           ...(options.brandKitId ? { brandKitId: options.brandKitId } : {}),
@@ -458,7 +505,7 @@ export async function editShellOfferImage(options: {
     sessionId: options.sessionId,
     productId: options.productId,
     imageSource: sample,
-    label: options.actionType === 'optimize' ? 'Optimized for post' : options.actionType === 'enhance' ? 'Enhanced' : 'Edited',
+    label: shellImageActionLabel(options.actionType, options.language || 'es'),
     actionType: options.actionType,
     userText: options.userText,
     metadata: {
@@ -508,18 +555,20 @@ export async function uploadShellOfferImage(options: {
   productId: string
   dataUrl: string
   filename?: string
-  kind?: 'product' | 'context' | 'scene' | 'style'
+  kind?: 'product' | 'context' | 'scene' | 'style' | 'logo'
 }): Promise<ProductImage> {
   const role: ReferenceRole =
     options.kind === 'style'
       ? 'style'
-      : options.kind === 'scene' || options.kind === 'context'
-        ? 'scene'
-        : 'product'
+      : options.kind === 'logo'
+        ? 'logo'
+        : options.kind === 'scene' || options.kind === 'context'
+          ? 'scene'
+          : 'product'
   const dbKind = dbKindForReferenceRole(role)
   const label = labelForReferenceRole(role, 'es')
   // uploadProductImage always unique-ifies the storage object name.
-  // Keep the role label as the product_images label for scene/style classification.
+  // Keep the role label as the product_images label for scene/style/logo classification.
   const publicUrl = await uploadProductImage(
     options.userId,
     options.productId,
@@ -542,16 +591,18 @@ export async function copyShellOfferImageToProduct(options: {
     id: string
     image_url: string
     label?: string | null
-    kind: 'product' | 'context' | 'scene' | 'style'
+    kind: 'product' | 'context' | 'scene' | 'style' | 'logo'
   }
   targetProductId: string
 }): Promise<ProductImage> {
   const role: ReferenceRole =
     options.source.kind === 'style'
       ? 'style'
-      : options.source.kind === 'scene' || options.source.kind === 'context'
-        ? 'scene'
-        : 'product'
+      : options.source.kind === 'logo'
+        ? 'logo'
+        : options.source.kind === 'scene' || options.source.kind === 'context'
+          ? 'scene'
+          : 'product'
   const dataUrl = await compressBase64ForApi(await urlToBase64(options.source.image_url))
   const publicUrl = await uploadProductImage(
     options.userId,

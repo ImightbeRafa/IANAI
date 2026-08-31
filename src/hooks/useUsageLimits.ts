@@ -8,6 +8,7 @@ export interface UsageLimits extends UsageLimitsRow {
 }
 
 const CACHE_TTL_MS = 60_000
+const USAGE_REFRESH_EVENT = 'advance-ai:usage-limits-refresh'
 let _cache: { data: UsageLimitsRow; userId: string; ts: number } | null = null
 
 const DEFAULT_DATA: UsageLimitsRow = {
@@ -23,6 +24,14 @@ const DEFAULT_DATA: UsageLimitsRow = {
   repliesLimit: 10,
   creditsRemaining: 0,
   creditsEnabled: false,
+}
+
+/** Clear cache and notify all mounted useUsageLimits consumers (e.g. after gift). */
+export function invalidateUsageLimitsCache(): void {
+  _cache = null
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(USAGE_REFRESH_EVENT))
+  }
 }
 
 /**
@@ -62,10 +71,18 @@ export function useUsageLimits(): UsageLimits {
     void doFetch()
   }, [doFetch])
 
-  const refresh = useCallback(() => {
-    _cache = null
-    void doFetch(true)
+  useEffect(() => {
+    const onRefresh = () => {
+      _cache = null
+      void doFetch(true)
+    }
+    window.addEventListener(USAGE_REFRESH_EVENT, onRefresh)
+    return () => window.removeEventListener(USAGE_REFRESH_EVENT, onRefresh)
   }, [doFetch])
+
+  const refresh = useCallback(() => {
+    invalidateUsageLimitsCache()
+  }, [])
 
   return { ...data, loading, refresh }
 }

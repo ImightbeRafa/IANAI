@@ -69,6 +69,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     localStorage.setItem('ai-language', language)
+    document.documentElement.lang = language
   }, [language])
 
   const setLanguage = (lang: Language) => {

@@ -10,6 +10,7 @@ import type {
 import {
   createBrandKit,
   createProduct,
+  createProductImage,
   getProduct,
   isMissingRowError,
   updateBrandKit,
@@ -40,7 +41,6 @@ import {
   emptySetupFacts,
   findBrandRuleToRemove,
   hasOfferHypothesis,
-  introPrompt,
   isAffirmative,
   isBrandRuleRemoval,
   isPauseSetup,
@@ -349,6 +349,8 @@ export function useChatBrandSetup(options: {
     linkedKit?.updated_at,
   ])
 
+  // First-run chrome: empty CTA replaces the long Hola welcome when kit is incomplete.
+  // (Welcome text stays available for createInitialFlow / conversational setup.)
   useEffect(() => {
     if (!visible || !session?.id) return
     if (messagesLoading) return
@@ -356,19 +358,12 @@ export function useChatBrandSetup(options: {
       welcomedSessionsRef.current.add(session.id)
       return
     }
-    const storageKey = `ianai.chat-welcome.${session.id}`
-    try {
-      if (sessionStorage.getItem(storageKey) === '1') {
-        welcomedSessionsRef.current.add(session.id)
-        return
-      }
-    } catch { /* private mode */ }
-    if (welcomedSessionsRef.current.has(session.id)) return
+    // Do not auto-persist ¡Hola! — ChatThread shows “Empezá por tu marca” instead.
     welcomedSessionsRef.current.add(session.id)
-    try { sessionStorage.setItem(storageKey, '1') } catch { /* ignore */ }
-    const intro = introPrompt(language, business?.name || '')
-    void onPersistTurn('assistant', intro)
-  }, [visible, session?.id, messageCount, messagesLoading, language, business?.name, onPersistTurn])
+    try {
+      sessionStorage.setItem(`ianai.chat-welcome.${session.id}`, '1')
+    } catch { /* private mode */ }
+  }, [visible, session?.id, messageCount, messagesLoading])
 
   const skip = useCallback(() => {
     if (!business) return
@@ -465,6 +460,43 @@ export function useChatBrandSetup(options: {
       ...(facts.offerName.trim() ? { title: facts.offerName.trim().slice(0, 80) } : {}),
     })
   }, [language, onAttachOffer, onPatchSession, persistBusiness, persistOffer])
+
+  /** After URL extract: create/link offer + product photos so Ofertas is not empty before confirm. */
+  const materializeExtractedOffer = useCallback(async (facts: SetupFlowState['facts']) => {
+    if (!business || !hasOfferHypothesis(facts)) return null
+    const product = await persistOffer(facts)
+    if (!product?.id) return null
+    await onAttachOffer(product.id)
+
+    const refs = (facts.reference_images || [])
+      .map((url) => url.trim())
+      .filter((url) => /^https?:\/\//i.test(url))
+      .filter((url) => /\.(jpe?g|png)(\?|#|$)/i.test(url))
+    const unique = [...new Set(refs)].slice(0, 8)
+    for (let i = 0; i < unique.length; i += 1) {
+      try {
+        await createProductImage(
+          product.id,
+          userId,
+          unique[i],
+          `Web ${i + 1}`,
+          'product',
+          session?.id ? { sessionId: session.id } : undefined
+        )
+      } catch (err) {
+        console.warn('ingest product image skipped', err)
+      }
+    }
+    await onProductsChanged()
+    return { product, photoCount: unique.length }
+  }, [
+    business,
+    onAttachOffer,
+    onProductsChanged,
+    persistOffer,
+    session?.id,
+    userId,
+  ])
 
   const persistBrandKit = useCallback(async (
     facts: SetupFlowState['facts'],
@@ -765,15 +797,38 @@ export function useChatBrandSetup(options: {
         }
         const asked = [...new Set([...current.asked, ...askedFromFacts(facts)])]
         await persistBusiness(facts)
-        if (facts.logo_url || facts.brand_voice || facts.brand_visual || facts.primary_color) {
+        if (
+          facts.logo_url
+          || facts.brand_voice
+          || facts.brand_visual
+          || facts.primary_color
+          || (facts.reference_images && facts.reference_images.length > 0)
+        ) {
           await persistBrandKit(facts)
+        }
+        let photoCount = 0
+        if (hasOfferHypothesis(facts)) {
+          const materialized = await materializeExtractedOffer(facts)
+          photoCount = materialized?.photoCount ?? 0
+        }
+        const missingBits: string[] = []
+        if (!facts.re_price?.trim() && !/\d/.test(facts.menu_text || '')) {
+          missingBits.push(language === 'es' ? 'el precio' : 'the price')
+        }
+        if (photoCount === 0) {
+          missingBits.push(language === 'es' ? 'fotos del producto' : 'product photos')
         }
         const summary = url
           ? (language === 'es'
               ? `Analicé el sitio${analyzedPages.filter((page) => page.ok).length > 1 ? ` y ${analyzedPages.filter((page) => page.ok).length - 1} páginas relevantes` : ''}. Organicé lo encontrado, las inferencias y lo que todavía necesita confirmación en la tarjeta.`
               : `I analyzed the site${analyzedPages.filter((page) => page.ok).length > 1 ? ` plus ${analyzedPages.filter((page) => page.ok).length - 1} relevant pages` : ''}. I organized web facts, inferences, and items that still need confirmation in the card.`)
           : reviewCopy(language)
-        const reply = `${summary}\n\n${nextStepCopy(language)}`
+        const missingAsk = missingBits.length > 0
+          ? (language === 'es'
+              ? `\n\nTodavía falta ${missingBits.join(' y ')}. Si los tenés, pegá el precio o subí fotos del producto acá.`
+              : `\n\nStill missing ${missingBits.join(' and ')}. If you have them, paste the price or upload product photos here.`)
+          : ''
+        const reply = `${summary}\n\n${nextStepCopy(language)}${missingAsk}`
         await onPersistTurn('assistant', reply)
         if (activeSessionIdRef.current !== originSessionId) return { ignored: true }
         current = {
@@ -876,7 +931,7 @@ export function useChatBrandSetup(options: {
         busyRef.current = false
       }
     }
-  }, [askNext, business, commitConfirmedSetup, flow, language, onPersistTurn, persistBrandKit, persistBusiness, session?.id, skip])
+  }, [askNext, business, commitConfirmedSetup, flow, language, materializeExtractedOffer, onPersistTurn, persistBrandKit, persistBusiness, session?.id, skip])
 
   const addRule = useCallback(async (raw: string) => {
     const rule = normalizeBrandRule(raw)
