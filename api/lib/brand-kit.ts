@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
 import { isBloomDermalPatchSku } from './product-creative-rules.js'
+import { fetchPublicUrl } from './url-safety.js'
 
 export interface BrandKitRow {
   id: string
@@ -232,7 +233,7 @@ export async function fetchBrandImageAsBase64(
 ): Promise<{ mimeType: string; data: string } | null> {
   if (!url) return null
   try {
-    const resp = await fetch(url)
+    const resp = await fetchPublicUrl(url)
     if (!resp.ok) {
       console.warn('Failed to fetch', label, resp.status, url)
       return null

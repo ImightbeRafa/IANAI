@@ -35,12 +35,16 @@ function readUserMetaFlag(
   return value === true || value === 'true' || value === 1
 }
 
-/** Vercel Preview (and local preview aliases) must not mint the +100 pack gift. */
+/**
+ * Fail-closed: grant the +100 pack only on production.
+ * Preview, `vercel dev`, Cloud Agent, and unset VERCEL_ENV must not insert lots on AIIAN.
+ * Opt out on production with CHAT_SHELL_OPEN_GIFT=0.
+ */
 export function shouldSkipChatShellOpenGift(): boolean {
   const vercelEnv = (process.env.VERCEL_ENV || '').toLowerCase()
-  if (vercelEnv === 'preview') return true
-  // Local `vercel dev` against Preview linkage still uses development — only skip true preview.
-  return false
+  if (vercelEnv !== 'production') return true
+  const flag = (process.env.CHAT_SHELL_OPEN_GIFT || '1').trim().toLowerCase()
+  return flag === '0' || flag === 'false' || flag === 'off'
 }
 
 export async function ensureChatShellOpenGift(userId: string): Promise<ChatShellOpenGiftResult> {
@@ -85,8 +89,9 @@ export async function ensureChatShellOpenGift(userId: string): Promise<ChatShell
     }
   }
 
-  // Preview: never insert a new +100 lot (do not claw existing production lots).
-  if (shouldSkipChatShellOpenGift()) {
+  // Non-production (and CREDITS_V1 off): never insert a new +100 lot.
+  // Do not claw existing production lots.
+  if (shouldSkipChatShellOpenGift() || !isCreditsV1Enabled()) {
     return {
       ok: true,
       granted: false,
@@ -96,11 +101,6 @@ export async function ensureChatShellOpenGift(userId: string): Promise<ChatShell
       showWelcome: false,
       tourDone: true,
     }
-  }
-
-  if (!isCreditsV1Enabled()) {
-    // Still allow welcome UI; gift insert may no-op until CREDITS_V1 is on.
-    // Attempt insert anyway so Preview/prod flip works without redeploy.
   }
 
   const expires = new Date()
@@ -154,8 +154,12 @@ export async function ensureChatShellOpenGift(userId: string): Promise<ChatShell
 export async function markChatShellWelcomeSeen(userId: string): Promise<boolean> {
   const db = getSupabaseAdmin()
   if (!db || !userId) return false
-  const { data: authUser } = await db.auth.admin.getUserById(userId)
-  const prev = (authUser?.user?.user_metadata || {}) as Record<string, unknown>
+  const { data: authUser, error: getErr } = await db.auth.admin.getUserById(userId)
+  if (getErr || !authUser?.user) {
+    console.error('markChatShellWelcomeSeen getUserById', getErr)
+    return false
+  }
+  const prev = (authUser.user.user_metadata || {}) as Record<string, unknown>
   const { error } = await db.auth.admin.updateUserById(userId, {
     user_metadata: {
       ...prev,
@@ -172,8 +176,12 @@ export async function markChatShellWelcomeSeen(userId: string): Promise<boolean>
 export async function markChatShellTourDone(userId: string): Promise<boolean> {
   const db = getSupabaseAdmin()
   if (!db || !userId) return false
-  const { data: authUser } = await db.auth.admin.getUserById(userId)
-  const prev = (authUser?.user?.user_metadata || {}) as Record<string, unknown>
+  const { data: authUser, error: getErr } = await db.auth.admin.getUserById(userId)
+  if (getErr || !authUser?.user) {
+    console.error('markChatShellTourDone getUserById', getErr)
+    return false
+  }
+  const prev = (authUser.user.user_metadata || {}) as Record<string, unknown>
   const { error } = await db.auth.admin.updateUserById(userId, {
     user_metadata: {
       ...prev,

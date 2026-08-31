@@ -655,6 +655,7 @@ export default function ChatShell({
           onSaveVersion={thread.handleSaveVersion}
           language={language}
           kitReady={brandSetup.snapshot.stronglyComplete}
+          hasOfferName={Boolean((brandSetup.facts.offerName || '').trim())}
           onStartBrandKit={() => {
             if (!workspace.activeBrand) {
               openBrandCreate()

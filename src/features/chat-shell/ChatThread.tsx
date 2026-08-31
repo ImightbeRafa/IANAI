@@ -156,6 +156,8 @@ interface ChatThreadProps {
   /** First-run empty CTA — opens Brand Kit / brand create (not a multi-step tour). */
   onStartBrandKit?: () => void
   kitReady?: boolean
+  /** Folder already has an offer name (existing classic users are not first-run). */
+  hasOfferName?: boolean
 }
 
 function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
@@ -259,6 +261,7 @@ export default memo(function ChatThread({
   onUploadSetupDocument,
   onStartBrandKit,
   kitReady = false,
+  hasOfferName = false,
 }: ChatThreadProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [attachOpen, setAttachOpen] = useState(false)
@@ -375,6 +378,7 @@ export default memo(function ChatThread({
   const showFirstRunCta = shouldShowFirstRunCta({
     hasSession: Boolean(session),
     kitReady,
+    hasOfferName,
     hasUserOrArtifactMessages,
     showInitialLoader,
   })

@@ -29,7 +29,7 @@ export default function Signup() {
   const [referralCode, setReferralCode] = useState<string | null>(null)
   const { signUp, signInWithGoogle } = useAuth()
   const [searchParams] = useSearchParams()
-  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/chat'
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/dashboard'
   const loginHref = `/login?redirect=${encodeURIComponent(returnPath)}`
 
   // Capture referral code from URL and persist in localStorage

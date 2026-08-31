@@ -204,6 +204,13 @@ export function quoteCredits(action: CreditAction, units = 1): number {
 
 export type LegacyMeterAction = 'script' | 'image' | 'description' | 'enhance' | 'reply' | 'edit'
 
+/** Map `/api/generate-image` `action` to the meter used by checkUsageLimit / incrementUsage. */
+export function meterActionForImageApi(action: string): LegacyMeterAction {
+  if (action === 'edit') return 'edit'
+  if (action === 'enhance') return 'enhance'
+  return 'image'
+}
+
 /** Map legacy checkUsageLimit actions when CREDITS_V1 is on. */
 export function legacyActionToCredit(options: {
   action: LegacyMeterAction

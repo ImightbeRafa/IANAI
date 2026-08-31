@@ -1,3 +1,17 @@
+## 2026-08-31 — Production-ready nits (merge-bar)
+
+**Area:** credits / chat-shell / homepage
+**Files:** `chat-shell-gift.ts`, `generate-image.ts`, `brand-kit.ts`, `homeContent.ts`, `Signup.tsx`, `chatShellFirstRun.ts`
+
+- +100 chat-shell gift is **fail-closed**: insert only when `VERCEL_ENV=production` (and `CREDITS_V1` on). Preview / development / unset skip. Opt out with `CHAT_SHELL_OPEN_GIFT=0`. Does not claw existing lots.
+- Image `action=edit` now checks and charges `'edit'` (`image_edit` = 18), matching the confirm-sheet quote. Enhance stays on its own 18-credit path.
+- Logo fallback fetch uses `fetchPublicUrl` (SSRF guard). Bloom pin uses loaded kit id only (no client spoof).
+- Welcome/tour metadata writes abort if `getUserById` fails (do not clobber `user_metadata`).
+- Homepage / signup default post-login is `/dashboard` until invite-all GO. Invited `preferred_ui=chat` still lands on `/chat` via `effectiveHome`.
+- First-run CTA hides when the folder already has an offer name (existing classic users).
+
+No merge. No `chat_shell` / invite / credit-gift / flag flips.
+
 ## 2026-08-31 — Production-ready nits (Preview → live)
 
 **Area:** chat-shell / credits / first-run

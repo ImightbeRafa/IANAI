@@ -20,6 +20,16 @@ describe('shouldShowFirstRunCta', () => {
     })).toBe(false)
   })
 
+  it('hides the CTA when the folder already has an offer (existing classic users)', () => {
+    expect(shouldShowFirstRunCta({
+      hasSession: true,
+      kitReady: false,
+      hasOfferName: true,
+      hasUserOrArtifactMessages: false,
+      showInitialLoader: false,
+    })).toBe(false)
+  })
+
   it('hides the CTA once the user has messages or artifacts', () => {
     expect(shouldShowFirstRunCta({
       hasSession: true,

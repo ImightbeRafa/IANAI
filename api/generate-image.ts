@@ -26,6 +26,7 @@ import {
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicUrl } from './lib/url-safety.js'
+import { meterActionForImageApi } from './lib/credits/catalog.js'
 import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
@@ -615,20 +616,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       }
 
-      // Check usage limits for new generation requests
-      const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, 'image', {
-        imageModel: model,
-      })
-      if (!allowed) {
-        return res.status(429).json({ 
-          error: 'Límite de imágenes alcanzado',
-          message: creditsRequired
-            ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
-            : `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
-          limit,
-          remaining: 0,
-          creditsRequired,
+      // Enhance has its own later check (18). Edit must not use generate's 6-credit meter.
+      const meterAction = meterActionForImageApi(String(action))
+      if (meterAction !== 'enhance') {
+        const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, meterAction, {
+          imageModel: model,
         })
+        if (!allowed) {
+          return res.status(429).json({
+            error: 'Límite de imágenes alcanzado',
+            message: creditsRequired
+              ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
+              : `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
+            limit,
+            remaining: 0,
+            creditsRequired,
+          })
+        }
       }
     }
 
@@ -690,7 +694,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const hasEditLogo = !!(brandKit?.logo_url || logoFallbackUrl)
       const bloomScope = {
         productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-        brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+        brandKitId: brandKit?.id ?? null,
       }
       const bloomSku = isBloomDermalPatchSku(bloomScope)
       const brandEditRules = [
@@ -785,7 +789,7 @@ Edit instruction: ${editPrompt}`
           const outputTokens = openAIUsage?.output_tokens || 0
           const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
 
-          await incrementUsage(user.id, 'image', { generationId, imageModel: model })
+          await incrementUsage(user.id, 'edit', { generationId, imageModel: model })
           await deductBonusImage(user.id)
 
           await logApiUsage({
@@ -871,7 +875,7 @@ Edit instruction: ${editPrompt}`
             supportImageUrls: supportUrls,
             aspectRatio: editAR,
           })
-          await incrementUsage(user.id, 'image', { generationId, imageModel: model })
+          await incrementUsage(user.id, 'edit', { generationId, imageModel: model })
           await deductBonusImage(user.id)
           await logApiUsage({
             userId: user.id,
@@ -990,7 +994,7 @@ Edit instruction: ${editPrompt}`
         }
         if (!imageUrl) return res.status(500).json({ error: 'Gemini did not return an edited image' })
 
-        await incrementUsage(user.id, 'image', { generationId, imageModel: model })
+        await incrementUsage(user.id, 'edit', { generationId, imageModel: model })
         await deductBonusImage(user.id)
 
         const editUsage = response.usageMetadata
@@ -1082,13 +1086,13 @@ Edit instruction: ${editPrompt}`
         {
           hasProductRef: hasProductRef,
           productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-          brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+          brandKitId: brandKit?.id ?? null,
         }
       )
       const enhanceHasLogo = !!(brandKit?.logo_url || logoFallbackUrl)
       const enhanceBloomSku = isBloomDermalPatchSku({
         productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-        brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+        brandKitId: brandKit?.id ?? null,
       })
       const enhanceLogoRules = buildLogoStampRules(
         enhanceLang === 'en' ? 'en' : 'es',
@@ -1676,7 +1680,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const postLangCode = postLanguage === 'en' ? 'en' : 'es'
     const bloomScope = {
       productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-      brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+      brandKitId: brandKit?.id ?? null,
     }
     const bloomSku = isBloomDermalPatchSku(bloomScope)
     const postProductSilhouette = postProductCreativeRow

@@ -9,6 +9,7 @@ import {
   quoteCredits,
   resolveImageCreditAction,
   legacyActionToCredit,
+  meterActionForImageApi,
 } from '../api/lib/credits/catalog'
 import {
   applyMonthlyGrant,
@@ -57,6 +58,20 @@ describe('credit catalog', () => {
       units: 1,
     })
     expect(quoteCredits('image_edit')).toBe(18)
+  })
+
+  it('maps generate-image API actions to the matching meter (edit = 18, generate = 6)', () => {
+    expect(meterActionForImageApi('edit')).toBe('edit')
+    expect(meterActionForImageApi('enhance')).toBe('enhance')
+    expect(meterActionForImageApi('generate')).toBe('image')
+    expect(legacyActionToCredit({
+      action: meterActionForImageApi('edit'),
+      imageModel: 'grok-imagine',
+    })).toEqual({ creditAction: 'image_edit', units: 1 })
+    expect(legacyActionToCredit({
+      action: meterActionForImageApi('generate'),
+      imageModel: 'grok-imagine',
+    })).toEqual({ creditAction: 'image_standard', units: 1 })
   })
 
   it('defines public plans without unlimited', () => {

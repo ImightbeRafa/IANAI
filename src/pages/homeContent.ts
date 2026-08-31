@@ -139,4 +139,5 @@ export const HOME_PLANS = [
   },
 ] as const
 
-export const HOME_AUTH_REDIRECT = '/chat'
+/** Post-login from the public homepage. Stay on classic until invite-all GO. */
+export const HOME_AUTH_REDIRECT = '/dashboard'
