@@ -680,10 +680,16 @@ export default function ChatShell({
           onUploadOfferReference={(file, kind, productId) => thread.uploadOfferImage(file, productId, kind)}
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
           offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
-          onPreparePostFromScript={(scriptText, density) => thread.prepareScriptForPost(scriptText, density)}
-          onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) =>
+          onPreparePostFromScript={(scriptText, density) => {
+            if (!brandSetup.snapshot.stronglyComplete) {
+              return Promise.reject(new Error('Primero el kit'))
+            }
+            return thread.prepareScriptForPost(scriptText, density)
+          }}
+          onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) => {
+            if (!brandSetup.snapshot.stronglyComplete) return
             void thread.generateImageFromScript(scriptText, productId, scriptTitle, options)
-          }
+          }}
           onOpenOfferImage={openLightbox}
           onEditOfferImage={(productImageId, imageUrl, instruction, productId) =>
             thread.editOfferImage(productImageId, imageUrl, instruction, productId)

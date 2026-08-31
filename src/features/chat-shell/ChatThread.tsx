@@ -576,6 +576,7 @@ export default memo(function ChatThread({
                           offerImageUrl={offerImage?.image_url}
                           referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
+                          kitGenerateBlocked={!kitReady}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
                               ...opts,
@@ -652,6 +653,7 @@ export default memo(function ChatThread({
                         savingScript={savingScript}
                         referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
+                        kitGenerateBlocked={!kitReady}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}

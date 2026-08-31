@@ -94,6 +94,8 @@ interface ChatShellScriptCardProps {
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
   snapshotKey?: string
   openPostPreviewNonce?: number
+  /** When true (kit not stronglyComplete), block Crear post / image generate — same as glass “Primero el kit”. */
+  kitGenerateBlocked?: boolean
 }
 
 const ENHANCE_PROMPT =
@@ -179,6 +181,7 @@ export default function ChatShellScriptCard({
   onLatestVersionChange,
   snapshotKey,
   openPostPreviewNonce = 0,
+  kitGenerateBlocked = false,
 }: ChatShellScriptCardProps) {
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -431,6 +434,7 @@ export default function ChatShellScriptCard({
   }
 
   const openPostPreview = async (density: 'hard' | 'medium' = postDensity) => {
+    if (kitGenerateBlocked) return
     if (!onGenerateImage || operation) return
     onOpenPostPreview?.()
     const active = versions[activeIndex]
@@ -822,12 +826,17 @@ export default function ChatShellScriptCard({
           <button
             type="button"
             className="chat-shell__artifact-action is-primary"
-            disabled={busy || imageBusy || preparingPost}
+            disabled={busy || imageBusy || preparingPost || kitGenerateBlocked}
             onClick={() => void openPostPreview()}
-            title={es ? 'Crear post' : 'Create post'}
+            title={kitGenerateBlocked ? 'Primero el kit' : (es ? 'Crear post' : 'Create post')}
+            data-kit-blocked={kitGenerateBlocked ? 'true' : undefined}
           >
             {imageBusy || preparingPost ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
-            {preparingPost ? (es ? 'Optimizando…' : 'Optimizing…') : (es ? 'Crear post' : 'Create post')}
+            {kitGenerateBlocked
+              ? 'Primero el kit'
+              : preparingPost
+                ? (es ? 'Optimizando…' : 'Optimizing…')
+                : (es ? 'Crear post' : 'Create post')}
           </button>
         ) : null}
         <div className="chat-shell__artifact-menu-wrap">
@@ -864,9 +873,17 @@ export default function ChatShellScriptCard({
                 </button>
               ))}
               {onGenerateImage ? (
-                <button type="button" role="menuitem" disabled={imageBusy || preparingPost} onClick={() => { setMoreOpen(false); void openPostPreview() }}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={imageBusy || preparingPost || kitGenerateBlocked}
+                  title={kitGenerateBlocked ? 'Primero el kit' : undefined}
+                  onClick={() => { setMoreOpen(false); void openPostPreview() }}
+                >
                   <Wand2 size={13} />
-                  {es ? 'Optimizar para post' : 'Optimize for post'}
+                  {kitGenerateBlocked
+                    ? 'Primero el kit'
+                    : (es ? 'Optimizar para post' : 'Optimize for post')}
                 </button>
               ) : null}
               {offerImageId && offerImageUrl && onEditOfferImage ? (

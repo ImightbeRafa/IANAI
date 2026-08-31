@@ -1,3 +1,9 @@
+## 2026-08-31 — PR #34: gate in-thread Crear post with Primero el kit
+
+- Script card “Crear post” / “Optimizar para post” disabled with **Primero el kit** when kit not `stronglyComplete` (same gate as glass Post).
+- Defense: ChatShell prepare/generate-from-script no-ops when kit incomplete.
+- Glass Primero el kit + setup Falta: unchanged. Empty CTA still empty-thread only.
+
 ## 2026-08-30 — PR #34: first-run CTA + Primero el kit visible (WD FAIL fix)
 
 - Empty first-run: stop auto-Hola welcome; show one line + button **Empezá por tu marca** when kit not `stronglyComplete` (even if a legacy welcome row exists).
