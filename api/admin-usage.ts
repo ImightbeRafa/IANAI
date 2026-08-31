@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { supabaseAdmin } from './lib/supabase-admin.js'
 import { CREDIT_COGS_USD } from './lib/credits/catalog.js'
+import { resolveAdminDashboardAccess } from './lib/preview-admin.js'
 import {
   ADMIN_USAGE_MAX_ROWS,
   aggregateDailyUsage,
@@ -96,7 +97,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', user.id)
     .maybeSingle()
 
-  if (!profile?.is_admin) {
+  if (!resolveAdminDashboardAccess({
+    profileIsAdmin: profile?.is_admin === true,
+    email: user.email,
+  })) {
     return res.status(403).json({ error: 'Admin access required' })
   }
 

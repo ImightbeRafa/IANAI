@@ -1,3 +1,9 @@
+## 2026-08-31 — PR #34: Preview-only /admin for invited QA
+
+- `VERCEL_ENV=preview`: allowlisted QA emails (`sup.rafa0412@gmail.com`, `ralauas@gmail.com`) can open `/admin` + admin read APIs without `profiles.is_admin`.
+- Production / non-preview: still requires `profiles.is_admin` (fail closed). No AIIAN `is_admin` writes.
+- Chat nuevo single-flight unchanged.
+
 ## 2026-08-31 — PR #34: Chat nuevo one-click (WD FAIL fix)
 
 - Module-level `runCreateSessionSingleFlight` (survives Strict Mode remount); joins concurrent callers; 2s post-success coalesce against ghost clicks.

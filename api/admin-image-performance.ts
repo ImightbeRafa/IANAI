@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { supabaseAdmin } from './lib/supabase-admin.js'
+import { resolveAdminDashboardAccess } from './lib/preview-admin.js'
 
 type UsageLogRow = {
   id: string
@@ -85,7 +86,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', user.id)
     .maybeSingle()
 
-  if (!profile?.is_admin) return res.status(403).json({ error: 'Admin access required' })
+  if (!resolveAdminDashboardAccess({
+    profileIsAdmin: profile?.is_admin === true,
+    email: user.email,
+  })) {
+    return res.status(403).json({ error: 'Admin access required' })
+  }
 
   const endDate = typeof req.query.end_date === 'string' ? new Date(req.query.end_date) : new Date()
   const startDate = typeof req.query.start_date === 'string'

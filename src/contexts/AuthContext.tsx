@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useRef, ReactNode } fro
 import { User, Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
+import { resolveClientAdminAccess } from '../lib/previewAdmin'
 
 interface AuthContextType {
   user: User | null
@@ -34,16 +35,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Fetch admin status from profiles table. Do not mark adminResolved until this finishes
   // so /admin does not bounce real admins to /dashboard during the profiles round-trip.
-  const fetchAdminStatus = async (userId: string) => {
+  // Preview-only: allowlisted QA emails may access /admin without profiles.is_admin.
+  const fetchAdminStatus = async (userId: string, email?: string | null) => {
     try {
       const { data } = await supabase
         .from('profiles')
         .select('is_admin')
         .eq('id', userId)
         .maybeSingle()
-      setIsAdmin(data?.is_admin === true)
+      setIsAdmin(resolveClientAdminAccess({
+        profileIsAdmin: data?.is_admin === true,
+        email,
+      }))
     } catch {
-      setIsAdmin(false)
+      setIsAdmin(resolveClientAdminAccess({
+        profileIsAdmin: false,
+        email,
+      }))
     } finally {
       setAdminResolved(true)
     }
@@ -99,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null)
         if (session?.user) {
           setAdminResolved(false)
-          void fetchAdminStatus(session.user.id)
+          void fetchAdminStatus(session.user.id, session.user.email)
         } else {
           clearAdmin()
         }
@@ -144,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(session?.user ?? null)
           if (session?.user) {
             setAdminResolved(false)
-            void fetchAdminStatus(session.user.id)
+            void fetchAdminStatus(session.user.id, session.user.email)
           } else {
             clearAdmin()
           }
@@ -173,7 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSession(data.session)
             setUser(data.session.user)
             setAdminResolved(false)
-            void fetchAdminStatus(data.session.user.id)
+            void fetchAdminStatus(data.session.user.id, data.session.user.email)
             // Apply referral code from localStorage (Google OAuth flow)
             const storedRef = localStorage.getItem('referral_code')
             if (storedRef) {
