@@ -14,6 +14,7 @@ import {
   truncateSidebarTitle,
   uniquifySidebarLabels,
   writeBrandOpen,
+  resolveSelectedSessionTitle,
 } from '../src/features/chat-shell/chatShellSidebar'
 
 describe('chatShellSidebar titles', () => {
@@ -83,6 +84,35 @@ describe('chatShellSidebar titles', () => {
       b: 'Launch',
       c: 'Hoy 6:11 p. m. · 2',
     })
+  })
+
+  it('header crumb matches the selected sidebar row, not Chat nuevo', () => {
+    const older = {
+      id: 'older',
+      title: 'Chat nuevo',
+      updated_at: '2026-08-11T15:00:00.000Z',
+      created_at: '2026-08-11T15:00:00.000Z',
+    }
+    const twin = {
+      id: 'twin',
+      title: 'New chat',
+      updated_at: '2026-08-11T15:00:00.000Z',
+      created_at: '2026-08-11T14:00:00.000Z',
+    }
+    const nowMs = Date.parse('2026-09-01T12:00:00.000Z')
+    const header = resolveSelectedSessionTitle({
+      session: older,
+      siblings: [older, twin],
+      language: 'en',
+      nowMs,
+    })
+    const sidebar = uniquifySidebarLabels([
+      { id: older.id, label: resolveSessionSidebarTitle({ session: older, nowMs, language: 'en' }).label },
+      { id: twin.id, label: resolveSessionSidebarTitle({ session: twin, nowMs, language: 'en' }).label },
+    ])
+    expect(header).toBe(sidebar.older)
+    expect(header).not.toMatch(/Chat nuevo|New chat/i)
+    expect(header).toMatch(/· 1$/)
   })
 
   it('truncates around 36–42 chars without Session spam', () => {

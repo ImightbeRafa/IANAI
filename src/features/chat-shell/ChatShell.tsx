@@ -20,6 +20,8 @@ import { useChatBrandSetup } from './useChatBrandSetup'
 import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
 import { kitHardBlocked } from './chatShellFirstRun'
+import { formatMissingSetupSteps, resolveKitChipTitle } from './chatShellBrandSetup'
+import { resolveSelectedSessionTitle } from './chatShellSidebar'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
@@ -496,7 +498,12 @@ export default function ChatShell({
 
   const crumbs = [
     workspace.activeBrand?.name,
-    workspace.activeSession?.title,
+    resolveSelectedSessionTitle({
+      session: workspace.activeSession,
+      siblings: workspace.sessions,
+      firstUserPreviews: workspace.firstUserPreviews,
+      language: language === 'en' ? 'en' : 'es',
+    }),
     thread.activeProduct?.name,
   ].filter(Boolean).join(' / ')
 
@@ -509,6 +516,21 @@ export default function ChatShell({
   const hasOfferName = Boolean((brandSetup.facts.offerName || '').trim())
   const kitListo = brandSetup.snapshot.stronglyComplete
   const hardBlocked = kitHardBlocked({ kitReady: kitListo, hasOfferName })
+  const missingSetupLabel = formatMissingSetupSteps(
+    brandSetup.snapshot,
+    language === 'en' ? 'en' : 'es'
+  )
+  const kitChipTitle = resolveKitChipTitle({
+    kitReady: kitListo,
+    trackerVisible: brandSetup.trackerVisible,
+    missingLabel: missingSetupLabel,
+    hasOfferName,
+    labels: {
+      kitReady: t.kitReady,
+      kitNeedsTune: t.kitNeedsTune,
+      kitNotReady: t.kitNotReady,
+    },
+  })
 
   const threadScripts = useMemo(() => {
     const items: { id: string; label: string }[] = []
@@ -717,13 +739,7 @@ export default function ChatShell({
               language={language}
               available={createWidget.available}
               hidden={createWidget.hidden}
-              title={
-                kitListo
-                  ? t.kitReady
-                  : hasOfferName
-                    ? t.kitNeedsTune
-                    : t.kitNotReady
-              }
+              title={kitChipTitle}
               onHide={createWidget.hide}
               onShow={createWidget.show}
               actions={(() => {

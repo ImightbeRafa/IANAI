@@ -308,6 +308,53 @@ export const BRAND_SETUP_STEPS: BrandSetupStepId[] = [
   'sources',
 ]
 
+export const BRAND_SETUP_STEP_COPY = {
+  es: {
+    business: 'Negocio',
+    channels: 'Canales',
+    audience: 'Público',
+    offer: 'Oferta',
+    brand: 'Marca visual',
+    sources: 'Fuentes',
+    missingPrefix: 'Falta',
+  },
+  en: {
+    business: 'Business',
+    channels: 'Channels',
+    audience: 'Audience',
+    offer: 'Offer',
+    brand: 'Brand look',
+    sources: 'Sources',
+    missingPrefix: 'Missing',
+  },
+} as const
+
+/** Setup-pin / glass chip share this so they never disagree (no “Falta afinar” vs named gaps). */
+export function formatMissingSetupSteps(
+  snapshot: BrandSetupSnapshot,
+  language: 'en' | 'es',
+  steps: BrandSetupStepId[] = BRAND_SETUP_STEPS,
+): string | null {
+  const missing = steps.filter((step) => !stepComplete(snapshot, step))
+  if (missing.length === 0) return null
+  const t = BRAND_SETUP_STEP_COPY[language]
+  const names = missing.slice(0, 3).map((step) => t[step]).join(', ')
+  return `${t.missingPrefix}: ${names}${missing.length > 3 ? '…' : ''}`
+}
+
+/** Glass chip: named gaps when the setup pin is visible; never a vaguer “Falta afinar”. */
+export function resolveKitChipTitle(options: {
+  kitReady: boolean
+  trackerVisible: boolean
+  missingLabel: string | null
+  hasOfferName: boolean
+  labels: { kitReady: string; kitNeedsTune: string; kitNotReady: string }
+}): string {
+  if (options.kitReady) return options.labels.kitReady
+  if (options.trackerVisible && options.missingLabel) return options.missingLabel
+  return options.hasOfferName ? options.labels.kitNeedsTune : options.labels.kitNotReady
+}
+
 export function shouldShowBrandSetup(options: {
   loaded: boolean
   business: Business | null | undefined

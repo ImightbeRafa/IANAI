@@ -1,3 +1,13 @@
+## 2026-09-01 — Header session crumb + glass chip named gaps
+
+**Area:** chat-shell
+**Files:** `ChatShell.tsx`, `chatShellSidebar.ts`, `chatShellBrandSetup.ts`, `ChatBrandSetupCard.tsx`
+
+- Header crumbs use the same selected-session title as the sidebar (stored title → first user message → relative time, uniquified). No more `IdleBar Demo / Chat nuevo` while the row says `Aug 11 · 1`.
+- Glass Brand Kit chip uses the same `Falta: Público, Fuentes` string as the setup pin when the tracker is visible. Drops the vaguer “Falta afinar” in that state.
+
+No merge. No invite / `chat_shell` / gift / SQL.
+
 ## 2026-09-01 — Preview leftover nits (login, gate, generationId, i18n)
 
 **Area:** chat-shell / credits / login

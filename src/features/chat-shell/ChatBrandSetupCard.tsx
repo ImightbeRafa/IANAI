@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { Check, ChevronDown, Settings2 } from 'lucide-react'
-import { stepComplete, type BrandSetupStepId } from './chatShellBrandSetup'
+import {
+  formatMissingSetupSteps,
+  stepComplete,
+  type BrandSetupStepId,
+} from './chatShellBrandSetup'
 import type { useChatBrandSetup } from './useChatBrandSetup'
 
 const STEP_LABEL = {
@@ -16,7 +20,6 @@ const STEP_LABEL = {
     hint: 'Tocá lo que falte — el chat te guía. Desaparece cuando esté completo.',
     open: 'Configurar',
     close: 'Cerrar',
-    missingPrefix: 'Falta',
   },
   en: {
     business: 'Business',
@@ -30,7 +33,6 @@ const STEP_LABEL = {
     hint: 'Tap what’s missing — chat guides you. This bar hides when it’s complete.',
     open: 'Configure',
     close: 'Close',
-    missingPrefix: 'Missing',
   },
 } as const
 
@@ -44,9 +46,7 @@ export default function ChatBrandSetupCard({ language = 'es', setup }: ChatBrand
   const [expanded, setExpanded] = useState(false)
   if (!setup.trackerVisible) return null
   const missingSteps = setup.steps.filter((step) => !setup.stepComplete(setup.snapshot, step))
-  const missingLabel = missingSteps.length
-    ? `${t.missingPrefix}: ${missingSteps.slice(0, 3).map((step) => t[step]).join(', ')}${missingSteps.length > 3 ? '…' : ''}`
-    : null
+  const missingLabel = formatMissingSetupSteps(setup.snapshot, language)
 
   return (
     <div className={`chat-shell__setup-pin${expanded ? ' is-expanded' : ' is-collapsed'}`} aria-label={t.title}>
