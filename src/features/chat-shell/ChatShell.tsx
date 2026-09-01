@@ -21,7 +21,7 @@ import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
 import { kitHardBlocked } from './chatShellFirstRun'
 import { formatMissingSetupSteps, resolveKitChipTitle } from './chatShellBrandSetup'
-import { resolveSelectedSessionTitle } from './chatShellSidebar'
+import { resolveHeaderSessionTitle } from './chatShellSidebar'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
@@ -498,11 +498,17 @@ export default function ChatShell({
 
   const crumbs = [
     workspace.activeBrand?.name,
-    resolveSelectedSessionTitle({
+    resolveHeaderSessionTitle({
       session: workspace.activeSession,
       siblings: workspace.sessions,
       firstUserPreviews: workspace.firstUserPreviews,
       language: language === 'en' ? 'en' : 'es',
+      hasThreadContent: thread.messages.some((message) => (
+        message.role === 'user'
+        || Boolean(message.artifacts && message.artifacts.length > 0)
+      )),
+      loadingMessages: thread.loadingMessages,
+      emptyLabel: t.defaultSessionTitle,
     }),
     thread.activeProduct?.name,
   ].filter(Boolean).join(' / ')

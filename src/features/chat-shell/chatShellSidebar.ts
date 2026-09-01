@@ -238,6 +238,38 @@ export function resolveSessionSidebarTitle(options: {
 }
 
 /**
+ * Header crumb for the selected session.
+ * Past threads use the same label as the sidebar row (never leftover “Chat nuevo”).
+ * A new empty chat may still say Chat nuevo / New chat.
+ */
+export function resolveHeaderSessionTitle(options: {
+  session: Pick<ChatSession, 'id' | 'title' | 'updated_at' | 'created_at'> | null | undefined
+  siblings?: Array<Pick<ChatSession, 'id' | 'title' | 'updated_at' | 'created_at'>>
+  firstUserPreviews?: Record<string, string>
+  language?: 'es' | 'en'
+  nowMs?: number
+  hasThreadContent?: boolean
+  loadingMessages?: boolean
+  emptyLabel?: string
+}): string | null {
+  const session = options.session
+  if (!session) return null
+  const language = options.language === 'en' ? 'en' : 'es'
+  const stored = (session.title || '').trim()
+  const preview = (options.firstUserPreviews?.[session.id] || '').trim()
+  const emptyNewChat = (
+    isDefaultSessionTitle(stored)
+    && !preview
+    && !options.hasThreadContent
+    && !options.loadingMessages
+  )
+  if (emptyNewChat) {
+    return options.emptyLabel || (language === 'en' ? 'New chat' : 'Chat nuevo')
+  }
+  return resolveSelectedSessionTitle(options)
+}
+
+/**
  * Header crumb for the selected session — same label the sidebar row shows
  * (stored title → first user message → relative time, then uniquified).
  */

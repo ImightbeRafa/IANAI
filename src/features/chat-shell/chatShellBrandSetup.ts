@@ -342,7 +342,7 @@ export function formatMissingSetupSteps(
   return `${t.missingPrefix}: ${names}${missing.length > 3 ? '…' : ''}`
 }
 
-/** Glass chip: named gaps when the setup pin is visible; never a vaguer “Falta afinar”. */
+/** Glass chip: named gaps whenever we know them; never a vaguer “Falta afinar”. */
 export function resolveKitChipTitle(options: {
   kitReady: boolean
   trackerVisible: boolean
@@ -351,7 +351,7 @@ export function resolveKitChipTitle(options: {
   labels: { kitReady: string; kitNeedsTune: string; kitNotReady: string }
 }): string {
   if (options.kitReady) return options.labels.kitReady
-  if (options.trackerVisible && options.missingLabel) return options.missingLabel
+  if (options.missingLabel) return options.missingLabel
   return options.hasOfferName ? options.labels.kitNeedsTune : options.labels.kitNotReady
 }
 

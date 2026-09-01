@@ -169,6 +169,17 @@ describe('chatShellBrandSetup completeness', () => {
         kitNotReady: 'Brand Kit incompleto',
       },
     })).toBe('Brand Kit listo')
+    expect(resolveKitChipTitle({
+      kitReady: false,
+      trackerVisible: false,
+      missingLabel: missingEs,
+      hasOfferName: true,
+      labels: {
+        kitReady: 'Brand Kit listo',
+        kitNeedsTune: 'Falta afinar',
+        kitNotReady: 'Brand Kit incompleto',
+      },
+    })).toBe(missingEs)
   })
 
   it('evaluates offer core per product type', () => {

@@ -1,3 +1,13 @@
+## 2026-09-01 — Header past-thread title + named kit chip
+
+**Area:** chat-shell
+**Files:** `ChatShell.tsx`, `chatShellSidebar.ts`, `chatShellBrandSetup.ts`
+
+- Header on a past thread uses that session’s title (first user message / sidebar label). Never leftover “Chat nuevo” on an old thread. New empty chat may still say Chat nuevo.
+- Glass chip always names the same missing fields as the setup pin (`Falta: Público, Fuentes`) when those gaps are known.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
 ## 2026-09-01 — Header session crumb + glass chip named gaps
 
 **Area:** chat-shell
