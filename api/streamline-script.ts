@@ -42,9 +42,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Script text is required' })
     }
 
+    const sessionBound = sessionId != null && sessionId !== ''
+    const generationIdResult = resolveChatGenerationId({
+      sessionBound,
+      incoming: req.body?.generationId,
+    })
+    if (!generationIdResult.ok) {
+      return res.status(400).json({
+        error: generationIdResult.error,
+        code: 'generation_id_required',
+      })
+    }
+    generationId = generationIdResult.generationId
+
     // Chat-shell: when sessionId is present, bind product to that session's offer.
     // Classic /posts callers omit sessionId and keep prior behavior.
-    if (sessionId != null && sessionId !== '') {
+    if (sessionBound) {
       if (!(await requireChatShellAccess(res, user.id))) return
       if (!isUuid(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' })
       const access = await resolveAuthorizedSessionProduct(
@@ -59,19 +72,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(403).json({ error: 'No access to product' })
       }
     }
-
-    const sessionBound = sessionId != null && sessionId !== ''
-    const generationIdResult = resolveChatGenerationId({
-      sessionBound,
-      incoming: req.body?.generationId,
-    })
-    if (!generationIdResult.ok) {
-      return res.status(400).json({
-        error: generationIdResult.error,
-        code: 'generation_id_required',
-      })
-    }
-    generationId = generationIdResult.generationId
 
     const xaiApiKey = process.env.GROK_API_KEY
     if (!xaiApiKey) {

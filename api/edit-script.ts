@@ -69,8 +69,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!editInstruction || typeof editInstruction !== 'string') return res.status(400).json({ error: 'editInstruction is required' })
     if (!['en', 'es'].includes(language)) return res.status(400).json({ error: 'language must be en or es' })
 
+    const sessionBound = sessionId != null && sessionId !== ''
+    const generationIdResult = resolveChatGenerationId({
+      sessionBound,
+      incoming: (req.body as { generationId?: unknown } | undefined)?.generationId,
+    })
+    if (!generationIdResult.ok) {
+      return res.status(400).json({
+        error: generationIdResult.error,
+        code: 'generation_id_required',
+      })
+    }
+    const generationId = generationIdResult.generationId
+
     // Chat-shell: optional session binding — reject foreign productId on the session.
-    if (sessionId != null && sessionId !== '') {
+    if (sessionBound) {
       if (!(await requireChatShellAccess(res, user.id))) return
       if (!isUuid(sessionId)) return res.status(400).json({ error: 'Invalid sessionId' })
       const access = await resolveAuthorizedSessionProduct(
@@ -85,19 +98,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(403).json({ error: 'No access to product' })
       }
     }
-
-    const sessionBound = sessionId != null && sessionId !== ''
-    const generationIdResult = resolveChatGenerationId({
-      sessionBound,
-      incoming: (req.body as { generationId?: unknown } | undefined)?.generationId,
-    })
-    if (!generationIdResult.ok) {
-      return res.status(400).json({
-        error: generationIdResult.error,
-        code: 'generation_id_required',
-      })
-    }
-    const generationId = generationIdResult.generationId
 
     if (sessionBound) {
       const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, 'script_edit')
