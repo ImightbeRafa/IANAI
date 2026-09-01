@@ -19,6 +19,7 @@ import { useChatSessionThread } from './useChatSessionThread'
 import { useChatBrandSetup } from './useChatBrandSetup'
 import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
+import { kitHardBlocked } from './chatShellFirstRun'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
@@ -48,6 +49,7 @@ interface ChatShellProps {
   displayName: string
   initials: string
   userId: string
+  onOpenTour?: () => void
 }
 
 export default function ChatShell({
@@ -56,6 +58,7 @@ export default function ChatShell({
   displayName,
   initials,
   userId,
+  onOpenTour,
 }: ChatShellProps) {
   const navigate = useNavigate()
   const rollout = useChatShellRollout()
@@ -503,6 +506,9 @@ export default function ChatShell({
       : thread.activeProduct
         ? 1
         : 0
+  const hasOfferName = Boolean((brandSetup.facts.offerName || '').trim())
+  const kitListo = brandSetup.snapshot.stronglyComplete
+  const hardBlocked = kitHardBlocked({ kitReady: kitListo, hasOfferName })
 
   const threadScripts = useMemo(() => {
     const items: { id: string; label: string }[] = []
@@ -577,6 +583,7 @@ export default function ChatShell({
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
         onDeleteBrand={(brandId) => void workspace.deleteBrand(brandId)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTour={onOpenTour}
         onSwitchToClassic={rollout.showSwitch ? handleSwitchToClassic : undefined}
       />
 
@@ -654,8 +661,8 @@ export default function ChatShell({
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
           language={language}
-          kitReady={brandSetup.snapshot.stronglyComplete}
-          hasOfferName={Boolean((brandSetup.facts.offerName || '').trim())}
+          kitReady={kitListo}
+          hasOfferName={hasOfferName}
           onStartBrandKit={() => {
             if (!workspace.activeBrand) {
               openBrandCreate()
@@ -682,13 +689,13 @@ export default function ChatShell({
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
           offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
           onPreparePostFromScript={(scriptText, density) => {
-            if (!brandSetup.snapshot.stronglyComplete) {
+            if (hardBlocked) {
               return Promise.reject(new Error(t.kitBlockedHint))
             }
             return thread.prepareScriptForPost(scriptText, density)
           }}
           onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) => {
-            if (!brandSetup.snapshot.stronglyComplete) return
+            if (hardBlocked) return
             void thread.generateImageFromScript(scriptText, productId, scriptTitle, options)
           }}
           onOpenOfferImage={openLightbox}
@@ -711,15 +718,16 @@ export default function ChatShell({
               available={createWidget.available}
               hidden={createWidget.hidden}
               title={
-                brandSetup.snapshot.stronglyComplete
+                kitListo
                   ? t.kitReady
-                  : t.kitNotReady
+                  : hasOfferName
+                    ? t.kitNeedsTune
+                    : t.kitNotReady
               }
               onHide={createWidget.hide}
               onShow={createWidget.show}
               actions={(() => {
-                const kitListo = brandSetup.snapshot.stronglyComplete
-                const blocked = !kitListo
+                const blocked = hardBlocked
                 const baseDisabled = brandSetup.busy || thread.loadingMessages
                 return [
                 {
@@ -778,24 +786,24 @@ export default function ChatShell({
               language={language}
               facts={brandSetup.facts}
               busy={brandSetup.busy || thread.loadingMessages}
-              confirmed={brandSetup.snapshot.stronglyComplete}
+              confirmed={kitListo}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
               showCreateActions={false}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
-                if (!brandSetup.snapshot.stronglyComplete) return
+                if (hardBlocked) return
                 thread.cancelImageClarify()
                 thread.startScriptsFlow()
               }}
               onCreatePost={() => {
-                if (!brandSetup.snapshot.stronglyComplete) return
+                if (hardBlocked) return
                 thread.cancelScriptClarify()
                 thread.startPostFlow()
               }}
               onCreateProductPhoto={() => {
-                if (!brandSetup.snapshot.stronglyComplete) return
+                if (hardBlocked) return
                 thread.cancelScriptClarify()
                 thread.startProductFotoFlow()
               }}

@@ -1,3 +1,14 @@
+## 2026-09-01 — Wire chat-shell tour on PR #35 Preview
+
+**Area:** chat-shell first-run
+**Files:** `ChatShellPage.tsx`, `ChatShellTourWizard.tsx`, `chatShellOnboarding.ts`, `chatShellFirstRun.ts`, `ChatShell.tsx`, `ChatSidebar.tsx`
+
+- `ChatShellTourWizard` now mounts for invited `/chat` users: first open (Preview skip-gift still returns real `tourDone`), gift “Ver cómo funciona”, and sidebar “Cómo funciona”. Skip/finish persist via `tour_done`. Does not write kits/brands/offers/sessions.
+- Preview gift skip no longer fabricates `tourDone: true` (that hid the wizard). Still no +100 insert off production.
+- Soft kit: glass / script CTAs hard-block only when there is no offer and kit is not listo. Existing folders with an offer get ready-empty + “Falta afinar”; setup pin still names what’s missing.
+
+No merge. No invite / `chat_shell` / gift / SQL flips.
+
 ## 2026-08-31 — Production-ready nits (merge-bar)
 
 **Area:** credits / chat-shell / homepage

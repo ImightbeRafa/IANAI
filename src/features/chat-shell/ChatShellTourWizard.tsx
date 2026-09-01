@@ -43,7 +43,46 @@ const STEPS_ES = [
   {
     id: 'credits',
     title: 'Créditos y feedback',
-    body: 'Te regalamos créditos para probar. Un guion cuesta 3, una imagen 6, Pro 24. Contanos qué mejorar — leemos el feedback.',
+    body: 'Los créditos se usan por generación. Un guion cuesta 3, una imagen 6, Pro 24. Contanos qué mejorar — leemos el feedback.',
+    icon: Sparkles,
+  },
+] as const
+
+const STEPS_EN = [
+  {
+    id: 'single',
+    title: 'One chat for everything',
+    body: 'Ask for scripts, posts, and photos in the same thread. No jumping between screens — the chat understands what you want to create.',
+    icon: MessageSquare,
+  },
+  {
+    id: 'folders',
+    title: 'Brands and folders',
+    body: 'Each brand lives in its folder on the left. Switch brands without losing context: each chat keeps that brand’s offers, scripts, and images.',
+    icon: FolderKanban,
+  },
+  {
+    id: 'brandkit',
+    title: 'Brand Kit beside the composer',
+    body: 'The Brand Kit (Scripts, Post, Photo, Pack) sits to the left of the text box. Use it to start fast, or type in chat: “generate 2 sales scripts”.',
+    icon: Package,
+  },
+  {
+    id: 'setup',
+    title: 'Brand setup',
+    body: 'The setup bar shows what’s missing: business, channels, audience, offer, look, and sources. Tap a gap and chat guides you. Without a clear offer we won’t generate scripts — we’ll ask first.',
+    icon: Palette,
+  },
+  {
+    id: 'classic',
+    title: 'Classic ↔ Chat',
+    body: 'Use Chat as home, or switch back to the classic dashboard anytime. Nobody has to learn everything at once.',
+    icon: LayoutDashboard,
+  },
+  {
+    id: 'credits',
+    title: 'Credits and feedback',
+    body: 'Credits are charged per generation. A script costs 3, an image 6, Pro 24. Tell us what to improve — we read the feedback.',
     icon: Sparkles,
   },
 ] as const
@@ -60,7 +99,7 @@ export default function ChatShellTourWizard({
   onSkipForever,
 }: ChatShellTourWizardProps) {
   const [index, setIndex] = useState(0)
-  const steps = STEPS_ES
+  const steps = language === 'en' ? STEPS_EN : STEPS_ES
   const step = steps[index]
   const Icon = step.icon
   const last = index === steps.length - 1

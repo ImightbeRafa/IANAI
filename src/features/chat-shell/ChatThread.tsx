@@ -43,7 +43,7 @@ import {
   type ShellImageAspect,
   type ShellImageDensity,
 } from './chatShellImageIntent'
-import { shouldShowFirstRunCta } from './chatShellFirstRun'
+import { shouldShowFirstRunCta, kitHardBlocked } from './chatShellFirstRun'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -382,6 +382,7 @@ export default memo(function ChatThread({
     hasUserOrArtifactMessages,
     showInitialLoader,
   })
+  const generateBlocked = kitHardBlocked({ kitReady, hasOfferName })
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -586,7 +587,7 @@ export default memo(function ChatThread({
                           offerImageUrl={offerImage?.image_url}
                           referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
-                          kitGenerateBlocked={!kitReady}
+                          kitGenerateBlocked={generateBlocked}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
                               ...opts,
@@ -663,7 +664,7 @@ export default memo(function ChatThread({
                         savingScript={savingScript}
                         referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
-                        kitGenerateBlocked={!kitReady}
+                        kitGenerateBlocked={generateBlocked}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}

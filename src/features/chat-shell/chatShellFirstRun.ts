@@ -15,3 +15,11 @@ export function shouldShowFirstRunCta(input: {
     && !input.showInitialLoader
   )
 }
+
+/** Hard-block generate only when there is no offer/kit to work from. */
+export function kitHardBlocked(input: {
+  kitReady: boolean
+  hasOfferName?: boolean
+}): boolean {
+  return !input.kitReady && !Boolean(input.hasOfferName)
+}

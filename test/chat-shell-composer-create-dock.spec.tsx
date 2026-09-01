@@ -112,4 +112,22 @@ describe('ChatComposerCreateDock', () => {
     expect(blocked.length).toBe(4)
     expect(screen.getByRole('button', { name: 'Guiones — Primero el kit' })).toBeTruthy()
   })
+
+  it('does not show Primero el kit when verbs are enabled (soft Falta afinar)', () => {
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Falta afinar"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={makeActions()}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Falta afinar')).toBeTruthy()
+    expect(screen.queryByText('Primero el kit')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Guiones' }) as HTMLButtonElement).disabled).toBe(false)
+  })
 })

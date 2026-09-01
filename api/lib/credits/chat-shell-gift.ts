@@ -90,7 +90,7 @@ export async function ensureChatShellOpenGift(userId: string): Promise<ChatShell
   }
 
   // Non-production (and CREDITS_V1 off): never insert a new +100 lot.
-  // Do not claw existing production lots.
+  // Do not claw existing production lots. Keep real tourDone so Preview still mounts the wizard.
   if (shouldSkipChatShellOpenGift() || !isCreditsV1Enabled()) {
     return {
       ok: true,
@@ -99,7 +99,7 @@ export async function ensureChatShellOpenGift(userId: string): Promise<ChatShell
       credits: CHAT_SHELL_OPEN_GIFT_CREDITS,
       creditsRemaining: remainingBefore,
       showWelcome: false,
-      tourDone: true,
+      tourDone,
     }
   }
 

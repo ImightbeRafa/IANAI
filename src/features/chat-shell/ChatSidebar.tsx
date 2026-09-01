@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
+  CircleHelp,
   MoreHorizontal,
   Settings,
   Trash2,
@@ -54,6 +55,7 @@ interface ChatSidebarProps {
   onDeleteSession: (sessionId: string) => void | Promise<void>
   onDeleteBrand: (brandId: string) => void | Promise<void>
   onOpenSettings: () => void
+  onOpenTour?: () => void
   onSwitchToClassic?: () => void
 }
 
@@ -87,6 +89,7 @@ export default function ChatSidebar({
   onDeleteSession,
   onDeleteBrand,
   onOpenSettings,
+  onOpenTour,
   onSwitchToClassic,
 }: ChatSidebarProps) {
   const { language } = useLanguage()
@@ -573,6 +576,17 @@ export default function ChatSidebar({
             {t.classicShort}
           </button>
         )}
+        {onOpenTour ? (
+          <button
+            type="button"
+            className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
+            aria-label={t.openTour}
+            title={t.openTour}
+            onClick={onOpenTour}
+          >
+            <CircleHelp size={15} aria-hidden />
+          </button>
+        ) : null}
         <button
           type="button"
           className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
