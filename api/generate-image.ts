@@ -25,7 +25,7 @@ import {
 } from './lib/image-enhance.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
-import { fetchPublicUrl } from './lib/url-safety.js'
+import { fetchPublicImageAsDataUrl } from './lib/fetch-image-data-url.js'
 import { meterActionForImageApi } from './lib/credits/catalog.js'
 import {
   estimateGrokImageCostUsd,
@@ -133,21 +133,6 @@ function isTransientGeminiError(error: unknown): boolean {
     || message.includes('503')
 }
 
-async function fetchImageUrlAsDataUrl(url: string): Promise<string | null> {
-  try {
-    const imgResp = await fetchPublicUrl(url, { timeoutMs: 15000, maxRedirects: 3 })
-    if (!imgResp.ok) return null
-    const contentType = imgResp.headers.get('content-type') || 'image/webp'
-    if (!contentType.startsWith('image/')) return null
-    const buffer = await imgResp.arrayBuffer()
-    if (buffer.byteLength > 8_000_000) return null
-    const base64 = Buffer.from(buffer).toString('base64')
-    return `data:${contentType.split(';')[0]};base64,${base64}`
-  } catch (err) {
-    console.error('fetchImageUrlAsDataUrl failed', err instanceof Error ? err.message : err)
-    return null
-  }
-}
 
 /**
  * Fill input_image* from authorized product_images rows (chat-shell Producto mode).
@@ -268,7 +253,7 @@ async function hydrateInputImagesFromProductImages(
   let slot = 0
   for (const row of rows.slice(0, 4)) {
     if (!row.image_url) continue
-    const dataUrl = await fetchImageUrlAsDataUrl(row.image_url)
+    const dataUrl = await fetchPublicImageAsDataUrl(row.image_url)
     if (!dataUrl) {
       return {
         ok: false,

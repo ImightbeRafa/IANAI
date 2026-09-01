@@ -1,3 +1,14 @@
+## 2026-09-01 — Preview feedback: close sheets, Pack qty, Pack in-chat, kit refs via server
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `ChatShellBulkDialog.tsx`, `ChatShell.tsx`, `chatShellImageApi.ts`, `api/fetch-image.ts`, `api/lib/fetch-image-data-url.ts`, `api/lib/grok-image-generate.ts`, `api/generate-image.ts`, `api/bulk-scripts.ts`, `api/bulk-campaign.ts`, `.cursor/skills/verify-advance/`
+
+- Post/Foto **Generar** closes the sheet immediately; the thread shows **Generando post…** instead of a stuck Paso 6.
+- Pack **Cantidad (2–25)** uses a typing draft + **− / +** (no clamp-on-keystroke). **Confirmar y generar** closes to chat, shows pack progress, reloads messages, and writes a clear assistant error if the pack cannot run (never silent empty).
+- Kit/store product + logo images are fetched **server-side** (`/api/fetch-image`, generate hydrate, Grok ref resolve). Browser `fetch` is not used for storefront hosts. CSP `connect-src` / `script-src` unchanged (`vercel.live` feedback.js stays blocked). `signInWithPassword` is the only password grant — 400 is a failed login, not leftover code.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
 ## 2026-09-01 — verify-advance skill for chat-shell Preview
 
 **Area:** chat-shell / agent

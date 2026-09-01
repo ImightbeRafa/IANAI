@@ -58,6 +58,7 @@ interface ChatThreadProps {
   latestImagesByOffer: Map<string, ShellImageLike>
   offerImages?: ShellImageLike[]
   imageBusy: boolean
+  packBusy?: boolean
   setupBusy?: boolean
   imageModel?: ImageModel
   imageAspect?: ShellImageAspect
@@ -217,6 +218,7 @@ export default memo(function ChatThread({
   latestImagesByOffer,
   offerImages = [],
   imageBusy,
+  packBusy = false,
   setupBusy = false,
   imageModel,
   imageAspect,
@@ -387,11 +389,13 @@ export default memo(function ChatThread({
   const kitGenerateBlocked = !kitReady
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
-    : setupBusy
-      ? 'setup'
-      : sending && !imageClarify
-        ? 'script'
-        : null
+    : packBusy
+      ? 'pack'
+      : setupBusy
+        ? 'setup'
+        : sending && !imageClarify
+          ? 'script'
+          : null
   const progressSubtitle = walkProgress
     ? `${walkProgress.current}/${walkProgress.total}${walkProgress.offerName ? ` · ${walkProgress.offerName}` : ''}`
     : undefined
@@ -402,7 +406,7 @@ export default memo(function ChatThread({
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [messages.length, setupTurns.length, progressKind, sending, setupBusy, imageBusy, loadingMessages])
+  }, [messages.length, setupTurns.length, progressKind, sending, setupBusy, imageBusy, packBusy, loadingMessages])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashCommands.length > 0) {
@@ -719,7 +723,7 @@ export default memo(function ChatThread({
               key={`${progressKind}-${scriptType || ''}`}
               kind={progressKind}
               language={language}
-              subtitle={progressKind === 'image' ? imageModel : progressSubtitle}
+              subtitle={progressKind === 'image' ? imageModel : progressKind === 'pack' ? (language === 'es' ? 'Pack' : 'Pack') : progressSubtitle}
               imageModel={imageModel}
               aspectRatio={imageAspect}
               context={{

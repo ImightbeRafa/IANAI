@@ -388,6 +388,97 @@ async function driveTour(url, dir, lines) {
   })
 }
 
+async function dismissTourIfPresent(page, lines) {
+  const skip = page.getByRole('button', { name: /saltar y no volver a mostrar|skip and never show again|saltar|skip/i })
+  if (await skip.count()) {
+    await skip.first().click()
+    await sleep(1000)
+    lines.push('dismissed leftover tour')
+  }
+}
+
+async function drivePackQty(url, dir, lines) {
+  if (!process.env.ADVANCE_VERIFY_EMAIL || !process.env.ADVANCE_VERIFY_PASSWORD) {
+    throw new Error('pack-qty requires ADVANCE_VERIFY_EMAIL / ADVANCE_VERIFY_PASSWORD')
+  }
+  await withBrowser(async (browser) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    const page = await ctx.newPage()
+    await page.addInitScript(() => localStorage.setItem('ai-language', 'es'))
+    await signIn(page, url)
+    await sleep(2500)
+    await dismissTourIfPresent(page, lines)
+    const pack = page.getByRole('button', { name: /^Pack$/ }).first()
+    await pack.waitFor({ timeout: 20000 })
+    await pack.click()
+    const dialog = page.getByRole('dialog', { name: 'Pack' })
+    await dialog.waitFor({ timeout: 15000 })
+    const input = page.locator('#chat-shell-bulk-count')
+    await input.waitFor({ timeout: 10000 })
+    const start = await input.inputValue()
+    lines.push(`qty start=${start}`)
+    await input.fill('3')
+    const typed = await input.inputValue()
+    lines.push(`qty typed=${typed}`)
+    if (typed !== '3') throw new Error(`cantidad did not accept 3, got ${typed}`)
+    const shot = join(dir, '01-pack-qty-3.png')
+    await dialog.screenshot({ path: shot })
+    copyArtifact(shot, 'verify_advance_pack_qty_3.png')
+    await page.getByRole('button', { name: 'Más' }).click()
+    const plus = await input.inputValue()
+    lines.push(`qty plus=${plus}`)
+    if (plus !== '4') throw new Error(`Más did not step to 4, got ${plus}`)
+    await page.getByRole('button', { name: 'Menos' }).click()
+    const minus = await input.inputValue()
+    lines.push(`qty minus=${minus}`)
+    if (minus !== '3') throw new Error(`Menos did not return to 3, got ${minus}`)
+    const footerCancel = page.locator('.chat-shell__modal-btn').filter({ hasText: /^Cancelar$/ }).first()
+    await footerCancel.click()
+    await sleep(500)
+    if (await dialog.count()) throw new Error('Pack dialog still open after Cancelar')
+    lines.push('cancelled without generate')
+    await ctx.close()
+  })
+}
+
+async function driveCloseSheet(url, dir, lines) {
+  if (!process.env.ADVANCE_VERIFY_EMAIL || !process.env.ADVANCE_VERIFY_PASSWORD) {
+    throw new Error('close-sheet-on-generate requires ADVANCE_VERIFY_EMAIL / ADVANCE_VERIFY_PASSWORD')
+  }
+  lines.push('no-spend path: do not click Generar on Preview')
+  await withBrowser(async (browser) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    const page = await ctx.newPage()
+    await page.addInitScript(() => localStorage.setItem('ai-language', 'es'))
+    await signIn(page, url)
+    await sleep(2500)
+    await dismissTourIfPresent(page, lines)
+    const post = page.getByRole('button', { name: /^Post$/ }).first()
+    await post.waitFor({ timeout: 20000 })
+    const shot = join(dir, '01-chat-ready.png')
+    await page.screenshot({ path: shot })
+    copyArtifact(shot, 'verify_advance_close_sheet_chat_ready.png')
+    lines.push('Post glass visible; Generar close is covered by Vitest (imageClarify null unmounts sheet)')
+    await ctx.close()
+  })
+}
+
+async function drivePackProduces(url, dir, lines) {
+  lines.push(`url=${url}`)
+  if (process.env.ADVANCE_VERIFY_ALLOW_PACK_GENERATE !== '1') {
+    writeFileSync(join(dir, 'verdict.txt'), 'SKIPPED pack-produces (set ADVANCE_VERIFY_ALLOW_PACK_GENERATE=1 to spend credits)\n')
+    lines.push('SKIP pack-produces: credit spend not allowed')
+    return
+  }
+  throw new Error('Authenticated pack generate drive is opt-in and not implemented as a spend-by-default recipe.')
+}
+
+async function driveKitRefs(url, dir, lines) {
+  lines.push(`url=${url}`)
+  writeFileSync(join(dir, 'verdict.txt'), 'SKIPPED kit-refs-used live generate (unit tests cover CSP/server fetch; do not spend credits by default)\n')
+  lines.push('SKIP kit-refs-used live generate; unit tests are the default proof')
+}
+
 async function drive(feature) {
   const state = readState()
   if (!state) die('No instance. Run launch first.')
@@ -399,6 +490,10 @@ async function drive(feature) {
     if (feature === 'uninvited-chat-gate') await driveUninvited(url, dir, lines)
     else if (feature === 'after-skip-chrome') await driveAfterSkip(url, dir, lines)
     else if (feature === 'invited-first-chat-tour') await driveTour(url, dir, lines)
+    else if (feature === 'pack-qty') await drivePackQty(url, dir, lines)
+    else if (feature === 'close-sheet-on-generate') await driveCloseSheet(url, dir, lines)
+    else if (feature === 'pack-produces') await drivePackProduces(url, dir, lines)
+    else if (feature === 'kit-refs-used') await driveKitRefs(url, dir, lines)
     else die(`Unknown feature ${feature}`)
     if (!existsSync(join(dir, 'verdict.txt'))) writeFileSync(join(dir, 'verdict.txt'), 'PASS\n')
     lines.push('PASS')

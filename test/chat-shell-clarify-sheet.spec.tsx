@@ -193,4 +193,54 @@ describe('ChatShellClarifySheet', () => {
     const labels = Array.from(footer?.querySelectorAll('button') || []).map((btn) => btn.textContent)
     expect(labels).toEqual(['Atrás', 'Cancelar'])
   })
+
+  it('unmounts Post refs sheet when parent clears imageClarify after Generar', async () => {
+    const user = userEvent.setup()
+    const onAnswer = vi.fn()
+    const refsState = {
+      sessionId: 's1',
+      step: 'refs' as const,
+      originText: 'Quiero crear un post',
+      productId: 'p1',
+      source: 'composer' as const,
+      partial: {},
+      history: [],
+      preferences: {
+        style: { kind: 'preset' as const, presetId: 'venta-directa' as const },
+        aspectRatio: '9:16' as const,
+        model: 'grok-imagine' as const,
+        density: 'hard' as const,
+      },
+      referencesRequired: true,
+      referenceImages: [{
+        id: 'img1',
+        url: 'https://cdn.example/product.webp',
+        kind: 'product' as const,
+        dbKind: 'product' as const,
+        productId: 'p1',
+        selected: true,
+      }],
+    }
+    const { rerender } = render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={refsState}
+        onAnswerImageClarify={onAnswer}
+      />
+    )
+    expect(screen.getByRole('dialog', { name: 'Post' })).toBeTruthy()
+    expect(screen.getByText(/Confirmá referencias/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Generar' }))
+    expect(onAnswer).toHaveBeenCalledWith({ useReferences: true })
+    rerender(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={null}
+        onAnswerImageClarify={onAnswer}
+      />
+    )
+    expect(screen.queryByRole('dialog', { name: 'Post' })).toBeNull()
+  })
 })

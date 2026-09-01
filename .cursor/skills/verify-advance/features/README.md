@@ -36,3 +36,7 @@ Each feature file starts with an H1 and one paragraph, then exactly four H2 sect
 - [Invited first `/chat` tour](./invited-first-chat-tour.md) — tour “Un chat para todo”, skip persists, existing kits stay.
 - [After-skip chrome](./after-skip-chrome.md) — header matches the selected session; glass Guiones/Post/Foto/Pack; incomplete kit named Falta + disabled Primero el kit; Pack fully readable.
 - [Uninvited `/chat` gate](./uninvited-chat-gate.md) — Chat es por invitación / 403. The skill must not grant invites.
+- [Close sheet on generate](./close-sheet-on-generate.md) — Post/Foto Generar closes Paso 6 immediately; wait on the generating card.
+- [Pack quantity](./pack-qty.md) — Cantidad 2–25 typing + steppers. Cancel; do not generate.
+- [Pack produces](./pack-produces.md) — Confirm closes to chat; scripts appear or a clear in-chat error. Credit spend; skip by default.
+- [Kit refs used](./kit-refs-used.md) — product/logo refs via server fetch, not browser connect-src to the store.

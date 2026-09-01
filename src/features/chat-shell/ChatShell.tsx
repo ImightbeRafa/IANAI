@@ -88,6 +88,7 @@ export default function ChatShell({
   ))
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkCount, setBulkCount] = useState(10)
+  const [packBusy, setPackBusy] = useState(false)
   const [mcpIntake, setMcpIntake] = useState<ChatShellMcpIntakeIntent | null>(() => {
     if (typeof window === 'undefined') return null
     return captureMcpIntakeFromUrl() || readStoredMcpIntake()
@@ -674,6 +675,7 @@ export default function ChatShell({
           latestImagesByOffer={thread.latestImagesByOffer}
           offerImages={thread.offerImages}
           imageBusy={thread.imageBusy}
+          packBusy={packBusy}
           setupBusy={brandSetup.busy}
           imageModel={thread.imagePrefs.model}
           imageAspect={thread.imagePrefs.aspectRatio}
@@ -947,9 +949,48 @@ export default function ChatShell({
           sessionId={workspace.activeSession?.id}
           initialCount={bulkCount}
           onClose={() => setBulkOpen(false)}
-          onDone={(summary) => {
+          onLaunch={({ count, mode }) => {
             setBulkOpen(false)
-            void thread.persistTurn('assistant', summary)
+            setPackBusy(true)
+            const label = language === 'es'
+              ? (mode === 'campaign'
+                ? `Pack campaña · ${count} ángulos`
+                : `Pack · ${count} guiones`)
+              : (mode === 'campaign'
+                ? `Campaign pack · ${count} angles`
+                : `Pack · ${count} scripts`)
+            void thread.persistTurn('user', label)
+          }}
+          onDone={(summary, result) => {
+            void (async () => {
+              try {
+                if (
+                  result?.sessionId
+                  && workspace.activeSession?.id
+                  && result.sessionId !== workspace.activeSession.id
+                ) {
+                  await thread.persistTurn(
+                    'assistant',
+                    language === 'es'
+                      ? `El pack se guardó en otro chat. ${summary}`
+                      : `The pack was saved in another chat. ${summary}`
+                  )
+                }
+                await thread.reloadMessages()
+                await thread.persistTurn('assistant', summary)
+              } finally {
+                setPackBusy(false)
+              }
+            })()
+          }}
+          onError={(message) => {
+            setPackBusy(false)
+            void thread.persistTurn(
+              'assistant',
+              language === 'es'
+                ? `No pude generar el pack. ${message}`
+                : `Could not generate the pack. ${message}`
+            )
           }}
         />
       ) : null}

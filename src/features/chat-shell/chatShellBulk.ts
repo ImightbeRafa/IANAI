@@ -73,8 +73,16 @@ async function postJson<T>(name: Parameters<typeof bulkApiUrl>[0], body: Record<
     headers: await authHeaders(),
     body: JSON.stringify(body),
   })
-  const json = await response.json().catch(() => ({})) as T & { error?: string }
-  if (!response.ok) throw new Error(json.error || `Request failed (${response.status})`)
+  const json = await response.json().catch(() => ({})) as T & {
+    error?: string
+    items?: Array<{ error?: string; title?: string }>
+  }
+  if (!response.ok) {
+    const itemError = Array.isArray(json.items)
+      ? json.items.find((item) => item?.error)?.error
+      : undefined
+    throw new Error(json.error || itemError || `Request failed (${response.status})`)
+  }
   return json
 }
 
@@ -83,6 +91,17 @@ export function clampComposerBulkCount(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(String(value).trim())
   if (!Number.isFinite(n)) return 10
   return Math.min(25, Math.max(2, Math.round(n)))
+}
+
+/** Allow typing 15 (do not clamp "1" to 2 on every keystroke). */
+export function sanitizeComposerBulkCountDraft(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 2)
+  return digits
+}
+
+export function stepComposerBulkCount(current: string | number, delta: number): string {
+  const n = clampComposerBulkCount(current === '' ? 10 : current)
+  return String(clampComposerBulkCount(n + delta))
 }
 
 export async function fetchBulkAngles(body: {

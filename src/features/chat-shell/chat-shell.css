@@ -4634,6 +4634,47 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
+.chat-shell__qty {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.chat-shell__modal-input--qty {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  appearance: textfield;
+}
+
+.chat-shell__modal-input--qty::-webkit-outer-spin-button,
+.chat-shell__modal-input--qty::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.chat-shell__qty-btn {
+  flex: 0 0 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-shell__qty-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-shell__qty-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .chat-shell__modal-error {
   margin-top: 8px;
   font-size: 12px;

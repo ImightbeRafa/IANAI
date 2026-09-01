@@ -84,6 +84,10 @@ Harness: Playwright against the launched origin. Playwright is **not** a package
 node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive after-skip-chrome
 node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive uninvited-chat-gate
 node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive invited-first-chat-tour
+node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive pack-qty
+node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive close-sheet-on-generate
+node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive pack-produces
+node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive kit-refs-used
 ```
 
 Stable handles (ES unless noted):
@@ -98,6 +102,7 @@ Stable handles (ES unless noted):
 | Header | `.chat-shell__crumbs` |
 | Falta chip | `.chat-shell__idle-kit-title` |
 | Glass verbs | toolbar buttons `Guiones`, `Post`, `Foto`, `Pack` |
+| Pack quantity | `#chat-shell-bulk-count`, buttons `Menos` / `Más` |
 | Script post CTA | `.chat-shell__artifact-action` text `Primero el kit` / `Crear post` |
 | Invite gate | heading `Chat es por invitación` |
 
