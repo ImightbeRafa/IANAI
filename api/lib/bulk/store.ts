@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isReusableProductReference } from '../product-image-refs.js'
 import { encodeGeneratedImageJpeg } from '../generated-image-jpeg.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { RecentScriptSummary, StyleDna } from './types.js'
@@ -37,14 +38,16 @@ export async function listProductRefUrls(
   if (!db || !userId || !offerId) return []
   const { data, error } = await db
     .from('product_images')
-    .select('image_url, kind')
+    .select('image_url, kind, message_id')
     .eq('product_id', offerId)
-    .eq('user_id', userId)
     .in('kind', ['product', 'context'])
     .order('created_at', { ascending: false })
     .limit(limit)
   if (error || !data) return []
-  return data.map((row) => row.image_url as string).filter(Boolean)
+  return data
+    .filter((row) => isReusableProductReference(row))
+    .map((row) => row.image_url as string)
+    .filter(Boolean)
 }
 
 export async function saveExpandedProductRef(options: {

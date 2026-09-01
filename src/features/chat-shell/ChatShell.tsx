@@ -34,7 +34,7 @@ import { useChatShellRollout } from './ChatShellRolloutContext'
 import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
 import ChatShellBulkDialog from './ChatShellBulkDialog'
-import { clampComposerBulkCount } from './chatShellBulk'
+import { clampComposerBulkCount, packFailureCopy } from './chatShellBulk'
 import {
   captureMcpIntakeFromUrl,
   clearStoredMcpIntake,
@@ -949,19 +949,11 @@ export default function ChatShell({
           sessionId={workspace.activeSession?.id}
           initialCount={bulkCount}
           onClose={() => setBulkOpen(false)}
-          onLaunch={({ count, mode }) => {
+          onLaunch={() => {
             setBulkOpen(false)
             setPackBusy(true)
-            const label = language === 'es'
-              ? (mode === 'campaign'
-                ? `Pack campaña · ${count} ángulos`
-                : `Pack · ${count} guiones`)
-              : (mode === 'campaign'
-                ? `Campaign pack · ${count} angles`
-                : `Pack · ${count} scripts`)
-            void thread.persistTurn('user', label)
           }}
-          onDone={(summary, result) => {
+          onDone={(_summary, result) => {
             void (async () => {
               try {
                 if (
@@ -971,13 +963,15 @@ export default function ChatShell({
                 ) {
                   await thread.persistTurn(
                     'assistant',
-                    language === 'es'
-                      ? `El pack se guardó en otro chat. ${summary}`
-                      : `The pack was saved in another chat. ${summary}`
+                    packFailureCopy(
+                      language === 'es'
+                        ? 'El pack se guardó en otro chat.'
+                        : 'The pack was saved in another chat.',
+                      language
+                    )
                   )
                 }
                 await thread.reloadMessages()
-                await thread.persistTurn('assistant', summary)
               } finally {
                 setPackBusy(false)
               }
@@ -985,12 +979,7 @@ export default function ChatShell({
           }}
           onError={(message) => {
             setPackBusy(false)
-            void thread.persistTurn(
-              'assistant',
-              language === 'es'
-                ? `No pude generar el pack. ${message}`
-                : `Could not generate the pack. ${message}`
-            )
+            void thread.persistTurn('assistant', packFailureCopy(message, language))
           }}
         />
       ) : null}

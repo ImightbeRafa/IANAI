@@ -1,5 +1,6 @@
 import { supabaseAdmin as supabase } from './supabase-admin.js'
 import { isBloomDermalPatchSku } from './product-creative-rules.js'
+import { sniffImageMime } from './fetch-image-data-url.js'
 import { fetchPublicUrl } from './url-safety.js'
 
 export interface BrandKitRow {
@@ -238,9 +239,17 @@ export async function fetchBrandImageAsBase64(
       console.warn('Failed to fetch', label, resp.status, url)
       return null
     }
+    const buffer = await resp.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
     const rawContentType = (resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
 
     let effectiveMime: string | null = GEMINI_SUPPORTED_IMAGE_MIMES.has(rawContentType) ? rawContentType : null
+    if (!effectiveMime) {
+      const sniffed = sniffImageMime(bytes)
+      if (sniffed && GEMINI_SUPPORTED_IMAGE_MIMES.has(sniffed)) {
+        effectiveMime = sniffed
+      }
+    }
     if (!effectiveMime) {
       const inferred = inferMimeFromUrl(url)
       if (inferred && GEMINI_SUPPORTED_IMAGE_MIMES.has(inferred)) {
@@ -257,7 +266,6 @@ export async function fetchBrandImageAsBase64(
 
     if (effectiveMime === 'image/jpg') effectiveMime = 'image/jpeg'
 
-    const buffer = await resp.arrayBuffer()
     const base64 = Buffer.from(buffer).toString('base64')
     return { mimeType: effectiveMime, data: base64 }
   } catch (err) {
@@ -277,10 +285,14 @@ function isAlreadyHostedBrandLogo(url: string): boolean {
   return /\/storage\/v1\/object\/public\/post-images\//i.test(url) && /\/brand-kit\//i.test(url)
 }
 
-function logoSkipReason(url: string): 'svg' | null {
+export function brandLogoSkipReason(url: string): 'svg' | null {
   const clean = url.split('?')[0].split('#')[0].toLowerCase()
   if (clean.endsWith('.svg') || clean.endsWith('.ico') || clean.endsWith('.gif')) return 'svg'
   return null
+}
+
+function logoSkipReason(url: string): 'svg' | null {
+  return brandLogoSkipReason(url)
 }
 
 /**

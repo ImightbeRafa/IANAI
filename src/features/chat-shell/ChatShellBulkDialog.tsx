@@ -130,6 +130,12 @@ export default function ChatShellBulkDialog({
           angleIds: selected,
           styleDnaId: styleDnaId || undefined,
         })
+        if (result.succeededScripts <= 0 && result.succeededPosts <= 0) {
+          onError?.(es
+            ? 'No se pudo generar el pack. Ningún guion se guardó.'
+            : 'Could not generate the pack. No scripts were saved.')
+          return
+        }
         onDone(es
           ? `Pack ${result.packId.slice(0, 8)}: ${result.succeededScripts} guiones y ${result.succeededPosts} posts. ${result.charged} créditos.`
           : `Pack ${result.packId.slice(0, 8)}: ${result.succeededScripts} scripts and ${result.succeededPosts} posts. ${result.charged} credits.`, {
@@ -145,6 +151,12 @@ export default function ChatShellBulkDialog({
           angles: selectedAngles,
           angleIds: selected,
         })
+        if (result.succeeded <= 0) {
+          onError?.(es
+            ? 'No se pudo generar el pack. Ningún guion se guardó.'
+            : 'Could not generate the pack. No scripts were saved.')
+          return
+        }
         onDone(es
           ? `Pack ${result.packId.slice(0, 8)}: ${result.succeeded} guiones guardados. ${result.charged} créditos.`
           : `Pack ${result.packId.slice(0, 8)}: ${result.succeeded} scripts saved. ${result.charged} credits.`, {

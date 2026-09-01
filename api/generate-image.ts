@@ -16,7 +16,7 @@ import { buildOrganicSinglePrompt, type OrganicSingleSubtype, type OrganicAspect
 import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64, brandLogoSkipReason } from './lib/brand-kit.js'
 import { resolvePostModeAspect } from './lib/post-aspect.js'
 import {
   appendEnhanceUserDirection,
@@ -26,6 +26,7 @@ import {
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
 import { fetchPublicImageAsDataUrl } from './lib/fetch-image-data-url.js'
+import { isReusableProductReference } from './lib/product-image-refs.js'
 import { meterActionForImageApi } from './lib/credits/catalog.js'
 import {
   estimateGrokImageCostUsd,
@@ -204,7 +205,7 @@ async function hydrateInputImagesFromProductImages(
       if (!row) {
         return { ok: false, status: 404, error: 'Product image not found' }
       }
-      if (row.kind === 'generated' || row.message_id) {
+      if (!isReusableProductReference(row)) {
         continue
       }
       if (options.sessionId) {
@@ -232,10 +233,19 @@ async function hydrateInputImagesFromProductImages(
       console.error('hydrate auto product_images error', error)
       return { ok: false, status: 500, error: 'Failed to load product images' }
     }
-    rows = ((data || []) as ImageRow[]).filter((row) => row.kind !== 'generated' && !row.message_id)
+    rows = ((data || []) as ImageRow[]).filter((row) => isReusableProductReference(row))
   }
 
-  if (rows.length === 0) return { ok: true }
+  if (rows.length === 0) {
+    if (ids.length > 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Could not load product reference image. Re-upload and try again.',
+      }
+    }
+    return { ok: true }
+  }
 
   // Prefer product kind ordering
   rows.sort((a, b) => {
@@ -263,6 +273,14 @@ async function hydrateInputImagesFromProductImages(
     }
     imageParams[inputKeys[slot]] = dataUrl
     slot += 1
+  }
+
+  if (slot === 0 && ids.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Could not load product reference image. Re-upload and try again.',
+    }
   }
 
   return { ok: true }
@@ -2644,26 +2662,40 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         .filter((row) => row.role !== 'product')
         .map((row) => row.url)
       // Prefer product photos first so edits API treats SKU as source of truth.
-      const referenceUrls = selectGrokReferenceBudget(
-        [
-          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
-          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
-        ],
-        3
-      ).map((row) => row.url)
-      const productReferenceCount = productRefUrls.length
-
       let grokLogoDataUrl: string | null = null
-      if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
+      const logoSourceUrl = (brandKit?.logo_url || logoFallbackUrl || '').trim()
+      if (logoSourceUrl && isPostMode && !isProductMode && !isLogoMode) {
         try {
           const logoData = await resolveInlineLogo()
           if (logoData) {
             grokLogoDataUrl = `data:${logoData.mimeType};base64,${logoData.data}`
+          } else if (!brandLogoSkipReason(logoSourceUrl)) {
+            return res.status(400).json({
+              error: imageParams.language === 'en'
+                ? 'Could not load the brand logo. Re-upload it and try again.'
+                : 'No pude cargar el logo de la marca. Volvé a subirlo e intentá de nuevo.',
+            })
           }
         } catch (logoErr) {
           console.warn('Failed to inject brand logo for Grok post generate:', logoErr)
+          if (!brandLogoSkipReason(logoSourceUrl)) {
+            return res.status(400).json({
+              error: imageParams.language === 'en'
+                ? 'Could not load the brand logo. Re-upload it and try again.'
+                : 'No pude cargar el logo de la marca. Volvé a subirlo e intentá de nuevo.',
+            })
+          }
         }
       }
+      const grokProductReferenceCount = productRefUrls.length
+      const referenceUrls = selectGrokReferenceBudget(
+        [
+          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
+          ...(grokLogoDataUrl ? [{ url: grokLogoDataUrl, role: 'style' as const }] : []),
+          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
+        ],
+        3
+      ).map((row) => row.url)
 
       const grokCtaStrength = ((): string => {
         const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
@@ -2696,7 +2728,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           businessContext: typeof imageParams.businessContext === 'string'
             ? imageParams.businessContext
             : null,
-          hasProductRefs: productReferenceCount > 0,
+          hasProductRefs: grokProductReferenceCount > 0,
           hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
           productSilhouette: postProductSilhouette,
           lockedOfferPrice: postLockedOfferPrice,
@@ -2750,7 +2782,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         const grokApi = resolveGrokImageApiMode({
           action: 'generate',
-          productReferenceCount,
+          productReferenceCount: grokProductReferenceCount,
           referenceCount: referenceUrls.length,
         })
         const buildGrokRequest = (prompt: string): Record<string, unknown> => {

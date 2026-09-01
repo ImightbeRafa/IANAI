@@ -124,6 +124,27 @@ describe('ChatShellBulkDialog Pack sheet', () => {
     expect(input.value).toBe('15')
   })
 
+  it('updates credits when Cantidad goes from 2 to 10', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatShellBulkDialog
+        open
+        language="es"
+        brandId="b1"
+        initialCount={2}
+        onClose={vi.fn()}
+        onDone={vi.fn()}
+      />
+    )
+    const input = screen.getByLabelText('Cantidad (2–25)') as HTMLInputElement
+    expect(input.value).toBe('2')
+    expect(screen.getByText(/6 créditos · máximo estimado/)).toBeTruthy()
+    await user.clear(input)
+    await user.type(input, '10')
+    expect(input.value).toBe('10')
+    expect(screen.getByText(/30 créditos · máximo estimado/)).toBeTruthy()
+  })
+
   it('closes to chat on Confirmar y generar and reports missing session in-chat', async () => {
     const user = userEvent.setup()
     const onLaunch = vi.fn()

@@ -1,11 +1,10 @@
 ## 2026-09-01 — Preview feedback: close sheets, Pack qty, Pack in-chat, kit refs via server
 
 **Area:** chat-shell
-**Files:** `useChatSessionThread.ts`, `ChatShellBulkDialog.tsx`, `ChatShell.tsx`, `chatShellImageApi.ts`, `api/fetch-image.ts`, `api/lib/fetch-image-data-url.ts`, `api/lib/grok-image-generate.ts`, `api/generate-image.ts`, `api/bulk-scripts.ts`, `api/bulk-campaign.ts`, `.cursor/skills/verify-advance/`
+**Files:** `useChatSessionThread.ts`, `ChatShellBulkDialog.tsx`, `ChatShellClarifySheet.tsx`, `ChatShell.tsx`, `chatShellImageApi.ts`, `api/fetch-image.ts`, `api/lib/fetch-image-data-url.ts`, `api/lib/product-image-refs.ts`, `api/lib/grok-image-generate.ts`, `api/generate-image.ts`, `api/bulk-scripts.ts`, `api/bulk-campaign.ts`, `api/lib/bulk/store.ts`
 
-- Post/Foto **Generar** closes the sheet immediately; the thread shows **Generando post…** instead of a stuck Paso 6.
-- Pack **Cantidad (2–25)** uses a typing draft + **− / +** (no clamp-on-keystroke). **Confirmar y generar** closes to chat, shows pack progress, reloads messages, and writes a clear assistant error if the pack cannot run (never silent empty).
-- Kit/store product + logo images are fetched **server-side** (`/api/fetch-image`, generate hydrate, Grok ref resolve). Browser `fetch` is not used for storefront hosts. CSP `connect-src` / `script-src` unchanged (`vercel.live` feedback.js stays blocked). `signInWithPassword` is the only password grant — 400 is a failed login, not leftover code.
+- Post/Foto **Generar** closes the sheet immediately (and hides it while `imageBusy`); the thread shows **Generando post…** instead of a stuck Paso 6. Pack confirm does the same with **Generando pack** — no extra “Pack · N guiones” transcript lines. Failures persist a Spanish `No pude generar el pack.` turn (never silent empty).
+- Kit/store product + logo images are fetched **server-side** (`/api/fetch-image`, generate hydrate, Grok ref resolve). Hydrate no longer skips `kind=product` rows that have `message_id`. Raster logo fetch failure is a Spanish error, not a silent compose. Browser `fetch` is not used for storefront hosts. CSP `connect-src` / `script-src` unchanged (`vercel.live` feedback.js stays blocked). `signInWithPassword` is the only password grant — 400 is a failed login, not leftover code.
 
 No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
 

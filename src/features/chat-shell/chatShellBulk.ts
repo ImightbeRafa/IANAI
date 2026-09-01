@@ -104,6 +104,29 @@ export function stepComposerBulkCount(current: string | number, delta: number): 
   return String(clampComposerBulkCount(n + delta))
 }
 
+/** In-chat Pack failure. Never a silent empty complete. */
+export function packFailureCopy(raw: string, language: 'es' | 'en'): string {
+  const message = (raw || '').trim() || (language === 'es' ? 'Error desconocido' : 'Unknown error')
+  if (language === 'en') return `Could not generate the pack. ${message}`
+  const lower = message.toLowerCase()
+  if (/brand has no offers|no offers/.test(lower)) {
+    return 'No pude generar el pack. Esta marca no tiene ofertas. Creá una oferta e intentá de nuevo.'
+  }
+  if (/request failed/.test(lower)) {
+    return `No pude generar el pack. ${message.replace(/^Request failed/i, 'La solicitud falló')}`
+  }
+  if (/credit|402|limit reached|insufficient/.test(lower)) {
+    return 'No pude generar el pack. No hay créditos suficientes para este pack.'
+  }
+  if (/chat abierto|sessionid|open a chat/.test(lower)) {
+    return 'No pude generar el pack. No hay un chat abierto para guardar el pack.'
+  }
+  if (/^no pude generar el pack/i.test(message) || /^no se pudo generar el pack/i.test(message)) {
+    return message
+  }
+  return `No pude generar el pack. ${message}`
+}
+
 export async function fetchBulkAngles(body: {
   brandId: string
   offerId?: string

@@ -260,7 +260,8 @@ export default function ChatShellClarifySheet({
     )
   }
 
-  if (imageClarify) {
+  // Generar sets imageBusy before React may clear imageClarify — never keep the overlay over Generando…
+  if (imageClarify && !imageBusy) {
     const meta = imageStepMeta(imageClarify)
     const isRefs = imageClarify.step === 'refs'
     const creditsLine = isRefs

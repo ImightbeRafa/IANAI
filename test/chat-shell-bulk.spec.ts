@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampComposerBulkCount, sanitizeComposerBulkCountDraft, stepComposerBulkCount } from '../src/features/chat-shell/chatShellBulk'
+import { clampComposerBulkCount, sanitizeComposerBulkCountDraft, stepComposerBulkCount, packFailureCopy } from '../src/features/chat-shell/chatShellBulk'
 
 describe('ChatShell bulk count', () => {
   it('clamps composer count to 2–25 with default 10', () => {
@@ -20,5 +20,11 @@ describe('ChatShell bulk count', () => {
     expect(stepComposerBulkCount('2', -1)).toBe('2')
     expect(stepComposerBulkCount('2', 1)).toBe('3')
     expect(stepComposerBulkCount('25', 1)).toBe('25')
+  })
+
+  it('writes a Spanish in-chat pack error, never a silent empty', () => {
+    expect(packFailureCopy('Brand has no offers', 'es')).toMatch(/^No pude generar el pack/)
+    expect(packFailureCopy('Brand has no offers', 'es')).toMatch(/ofertas/)
+    expect(packFailureCopy('Request failed (402)', 'es')).toMatch(/solicitud falló/)
   })
 })

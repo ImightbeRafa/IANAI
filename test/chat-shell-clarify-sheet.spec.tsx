@@ -243,4 +243,41 @@ describe('ChatShellClarifySheet', () => {
     )
     expect(screen.queryByRole('dialog', { name: 'Post' })).toBeNull()
   })
+
+  it('hides Post refs sheet while Generando even if imageClarify is still set', () => {
+    const refsState = {
+      sessionId: 's1',
+      step: 'refs' as const,
+      originText: 'Quiero crear un post',
+      productId: 'p1',
+      source: 'composer' as const,
+      partial: {},
+      history: [],
+      preferences: {
+        style: { kind: 'preset' as const, presetId: 'venta-directa' as const },
+        aspectRatio: '9:16' as const,
+        model: 'grok-imagine' as const,
+        density: 'hard' as const,
+      },
+      referencesRequired: true,
+      referenceImages: [{
+        id: 'img1',
+        url: 'https://cdn.example/product.webp',
+        kind: 'product' as const,
+        dbKind: 'product' as const,
+        productId: 'p1',
+        selected: true,
+      }],
+    }
+    render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={refsState}
+        imageBusy
+        onAnswerImageClarify={vi.fn()}
+      />
+    )
+    expect(screen.queryByRole('dialog', { name: 'Post' })).toBeNull()
+  })
 })
