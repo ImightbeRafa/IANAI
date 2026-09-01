@@ -1,10 +1,13 @@
 /** @vitest-environment happy-dom */
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatComposerCreateDock, {
   type ComposerCreateAction,
 } from '../src/features/chat-shell/ChatComposerCreateDock'
+
+const SHELL_CSS = readFileSync('src/features/chat-shell/chat-shell.css', 'utf8')
 
 afterEach(cleanup)
 
@@ -129,5 +132,38 @@ describe('ChatComposerCreateDock', () => {
     expect(screen.getByText('Falta afinar')).toBeTruthy()
     expect(screen.queryByText('Primero el kit')).toBeNull()
     expect((screen.getByRole('button', { name: 'Guiones' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('keeps Guiones/Post/Foto/Pack fully labeled when the named Falta chip is long', () => {
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Falta: Público, Fuentes"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={makeActions()}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Falta: Público, Fuentes')).toBeTruthy()
+    for (const label of ['Guiones', 'Post', 'Foto', 'Pack'] as const) {
+      const button = screen.getByRole('button', { name: label })
+      expect(button.querySelector('span')?.textContent).toBe(label)
+    }
+  })
+
+  it('does not ellipsis glass verb labels or the named Falta chip', () => {
+    const spanBlock = SHELL_CSS.split('.chat-shell__idle-actions button span {')[1]?.split('}')[0] || ''
+    expect(spanBlock).toMatch(/overflow:\s*visible/)
+    expect(spanBlock).not.toMatch(/text-overflow:\s*ellipsis/)
+    const actionsBlock = SHELL_CSS.split('.chat-shell__idle-actions {')[1]?.split('}')[0] || ''
+    expect(actionsBlock).toMatch(/flex:\s*0 0 auto/)
+    expect(actionsBlock).not.toMatch(/overflow-x:\s*auto/)
+    const titleBlock = SHELL_CSS.split('.chat-shell__idle-kit-title strong {')[1]?.split('}')[0] || ''
+    expect(titleBlock).toMatch(/white-space:\s*normal/)
+    expect(titleBlock).not.toMatch(/text-overflow:\s*ellipsis/)
+    expect(titleBlock).not.toMatch(/white-space:\s*nowrap/)
   })
 })

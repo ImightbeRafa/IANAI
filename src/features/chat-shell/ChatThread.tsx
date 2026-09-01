@@ -43,7 +43,7 @@ import {
   type ShellImageAspect,
   type ShellImageDensity,
 } from './chatShellImageIntent'
-import { shouldShowFirstRunCta, kitHardBlocked } from './chatShellFirstRun'
+import { shouldShowFirstRunCta } from './chatShellFirstRun'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -382,7 +382,9 @@ export default memo(function ChatThread({
     hasUserOrArtifactMessages,
     showInitialLoader,
   })
-  const generateBlocked = kitHardBlocked({ kitReady, hasOfferName })
+  // In-thread Crear post / Optimizar para post: same stronglyComplete gate as #34
+  // (not kitHardBlocked). Soft kit still unlocks glass verbs when an offer exists.
+  const kitGenerateBlocked = !kitReady
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -587,7 +589,7 @@ export default memo(function ChatThread({
                           offerImageUrl={offerImage?.image_url}
                           referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
-                          kitGenerateBlocked={generateBlocked}
+                          kitGenerateBlocked={kitGenerateBlocked}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
                               ...opts,
@@ -664,7 +666,7 @@ export default memo(function ChatThread({
                         savingScript={savingScript}
                         referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
-                        kitGenerateBlocked={generateBlocked}
+                        kitGenerateBlocked={kitGenerateBlocked}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}

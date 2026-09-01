@@ -297,6 +297,34 @@ describe('ChatShellScriptCard post preview', () => {
     expect(await screen.findByText(/No pude guardar el texto del post/)).toBeTruthy()
     expect(onGenerateImage).not.toHaveBeenCalled()
   })
+
+  it('disables Crear post with Primero el kit and no filled primary when the kit is incomplete', () => {
+    const onGenerateImage = vi.fn()
+    const onPreparePost = vi.fn(async () => 'should not run')
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
+        language="es"
+        onGenerateImage={onGenerateImage}
+        onPreparePost={onPreparePost}
+        kitGenerateBlocked
+      />
+    )
+
+    const crearPost = screen.getByRole('button', { name: 'Primero el kit' })
+    expect((crearPost as HTMLButtonElement).disabled).toBe(true)
+    expect(crearPost.className.split(/\s+/)).not.toContain('is-primary')
+    expect(crearPost.getAttribute('data-kit-blocked')).toBe('true')
+    expect(screen.queryByRole('button', { name: /crear post/i })).toBeNull()
+
+    fireEvent.click(crearPost)
+    expect(onPreparePost).not.toHaveBeenCalled()
+    expect(onGenerateImage).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /más acciones/i }))
+    const optimize = screen.getByRole('menuitem', { name: 'Primero el kit' })
+    expect((optimize as HTMLButtonElement).disabled).toBe(true)
+  })
 })
 
 describe('collectImageScriptChoices', () => {

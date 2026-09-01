@@ -1,3 +1,13 @@
+## 2026-09-01 — Script card Primero el kit + glass Pack not clipped
+
+**Area:** chat-shell
+**Files:** `ChatThread.tsx`, `ChatShellScriptCard.tsx`, `chat-shell.css`
+
+- In-thread “Crear post” / “Optimizar para post” gate on `stronglyComplete` again (same leftover closed on #34). Incomplete kits (IdleBar `Falta: Público, Fuentes` even with an offer) show disabled **Primero el kit** with no filled `is-primary`. Glass verbs stay on soft `kitHardBlocked`. Existing kits are not wiped.
+- Glass row no longer ellipsizes Pack to “Pa…”. Verb group does not shrink; named Falta chip wraps instead of hiding. Guiones / Post / Foto / Pack stay fully readable.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
 ## 2026-09-01 — Header past-thread title + named kit chip
 
 **Area:** chat-shell

@@ -869,10 +869,11 @@ export default function ChatShellScriptCard({
         {onGenerateImage ? (
           <button
             type="button"
-            className="chat-shell__artifact-action is-primary"
+            className={`chat-shell__artifact-action${kitGenerateBlocked ? '' : ' is-primary'}`}
             disabled={busy || imageBusy || preparingPost || kitGenerateBlocked}
             onClick={() => void openPostPreview()}
             title={kitGenerateBlocked ? kitBlockedHint : (es ? 'Crear post' : 'Create post')}
+            aria-label={kitGenerateBlocked ? kitBlockedHint : (es ? 'Crear post' : 'Create post')}
             data-kit-blocked={kitGenerateBlocked ? 'true' : undefined}
           >
             {imageBusy || preparingPost ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}

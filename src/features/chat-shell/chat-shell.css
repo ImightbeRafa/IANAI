@@ -1655,6 +1655,13 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   color: var(--text-muted);
 }
 
+.chat-shell__artifact-action.is-primary:disabled,
+.chat-shell__artifact-action[data-kit-blocked="true"] {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
 .chat-shell__artifact-edit {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -2337,7 +2344,7 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .chat-shell__idle-kit {
@@ -2345,7 +2352,7 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  flex-shrink: 1;
+  flex: 1 1 10rem;
   padding-right: 8px;
   border-right: 1px solid color-mix(in srgb, #67e8f9 18%, transparent);
 }
@@ -2364,23 +2371,18 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.25;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: break-word;
 }
 
 .chat-shell__idle-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  flex: 1;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.chat-shell__idle-actions::-webkit-scrollbar {
-  display: none;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .chat-shell__idle-actions button {
@@ -2411,9 +2413,9 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 }
 
 .chat-shell__idle-actions button span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: none;
+  overflow: visible;
   white-space: nowrap;
 }
 
