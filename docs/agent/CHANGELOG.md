@@ -1,3 +1,13 @@
+## 2026-09-01 — verify-advance skill for chat-shell Preview
+
+**Area:** chat-shell / agent
+**Files:** `.cursor/skills/verify-advance/`
+
+- Project-local verification skill (`verify-advance`) for `/chat`: Launch, Doctor, Drive, Evidence, Cleanup, Helpers.
+- Feature map: invited first-open tour, after-skip chrome (named Falta, Primero el kit, Pack readable), uninvited invite gate. No secrets in the skill. Does not grant invites, write AIIAN SQL, or wipe kits.
+
+No merge. No invite / `chat_shell` / gift / SQL.
+
 ## 2026-09-01 — Script card Primero el kit + glass Pack not clipped
 
 **Area:** chat-shell
