@@ -9,6 +9,7 @@ import {
   quoteCredits,
   resolveImageCreditAction,
   legacyActionToCredit,
+  legacyMeterRpcAction,
   meterActionForImageApi,
 } from '../api/lib/credits/catalog'
 import {
@@ -72,6 +73,23 @@ describe('credit catalog', () => {
       action: meterActionForImageApi('generate'),
       imageModel: 'grok-imagine',
     })).toEqual({ creditAction: 'image_standard', units: 1 })
+  })
+
+  it('maps chat-shell script_edit and condense to guion_edit / prompt_condense', () => {
+    expect(legacyActionToCredit({ action: 'script_edit' })).toEqual({
+      creditAction: 'guion_edit',
+      units: 1,
+    })
+    expect(quoteCredits('guion_edit')).toBe(1)
+    expect(legacyActionToCredit({ action: 'condense' })).toEqual({
+      creditAction: 'prompt_condense',
+      units: 1,
+    })
+    expect(quoteCredits('prompt_condense')).toBe(0)
+    expect(legacyMeterRpcAction('script_edit')).toBeNull()
+    expect(legacyMeterRpcAction('condense')).toBeNull()
+    expect(legacyMeterRpcAction('edit')).toBe('image')
+    expect(legacyMeterRpcAction('enhance')).toBe('enhance')
   })
 
   it('defines public plans without unlimited', () => {

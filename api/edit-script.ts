@@ -1,10 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth } from './lib/auth.js'
+import { requireAuth, checkUsageLimit, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import { GROK_API_URL, GROK_TEXT_MODEL } from './lib/grok-models.js'
 import { isUuid, resolveAuthorizedSessionProduct } from './lib/session-access.js'
 import { userHasProductAccess } from './lib/product-access.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
+import { resolveChatGenerationId } from './lib/credits/chat-generation-id.js'
 
 type Language = 'en' | 'es'
 type EditType = 'script_edit' | 'script_enhance' | 'script_hook' | 'script_consciousness'
@@ -85,6 +86,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    const sessionBound = sessionId != null && sessionId !== ''
+    const generationIdResult = resolveChatGenerationId({
+      sessionBound,
+      incoming: (req.body as { generationId?: unknown } | undefined)?.generationId,
+    })
+    if (!generationIdResult.ok) {
+      return res.status(400).json({
+        error: generationIdResult.error,
+        code: 'generation_id_required',
+      })
+    }
+    const generationId = generationIdResult.generationId
+
+    if (sessionBound) {
+      const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, 'script_edit')
+      if (!allowed) {
+        return res.status(429).json({
+          error: 'Límite de créditos alcanzado',
+          message: creditsRequired
+            ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
+            : `Has alcanzado el límite de ${limit} este mes. Actualiza tu plan para continuar.`,
+          limit,
+          remaining: 0,
+          creditsRequired,
+        })
+      }
+    }
+
     const grokApiKey = process.env.GROK_API_KEY
     if (!grokApiKey) return res.status(500).json({ error: 'Grok API key not configured' })
 
@@ -124,11 +153,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model: GROK_TEXT_MODEL,
       inputTokens: data.usage?.prompt_tokens || estimateTokens(systemPrompt + userPrompt),
       outputTokens: data.usage?.completion_tokens || estimateTokens(content),
+      generationId,
       success: true,
-      metadata: { editType: safeEditType },
+      metadata: { editType: safeEditType, sessionBound },
     })
 
-    return res.status(200).json({ content })
+    if (sessionBound) {
+      await incrementUsage(user.id, 'script_edit', { generationId })
+    }
+
+    return res.status(200).json({ content, generationId })
   } catch (error) {
     console.error('Edit script error:', error)
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Internal server error' })

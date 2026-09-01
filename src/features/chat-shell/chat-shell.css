@@ -4199,6 +4199,40 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   font-family: var(--font-sans);
 }
 
+/* Invite gate matches homepage / chat-shell dark (#07090d), not OS light. */
+.chat-shell__gate[data-theme="obsidian-dark"] {
+  background:
+    radial-gradient(900px 480px at 18% -8%, rgba(45, 226, 255, 0.14), transparent 52%),
+    #07090d;
+  color: #e8eef8;
+}
+
+.chat-shell__gate[data-theme="obsidian-dark"] .chat-shell__gate-card {
+  background: #11161e;
+  border: 1px solid rgba(45, 226, 255, 0.18);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.chat-shell__gate[data-theme="obsidian-dark"] .chat-shell__gate-card h1 {
+  color: #e8eef8;
+}
+
+.chat-shell__gate[data-theme="obsidian-dark"] .chat-shell__gate-card p {
+  color: rgba(232, 238, 248, 0.72);
+}
+
+.chat-shell__gate[data-theme="obsidian-dark"] .chat-shell__btn {
+  color: #e8eef8;
+  border-color: rgba(45, 226, 255, 0.28);
+  background: transparent;
+}
+
+.chat-shell__gate[data-theme="obsidian-dark"] .chat-shell__btn--primary {
+  background: #2de2ff;
+  border-color: #2de2ff;
+  color: #07090d;
+}
+
 .chat-shell__gate-theme {
   position: fixed;
   top: 16px;

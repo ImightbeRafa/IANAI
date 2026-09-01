@@ -202,13 +202,40 @@ export function quoteCredits(action: CreditAction, units = 1): number {
   return per * n
 }
 
-export type LegacyMeterAction = 'script' | 'image' | 'description' | 'enhance' | 'reply' | 'edit'
+export type LegacyMeterAction = 'script' | 'image' | 'description' | 'enhance' | 'reply' | 'edit' | 'script_edit' | 'condense'
 
 /** Map `/api/generate-image` `action` to the meter used by checkUsageLimit / incrementUsage. */
 export function meterActionForImageApi(action: string): LegacyMeterAction {
   if (action === 'edit') return 'edit'
   if (action === 'enhance') return 'enhance'
   return 'image'
+}
+
+/**
+ * Legacy `increment_usage` RPC only knows script/image/description/reply
+ * (plus the existing enhance pass-through). Chat-shell script_edit / condense
+ * skip that RPC when CREDITS_V1 is off — credits v1 consume handles them.
+ */
+export function legacyMeterRpcAction(
+  action: LegacyMeterAction
+): 'script' | 'image' | 'description' | 'reply' | 'enhance' | null {
+  switch (action) {
+    case 'script_edit':
+    case 'condense':
+      return null
+    case 'edit':
+      return 'image'
+    case 'script':
+    case 'image':
+    case 'description':
+    case 'enhance':
+    case 'reply':
+      return action
+    default: {
+      const _exhaustive: never = action
+      return _exhaustive
+    }
+  }
 }
 
 /** Map legacy checkUsageLimit actions when CREDITS_V1 is on. */
@@ -227,6 +254,10 @@ export function legacyActionToCredit(options: {
       return { creditAction: 'image_enhance', units: 1 }
     case 'edit':
       return { creditAction: 'image_edit', units: 1 }
+    case 'script_edit':
+      return { creditAction: 'guion_edit', units: 1 }
+    case 'condense':
+      return { creditAction: 'prompt_condense', units: 1 }
     case 'image':
       return {
         creditAction: resolveImageCreditAction({

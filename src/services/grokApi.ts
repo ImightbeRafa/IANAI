@@ -1,4 +1,5 @@
 import type { Message, ScriptGenerationSettings, ProductType, ContextDocument, Business, Product } from '../types'
+import { mintShellGenerationId } from '../features/chat-shell/shellGenerationId'
 import { supabase } from '../lib/supabase'
 
 const CHAT_API_URL = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
@@ -272,6 +273,7 @@ export async function editScript(
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
   if (!token) throw new Error(language === 'es' ? 'No estás autenticado.' : 'Not authenticated.')
+  const generationId = mintShellGenerationId()
 
   let contextBlock = ''
   if (businessCtx && Object.keys(businessCtx).length > 0) {
@@ -330,6 +332,7 @@ STRICT RULES:
       businessDetails: {},
       language,
       feature: editType || 'script',
+      generationId,
       ...(sessionId ? { sessionId } : {}),
       ...(productId ? { productId } : {})
     })
@@ -361,6 +364,7 @@ export async function streamlineScriptForPost(options: {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
   if (!token) throw new Error(options.language === 'en' ? 'Not authenticated.' : 'No estás autenticado.')
+  const generationId = mintShellGenerationId()
 
   const response = await fetch(STREAMLINE_API_URL, {
     method: 'POST',
@@ -374,6 +378,7 @@ export async function streamlineScriptForPost(options: {
       textDensity: options.textDensity || 'hard',
       language: options.language || 'es',
       productContext: options.productContext,
+      generationId,
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       ...(options.productId ? { productId: options.productId } : {}),
     }),

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth } from './lib/auth.js'
+import { requireAuth, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
 import {
   GROK_TEXT_MODEL_EFFICIENT,
@@ -13,6 +13,7 @@ import {
 import { isUuid, resolveAuthorizedSessionProduct } from './lib/session-access.js'
 import { userHasProductAccess } from './lib/product-access.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
+import { resolveChatGenerationId } from './lib/credits/chat-generation-id.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -26,6 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return
 
   try {
+    let generationId: string | undefined
     const {
       script,
       postStyle = 'venta-directa',
@@ -57,6 +59,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(403).json({ error: 'No access to product' })
       }
     }
+
+    const sessionBound = sessionId != null && sessionId !== ''
+    const generationIdResult = resolveChatGenerationId({
+      sessionBound,
+      incoming: req.body?.generationId,
+    })
+    if (!generationIdResult.ok) {
+      return res.status(400).json({
+        error: generationIdResult.error,
+        code: 'generation_id_required',
+      })
+    }
+    generationId = generationIdResult.generationId
 
     const xaiApiKey = process.env.GROK_API_KEY
     if (!xaiApiKey) {
@@ -107,6 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model: GROK_TEXT_MODEL_EFFICIENT,
       inputTokens,
       outputTokens,
+      generationId,
       success: true,
       metadata: {
         action: 'streamline_script',
@@ -115,10 +131,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         textDensity,
         hasProductContext: !!safeContext,
         endpoint: completion.endpoint,
+        sessionBound,
       }
     })
 
-    return res.status(200).json({ streamlined, textDensity })
+    if (sessionBound) {
+      await incrementUsage(user.id, 'condense', { generationId })
+    }
+
+    return res.status(200).json({ streamlined, textDensity, generationId })
 
   } catch (error) {
     console.error('Streamline script error:', error)
@@ -128,6 +149,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       userEmail: user.email,
       feature: 'prompt_condense',
       model: GROK_TEXT_MODEL_EFFICIENT,
+      generationId,
       success: false,
       errorMessage: error instanceof Error ? error.message : 'Unknown error'
     })

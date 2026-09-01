@@ -1,3 +1,15 @@
+## 2026-09-01 — Preview leftover nits (login, gate, generationId, i18n)
+
+**Area:** chat-shell / credits / login
+**Files:** `Login.tsx`, `ChatShellGate.tsx`, `ChatShellPage.tsx`, `chat-shell.css`, `edit-script.ts`, `streamline-script.ts`, `grokApi.ts`, `catalog.ts`, `ChatShellScriptCard.tsx`
+
+- Login subtitle matches homepage / chat-shell: “Guiones, posts y fotos de agencia. En un chat.”
+- Invite-gate is locked to obsidian-dark (`#07090d`) so it matches the chat-shell homepage, not OS light.
+- `edit-script` / `streamline-script` require a client `generationId` UUID when `sessionId` is present (same reject-missing as generate-image / `/api/chat`). Chat-shell edits consume `guion_edit` (1) idempotently; streamline stays `prompt_condense` (0). Classic callers without `sessionId` still mint server-side and stay uncharged.
+- Script-card hook / awareness more-menu options use `labelEs` / `labelEn`.
+
+No merge. No invite / `chat_shell` / gift / SQL. No getMessages pagination, CORS lock, or Deployment Protection.
+
 ## 2026-09-01 — Wire chat-shell tour on PR #35 Preview
 
 **Area:** chat-shell first-run

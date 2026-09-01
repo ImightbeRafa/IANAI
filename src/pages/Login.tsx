@@ -8,7 +8,7 @@ import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 const labels = {
   es: {
-    subtitle: 'Iniciá sesión para crear guiones que venden',
+    subtitle: 'Guiones, posts y fotos de agencia. En un chat.',
     google: 'Continuar con Google',
     googleConnecting: 'Conectando…',
     orEmail: 'o iniciá con tu correo',
@@ -24,7 +24,7 @@ const labels = {
     signInFail: 'No se pudo iniciar sesión',
   },
   en: {
-    subtitle: 'Sign in to create winning ad scripts',
+    subtitle: 'Agency scripts, posts, and photos. In one chat.',
     google: 'Continue with Google',
     googleConnecting: 'Connecting...',
     orEmail: 'or sign in with email',

@@ -48,11 +48,12 @@ export default function ChatShellPage() {
   const [phase, setPhase] = useState<OnboardingPhase>('loading')
 
   useLayoutEffect(() => {
-    applyChatShellTheme(theme)
+    const applied = canAccessChat ? theme : 'obsidian-dark'
+    applyChatShellTheme(applied)
     return () => {
       clearChatShellTheme()
     }
-  }, [theme])
+  }, [theme, canAccessChat])
 
   useEffect(() => {
     if (!canAccessChat || !user?.id) return
@@ -135,9 +136,10 @@ export default function ChatShellPage() {
     return (
       <ChatShellGate
         onRetry={refresh}
-        theme={theme}
+        theme="obsidian-dark"
         onToggleTheme={toggleTheme}
         reason={reason}
+        showThemeToggle={false}
       />
     )
   }

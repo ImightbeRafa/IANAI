@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import ChatShellScriptCard from '../src/features/chat-shell/ChatShellScriptCard'
+import ChatShellScriptCard, {
+  CONSCIOUSNESS_OPTIONS,
+  HOOK_OPTIONS,
+} from '../src/features/chat-shell/ChatShellScriptCard'
 import { collectImageScriptChoices, shouldReviewChosenScript } from '../src/features/chat-shell/useChatSessionThread'
 import { getScriptsByMessage, getScriptVersions } from '../src/services/database'
 
@@ -323,5 +326,31 @@ describe('collectImageScriptChoices', () => {
     expect(shouldReviewChosenScript('Generar post', 'rail')).toBe(true)
     expect(shouldReviewChosenScript('Quiero crear un post', 'script_card')).toBe(false)
     expect(shouldReviewChosenScript('Hazme un logo', 'composer')).toBe(false)
+  })
+
+  it('shows ES/EN hook and awareness labels in the more menu', () => {
+    expect(HOOK_OPTIONS.map((opt) => opt.labelEn)).toEqual([
+      'Direct definition',
+      'Tangible pain',
+      'Direct offer',
+    ])
+    expect(CONSCIOUSNESS_OPTIONS.map((opt) => opt.labelEn)).toEqual(['Cold', 'Warm', 'Hot'])
+
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Direct sale', content: 'Original script' }}
+        language="en"
+        onEdit={async () => 'edited'}
+        onGenerateImage={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }))
+    expect(screen.getByRole('menuitem', { name: /direct definition/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /tangible pain/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /direct offer/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /^cold$/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /^warm$/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /^hot$/i })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /definición directa/i })).toBeNull()
   })
 })
