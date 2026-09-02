@@ -940,7 +940,7 @@ export default function ChatShell({
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
 
-      {bulkOpen && workspace.activeBrand ? (
+      {workspace.activeBrand ? (
         <ChatShellBulkDialog
           open={bulkOpen}
           language={language}
