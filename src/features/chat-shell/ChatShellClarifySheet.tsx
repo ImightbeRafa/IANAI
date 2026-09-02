@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ScriptFramework } from '../../types'
 import { CREDIT_WEIGHTS } from '../../lib/creditsCatalog'
+import { scriptQuoteCount, withRemainingBalance } from './chatShellCreditQuote'
 import ChatShellFlowSheet from './ChatShellFlowSheet'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
@@ -57,6 +58,8 @@ interface ChatShellClarifySheetProps {
   onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style' | 'logo', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
   onOpenImagesRail?: () => void
+  creditsRemaining?: number | null
+  creditsEnabled?: boolean
 }
 
 function ChipRow({ children }: { children: ReactNode }) {
@@ -160,17 +163,24 @@ export default function ChatShellClarifySheet({
   onUploadOfferReference,
   onRemoveOfferReference,
   onOpenImagesRail,
+  creditsRemaining = null,
+  creditsEnabled = false,
 }: ChatShellClarifySheetProps) {
   const t = shellT(language)
   const es = language === 'es'
 
   if (scriptClarify) {
     const meta = scriptStepIndex(scriptClarify)
-    const count = Math.max(1, scriptClarify.settings.variations || 1)
+    const count = scriptQuoteCount(scriptClarify.settings)
     const credits = CREDIT_WEIGHTS.guion_oferta * count
     const isCtaStep = scriptClarify.step === 'cta'
     const creditsLine = isCtaStep
-      ? t.flowCreditsScript.replace('{n}', String(credits)).replace('{count}', String(count))
+      ? withRemainingBalance(
+        t.flowCreditsScript.replace('{n}', String(credits)).replace('{count}', String(count)),
+        creditsRemaining,
+        language,
+        creditsEnabled
+      )
       : null
     const question =
       scriptClarify.step === 'type'
@@ -265,7 +275,12 @@ export default function ChatShellClarifySheet({
     const meta = imageStepMeta(imageClarify)
     const isRefs = imageClarify.step === 'refs'
     const creditsLine = isRefs
-      ? t.flowCreditsImage.replace('{n}', String(CREDIT_WEIGHTS.image_standard))
+      ? withRemainingBalance(
+        t.flowCreditsImage.replace('{n}', String(CREDIT_WEIGHTS.image_standard)),
+        creditsRemaining,
+        language,
+        creditsEnabled
+      )
       : null
     const canContinueRefs =
       !imageClarify.referencesRequired

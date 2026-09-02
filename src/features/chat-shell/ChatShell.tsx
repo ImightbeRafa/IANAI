@@ -35,6 +35,8 @@ import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
 import ChatShellBulkDialog from './ChatShellBulkDialog'
 import { clampComposerBulkCount, packFailureCopy } from './chatShellBulk'
+import { invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
+import { formatCreditsBalance } from './chatShellCreditQuote'
 import {
   captureMcpIntakeFromUrl,
   clearStoredMcpIntake,
@@ -646,6 +648,11 @@ export default function ChatShell({
               </button>
             </div>
             <div className="chat-shell__crumbs">{crumbs || t.chat}</div>
+            {thread.creditsEnabled ? (
+              <span className="chat-shell__credits-tag">
+                {formatCreditsBalance(thread.creditsRemaining, language)}
+              </span>
+            ) : null}
             <span className="chat-shell__model-tag">
               {getTextModelPreference() === 'efficient' ? t.efficientModel : t.bestModel}
             </span>
@@ -712,6 +719,8 @@ export default function ChatShell({
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
           onBackScriptClarify={() => thread.backScriptClarify()}
           creditQuote={thread.creditQuote}
+          creditsRemaining={thread.creditsRemaining}
+          creditsEnabled={thread.creditsEnabled}
           onConfirmCreditQuote={() => void thread.confirmCreditQuote()}
           onCancelCreditQuote={() => thread.cancelCreditQuote()}
           onOpenImagesRail={() => selectRailTab('images')}
@@ -948,6 +957,8 @@ export default function ChatShell({
           offerId={thread.activeProduct?.id || thread.offers[0]?.product_id}
           sessionId={workspace.activeSession?.id}
           initialCount={bulkCount}
+          creditsRemaining={thread.creditsRemaining}
+          creditsEnabled={thread.creditsEnabled}
           onClose={() => setBulkOpen(false)}
           onLaunch={() => {
             setBulkOpen(false)
@@ -972,6 +983,7 @@ export default function ChatShell({
                   )
                 }
                 await thread.reloadMessages()
+                invalidateUsageLimitsCache()
               } finally {
                 setPackBusy(false)
               }

@@ -15,6 +15,7 @@ interface AuthContextType {
   signInWithGoogle: (options?: { redirectPath?: string }) => Promise<void>
   signOut: () => Promise<void>
   updateProfile: (updates: { full_name?: string; avatar_url?: string }) => Promise<void>
+  updatePassword: (password: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -261,8 +262,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error
   }
 
+  const updatePassword = async (password: string) => {
+    if (!user) throw new Error('No user logged in')
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) throw error
+  }
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, isAdmin, adminResolved, signUp, signIn, signInWithGoogle, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ user, session, loading, isAdmin, adminResolved, signUp, signIn, signInWithGoogle, signOut, updateProfile, updatePassword }}>
       {children}
     </AuthContext.Provider>
   )

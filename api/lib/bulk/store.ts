@@ -50,6 +50,23 @@ export async function listProductRefUrls(
     .filter(Boolean)
 }
 
+export function unionProductRefUrls(
+  offerUrls: string[],
+  kitUrls?: string[] | null,
+  limit = 8
+): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of [...offerUrls, ...(kitUrls || [])]) {
+    const url = typeof raw === 'string' ? raw.trim() : ''
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
 export async function saveExpandedProductRef(options: {
   userId: string
   offerId: string

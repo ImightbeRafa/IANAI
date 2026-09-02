@@ -507,6 +507,7 @@ export function buildShellImageGenerateBody(options: {
   brandLogoUrl?: string
   generationId?: string
   referenceMode?: 'use' | 'none'
+  kitReferenceUrls?: string[]
 }): Record<string, unknown> {
   const prefs = options.preferences
   if (!prefs.style) {
@@ -537,6 +538,8 @@ export function buildShellImageGenerateBody(options: {
   }
   body.productImageIds = productImageIds
   if (productImageIds[0]) body.productImageId = productImageIds[0]
+  const kitReferenceUrls = (options.kitReferenceUrls || []).filter((url) => typeof url === 'string' && url.trim())
+  if (kitReferenceUrls.length) body.kitReferenceUrls = kitReferenceUrls.slice(0, 4)
 
   if (prefs.style.kind === 'logo') {
     body.postStyle = 'logo'

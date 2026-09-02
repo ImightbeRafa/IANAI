@@ -98,6 +98,8 @@ interface ChatThreadProps {
   onCancelScriptClarify?: () => void
   onBackScriptClarify?: () => void
   creditQuote?: CreditQuote | null
+  creditsRemaining?: number | null
+  creditsEnabled?: boolean
   onConfirmCreditQuote?: () => void
   onCancelCreditQuote?: () => void
   onOpenImagesRail?: () => void
@@ -241,6 +243,8 @@ export default memo(function ChatThread({
   onCancelScriptClarify,
   onBackScriptClarify,
   creditQuote = null,
+  creditsRemaining,
+  creditsEnabled = false,
   onConfirmCreditQuote,
   onCancelCreditQuote,
   onOpenImagesRail,
@@ -789,6 +793,8 @@ export default memo(function ChatThread({
           scriptClarify={scriptClarify && offerCount > 0 ? scriptClarify : null}
           imageClarify={imageClarify}
           imageBusy={imageBusy}
+          creditsRemaining={creditsEnabled ? creditsRemaining : null}
+          creditsEnabled={creditsEnabled}
           onAnswerScriptClarify={onAnswerScriptClarify}
           onCancelScriptClarify={() => {
             setPostPreviewScriptKey(null)

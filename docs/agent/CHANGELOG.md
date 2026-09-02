@@ -1,3 +1,17 @@
+## 2026-09-02 — Preview leftovers: footer/rail, credits, kit product+logo refs
+
+**Area:** chat-shell
+**Files:** `ChatSidebar.tsx`, `chat-shell.css`, `ChatShell.tsx`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, `chatShellReferenceSelection.ts`, `useChatSessionThread.ts`, `api/generate-image.ts`, `api/lib/bulk/*`, `Settings.tsx`, `AuthContext.tsx`
+
+- Sidebar account footer: full name wraps, credits stay on their own line, CLÁSICO pill no longer covers name/credits. Help + settings stay. Header shows the same remaining balance as the footer.
+- Right rail labels wrap (2-line clamp) instead of clipping mid-word. “Mejor calidad” chip no longer ellipsizes.
+- Sheets and Pack quotes append `te quedan N` using the same remaining number. Pack `onDone` refreshes the usage cache.
+- Pack + single post attach brand-kit `reference_images` as product refs and kit `logo_url` as logo. No invented SKU expand. Style-injection no longer tells the model to ignore kit product photos.
+- Guiones mix: quote count follows mixed `variations` vs by_type config; rail Generar starts type → count → CTA so website vs message is not applied to a stale mix count.
+- Settings (existing Configuración) can change password.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
 ## 2026-09-01 — Preview feedback: close sheets, Pack qty, Pack in-chat, kit refs via server
 
 **Area:** chat-shell

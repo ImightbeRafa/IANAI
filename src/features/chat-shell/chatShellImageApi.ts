@@ -316,6 +316,7 @@ export async function generateShellOfferImage(options: {
   preferences: ShellImagePreferences
   /** Offer-scoped product_images ids (refs) — required for Producto mode. */
   productImageIds: string[]
+  kitReferenceUrls?: string[]
   brandKitId?: string
   customColors?: string[]
   brandLogoUrl?: string
@@ -336,7 +337,7 @@ export async function generateShellOfferImage(options: {
     throw new Error('Choose an image style before Generate.')
   }
 
-  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length) {
+  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length && !(options.kitReferenceUrls || []).length) {
     throw new Error(
       'Upload at least one product reference image for this offer before Generate.'
     )
@@ -356,6 +357,7 @@ export async function generateShellOfferImage(options: {
     language,
     brandKitId: options.brandKitId,
     productImageIds: options.productImageIds,
+    kitReferenceUrls: options.kitReferenceUrls,
     scriptText: options.scriptText,
     businessContext: options.businessContext,
     customColors: options.customColors,

@@ -144,8 +144,11 @@ import {
   catalogOfferReferences,
   confirmedReferenceImageIds,
   hasSelectedProductReference,
+  isKitVisualId,
+  mergeKitVisualsIntoCatalog,
   partitionReferenceCopies,
   selectedBrandLogoUrl,
+  selectedKitProductUrls,
   shouldPromptImageReferences,
   toggleReferenceSelection,
   withPreselectedReferences,
@@ -308,7 +311,11 @@ function settingsForScriptType(
   type: ScriptFramework | 'mixed'
 ): ScriptGenerationSettings {
   if (type === 'mixed') {
-    return { ...settings, generationMode: 'mixed', variations: Math.max(1, settings.variations) }
+    return {
+      ...settings,
+      generationMode: 'mixed',
+      variations: Math.max(1, Math.min(10, settings.variations || 1)),
+    }
   }
   const scriptTypeConfig = { ...settings.scriptTypeConfig }
   for (const key of Object.keys(scriptTypeConfig) as ScriptFramework[]) {
@@ -2003,6 +2010,7 @@ export function useChatSessionThread(options: {
     source: string
     referenceMode?: 'use' | 'none'
     referenceImageIds?: string[]
+    kitReferenceUrls?: string[]
     /** Selected Subir logo on Confirmá referencias — overrides kit logo for this generate. */
     brandLogoUrlOverride?: string
     alreadyOptimized?: boolean
@@ -2046,12 +2054,30 @@ export function useChatSessionThread(options: {
       }
       setOfferImages(images)
       const productNames = new Map(brandProducts.map((product) => [product.id, product.name]))
+      const brandKitId = resolveBrandKitIdForSession(
+        session?.brand_kit_id,
+        options.productId,
+        brandKits,
+        storage
+      )
+      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
       const catalog = withPreselectedReferences(
-        catalogOfferReferences(images, productNames),
+        mergeKitVisualsIntoCatalog(
+          catalogOfferReferences(images, productNames),
+          linkedKit,
+          options.productId
+        ),
         options.productId,
         options.referenceImageIds
       )
-      const referencesRequired = requiresProductReferences(prefs.style)
+      const kitHasProductPhotos = (linkedKit?.reference_images || []).some(
+        (url) => typeof url === 'string' && url.trim().length > 0
+      )
+      const catalogHasProduct = catalog.some((img) => img.kind === 'product')
+      const referencesRequired =
+        requiresProductReferences(prefs.style)
+        || kitHasProductPhotos
+        || catalogHasProduct
       const referenceMode = options.referenceMode
       // Always open Confirmá referencias for product/post/organic until the user
       // clicks Generar / Crear sin referencias on that sheet (sets referenceMode).
@@ -2087,8 +2113,13 @@ export function useChatSessionThread(options: {
       }
       const productImageIds = referenceMode === 'none'
         ? []
-        : (options.referenceImageIds || [])
-      if (referencesRequired && productImageIds.length === 0) {
+        : (options.referenceImageIds || []).filter((id) => !isKitVisualId(id))
+      const kitReferenceUrls = referenceMode === 'none'
+        ? []
+        : (options.kitReferenceUrls && options.kitReferenceUrls.length
+          ? options.kitReferenceUrls
+          : selectedKitProductUrls(catalog))
+      if (referencesRequired && productImageIds.length === 0 && kitReferenceUrls.length === 0) {
         setImageOfferId(options.productId)
         setImageClarify({
           sessionId: originSessionId,
@@ -2113,13 +2144,6 @@ export function useChatSessionThread(options: {
         return
       }
 
-      const brandKitId = resolveBrandKitIdForSession(
-        session?.brand_kit_id,
-        options.productId,
-        brandKits,
-        storage
-      )
-      const linkedKit = brandKits.find((kit) => kit.id === brandKitId)
       const brandVisual = collectBrandGenerateVisual(linkedKit, brandVisualRef?.current)
       const brandLogoUrl = options.brandLogoUrlOverride || brandVisual.brandLogoUrl
       let prompt = options.prompt
@@ -2230,6 +2254,7 @@ export function useChatSessionThread(options: {
         prompt,
         preferences: prefs,
         productImageIds,
+        kitReferenceUrls,
         brandKitId,
         customColors: brandVisual.customColors,
         brandLogoUrl,
@@ -2705,7 +2730,7 @@ export function useChatSessionThread(options: {
             ? selectedBrandLogoUrl(pendingClarify.referenceImages || [])
             : undefined
           if (answer.useReferences && selected.length) {
-            const nonLogoSelected = selected.filter((item) => item.kind !== 'logo')
+            const nonLogoSelected = selected.filter((item) => item.kind !== 'logo' && !isKitVisualId(item.id))
             const { keepIds, copyIds } = partitionReferenceCopies(nonLogoSelected, pendingClarify.productId)
             const copiedIds: string[] = []
             for (const id of copyIds) {
@@ -2744,6 +2769,9 @@ export function useChatSessionThread(options: {
             source: pendingClarify.source,
             referenceMode: answer.useReferences ? 'use' : 'none',
             referenceImageIds: answer.useReferences ? referenceImageIds : [],
+            kitReferenceUrls: answer.useReferences
+              ? selectedKitProductUrls(pendingClarify.referenceImages || [])
+              : [],
             brandLogoUrlOverride: logoUrl,
             alreadyOptimized: pendingClarify.alreadyOptimized,
             priorClarify: pendingClarify,
@@ -3021,10 +3049,11 @@ export function useChatSessionThread(options: {
     setNotice(null)
     setScriptClarify({
       sessionId: session.id,
-      step: 'cta',
+      step: 'type',
       originText: label,
       settings: scriptSettings,
-      remaining: [],
+      remaining: ['count', 'cta'],
+      history: [],
     })
   }, [scriptSettings, language, session])
 
@@ -3284,5 +3313,7 @@ export function useChatSessionThread(options: {
     walkProgress,
     linkedOfferIds,
     refreshBrandProducts,
+    creditsRemaining: usage.creditsRemaining,
+    creditsEnabled: usage.creditsEnabled,
   }
 }

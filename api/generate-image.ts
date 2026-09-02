@@ -286,6 +286,62 @@ async function hydrateInputImagesFromProductImages(
   return { ok: true }
 }
 
+function uniqueTrimmedUrls(values: unknown, limit = 4): string[] {
+  const list = Array.isArray(values) ? values : []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of list) {
+    const url = typeof raw === 'string' ? raw.trim() : ''
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+async function appendKitProductReferenceImages(
+  imageParams: Record<string, unknown>,
+  kit: { reference_images?: string[] | null } | null,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const inputKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4'] as const
+  let slot = inputKeys.filter(
+    (key) => typeof imageParams[key] === 'string' && (imageParams[key] as string).length > 0
+  ).length
+  if (slot >= 4) return { ok: true }
+  const urls = uniqueTrimmedUrls(
+    [...uniqueTrimmedUrls(imageParams.kitReferenceUrls, 4), ...uniqueTrimmedUrls(kit?.reference_images, 4)],
+    4
+  )
+  if (urls.length === 0) return { ok: true }
+  const roles = Array.isArray(imageParams.referenceImageRoles)
+    ? [...imageParams.referenceImageRoles]
+    : []
+  const kinds = Array.isArray(imageParams.referenceImageKinds)
+    ? [...imageParams.referenceImageKinds]
+    : []
+  for (const url of urls) {
+    if (slot >= 4) break
+    const dataUrl = await fetchPublicImageAsDataUrl(url)
+    if (!dataUrl) {
+      return {
+        ok: false,
+        status: 400,
+        error: imageParams.language === 'en'
+          ? 'Could not load the brand-kit product photo. Re-upload it and try again.'
+          : 'No pude cargar la foto de producto del kit. Volvé a subirla e intentá de nuevo.',
+      }
+    }
+    imageParams[inputKeys[slot]] = dataUrl
+    roles[slot] = 'product'
+    kinds[slot] = 'product'
+    slot += 1
+  }
+  if (roles.length) imageParams.referenceImageRoles = roles
+  if (kinds.length) imageParams.referenceImageKinds = kinds
+  return { ok: true }
+}
+
 /** Cap Grok to 3 refs and keep slot order aligned with role contracts. */
 function applyGrokThreeReferenceBudget(imageParams: Record<string, unknown>): void {
   const keys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4'] as const
@@ -1631,14 +1687,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const isProductMode = isPostMode && (imageParams.postStyle || '') === 'product'
     const isLogoMode = isPostMode && (imageParams.postStyle || '') === 'logo'
 
-    // Producto / shell: hydrate input_image* from authorized offer product_images
-    // (uploads write product_images — do not require a separate legacy source).
-    // referenceMode 'none' ("Crear sin referencias") must not auto-hydrate kit photos.
+    // Producto / shell: hydrate input_image* from authorized offer product_images,
+    // then brand-kit reference_images as product truth (not style mood).
     const referenceMode = imageParams.referenceMode === 'none' ? 'none' : 'use'
     if (isProductMode || rawSessionId) {
       const hasExplicitRefList = Array.isArray(imageParams.productImageIds)
         || (typeof imageParams.productImageId === 'string' && Boolean(imageParams.productImageId))
-      const wantAutoHydrate = referenceMode !== 'none'
+      const kitHasProductPhotos = uniqueTrimmedUrls(brandKit?.reference_images, 4).length > 0
+        || uniqueTrimmedUrls(imageParams.kitReferenceUrls, 4).length > 0
+      const wantAutoHydrate = (referenceMode !== 'none' || kitHasProductPhotos)
         && !hasExplicitRefList
         && !isLogoMode
         && (isProductMode || isPostMode)
@@ -1653,6 +1710,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       })
       if (!hydrate.ok) {
         return res.status(hydrate.status).json({ error: hydrate.error })
+      }
+      if (!isLogoMode) {
+        const kitHydrate = await appendKitProductReferenceImages(imageParams, brandKit)
+        if (!kitHydrate.ok) {
+          return res.status(kitHydrate.status).json({ error: kitHydrate.error })
+        }
       }
     }
 
@@ -2163,14 +2226,17 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
       if (brandKit && isPostMode && !isProductMode && !isLogoMode) {
         try {
-          const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
-          styleRefs.forEach((img, idx) => {
-            references.push({
-              label: `Brand style reference ${idx + 1}. Use for mood, lighting, photography, and surfaces only — do not copy products from it.`,
-              mimeType: img.mimeType,
-              data: img.data,
+          const kitProductUrls = new Set(uniqueTrimmedUrls(brandKit.reference_images, 8))
+          if (kitProductUrls.size === 0) {
+            const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
+            styleRefs.forEach((img, idx) => {
+              references.push({
+                label: `Brand style reference ${idx + 1}. Use for mood, lighting, photography, and surfaces only — do not copy products from it.`,
+                mimeType: img.mimeType,
+                data: img.data,
+              })
             })
-          })
+          }
         } catch (refErr) {
           console.warn('Failed to inject brand style references:', refErr)
         }
@@ -2400,13 +2466,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         if (brandKit && isPostMode && !isProductMode && !isLogoMode) {
           try {
-            const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
-            if (styleRefs.length > 0) {
-              promptParts.push({ text: `BRAND STYLE REFERENCES (${styleRefs.length}) — mood, lighting, photography, surfaces, and art direction only. Do NOT copy products or packaging from these images.` })
-              styleRefs.forEach((img, idx) => {
-                promptParts.push({ text: `Brand style reference ${idx + 1} of ${styleRefs.length}.` })
-                promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
-              })
+            const kitProductUrls = uniqueTrimmedUrls(brandKit.reference_images, 8)
+            if (kitProductUrls.length === 0) {
+              const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
+              if (styleRefs.length > 0) {
+                promptParts.push({ text: `BRAND STYLE REFERENCES (${styleRefs.length}) — mood, lighting, photography, surfaces, and art direction only. Do NOT copy products or packaging from these images.` })
+                styleRefs.forEach((img, idx) => {
+                  promptParts.push({ text: `Brand style reference ${idx + 1} of ${styleRefs.length}.` })
+                  promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+                })
+              }
             }
           } catch (refErr) {
             console.warn('Failed to inject brand style references inline:', refErr)

@@ -64,6 +64,38 @@ describe('ChatShellClarifySheet', () => {
     expect(screen.getByRole('button', { name: 'Atrás' })).toBeTruthy()
   })
 
+  it('quotes mixed Guiones count the same for web vs message CTA and shows remaining', () => {
+    const mixed = scriptState({
+      step: 'cta',
+      remaining: [],
+      ctaChannel: 'website',
+      history: [scriptState()],
+      settings: { ...DEFAULT_SCRIPT_SETTINGS, generationMode: 'mixed', variations: 5 },
+    })
+    const { rerender } = render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={mixed}
+        imageClarify={null}
+        creditsRemaining={142}
+        creditsEnabled
+      />
+    )
+    expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
+    expect(screen.getByText(/te quedan 142/)).toBeTruthy()
+    rerender(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={{ ...mixed, ctaChannel: 'messages' }}
+        imageClarify={null}
+        creditsRemaining={142}
+        creditsEnabled
+      />
+    )
+    expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
+    expect(screen.getByText(/te quedan 142/)).toBeTruthy()
+  })
+
   it('keeps credits on Guiones Paso 3 and shows Generar only after CTA pick', async () => {
     const user = userEvent.setup()
     const onAnswer = vi.fn()

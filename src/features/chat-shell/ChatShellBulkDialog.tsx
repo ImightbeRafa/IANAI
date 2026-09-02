@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CREDIT_WEIGHTS } from '../../lib/creditsCatalog'
+import { withRemainingBalance } from './chatShellCreditQuote'
 import {
   clampComposerBulkCount,
   fetchBulkAngles,
@@ -26,6 +27,8 @@ interface ChatShellBulkDialogProps {
   offerId?: string
   sessionId?: string
   initialCount?: number
+  creditsRemaining?: number
+  creditsEnabled?: boolean
   onClose: () => void
   onLaunch?: (info: PackLaunchInfo) => void
   onDone: (summary: string, result?: { sessionId?: string }) => void
@@ -39,6 +42,8 @@ export default function ChatShellBulkDialog({
   offerId,
   sessionId,
   initialCount = 10,
+  creditsRemaining,
+  creditsEnabled = false,
   onClose,
   onLaunch,
   onDone,
@@ -75,11 +80,16 @@ export default function ChatShellBulkDialog({
   const estimatedCredits = mode === 'campaign'
     ? units * (CREDIT_WEIGHTS.guion_oferta + CREDIT_WEIGHTS.image_standard)
     : units * CREDIT_WEIGHTS.guion_oferta
-  const creditsLine = step === 2 && board && quote
-    ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
-    : (es
-      ? `${estimatedCredits} créditos · máximo estimado`
-      : `${estimatedCredits} credits · estimated maximum`)
+  const creditsLine = withRemainingBalance(
+    step === 2 && board && quote
+      ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
+      : (es
+        ? `${estimatedCredits} créditos · máximo estimado`
+        : `${estimatedCredits} credits · estimated maximum`),
+    creditsEnabled ? creditsRemaining : null,
+    language,
+    creditsEnabled
+  )
   const canConfirm = step === 2 && Boolean(board) && selectedAngles.length > 0
 
   async function loadAngles() {

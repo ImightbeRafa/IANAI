@@ -5,7 +5,7 @@ import { getProfile } from '../services/database'
 import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
 import Layout from '../components/Layout'
-import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info, Loader2 } from 'lucide-react'
+import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, CreditCard, Zap, Crown, Check, ChevronRight, Palette, Plus, X, Trash2, Code2, Rocket, MessageSquarePlus, Clock, Sparkles, Wrench, Bug, ArrowUpCircle, AlertTriangle, Info, Loader2, Lock } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import CreditsChip from '../components/CreditsChip'
@@ -44,12 +44,16 @@ export function SettingsContent({
   theme?: ChatShellTheme
   onThemeChange?: (theme: ChatShellTheme) => void
 }) {
-  const { user, updateProfile } = useAuth()
+  const { user, updateProfile, updatePassword } = useAuth()
   const show = (id: SettingsSection) => section === 'all' || section === id
   const { language, setLanguage } = useLanguage()
   const [fullName, setFullName] = useState(user?.user_metadata?.full_name || '')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
+  const [passwordMessage, setPasswordMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const usageLimits = useUsageLimits()
   const currentPlan = (usageLimits.plan || 'free') as PlanKey
@@ -237,6 +241,14 @@ export function SettingsContent({
       email: 'Correo Electrónico',
       emailCantChange: 'El correo no se puede cambiar',
       fullName: 'Nombre Completo',
+      changePassword: 'Cambiar contraseña',
+      newPassword: 'Nueva contraseña',
+      confirmPassword: 'Confirmar contraseña',
+      passwordHint: 'Mínimo 8 caracteres, con mayúscula, minúscula y un número.',
+      passwordMismatch: 'Las contraseñas no coinciden',
+      passwordUpdated: 'Contraseña actualizada',
+      updatingPassword: 'Guardando…',
+      savePassword: 'Actualizar contraseña',
       saveChanges: 'Guardar Cambios',
       saving: 'Guardando...',
       aiPreferences: 'Preferencias de IA',
@@ -265,6 +277,14 @@ export function SettingsContent({
       email: 'Email',
       emailCantChange: 'Email cannot be changed',
       fullName: 'Full Name',
+      changePassword: 'Change password',
+      newPassword: 'New password',
+      confirmPassword: 'Confirm password',
+      passwordHint: 'At least 8 characters, with uppercase, lowercase, and a number.',
+      passwordMismatch: 'Passwords do not match',
+      passwordUpdated: 'Password updated',
+      updatingPassword: 'Saving…',
+      savePassword: 'Update password',
       saveChanges: 'Save Changes',
       saving: 'Saving...',
       aiPreferences: 'AI Preferences',
@@ -415,6 +435,38 @@ export function SettingsContent({
     }
   }
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPasswordMessage(null)
+    const errors: string[] = []
+    if (newPassword.length < 8) errors.push(language === 'es' ? 'Mínimo 8 caracteres' : 'At least 8 characters')
+    if (!/[A-Z]/.test(newPassword)) errors.push(language === 'es' ? 'Una letra mayúscula' : 'One uppercase letter')
+    if (!/[a-z]/.test(newPassword)) errors.push(language === 'es' ? 'Una letra minúscula' : 'One lowercase letter')
+    if (!/[0-9]/.test(newPassword)) errors.push(language === 'es' ? 'Un número' : 'One number')
+    if (errors.length) {
+      setPasswordMessage({ type: 'error', text: errors.join('. ') })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage({ type: 'error', text: t.passwordMismatch })
+      return
+    }
+    setPasswordLoading(true)
+    try {
+      await updatePassword(newPassword)
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordMessage({ type: 'success', text: t.passwordUpdated })
+    } catch (error) {
+      setPasswordMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : (language === 'es' ? 'No se pudo cambiar la contraseña' : 'Could not change password'),
+      })
+    } finally {
+      setPasswordLoading(false)
+    }
+  }
+
   return (
       <div className={surface === 'dialog' ? 'chat-shell__settings-content' : 'p-6 lg:p-8 max-w-2xl mx-auto'}>
         {surface === 'page' && (
@@ -429,6 +481,11 @@ export function SettingsContent({
 
         {show('general') && (
         <div className="card">
+          {usageLimits.creditsEnabled && !usageLimits.loading ? (
+            <p className="text-sm text-dark-600 mb-4 font-medium">
+              {usageLimits.creditsRemaining} {language === 'es' ? 'créditos IA' : 'AI credits'}
+            </p>
+          ) : null}
           <h2 className="text-lg font-semibold text-dark-900 mb-6">{t.profileInfo}</h2>
           
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -488,6 +545,64 @@ export function SettingsContent({
             >
               <Save className="w-4 h-4" />
               {loading ? t.saving : t.saveChanges}
+            </button>
+          </form>
+          <form onSubmit={handleChangePassword} className="space-y-5 mt-6 pt-6 border-t border-dark-200">
+            <h3 className="text-base font-semibold text-dark-900">{t.changePassword}</h3>
+            <p className="text-xs text-dark-400">{t.passwordHint}</p>
+            {passwordMessage && (
+              <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
+                passwordMessage.type === 'success'
+                  ? 'bg-green-900/20 border border-green-700/30 text-green-400'
+                  : 'bg-red-900/20 border border-red-700/30 text-red-400'
+              }`}>
+                {passwordMessage.type === 'success' ? (
+                  <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                )}
+                {passwordMessage.text}
+              </div>
+            )}
+            <div>
+              <label htmlFor="newPassword" className="block text-sm font-medium text-dark-700 mb-1.5">
+                {t.newPassword}
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
+                <input
+                  id="newPassword"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="input-field pl-10"
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-dark-700 mb-1.5">
+                {t.confirmPassword}
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-400" />
+                <input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="input-field pl-10"
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={passwordLoading || !newPassword}
+              className="btn-primary flex items-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              {passwordLoading ? t.updatingPassword : t.savePassword}
             </button>
           </form>
           <div className="mt-6 pt-6 border-t border-dark-200">

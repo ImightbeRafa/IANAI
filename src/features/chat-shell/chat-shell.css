@@ -9,7 +9,7 @@ html.chat-shell-route #root {
 
 html.chat-shell-route {
   --chat-sidebar-w: 244px;
-  --chat-rail-w: 236px;
+  --chat-rail-w: 256px;
 }
 
 html.chat-shell-route,
@@ -27,7 +27,7 @@ html.chat-shell-route *::-webkit-scrollbar {
 
 .chat-shell {
   --chat-sidebar-w: 244px;
-  --chat-rail-w: 236px;
+  --chat-rail-w: 256px;
   --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
   --chat-ui-track: 0;
   --chat-row-h: 32px;
@@ -117,15 +117,15 @@ html.chat-shell-route *::-webkit-scrollbar {
 
 .chat-shell__classic-btn {
   flex: 0 0 auto;
-  height: 24px;
-  padding: 0 9px;
+  height: 20px;
+  padding: 0 7px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
   color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   line-height: 1;
   cursor: pointer;
@@ -1077,36 +1077,39 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 .chat-shell__user {
   flex-shrink: 0;
   margin-top: 8px;
-  padding: 8px 6px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-elevated);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: var(--chat-ui-track);
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 2px;
   min-width: 0;
 }
 
 .chat-shell__user-copy {
   min-width: 0;
-  flex: 1;
+  display: grid;
+  gap: 2px;
 }
 
 .chat-shell__user-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
   min-width: 0;
 }
 
 .chat-shell__user-name-text {
+  display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.25;
   font-weight: 600;
 }
 
@@ -1114,9 +1117,24 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   color: var(--text-faint);
   font-size: 0.68rem;
   letter-spacing: var(--chat-ui-track);
-  white-space: normal;
+  white-space: nowrap;
   line-height: 1.25;
   overflow: visible;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-shell__user-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-shell__user-icons {
+  display: flex;
+  align-items: center;
+  gap: 0;
 }
 
 .chat-shell__modal-hint {
@@ -1203,6 +1221,20 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   white-space: nowrap;
 }
 
+.chat-shell__credits-tag {
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--bg-soft);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-shell__style-tag,
 .chat-shell__model-tag {
   color: var(--text-faint);
@@ -1214,11 +1246,7 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   padding: 4px 9px;
   background: var(--bg-soft);
   white-space: nowrap;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 1;
+  flex-shrink: 0;
 }
 
 .chat-shell__topbar-pills {
@@ -2502,13 +2530,17 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 }
 
 .chat-shell__composer-kit-title strong {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.25;
 }
 
 .chat-shell__composer-kit-actions {
@@ -2540,8 +2572,13 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 .chat-shell__composer-kit-actions button span {
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.15;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .chat-shell__composer-kit-actions button.is-on,
@@ -2854,23 +2891,31 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 }
 
 .chat-shell__rail-snapshot-brand strong {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: 0.82rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.3;
 }
 
 .chat-shell__rail-snapshot-brand span {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: 0.68rem;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.3;
 }
 
 .chat-shell__rail-snapshot-meta {
@@ -2954,9 +2999,15 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 
 .chat-shell__widget-row span {
   min-width: 0;
+  flex: 1;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .chat-shell__widget-count {
@@ -3041,8 +3092,13 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .chat-shell__offer-primary {
@@ -5344,8 +5400,13 @@ html.chat-shell-route .chat-shell-feedback-fab:hover {
 .chat-shell__brand-profile-compact > strong,
 .chat-shell__brand-profile-compact > span:not(.chat-shell__brand-profile-compact-progress) {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .chat-shell__brand-profile-compact > strong {
