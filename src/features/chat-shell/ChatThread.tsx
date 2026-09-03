@@ -23,8 +23,8 @@ import { isScriptContent, parseScripts, type ParsedScript } from '../../utils/sc
 import {
   type FailedOfferBatch,
   type ImageClarifyState,
+  type ScriptClarifyAnswer,
   type ScriptClarifyState,
-  type ScriptCtaChannel,
 } from './useChatSessionThread'
 import ChatShellClarifySheet from './ChatShellClarifySheet'
 import { creditQuoteCopy, type CreditQuote } from './chatShellCreditQuote'
@@ -89,12 +89,7 @@ interface ChatThreadProps {
   onSelectImageOffer?: (productId: string) => void
   scriptClarify?: ScriptClarifyState | null
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
-  onAnswerScriptClarify?: (answer: {
-    type?: ScriptFramework | 'mixed'
-    count?: number
-    ctaChannel?: ScriptCtaChannel
-    confirm?: boolean
-  }) => void
+  onAnswerScriptClarify?: (answer: ScriptClarifyAnswer) => void
   onCancelScriptClarify?: () => void
   onBackScriptClarify?: () => void
   creditQuote?: CreditQuote | null

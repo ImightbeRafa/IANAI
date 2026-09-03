@@ -317,6 +317,11 @@ interface ScriptSettings {
   ctaStrength?: CTAStrength
   useStructuredPipeline?: boolean
   forceFreshAngles?: boolean
+  ctaMix?: {
+    website: number
+    messages: number
+    none: number
+  }
 }
 
 interface ContextDocumentData {

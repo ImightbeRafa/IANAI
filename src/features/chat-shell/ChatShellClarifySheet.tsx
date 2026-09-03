@@ -2,6 +2,12 @@ import type { ReactNode } from 'react'
 import type { ScriptFramework } from '../../types'
 import { CREDIT_WEIGHTS } from '../../lib/creditsCatalog'
 import { scriptQuoteCount, withRemainingBalance } from './chatShellCreditQuote'
+import {
+  isValidCtaMix,
+  resolvedCtaMix,
+  selectedMixCount,
+  type ScriptCtaChannel,
+} from './chatShellCtaMix'
 import ChatShellFlowSheet from './ChatShellFlowSheet'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
@@ -24,8 +30,8 @@ import {
 } from './chatShellIngredientsCheck'
 import type {
   ImageClarifyState,
+  ScriptClarifyAnswer,
   ScriptClarifyState,
-  ScriptCtaChannel,
 } from './useChatSessionThread'
 
 interface ChatShellClarifySheetProps {
@@ -33,12 +39,7 @@ interface ChatShellClarifySheetProps {
   scriptClarify: ScriptClarifyState | null
   imageClarify: ImageClarifyState | null
   imageBusy?: boolean
-  onAnswerScriptClarify?: (answer: {
-    type?: ScriptFramework | 'mixed'
-    count?: number
-    ctaChannel?: ScriptCtaChannel
-    confirm?: boolean
-  }) => void
+  onAnswerScriptClarify?: (answer: ScriptClarifyAnswer) => void
   onCancelScriptClarify?: () => void
   onBackScriptClarify?: () => void
   onAnswerImageClarify?: (answer: {
@@ -188,8 +189,15 @@ export default function ChatShellClarifySheet({
         : scriptClarify.step === 'count'
           ? t.flowPickCount
           : t.flowPickCta
-    // CTA chips only select; Generar primary confirms. Show primary once a chip is picked.
-    const ctaPicked = Boolean(scriptClarify.ctaChannel)
+    // CTA chips only select; Generar primary confirms. Mix counts must sum to script total.
+    const ctaMix = resolvedCtaMix(scriptClarify.ctaMix, scriptClarify.ctaChannel, count)
+    const ctaPicked = isValidCtaMix(ctaMix, count)
+    const showMixSteppers = selectedMixCount(ctaMix) > 1
+    const ctaOptions: Array<[ScriptCtaChannel, string]> = [
+      ['website', es ? 'Comprar en web' : 'Buy on website'],
+      ['messages', es ? 'Enviar mensaje' : 'Send a message'],
+      ['none', es ? 'Sin CTA' : 'No CTA'],
+    ]
 
     return (
       <ChatShellFlowSheet
@@ -241,29 +249,44 @@ export default function ChatShellClarifySheet({
               </button>
             ))
           ) : (
-            <>
-              <button
-                type="button"
-                className={`chat-shell__btn chat-shell__btn--pill${scriptClarify.ctaChannel === 'website' ? ' is-on' : ''}`}
-                onClick={() => onAnswerScriptClarify?.({ ctaChannel: 'website' })}
-              >
-                {es ? 'Comprar en web' : 'Buy on website'}
-              </button>
-              <button
-                type="button"
-                className={`chat-shell__btn chat-shell__btn--pill${scriptClarify.ctaChannel === 'messages' ? ' is-on' : ''}`}
-                onClick={() => onAnswerScriptClarify?.({ ctaChannel: 'messages' })}
-              >
-                {es ? 'Enviar mensaje' : 'Send a message'}
-              </button>
-              <button
-                type="button"
-                className={`chat-shell__btn chat-shell__btn--pill${scriptClarify.ctaChannel === 'none' ? ' is-on' : ''}`}
-                onClick={() => onAnswerScriptClarify?.({ ctaChannel: 'none' })}
-              >
-                {es ? 'Sin CTA' : 'No CTA'}
-              </button>
-            </>
+            <div className="chat-shell__cta-mix">
+              {ctaOptions.map(([channel, label]) => {
+                const channelCount = ctaMix[channel]
+                const on = channelCount > 0
+                return (
+                  <div key={channel} className="chat-shell__cta-mix-item">
+                    <button
+                      type="button"
+                      className={`chat-shell__btn chat-shell__btn--pill${on ? ' is-on' : ''}`}
+                      onClick={() => onAnswerScriptClarify?.({ ctaChannel: channel })}
+                    >
+                      {label}
+                      {on ? <span className="chat-shell__count">{channelCount}</span> : null}
+                    </button>
+                    {showMixSteppers && on ? (
+                      <span className="chat-shell__cta-mix-steppers">
+                        <button
+                          type="button"
+                          className="chat-shell__cta-mix-step"
+                          aria-label={es ? `Menos ${label}` : `Fewer ${label}`}
+                          onClick={() => onAnswerScriptClarify?.({ ctaMixDelta: { channel, delta: -1 } })}
+                        >
+                          −
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-shell__cta-mix-step"
+                          aria-label={es ? `Más ${label}` : `More ${label}`}
+                          onClick={() => onAnswerScriptClarify?.({ ctaMixDelta: { channel, delta: 1 } })}
+                        >
+                          +
+                        </button>
+                      </span>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </ChipRow>
       </ChatShellFlowSheet>

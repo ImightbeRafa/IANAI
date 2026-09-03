@@ -45,8 +45,19 @@ import {
   buildCreditQuote,
   quoteEditEnhanceCredits,
   quoteImageCredits,
+  scriptQuoteCount,
   type CreditQuote,
 } from './chatShellCreditQuote'
+import {
+  adjustMixCount,
+  channelOverrideFromMix,
+  isValidCtaMix,
+  primaryChannelFromMix,
+  resolvedCtaMix,
+  toggleMixChannel,
+  type CtaMix,
+  type ScriptCtaChannel,
+} from './chatShellCtaMix'
 import { friendlyImageError } from './chatShellImageErrors'
 import { mintShellGenerationId } from './shellGenerationId'
 import {
@@ -275,7 +286,7 @@ export function shouldReviewChosenScript(originText?: string | null, source?: st
   return /\b(post|posts|publicaci[oó]n|publication)\b/i.test(originText || '')
 }
 
-export type ScriptCtaChannel = 'website' | 'messages' | 'none'
+export type { ScriptCtaChannel } from './chatShellCtaMix'
 
 export type ScriptClarifyState = {
   sessionId: string
@@ -283,9 +294,18 @@ export type ScriptClarifyState = {
   originText: string
   settings: ScriptGenerationSettings
   ctaChannel?: ScriptCtaChannel
+  ctaMix?: CtaMix
   remaining: Array<'type' | 'count' | 'cta'>
   /** Prior sheet steps for Pack-family Back (no transcript). */
   history?: ScriptClarifyState[]
+}
+
+export type ScriptClarifyAnswer = {
+  type?: ScriptFramework | 'mixed'
+  count?: number
+  ctaChannel?: ScriptCtaChannel
+  ctaMixDelta?: { channel: ScriptCtaChannel; delta: 1 | -1 }
+  confirm?: boolean
 }
 
 function pushScriptHistory(current: ScriptClarifyState): ScriptClarifyState[] {
@@ -1552,27 +1572,34 @@ export function useChatSessionThread(options: {
     setNotice(null)
   }, [])
 
-  const answerScriptClarify = useCallback(async (answer: {
-    type?: ScriptFramework | 'mixed'
-    count?: number
-    ctaChannel?: ScriptCtaChannel
-    confirm?: boolean
-  }) => {
+  const answerScriptClarify = useCallback(async (answer: ScriptClarifyAnswer) => {
     if (!scriptClarify || !session || scriptClarify.sessionId !== session.id) return
-    const finish = async (settings: ScriptGenerationSettings, ctaChannel?: ScriptCtaChannel) => {
-      const channel = ctaChannel || scriptClarify.ctaChannel
+    const total = scriptQuoteCount(scriptClarify.settings)
+    const finish = async (settings: ScriptGenerationSettings, mix: CtaMix) => {
       setScriptClarify(null)
       await send(scriptClarify.originText, {
         forceSettings: settings,
         skipImage: true,
         bypassScriptClarify: true,
-        channelOverride: !channel || channel === 'none' ? undefined : channel,
+        channelOverride: channelOverrideFromMix(mix),
       })
     }
-    const advance = async (settings: ScriptGenerationSettings, ctaChannel?: ScriptCtaChannel) => {
+    const advance = async (
+      settings: ScriptGenerationSettings,
+      mix?: CtaMix,
+      channel?: ScriptCtaChannel
+    ) => {
       const [next, ...remaining] = scriptClarify.remaining
       if (!next) {
-        await finish(settings, ctaChannel)
+        const resolved = resolvedCtaMix(mix, channel, scriptQuoteCount(settings))
+        if (!isValidCtaMix(resolved, scriptQuoteCount(settings))) return
+        await finish({
+          ...settings,
+          ctaMix: resolved,
+          ctaStrength: resolved.none === scriptQuoteCount(settings)
+            ? 'none' as const
+            : settings.ctaStrength || 'sales' as const,
+        }, resolved)
         return
       }
       setScriptClarify({
@@ -1580,43 +1607,69 @@ export function useChatSessionThread(options: {
         step: next,
         remaining,
         settings,
-        ctaChannel,
+        ctaChannel: next === 'cta' ? channel : undefined,
+        ctaMix: next === 'cta' ? mix : undefined,
         history: pushScriptHistory(scriptClarify),
       })
     }
-    if (answer.confirm && scriptClarify.step === 'cta' && scriptClarify.ctaChannel) {
-      const channel = scriptClarify.ctaChannel
+    if (answer.confirm && scriptClarify.step === 'cta') {
+      const mix = resolvedCtaMix(scriptClarify.ctaMix, scriptClarify.ctaChannel, total)
+      if (!isValidCtaMix(mix, total)) return
       const settings = {
         ...scriptClarify.settings,
-        ctaStrength: channel === 'none' ? 'none' as const : scriptClarify.settings.ctaStrength || 'sales' as const,
+        ctaMix: mix,
+        ctaStrength: mix.none === total
+          ? 'none' as const
+          : scriptClarify.settings.ctaStrength || 'sales' as const,
       }
-      await finish(settings, channel)
+      await finish(settings, mix)
       return
     }
     if (scriptClarify.step === 'type' && answer.type) {
-      await advance(settingsForScriptType(scriptClarify.settings, answer.type), scriptClarify.ctaChannel)
+      await advance(settingsForScriptType(scriptClarify.settings, answer.type))
       return
     }
     if (scriptClarify.step === 'count' && answer.count) {
-      await advance(settingsForScriptCount(scriptClarify.settings, answer.count), scriptClarify.ctaChannel)
+      await advance(settingsForScriptCount(scriptClarify.settings, answer.count))
+      return
+    }
+    if (scriptClarify.step === 'cta' && answer.ctaMixDelta) {
+      const current = resolvedCtaMix(scriptClarify.ctaMix, scriptClarify.ctaChannel, total)
+      const mix = adjustMixCount(current, answer.ctaMixDelta.channel, answer.ctaMixDelta.delta, total)
+      setScriptClarify({
+        ...scriptClarify,
+        settings: {
+          ...scriptClarify.settings,
+          ctaMix: mix,
+          ctaStrength: mix.none === total
+            ? 'none' as const
+            : scriptClarify.settings.ctaStrength || 'sales' as const,
+        },
+        ctaMix: mix,
+        ctaChannel: primaryChannelFromMix(mix),
+      })
       return
     }
     if (scriptClarify.step === 'cta' && answer.ctaChannel) {
-      const channel = answer.ctaChannel
+      const mix = toggleMixChannel(scriptClarify.ctaMix, answer.ctaChannel, total)
       const settings = {
         ...scriptClarify.settings,
-        ctaStrength: channel === 'none' ? 'none' as const : scriptClarify.settings.ctaStrength || 'sales' as const,
+        ctaMix: mix,
+        ctaStrength: mix.none === total
+          ? 'none' as const
+          : scriptClarify.settings.ctaStrength || 'sales' as const,
       }
       // Last step: select CTA only; primary Generar confirms (credits line visible).
       if (scriptClarify.remaining.length === 0) {
         setScriptClarify({
           ...scriptClarify,
           settings,
-          ctaChannel: channel,
+          ctaMix: mix,
+          ctaChannel: primaryChannelFromMix(mix),
         })
         return
       }
-      await advance(settings, channel)
+      await advance(settings, mix, primaryChannelFromMix(mix))
     }
   }, [scriptClarify, session, send])
 

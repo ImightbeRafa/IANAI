@@ -83,6 +83,7 @@ describe('ChatShellClarifySheet', () => {
     )
     expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
     expect(screen.getByText(/te quedan 142/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Comprar en web/ })).toBeTruthy()
     rerender(
       <ChatShellClarifySheet
         language="es"
@@ -94,6 +95,30 @@ describe('ChatShellClarifySheet', () => {
     )
     expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
     expect(screen.getByText(/te quedan 142/)).toBeTruthy()
+  })
+
+  it('shows mixed CTA counts next to each selected option and keeps the same quote', () => {
+    render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={scriptState({
+          step: 'cta',
+          remaining: [],
+          ctaChannel: 'website',
+          ctaMix: { website: 3, messages: 2, none: 0 },
+          history: [scriptState()],
+          settings: { ...DEFAULT_SCRIPT_SETTINGS, generationMode: 'mixed', variations: 5 },
+        })}
+        imageClarify={null}
+        creditsRemaining={142}
+        creditsEnabled
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Comprar en web 3' }).textContent).toMatch(/3/)
+    expect(screen.getByRole('button', { name: 'Enviar mensaje 2' }).textContent).toMatch(/2/)
+    expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Generar' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Más Comprar en web' })).toBeTruthy()
   })
 
   it('keeps credits on Guiones Paso 3 and shows Generar only after CTA pick', async () => {

@@ -2722,6 +2722,54 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   background: color-mix(in srgb, var(--accent, #5b8def) 16%, transparent);
 }
 
+.chat-shell__cta-mix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.chat-shell__cta-mix-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-shell__cta-mix .chat-shell__btn--pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-shell__cta-mix .chat-shell__btn--pill.is-on .chat-shell__count {
+  background: var(--accent, #5b8def);
+  color: #fff;
+}
+
+.chat-shell__cta-mix-steppers {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.chat-shell__cta-mix-step {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-shell__cta-mix-step:hover {
+  border-color: var(--accent, #5b8def);
+}
+
 .chat-shell__image-knobs {
   display: flex;
   flex-direction: column;
