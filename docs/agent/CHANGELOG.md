@@ -1,3 +1,14 @@
+## 2026-09-03 — Guiones mix CTAs, Uso history, ticket events
+
+**Area:** chat-shell / billing / tickets
+**Files:** `ChatShellClarifySheet.tsx`, `chatShellCtaMix.ts`, `useChatSessionThread.ts`, `script-briefs.ts`, `api/my-usage.ts`, `UsageHistoryCard.tsx`, `api/ticket-events.ts`, `FeedbackButton.tsx`
+
+- Guiones Paso 3: keep Comprar en web / Enviar mensaje / Sin CTA. First pick is all N of that type; a second type steals 1. Selected pills show a count; +/- rebalance. Mix must sum to the script total. Credits quote stays `guion_oferta × count` (same math as today).
+- Plan y facturación shows **Historial de uso** for the signed-in user only (kind, when, credits, success/fail). `GET /api/my-usage` joins own ledger + logs. No clawback. Admin cost screen unchanged.
+- Tickets live in this repo (`feedback_tickets`). `GET/POST /api/ticket-events` is Preview-safe: poll with `TICKETS_WEBHOOK_SECRET` or admin JWT; POST after create (user JWT) optionally fires `TICKETS_EVENT_WEBHOOK_URL`. Ticket insert still succeeds if notify fails.
+
+No merge. No invite / `chat_shell` / gift / SQL. Kit pixel-lock and cutover untouched.
+
 ## 2026-09-03 — Pack Paso 1 intro wraps (no mid-word clip)
 
 **Area:** chat-shell

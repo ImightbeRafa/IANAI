@@ -91,6 +91,26 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.11',
+    date: '2026-09-03',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'En guiones podés mezclar CTAs: unos a la web, otros a mensaje, o sin CTA, con un número al lado de cada opción. Los créditos se cotizan igual que hoy.',
+          en: 'Script CTAs can mix: some to the website, some to message, or none, with a count next to each option. Credits quote the same as today.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'En Plan y facturación ves tu historial de uso: qué se generó, cuándo, créditos y si salió bien o falló. Solo el tuyo.',
+          en: 'Plan & Billing now shows your usage history: what ran, when, credits, and success vs fail. Yours only.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.10',
     date: '2026-08-27',
     items: [
