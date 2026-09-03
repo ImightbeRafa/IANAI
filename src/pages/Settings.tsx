@@ -9,6 +9,7 @@ import { User, Mail, Save, AlertCircle, CheckCircle, Globe, Users, UserCircle, C
 import { Link } from 'react-router-dom'
 import { useUsageLimits } from '../hooks/useUsageLimits'
 import CreditsChip from '../components/CreditsChip'
+import UsageHistoryCard from '../components/UsageHistoryCard'
 import { getBrandKits, createBrandKit, updateBrandKit, deleteBrandKit, setDefaultBrandKit, getSubscription, getPayments, getBusinesses, linkBrandKitToBusiness } from '../services/database'
 import type { BrandKit, BrandKitFormData, Subscription, Payment, Business } from '../types'
 import { CHANGELOG, ROADMAP, STATUS_ALERT, type ChangeCategory, type RoadmapStatus } from '../data/changelog'
@@ -1307,11 +1308,7 @@ export function SettingsContent({
                   <p className="text-xs text-dark-500">{CREDITS_PITCH[language]}</p>
                 </div>
               )}
-              <p className="text-xs text-dark-400 leading-relaxed px-1">
-                {language === 'es'
-                  ? 'Estamos mejorando esta sección para que el uso y la facturación sean más claros. Gracias por tu paciencia.'
-                  : 'We’re improving this section so usage and billing are clearer. Thanks for your patience.'}
-              </p>
+              <UsageHistoryCard language={language} />
             </div>
           )}
 
