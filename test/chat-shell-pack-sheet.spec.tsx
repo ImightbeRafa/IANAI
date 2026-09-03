@@ -41,6 +41,9 @@ describe('ChatShellBulkDialog Pack sheet', () => {
     expect(screen.getByRole('dialog', { name: 'Pack' })).toBeTruthy()
     expect(screen.queryByText('Bulk / Pack')).toBeNull()
     expect(screen.getByText('Paso 1 de 2')).toBeTruthy()
+    expect(screen.getByText(
+      'Ángulos distintos por nicho (no el mismo anuncio con otras palabras). Luego confirmás y generamos.'
+    )).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Confirmar y generar' })).toBeNull()
     const footerCancel = screen.getAllByRole('button', { name: 'Cancelar' })
       .find((btn) => btn.className.includes('chat-shell__modal-btn'))

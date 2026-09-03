@@ -1,3 +1,12 @@
+## 2026-09-03 — Pack Paso 1 intro wraps (no mid-word clip)
+
+**Area:** chat-shell
+**Files:** `chat-shell.css`, `test/chat-shell-pack-sheet.spec.tsx`
+
+- Pack sheet helper copy (`Ángulos distintos por nicho… Luego confirmás y generamos.`) wraps on Paso 1 instead of clipping mid-word. Quantity 2–25 and Solo guiones / Pack campaña unchanged.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
 ## 2026-09-02 — Preview leftovers: footer/rail, credits, kit product+logo refs
 
 **Area:** chat-shell
