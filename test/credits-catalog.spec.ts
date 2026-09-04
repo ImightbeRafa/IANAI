@@ -2,6 +2,7 @@
  * Pure credit catalog + FIFO tests (no DB).
  */
 import { describe, expect, it } from 'vitest'
+import { planDisplayName } from '../src/lib/creditsCatalog'
 import {
   CREDIT_WEIGHTS,
   PLAN_CATALOG,
@@ -104,6 +105,14 @@ describe('credit catalog', () => {
     expect(PLAN_CATALOG.pro.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
     expect(PLAN_CATALOG.business.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
     expect(CREDIT_PACK.paymentLink).toBeNull()
+  })
+})
+
+describe('planDisplayName', () => {
+  it('shows Gratis for the free plan in Spanish', () => {
+    expect(planDisplayName('free', 'es')).toBe('Gratis')
+    expect(planDisplayName('free', 'en')).toBe('Free')
+    expect(planDisplayName('pro', 'es')).toBe('Premium')
   })
 })
 

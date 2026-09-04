@@ -111,8 +111,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         category: 'improvement',
         text: {
-          es: 'El recorrido inicial explica Guiones, Post, Foto y Pack. Si ya tenés marcas, siguen listadas. Saltar no borra nada. Si el kit está a medias, ves qué falta con nombre.',
-          en: 'The first-run tour explains Scripts, Post, Photo, and Pack. Brands you already have stay listed. Skip never wipes data. If a kit is half-done, it names what is missing.',
+          es: 'Si el chat no tiene oferta, Guiones, Post, Foto y Pack se ven apagados (Elegí oferta) y te llevan a Ofertas. No parecen activos sin hacer nada.',
+          en: 'If the chat has no offer, Scripts, Post, Photo, and Pack look off (Choose offer) and take you to Offers. They do not look active and do nothing.',
         },
       },
     ],

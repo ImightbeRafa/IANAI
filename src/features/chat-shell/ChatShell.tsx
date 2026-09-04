@@ -19,7 +19,7 @@ import { useChatSessionThread } from './useChatSessionThread'
 import { useChatBrandSetup } from './useChatBrandSetup'
 import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
-import { kitHardBlocked } from './chatShellFirstRun'
+import { glassVerbBlockHint, kitHardBlocked, resolveGlassVerbBlock } from './chatShellFirstRun'
 import { formatMissingSetupSteps, resolveKitChipTitle } from './chatShellBrandSetup'
 import { resolveHeaderSessionTitle } from './chatShellSidebar'
 import { parseShellCommand } from './chatShellCommands'
@@ -525,6 +525,21 @@ export default function ChatShell({
   const hasOfferName = Boolean((brandSetup.facts.offerName || '').trim())
   const kitListo = brandSetup.snapshot.stronglyComplete
   const hardBlocked = kitHardBlocked({ kitReady: kitListo, hasOfferName })
+  const hasSessionOffer = Boolean(
+    thread.offers.length > 0
+    || thread.activeProduct
+    || thread.offerProductId
+    || workspace.activeSession?.product_id
+  )
+  const glassBlock = resolveGlassVerbBlock({
+    kitReady: kitListo,
+    hasOfferName,
+    hasSessionOffer,
+  })
+  const glassBlockHint = glassVerbBlockHint(glassBlock.reason, {
+    kit: t.kitBlockedHint,
+    offer: t.chooseOfferHint,
+  })
   const missingSetupLabel = formatMissingSetupSteps(
     brandSetup.snapshot,
     language === 'en' ? 'en' : 'es'
@@ -760,55 +775,72 @@ export default function ChatShell({
               onHide={createWidget.hide}
               onShow={createWidget.show}
               actions={(() => {
-                const blocked = hardBlocked
+                const blocked = glassBlock.blocked
                 const baseDisabled = brandSetup.busy || thread.loadingMessages
+                const offerClick = glassBlock.reason === 'offer'
+                const onBlockedOr = (run: () => void) => {
+                  if (offerClick) {
+                    openOffersRail()
+                    return
+                  }
+                  if (blocked) return
+                  run()
+                }
                 return [
                 {
                   id: 'scripts' as const,
                   label: t.createScriptsShort,
                   active: activeCreateAction === 'scripts',
-                  disabled: baseDisabled || blocked,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick),
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    thread.cancelImageClarify()
-                    thread.startScriptsFlow()
+                    onBlockedOr(() => {
+                      thread.cancelImageClarify()
+                      thread.startScriptsFlow()
+                    })
                   },
                 },
                 {
                   id: 'post' as const,
                   label: t.createPostShort,
                   active: activeCreateAction === 'post',
-                  disabled: baseDisabled || blocked,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick),
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    thread.cancelScriptClarify()
-                    thread.startPostFlow()
+                    onBlockedOr(() => {
+                      thread.cancelScriptClarify()
+                      thread.startPostFlow()
+                    })
                   },
                 },
                 {
                   id: 'product' as const,
                   label: t.createProductShort,
                   active: activeCreateAction === 'product',
-                  disabled: baseDisabled || blocked,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick),
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    thread.cancelScriptClarify()
-                    thread.startProductFotoFlow()
+                    onBlockedOr(() => {
+                      thread.cancelScriptClarify()
+                      thread.startProductFotoFlow()
+                    })
                   },
                 },
                 {
                   id: 'bulk' as const,
                   label: t.createBulkShort,
                   active: false,
-                  disabled: baseDisabled || blocked || !workspace.activeBrand,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick) || !workspace.activeBrand,
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    setBulkCount(10)
-                    setBulkOpen(true)
+                    onBlockedOr(() => {
+                      setBulkCount(10)
+                      setBulkOpen(true)
+                    })
                   },
                 },
               ]

@@ -25,6 +25,7 @@ import {
   CREDITS_PITCH,
   PLAN_CATALOG_UI,
   PUBLIC_BILLING_PLANS,
+  planDisplayName,
   type FrontendPlanId,
 } from '../lib/creditsCatalog'
 
@@ -1270,7 +1271,7 @@ export function SettingsContent({
                 currentPlan === 'pro' ? 'bg-purple-900/20 text-purple-700' :
                 'bg-amber-900/20 text-amber-400'
               }`}>
-                {PLAN_DETAILS[currentPlan].name}
+                {planDisplayName(currentPlan, language === 'en' ? 'en' : 'es')}
               </span>
             )}
           </div>

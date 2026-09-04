@@ -485,8 +485,9 @@ export function formatImageAssumptions(
           ? 'Grok Imagine 2.0'
           : prefs.model
 
-  const densityLabel =
-    prefs.density === 'hard' ? 'Hard' : prefs.density === 'standard' ? 'Standard' : 'Medium'
+  const densityLabel = language === 'es'
+    ? (prefs.density === 'hard' ? 'Poco texto' : prefs.density === 'standard' ? 'Texto medio' : 'Medio')
+    : (prefs.density === 'hard' ? 'Short copy' : prefs.density === 'standard' ? 'Standard' : 'Medium')
 
   return language === 'es'
     ? `${styleLabel} · ${prefs.aspectRatio} · ${modelLabel} · ${densityLabel}`

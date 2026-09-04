@@ -302,6 +302,27 @@ describe('buildShellImageGenerateBody', () => {
     expect(label).toContain('Comparación')
     expect(label).toContain('3:4')
     expect(label).toContain('Nano Banana Pro')
+    expect(label).not.toContain('Hard')
+  })
+
+  it('localizes density instead of showing Hard', () => {
+    const es = formatImageAssumptions({
+      style: { kind: 'preset', presetId: 'comparison' },
+      aspectRatio: '9:16',
+      model: 'grok-imagine',
+      density: 'hard',
+    }, 'es')
+    expect(es).toContain('Grok Imagine 2.0')
+    expect(es).toContain('Poco texto')
+    expect(es).not.toContain('Hard')
+    const en = formatImageAssumptions({
+      style: { kind: 'preset', presetId: 'comparison' },
+      aspectRatio: '9:16',
+      model: 'grok-imagine',
+      density: 'hard',
+    }, 'en')
+    expect(en).toContain('Short copy')
+    expect(en).not.toContain('Hard')
   })
 })
 

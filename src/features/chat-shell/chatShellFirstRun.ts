@@ -23,3 +23,37 @@ export function kitHardBlocked(input: {
 }): boolean {
   return !input.kitReady && !Boolean(input.hasOfferName)
 }
+
+export type GlassVerbBlockReason = 'kit' | 'offer' | null
+
+/**
+ * Glass Guiones/Post/Foto/Pack must not look enabled on an empty / no-oferta
+ * session. Soft kit (offer on this session, kit incomplete) stays unlocked.
+ */
+export function resolveGlassVerbBlock(input: {
+  kitReady: boolean
+  hasOfferName?: boolean
+  hasSessionOffer: boolean
+}): { blocked: boolean; reason: GlassVerbBlockReason } {
+  if (input.hasSessionOffer) return { blocked: false, reason: null }
+  if (!input.kitReady && !input.hasOfferName) return { blocked: true, reason: 'kit' }
+  return { blocked: true, reason: 'offer' }
+}
+
+export function glassVerbBlockHint(
+  reason: GlassVerbBlockReason,
+  labels: { kit: string; offer: string }
+): string | undefined {
+  switch (reason) {
+    case 'kit':
+      return labels.kit
+    case 'offer':
+      return labels.offer
+    case null:
+      return undefined
+    default: {
+      const _never: never = reason
+      return _never
+    }
+  }
+}

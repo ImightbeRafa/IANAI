@@ -1,3 +1,14 @@
+## 2026-09-04 — Honest glass on empty sessions; Gratis / Poco texto
+
+**Area:** chat-shell / billing
+**Files:** `chatShellFirstRun.ts`, `ChatShell.tsx`, `ChatComposerCreateDock.tsx`, `chat-shell.css`, `Settings.tsx`, `chatShellImageIntent.ts`
+
+- Glass Guiones/Post/Foto/Pack on a session with no offer look blocked (`Elegí oferta`) and click opens Ofertas. No kit + no offer still uses disabled **Primero el kit**. Soft kit with a session offer stays enabled. Falta: Público, Fuentes chip unchanged.
+- Plan y facturación badge: Free → **Gratis** in Spanish (`planDisplayName`).
+- Image assumption line: density `hard` shows **Poco texto** / Short copy, not Hard.
+
+No merge. Invite-all / Preview gift fail-closed / wizard / mix CTAs / Uso history untouched.
+
 ## 2026-09-04 — Mass cutover: invite-all, prod gift 100, wizard harden
 
 **Area:** chat-shell / rollout / billing

@@ -2448,15 +2448,25 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 }
 
 .chat-shell__idle-actions button.is-on,
-.chat-shell__idle-actions button:hover:not(:disabled) {
+.chat-shell__idle-actions button:hover:not(:disabled):not(.is-blocked) {
   border-color: color-mix(in srgb, #67e8f9 42%, transparent);
   background: color-mix(in srgb, #22d3ee 18%, transparent);
   color: var(--text);
 }
 
-.chat-shell__idle-actions button:disabled {
+.chat-shell__idle-actions button:disabled,
+.chat-shell__idle-actions button.is-blocked {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.chat-shell__idle-actions button.is-blocked {
+  cursor: pointer;
+}
+
+.chat-shell__idle-actions button.is-blocked:hover {
+  border-color: color-mix(in srgb, #67e8f9 28%, transparent);
+  background: color-mix(in srgb, #22d3ee 10%, transparent);
 }
 
 .chat-shell__idle-action-block {

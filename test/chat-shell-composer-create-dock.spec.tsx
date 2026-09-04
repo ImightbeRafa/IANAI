@@ -103,10 +103,10 @@ describe('ChatComposerCreateDock', () => {
         onHide={vi.fn()}
         onShow={vi.fn()}
         actions={[
-          { id: 'scripts', label: 'Guiones', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
-          { id: 'post', label: 'Post', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
-          { id: 'product', label: 'Foto', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
-          { id: 'bulk', label: 'Pack', onClick: vi.fn(), disabled: true, blockedReason: 'kit' },
+          { id: 'scripts', label: 'Guiones', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+          { id: 'post', label: 'Post', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+          { id: 'product', label: 'Foto', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+          { id: 'bulk', label: 'Pack', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
         ]}
         reviewPanel={<div>Detalle del kit</div>}
       />
@@ -114,6 +114,36 @@ describe('ChatComposerCreateDock', () => {
     const blocked = screen.getAllByText('Primero el kit')
     expect(blocked.length).toBe(4)
     expect(screen.getByRole('button', { name: 'Guiones — Primero el kit' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Guiones — Primero el kit' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('looks blocked with Elegí oferta and click still opens Ofertas', async () => {
+    const user = userEvent.setup()
+    const onScripts = vi.fn()
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Falta: Público, Fuentes"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={[
+          { id: 'scripts', label: 'Guiones', onClick: onScripts, lookBlocked: true, blockedReason: 'Elegí oferta' },
+          { id: 'post', label: 'Post', onClick: vi.fn(), lookBlocked: true, blockedReason: 'Elegí oferta' },
+          { id: 'product', label: 'Foto', onClick: vi.fn(), lookBlocked: true, blockedReason: 'Elegí oferta' },
+          { id: 'bulk', label: 'Pack', onClick: vi.fn(), lookBlocked: true, blockedReason: 'Elegí oferta' },
+        ]}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Falta: Público, Fuentes')).toBeTruthy()
+    const guiones = screen.getByRole('button', { name: 'Guiones — Elegí oferta' })
+    expect((guiones as HTMLButtonElement).disabled).toBe(false)
+    expect(guiones.className).toMatch(/is-blocked/)
+    expect(screen.getAllByText('Elegí oferta').length).toBe(4)
+    await user.click(guiones)
+    expect(onScripts).toHaveBeenCalledTimes(1)
   })
 
   it('does not show Primero el kit when verbs are enabled (soft Falta afinar)', () => {

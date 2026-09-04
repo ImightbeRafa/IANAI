@@ -3,7 +3,7 @@ import {
   onboardingPhaseAfterOpenFailure,
   resolveChatShellOnboardingPhase,
 } from '../src/features/chat-shell/chatShellOnboarding'
-import { kitHardBlocked, shouldShowFirstRunCta } from '../src/features/chat-shell/chatShellFirstRun'
+import { kitHardBlocked, resolveGlassVerbBlock, shouldShowFirstRunCta } from '../src/features/chat-shell/chatShellFirstRun'
 
 describe('resolveChatShellOnboardingPhase', () => {
   it('skips chrome when the user already finished or skipped the tour', () => {
@@ -52,6 +52,48 @@ describe('kitHardBlocked', () => {
 
   it('unlocks glass when the kit is listo', () => {
     expect(kitHardBlocked({ kitReady: true, hasOfferName: false })).toBe(false)
+  })
+})
+
+describe('resolveGlassVerbBlock', () => {
+  it('blocks empty / no-oferta sessions even when setup facts have an offer name', () => {
+    const row = resolveGlassVerbBlock({
+      kitReady: false,
+      hasOfferName: true,
+      hasSessionOffer: false,
+    })
+    expect(row.blocked).toBe(true)
+    expect(row.reason).toBe('offer')
+  })
+
+  it('uses Primero el kit when there is no kit and no offer at all', () => {
+    const row = resolveGlassVerbBlock({
+      kitReady: false,
+      hasOfferName: false,
+      hasSessionOffer: false,
+    })
+    expect(row.blocked).toBe(true)
+    expect(row.reason).toBe('kit')
+  })
+
+  it('keeps glass unlocked for soft kit when this session has an offer', () => {
+    const row = resolveGlassVerbBlock({
+      kitReady: false,
+      hasOfferName: true,
+      hasSessionOffer: true,
+    })
+    expect(row.blocked).toBe(false)
+    expect(row.reason).toBe(null)
+  })
+
+  it('blocks a listo kit on a session with no offer', () => {
+    const row = resolveGlassVerbBlock({
+      kitReady: true,
+      hasOfferName: true,
+      hasSessionOffer: false,
+    })
+    expect(row.blocked).toBe(true)
+    expect(row.reason).toBe('offer')
   })
 })
 
