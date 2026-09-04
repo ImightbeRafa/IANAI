@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, ImagePlus, Loader2, RotateCw, Send, Wand2, X } from 'lucide-react'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 import { downloadShellImage, filenameForShellImage } from './chatShellDownload'
+import { localizeImageAssumptionLine } from './chatShellImageIntent'
 
 export interface ImageEditAttachment {
   dataUrl: string
@@ -60,6 +61,8 @@ export default function ChatShellImageLightbox({
 
   if (!open) return null
 
+  const displayAlt = localizeImageAssumptionLine(alt, language)
+
   const submit = () => {
     const trimmed = reason.trim()
     if (!trimmed || busy || !onRequestEdit) return
@@ -94,7 +97,7 @@ export default function ChatShellImageLightbox({
       />
       <div className="chat-shell__lightbox-panel">
         <header className="chat-shell__lightbox-head">
-          <strong>{productName || alt || t.viewImage}</strong>
+          <strong>{productName || displayAlt || t.viewImage}</strong>
           <div className="chat-shell__lightbox-head-actions">
             <button
               type="button"
@@ -117,7 +120,7 @@ export default function ChatShellImageLightbox({
           </div>
         </header>
         <div className="chat-shell__lightbox-stage">
-          <img src={url} alt={alt || productName || t.viewImage} />
+          <img src={url} alt={displayAlt || productName || t.viewImage} />
         </div>
         <footer className="chat-shell__lightbox-foot">
           {onRequestEdit ? (

@@ -1,3 +1,14 @@
+## 2026-09-04 — Rail image line: Hard → Poco texto
+
+**Area:** chat-shell
+**Files:** `chatShellImageIntent.ts`, `ChatContextRail.tsx`, `ChatImageSettingsPanel.tsx`, `ChatShellImageCard.tsx`, `ChatShellImageLightbox.tsx`
+
+- User-facing image/model quality line no longer shows **Hard**. Stored labels like `Grok Imagine 2.0 · Hard` render as **Poco texto** (EN **Short copy**).
+- Images-tab density chip `hard` option: **Mínimo/Minimal** → **Poco texto / Short copy**.
+- Internal enum/API `textDensity: 'hard'` unchanged.
+
+No merge. Invite-all / gift / tickets / HOME_AUTH / glass / Post / Guiones mix untouched.
+
 ## 2026-09-04 — WD merge blockers: empty glass, Post≠Foto, Guiones mix Generar
 
 **Area:** chat-shell

@@ -10,7 +10,7 @@ import { shellT } from './chatShellLabels'
 import ChatScriptPanel from './ChatScriptPanel'
 import ChatImageSettingsPanel from './ChatImageSettingsPanel'
 import ChatOfferCreateForm from './ChatOfferCreateForm'
-import type { ShellImagePreferences } from './chatShellImageIntent'
+import { localizeImageAssumptionLine, type ShellImagePreferences } from './chatShellImageIntent'
 import { buildImageWorkspaces, latestGeneratedPerWorkspace } from './chatShellImages'
 import { IconDoc, IconImage, IconOffer, IconVisual, IconWeb } from './ChatShellIcons'
 
@@ -203,7 +203,7 @@ export default function ChatContextRail({
         id: image.id,
         tab: 'images' as const,
         icon: <IconImage size={14} />,
-        label: image.label || `${t.images} ${index + 1}`,
+        label: localizeImageAssumptionLine(image.label, language) || `${t.images} ${index + 1}`,
       })),
       ...threadScripts.slice(0, 5).map((script) => ({
         id: script.id,
@@ -652,7 +652,7 @@ export default function ChatContextRail({
                         onClick={() => onOpenOfferImage?.(img)}
                         aria-label={t.viewImage}
                       >
-                        <img src={img.image_url} alt={img.label || 'Offer image'} />
+                        <img src={img.image_url} alt={localizeImageAssumptionLine(img.label, language) || 'Offer image'} />
                       </button>
                       <figcaption>
                         <span>

@@ -485,13 +485,42 @@ export function formatImageAssumptions(
           ? 'Grok Imagine 2.0'
           : prefs.model
 
-  const densityLabel = language === 'es'
-    ? (prefs.density === 'hard' ? 'Poco texto' : prefs.density === 'standard' ? 'Texto medio' : 'Medio')
-    : (prefs.density === 'hard' ? 'Short copy' : prefs.density === 'standard' ? 'Standard' : 'Medium')
+  const densityLabel = imageDensityUserLabel(prefs.density, language)
 
-  return language === 'es'
-    ? `${styleLabel} · ${prefs.aspectRatio} · ${modelLabel} · ${densityLabel}`
-    : `${styleLabel} · ${prefs.aspectRatio} · ${modelLabel} · ${densityLabel}`
+  return `${styleLabel} · ${prefs.aspectRatio} · ${modelLabel} · ${densityLabel}`
+}
+
+/** User-facing density for the image/model quality line. Internal enum stays `hard`. */
+export function imageDensityUserLabel(
+  density: string | null | undefined,
+  language: 'en' | 'es' = 'es'
+): string {
+  if (density === 'hard') return language === 'es' ? 'Poco texto' : 'Short copy'
+  if (language === 'es') {
+    if (density === 'standard') return 'Texto medio'
+    return 'Medio'
+  }
+  if (density === 'standard') return 'Standard'
+  return 'Medium'
+}
+
+/**
+ * Rewrite leftover stored labels (`· Hard`, `density:hard`, Mínimo/Minimal)
+ * so the right rail / cards never show the internal density enum.
+ */
+export function localizeImageAssumptionLine(
+  text: string | null | undefined,
+  language: 'en' | 'es' = 'es'
+): string {
+  if (!text) return ''
+  const replacement = imageDensityUserLabel('hard', language)
+  return text
+    .replace(/\bdensity:hard\b/gi, replacement)
+    .replace(
+      /(^|[·•]\s*)(?:Hard|Mínimo|Minimal|Poco texto|Short copy)\b/g,
+      `$1${replacement}`
+    )
+    .replace(/(^|[·•]\s*)hard\b/g, `$1${replacement}`)
 }
 
 export function buildShellImageGenerateBody(options: {

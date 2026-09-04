@@ -118,6 +118,13 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         category: 'fix',
         text: {
+          es: 'En el chat, la línea de modelo de imagen dice Poco texto en vez de Hard.',
+          en: 'In chat, the image model line says Short copy instead of Hard.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
           es: 'Si pedís un post y elegís Producto, la hoja sigue diciendo Post. Foto queda para el botón Foto.',
           en: 'If you start a post and pick Product, the sheet stays titled Post. Photo stays on the Photo button.',
         },
