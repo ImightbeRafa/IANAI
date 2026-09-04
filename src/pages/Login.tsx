@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import { CHAT_SHELL_AUTH_HOME } from '../features/chat-shell/chatShellRollout'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 const labels = {
@@ -52,7 +53,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [referralCode, setReferralCode] = useState<string | null>(null)
-  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/dashboard'
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || CHAT_SHELL_AUTH_HOME
   const t = labels[language === 'en' ? 'en' : 'es']
 
   // Capture referral code from URL and persist in localStorage

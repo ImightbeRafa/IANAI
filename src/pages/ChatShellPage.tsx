@@ -11,7 +11,7 @@ import {
   markChatShellWelcomeSeenClient,
   type ChatShellOpenEnsureResult,
 } from '../features/chat-shell/chatShellOpenApi'
-import { resolveChatShellOnboardingPhase } from '../features/chat-shell/chatShellOnboarding'
+import { resolveChatShellOnboardingPhase, onboardingPhaseAfterOpenFailure } from '../features/chat-shell/chatShellOnboarding'
 import { invalidateUsageLimitsCache } from '../hooks/useUsageLimits'
 import {
   applyChatShellTheme,
@@ -21,6 +21,7 @@ import {
   type ChatShellTheme,
 } from '../features/chat-shell/chatShellTheme'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
+import { resolveChatShellGateReason } from '../features/chat-shell/chatShellRollout'
 import '../features/chat-shell/chat-shell.css'
 import '../features/chat-shell/chat-shell-feature-modals.css'
 
@@ -70,7 +71,7 @@ export default function ChatShellPage() {
       })
       .catch((err) => {
         console.error('chat-shell open gift', err)
-        if (!cancelled) setPhase('done')
+        if (!cancelled) setPhase(onboardingPhaseAfterOpenFailure())
       })
     return () => {
       cancelled = true
@@ -127,12 +128,7 @@ export default function ChatShellPage() {
   }
 
   if (!canAccessChat) {
-    const reason =
-      killSwitch === 'unreadable'
-        ? 'unreadable'
-        : killSwitch === 'enabled'
-          ? 'invite'
-          : 'disabled'
+    const reason = resolveChatShellGateReason(killSwitch)
     return (
       <ChatShellGate
         onRetry={refresh}

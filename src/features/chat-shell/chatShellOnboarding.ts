@@ -11,3 +11,8 @@ export function resolveChatShellOnboardingPhase(result: {
   if (result.granted || result.showWelcome) return 'gift'
   return 'tour'
 }
+
+/** Open-gift / network failure must not skip the wizard for first open. */
+export function onboardingPhaseAfterOpenFailure(): 'tour' {
+  return 'tour'
+}

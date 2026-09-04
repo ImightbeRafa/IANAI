@@ -91,6 +91,33 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.12',
+    date: '2026-09-04',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'El chat es el inicio para todos. Entrá y pedí guiones, posts y fotos en un solo lugar. El panel clásico sigue en Configuración si lo necesitás.',
+          en: 'Chat is home for everyone. Open it and ask for scripts, posts, and photos in one place. Classic remains under Settings if you need it.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'La primera vez que abrís el chat en producción recibís 100 créditos de bienvenida para probar. Solo una vez.',
+          en: 'The first time you open chat in production you get 100 welcome credits to try it. Once only.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'El recorrido inicial explica Guiones, Post, Foto y Pack. Si ya tenés marcas, siguen listadas. Saltar no borra nada. Si el kit está a medias, ves qué falta con nombre.',
+          en: 'The first-run tour explains Scripts, Post, Photo, and Pack. Brands you already have stay listed. Skip never wipes data. If a kit is half-done, it names what is missing.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.11',
     date: '2026-09-03',
     items: [

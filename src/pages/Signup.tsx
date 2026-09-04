@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff, Gift } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import { CHAT_SHELL_AUTH_HOME } from '../features/chat-shell/chatShellRollout'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 // Password validation
@@ -29,7 +30,7 @@ export default function Signup() {
   const [referralCode, setReferralCode] = useState<string | null>(null)
   const { signUp, signInWithGoogle } = useAuth()
   const [searchParams] = useSearchParams()
-  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/dashboard'
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || CHAT_SHELL_AUTH_HOME
   const loginHref = `/login?redirect=${encodeURIComponent(returnPath)}`
 
   // Capture referral code from URL and persist in localStorage

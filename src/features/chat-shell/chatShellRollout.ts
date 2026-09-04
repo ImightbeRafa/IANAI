@@ -24,19 +24,22 @@ export function parsePreferredUi(value: unknown): PreferredUi | null {
   return null
 }
 
+export const CHAT_SHELL_AUTH_HOME = '/chat'
+export const CLASSIC_AUTH_HOME = '/dashboard'
+
 /**
- * Kill switch + invite. Preference never grants access and never redirects
- * home unless the user opted into chat (`preferred_ui`). Flag-on without
- * `chat_beta_access` is denied (frontend mirrors server gate).
+ * Kill switch is the only gate. When `chat_shell` is on, every signed-in user
+ * can open `/chat` (invite-all). Preference no longer grants or denies access.
+ * Flag off / unreadable fails closed to classic.
  */
 export function resolveChatShellRollout(input: ChatShellRolloutInput): ChatShellRollout {
   const killSwitch = input.killSwitch
   const betaAccess = input.betaAccess === true
   const preferredUi = input.preferredUi === 'chat' ? 'chat' : 'classic'
   const killOn = killSwitch === 'enabled'
-  const canAccessChat = killOn && betaAccess
+  const canAccessChat = killOn
   const showSwitch = canAccessChat
-  const effectiveHome: PreferredUi = canAccessChat && preferredUi === 'chat' ? 'chat' : 'classic'
+  const effectiveHome: PreferredUi = canAccessChat ? 'chat' : 'classic'
 
   return {
     killSwitch,
@@ -46,4 +49,14 @@ export function resolveChatShellRollout(input: ChatShellRolloutInput): ChatShell
     showSwitch,
     effectiveHome,
   }
+}
+
+export function resolveChatShellGateReason(
+  killSwitch: ChatShellKillSwitch
+): 'unreadable' | 'disabled' {
+  return killSwitch === 'unreadable' ? 'unreadable' : 'disabled'
+}
+
+export function authHomePath(canAccessChat: boolean): string {
+  return canAccessChat ? CHAT_SHELL_AUTH_HOME : CLASSIC_AUTH_HOME
 }

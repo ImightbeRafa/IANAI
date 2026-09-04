@@ -36,6 +36,26 @@ describe('ChatShellTourWizard', () => {
     expect(onFinish).toHaveBeenCalledTimes(1)
   })
 
+  it('shows Guiones / Post / Foto / Pack and skip-never-wipes copy', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatShellTourWizard language="es" onFinish={vi.fn()} onSkipForever={vi.fn()} />
+    )
+    expect(screen.getByText('Guiones')).toBeTruthy()
+    expect(screen.getByText('Post')).toBeTruthy()
+    expect(screen.getByText('Foto')).toBeTruthy()
+    expect(screen.getByText('Pack')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(screen.getByRole('heading', { name: 'Guiones, Post, Foto y Pack' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(screen.getByRole('heading', { name: 'Setup de marca' })).toBeTruthy()
+    expect(screen.getByText(/Falta:/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(screen.getByRole('heading', { name: 'Nada se borra al saltar' })).toBeTruthy()
+    expect(screen.getByText(/no borra marcas, kits ni chats/)).toBeTruthy()
+  })
+
   it('renders English copy when language is en', () => {
     render(
       <ChatShellTourWizard language="en" onFinish={vi.fn()} onSkipForever={vi.fn()} />

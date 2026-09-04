@@ -1,3 +1,16 @@
+## 2026-09-04 — Mass cutover: invite-all, prod gift 100, wizard harden
+
+**Area:** chat-shell / rollout / billing
+**Files:** `chatShellRollout.ts`, `api/lib/chat-shell-access.ts`, `ChatShellPage.tsx`, `ChatShellTourWizard.tsx`, `chatShellTourSteps.ts`, `Home.tsx`, `Login.tsx`, `Signup.tsx`, `AuthContext.tsx`, `App.tsx`, `docs/operations/chat-shell-production-transition.md`
+
+- Kill switch only: `app_feature_flags.chat_shell` on → every authenticated user has `/chat`. `chat_beta_access` is not a gate. Flag off/unreadable fails closed (`Chat aún no está habilitado`). Never `Chat es por invitación` after cutover.
+- Authenticated home is `/chat` (homepage, login, signup, Google OAuth fallback). `/dashboard` stays reachable — no DashboardHome bounce (classic switch must work).
+- First production `/chat` open still gifts **100** pack credits once (`CHAT_SHELL_OPEN_GIFT_CREDITS`, CREDITS_V1 lot). Preview / non-production fail closed. No clawback. Open-gift failure keeps the tour mounted (`onboardingPhaseAfterOpenFailure`).
+- Tour steps match Guiones / Post / Foto / Pack. Skip marks `chat_shell_tour_done` only. Soft kit Falta copy unchanged.
+- Tests: rollout invite-all, access-from-flag, page wizard mount on gift failure, tour verbs + skip-never-wipes.
+
+No merge. No live AIIAN SQL. No Preview gift. No second ledger. No Instagram.
+
 ## 2026-09-03 — Guiones mix CTAs, Uso history, ticket events
 
 **Area:** chat-shell / billing / tickets

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveChatShellOnboardingPhase } from '../src/features/chat-shell/chatShellOnboarding'
+import {
+  onboardingPhaseAfterOpenFailure,
+  resolveChatShellOnboardingPhase,
+} from '../src/features/chat-shell/chatShellOnboarding'
 import { kitHardBlocked, shouldShowFirstRunCta } from '../src/features/chat-shell/chatShellFirstRun'
 
 describe('resolveChatShellOnboardingPhase', () => {
@@ -30,6 +33,10 @@ describe('resolveChatShellOnboardingPhase', () => {
       granted: false,
       showWelcome: false,
     })).toBe('tour')
+  })
+
+  it('keeps the wizard mounted when chat-shell-open fails (never skip to done)', () => {
+    expect(onboardingPhaseAfterOpenFailure()).toBe('tour')
   })
 })
 
