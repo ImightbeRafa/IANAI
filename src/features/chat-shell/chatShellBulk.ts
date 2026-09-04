@@ -73,8 +73,16 @@ async function postJson<T>(name: Parameters<typeof bulkApiUrl>[0], body: Record<
     headers: await authHeaders(),
     body: JSON.stringify(body),
   })
-  const json = await response.json().catch(() => ({})) as T & { error?: string }
-  if (!response.ok) throw new Error(json.error || `Request failed (${response.status})`)
+  const json = await response.json().catch(() => ({})) as T & {
+    error?: string
+    items?: Array<{ error?: string; title?: string }>
+  }
+  if (!response.ok) {
+    const itemError = Array.isArray(json.items)
+      ? json.items.find((item) => item?.error)?.error
+      : undefined
+    throw new Error(json.error || itemError || `Request failed (${response.status})`)
+  }
   return json
 }
 
@@ -83,6 +91,40 @@ export function clampComposerBulkCount(value: unknown): number {
   const n = typeof value === 'number' ? value : Number(String(value).trim())
   if (!Number.isFinite(n)) return 10
   return Math.min(25, Math.max(2, Math.round(n)))
+}
+
+/** Allow typing 15 (do not clamp "1" to 2 on every keystroke). */
+export function sanitizeComposerBulkCountDraft(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 2)
+  return digits
+}
+
+export function stepComposerBulkCount(current: string | number, delta: number): string {
+  const n = clampComposerBulkCount(current === '' ? 10 : current)
+  return String(clampComposerBulkCount(n + delta))
+}
+
+/** In-chat Pack failure. Never a silent empty complete. */
+export function packFailureCopy(raw: string, language: 'es' | 'en'): string {
+  const message = (raw || '').trim() || (language === 'es' ? 'Error desconocido' : 'Unknown error')
+  if (language === 'en') return `Could not generate the pack. ${message}`
+  const lower = message.toLowerCase()
+  if (/brand has no offers|no offers/.test(lower)) {
+    return 'No pude generar el pack. Esta marca no tiene ofertas. Creá una oferta e intentá de nuevo.'
+  }
+  if (/request failed/.test(lower)) {
+    return `No pude generar el pack. ${message.replace(/^Request failed/i, 'La solicitud falló')}`
+  }
+  if (/credit|402|limit reached|insufficient/.test(lower)) {
+    return 'No pude generar el pack. No hay créditos suficientes para este pack.'
+  }
+  if (/chat abierto|sessionid|open a chat/.test(lower)) {
+    return 'No pude generar el pack. No hay un chat abierto para guardar el pack.'
+  }
+  if (/^no pude generar el pack/i.test(message) || /^no se pudo generar el pack/i.test(message)) {
+    return message
+  }
+  return `No pude generar el pack. ${message}`
 }
 
 export async function fetchBulkAngles(body: {

@@ -4,6 +4,7 @@ import { supabaseAdmin } from './supabase-admin.js'
 import {
   isCreditsV1Enabled,
   legacyActionToCredit,
+  legacyMeterRpcAction,
   quoteCredits,
   type LegacyMeterAction,
 } from './credits/catalog.js'
@@ -187,6 +188,11 @@ export async function checkUsageLimit(
       return { allowed: false, remaining: 0, limit: 0 }
     }
 
+    // Chat-shell script_edit / condense have no legacy monthly meter.
+    if (action === 'script_edit' || action === 'condense') {
+      return { allowed: true, remaining: -1, limit: -1 }
+    }
+
     // Enhance/edit check against the image limit (enhance at half rate) — legacy path only
     const effectiveAction = action === 'enhance' || action === 'edit' ? 'image' : action
 
@@ -307,7 +313,8 @@ export async function incrementUsage(
   }
 
   try {
-    const rpcAction = action === 'edit' ? 'image' : action
+    const rpcAction = legacyMeterRpcAction(action)
+    if (!rpcAction) return
     const { error } = await supabaseAdmin.rpc('increment_usage', {
       p_user_id: userId,
       p_action: rpcAction

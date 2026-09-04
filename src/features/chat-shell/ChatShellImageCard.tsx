@@ -4,6 +4,7 @@ import type { MessageArtifact } from '../../types'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 import type { ShellImageLike } from './chatShellImages'
 import { downloadShellImage, filenameForShellImage } from './chatShellDownload'
+import { localizeImageAssumptionLine } from './chatShellImageIntent'
 
 interface ChatShellImageCardProps {
   artifact: MessageArtifact
@@ -50,10 +51,13 @@ export default function ChatShellImageCard({
   const [imageStatus, setImageStatus] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [downloading, setDownloading] = useState(false)
 
-  const assumptions =
+  const assumptions = localizeImageAssumptionLine(
     typeof artifact.action_metadata?.assumptions === 'string'
       ? artifact.action_metadata.assumptions
-      : null
+      : null,
+    language
+  ) || null
+  const imageLabel = localizeImageAssumptionLine(image?.label, language)
   const aspect = aspectFromAssumptions(assumptions)
 
   if (!url || !image) {
@@ -76,7 +80,7 @@ export default function ChatShellImageCard({
       <header className="chat-shell__artifact-head">
         <div className="chat-shell__artifact-title-row">
           <strong className="chat-shell__artifact-title">
-            {productName || image.label || 'Image'}
+            {productName || imageLabel || 'Image'}
           </strong>
           {assumptions ? (
             <span className="chat-shell__artifact-offer">{assumptions}</span>
@@ -96,7 +100,7 @@ export default function ChatShellImageCard({
                 key={version.id}
                 type="button"
                 className={index === activeIndex ? 'is-on' : ''}
-                title={version.label || title}
+                title={localizeImageAssumptionLine(version.label, language) || title}
                 aria-label={title}
                 onClick={() => setViewIndex(index === latestIndex ? null : index)}
               >
@@ -117,7 +121,7 @@ export default function ChatShellImageCard({
           <img
             className="chat-shell__image-shot"
             src={url}
-            alt={image.label || productName || 'Generated'}
+            alt={imageLabel || productName || 'Generated'}
             data-aspect={aspect || undefined}
             onLoad={() => setImageStatus('ready')}
             onError={() => {

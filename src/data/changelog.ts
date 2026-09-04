@@ -91,6 +91,74 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.12',
+    date: '2026-09-04',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'El chat es el inicio para todos. Entrá y pedí guiones, posts y fotos en un solo lugar. El panel clásico sigue en Configuración si lo necesitás.',
+          en: 'Chat is home for everyone. Open it and ask for scripts, posts, and photos in one place. Classic remains under Settings if you need it.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'La primera vez que abrís el chat en producción recibís 100 créditos de bienvenida para probar. Solo una vez.',
+          en: 'The first time you open chat in production you get 100 welcome credits to try it. Once only.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Si el chat no tiene oferta, Guiones, Post, Foto y Pack se ven apagados (Elegí oferta) y te llevan a Ofertas. Pack no arranca vacío.',
+          en: 'If the chat has no offer, Scripts, Post, Photo, and Pack look off (Choose offer) and take you to Offers. Pack does not start empty.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'En el chat, la línea de modelo de imagen dice Poco texto en vez de Hard.',
+          en: 'In chat, the image model line says Short copy instead of Hard.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Si pedís un post y elegís Producto, la hoja sigue diciendo Post. Foto queda para el botón Foto.',
+          en: 'If you start a post and pick Product, the sheet stays titled Post. Photo stays on the Photo button.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'En guiones paso 3 ves la mezcla de CTAs y Generar (apagado hasta elegir). El primero toma todas las versiones; el segundo le saca 1.',
+          en: 'Script step 3 shows the CTA mix and Generate (off until you pick). First pick takes every version; a second type steals 1.',
+        },
+      },
+    ],
+  },
+  {
+    version: '0.1.11',
+    date: '2026-09-03',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'En guiones podés mezclar CTAs: unos a la web, otros a mensaje, o sin CTA, con un número al lado de cada opción. Los créditos se cotizan igual que hoy.',
+          en: 'Script CTAs can mix: some to the website, some to message, or none, with a count next to each option. Credits quote the same as today.',
+        },
+      },
+      {
+        category: 'feature',
+        text: {
+          es: 'En Plan y facturación ves tu historial de uso: qué se generó, cuándo, créditos y si salió bien o falló. Solo el tuyo.',
+          en: 'Plan & Billing now shows your usage history: what ran, when, credits, and success vs fail. Yours only.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.10',
     date: '2026-08-27',
     items: [

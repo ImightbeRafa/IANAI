@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
+  CircleHelp,
   MoreHorizontal,
   Settings,
   Trash2,
@@ -54,6 +55,7 @@ interface ChatSidebarProps {
   onDeleteSession: (sessionId: string) => void | Promise<void>
   onDeleteBrand: (brandId: string) => void | Promise<void>
   onOpenSettings: () => void
+  onOpenTour?: () => void
   onSwitchToClassic?: () => void
 }
 
@@ -87,6 +89,7 @@ export default function ChatSidebar({
   onDeleteSession,
   onDeleteBrand,
   onOpenSettings,
+  onOpenTour,
   onSwitchToClassic,
 }: ChatSidebarProps) {
   const { language } = useLanguage()
@@ -562,26 +565,41 @@ export default function ChatSidebar({
                 : `${t.scriptsUsed} ${usage.scriptsUsed}/${usage.scriptsLimit === -1 ? '∞' : usage.scriptsLimit} · ${t.imagesUsed} ${usage.imagesUsed}/${usage.imagesLimit === -1 ? '∞' : usage.imagesLimit}`}
           </div>
         </div>
-        {onSwitchToClassic && (
-          <button
-            type="button"
-            className="chat-shell__classic-btn"
-            aria-label={t.useClassic}
-            title={t.useClassic}
-            onClick={onSwitchToClassic}
-          >
-            {t.classicShort}
-          </button>
-        )}
-        <button
-          type="button"
-          className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
-          aria-label={t.settings}
-          title={t.settings}
-          onClick={onOpenSettings}
-        >
-          <Settings size={15} aria-hidden />
-        </button>
+        <div className="chat-shell__user-actions">
+          {onSwitchToClassic && (
+            <button
+              type="button"
+              className="chat-shell__classic-btn"
+              aria-label={t.useClassic}
+              title={t.useClassic}
+              onClick={onSwitchToClassic}
+            >
+              {t.classicShort}
+            </button>
+          )}
+          <div className="chat-shell__user-icons">
+            {onOpenTour ? (
+              <button
+                type="button"
+                className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
+                aria-label={t.openTour}
+                title={t.openTour}
+                onClick={onOpenTour}
+              >
+                <CircleHelp size={15} aria-hidden />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
+              aria-label={t.settings}
+              title={t.settings}
+              onClick={onOpenSettings}
+            >
+              <Settings size={15} aria-hidden />
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
   )

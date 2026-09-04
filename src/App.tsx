@@ -10,7 +10,7 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import OAuthConsent from './pages/OAuthConsent'
 import McpApprove from './pages/McpApprove'
-import { ChatShellRolloutProvider, useChatShellRollout } from './features/chat-shell/ChatShellRolloutContext'
+import { ChatShellRolloutProvider } from './features/chat-shell/ChatShellRolloutContext'
 
 // Lazy-loaded pages (code-split for smaller initial bundle)
 const OverviewDashboard = lazy(() => import('./pages/OverviewDashboard'))
@@ -57,9 +57,6 @@ function AppFeedback() {
 }
 
 function DashboardHome() {
-  const { loading, effectiveHome } = useChatShellRollout()
-  if (loading) return <LazyFallback />
-  if (effectiveHome === 'chat') return <Navigate to="/chat" replace />
   return <OverviewDashboard />
 }
 

@@ -23,8 +23,8 @@ import { isScriptContent, parseScripts, type ParsedScript } from '../../utils/sc
 import {
   type FailedOfferBatch,
   type ImageClarifyState,
+  type ScriptClarifyAnswer,
   type ScriptClarifyState,
-  type ScriptCtaChannel,
 } from './useChatSessionThread'
 import ChatShellClarifySheet from './ChatShellClarifySheet'
 import { creditQuoteCopy, type CreditQuote } from './chatShellCreditQuote'
@@ -43,6 +43,7 @@ import {
   type ShellImageAspect,
   type ShellImageDensity,
 } from './chatShellImageIntent'
+import { shouldShowFirstRunCta } from './chatShellFirstRun'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -57,6 +58,7 @@ interface ChatThreadProps {
   latestImagesByOffer: Map<string, ShellImageLike>
   offerImages?: ShellImageLike[]
   imageBusy: boolean
+  packBusy?: boolean
   setupBusy?: boolean
   imageModel?: ImageModel
   imageAspect?: ShellImageAspect
@@ -87,15 +89,12 @@ interface ChatThreadProps {
   onSelectImageOffer?: (productId: string) => void
   scriptClarify?: ScriptClarifyState | null
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
-  onAnswerScriptClarify?: (answer: {
-    type?: ScriptFramework | 'mixed'
-    count?: number
-    ctaChannel?: ScriptCtaChannel
-    confirm?: boolean
-  }) => void
+  onAnswerScriptClarify?: (answer: ScriptClarifyAnswer) => void
   onCancelScriptClarify?: () => void
   onBackScriptClarify?: () => void
   creditQuote?: CreditQuote | null
+  creditsRemaining?: number | null
+  creditsEnabled?: boolean
   onConfirmCreditQuote?: () => void
   onCancelCreditQuote?: () => void
   onOpenImagesRail?: () => void
@@ -155,6 +154,8 @@ interface ChatThreadProps {
   /** First-run empty CTA — opens Brand Kit / brand create (not a multi-step tour). */
   onStartBrandKit?: () => void
   kitReady?: boolean
+  /** Folder already has an offer name (existing classic users are not first-run). */
+  hasOfferName?: boolean
 }
 
 function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
@@ -214,6 +215,7 @@ export default memo(function ChatThread({
   latestImagesByOffer,
   offerImages = [],
   imageBusy,
+  packBusy = false,
   setupBusy = false,
   imageModel,
   imageAspect,
@@ -236,6 +238,8 @@ export default memo(function ChatThread({
   onCancelScriptClarify,
   onBackScriptClarify,
   creditQuote = null,
+  creditsRemaining,
+  creditsEnabled = false,
   onConfirmCreditQuote,
   onCancelCreditQuote,
   onOpenImagesRail,
@@ -258,6 +262,7 @@ export default memo(function ChatThread({
   onUploadSetupDocument,
   onStartBrandKit,
   kitReady = false,
+  hasOfferName = false,
 }: ChatThreadProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [attachOpen, setAttachOpen] = useState(false)
@@ -371,14 +376,25 @@ export default memo(function ChatThread({
     })
   }, [visibleMessages])
   // First-run: kit incomplete + no real conversation → CTA (not Hola welcome).
-  const showFirstRunCta = Boolean(session) && !kitReady && !hasUserOrArtifactMessages && !showInitialLoader
+  const showFirstRunCta = shouldShowFirstRunCta({
+    hasSession: Boolean(session),
+    kitReady,
+    hasOfferName,
+    hasUserOrArtifactMessages,
+    showInitialLoader,
+  })
+  // In-thread Crear post / Optimizar para post: same stronglyComplete gate as #34
+  // (not kitHardBlocked). Soft kit still unlocks glass verbs when an offer exists.
+  const kitGenerateBlocked = !kitReady
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
-    : setupBusy
-      ? 'setup'
-      : sending && !imageClarify
-        ? 'script'
-        : null
+    : packBusy
+      ? 'pack'
+      : setupBusy
+        ? 'setup'
+        : sending && !imageClarify
+          ? 'script'
+          : null
   const progressSubtitle = walkProgress
     ? `${walkProgress.current}/${walkProgress.total}${walkProgress.offerName ? ` · ${walkProgress.offerName}` : ''}`
     : undefined
@@ -389,7 +405,7 @@ export default memo(function ChatThread({
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [messages.length, setupTurns.length, progressKind, sending, setupBusy, imageBusy, loadingMessages])
+  }, [messages.length, setupTurns.length, progressKind, sending, setupBusy, imageBusy, packBusy, loadingMessages])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashCommands.length > 0) {
@@ -447,7 +463,7 @@ export default memo(function ChatThread({
                   data-cta="empezar-marca"
                   onClick={onStartBrandKit}
                 >
-                  Empezá por tu marca
+                  {t.emptyFirstRunCta}
                 </button>
               ) : null}
             </div>
@@ -471,7 +487,7 @@ export default memo(function ChatThread({
                       data-cta="empezar-marca"
                       onClick={onStartBrandKit}
                     >
-                      Empezá por tu marca
+                      {t.emptyFirstRunCta}
                     </button>
                   ) : null}
                 </div>
@@ -576,7 +592,7 @@ export default memo(function ChatThread({
                           offerImageUrl={offerImage?.image_url}
                           referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
-                          kitGenerateBlocked={!kitReady}
+                          kitGenerateBlocked={kitGenerateBlocked}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
                               ...opts,
@@ -653,7 +669,7 @@ export default memo(function ChatThread({
                         savingScript={savingScript}
                         referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
-                        kitGenerateBlocked={!kitReady}
+                        kitGenerateBlocked={kitGenerateBlocked}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}
@@ -706,7 +722,7 @@ export default memo(function ChatThread({
               key={`${progressKind}-${scriptType || ''}`}
               kind={progressKind}
               language={language}
-              subtitle={progressKind === 'image' ? imageModel : progressSubtitle}
+              subtitle={progressKind === 'image' ? imageModel : progressKind === 'pack' ? (language === 'es' ? 'Pack' : 'Pack') : progressSubtitle}
               imageModel={imageModel}
               aspectRatio={imageAspect}
               context={{
@@ -772,6 +788,8 @@ export default memo(function ChatThread({
           scriptClarify={scriptClarify && offerCount > 0 ? scriptClarify : null}
           imageClarify={imageClarify}
           imageBusy={imageBusy}
+          creditsRemaining={creditsEnabled ? creditsRemaining : null}
+          creditsEnabled={creditsEnabled}
           onAnswerScriptClarify={onAnswerScriptClarify}
           onCancelScriptClarify={() => {
             setPostPreviewScriptKey(null)

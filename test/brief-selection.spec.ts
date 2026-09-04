@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { expandCtaMixSlots } from '../api/lib/guiones/cta-mix'
 import { selectScriptBriefs } from '../api/lib/guiones/script-briefs'
 import type { AngleCandidate, ScriptSettings } from '../api/lib/guiones/types'
 
@@ -47,6 +48,56 @@ describe('selectScriptBriefs', () => {
     expect(briefs).toHaveLength(3)
     expect(briefs.map(b => b.scriptType)).toEqual(['venta_directa', 'desvalidar_alternativas', 'desvalidar_alternativas'])
     expect(new Set(briefs.map(b => `${b.hookMechanism}:${b.buyerStage}`)).size).toBe(3)
+    expect(briefs.every((brief) => brief.cta.channel === 'messages')).toBe(true)
+  })
+
+  it('assigns mixed CTA channels per brief when ctaMix sums to the script total', () => {
+    const mixed: ScriptSettings = {
+      framework: 'venta_directa',
+      variations: 5,
+      generationMode: 'mixed',
+      ctaStrength: 'sales',
+      ctaMix: { website: 3, messages: 2, none: 0 },
+    }
+    const briefs = selectScriptBriefs(
+      [0, 1, 2, 3, 4].map((i) => candidate(`m${i}`, 'venta_directa', `hook_${i}`, i % 3 === 0 ? 'cold' : i % 3 === 1 ? 'warm' : 'hot')),
+      mixed,
+      'product',
+      'sales',
+      'website'
+    )
+    expect(briefs.map((brief) => brief.cta.channel)).toEqual([
+      'website', 'website', 'website', 'messages', 'messages',
+    ])
+  })
+
+  it('uses none strength for Sin CTA slots in a mix', () => {
+    const mixed: ScriptSettings = {
+      framework: 'venta_directa',
+      variations: 3,
+      generationMode: 'mixed',
+      ctaMix: { website: 1, messages: 1, none: 1 },
+    }
+    const briefs = selectScriptBriefs(
+      [0, 1, 2].map((i) => candidate(`n${i}`, 'venta_directa', `hook_${i}`, 'warm')),
+      mixed,
+      'product',
+      'sales',
+      'website'
+    )
+    expect(briefs.map((brief) => brief.cta.strength)).toEqual(['sales', 'sales', 'none'])
+    expect(briefs[2].cta.channel).toBeUndefined()
   })
 })
 
+describe('expandCtaMixSlots', () => {
+  it('falls back to a single channel when mix does not sum to count', () => {
+    const slots = expandCtaMixSlots(
+      { website: 1, messages: 1, none: 0 },
+      5,
+      { channel: 'website', strength: 'sales' }
+    )
+    expect(slots).toHaveLength(5)
+    expect(slots.every((slot) => slot.channel === 'website')).toBe(true)
+  })
+})

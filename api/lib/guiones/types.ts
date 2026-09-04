@@ -38,6 +38,12 @@ export interface ScriptSettings {
   ctaStrength?: CTAStrength
   useStructuredPipeline?: boolean
   forceFreshAngles?: boolean
+  /** Per-script CTA mix; counts must equal requested script total. */
+  ctaMix?: {
+    website: number
+    messages: number
+    none: number
+  }
 }
 
 export interface ContextDocumentData {

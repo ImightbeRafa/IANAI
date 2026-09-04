@@ -579,6 +579,12 @@ export interface ScriptGenerationSettings {
   ctaStrength?: CTAStrength
   useStructuredPipeline?: boolean
   forceFreshAngles?: boolean
+  /** Per-script CTA mix; counts must equal requested script total. */
+  ctaMix?: {
+    website: number
+    messages: number
+    none: number
+  }
 }
 
 export type BuyerStage = 'cold' | 'warm' | 'hot'

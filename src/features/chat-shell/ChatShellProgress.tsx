@@ -3,7 +3,7 @@ import { IconAdvanceMark } from './ChatShellIcons'
 import type { ImageModel, ScriptFramework } from '../../types'
 import type { ShellImageAspect } from './chatShellImageIntent'
 
-export type ChatShellProgressKind = 'setup' | 'script' | 'image'
+export type ChatShellProgressKind = 'setup' | 'script' | 'image' | 'pack'
 
 export type ChatShellProgressContext = {
   scriptType?: ScriptFramework | 'mixed' | string | null
@@ -65,6 +65,10 @@ export function progressStepsFor(
       return scriptStepsFor(language, context?.scriptType)
     case 'image':
       return []
+    case 'pack':
+      return language === 'es'
+        ? ['Armando los ángulos…', 'Escribiendo los guiones…', 'Guardando en el chat…']
+        : ['Building the angles…', 'Writing the scripts…', 'Saving into the chat…']
     default: {
       const _exhaustive: never = kind
       return _exhaustive
@@ -95,6 +99,8 @@ function headingFor(
     }
     case 'image':
       return language === 'es' ? 'Generando' : 'Generating'
+    case 'pack':
+      return language === 'es' ? 'Generando pack' : 'Generating pack'
     default: {
       const _exhaustive: never = kind
       return _exhaustive

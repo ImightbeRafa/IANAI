@@ -2,6 +2,7 @@
  * Pure credit catalog + FIFO tests (no DB).
  */
 import { describe, expect, it } from 'vitest'
+import { planDisplayName } from '../src/lib/creditsCatalog'
 import {
   CREDIT_WEIGHTS,
   PLAN_CATALOG,
@@ -9,6 +10,8 @@ import {
   quoteCredits,
   resolveImageCreditAction,
   legacyActionToCredit,
+  legacyMeterRpcAction,
+  meterActionForImageApi,
 } from '../api/lib/credits/catalog'
 import {
   applyMonthlyGrant,
@@ -59,6 +62,37 @@ describe('credit catalog', () => {
     expect(quoteCredits('image_edit')).toBe(18)
   })
 
+  it('maps generate-image API actions to the matching meter (edit = 18, generate = 6)', () => {
+    expect(meterActionForImageApi('edit')).toBe('edit')
+    expect(meterActionForImageApi('enhance')).toBe('enhance')
+    expect(meterActionForImageApi('generate')).toBe('image')
+    expect(legacyActionToCredit({
+      action: meterActionForImageApi('edit'),
+      imageModel: 'grok-imagine',
+    })).toEqual({ creditAction: 'image_edit', units: 1 })
+    expect(legacyActionToCredit({
+      action: meterActionForImageApi('generate'),
+      imageModel: 'grok-imagine',
+    })).toEqual({ creditAction: 'image_standard', units: 1 })
+  })
+
+  it('maps chat-shell script_edit and condense to guion_edit / prompt_condense', () => {
+    expect(legacyActionToCredit({ action: 'script_edit' })).toEqual({
+      creditAction: 'guion_edit',
+      units: 1,
+    })
+    expect(quoteCredits('guion_edit')).toBe(1)
+    expect(legacyActionToCredit({ action: 'condense' })).toEqual({
+      creditAction: 'prompt_condense',
+      units: 1,
+    })
+    expect(quoteCredits('prompt_condense')).toBe(0)
+    expect(legacyMeterRpcAction('script_edit')).toBeNull()
+    expect(legacyMeterRpcAction('condense')).toBeNull()
+    expect(legacyMeterRpcAction('edit')).toBe('image')
+    expect(legacyMeterRpcAction('enhance')).toBe('enhance')
+  })
+
   it('defines public plans without unlimited', () => {
     expect(PLAN_CATALOG.starter.creditsPerMonth).toBe(750)
     expect(PLAN_CATALOG.pro.creditsPerMonth).toBe(1500)
@@ -71,6 +105,14 @@ describe('credit catalog', () => {
     expect(PLAN_CATALOG.pro.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
     expect(PLAN_CATALOG.business.paymentLink).toMatch(/^https:\/\/tp\.cr\//)
     expect(CREDIT_PACK.paymentLink).toBeNull()
+  })
+})
+
+describe('planDisplayName', () => {
+  it('shows Gratis for the free plan in Spanish', () => {
+    expect(planDisplayName('free', 'es')).toBe('Gratis')
+    expect(planDisplayName('free', 'en')).toBe('Free')
+    expect(planDisplayName('pro', 'es')).toBe('Premium')
   })
 })
 

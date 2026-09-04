@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import ChatShell from '../features/chat-shell/ChatShell'
 import ChatShellGate from '../features/chat-shell/ChatShellGate'
+import ChatShellTourWizard from '../features/chat-shell/ChatShellTourWizard'
 import ChatShellWelcomeGiftModal from '../features/chat-shell/ChatShellWelcomeGiftModal'
 import {
   ensureChatShellOpenGift,
@@ -10,6 +11,7 @@ import {
   markChatShellWelcomeSeenClient,
   type ChatShellOpenEnsureResult,
 } from '../features/chat-shell/chatShellOpenApi'
+import { resolveChatShellOnboardingPhase, onboardingPhaseAfterOpenFailure } from '../features/chat-shell/chatShellOnboarding'
 import { invalidateUsageLimitsCache } from '../hooks/useUsageLimits'
 import {
   applyChatShellTheme,
@@ -19,6 +21,7 @@ import {
   type ChatShellTheme,
 } from '../features/chat-shell/chatShellTheme'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
+import { resolveChatShellGateReason } from '../features/chat-shell/chatShellRollout'
 import '../features/chat-shell/chat-shell.css'
 import '../features/chat-shell/chat-shell-feature-modals.css'
 
@@ -35,7 +38,7 @@ function initialsFromName(name: string): string {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
-type OnboardingPhase = 'loading' | 'gift' | 'done'
+type OnboardingPhase = 'loading' | 'gift' | 'tour' | 'done'
 
 export default function ChatShellPage() {
   const { user } = useAuth()
@@ -46,11 +49,12 @@ export default function ChatShellPage() {
   const [phase, setPhase] = useState<OnboardingPhase>('loading')
 
   useLayoutEffect(() => {
-    applyChatShellTheme(theme)
+    const applied = canAccessChat ? theme : 'obsidian-dark'
+    applyChatShellTheme(applied)
     return () => {
       clearChatShellTheme()
     }
-  }, [theme])
+  }, [theme, canAccessChat])
 
   useEffect(() => {
     if (!canAccessChat || !user?.id) return
@@ -63,20 +67,11 @@ export default function ChatShellPage() {
         if (result.granted || result.creditsRemaining > 0) {
           invalidateUsageLimitsCache()
         }
-        if (result.tourDone) {
-          setPhase('done')
-          return
-        }
-        if (result.granted || result.showWelcome) {
-          setPhase('gift')
-          return
-        }
-        // First-run chrome is the empty composer CTA ("Empezá por tu marca") — not a multi-step tour.
-        setPhase('done')
+        setPhase(resolveChatShellOnboardingPhase(result))
       })
       .catch((err) => {
         console.error('chat-shell open gift', err)
-        if (!cancelled) setPhase('done')
+        if (!cancelled) setPhase(onboardingPhaseAfterOpenFailure())
       })
     return () => {
       cancelled = true
@@ -93,10 +88,23 @@ export default function ChatShellPage() {
     applyTheme(theme === 'obsidian-dark' ? 'obsidian-light' : 'obsidian-dark')
   }
 
-  const dismissGift = (_continueToTour: boolean) => {
-    // Skip multi-step tour — empty composer CTA covers first-run.
+  const openTour = () => {
+    setPhase('tour')
+  }
+
+  const dismissGiftSkipTour = () => {
     setPhase('done')
     void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
+    void markChatShellTourDoneClient().catch((err) => console.error(err))
+  }
+
+  const continueGiftToTour = () => {
+    setPhase('tour')
+    void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
+  }
+
+  const finishTour = () => {
+    setPhase('done')
     void markChatShellTourDoneClient().catch((err) => console.error(err))
   }
 
@@ -120,18 +128,14 @@ export default function ChatShellPage() {
   }
 
   if (!canAccessChat) {
-    const reason =
-      killSwitch === 'unreadable'
-        ? 'unreadable'
-        : killSwitch === 'enabled'
-          ? 'invite'
-          : 'disabled'
+    const reason = resolveChatShellGateReason(killSwitch)
     return (
       <ChatShellGate
         onRetry={refresh}
-        theme={theme}
+        theme="obsidian-dark"
         onToggleTheme={toggleTheme}
         reason={reason}
+        showThemeToggle={false}
       />
     )
   }
@@ -155,14 +159,22 @@ export default function ChatShellPage() {
         displayName={displayName}
         initials={initials}
         userId={user.id}
+        onOpenTour={openTour}
       />
       {phase === 'gift' && gift ? (
         <ChatShellWelcomeGiftModal
           credits={gift.credits || 100}
           granted={gift.granted}
           language={lang}
-          onContinue={() => dismissGift(true)}
-          onDismiss={() => dismissGift(false)}
+          onContinue={continueGiftToTour}
+          onDismiss={dismissGiftSkipTour}
+        />
+      ) : null}
+      {phase === 'tour' ? (
+        <ChatShellTourWizard
+          language={lang}
+          onFinish={finishTour}
+          onSkipForever={finishTour}
         />
       ) : null}
     </>

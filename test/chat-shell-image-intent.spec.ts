@@ -5,6 +5,7 @@ import {
   buildShellImageGenerateBody,
   DEFAULT_IMAGE_PREFERENCES,
   formatImageAssumptions,
+  localizeImageAssumptionLine,
   looksLikeOrganicScript,
   looksLikeSalesScript,
   parseChatShellImageIntent,
@@ -302,6 +303,41 @@ describe('buildShellImageGenerateBody', () => {
     expect(label).toContain('Comparación')
     expect(label).toContain('3:4')
     expect(label).toContain('Nano Banana Pro')
+    expect(label).not.toContain('Hard')
+  })
+
+  it('localizes density instead of showing Hard', () => {
+    const es = formatImageAssumptions({
+      style: { kind: 'preset', presetId: 'comparison' },
+      aspectRatio: '9:16',
+      model: 'grok-imagine',
+      density: 'hard',
+    }, 'es')
+    expect(es).toContain('Grok Imagine 2.0')
+    expect(es).toContain('Poco texto')
+    expect(es).not.toContain('Hard')
+    const en = formatImageAssumptions({
+      style: { kind: 'preset', presetId: 'comparison' },
+      aspectRatio: '9:16',
+      model: 'grok-imagine',
+      density: 'hard',
+    }, 'en')
+    expect(en).toContain('Short copy')
+    expect(en).not.toContain('Hard')
+  })
+
+  it('rewrites stored Hard on the user-facing image/model line', () => {
+    const stored = 'Cita / Motivacional · 1:1 · Grok Imagine 2.0 · Hard'
+    const es = localizeImageAssumptionLine(stored, 'es')
+    expect(es).toBe('Cita / Motivacional · 1:1 · Grok Imagine 2.0 · Poco texto')
+    expect(es).not.toContain('Hard')
+    const en = localizeImageAssumptionLine(stored, 'en')
+    expect(en).toBe('Cita / Motivacional · 1:1 · Grok Imagine 2.0 · Short copy')
+    expect(en).not.toContain('Hard')
+    expect(localizeImageAssumptionLine('Grok Imagine 2.0 · Mínimo', 'es')).toContain('Poco texto')
+    expect(localizeImageAssumptionLine('density:hard', 'es')).toBe('Poco texto')
+    expect(localizeImageAssumptionLine('Grok Imagine 2.0 · Poco texto', 'es')).toContain('Poco texto')
+    expect(localizeImageAssumptionLine('Grok Imagine 2.0 · Poco texto', 'es')).not.toContain('Hard')
   })
 })
 

@@ -64,7 +64,64 @@ describe('ChatShellClarifySheet', () => {
     expect(screen.getByRole('button', { name: 'Atrás' })).toBeTruthy()
   })
 
-  it('keeps credits on Guiones Paso 3 and shows Generar only after CTA pick', async () => {
+  it('quotes mixed Guiones count the same for web vs message CTA and shows remaining', () => {
+    const mixed = scriptState({
+      step: 'cta',
+      remaining: [],
+      ctaChannel: 'website',
+      history: [scriptState()],
+      settings: { ...DEFAULT_SCRIPT_SETTINGS, generationMode: 'mixed', variations: 5 },
+    })
+    const { rerender } = render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={mixed}
+        imageClarify={null}
+        creditsRemaining={142}
+        creditsEnabled
+      />
+    )
+    expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
+    expect(screen.getByText(/te quedan 142/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Comprar en web/ })).toBeTruthy()
+    rerender(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={{ ...mixed, ctaChannel: 'messages' }}
+        imageClarify={null}
+        creditsRemaining={142}
+        creditsEnabled
+      />
+    )
+    expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
+    expect(screen.getByText(/te quedan 142/)).toBeTruthy()
+  })
+
+  it('shows mixed CTA counts next to each selected option and keeps the same quote', () => {
+    render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={scriptState({
+          step: 'cta',
+          remaining: [],
+          ctaChannel: 'website',
+          ctaMix: { website: 3, messages: 2, none: 0 },
+          history: [scriptState()],
+          settings: { ...DEFAULT_SCRIPT_SETTINGS, generationMode: 'mixed', variations: 5 },
+        })}
+        imageClarify={null}
+        creditsRemaining={142}
+        creditsEnabled
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Comprar en web 3' }).textContent).toMatch(/3/)
+    expect(screen.getByRole('button', { name: 'Enviar mensaje 2' }).textContent).toMatch(/2/)
+    expect(screen.getByText(/15 créditos · 5 guion/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Generar' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Más Comprar en web' })).toBeTruthy()
+  })
+
+  it('shows Generar disabled on Guiones Paso 3 until a CTA is picked', async () => {
     const user = userEvent.setup()
     const onAnswer = vi.fn()
     const { rerender } = render(
@@ -80,8 +137,10 @@ describe('ChatShellClarifySheet', () => {
         onBackScriptClarify={vi.fn()}
       />
     )
+    expect(screen.getByText('Elegí la mezcla de CTAs.')).toBeTruthy()
     expect(screen.getByText(/créditos/i)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Generar' })).toBeNull()
+    const generarBefore = screen.getByRole('button', { name: 'Generar' }) as HTMLButtonElement
+    expect(generarBefore.disabled).toBe(true)
     await user.click(screen.getByRole('button', { name: 'Comprar en web' }))
     expect(onAnswer).toHaveBeenCalledWith({ ctaChannel: 'website' })
 
@@ -100,8 +159,8 @@ describe('ChatShellClarifySheet', () => {
       />
     )
     expect(screen.getByText(/créditos/i)).toBeTruthy()
-    const generar = screen.getByRole('button', { name: 'Generar' })
-    expect(generar).toBeTruthy()
+    const generar = screen.getByRole('button', { name: 'Generar' }) as HTMLButtonElement
+    expect(generar.disabled).toBe(false)
     const footer = generar.closest('.chat-shell__modal-actions')
     const labels = Array.from(footer?.querySelectorAll('button') || []).map((btn) => btn.textContent)
     expect(labels).toEqual(['Atrás', 'Cancelar', 'Generar'])
@@ -151,6 +210,45 @@ describe('ChatShellClarifySheet', () => {
     expect(screen.queryByText('Optimizar texto')).toBeNull()
   })
 
+  it('keeps Post title when Post flow picks Producto style chips', () => {
+    render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={{
+          sessionId: 's1',
+          step: 'style',
+          mode: 'product',
+          family: 'post',
+          originText: 'Quiero crear un post',
+          productId: 'p1',
+          source: 'composer',
+          scriptTitle: 'Estabilidad en series pesadas',
+          scriptText: 'Hook…',
+          partial: {},
+          history: [{
+            sessionId: 's1',
+            step: 'mode',
+            family: 'post',
+            originText: 'Quiero crear un post',
+            productId: 'p1',
+            source: 'composer',
+            scriptTitle: 'Estabilidad en series pesadas',
+            scriptText: 'Hook…',
+            partial: {},
+          }],
+        }}
+        onCancelImageClarify={vi.fn()}
+        onBackImageClarify={vi.fn()}
+      />
+    )
+    expect(screen.getByRole('dialog', { name: 'Post' })).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Foto' })).toBeNull()
+    expect(screen.getByText('Elegí un estilo.')).toBeTruthy()
+    expect(screen.getByText('Estabilidad en series pesadas')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Estudio Hero|Studio Hero/ })).toBeTruthy()
+  })
+
   it('shows Back on Foto step 2+ (aspect after style)', () => {
     render(
       <ChatShellClarifySheet
@@ -160,6 +258,7 @@ describe('ChatShellClarifySheet', () => {
           sessionId: 's1',
           step: 'aspect',
           mode: 'product',
+          family: 'foto',
           originText: 'foto',
           productId: 'p1',
           source: 'composer',
@@ -174,6 +273,7 @@ describe('ChatShellClarifySheet', () => {
             sessionId: 's1',
             step: 'style',
             mode: 'product',
+            family: 'foto',
             originText: 'foto',
             productId: 'p1',
             source: 'composer',
@@ -192,5 +292,92 @@ describe('ChatShellClarifySheet', () => {
     const footer = atras.closest('.chat-shell__modal-actions')
     const labels = Array.from(footer?.querySelectorAll('button') || []).map((btn) => btn.textContent)
     expect(labels).toEqual(['Atrás', 'Cancelar'])
+  })
+
+  it('unmounts Post refs sheet when parent clears imageClarify after Generar', async () => {
+    const user = userEvent.setup()
+    const onAnswer = vi.fn()
+    const refsState = {
+      sessionId: 's1',
+      step: 'refs' as const,
+      originText: 'Quiero crear un post',
+      productId: 'p1',
+      source: 'composer' as const,
+      partial: {},
+      history: [],
+      preferences: {
+        style: { kind: 'preset' as const, presetId: 'venta-directa' as const },
+        aspectRatio: '9:16' as const,
+        model: 'grok-imagine' as const,
+        density: 'hard' as const,
+      },
+      referencesRequired: true,
+      referenceImages: [{
+        id: 'img1',
+        url: 'https://cdn.example/product.webp',
+        kind: 'product' as const,
+        dbKind: 'product' as const,
+        productId: 'p1',
+        selected: true,
+      }],
+    }
+    const { rerender } = render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={refsState}
+        onAnswerImageClarify={onAnswer}
+      />
+    )
+    expect(screen.getByRole('dialog', { name: 'Post' })).toBeTruthy()
+    expect(screen.getByText(/Confirmá referencias/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Generar' }))
+    expect(onAnswer).toHaveBeenCalledWith({ useReferences: true })
+    rerender(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={null}
+        onAnswerImageClarify={onAnswer}
+      />
+    )
+    expect(screen.queryByRole('dialog', { name: 'Post' })).toBeNull()
+  })
+
+  it('hides Post refs sheet while Generando even if imageClarify is still set', () => {
+    const refsState = {
+      sessionId: 's1',
+      step: 'refs' as const,
+      originText: 'Quiero crear un post',
+      productId: 'p1',
+      source: 'composer' as const,
+      partial: {},
+      history: [],
+      preferences: {
+        style: { kind: 'preset' as const, presetId: 'venta-directa' as const },
+        aspectRatio: '9:16' as const,
+        model: 'grok-imagine' as const,
+        density: 'hard' as const,
+      },
+      referencesRequired: true,
+      referenceImages: [{
+        id: 'img1',
+        url: 'https://cdn.example/product.webp',
+        kind: 'product' as const,
+        dbKind: 'product' as const,
+        productId: 'p1',
+        selected: true,
+      }],
+    }
+    render(
+      <ChatShellClarifySheet
+        language="es"
+        scriptClarify={null}
+        imageClarify={refsState}
+        imageBusy
+        onAnswerImageClarify={vi.fn()}
+      />
+    )
+    expect(screen.queryByRole('dialog', { name: 'Post' })).toBeNull()
   })
 })

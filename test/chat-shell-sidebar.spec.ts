@@ -14,6 +14,8 @@ import {
   truncateSidebarTitle,
   uniquifySidebarLabels,
   writeBrandOpen,
+  resolveSelectedSessionTitle,
+  resolveHeaderSessionTitle,
 } from '../src/features/chat-shell/chatShellSidebar'
 
 describe('chatShellSidebar titles', () => {
@@ -83,6 +85,64 @@ describe('chatShellSidebar titles', () => {
       b: 'Launch',
       c: 'Hoy 6:11 p. m. · 2',
     })
+  })
+
+  it('header crumb matches the selected sidebar row, not Chat nuevo', () => {
+    const older = {
+      id: 'older',
+      title: 'Chat nuevo',
+      updated_at: '2026-08-11T15:00:00.000Z',
+      created_at: '2026-08-11T15:00:00.000Z',
+    }
+    const twin = {
+      id: 'twin',
+      title: 'New chat',
+      updated_at: '2026-08-11T15:00:00.000Z',
+      created_at: '2026-08-11T14:00:00.000Z',
+    }
+    const nowMs = Date.parse('2026-09-01T12:00:00.000Z')
+    const header = resolveHeaderSessionTitle({
+      session: older,
+      siblings: [older, twin],
+      language: 'en',
+      nowMs,
+      hasThreadContent: true,
+    })
+    const sidebar = uniquifySidebarLabels([
+      { id: older.id, label: resolveSessionSidebarTitle({ session: older, nowMs, language: 'en' }).label },
+      { id: twin.id, label: resolveSessionSidebarTitle({ session: twin, nowMs, language: 'en' }).label },
+    ])
+    expect(header).toBe(sidebar.older)
+    expect(header).not.toMatch(/Chat nuevo|New chat/i)
+    expect(header).toMatch(/· 1$/)
+  })
+
+  it('keeps Chat nuevo on a new empty chat and uses the first user message on a past thread', () => {
+    const empty = {
+      id: 'empty',
+      title: 'Chat nuevo',
+      updated_at: '2026-09-01T17:26:00.000Z',
+      created_at: '2026-09-01T17:26:00.000Z',
+    }
+    expect(resolveHeaderSessionTitle({
+      session: empty,
+      language: 'es',
+      hasThreadContent: false,
+      loadingMessages: false,
+    })).toBe('Chat nuevo')
+
+    const past = {
+      id: 'past',
+      title: 'Chat nuevo',
+      updated_at: '2026-08-20T15:00:00.000Z',
+      created_at: '2026-08-20T15:00:00.000Z',
+    }
+    expect(resolveHeaderSessionTitle({
+      session: past,
+      language: 'es',
+      firstUserPreviews: { past: 'Quiero crear guiones' },
+      hasThreadContent: true,
+    })).toBe('Quiero crear guiones')
   })
 
   it('truncates around 36–42 chars without Session spam', () => {

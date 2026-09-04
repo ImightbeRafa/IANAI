@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import { CHAT_SHELL_AUTH_HOME } from '../features/chat-shell/chatShellRollout'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 const labels = {
   es: {
-    subtitle: 'Iniciá sesión para crear guiones que venden',
+    subtitle: 'Guiones, posts y fotos de agencia. En un chat.',
     google: 'Continuar con Google',
     googleConnecting: 'Conectando…',
     orEmail: 'o iniciá con tu correo',
@@ -24,7 +25,7 @@ const labels = {
     signInFail: 'No se pudo iniciar sesión',
   },
   en: {
-    subtitle: 'Sign in to create winning ad scripts',
+    subtitle: 'Agency scripts, posts, and photos. In one chat.',
     google: 'Continue with Google',
     googleConnecting: 'Connecting...',
     orEmail: 'or sign in with email',
@@ -47,12 +48,12 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const { signIn, signInWithGoogle } = useAuth()
+  const { user, loading: authLoading, signIn, signInWithGoogle } = useAuth()
   const { language } = useLanguage()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [referralCode, setReferralCode] = useState<string | null>(null)
-  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/dashboard'
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || CHAT_SHELL_AUTH_HOME
   const t = labels[language === 'en' ? 'en' : 'es']
 
   // Capture referral code from URL and persist in localStorage
@@ -66,6 +67,10 @@ export default function Login() {
       if (stored) setReferralCode(stored)
     }
   }, [searchParams])
+
+  if (!authLoading && user) {
+    return <Navigate to={returnPath} replace />
+  }
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true)

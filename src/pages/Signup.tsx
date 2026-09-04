@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff, Gift } from 'lucide-react'
 import AdvanceLogo from '../components/AdvanceLogo'
+import { CHAT_SHELL_AUTH_HOME } from '../features/chat-shell/chatShellRollout'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
 // Password validation
@@ -27,9 +28,9 @@ export default function Signup() {
   const [showPassword, setShowPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [referralCode, setReferralCode] = useState<string | null>(null)
-  const { signUp, signInWithGoogle } = useAuth()
+  const { user, loading: authLoading, signUp, signInWithGoogle } = useAuth()
   const [searchParams] = useSearchParams()
-  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || '/chat'
+  const returnPath = safeAppReturnPath(searchParams.get('redirect')) || CHAT_SHELL_AUTH_HOME
   const loginHref = `/login?redirect=${encodeURIComponent(returnPath)}`
 
   // Capture referral code from URL and persist in localStorage
@@ -43,6 +44,10 @@ export default function Signup() {
       if (stored) setReferralCode(stored)
     }
   }, [searchParams])
+
+  if (!authLoading && user) {
+    return <Navigate to={returnPath} replace />
+  }
   
   const passwordValidation = validatePassword(password)
 

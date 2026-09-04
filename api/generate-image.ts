@@ -16,7 +16,7 @@ import { buildOrganicSinglePrompt, type OrganicSingleSubtype, type OrganicAspect
 import type { CTAStrength } from './data/organic-script-prompts.js'
 import { findColorPaletteById } from './data/color-palettes.js'
 import { getMemoryInjection } from './lib/memory-helpers.js'
-import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64 } from './lib/brand-kit.js'
+import { resolveBrandKit, buildBrandColorOverride, buildBrandVoicePrompt, buildBrandVisualPrompt, fetchBrandLogoAsBase64, fetchBrandImageAsBase64, fetchBrandStyleReferencesAsBase64, brandLogoSkipReason } from './lib/brand-kit.js'
 import { resolvePostModeAspect } from './lib/post-aspect.js'
 import {
   appendEnhanceUserDirection,
@@ -25,7 +25,9 @@ import {
 } from './lib/image-enhance.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { supabaseAdmin as imgMemSupabase } from './lib/supabase-admin.js'
-import { fetchPublicUrl } from './lib/url-safety.js'
+import { fetchPublicImageAsDataUrl } from './lib/fetch-image-data-url.js'
+import { isReusableProductReference } from './lib/product-image-refs.js'
+import { meterActionForImageApi } from './lib/credits/catalog.js'
 import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
@@ -132,21 +134,6 @@ function isTransientGeminiError(error: unknown): boolean {
     || message.includes('503')
 }
 
-async function fetchImageUrlAsDataUrl(url: string): Promise<string | null> {
-  try {
-    const imgResp = await fetchPublicUrl(url, { timeoutMs: 15000, maxRedirects: 3 })
-    if (!imgResp.ok) return null
-    const contentType = imgResp.headers.get('content-type') || 'image/webp'
-    if (!contentType.startsWith('image/')) return null
-    const buffer = await imgResp.arrayBuffer()
-    if (buffer.byteLength > 8_000_000) return null
-    const base64 = Buffer.from(buffer).toString('base64')
-    return `data:${contentType.split(';')[0]};base64,${base64}`
-  } catch (err) {
-    console.error('fetchImageUrlAsDataUrl failed', err instanceof Error ? err.message : err)
-    return null
-  }
-}
 
 /**
  * Fill input_image* from authorized product_images rows (chat-shell Producto mode).
@@ -218,7 +205,7 @@ async function hydrateInputImagesFromProductImages(
       if (!row) {
         return { ok: false, status: 404, error: 'Product image not found' }
       }
-      if (row.kind === 'generated' || row.message_id) {
+      if (!isReusableProductReference(row)) {
         continue
       }
       if (options.sessionId) {
@@ -246,10 +233,19 @@ async function hydrateInputImagesFromProductImages(
       console.error('hydrate auto product_images error', error)
       return { ok: false, status: 500, error: 'Failed to load product images' }
     }
-    rows = ((data || []) as ImageRow[]).filter((row) => row.kind !== 'generated' && !row.message_id)
+    rows = ((data || []) as ImageRow[]).filter((row) => isReusableProductReference(row))
   }
 
-  if (rows.length === 0) return { ok: true }
+  if (rows.length === 0) {
+    if (ids.length > 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Could not load product reference image. Re-upload and try again.',
+      }
+    }
+    return { ok: true }
+  }
 
   // Prefer product kind ordering
   rows.sort((a, b) => {
@@ -267,7 +263,7 @@ async function hydrateInputImagesFromProductImages(
   let slot = 0
   for (const row of rows.slice(0, 4)) {
     if (!row.image_url) continue
-    const dataUrl = await fetchImageUrlAsDataUrl(row.image_url)
+    const dataUrl = await fetchPublicImageAsDataUrl(row.image_url)
     if (!dataUrl) {
       return {
         ok: false,
@@ -279,6 +275,70 @@ async function hydrateInputImagesFromProductImages(
     slot += 1
   }
 
+  if (slot === 0 && ids.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Could not load product reference image. Re-upload and try again.',
+    }
+  }
+
+  return { ok: true }
+}
+
+function uniqueTrimmedUrls(values: unknown, limit = 4): string[] {
+  const list = Array.isArray(values) ? values : []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of list) {
+    const url = typeof raw === 'string' ? raw.trim() : ''
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+async function appendKitProductReferenceImages(
+  imageParams: Record<string, unknown>,
+  kit: { reference_images?: string[] | null } | null,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const inputKeys = ['input_image', 'input_image_2', 'input_image_3', 'input_image_4'] as const
+  let slot = inputKeys.filter(
+    (key) => typeof imageParams[key] === 'string' && (imageParams[key] as string).length > 0
+  ).length
+  if (slot >= 4) return { ok: true }
+  const urls = uniqueTrimmedUrls(
+    [...uniqueTrimmedUrls(imageParams.kitReferenceUrls, 4), ...uniqueTrimmedUrls(kit?.reference_images, 4)],
+    4
+  )
+  if (urls.length === 0) return { ok: true }
+  const roles = Array.isArray(imageParams.referenceImageRoles)
+    ? [...imageParams.referenceImageRoles]
+    : []
+  const kinds = Array.isArray(imageParams.referenceImageKinds)
+    ? [...imageParams.referenceImageKinds]
+    : []
+  for (const url of urls) {
+    if (slot >= 4) break
+    const dataUrl = await fetchPublicImageAsDataUrl(url)
+    if (!dataUrl) {
+      return {
+        ok: false,
+        status: 400,
+        error: imageParams.language === 'en'
+          ? 'Could not load the brand-kit product photo. Re-upload it and try again.'
+          : 'No pude cargar la foto de producto del kit. Volvé a subirla e intentá de nuevo.',
+      }
+    }
+    imageParams[inputKeys[slot]] = dataUrl
+    roles[slot] = 'product'
+    kinds[slot] = 'product'
+    slot += 1
+  }
+  if (roles.length) imageParams.referenceImageRoles = roles
+  if (kinds.length) imageParams.referenceImageKinds = kinds
   return { ok: true }
 }
 
@@ -615,20 +675,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       }
 
-      // Check usage limits for new generation requests
-      const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, 'image', {
-        imageModel: model,
-      })
-      if (!allowed) {
-        return res.status(429).json({ 
-          error: 'Límite de imágenes alcanzado',
-          message: creditsRequired
-            ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
-            : `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
-          limit,
-          remaining: 0,
-          creditsRequired,
+      // Enhance has its own later check (18). Edit must not use generate's 6-credit meter.
+      const meterAction = meterActionForImageApi(String(action))
+      if (meterAction !== 'enhance') {
+        const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, meterAction, {
+          imageModel: model,
         })
+        if (!allowed) {
+          return res.status(429).json({
+            error: 'Límite de imágenes alcanzado',
+            message: creditsRequired
+              ? `Necesitas ${creditsRequired} créditos IA. Te quedan ${remaining}.`
+              : `Has alcanzado el límite de ${limit} imágenes este mes. Actualiza tu plan para continuar.`,
+            limit,
+            remaining: 0,
+            creditsRequired,
+          })
+        }
       }
     }
 
@@ -690,7 +753,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const hasEditLogo = !!(brandKit?.logo_url || logoFallbackUrl)
       const bloomScope = {
         productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-        brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+        brandKitId: brandKit?.id ?? null,
       }
       const bloomSku = isBloomDermalPatchSku(bloomScope)
       const brandEditRules = [
@@ -785,7 +848,7 @@ Edit instruction: ${editPrompt}`
           const outputTokens = openAIUsage?.output_tokens || 0
           const costOverrideUsd = calculateOpenAIImageCost(openAIUsage)
 
-          await incrementUsage(user.id, 'image', { generationId, imageModel: model })
+          await incrementUsage(user.id, 'edit', { generationId, imageModel: model })
           await deductBonusImage(user.id)
 
           await logApiUsage({
@@ -871,7 +934,7 @@ Edit instruction: ${editPrompt}`
             supportImageUrls: supportUrls,
             aspectRatio: editAR,
           })
-          await incrementUsage(user.id, 'image', { generationId, imageModel: model })
+          await incrementUsage(user.id, 'edit', { generationId, imageModel: model })
           await deductBonusImage(user.id)
           await logApiUsage({
             userId: user.id,
@@ -990,7 +1053,7 @@ Edit instruction: ${editPrompt}`
         }
         if (!imageUrl) return res.status(500).json({ error: 'Gemini did not return an edited image' })
 
-        await incrementUsage(user.id, 'image', { generationId, imageModel: model })
+        await incrementUsage(user.id, 'edit', { generationId, imageModel: model })
         await deductBonusImage(user.id)
 
         const editUsage = response.usageMetadata
@@ -1082,13 +1145,13 @@ Edit instruction: ${editPrompt}`
         {
           hasProductRef: hasProductRef,
           productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-          brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+          brandKitId: brandKit?.id ?? null,
         }
       )
       const enhanceHasLogo = !!(brandKit?.logo_url || logoFallbackUrl)
       const enhanceBloomSku = isBloomDermalPatchSku({
         productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-        brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+        brandKitId: brandKit?.id ?? null,
       })
       const enhanceLogoRules = buildLogoStampRules(
         enhanceLang === 'en' ? 'en' : 'es',
@@ -1624,14 +1687,15 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const isProductMode = isPostMode && (imageParams.postStyle || '') === 'product'
     const isLogoMode = isPostMode && (imageParams.postStyle || '') === 'logo'
 
-    // Producto / shell: hydrate input_image* from authorized offer product_images
-    // (uploads write product_images — do not require a separate legacy source).
-    // referenceMode 'none' ("Crear sin referencias") must not auto-hydrate kit photos.
+    // Producto / shell: hydrate input_image* from authorized offer product_images,
+    // then brand-kit reference_images as product truth (not style mood).
     const referenceMode = imageParams.referenceMode === 'none' ? 'none' : 'use'
     if (isProductMode || rawSessionId) {
       const hasExplicitRefList = Array.isArray(imageParams.productImageIds)
         || (typeof imageParams.productImageId === 'string' && Boolean(imageParams.productImageId))
-      const wantAutoHydrate = referenceMode !== 'none'
+      const kitHasProductPhotos = uniqueTrimmedUrls(brandKit?.reference_images, 4).length > 0
+        || uniqueTrimmedUrls(imageParams.kitReferenceUrls, 4).length > 0
+      const wantAutoHydrate = (referenceMode !== 'none' || kitHasProductPhotos)
         && !hasExplicitRefList
         && !isLogoMode
         && (isProductMode || isPostMode)
@@ -1646,6 +1710,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
       })
       if (!hydrate.ok) {
         return res.status(hydrate.status).json({ error: hydrate.error })
+      }
+      if (!isLogoMode) {
+        const kitHydrate = await appendKitProductReferenceImages(imageParams, brandKit)
+        if (!kitHydrate.ok) {
+          return res.status(kitHydrate.status).json({ error: kitHydrate.error })
+        }
       }
     }
 
@@ -1676,7 +1746,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
     const postLangCode = postLanguage === 'en' ? 'en' : 'es'
     const bloomScope = {
       productId: typeof imageParams.productId === 'string' ? imageParams.productId : null,
-      brandKitId: brandKit?.id || (typeof brandKitIdParam === 'string' ? brandKitIdParam : null),
+      brandKitId: brandKit?.id ?? null,
     }
     const bloomSku = isBloomDermalPatchSku(bloomScope)
     const postProductSilhouette = postProductCreativeRow
@@ -2156,14 +2226,17 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
       if (brandKit && isPostMode && !isProductMode && !isLogoMode) {
         try {
-          const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
-          styleRefs.forEach((img, idx) => {
-            references.push({
-              label: `Brand style reference ${idx + 1}. Use for mood, lighting, photography, and surfaces only — do not copy products from it.`,
-              mimeType: img.mimeType,
-              data: img.data,
+          const kitProductUrls = new Set(uniqueTrimmedUrls(brandKit.reference_images, 8))
+          if (kitProductUrls.size === 0) {
+            const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
+            styleRefs.forEach((img, idx) => {
+              references.push({
+                label: `Brand style reference ${idx + 1}. Use for mood, lighting, photography, and surfaces only — do not copy products from it.`,
+                mimeType: img.mimeType,
+                data: img.data,
+              })
             })
-          })
+          }
         } catch (refErr) {
           console.warn('Failed to inject brand style references:', refErr)
         }
@@ -2393,13 +2466,16 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         if (brandKit && isPostMode && !isProductMode && !isLogoMode) {
           try {
-            const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
-            if (styleRefs.length > 0) {
-              promptParts.push({ text: `BRAND STYLE REFERENCES (${styleRefs.length}) — mood, lighting, photography, surfaces, and art direction only. Do NOT copy products or packaging from these images.` })
-              styleRefs.forEach((img, idx) => {
-                promptParts.push({ text: `Brand style reference ${idx + 1} of ${styleRefs.length}.` })
-                promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
-              })
+            const kitProductUrls = uniqueTrimmedUrls(brandKit.reference_images, 8)
+            if (kitProductUrls.length === 0) {
+              const styleRefs = await fetchBrandStyleReferencesAsBase64(brandKit, 2)
+              if (styleRefs.length > 0) {
+                promptParts.push({ text: `BRAND STYLE REFERENCES (${styleRefs.length}) — mood, lighting, photography, surfaces, and art direction only. Do NOT copy products or packaging from these images.` })
+                styleRefs.forEach((img, idx) => {
+                  promptParts.push({ text: `Brand style reference ${idx + 1} of ${styleRefs.length}.` })
+                  promptParts.push({ inlineData: { mimeType: img.mimeType, data: img.data } })
+                })
+              }
             }
           } catch (refErr) {
             console.warn('Failed to inject brand style references inline:', refErr)
@@ -2655,26 +2731,40 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
         .filter((row) => row.role !== 'product')
         .map((row) => row.url)
       // Prefer product photos first so edits API treats SKU as source of truth.
-      const referenceUrls = selectGrokReferenceBudget(
-        [
-          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
-          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
-        ],
-        3
-      ).map((row) => row.url)
-      const productReferenceCount = productRefUrls.length
-
       let grokLogoDataUrl: string | null = null
-      if ((brandKit?.logo_url || logoFallbackUrl) && isPostMode && !isProductMode && !isLogoMode) {
+      const logoSourceUrl = (brandKit?.logo_url || logoFallbackUrl || '').trim()
+      if (logoSourceUrl && isPostMode && !isProductMode && !isLogoMode) {
         try {
           const logoData = await resolveInlineLogo()
           if (logoData) {
             grokLogoDataUrl = `data:${logoData.mimeType};base64,${logoData.data}`
+          } else if (!brandLogoSkipReason(logoSourceUrl)) {
+            return res.status(400).json({
+              error: imageParams.language === 'en'
+                ? 'Could not load the brand logo. Re-upload it and try again.'
+                : 'No pude cargar el logo de la marca. Volvé a subirlo e intentá de nuevo.',
+            })
           }
         } catch (logoErr) {
           console.warn('Failed to inject brand logo for Grok post generate:', logoErr)
+          if (!brandLogoSkipReason(logoSourceUrl)) {
+            return res.status(400).json({
+              error: imageParams.language === 'en'
+                ? 'Could not load the brand logo. Re-upload it and try again.'
+                : 'No pude cargar el logo de la marca. Volvé a subirlo e intentá de nuevo.',
+            })
+          }
         }
       }
+      const grokProductReferenceCount = productRefUrls.length
+      const referenceUrls = selectGrokReferenceBudget(
+        [
+          ...productRefUrls.map((url) => ({ url, role: 'product' as const })),
+          ...(grokLogoDataUrl ? [{ url: grokLogoDataUrl, role: 'style' as const }] : []),
+          ...supportRefUrls.map((url) => ({ url, role: 'scene' as const })),
+        ],
+        3
+      ).map((row) => row.url)
 
       const grokCtaStrength = ((): string => {
         const raw = (imageParams.ctaStrength as string | undefined) || 'sales'
@@ -2707,7 +2797,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           businessContext: typeof imageParams.businessContext === 'string'
             ? imageParams.businessContext
             : null,
-          hasProductRefs: productReferenceCount > 0,
+          hasProductRefs: grokProductReferenceCount > 0,
           hasSceneRef: grokRefCandidates.some((row) => row.role === 'scene'),
           productSilhouette: postProductSilhouette,
           lockedOfferPrice: postLockedOfferPrice,
@@ -2761,7 +2851,7 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 
         const grokApi = resolveGrokImageApiMode({
           action: 'generate',
-          productReferenceCount,
+          productReferenceCount: grokProductReferenceCount,
           referenceCount: referenceUrls.length,
         })
         const buildGrokRequest = (prompt: string): Record<string, unknown> => {

@@ -19,6 +19,9 @@ import { useChatSessionThread } from './useChatSessionThread'
 import { useChatBrandSetup } from './useChatBrandSetup'
 import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
+import { glassVerbBlockHint, kitHardBlocked, resolveGlassVerbBlock } from './chatShellFirstRun'
+import { formatMissingSetupSteps, resolveKitChipTitle } from './chatShellBrandSetup'
+import { resolveHeaderSessionTitle } from './chatShellSidebar'
 import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
@@ -31,7 +34,9 @@ import { useChatShellRollout } from './ChatShellRolloutContext'
 import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
 import ChatShellBulkDialog from './ChatShellBulkDialog'
-import { clampComposerBulkCount } from './chatShellBulk'
+import { clampComposerBulkCount, packFailureCopy } from './chatShellBulk'
+import { invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
+import { formatCreditsBalance } from './chatShellCreditQuote'
 import {
   captureMcpIntakeFromUrl,
   clearStoredMcpIntake,
@@ -48,6 +53,7 @@ interface ChatShellProps {
   displayName: string
   initials: string
   userId: string
+  onOpenTour?: () => void
 }
 
 export default function ChatShell({
@@ -56,6 +62,7 @@ export default function ChatShell({
   displayName,
   initials,
   userId,
+  onOpenTour,
 }: ChatShellProps) {
   const navigate = useNavigate()
   const rollout = useChatShellRollout()
@@ -83,6 +90,7 @@ export default function ChatShell({
   ))
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkCount, setBulkCount] = useState(10)
+  const [packBusy, setPackBusy] = useState(false)
   const [mcpIntake, setMcpIntake] = useState<ChatShellMcpIntakeIntent | null>(() => {
     if (typeof window === 'undefined') return null
     return captureMcpIntakeFromUrl() || readStoredMcpIntake()
@@ -261,7 +269,7 @@ export default function ChatShell({
 
   const activeCreateAction = thread.scriptClarify
     ? 'scripts' as const
-    : thread.imageClarify?.mode === 'product' || thread.imageClarify?.preferences?.style?.kind === 'product'
+    : thread.imageClarify?.family === 'foto'
       ? 'product' as const
       : thread.imageClarify
         ? 'post' as const
@@ -331,6 +339,14 @@ export default function ChatShell({
       return send(command.rest ? `logo ${command.rest}` : 'logo')
     }
     if (command?.id === 'bulk') {
+      const hasOffer = thread.offers.length > 0
+        || Boolean(thread.activeProduct)
+        || Boolean(thread.offerProductId)
+        || Boolean(workspace.activeSession?.product_id)
+      if (!hasOffer) {
+        selectRailTab('offers')
+        return
+      }
       setBulkCount(clampComposerBulkCount(command.rest || 10))
       setBulkOpen(true)
       return
@@ -349,7 +365,7 @@ export default function ChatShell({
       return brandSetup.reply(text)
     }
     return send(text)
-  }, [navigate, send, brandSetup, language, selectRailTab])
+  }, [navigate, send, brandSetup, language, selectRailTab, thread, workspace.activeSession?.product_id])
 
   const startLogo = useCallback((archetype?: string) => {
     patchImagePreferences({
@@ -493,7 +509,18 @@ export default function ChatShell({
 
   const crumbs = [
     workspace.activeBrand?.name,
-    workspace.activeSession?.title,
+    resolveHeaderSessionTitle({
+      session: workspace.activeSession,
+      siblings: workspace.sessions,
+      firstUserPreviews: workspace.firstUserPreviews,
+      language: language === 'en' ? 'en' : 'es',
+      hasThreadContent: thread.messages.some((message) => (
+        message.role === 'user'
+        || Boolean(message.artifacts && message.artifacts.length > 0)
+      )),
+      loadingMessages: thread.loadingMessages,
+      emptyLabel: t.defaultSessionTitle,
+    }),
     thread.activeProduct?.name,
   ].filter(Boolean).join(' / ')
 
@@ -503,6 +530,39 @@ export default function ChatShell({
       : thread.activeProduct
         ? 1
         : 0
+  const hasOfferName = Boolean((brandSetup.facts.offerName || '').trim())
+  const kitListo = brandSetup.snapshot.stronglyComplete
+  const hardBlocked = kitHardBlocked({ kitReady: kitListo, hasOfferName })
+  const hasSessionOffer = Boolean(
+    thread.offers.length > 0
+    || thread.activeProduct
+    || thread.offerProductId
+    || workspace.activeSession?.product_id
+  )
+  const glassBlock = resolveGlassVerbBlock({
+    kitReady: kitListo,
+    hasOfferName,
+    hasSessionOffer,
+  })
+  const glassBlockHint = glassVerbBlockHint(glassBlock.reason, {
+    kit: t.kitBlockedHint,
+    offer: t.chooseOfferHint,
+  })
+  const missingSetupLabel = formatMissingSetupSteps(
+    brandSetup.snapshot,
+    language === 'en' ? 'en' : 'es'
+  )
+  const kitChipTitle = resolveKitChipTitle({
+    kitReady: kitListo,
+    trackerVisible: brandSetup.trackerVisible,
+    missingLabel: missingSetupLabel,
+    hasOfferName,
+    labels: {
+      kitReady: t.kitReady,
+      kitNeedsTune: t.kitNeedsTune,
+      kitNotReady: t.kitNotReady,
+    },
+  })
 
   const threadScripts = useMemo(() => {
     const items: { id: string; label: string }[] = []
@@ -577,6 +637,7 @@ export default function ChatShell({
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
         onDeleteBrand={(brandId) => void workspace.deleteBrand(brandId)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTour={onOpenTour}
         onSwitchToClassic={rollout.showSwitch ? handleSwitchToClassic : undefined}
       />
 
@@ -610,6 +671,11 @@ export default function ChatShell({
               </button>
             </div>
             <div className="chat-shell__crumbs">{crumbs || t.chat}</div>
+            {thread.creditsEnabled ? (
+              <span className="chat-shell__credits-tag">
+                {formatCreditsBalance(thread.creditsRemaining, language)}
+              </span>
+            ) : null}
             <span className="chat-shell__model-tag">
               {getTextModelPreference() === 'efficient' ? t.efficientModel : t.bestModel}
             </span>
@@ -639,6 +705,7 @@ export default function ChatShell({
           latestImagesByOffer={thread.latestImagesByOffer}
           offerImages={thread.offerImages}
           imageBusy={thread.imageBusy}
+          packBusy={packBusy}
           setupBusy={brandSetup.busy}
           imageModel={thread.imagePrefs.model}
           imageAspect={thread.imagePrefs.aspectRatio}
@@ -654,7 +721,8 @@ export default function ChatShell({
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
           language={language}
-          kitReady={brandSetup.snapshot.stronglyComplete}
+          kitReady={kitListo}
+          hasOfferName={hasOfferName}
           onStartBrandKit={() => {
             if (!workspace.activeBrand) {
               openBrandCreate()
@@ -674,6 +742,8 @@ export default function ChatShell({
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
           onBackScriptClarify={() => thread.backScriptClarify()}
           creditQuote={thread.creditQuote}
+          creditsRemaining={thread.creditsRemaining}
+          creditsEnabled={thread.creditsEnabled}
           onConfirmCreditQuote={() => void thread.confirmCreditQuote()}
           onCancelCreditQuote={() => thread.cancelCreditQuote()}
           onOpenImagesRail={() => selectRailTab('images')}
@@ -681,13 +751,13 @@ export default function ChatShell({
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
           offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
           onPreparePostFromScript={(scriptText, density) => {
-            if (!brandSetup.snapshot.stronglyComplete) {
-              return Promise.reject(new Error('Primero el kit'))
+            if (hardBlocked) {
+              return Promise.reject(new Error(t.kitBlockedHint))
             }
             return thread.prepareScriptForPost(scriptText, density)
           }}
           onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) => {
-            if (!brandSetup.snapshot.stronglyComplete) return
+            if (hardBlocked) return
             void thread.generateImageFromScript(scriptText, productId, scriptTitle, options)
           }}
           onOpenOfferImage={openLightbox}
@@ -709,64 +779,76 @@ export default function ChatShell({
               language={language}
               available={createWidget.available}
               hidden={createWidget.hidden}
-              title={
-                brandSetup.snapshot.stronglyComplete
-                  ? t.kitReady
-                  : t.kitNotReady
-              }
+              title={kitChipTitle}
               onHide={createWidget.hide}
               onShow={createWidget.show}
               actions={(() => {
-                const kitListo = brandSetup.snapshot.stronglyComplete
-                const blocked = !kitListo
+                const blocked = glassBlock.blocked
                 const baseDisabled = brandSetup.busy || thread.loadingMessages
+                const offerClick = glassBlock.reason === 'offer'
+                const onBlockedOr = (run: () => void) => {
+                  if (offerClick) {
+                    openOffersRail()
+                    return
+                  }
+                  if (blocked) return
+                  run()
+                }
                 return [
                 {
                   id: 'scripts' as const,
                   label: t.createScriptsShort,
                   active: activeCreateAction === 'scripts',
-                  disabled: baseDisabled || blocked,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick),
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    thread.cancelImageClarify()
-                    thread.startScriptsFlow()
+                    onBlockedOr(() => {
+                      thread.cancelImageClarify()
+                      thread.startScriptsFlow()
+                    })
                   },
                 },
                 {
                   id: 'post' as const,
                   label: t.createPostShort,
                   active: activeCreateAction === 'post',
-                  disabled: baseDisabled || blocked,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick),
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    thread.cancelScriptClarify()
-                    thread.startPostFlow()
+                    onBlockedOr(() => {
+                      thread.cancelScriptClarify()
+                      thread.startPostFlow()
+                    })
                   },
                 },
                 {
                   id: 'product' as const,
                   label: t.createProductShort,
                   active: activeCreateAction === 'product',
-                  disabled: baseDisabled || blocked,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick),
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    thread.cancelScriptClarify()
-                    thread.startProductFotoFlow()
+                    onBlockedOr(() => {
+                      thread.cancelScriptClarify()
+                      thread.startProductFotoFlow()
+                    })
                   },
                 },
                 {
                   id: 'bulk' as const,
                   label: t.createBulkShort,
                   active: false,
-                  disabled: baseDisabled || blocked || !workspace.activeBrand,
-                  blockedReason: blocked ? t.kitBlockedHint : undefined,
+                  disabled: baseDisabled || (blocked && !offerClick) || !workspace.activeBrand,
+                  lookBlocked: offerClick,
+                  blockedReason: glassBlockHint,
                   onClick: () => {
-                    if (blocked) return
-                    setBulkCount(10)
-                    setBulkOpen(true)
+                    onBlockedOr(() => {
+                      setBulkCount(10)
+                      setBulkOpen(true)
+                    })
                   },
                 },
               ]
@@ -777,24 +859,36 @@ export default function ChatShell({
               language={language}
               facts={brandSetup.facts}
               busy={brandSetup.busy || thread.loadingMessages}
-              confirmed={brandSetup.snapshot.stronglyComplete}
+              confirmed={kitListo}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
               showCreateActions={false}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
-                if (!brandSetup.snapshot.stronglyComplete) return
+                if (glassBlock.reason === 'offer') {
+                  openOffersRail()
+                  return
+                }
+                if (glassBlock.blocked || hardBlocked) return
                 thread.cancelImageClarify()
                 thread.startScriptsFlow()
               }}
               onCreatePost={() => {
-                if (!brandSetup.snapshot.stronglyComplete) return
+                if (glassBlock.reason === 'offer') {
+                  openOffersRail()
+                  return
+                }
+                if (glassBlock.blocked || hardBlocked) return
                 thread.cancelScriptClarify()
                 thread.startPostFlow()
               }}
               onCreateProductPhoto={() => {
-                if (!brandSetup.snapshot.stronglyComplete) return
+                if (glassBlock.reason === 'offer') {
+                  openOffersRail()
+                  return
+                }
+                if (glassBlock.blocked || hardBlocked) return
                 thread.cancelScriptClarify()
                 thread.startProductFotoFlow()
               }}
@@ -907,18 +1001,49 @@ export default function ChatShell({
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
 
-      {bulkOpen && workspace.activeBrand ? (
+      {workspace.activeBrand ? (
         <ChatShellBulkDialog
-          open={bulkOpen}
+          open={bulkOpen && hasSessionOffer}
           language={language}
           brandId={workspace.activeBrand.id}
           offerId={thread.activeProduct?.id || thread.offers[0]?.product_id}
           sessionId={workspace.activeSession?.id}
           initialCount={bulkCount}
+          creditsRemaining={thread.creditsRemaining}
+          creditsEnabled={thread.creditsEnabled}
           onClose={() => setBulkOpen(false)}
-          onDone={(summary) => {
+          onLaunch={() => {
             setBulkOpen(false)
-            void thread.persistTurn('assistant', summary)
+            setPackBusy(true)
+          }}
+          onDone={(_summary, result) => {
+            void (async () => {
+              try {
+                if (
+                  result?.sessionId
+                  && workspace.activeSession?.id
+                  && result.sessionId !== workspace.activeSession.id
+                ) {
+                  await thread.persistTurn(
+                    'assistant',
+                    packFailureCopy(
+                      language === 'es'
+                        ? 'El pack se guardó en otro chat.'
+                        : 'The pack was saved in another chat.',
+                      language
+                    )
+                  )
+                }
+                await thread.reloadMessages()
+                invalidateUsageLimitsCache()
+              } finally {
+                setPackBusy(false)
+              }
+            })()
+          }}
+          onError={(message) => {
+            setPackBusy(false)
+            void thread.persistTurn('assistant', packFailureCopy(message, language))
           }}
         />
       ) : null}

@@ -25,4 +25,10 @@ describe('ChatShellProgress steps', () => {
   it('has no text steps for the image frame', () => {
     expect(progressStepsFor('image', 'en')).toEqual([])
   })
+
+  it('uses pack thinking steps', () => {
+    const steps = progressStepsFor('pack', 'es')
+    expect(steps[0]).toMatch(/ángulos/)
+    expect(steps.join(' ')).toMatch(/guiones/)
+  })
 })

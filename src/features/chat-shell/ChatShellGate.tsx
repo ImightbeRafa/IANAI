@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { CLASSIC_AUTH_HOME } from './chatShellRollout'
 import type { ChatShellTheme } from './chatShellTheme'
 import { AdvanceWordmark } from './ChatShellIcons'
 import ThemeToggle from './ThemeToggle'
@@ -9,6 +10,7 @@ interface ChatShellGateProps {
   theme: ChatShellTheme
   onToggleTheme: () => void
   reason?: 'unreadable' | 'disabled' | 'invite'
+  showThemeToggle?: boolean
 }
 
 export default function ChatShellGate({
@@ -16,6 +18,7 @@ export default function ChatShellGate({
   theme,
   onToggleTheme,
   reason = 'disabled',
+  showThemeToggle = true,
 }: ChatShellGateProps) {
   const { language } = useLanguage()
   const es = language === 'es'
@@ -40,15 +43,17 @@ export default function ChatShellGate({
 
   return (
     <div className="chat-shell__gate" data-theme={theme}>
-      <div className="chat-shell__gate-theme">
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      </div>
+      {showThemeToggle ? (
+        <div className="chat-shell__gate-theme">
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
+      ) : null}
       <div className="chat-shell__gate-card">
         <AdvanceWordmark size={22} />
         <h1>{title}</h1>
         <p>{body}</p>
         <div className="chat-shell__gate-actions">
-          <Link to="/dashboard" className="chat-shell__btn chat-shell__btn--primary chat-shell__link-btn">
+          <Link to={CLASSIC_AUTH_HOME} className="chat-shell__btn chat-shell__btn--primary chat-shell__link-btn">
             {es ? 'Volver al panel' : 'Back to dashboard'}
           </Link>
           <button type="button" className="chat-shell__btn" onClick={onRetry}>

@@ -42,6 +42,18 @@ Auth = requires valid Supabase JWT via `requireAuth()`.
 | `/api/admin-image-performance` | ✓ Admin | Image model performance |
 | `/api/admin-usage` | ✓ Admin | Usage/cost analytics (`api_usage_logs` via service role) |
 
+## Account
+
+| Route | Auth | Purpose |
+|-------|------|---------|
+| `/api/my-usage` | ✓ | Signed-in user usage history (own `credit_ledger` + `api_usage_logs` only) |
+
+## Tickets
+
+| Route | Auth | Purpose |
+|-------|------|---------|
+| `/api/ticket-events` | GET: `TICKETS_WEBHOOK_SECRET` or admin JWT; POST: user JWT | Preview-safe ticket.created poll + optional outbound POST to `TICKETS_EVENT_WEBHOOK_URL` (`feedback_tickets`) |
+
 ## Payments (TiloPay)
 
 | Route | Auth | Purpose |

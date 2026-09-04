@@ -1,52 +1,26 @@
 import { useState } from 'react'
 import {
   FolderKanban,
-  LayoutDashboard,
   MessageSquare,
   Package,
   Palette,
   Sparkles,
+  ShieldCheck,
   X,
 } from 'lucide-react'
+import {
+  CHAT_SHELL_TOUR_STEPS_EN,
+  CHAT_SHELL_TOUR_STEPS_ES,
+} from './chatShellTourSteps'
 
-const STEPS_ES = [
-  {
-    id: 'single',
-    title: 'Un chat para todo',
-    body: 'En este espacio pedís guiones, posts y fotos en el mismo hilo. No hace falta saltar entre pantallas: el chat entiende qué querés crear.',
-    icon: MessageSquare,
-  },
-  {
-    id: 'folders',
-    title: 'Marcas y carpetas',
-    body: 'Cada marca vive en su carpeta a la izquierda. Cambiá de marca sin perder el contexto: cada chat guarda ofertas, guiones e imágenes de esa marca.',
-    icon: FolderKanban,
-  },
-  {
-    id: 'brandkit',
-    title: 'Brand Kit al lado del composer',
-    body: 'El Brand Kit (Guiones, Post, Foto, Pack) está a la izquierda del cuadro de texto. Usalo para arrancar rápido. También podés escribir en el chat: “generame 2 de venta”.',
-    icon: Package,
-  },
-  {
-    id: 'setup',
-    title: 'Setup de marca',
-    body: 'La barra de Setup te muestra qué falta: negocio, canales, público, oferta, visual y fuentes. Tocá lo que falte y el chat te guía. Sin oferta clara no se generan guiones — te lo vamos a pedir.',
-    icon: Palette,
-  },
-  {
-    id: 'classic',
-    title: 'Clásico ↔ Chat',
-    body: 'Podés usar Chat como inicio o volver al panel clásico cuando quieras. Nadie te obliga a aprender todo de golpe.',
-    icon: LayoutDashboard,
-  },
-  {
-    id: 'credits',
-    title: 'Créditos y feedback',
-    body: 'Te regalamos créditos para probar. Un guion cuesta 3, una imagen 6, Pro 24. Contanos qué mejorar — leemos el feedback.',
-    icon: Sparkles,
-  },
-] as const
+const STEP_ICONS = {
+  single: MessageSquare,
+  folders: FolderKanban,
+  verbs: Package,
+  setup: Palette,
+  keep: ShieldCheck,
+  credits: Sparkles,
+} as const
 
 interface ChatShellTourWizardProps {
   language?: 'es' | 'en'
@@ -60,11 +34,12 @@ export default function ChatShellTourWizard({
   onSkipForever,
 }: ChatShellTourWizardProps) {
   const [index, setIndex] = useState(0)
-  const steps = STEPS_ES
+  const steps = language === 'en' ? CHAT_SHELL_TOUR_STEPS_EN : CHAT_SHELL_TOUR_STEPS_ES
   const step = steps[index]
-  const Icon = step.icon
+  const Icon = STEP_ICONS[step.id]
   const last = index === steps.length - 1
   const es = language === 'es'
+  const verbsOn = step.id === 'verbs' || step.id === 'single'
 
   return (
     <div className="chat-shell__feature-modal" role="dialog" aria-modal="true" aria-labelledby="chat-shell-tour-title">
@@ -96,11 +71,11 @@ export default function ChatShellTourWizard({
           <div className="chat-shell__tour-mock-stage">
             <div className="chat-shell__tour-mock-bubble is-user" />
             <div className="chat-shell__tour-mock-bubble is-ai" />
-            <div className="chat-shell__tour-mock-kit">
-              <span className={step.id === 'brandkit' || step.id === 'single' ? 'is-on' : ''} />
-              <span />
-              <span />
-              <span />
+            <div className="chat-shell__tour-mock-kit" data-tour-verbs={step.id === 'verbs' ? 'on' : 'off'}>
+              <span className={verbsOn ? 'is-on' : ''}>{es ? 'Guiones' : 'Scripts'}</span>
+              <span className={step.id === 'verbs' ? 'is-on' : ''}>Post</span>
+              <span className={step.id === 'verbs' ? 'is-on' : ''}>{es ? 'Foto' : 'Photo'}</span>
+              <span className={step.id === 'verbs' ? 'is-on' : ''}>Pack</span>
             </div>
           </div>
         </div>

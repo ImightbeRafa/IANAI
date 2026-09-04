@@ -1,4 +1,184 @@
-## 2026-08-31 — PR #34: homepage denser + CTA ink + faster fan pop
+## 2026-09-04 — Rail image line: Hard → Poco texto
+
+**Area:** chat-shell
+**Files:** `chatShellImageIntent.ts`, `ChatContextRail.tsx`, `ChatImageSettingsPanel.tsx`, `ChatShellImageCard.tsx`, `ChatShellImageLightbox.tsx`
+
+- User-facing image/model quality line no longer shows **Hard**. Stored labels like `Grok Imagine 2.0 · Hard` render as **Poco texto** (EN **Short copy**).
+- Images-tab density chip `hard` option: **Mínimo/Minimal** → **Poco texto / Short copy**.
+- Internal enum/API `textDensity: 'hard'` unchanged.
+
+No merge. Invite-all / gift / tickets / HOME_AUTH / glass / Post / Guiones mix untouched.
+
+## 2026-09-04 — WD merge blockers: empty glass, Post≠Foto, Guiones mix Generar
+
+**Area:** chat-shell
+**Files:** `chatShellFirstRun.ts`, `ChatShell.tsx`, `ChatComposerCreateDock.tsx`, `ChatShellClarifySheet.tsx`, `useChatSessionThread.ts`, `chatShellLabels.ts`, `chatShellIngredientsCheck.ts`, `Settings.tsx`, `chatShellImageIntent.ts`
+
+- **A.** Empty / no-oferta sessions: Guiones/Post/Foto/Pack look blocked (`Elegí oferta`) and click opens Ofertas. Pack does not open a full sheet with 0 ofertas. No kit facts → disabled **Primero el kit**. Soft kit with a session offer stays enabled.
+- **B.** Post composer keeps title **Post** when the user picks Producto (style chips). Foto button still titles **Foto**.
+- **C.** Guiones Paso 3 copy is **Elegí la mezcla de CTAs.** Mix pills + counts + +/- (second type) stay. **Generar** is always in the footer (disabled until a CTA is picked).
+- SHOULD: Plan badge Free → **Gratis**. Image line density `hard` → **Poco texto**. User-facing “rail” copy → Ofertas.
+
+No merge. Invite-all / Preview gift fail-closed / wizard / Uso history / tickets / HOME_AUTH untouched.
+
+## 2026-09-04 — Honest glass on empty sessions; Gratis / Poco texto
+
+**Area:** chat-shell / billing
+**Files:** `chatShellFirstRun.ts`, `ChatShell.tsx`, `ChatComposerCreateDock.tsx`, `chat-shell.css`, `Settings.tsx`, `chatShellImageIntent.ts`
+
+- Glass Guiones/Post/Foto/Pack on a session with no offer look blocked (`Elegí oferta`) and click opens Ofertas. No kit + no offer still uses disabled **Primero el kit**. Soft kit with a session offer stays enabled. Falta: Público, Fuentes chip unchanged.
+- Plan y facturación badge: Free → **Gratis** in Spanish (`planDisplayName`).
+- Image assumption line: density `hard` shows **Poco texto** / Short copy, not Hard.
+
+No merge. Invite-all / Preview gift fail-closed / wizard / mix CTAs / Uso history untouched.
+
+## 2026-09-04 — Mass cutover: invite-all, prod gift 100, wizard harden
+
+**Area:** chat-shell / rollout / billing
+**Files:** `chatShellRollout.ts`, `api/lib/chat-shell-access.ts`, `ChatShellPage.tsx`, `ChatShellTourWizard.tsx`, `chatShellTourSteps.ts`, `Home.tsx`, `Login.tsx`, `Signup.tsx`, `AuthContext.tsx`, `App.tsx`, `docs/operations/chat-shell-production-transition.md`
+
+- Kill switch only: `app_feature_flags.chat_shell` on → every authenticated user has `/chat`. `chat_beta_access` is not a gate. Flag off/unreadable fails closed (`Chat aún no está habilitado`). Never `Chat es por invitación` after cutover.
+- Authenticated home is `/chat` (homepage, login, signup, Google OAuth fallback). Signed-in visits to `/login` or `/signup` bounce to the return path (`/chat` unless a safe `?redirect=`). `/dashboard` stays reachable — no DashboardHome bounce (classic switch must work).
+- First production `/chat` open still gifts **100** pack credits once (`CHAT_SHELL_OPEN_GIFT_CREDITS`, CREDITS_V1 lot). Preview / non-production fail closed. No clawback. Open-gift failure keeps the tour mounted (`onboardingPhaseAfterOpenFailure`).
+- Tour steps match Guiones / Post / Foto / Pack. Skip marks `chat_shell_tour_done` only. Soft kit Falta copy unchanged.
+- Tests: rollout invite-all, access-from-flag, page wizard mount on gift failure, tour verbs + skip-never-wipes.
+
+No merge. No live AIIAN SQL. No Preview gift. No second ledger. No Instagram.
+
+## 2026-09-03 — Guiones mix CTAs, Uso history, ticket events
+
+**Area:** chat-shell / billing / tickets
+**Files:** `ChatShellClarifySheet.tsx`, `chatShellCtaMix.ts`, `useChatSessionThread.ts`, `script-briefs.ts`, `api/my-usage.ts`, `UsageHistoryCard.tsx`, `api/ticket-events.ts`, `FeedbackButton.tsx`
+
+- Guiones Paso 3: keep Comprar en web / Enviar mensaje / Sin CTA. First pick is all N of that type; a second type steals 1. Selected pills show a count; +/- rebalance. Mix must sum to the script total. Credits quote stays `guion_oferta × count` (same math as today).
+- Plan y facturación shows **Historial de uso** for the signed-in user only (kind, when, credits, success/fail). `GET /api/my-usage` joins own ledger + logs. No clawback. Admin cost screen unchanged.
+- Tickets live in this repo (`feedback_tickets`). `GET/POST /api/ticket-events` is Preview-safe: poll with `TICKETS_WEBHOOK_SECRET` or admin JWT; POST after create (user JWT) optionally fires `TICKETS_EVENT_WEBHOOK_URL`. Ticket insert still succeeds if notify fails.
+
+No merge. No invite / `chat_shell` / gift / SQL. Kit pixel-lock and cutover untouched.
+
+## 2026-09-03 — Pack Paso 1 intro wraps (no mid-word clip)
+
+**Area:** chat-shell
+**Files:** `chat-shell.css`, `test/chat-shell-pack-sheet.spec.tsx`
+
+- Pack sheet helper copy (`Ángulos distintos por nicho… Luego confirmás y generamos.`) wraps on Paso 1 instead of clipping mid-word. Quantity 2–25 and Solo guiones / Pack campaña unchanged.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
+## 2026-09-02 — Preview leftovers: footer/rail, credits, kit product+logo refs
+
+**Area:** chat-shell
+**Files:** `ChatSidebar.tsx`, `chat-shell.css`, `ChatShell.tsx`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, `chatShellReferenceSelection.ts`, `useChatSessionThread.ts`, `api/generate-image.ts`, `api/lib/bulk/*`, `Settings.tsx`, `AuthContext.tsx`
+
+- Sidebar account footer: full name wraps, credits stay on their own line, CLÁSICO pill no longer covers name/credits. Help + settings stay. Header shows the same remaining balance as the footer.
+- Right rail labels wrap fully (no 2-line clamp / ellipsis). “Mejor calidad” chip no longer ellipsizes.
+- Sheets and Pack quotes append `te quedan N` using the same remaining number. Pack `onDone` refreshes the usage cache.
+- Pack + single post attach brand-kit `reference_images` as product refs and kit `logo_url` as logo. No invented SKU expand. Style-injection no longer tells the model to ignore kit product photos.
+- Guiones mix: quote count follows mixed `variations` vs by_type config; rail Generar starts type → count → CTA so website vs message is not applied to a stale mix count.
+- Settings (existing Configuración) can change password.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
+## 2026-09-01 — Preview feedback: close sheets, Pack qty, Pack in-chat, kit refs via server
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `ChatShellBulkDialog.tsx`, `ChatShellClarifySheet.tsx`, `ChatShell.tsx`, `chatShellImageApi.ts`, `api/fetch-image.ts`, `api/lib/fetch-image-data-url.ts`, `api/lib/product-image-refs.ts`, `api/lib/grok-image-generate.ts`, `api/generate-image.ts`, `api/bulk-scripts.ts`, `api/bulk-campaign.ts`, `api/lib/bulk/store.ts`
+
+- Post/Foto **Generar** closes the sheet immediately (and hides it while `imageBusy`); the thread shows **Generando post…** instead of a stuck Paso 6. Pack confirm does the same with **Generando pack** — no extra “Pack · N guiones” transcript lines. Failures persist a Spanish `No pude generar el pack.` turn (never silent empty).
+- Kit/store product + logo images are fetched **server-side** (`/api/fetch-image`, generate hydrate, Grok ref resolve). Hydrate no longer skips `kind=product` rows that have `message_id`. Raster logo fetch failure is a Spanish error, not a silent compose. Browser `fetch` is not used for storefront hosts. CSP `connect-src` / `script-src` unchanged (`vercel.live` feedback.js stays blocked). `signInWithPassword` is the only password grant — 400 is a failed login, not leftover code.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
+## 2026-09-01 — verify-advance skill for chat-shell Preview
+
+**Area:** chat-shell / agent
+**Files:** `.cursor/skills/verify-advance/`
+
+- Project-local verification skill (`verify-advance`) for `/chat`: Launch, Doctor, Drive, Evidence, Cleanup, Helpers.
+- Feature map: invited first-open tour, after-skip chrome (named Falta, Primero el kit, Pack readable), uninvited invite gate. No secrets in the skill. Does not grant invites, write AIIAN SQL, or wipe kits.
+
+No merge. No invite / `chat_shell` / gift / SQL.
+
+## 2026-09-01 — Script card Primero el kit + glass Pack not clipped
+
+**Area:** chat-shell
+**Files:** `ChatThread.tsx`, `ChatShellScriptCard.tsx`, `chat-shell.css`
+
+- In-thread “Crear post” / “Optimizar para post” gate on `stronglyComplete` again (same leftover closed on #34). Incomplete kits (IdleBar `Falta: Público, Fuentes` even with an offer) show disabled **Primero el kit** with no filled `is-primary`. Glass verbs stay on soft `kitHardBlocked`. Existing kits are not wiped.
+- Glass row no longer ellipsizes Pack to “Pa…”. Verb group does not shrink; named Falta chip wraps instead of hiding. Guiones / Post / Foto / Pack stay fully readable.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
+## 2026-09-01 — Header past-thread title + named kit chip
+
+**Area:** chat-shell
+**Files:** `ChatShell.tsx`, `chatShellSidebar.ts`, `chatShellBrandSetup.ts`
+
+- Header on a past thread uses that session’s title (first user message / sidebar label). Never leftover “Chat nuevo” on an old thread. New empty chat may still say Chat nuevo.
+- Glass chip always names the same missing fields as the setup pin (`Falta: Público, Fuentes`) when those gaps are known.
+
+No merge. No invite / `chat_shell` / gift / SQL. Not a new wizard.
+
+## 2026-09-01 — Header session crumb + glass chip named gaps
+
+**Area:** chat-shell
+**Files:** `ChatShell.tsx`, `chatShellSidebar.ts`, `chatShellBrandSetup.ts`, `ChatBrandSetupCard.tsx`
+
+- Header crumbs use the same selected-session title as the sidebar (stored title → first user message → relative time, uniquified). No more `IdleBar Demo / Chat nuevo` while the row says `Aug 11 · 1`.
+- Glass Brand Kit chip uses the same `Falta: Público, Fuentes` string as the setup pin when the tracker is visible. Drops the vaguer “Falta afinar” in that state.
+
+No merge. No invite / `chat_shell` / gift / SQL.
+
+## 2026-09-01 — Preview leftover nits (login, gate, generationId, i18n)
+
+**Area:** chat-shell / credits / login
+**Files:** `Login.tsx`, `ChatShellGate.tsx`, `ChatShellPage.tsx`, `chat-shell.css`, `edit-script.ts`, `streamline-script.ts`, `grokApi.ts`, `catalog.ts`, `ChatShellScriptCard.tsx`
+
+- Login subtitle matches homepage / chat-shell: “Guiones, posts y fotos de agencia. En un chat.”
+- Invite-gate is locked to obsidian-dark (`#07090d`) so it matches the chat-shell homepage, not OS light.
+- `edit-script` / `streamline-script` require a client `generationId` UUID when `sessionId` is present (same reject-missing as generate-image / `/api/chat`). Chat-shell edits consume `guion_edit` (1) idempotently; streamline stays `prompt_condense` (0). Classic callers without `sessionId` still mint server-side and stay uncharged.
+- Script-card hook / awareness more-menu options use `labelEs` / `labelEn`.
+
+No merge. No invite / `chat_shell` / gift / SQL. No getMessages pagination, CORS lock, or Deployment Protection.
+
+## 2026-09-01 — Wire chat-shell tour on PR #35 Preview
+
+**Area:** chat-shell first-run
+**Files:** `ChatShellPage.tsx`, `ChatShellTourWizard.tsx`, `chatShellOnboarding.ts`, `chatShellFirstRun.ts`, `ChatShell.tsx`, `ChatSidebar.tsx`
+
+- `ChatShellTourWizard` now mounts for invited `/chat` users: first open (Preview skip-gift still returns real `tourDone`), gift “Ver cómo funciona”, and sidebar “Cómo funciona”. Skip/finish persist via `tour_done`. Does not write kits/brands/offers/sessions.
+- Preview gift skip no longer fabricates `tourDone: true` (that hid the wizard). Still no +100 insert off production.
+- Soft kit: glass / script CTAs hard-block only when there is no offer and kit is not listo. Existing folders with an offer get ready-empty + “Falta afinar”; setup pin still names what’s missing.
+
+No merge. No invite / `chat_shell` / gift / SQL flips.
+
+## 2026-08-31 — Production-ready nits (merge-bar)
+
+**Area:** credits / chat-shell / homepage
+**Files:** `chat-shell-gift.ts`, `generate-image.ts`, `brand-kit.ts`, `homeContent.ts`, `Signup.tsx`, `chatShellFirstRun.ts`
+
+- +100 chat-shell gift is **fail-closed**: insert only when `VERCEL_ENV=production` (and `CREDITS_V1` on). Preview / development / unset skip. Opt out with `CHAT_SHELL_OPEN_GIFT=0`. Does not claw existing lots.
+- Image `action=edit` now checks and charges `'edit'` (`image_edit` = 18), matching the confirm-sheet quote. Enhance stays on its own 18-credit path.
+- Logo fallback fetch uses `fetchPublicUrl` (SSRF guard). Bloom pin uses loaded kit id only (no client spoof).
+- Welcome/tour metadata writes abort if `getUserById` fails (do not clobber `user_metadata`).
+- Homepage / signup default post-login is `/dashboard` until invite-all GO. Invited `preferred_ui=chat` still lands on `/chat` via `effectiveHome`.
+- First-run CTA hides when the folder already has an offer name (existing classic users).
+
+No merge. No `chat_shell` / invite / credit-gift / flag flips.
+
+## 2026-08-31 — Production-ready nits (Preview → live)
+
+**Area:** chat-shell / credits / first-run
+**Files:** `api/chat.ts`, `api/lib/credits/chat-generation-id.ts`, `grokApi.ts`, `useChatSessionThread.ts`, `ChatThread.tsx`, `ChatComposerCreateDock.tsx`, `ChatShellScriptCard.tsx`, tests
+
+- Chat-shell `/api/chat` now **requires a client `generationId` UUID** when `sessionId` is present (same rule as generate-image). Classic `/scripts` still mints server-side. Stops retry/curl double-charge on guiones.
+- Pack sheet step 1 always shows estimated credits (`N créditos · máximo estimado`); locked with a test.
+- First-run CTA and glass “Primero el kit” use `labels.es` / `labels.en` (no hardcoded Spanish).
+- Empty-state CTA still only shows when the kit is **not** stronglyComplete — existing listo brands stay on the ready empty state (that was the WD recapture false FAIL).
+
+No merge. No `chat_shell` / invite / credit-gift / flag flips.
+
+
 
 - Fix Empezá hoy readability: dark ink on cyan (`.home-page a { color: inherit }` was forcing white).
 - Hero packed toward center, wider fan, less empty top/side/bottom; sections tighter/wider.
