@@ -1,3 +1,15 @@
+## 2026-09-04 — WD merge blockers: empty glass, Post≠Foto, Guiones mix Generar
+
+**Area:** chat-shell
+**Files:** `chatShellFirstRun.ts`, `ChatShell.tsx`, `ChatComposerCreateDock.tsx`, `ChatShellClarifySheet.tsx`, `useChatSessionThread.ts`, `chatShellLabels.ts`, `chatShellIngredientsCheck.ts`, `Settings.tsx`, `chatShellImageIntent.ts`
+
+- **A.** Empty / no-oferta sessions: Guiones/Post/Foto/Pack look blocked (`Elegí oferta`) and click opens Ofertas. Pack does not open a full sheet with 0 ofertas. No kit facts → disabled **Primero el kit**. Soft kit with a session offer stays enabled.
+- **B.** Post composer keeps title **Post** when the user picks Producto (style chips). Foto button still titles **Foto**.
+- **C.** Guiones Paso 3 copy is **Elegí la mezcla de CTAs.** Mix pills + counts + +/- (second type) stay. **Generar** is always in the footer (disabled until a CTA is picked).
+- SHOULD: Plan badge Free → **Gratis**. Image line density `hard` → **Poco texto**. User-facing “rail” copy → Ofertas.
+
+No merge. Invite-all / Preview gift fail-closed / wizard / Uso history / tickets / HOME_AUTH untouched.
+
 ## 2026-09-04 — Honest glass on empty sessions; Gratis / Poco texto
 
 **Area:** chat-shell / billing

@@ -111,8 +111,22 @@ export const CHANGELOG: ChangelogEntry[] = [
       {
         category: 'improvement',
         text: {
-          es: 'Si el chat no tiene oferta, Guiones, Post, Foto y Pack se ven apagados (Elegí oferta) y te llevan a Ofertas. No parecen activos sin hacer nada.',
-          en: 'If the chat has no offer, Scripts, Post, Photo, and Pack look off (Choose offer) and take you to Offers. They do not look active and do nothing.',
+          es: 'Si el chat no tiene oferta, Guiones, Post, Foto y Pack se ven apagados (Elegí oferta) y te llevan a Ofertas. Pack no arranca vacío.',
+          en: 'If the chat has no offer, Scripts, Post, Photo, and Pack look off (Choose offer) and take you to Offers. Pack does not start empty.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'Si pedís un post y elegís Producto, la hoja sigue diciendo Post. Foto queda para el botón Foto.',
+          en: 'If you start a post and pick Product, the sheet stays titled Post. Photo stays on the Photo button.',
+        },
+      },
+      {
+        category: 'fix',
+        text: {
+          es: 'En guiones paso 3 ves la mezcla de CTAs y Generar (apagado hasta elegir). El primero toma todas las versiones; el segundo le saca 1.',
+          en: 'Script step 3 shows the CTA mix and Generate (off until you pick). First pick takes every version; a second type steals 1.',
         },
       },
     ],

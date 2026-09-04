@@ -61,16 +61,16 @@ export function ingredientsPromptCopy(
   const named = missing.map((kind) => labels[kind])
   if (es) {
     if (named.length === 1) {
-      return `Todavía falta ${named[0]}. La generación sale mucho mejor con esa pieza. Podés subirla en el rail o seguir sin ${named[0]}.`
+      return `Todavía falta ${named[0]}. La generación sale mucho mejor con esa pieza. Podés subirla en Ofertas o seguir sin ${named[0]}.`
     }
     const last = named.pop()
-    return `Todavía faltan ${named.join(', ')} y ${last}. La generación sale mucho mejor con esas piezas. Podés subirlas en el rail o seguir sin cada una.`
+    return `Todavía faltan ${named.join(', ')} y ${last}. La generación sale mucho mejor con esas piezas. Podés subirlas en Ofertas o seguir sin cada una.`
   }
   if (named.length === 1) {
-    return `Still missing ${named[0]}. Generation works much better with it. Upload it in the rail or continue without it.`
+    return `Still missing ${named[0]}. Generation works much better with it. Upload it in Offers or continue without it.`
   }
   const last = named.pop()
-  return `Still missing ${named.join(', ')} and ${last}. Generation works much better with those pieces. Upload in the rail or continue without each one.`
+  return `Still missing ${named.join(', ')} and ${last}. Generation works much better with those pieces. Upload in Offers or continue without each one.`
 }
 
 export function skipIngredientLabel(kind: IngredientKind, language: 'en' | 'es'): string {

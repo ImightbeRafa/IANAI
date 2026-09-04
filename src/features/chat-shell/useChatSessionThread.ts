@@ -179,6 +179,8 @@ export type ImageClarifyState = {
   sessionId: string
   step: ImageClarifyStep
   mode?: ImageClarifyMode
+  /** Post composer stays Post even if the user picks Producto. Foto button is foto. */
+  family?: 'post' | 'foto'
   originText: string
   productId: string
   scriptText?: string
@@ -512,6 +514,7 @@ export function useChatSessionThread(options: {
     explicit?: Partial<ShellImagePreferences>
     alreadyOptimized?: boolean
     referenceImageIds?: string[]
+    family?: 'post' | 'foto'
   }) => Promise<void>>(async () => {})
 
   const loadRequestRef = useRef(0)
@@ -1686,12 +1689,11 @@ export function useChatSessionThread(options: {
     const hasOffer =
       planOfferGenerationWalk(offers).length > 0
       || Boolean(session.product_id)
-      || brandProducts.some((product) => product.name !== 'Quick Use Image Studio')
     if (!hasOffer) {
       setScriptClarify(null)
       setImageClarify(null)
       setNotice(language === 'es'
-        ? 'Primero necesitás una oferta. Creala en el panel Ofertas o confirmá el setup.'
+        ? 'Primero necesitás una oferta. Creala en Ofertas o confirmá el setup.'
         : 'You need an offer first. Create one in Offers or confirm setup.')
       return
     }
@@ -1709,7 +1711,7 @@ export function useChatSessionThread(options: {
       remaining: ['count', 'cta'],
       history: [],
     })
-  }, [session, offers, brandProducts, language])
+  }, [session, offers, language])
 
   const retryFailedOffers = useCallback(async () => {
     if (!session || !failedBatch || sending) return
@@ -2522,6 +2524,7 @@ export function useChatSessionThread(options: {
     explicit?: Partial<ShellImagePreferences>
     alreadyOptimized?: boolean
     referenceImageIds?: string[]
+    family?: 'post' | 'foto'
   }) => {
     if (!session) return
     const productId = options.productId || activeImageOfferId || offerProductId
@@ -2529,8 +2532,8 @@ export function useChatSessionThread(options: {
     if (!productId) {
       setNotice(
         language === 'es'
-          ? 'Elige una oferta en el rail antes de generar imagen.'
-          : 'Choose an offer in the rail before generating an image.'
+          ? 'Elegí una oferta en Ofertas antes de generar imagen.'
+          : 'Choose an offer in Offers before generating an image.'
       )
       return
     }
@@ -2546,6 +2549,7 @@ export function useChatSessionThread(options: {
     const isPostRequest = /\b(post|posts|publicaci[oó]n|publication)\b/i.test(
       options.userText || options.prompt || ''
     )
+    const family: 'post' | 'foto' = options.family ?? 'post'
     const needsScriptSelection =
       !options.scriptText
       && options.source !== 'script_card'
@@ -2569,6 +2573,7 @@ export function useChatSessionThread(options: {
       setImageClarify({
         sessionId: session.id,
         step: 'script',
+        family,
         originText: options.userText || options.prompt || 'Generate post',
         productId,
         source: options.source,
@@ -2617,6 +2622,7 @@ export function useChatSessionThread(options: {
       setImageClarify({
         sessionId: session.id,
         step: preferOrganic ? 'style' : 'mode',
+        family,
         mode: preferOrganic ? 'organic' : undefined,
         originText: options.userText || options.prompt || 'Generate image',
         productId,
@@ -2638,6 +2644,7 @@ export function useChatSessionThread(options: {
       setImageClarify({
         sessionId: session.id,
         step: 'aspect',
+        family,
         originText: options.userText || options.prompt || 'Generate image',
         productId,
         scriptText: options.scriptText,
@@ -2659,6 +2666,7 @@ export function useChatSessionThread(options: {
       setImageClarify({
         sessionId: session.id,
         step: 'density',
+        family,
         originText: options.userText || options.prompt || 'Generate image',
         productId,
         scriptText: options.scriptText,
@@ -3044,6 +3052,7 @@ export function useChatSessionThread(options: {
       prompt: language === 'es' ? 'Quiero crear un post' : 'I want to create a post',
       userText: language === 'es' ? 'Quiero crear un post' : 'I want to create a post',
       source: 'composer',
+      family: 'post',
     })
   }, [activeImageOfferId, offerProductId, language])
 
@@ -3055,8 +3064,8 @@ export function useChatSessionThread(options: {
     if (!productId) {
       setNotice(
         language === 'es'
-          ? 'Elige una oferta en el rail antes de generar imagen.'
-          : 'Choose an offer in the rail before generating an image.'
+          ? 'Elegí una oferta en Ofertas antes de generar imagen.'
+          : 'Choose an offer in Offers before generating an image.'
       )
       return
     }
@@ -3065,6 +3074,7 @@ export function useChatSessionThread(options: {
       sessionId: session.id,
       step: 'style',
       mode: 'product',
+      family: 'foto',
       originText: language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo',
       productId,
       source: 'composer',
@@ -3098,6 +3108,17 @@ export function useChatSessionThread(options: {
   const generateScripts = useCallback(async () => {
     const label = language === 'es' ? 'Generar guiones' : 'Generate scripts'
     if (!session) return
+    const hasOffer =
+      planOfferGenerationWalk(offers).length > 0
+      || Boolean(session.product_id)
+    if (!hasOffer) {
+      setScriptClarify(null)
+      setImageClarify(null)
+      setNotice(language === 'es'
+        ? 'Primero necesitás una oferta. Creala en Ofertas o confirmá el setup.'
+        : 'You need an offer first. Create one in Offers or confirm setup.')
+      return
+    }
     setImageClarify(null)
     setNotice(null)
     setScriptClarify({
@@ -3108,7 +3129,7 @@ export function useChatSessionThread(options: {
       remaining: ['count', 'cta'],
       history: [],
     })
-  }, [scriptSettings, language, session])
+  }, [scriptSettings, language, session, offers])
 
   const generateTypedImage = useCallback(async (
     explicit: Partial<ShellImagePreferences>,

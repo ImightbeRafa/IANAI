@@ -77,6 +77,9 @@ function scriptStepIndex(state: ScriptClarifyState): { step: number; total: numb
 
 function imageFlowTitle(state: ImageClarifyState, language: ChatShellLanguage): string {
   const t = shellT(language)
+  if (state.family === 'post') return t.flowPostTitle
+  if (state.family === 'foto') return t.flowFotoTitle
+  if (state.scriptText || state.scriptTitle) return t.flowPostTitle
   if (state.partial?.style?.kind === 'product' || state.mode === 'product') return t.flowFotoTitle
   return t.flowPostTitle
 }
@@ -211,10 +214,14 @@ export default function ChatShellClarifySheet({
         onCancel={() => onCancelScriptClarify?.()}
         onBack={scriptClarify.history?.length ? () => onBackScriptClarify?.() : null}
         primary={
-          isCtaStep && ctaPicked
+          isCtaStep
             ? {
                 label: t.flowGenerate,
-                onClick: () => onAnswerScriptClarify?.({ confirm: true }),
+                disabled: !ctaPicked,
+                onClick: () => {
+                  if (!ctaPicked) return
+                  onAnswerScriptClarify?.({ confirm: true })
+                },
               }
             : null
         }
@@ -453,7 +460,7 @@ export default function ChatShellClarifySheet({
                   disabled={imageBusy}
                   onClick={() => onOpenImagesRail?.()}
                 >
-                  {es ? 'Subir en el rail' : 'Upload in rail'}
+                  {es ? 'Subir imágenes' : 'Upload images'}
                 </button>
                 {(imageClarify.missingIngredients || []).map((kind) => (
                   <button

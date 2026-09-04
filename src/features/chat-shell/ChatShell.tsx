@@ -269,7 +269,7 @@ export default function ChatShell({
 
   const activeCreateAction = thread.scriptClarify
     ? 'scripts' as const
-    : thread.imageClarify?.mode === 'product' || thread.imageClarify?.preferences?.style?.kind === 'product'
+    : thread.imageClarify?.family === 'foto'
       ? 'product' as const
       : thread.imageClarify
         ? 'post' as const
@@ -339,6 +339,14 @@ export default function ChatShell({
       return send(command.rest ? `logo ${command.rest}` : 'logo')
     }
     if (command?.id === 'bulk') {
+      const hasOffer = thread.offers.length > 0
+        || Boolean(thread.activeProduct)
+        || Boolean(thread.offerProductId)
+        || Boolean(workspace.activeSession?.product_id)
+      if (!hasOffer) {
+        selectRailTab('offers')
+        return
+      }
       setBulkCount(clampComposerBulkCount(command.rest || 10))
       setBulkOpen(true)
       return
@@ -357,7 +365,7 @@ export default function ChatShell({
       return brandSetup.reply(text)
     }
     return send(text)
-  }, [navigate, send, brandSetup, language, selectRailTab])
+  }, [navigate, send, brandSetup, language, selectRailTab, thread, workspace.activeSession?.product_id])
 
   const startLogo = useCallback((archetype?: string) => {
     patchImagePreferences({
@@ -858,17 +866,29 @@ export default function ChatShell({
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
-                if (hardBlocked) return
+                if (glassBlock.reason === 'offer') {
+                  openOffersRail()
+                  return
+                }
+                if (glassBlock.blocked || hardBlocked) return
                 thread.cancelImageClarify()
                 thread.startScriptsFlow()
               }}
               onCreatePost={() => {
-                if (hardBlocked) return
+                if (glassBlock.reason === 'offer') {
+                  openOffersRail()
+                  return
+                }
+                if (glassBlock.blocked || hardBlocked) return
                 thread.cancelScriptClarify()
                 thread.startPostFlow()
               }}
               onCreateProductPhoto={() => {
-                if (hardBlocked) return
+                if (glassBlock.reason === 'offer') {
+                  openOffersRail()
+                  return
+                }
+                if (glassBlock.blocked || hardBlocked) return
                 thread.cancelScriptClarify()
                 thread.startProductFotoFlow()
               }}
@@ -983,7 +1003,7 @@ export default function ChatShell({
 
       {workspace.activeBrand ? (
         <ChatShellBulkDialog
-          open={bulkOpen}
+          open={bulkOpen && hasSessionOffer}
           language={language}
           brandId={workspace.activeBrand.id}
           offerId={thread.activeProduct?.id || thread.offers[0]?.product_id}
