@@ -16,10 +16,10 @@ You are writing for the next agent, cold. Follow this file, then the matching fe
 Hard locks (every run):
 
 - Do not merge. Do not open a second PR.
-- Do not invite-all, grant `chat_beta_access`, flip `chat_shell`, gift credits, or run live AIIAN SQL.
+- Do not flip `chat_shell`, gift credits, or run live AIIAN SQL. Invite-all is already in code; do not grant `chat_beta_access`.
 - Do not delete kits, brands, offers, or sessions.
 - Do not put passwords, emails, tokens, or service-role keys in this skill, the feature map, or evidence notes. Use env/file **names** only.
-- Do not grant invites from this skill. Uninvited `/chat` staying gated is a pass.
+- Unauthenticated `/chat` staying on login is a pass. A signed-in user seeing **Chat es por invitación** is a fail after cutover.
 
 ## Launch
 
@@ -51,8 +51,8 @@ Env names (never commit values):
 | `ADVANCE_VERIFY_BASE_URL` | Preview or local origin |
 | `ADVANCE_VERIFY_TARGET` | `preview` or `local` |
 | `ADVANCE_VERIFY_PORT` | Local Vite port (default `5173`) |
-| `ADVANCE_VERIFY_EMAIL` / `ADVANCE_VERIFY_PASSWORD` | Invited QA sign-in |
-| `ADVANCE_VERIFY_UNINVITED_EMAIL` / `ADVANCE_VERIFY_UNINVITED_PASSWORD` | Optional uninvited sign-in |
+| `ADVANCE_VERIFY_EMAIL` / `ADVANCE_VERIFY_PASSWORD` | QA sign-in (any signed-in AIIAN user when the kill switch is on) |
+| `ADVANCE_VERIFY_UNINVITED_EMAIL` / `ADVANCE_VERIFY_UNINVITED_PASSWORD` | Optional extra account to prove invite-all (must **not** see invite copy) |
 | `ADVANCE_VERIFY_PLAYWRIGHT` | Module path if `playwright` is not a repo dep |
 | `ADVANCE_VERIFY_CHROME` | Chrome executable (Cloud Agent: `/usr/local/bin/google-chrome`) |
 
@@ -104,7 +104,7 @@ Stable handles (ES unless noted):
 | Glass verbs | toolbar buttons `Guiones`, `Post`, `Foto`, `Pack` |
 | Pack quantity | `#chat-shell-bulk-count`, buttons `Menos` / `Más` |
 | Script post CTA | `.chat-shell__artifact-action` text `Primero el kit` / `Crear post` |
-| Invite gate | heading `Chat es por invitación` |
+| Kill switch off | heading `Chat aún no está habilitado` (ops-only; do not flip the flag) |
 
 Prefer those names over tab order. Feature recipes live in `features/`. Drive **one** mapped feature per prove-the-skill pass.
 

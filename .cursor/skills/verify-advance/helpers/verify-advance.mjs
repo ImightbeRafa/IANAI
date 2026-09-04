@@ -244,10 +244,34 @@ async function driveUninvited(url, dir, lines) {
   if (api.status !== 401) throw new Error(`expected 401, got ${api.status}`)
 
   if (!process.env.ADVANCE_VERIFY_UNINVITED_EMAIL || !process.env.ADVANCE_VERIFY_UNINVITED_PASSWORD) {
-    lines.push('SKIP invite-copy/api-forbidden: ADVANCE_VERIFY_UNINVITED_* unset (do not grant invites)')
+    lines.push('SKIP authenticated-open: ADVANCE_VERIFY_UNINVITED_* unset (do not grant invites)')
     return
   }
-  throw new Error('Authenticated uninvited drive is mapped but this helper leaves it explicit: unset UNINVITED env unless you have a pre-existing uninvited account.')
+
+  await withBrowser(async (browser) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    const page = await ctx.newPage()
+    await page.addInitScript(() => localStorage.setItem('ai-language', 'es'))
+    await page.goto(`${url}/login?redirect=/chat`, { waitUntil: 'networkidle', timeout: 60000 })
+    await page.locator('#email').fill(process.env.ADVANCE_VERIFY_UNINVITED_EMAIL)
+    await page.locator('#password').fill(process.env.ADVANCE_VERIFY_UNINVITED_PASSWORD)
+    await page.getByRole('button', { name: /iniciar sesión|sign in/i }).click()
+    await page.waitForURL(/\/chat/, { timeout: 30000 })
+    const invite = await page.getByRole('heading', { name: 'Chat es por invitación' }).count()
+    if (invite > 0) {
+      throw new Error('invite-all failed: signed-in user still sees Chat es por invitación')
+    }
+    const shell = await page.locator('.chat-shell').count()
+    const tour = await page.getByRole('dialog', { name: 'Un chat para todo' }).count()
+    lines.push(`authenticated /chat shell=${shell} tour=${tour} invite=${invite}`)
+    if (shell < 1 && tour < 1) {
+      throw new Error('signed-in user did not enter chat-shell after invite-all')
+    }
+    const shot = join(dir, '03-authenticated-open.png')
+    await page.screenshot({ path: shot, fullPage: true })
+    copyArtifact(shot, 'verify_advance_authenticated_open.png')
+    await ctx.close()
+  })
 }
 
 async function signIn(page, url) {

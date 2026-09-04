@@ -4,7 +4,7 @@ Use this when working on `/chat`. Classic dashboard lives in `src/pages/` and is
 
 ## Now
 
-Chat-shell is the brand-folder workspace: left nav (marcas/sesiones), center thread, right rail (contexto/ofertas/imágenes/guiones/marca). Preview (IANAI-preview) is the test bed. Production (AIIAN) stays classic until the kill switch + invite + `preferred_ui` canary in `docs/operations/chat-shell-production-transition.md`.
+Chat-shell **is** the product. `/chat` is home for every signed-in user when `app_feature_flags.chat_shell` is on (AIIAN live DB). Invite (`chat_beta_access`) is not required. Kill switch off fails closed to classic. First **production** open gifts 100 pack credits once; Preview never gifts. Production cutover notes: `docs/operations/chat-shell-production-transition.md`.
 
 ## Architecture
 

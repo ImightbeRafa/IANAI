@@ -1,6 +1,6 @@
 # Invited first `/chat` tour
 
-An invited user opening `/chat` before `tour_done` sees the tour dialog titled **Un chat para todo**. Skipping it persists so the next visit does not remount the tour. Existing brand kits, offers, and sessions stay.
+An authenticated user opening `/chat` before `tour_done` sees the tour dialog titled **Un chat para todo**. Skipping it persists so the next visit does not remount the tour. Existing brand kits, offers, and sessions stay.
 
 ## Sub-features
 
@@ -11,7 +11,7 @@ An invited user opening `/chat` before `tour_done` sees the tour dialog titled *
 
 ## How to get to it (user POV)
 
-- Sign in as an invited account (`profiles.chat_beta_access`) whose user metadata does not yet have `tour_done`.
+- Sign in as an account whose user metadata does not yet have `tour_done`. Invite is not required after cutover.
 - Open `/chat` (or `/login?redirect=/chat`).
 - If the gift modal appears first, choose **Ver cómo funciona** to reach the tour (do not use gift as a substitute for the tour title).
 - Reopen `/chat` after skip to confirm it does not return.
@@ -22,8 +22,8 @@ An invited user opening `/chat` before `tour_done` sees the tour dialog titled *
 Preconditions:
 
 - Instance is healthy (`verify-advance.mjs doctor`).
-- `ADVANCE_VERIFY_EMAIL` / `ADVANCE_VERIFY_PASSWORD` are set for an **invited** account that has not finished the tour. Do not use an after-skip chrome account if you need a first-open proof.
-- Do not grant invites. If the account is uninvited, stop and report the gate instead.
+- `ADVANCE_VERIFY_EMAIL` / `ADVANCE_VERIFY_PASSWORD` are set for an account that has not finished the tour. Do not use an after-skip chrome account if you need a first-open proof.
+- Do not grant invites or flip the kill switch. If `/chat` shows **Chat aún no está habilitado**, stop (flag off). **Chat es por invitación** is a fail after cutover.
 - Language ES (`localStorage.ai-language = es`).
 
 - **Open `/chat`.** Run `node .cursor/skills/verify-advance/helpers/verify-advance.mjs drive invited-first-chat-tour`. The harness signs in through `#email` / `#password` and the button **Iniciar sesión**, then waits for `/chat`.
