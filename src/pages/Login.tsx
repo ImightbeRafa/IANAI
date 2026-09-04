@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { Mail, Lock, AlertCircle } from 'lucide-react'
@@ -48,7 +48,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const { signIn, signInWithGoogle } = useAuth()
+  const { user, loading: authLoading, signIn, signInWithGoogle } = useAuth()
   const { language } = useLanguage()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -67,6 +67,10 @@ export default function Login() {
       if (stored) setReferralCode(stored)
     }
   }, [searchParams])
+
+  if (!authLoading && user) {
+    return <Navigate to={returnPath} replace />
+  }
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true)
