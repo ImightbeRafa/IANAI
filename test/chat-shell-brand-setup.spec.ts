@@ -11,6 +11,8 @@ import {
   shouldShowSetupTracker,
   stepComplete,
   writeBrandSetupSkipped,
+  formatMissingSetupSteps,
+  resolveKitChipTitle,
 } from '../src/features/chat-shell/chatShellBrandSetup'
 import { settingsCategories } from '../src/features/chat-shell/chatShellSettings'
 import {
@@ -128,6 +130,56 @@ describe('chatShellBrandSetup completeness', () => {
     })
     expect(snapshot.offerCore).toBe(true)
     expect(stepComplete(snapshot, 'offer')).toBe(true)
+  })
+
+  it('names missing setup steps for pin and glass chip (no Falta afinar)', () => {
+    const snapshot = buildBrandSetupSnapshot({
+      business: business({ name: 'IdleBar Demo', sales_channels: ['messages'] }),
+      products: [product({ name: 'Arnes Demo', type: 'product' })],
+      linkedKit: null,
+    })
+    const missingEs = formatMissingSetupSteps(snapshot, 'es')
+    const missingEn = formatMissingSetupSteps(snapshot, 'en')
+    expect(missingEs).toMatch(/^Falta: /)
+    expect(missingEs).toContain('Público')
+    expect(missingEs).toContain('Fuentes')
+    expect(missingEs).not.toMatch(/afinar/i)
+    expect(missingEn).toMatch(/^Missing: /)
+    expect(missingEn).toContain('Audience')
+    expect(missingEn).toContain('Sources')
+    expect(resolveKitChipTitle({
+      kitReady: false,
+      trackerVisible: true,
+      missingLabel: missingEs,
+      hasOfferName: true,
+      labels: {
+        kitReady: 'Brand Kit listo',
+        kitNeedsTune: 'Falta afinar',
+        kitNotReady: 'Brand Kit incompleto',
+      },
+    })).toBe(missingEs)
+    expect(resolveKitChipTitle({
+      kitReady: true,
+      trackerVisible: false,
+      missingLabel: null,
+      hasOfferName: true,
+      labels: {
+        kitReady: 'Brand Kit listo',
+        kitNeedsTune: 'Falta afinar',
+        kitNotReady: 'Brand Kit incompleto',
+      },
+    })).toBe('Brand Kit listo')
+    expect(resolveKitChipTitle({
+      kitReady: false,
+      trackerVisible: false,
+      missingLabel: missingEs,
+      hasOfferName: true,
+      labels: {
+        kitReady: 'Brand Kit listo',
+        kitNeedsTune: 'Falta afinar',
+        kitNotReady: 'Brand Kit incompleto',
+      },
+    })).toBe(missingEs)
   })
 
   it('evaluates offer core per product type', () => {

@@ -5,7 +5,7 @@ import { createMcpSupabaseAdapter } from '../mcp/supabase-adapter.js'
 import { mcpGetBrandContext } from '../mcp/user-tools.js'
 import { requireChatShellAccess } from '../chat-shell-access.js'
 import { isUuid } from '../session-access.js'
-import { listRecentScriptSummaries, listStyleDnasForBrand } from './store.js'
+import { listProductRefUrls, listRecentScriptSummaries, listStyleDnasForBrand, unionProductRefUrls } from './store.js'
 import type { BulkRunContext } from './run-bulk.js'
 import type { BulkLanguage } from './types.js'
 
@@ -67,6 +67,8 @@ export async function loadBulkRuntime(options: {
   }
   const style = await listStyleDnasForBrand(options.user.id, options.brandId)
   const recent = await listRecentScriptSummaries(options.user.id, offerId)
+  const offerRefs = await listProductRefUrls(options.user.id, offerId)
+  const productRefUrls = unionProductRefUrls(offerRefs, ctx.brandKit?.referenceImages)
   return {
     user: { id: options.user.id, email: options.user.email },
     brandId: options.brandId,
@@ -76,6 +78,7 @@ export async function loadBulkRuntime(options: {
     ctx,
     artifactStore,
     source: 'web',
+    productRefUrls,
     recentSummaries: recent.map((row) => `${row.title}: ${row.summary}`),
     styleDnas: style.styleDnas,
   }

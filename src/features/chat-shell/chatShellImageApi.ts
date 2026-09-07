@@ -32,17 +32,7 @@ import {
   type ReferenceRole,
 } from './chatShellReferenceSelection'
 import { friendlyImageError } from './chatShellImageErrors'
-
-function mintShellGenerationId(): string {
-  if (typeof globalThis.crypto?.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID()
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
-    const n = (Math.random() * 16) | 0
-    const v = ch === 'x' ? n : (n & 0x3) | 0x8
-    return v.toString(16)
-  })
-}
+import { mintShellGenerationId } from './shellGenerationId'
 
 export function shellImageActionLabel(
   actionType: MessageArtifact['action_type'],
@@ -64,10 +54,48 @@ const IMAGE_API = import.meta.env.PROD
   ? '/api/generate-image'
   : 'http://localhost:3000/api/generate-image'
 
+const FETCH_IMAGE_API = import.meta.env.PROD
+  ? '/api/fetch-image'
+  : 'http://localhost:3000/api/fetch-image'
+
 async function getAccessToken(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.access_token) throw new Error('Not authenticated')
   return session.access_token
+}
+
+/** Browser fetch is CSP-limited (self / supabase). Store kit URLs must go through /api/fetch-image. */
+export function canBrowserFetchImageUrl(url: string): boolean {
+  if (url.startsWith('data:') || url.startsWith('blob:')) return true
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://localhost')
+    if (typeof window !== 'undefined' && parsed.origin === window.location.origin) return true
+    return parsed.hostname.endsWith('.supabase.co')
+  } catch {
+    return false
+  }
+}
+
+async function fetchRemoteImageAsDataUrl(url: string): Promise<string> {
+  const token = await getAccessToken()
+  const res = await fetch(FETCH_IMAGE_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ url }),
+  })
+  const json = await res.json().catch(() => ({})) as { dataUrl?: string; error?: string }
+  if (!res.ok || !json.dataUrl) {
+    throw new Error(json.error || 'Could not load that reference image')
+  }
+  return json.dataUrl
+}
+
+export async function shellImageUrlToDataUrl(url: string): Promise<string> {
+  if (canBrowserFetchImageUrl(url)) return urlToBase64(url)
+  return fetchRemoteImageAsDataUrl(url)
 }
 
 type ImageApiResult = {
@@ -288,6 +316,7 @@ export async function generateShellOfferImage(options: {
   preferences: ShellImagePreferences
   /** Offer-scoped product_images ids (refs) — required for Producto mode. */
   productImageIds: string[]
+  kitReferenceUrls?: string[]
   brandKitId?: string
   customColors?: string[]
   brandLogoUrl?: string
@@ -308,7 +337,7 @@ export async function generateShellOfferImage(options: {
     throw new Error('Choose an image style before Generate.')
   }
 
-  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length) {
+  if (prefs.style.kind === 'product' && requiresProductReferences(prefs.style) && !options.productImageIds.length && !(options.kitReferenceUrls || []).length) {
     throw new Error(
       'Upload at least one product reference image for this offer before Generate.'
     )
@@ -328,6 +357,7 @@ export async function generateShellOfferImage(options: {
     language,
     brandKitId: options.brandKitId,
     productImageIds: options.productImageIds,
+    kitReferenceUrls: options.kitReferenceUrls,
     scriptText: options.scriptText,
     businessContext: options.businessContext,
     customColors: options.customColors,
@@ -399,13 +429,20 @@ export async function generateShellOfferImage(options: {
 async function compressReferenceUrls(urls: string[] | undefined): Promise<string[]> {
   if (!urls?.length) return []
   const compressed: string[] = []
+  const failures: string[] = []
   for (const url of urls.slice(0, 4)) {
     try {
-      const data = await compressBase64ForApi(await urlToBase64(url))
+      const data = await compressBase64ForApi(await shellImageUrlToDataUrl(url))
       if (data) compressed.push(data)
     } catch {
-      // Skip unreadable product/context refs; the source image still enhances.
+      failures.push(url)
     }
+  }
+  if (urls.length > 0 && compressed.length === 0) {
+    throw new Error('Could not load product or logo reference images. Re-upload kit photos and try again.')
+  }
+  if (failures.length) {
+    console.warn('Skipped unreadable reference URLs', failures.length)
   }
   return compressed
 }
@@ -443,7 +480,7 @@ export async function editShellOfferImage(options: {
   attachedToExisting: boolean
   workspaceMessageId?: string
 } | null> {
-  const base64 = await compressBase64ForApi(await urlToBase64(options.imageUrl))
+  const base64 = await compressBase64ForApi(await shellImageUrlToDataUrl(options.imageUrl))
   const inferredAspect = options.aspectRatio || await aspectRatioFromImageUrl(options.imageUrl) || undefined
   const isEnhance = options.actionType === 'enhance'
   const compressedRefs = options.editReferenceImages?.length
@@ -603,7 +640,7 @@ export async function copyShellOfferImageToProduct(options: {
         : options.source.kind === 'scene' || options.source.kind === 'context'
           ? 'scene'
           : 'product'
-  const dataUrl = await compressBase64ForApi(await urlToBase64(options.source.image_url))
+  const dataUrl = await compressBase64ForApi(await shellImageUrlToDataUrl(options.source.image_url))
   const publicUrl = await uploadProductImage(
     options.userId,
     options.targetProductId,

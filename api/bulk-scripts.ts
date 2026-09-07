@@ -57,6 +57,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       items: result.items,
       deepLink: deepLinkForPack(undefined, runtime.brandId, result.sessionId, result.packId),
       partial: result.succeeded > 0 && result.succeeded < angles.length,
+      error: result.succeeded > 0
+        ? undefined
+        : (result.items.find((item) => item.error)?.error || 'No se pudo generar el pack. Ningún guion se guardó.'),
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Bulk scripts failed'

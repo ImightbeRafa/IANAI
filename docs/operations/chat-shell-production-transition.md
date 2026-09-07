@@ -2,19 +2,22 @@
 
 Human-reviewed runbook. Do **not** apply Preview SQL (062–066 RLS notes) to AIIAN. This agent does not apply SQL to production.
 
-## Goal
+## Goal (mass cutover 2026-09-04)
 
-Ship chat-shell code to master with **zero user cutover**. Classic stays home until a person is invited and opts in.
+When this lands on **master**, every signed-in Advance user opens chat-shell immediately. No invite wait. First **production** `/chat` open gifts **100** pack credits once (CREDITS_V1 lot; Preview fail-closed). Classic `/dashboard` stays reachable via **Volver al panel clásico** — `/dashboard` must not bounce back to `/chat`.
+
+This agent does **not** merge to master and does **not** apply live AIIAN SQL. AIIAN `chat_shell` is already enabled (ops, 2026-08-21). Shipping the invite-all code is the cutover.
 
 ## Controls
 
-| Layer | Source | Default | Who changes it |
-|-------|--------|---------|----------------|
-| Kill switch | `app_feature_flags.chat_shell` | `false` | Ops / service role |
-| Invite | `profiles.chat_beta_access` | `false` | Ops / service role only (trigger blocks clients) |
-| Home UI | `profiles.preferred_ui` | `classic` | The invited user |
+| Layer | Source | After cutover | Who changes it |
+|-------|--------|---------------|----------------|
+| Kill switch | `app_feature_flags.chat_shell` | **on** = product open for every authenticated user; **off** / unreadable = fail closed (classic, “Chat aún no está habilitado”) | Ops / service role — no deploy needed |
+| Invite | `profiles.chat_beta_access` | **Not a gate.** Kept on the profile for history; clients still cannot self-grant | Ops only if you still write it |
+| Home | `effectiveHome` | `chat` when the kill switch is on | Code; preference no longer denies `/chat` |
+| Welcome gift | `credit_lots` id `chatShellOpenGiftLotId(userId)` | **+100** pack, 12-month TTL, once per user, **only** `VERCEL_ENV=production` | Code; opt out with `CHAT_SHELL_OPEN_GIFT=0` |
 
-Enabling the kill switch alone must not redirect anyone. Preference never grants access.
+Rollback without a deploy: set `chat_shell` false. Do not claw back gifted lots. Do not dump Preview SQL onto AIIAN.
 
 ## 1. Inventory AIIAN (before any apply)
 
@@ -55,33 +58,23 @@ Canary runbook: [`docs/operations/chat-shell-aiian-canary.md`](./chat-shell-aiia
 
 Older drafts mentioned applying repo migration `067` alone and maybe `068`. Prefer the consolidated pack above (foundation + corrected offer SET NULL delete semantics + rollout + security).
 
-## 3. Deploy code with the flag off
+## 3. Deploy code (invite-all)
 
-Production `ianai-omega.vercel.app` → AIIAN. Keep `chat_shell` false. Every user stays on `/dashboard`.
+Production `advanceai.studio` / `ianai-omega.vercel.app` → AIIAN. Kill switch already on. After merge, every authenticated user can open `/chat`. Login / homepage / signup land on `/chat`. Unauthenticated `/chat` still goes to login.
 
-## 4. Preview / first tester
+Preview uses the same gate (flag on = all signed-in users). Preview must **not** gift +100 (`VERCEL_ENV=preview` fail-closed).
 
-On IANAI-preview, after 067:
+## 4. First-open gift (production only)
 
-```sql
--- Preview only. Replace the email.
-UPDATE public.app_feature_flags
-SET enabled = true, updated_at = now()
-WHERE key = 'chat_shell';
+`POST /api/chat-shell-open` `{ action: "ensure" }` after access check:
 
-UPDATE public.profiles
-SET chat_beta_access = true
-WHERE email = 'you@example.com';
--- Leave preferred_ui = 'classic' so home does not jump.
-```
+- `VERCEL_ENV=production` and CREDITS_V1 on → insert pack lot of **100** if missing.
+- Existing lot → `already: true`, no second insert, no clawback.
+- Preview / `vercel dev` / unset env → skip insert; keep real `tourDone` so the wizard still mounts.
 
-Smoke: classic still loads. `/chat` works for that email. A second account without invite stays classic and cannot open `/chat`.
+## 5. Wizard
 
-## 5. Production canary (later)
-
-Same SQL on AIIAN, one internal email, `preferred_ui` still classic. They use **Probar Chat** / **Volver al panel clásico**.
-
-Stop if: another user’s data, recurring 403/406/FK, usage miscount, failed script/image generate.
+`ChatShellTourWizard` mounts when `tour_done` is false (including when open-gift fails). Skip only writes `chat_shell_tour_done`. Existing brands/kits stay. Soft kit: offer present + incomplete → named **Falta:** gaps; glass stays usable.
 
 ## Rollback
 
@@ -91,7 +84,7 @@ SET enabled = false, updated_at = now()
 WHERE key = 'chat_shell';
 ```
 
-No data rollback. Preference rows can stay.
+No data rollback. Gifted production lots stay. Preference rows can stay.
 
 ## Production readiness checklist
 
@@ -106,17 +99,19 @@ Do **not** merge to `master` or enable the kill switch until a human signs this 
 - [ ] Null-link / ownership-immutability triggers present.
 - [ ] `edit-script` and `streamline-script` authorization coverage + foreign session/product/image negative tests.
 
-### Rollout controls
+### Rollout controls (GO 2026-09-04)
 
-- [ ] `app_feature_flags.chat_shell` is **false** on AIIAN until canary approval.
-- [ ] Invite path: `profiles.chat_beta_access` + `preferred_ui` (classic default).
-- [ ] Enabling the flag alone does not redirect anyone.
+- [ ] Kill switch `app_feature_flags.chat_shell` stays **on** on AIIAN unless you need to turn the product off.
+- [ ] Invite (`chat_beta_access`) is **not** required. Signed-in users must not see “Chat es por invitación”.
+- [ ] Authenticated home is `/chat` when the flag is on. `/dashboard` still loads (no bounce).
+- [ ] Production first `/chat` open gifts **100** once. Preview gifts **0**.
 
 ### Preview gates (this branch)
 
 - [ ] `npm test` and `npm run build` green.
-- [ ] Preview env vars all target IANAI-preview (never mix frontend URL with a production service role).
-- [ ] Invited account can open `/chat`; uninvited stays classic and 403s `/chat`.
+- [ ] Preview env vars all target **AIIAN** (never mix frontend URL with a production service role from a different project).
+- [ ] Signed-in QA can open `/chat` without an invite. Unauthenticated `/chat` is login. Unauth `POST /api/chat-shell-open` is 401.
+- [ ] Wizard mounts on first open when `tour_done` is false. Skip does not wipe brands/kits.
 - [ ] Smoke: scripts, posts, image generate/edit, save, usage increment, folder delete, classic dashboard still loads.
 - [ ] Desktop + mobile (390×844 and 768×1024), dark + light.
 - [ ] Folder switch does not blank/jump the thread (cached and uncached). Create widget shows the **current** folder’s offer, never the previous brand.
@@ -134,5 +129,6 @@ Do **not** merge to `master` or enable the kill switch until a human signs this 
 
 - Dump Preview RLS / plan_limits seeds onto AIIAN
 - Auto-backfill `chat_sessions.business_id`
-- Auto-enroll admins or new signups
-- Turn the kill switch on for everyone as a “home” switch
+- Auto-enroll via SQL (code invite-all is the cutover; do not dump Preview invites)
+- Gift credits on Preview
+- Claw back existing credit lots

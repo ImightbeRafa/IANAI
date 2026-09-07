@@ -17,6 +17,7 @@ import {
 } from './grok-models.js'
 import { resolveGrokAspectRatio } from './grok-image-edit.js'
 import { prepareGrokImagePrompt } from './grok-image-prompt.js'
+import { resolveReferenceImageDataUrls } from './fetch-image-data-url.js'
 
 export type GrokImageGenerateResult = {
   imageDataUrl: string
@@ -80,7 +81,13 @@ export async function runGrokImageGenerate(options: {
     allowFallback: options.aspectRatioFallback === true,
   })
   const prepared = prepareGrokImagePrompt(options.prompt)
-  const refs = (options.referenceImageUrls || []).filter(Boolean).slice(0, 3)
+  const incomingRefs = (options.referenceImageUrls || []).filter(Boolean).slice(0, 3)
+  const refs = await resolveReferenceImageDataUrls(incomingRefs)
+  if (incomingRefs.length > 0 && refs.length === 0) {
+    throw new Error(
+      'Could not load product or logo reference images. Re-upload kit photos and try again.'
+    )
+  }
   const body: Record<string, unknown> = {
     model: GROK_IMAGE_PROVIDER_MODEL,
     prompt: prepared.prompt,

@@ -107,6 +107,11 @@ export const CREDIT_PACK_UI = {
 
 export const PUBLIC_BILLING_PLANS: FrontendPlanId[] = ['free', 'starter', 'pro', 'business']
 
+export function planDisplayName(plan: FrontendPlanId, language: 'es' | 'en'): string {
+  if (plan === 'free') return language === 'es' ? 'Gratis' : 'Free'
+  return PLAN_CATALOG_UI[plan]?.name || plan
+}
+
 export const CREDITS_PITCH = {
   es: 'Cada mes te damos créditos. Un guion cuesta 3. Una imagen estándar 6. Una imagen Pro 24. Si se te acaban, compra un paquete o sube de plan.',
   en: 'Each month you get credits. A script costs 3. A standard image 6. A Pro image 24. If you run out, buy a pack or upgrade.',

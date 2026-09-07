@@ -1,10 +1,13 @@
 /** @vitest-environment happy-dom */
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ChatComposerCreateDock, {
   type ComposerCreateAction,
 } from '../src/features/chat-shell/ChatComposerCreateDock'
+
+const SHELL_CSS = readFileSync('src/features/chat-shell/chat-shell.css', 'utf8')
 
 afterEach(cleanup)
 
@@ -88,5 +91,109 @@ describe('ChatComposerCreateDock', () => {
     expect(screen.queryByText('Brand Kit listo')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Mostrar Brand Kit' }))
     expect(onShow).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows Primero el kit on glass verbs when the kit is blocked', () => {
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Brand Kit incompleto"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={[
+          { id: 'scripts', label: 'Guiones', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+          { id: 'post', label: 'Post', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+          { id: 'product', label: 'Foto', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+          { id: 'bulk', label: 'Pack', onClick: vi.fn(), disabled: true, blockedReason: 'Primero el kit' },
+        ]}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    const blocked = screen.getAllByText('Primero el kit')
+    expect(blocked.length).toBe(4)
+    expect(screen.getByRole('button', { name: 'Guiones — Primero el kit' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Guiones — Primero el kit' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('looks blocked with Elegí oferta and click still opens Ofertas', async () => {
+    const user = userEvent.setup()
+    const onScripts = vi.fn()
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Falta: Público, Fuentes"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={[
+          { id: 'scripts', label: 'Guiones', onClick: onScripts, lookBlocked: true, blockedReason: 'Elegí oferta' },
+          { id: 'post', label: 'Post', onClick: vi.fn(), lookBlocked: true, blockedReason: 'Elegí oferta' },
+          { id: 'product', label: 'Foto', onClick: vi.fn(), lookBlocked: true, blockedReason: 'Elegí oferta' },
+          { id: 'bulk', label: 'Pack', onClick: vi.fn(), lookBlocked: true, blockedReason: 'Elegí oferta' },
+        ]}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Falta: Público, Fuentes')).toBeTruthy()
+    const guiones = screen.getByRole('button', { name: 'Guiones — Elegí oferta' })
+    expect((guiones as HTMLButtonElement).disabled).toBe(false)
+    expect(guiones.className).toMatch(/is-blocked/)
+    expect(screen.getAllByText('Elegí oferta').length).toBe(4)
+    await user.click(guiones)
+    expect(onScripts).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not show Primero el kit when verbs are enabled (soft Falta afinar)', () => {
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Falta afinar"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={makeActions()}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Falta afinar')).toBeTruthy()
+    expect(screen.queryByText('Primero el kit')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Guiones' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('keeps Guiones/Post/Foto/Pack fully labeled when the named Falta chip is long', () => {
+    render(
+      <ChatComposerCreateDock
+        language="es"
+        available
+        hidden={false}
+        title="Falta: Público, Fuentes"
+        onHide={vi.fn()}
+        onShow={vi.fn()}
+        actions={makeActions()}
+        reviewPanel={<div>Detalle del kit</div>}
+      />
+    )
+    expect(screen.getByText('Falta: Público, Fuentes')).toBeTruthy()
+    for (const label of ['Guiones', 'Post', 'Foto', 'Pack'] as const) {
+      const button = screen.getByRole('button', { name: label })
+      expect(button.querySelector('span')?.textContent).toBe(label)
+    }
+  })
+
+  it('does not ellipsis glass verb labels or the named Falta chip', () => {
+    const spanBlock = SHELL_CSS.split('.chat-shell__idle-actions button span {')[1]?.split('}')[0] || ''
+    expect(spanBlock).toMatch(/overflow:\s*visible/)
+    expect(spanBlock).not.toMatch(/text-overflow:\s*ellipsis/)
+    const actionsBlock = SHELL_CSS.split('.chat-shell__idle-actions {')[1]?.split('}')[0] || ''
+    expect(actionsBlock).toMatch(/flex:\s*0 0 auto/)
+    expect(actionsBlock).not.toMatch(/overflow-x:\s*auto/)
+    const titleBlock = SHELL_CSS.split('.chat-shell__idle-kit-title strong {')[1]?.split('}')[0] || ''
+    expect(titleBlock).toMatch(/white-space:\s*normal/)
+    expect(titleBlock).not.toMatch(/text-overflow:\s*ellipsis/)
+    expect(titleBlock).not.toMatch(/white-space:\s*nowrap/)
   })
 })

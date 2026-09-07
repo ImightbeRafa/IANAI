@@ -135,9 +135,9 @@ describe('bulk quote math', () => {
     expect(quote.lines.map((l) => l.action)).toEqual(['script', 'image', 'expand_ref'])
   })
 
-  it('counts expand only when refs are few', () => {
-    expect(countExpandNeeded(0)).toBe(3)
-    expect(countExpandNeeded(1)).toBe(2)
+  it('does not invent extra SKU photos when kit/offer refs exist or are missing', () => {
+    expect(countExpandNeeded(0)).toBe(0)
+    expect(countExpandNeeded(1)).toBe(0)
     expect(countExpandNeeded(2)).toBe(0)
     expect(countExpandNeeded(5)).toBe(0)
   })

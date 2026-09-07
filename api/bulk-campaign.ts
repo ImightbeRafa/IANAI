@@ -81,6 +81,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       expandedRefs: posts.expanded,
       deepLink: deepLinkForPack(undefined, runtime.brandId, scripts.sessionId, scripts.packId),
       partial: scripts.succeeded < angles.length || posts.succeeded < succeeded.length,
+      error: scripts.succeeded > 0
+        ? undefined
+        : (scripts.items.find((item) => item.error)?.error || 'No se pudo generar el pack. Ningún guion se guardó.'),
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Campaign pack failed'

@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import ChatShellScriptCard from '../src/features/chat-shell/ChatShellScriptCard'
+import ChatShellScriptCard, {
+  CONSCIOUSNESS_OPTIONS,
+  HOOK_OPTIONS,
+} from '../src/features/chat-shell/ChatShellScriptCard'
 import { collectImageScriptChoices, shouldReviewChosenScript } from '../src/features/chat-shell/useChatSessionThread'
 import { getScriptsByMessage, getScriptVersions } from '../src/services/database'
 
@@ -294,6 +297,34 @@ describe('ChatShellScriptCard post preview', () => {
     expect(await screen.findByText(/No pude guardar el texto del post/)).toBeTruthy()
     expect(onGenerateImage).not.toHaveBeenCalled()
   })
+
+  it('disables Crear post with Primero el kit and no filled primary when the kit is incomplete', () => {
+    const onGenerateImage = vi.fn()
+    const onPreparePost = vi.fn(async () => 'should not run')
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Venta directa', content: 'Guión original largo' }}
+        language="es"
+        onGenerateImage={onGenerateImage}
+        onPreparePost={onPreparePost}
+        kitGenerateBlocked
+      />
+    )
+
+    const crearPost = screen.getByRole('button', { name: 'Primero el kit' })
+    expect((crearPost as HTMLButtonElement).disabled).toBe(true)
+    expect(crearPost.className.split(/\s+/)).not.toContain('is-primary')
+    expect(crearPost.getAttribute('data-kit-blocked')).toBe('true')
+    expect(screen.queryByRole('button', { name: /crear post/i })).toBeNull()
+
+    fireEvent.click(crearPost)
+    expect(onPreparePost).not.toHaveBeenCalled()
+    expect(onGenerateImage).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /más acciones/i }))
+    const optimize = screen.getByRole('menuitem', { name: 'Primero el kit' })
+    expect((optimize as HTMLButtonElement).disabled).toBe(true)
+  })
 })
 
 describe('collectImageScriptChoices', () => {
@@ -323,5 +354,31 @@ describe('collectImageScriptChoices', () => {
     expect(shouldReviewChosenScript('Generar post', 'rail')).toBe(true)
     expect(shouldReviewChosenScript('Quiero crear un post', 'script_card')).toBe(false)
     expect(shouldReviewChosenScript('Hazme un logo', 'composer')).toBe(false)
+  })
+
+  it('shows ES/EN hook and awareness labels in the more menu', () => {
+    expect(HOOK_OPTIONS.map((opt) => opt.labelEn)).toEqual([
+      'Direct definition',
+      'Tangible pain',
+      'Direct offer',
+    ])
+    expect(CONSCIOUSNESS_OPTIONS.map((opt) => opt.labelEn)).toEqual(['Cold', 'Warm', 'Hot'])
+
+    render(
+      <ChatShellScriptCard
+        script={{ index: 1, title: 'Direct sale', content: 'Original script' }}
+        language="en"
+        onEdit={async () => 'edited'}
+        onGenerateImage={vi.fn()}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }))
+    expect(screen.getByRole('menuitem', { name: /direct definition/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /tangible pain/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /direct offer/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /^cold$/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /^warm$/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /^hot$/i })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /definición directa/i })).toBeNull()
   })
 })

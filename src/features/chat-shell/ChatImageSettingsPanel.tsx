@@ -2,6 +2,7 @@ import { Image as ImageIcon } from 'lucide-react'
 import { LOGO_ARCHETYPES } from '../../data/image-presets'
 import {
   anuncioStyleChoices,
+  imageDensityUserLabel,
   organicStyleChoices,
   productStyleChoices,
   type ShellImagePreferences,
@@ -103,7 +104,7 @@ export default function ChatImageSettingsPanel({
         <label className="chat-shell__field">
           <span>{es ? 'Texto' : 'Text'}</span>
           <select value={preferences?.density || 'hard'} onChange={(event) => onChange?.({ density: event.target.value as ShellImagePreferences['density'] })}>
-            <option value="hard">{es ? 'Mínimo' : 'Minimal'}</option>
+            <option value="hard">{imageDensityUserLabel('hard', language)}</option>
             <option value="medium">{es ? 'Medio' : 'Medium'}</option>
             <option value="standard">{es ? 'Completo' : 'Full'}</option>
           </select>

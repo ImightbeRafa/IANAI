@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { CHAT_SHELL_AUTH_HOME } from '../features/chat-shell/chatShellRollout'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
 import { resolveClientAdminAccess } from '../lib/previewAdmin'
 
@@ -15,6 +16,7 @@ interface AuthContextType {
   signInWithGoogle: (options?: { redirectPath?: string }) => Promise<void>
   signOut: () => Promise<void>
   updateProfile: (updates: { full_name?: string; avatar_url?: string }) => Promise<void>
+  updatePassword: (password: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -237,7 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signInWithGoogle = async (options?: { redirectPath?: string }) => {
-    const path = safeAppReturnPath(options?.redirectPath) || '/dashboard'
+    const path = safeAppReturnPath(options?.redirectPath) || CHAT_SHELL_AUTH_HOME
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -261,8 +263,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error
   }
 
+  const updatePassword = async (password: string) => {
+    if (!user) throw new Error('No user logged in')
+    const { error } = await supabase.auth.updateUser({ password })
+    if (error) throw error
+  }
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, isAdmin, adminResolved, signUp, signIn, signInWithGoogle, signOut, updateProfile }}>
+    <AuthContext.Provider value={{ user, session, loading, isAdmin, adminResolved, signUp, signIn, signInWithGoogle, signOut, updateProfile, updatePassword }}>
       {children}
     </AuthContext.Provider>
   )

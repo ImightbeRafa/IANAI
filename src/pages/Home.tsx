@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
+import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
+import { authHomePath } from '../features/chat-shell/chatShellRollout'
 import {
   HOME_AUTH_REDIRECT,
   HOME_FAN_CARDS,
@@ -20,6 +23,8 @@ function CyanMark({ className }: { className?: string }) {
 
 export default function Home() {
   const { language } = useLanguage()
+  const { user, loading: authLoading } = useAuth()
+  const { loading: rolloutLoading, canAccessChat } = useChatShellRollout()
   const lang = language === 'en' ? 'en' : 'es'
   const [fanReady, setFanReady] = useState(false)
 
@@ -89,6 +94,18 @@ export default function Home() {
 
   const chatSignup = `/signup?redirect=${encodeURIComponent(HOME_AUTH_REDIRECT)}`
   const chatLogin = `/login?redirect=${encodeURIComponent(HOME_AUTH_REDIRECT)}`
+
+  if (authLoading || (user && rolloutLoading)) {
+    return (
+      <div className="home-page" aria-busy="true">
+        <div className="home-nav" />
+      </div>
+    )
+  }
+
+  if (user) {
+    return <Navigate to={authHomePath(canAccessChat)} replace />
+  }
 
   return (
     <div className="home-page">

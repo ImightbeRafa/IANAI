@@ -38,6 +38,9 @@
     },
     "api/extract-brand.ts": {
       "maxDuration": 30
+    },
+    "api/fetch-image.ts": {
+      "maxDuration": 30
     }
   },
   "crons": [

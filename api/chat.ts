@@ -19,6 +19,7 @@ import { GROK_TEXT_MODEL, grokChatComplete, resolveGrokTextModel } from './lib/g
 import { resolveAuthorizedSessionProduct, isUuid } from './lib/session-access.js'
 import { userHasProductAccess } from './lib/product-access.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
+import { resolveChatGenerationId } from './lib/credits/chat-generation-id.js'
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
@@ -316,6 +317,11 @@ interface ScriptSettings {
   ctaStrength?: CTAStrength
   useStructuredPipeline?: boolean
   forceFreshAngles?: boolean
+  ctaMix?: {
+    website: number
+    messages: number
+    none: number
+  }
 }
 
 interface ContextDocumentData {
@@ -1613,7 +1619,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Determine usage action: 'description' if feature param says so, otherwise 'script'
   const usageAction: 'script' | 'description' = req.body?.feature === 'description' ? 'description' : 'script'
-  const chatGenerationId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-chat`
+  const rawSessionIdEarly = (req.body as { sessionId?: unknown } | undefined)?.sessionId
+  const sessionBound = rawSessionIdEarly != null && rawSessionIdEarly !== ''
+  const generationIdResult = resolveChatGenerationId({
+    sessionBound,
+    incoming: (req.body as { generationId?: unknown } | undefined)?.generationId,
+  })
+  if (!generationIdResult.ok) {
+    return res.status(400).json({ error: generationIdResult.error })
+  }
+  const chatGenerationId = generationIdResult.generationId
 
   // Check usage limits
   const { allowed, remaining, limit, creditsRequired } = await checkUsageLimit(user.id, usageAction)

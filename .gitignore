@@ -32,3 +32,6 @@ supabase/config.toml
 .env
 .env.local
 .env.*.local
+
+# Verification run artifacts (keep the README)
+.cursor/skills/verify-advance/evidence/runs/

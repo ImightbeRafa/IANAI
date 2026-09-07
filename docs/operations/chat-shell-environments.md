@@ -4,8 +4,8 @@
 
 | Env | App URL | Supabase | `chat_shell` flag | Notes |
 |-----|---------|----------|-------------------|-------|
-| Production | `advanceai.studio` / `ianai-omega.vercel.app` | **AIIAN** `lstzfxsdmggkoaxfawny` | enabled (invite-gated) | Real users; treat as sacred |
-| Vercel Preview (default) | `*.vercel.app` preview | **AIIAN** `lstzfxsdmggkoaxfawny` (same as production) | same DB flag / invites | **Policy as of 2026-08-22:** Preview uses production data so chat-shell can be perfected against real brands/sessions. Deployment Protection required. |
+| Production | `advanceai.studio` / `ianai-omega.vercel.app` | **AIIAN** `lstzfxsdmggkoaxfawny` | enabled → **all signed-in users** (kill switch only) | Real users; treat as sacred. First `/chat` open gifts **100** once. |
+| Vercel Preview (default) | `*.vercel.app` preview | **AIIAN** `lstzfxsdmggkoaxfawny` (same as production) | same kill switch (open when flag on) | **Policy as of 2026-08-22:** Preview uses production data. Deployment Protection required. **No +100 gift.** |
 | IANAI-preview (legacy, do not use for new work) | n/a | `adrwkzibhfdpwuycnzaa` | — | Isolated QA DB; retired for day-to-day chat-shell work |
 | Local | `localhost:5173` | AIIAN (via injected secrets) **or** local Supabase | developer-controlled | `npm run dev` for UI; `npm run dev:vercel` for `/api/*` |
 
@@ -38,14 +38,14 @@ Backend (Vercel functions) — same project:
 3. **Do not** apply IANAI-preview-only RLS/seed migrations onto AIIAN.
 4. Prefer synthetic or canary-owned rows for destructive tests; never mass-delete brands/products on Preview.
 5. Schema changes still go through reviewed migrations — Preview is not a free-for-all against production Postgres.
-6. Keep `chat_shell` invite gate (`profiles.chat_beta_access`); preference alone must not enroll everyone.
+6. Kill switch remains the only off switch. Do not gift on Preview. Do not dump Preview SQL onto AIIAN.
 
-## Feature flag design
+## Feature flag design (mass cutover)
 
-- Source of truth: `public.app_feature_flags` row `key = 'chat_shell'` (kill switch).
-- Per-user invite: `profiles.chat_beta_access` (default false). Clients cannot self-grant.
-- Home preference: `profiles.preferred_ui` (`classic` | `chat`). Does not grant access.
-- Enabling the kill switch must **not** redirect everyone to `/chat`. See `docs/operations/chat-shell-production-transition.md`.
+- Source of truth: `public.app_feature_flags` row `key = 'chat_shell'` (kill switch). Flag on → every authenticated user has `/chat`. Flag off / unreadable → classic + “Chat aún no está habilitado”.
+- `profiles.chat_beta_access` is **not** a gate after GO 2026-09-04. Clients still cannot self-grant the column.
+- Home for signed-in users is `/chat` when the flag is on. `/dashboard` stays reachable (no bounce). Preference does not deny access.
+- Welcome gift: **100** pack credits, production `VERCEL_ENV` only. Preview fail-closed.
 - Do **not** bake cutover solely into `VITE_CHAT_SHELL` — build-time flags drift across previews.
 
 ## Rafael actions (Preview → AIIAN cutover)

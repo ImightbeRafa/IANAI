@@ -103,6 +103,24 @@ function resolveViewportClass(): 'mobile' | 'desktop' {
   return window.innerWidth < 768 ? 'mobile' : 'desktop'
 }
 
+async function notifyTicketCreated(ticketId: string): Promise<void> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+    const url = import.meta.env.PROD ? '/api/ticket-events' : 'http://localhost:3000/api/ticket-events'
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ ticketId }),
+    })
+  } catch {
+    // Ticket already saved; the poll endpoint can pick it up.
+  }
+}
+
 function compressScreenshot(blob: Blob, maxWidth = 1280, quality = 0.7): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -295,7 +313,7 @@ export default function FeedbackButton() {
         } catch { /* ignore */ }
       }
 
-      await createFeedbackTicket({
+      const created = await createFeedbackTicket({
         user_id: user.id,
         user_email: user.email || undefined,
         subject: subject.trim(),
@@ -317,6 +335,9 @@ export default function FeedbackButton() {
         product_name: productName,
         user_plan: userPlan,
       })
+      if (created?.id) {
+        void notifyTicketCreated(created.id)
+      }
 
       setSubmitted(true)
       setTimeout(() => {

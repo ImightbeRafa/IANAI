@@ -101,17 +101,58 @@ interface ChatShellScriptCardProps {
 const ENHANCE_PROMPT =
   'Mejora claridad, buyer qualification, hechos concretos y CTA. Conserva el formato del guión. Devuelve UN solo guión completo.'
 
-const HOOK_OPTIONS = [
-  { label: 'Definición directa', prompt: 'Cambia el gancho a definición directa del producto/servicio. Mantén desarrollo y CTA. Devuelve UN solo guión.' },
-  { label: 'Dolor tangible', prompt: 'Cambia el gancho a un dolor tangible y específico del comprador ideal. Mantén desarrollo y CTA. Devuelve UN solo guión.' },
-  { label: 'Oferta directa', prompt: 'Cambia el gancho a oferta directa (qué es + beneficio). Mantén desarrollo y CTA. Devuelve UN solo guión.' },
-]
+export const HOOK_OPTIONS = [
+  {
+    id: 'direct_definition',
+    labelEs: 'Definición directa',
+    labelEn: 'Direct definition',
+    prompt: 'Cambia el gancho a definición directa del producto/servicio. Mantén desarrollo y CTA. Devuelve UN solo guión.',
+  },
+  {
+    id: 'tangible_pain',
+    labelEs: 'Dolor tangible',
+    labelEn: 'Tangible pain',
+    prompt: 'Cambia el gancho a un dolor tangible y específico del comprador ideal. Mantén desarrollo y CTA. Devuelve UN solo guión.',
+  },
+  {
+    id: 'direct_offer',
+    labelEs: 'Oferta directa',
+    labelEn: 'Direct offer',
+    prompt: 'Cambia el gancho a oferta directa (qué es + beneficio). Mantén desarrollo y CTA. Devuelve UN solo guión.',
+  },
+] as const
 
-const CONSCIOUSNESS_OPTIONS = [
-  { label: 'Frío', prompt: 'Ajusta el guión a conciencia FRÍA (revela el problema). Conserva formato. Devuelve UN solo guión.' },
-  { label: 'Tibio', prompt: 'Ajusta el guión a conciencia TIBIA (ya conoce el problema). Conserva formato. Devuelve UN solo guión.' },
-  { label: 'Caliente', prompt: 'Ajusta el guión a conciencia CALIENTE (listo para comprar). Conserva formato. Devuelve UN solo guión.' },
-]
+export const CONSCIOUSNESS_OPTIONS = [
+  {
+    id: 'cold',
+    labelEs: 'Frío',
+    labelEn: 'Cold',
+    prompt: 'Ajusta el guión a conciencia FRÍA (revela el problema). Conserva formato. Devuelve UN solo guión.',
+  },
+  {
+    id: 'warm',
+    labelEs: 'Tibio',
+    labelEn: 'Warm',
+    prompt: 'Ajusta el guión a conciencia TIBIA (ya conoce el problema). Conserva formato. Devuelve UN solo guión.',
+  },
+  {
+    id: 'hot',
+    labelEs: 'Caliente',
+    labelEn: 'Hot',
+    prompt: 'Ajusta el guión a conciencia CALIENTE (listo para comprar). Conserva formato. Devuelve UN solo guión.',
+  },
+] as const
+
+type ScriptCardOption = {
+  id: string
+  labelEs: string
+  labelEn: string
+  prompt: string
+}
+
+function optionLabel(opt: ScriptCardOption, language: 'en' | 'es'): string {
+  return language === 'es' ? opt.labelEs : opt.labelEn
+}
 
 function operationCopy(
   op: { kind: ScriptOpSource; label?: string },
@@ -380,14 +421,15 @@ export default function ChatShellScriptCard({
     }
   }
 
-  const runHook = async (opt: { label: string; prompt: string }) => {
+  const runHook = async (opt: ScriptCardOption) => {
     if (!onEdit || operation) return
+    const label = optionLabel(opt, language)
     setMoreOpen(false)
-    setOperation({ kind: 'hook', label: opt.label })
+    setOperation({ kind: 'hook', label })
     setEditError(null)
     try {
       const result = await onEdit(displayContent, opt.prompt, 'script_hook')
-      await pushVersion(result, 'hook', opt.label)
+      await pushVersion(result, 'hook', label)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Hook failed')
     } finally {
@@ -395,14 +437,15 @@ export default function ChatShellScriptCard({
     }
   }
 
-  const runConsciousness = async (opt: { label: string; prompt: string }) => {
+  const runConsciousness = async (opt: ScriptCardOption) => {
     if (!onEdit || operation) return
+    const label = optionLabel(opt, language)
     setMoreOpen(false)
-    setOperation({ kind: 'consciousness', label: opt.label })
+    setOperation({ kind: 'consciousness', label })
     setEditError(null)
     try {
       const result = await onEdit(displayContent, opt.prompt, 'script_consciousness')
-      await pushVersion(result, 'consciousness', opt.label)
+      await pushVersion(result, 'consciousness', label)
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Consciousness failed')
     } finally {
@@ -541,6 +584,7 @@ export default function ChatShellScriptCard({
   const busy = Boolean(operation) || saving || Boolean(savingScript) || savingPost
   const locked = readOnly
   const es = language === 'es'
+  const kitBlockedHint = es ? 'Primero el kit' : 'Kit first'
   const previewVersionLabel = (() => {
     const entry = versions[activeIndex]
     if (!entry || entry.source == null) return es ? 'Original' : 'Original'
@@ -825,15 +869,16 @@ export default function ChatShellScriptCard({
         {onGenerateImage ? (
           <button
             type="button"
-            className="chat-shell__artifact-action is-primary"
+            className={`chat-shell__artifact-action${kitGenerateBlocked ? '' : ' is-primary'}`}
             disabled={busy || imageBusy || preparingPost || kitGenerateBlocked}
             onClick={() => void openPostPreview()}
-            title={kitGenerateBlocked ? 'Primero el kit' : (es ? 'Crear post' : 'Create post')}
+            title={kitGenerateBlocked ? kitBlockedHint : (es ? 'Crear post' : 'Create post')}
+            aria-label={kitGenerateBlocked ? kitBlockedHint : (es ? 'Crear post' : 'Create post')}
             data-kit-blocked={kitGenerateBlocked ? 'true' : undefined}
           >
             {imageBusy || preparingPost ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
             {kitGenerateBlocked
-              ? 'Primero el kit'
+              ? kitBlockedHint
               : preparingPost
                 ? (es ? 'Optimizando…' : 'Optimizing…')
                 : (es ? 'Crear post' : 'Create post')}
@@ -860,16 +905,16 @@ export default function ChatShellScriptCard({
               </button>
               <div className="chat-shell__artifact-menu-label">{es ? 'Hooks' : 'Hooks'}</div>
               {HOOK_OPTIONS.map((opt) => (
-                <button key={opt.label} type="button" role="menuitem" onClick={() => { setMoreOpen(false); void runHook(opt) }} disabled={!onEdit}>
+                <button key={opt.id} type="button" role="menuitem" onClick={() => { setMoreOpen(false); void runHook(opt) }} disabled={!onEdit}>
                   <Anchor size={13} />
-                  {opt.label}
+                  {es ? opt.labelEs : opt.labelEn}
                 </button>
               ))}
               <div className="chat-shell__artifact-menu-label">{es ? 'Conciencia' : 'Awareness'}</div>
               {CONSCIOUSNESS_OPTIONS.map((opt) => (
-                <button key={opt.label} type="button" role="menuitem" onClick={() => { setMoreOpen(false); void runConsciousness(opt) }} disabled={!onEdit}>
+                <button key={opt.id} type="button" role="menuitem" onClick={() => { setMoreOpen(false); void runConsciousness(opt) }} disabled={!onEdit}>
                   <Sparkles size={13} />
-                  {opt.label}
+                  {es ? opt.labelEs : opt.labelEn}
                 </button>
               ))}
               {onGenerateImage ? (
@@ -877,12 +922,12 @@ export default function ChatShellScriptCard({
                   type="button"
                   role="menuitem"
                   disabled={imageBusy || preparingPost || kitGenerateBlocked}
-                  title={kitGenerateBlocked ? 'Primero el kit' : undefined}
+                  title={kitGenerateBlocked ? kitBlockedHint : undefined}
                   onClick={() => { setMoreOpen(false); void openPostPreview() }}
                 >
                   <Wand2 size={13} />
                   {kitGenerateBlocked
-                    ? 'Primero el kit'
+                    ? kitBlockedHint
                     : (es ? 'Optimizar para post' : 'Optimize for post')}
                 </button>
               ) : null}

@@ -20,13 +20,32 @@ describe('chat-shell open gift', () => {
     expect(CHAT_SHELL_OPEN_GIFT_CREDITS).toBe(100)
   })
 
-  it('skips gift insert when VERCEL_ENV=preview', () => {
-    const prev = process.env.VERCEL_ENV
+  it('grants only when VERCEL_ENV=production (fail-closed elsewhere)', () => {
+    const prevEnv = process.env.VERCEL_ENV
+    const prevFlag = process.env.CHAT_SHELL_OPEN_GIFT
+    delete process.env.CHAT_SHELL_OPEN_GIFT
+
     process.env.VERCEL_ENV = 'preview'
     expect(shouldSkipChatShellOpenGift()).toBe(true)
+
+    process.env.VERCEL_ENV = 'development'
+    expect(shouldSkipChatShellOpenGift()).toBe(true)
+
+    delete process.env.VERCEL_ENV
+    expect(shouldSkipChatShellOpenGift()).toBe(true)
+
     process.env.VERCEL_ENV = 'production'
     expect(shouldSkipChatShellOpenGift()).toBe(false)
-    if (prev === undefined) delete process.env.VERCEL_ENV
-    else process.env.VERCEL_ENV = prev
+
+    process.env.CHAT_SHELL_OPEN_GIFT = '0'
+    expect(shouldSkipChatShellOpenGift()).toBe(true)
+
+    process.env.CHAT_SHELL_OPEN_GIFT = '1'
+    expect(shouldSkipChatShellOpenGift()).toBe(false)
+
+    if (prevEnv === undefined) delete process.env.VERCEL_ENV
+    else process.env.VERCEL_ENV = prevEnv
+    if (prevFlag === undefined) delete process.env.CHAT_SHELL_OPEN_GIFT
+    else process.env.CHAT_SHELL_OPEN_GIFT = prevFlag
   })
 })

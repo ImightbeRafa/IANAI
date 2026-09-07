@@ -51,13 +51,88 @@ export function labelForReferenceRole(role: ReferenceRole, language: 'en' | 'es'
 }
 
 /** Logo attaches via brandLogoUrl — exclude from productImageIds so it is not mis-roled. */
+export const KIT_LOGO_REF_ID = 'kit:logo'
+export const KIT_PRODUCT_REF_PREFIX = 'kit:ref:'
+
+export function isKitVisualId(id: string): boolean {
+  return id === KIT_LOGO_REF_ID || id.startsWith(KIT_PRODUCT_REF_PREFIX)
+}
+
+export function isStoredProductImageId(id: string): boolean {
+  return Boolean(id) && !isKitVisualId(id)
+}
+
+export function catalogKitVisuals(
+  kit: { logo_url?: string | null; reference_images?: string[] | null } | null | undefined,
+  currentProductId: string
+): OfferReferenceImage[] {
+  const out: OfferReferenceImage[] = []
+  const logo = typeof kit?.logo_url === 'string' ? kit.logo_url.trim() : ''
+  if (logo) {
+    out.push({
+      id: KIT_LOGO_REF_ID,
+      url: logo,
+      kind: 'logo',
+      dbKind: 'context',
+      label: 'Logo · marca',
+      productId: currentProductId,
+    })
+  }
+  const seen = new Set(logo ? [logo] : [])
+  const refs = Array.isArray(kit?.reference_images) ? kit.reference_images : []
+  refs.forEach((raw, index) => {
+    const url = typeof raw === 'string' ? raw.trim() : ''
+    if (!url || seen.has(url)) return
+    seen.add(url)
+    out.push({
+      id: `${KIT_PRODUCT_REF_PREFIX}${index}`,
+      url,
+      kind: 'product',
+      dbKind: 'product',
+      label: 'Producto',
+      productId: currentProductId,
+    })
+  })
+  return out
+}
+
+export function mergeKitVisualsIntoCatalog(
+  catalog: OfferReferenceImage[],
+  kit: { logo_url?: string | null; reference_images?: string[] | null } | null | undefined,
+  currentProductId: string
+): OfferReferenceImage[] {
+  const existingUrls = new Set(catalog.map((img) => img.url))
+  const extras = catalogKitVisuals(kit, currentProductId).filter((img) => !existingUrls.has(img.url))
+  if (extras.length === 0) return catalog
+  const withoutDupLogo = catalog.filter((img) => {
+    if (img.kind !== 'logo') return true
+    return !extras.some((extra) => extra.kind === 'logo' && extra.url === img.url)
+  })
+  return [...extras, ...withoutDupLogo]
+}
+
 export function confirmedProductReferenceImageIds(
   images: Array<{ id: string; selected?: boolean; kind?: string | null }>
 ): string[] {
   return images
-    .filter((img) => img.selected === true && img.kind !== 'logo')
+    .filter((img) => img.selected === true && img.kind !== 'logo' && isStoredProductImageId(img.id))
     .map((img) => img.id)
     .slice(0, MAX_POST_REFERENCE_IMAGES)
+}
+
+export function selectedKitProductUrls(
+  images: Array<{ id: string; url: string; selected?: boolean; kind?: string | null }>
+): string[] {
+  const urls: string[] = []
+  const seen = new Set<string>()
+  for (const img of images) {
+    if (img.selected !== true || img.kind === 'logo' || !isKitVisualId(img.id) || !img.url) continue
+    if (seen.has(img.url)) continue
+    seen.add(img.url)
+    urls.push(img.url)
+    if (urls.length >= MAX_POST_REFERENCE_IMAGES) break
+  }
+  return urls
 }
 
 export function selectedBrandLogoUrl(
@@ -117,7 +192,7 @@ function sortByRecency(images: OfferReferenceImage[]): OfferReferenceImage[] {
   })
 }
 
-/** Up to 3 current-offer product angles. Scene / style / logo stay off until the user opts in. */
+/** Up to 3 current-offer product angles, plus kit logo when present. */
 export function preselectOfferReferenceIds(
   images: OfferReferenceImage[],
   currentProductId: string,
@@ -126,7 +201,10 @@ export function preselectOfferReferenceIds(
   const current = images.filter((img) => img.productId === currentProductId)
   const currentProducts = sortByRecency(current.filter((img) => img.kind === 'product'))
     .slice(0, Math.min(MAX_PRODUCT_ANGLE_PRESELECT, max))
-  return currentProducts.map((img) => img.id)
+  const ids = currentProducts.map((img) => img.id)
+  const logo = current.find((img) => img.kind === 'logo' && Boolean(img.url))
+  if (logo && !ids.includes(logo.id)) ids.push(logo.id)
+  return ids
 }
 
 export function withPreselectedReferences(
@@ -134,13 +212,12 @@ export function withPreselectedReferences(
   currentProductId: string,
   preferredIds?: string[]
 ): OfferReferenceImage[] {
-  // Only product angles may start selected — scene/style/logo require opt-in.
-  const preferredProducts = (preferredIds || [])
-    .filter((id) => catalog.some((img) => img.id === id && img.kind === 'product'))
-    .slice(0, MAX_POST_REFERENCE_IMAGES)
+  const preferred = (preferredIds || [])
+    .filter((id) => catalog.some((img) => img.id === id && (img.kind === 'product' || img.kind === 'logo')))
+    .slice(0, MAX_POST_REFERENCE_IMAGES + 1)
   const selectedIds = new Set(
-    preferredProducts.length > 0
-      ? preferredProducts
+    preferred.length > 0
+      ? preferred
       : preselectOfferReferenceIds(catalog, currentProductId)
   )
   return catalog.map((img) => ({ ...img, selected: selectedIds.has(img.id) }))
@@ -151,6 +228,13 @@ export function confirmedReferenceImageIds(
   images: Array<{ id: string; selected?: boolean; kind?: string | null }>
 ): string[] {
   return confirmedProductReferenceImageIds(images)
+}
+
+export function hasKitProductVisuals(
+  kit: { logo_url?: string | null; reference_images?: string[] | null } | null | undefined
+): boolean {
+  if (typeof kit?.logo_url === 'string' && kit.logo_url.trim()) return true
+  return (kit?.reference_images || []).some((url) => typeof url === 'string' && url.trim().length > 0)
 }
 
 export function hasSelectedProductReference(

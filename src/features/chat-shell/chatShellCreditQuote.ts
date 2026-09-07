@@ -103,3 +103,37 @@ export function creditQuoteCopy(
     cancel: 'Cancelar',
   }
 }
+
+export function formatCreditsBalance(remaining: number, language: 'en' | 'es'): string {
+  return language === 'es'
+    ? `${remaining} créditos IA`
+    : `${remaining} AI credits`
+}
+
+export function withRemainingBalance(
+  costLine: string,
+  remaining: number | null | undefined,
+  language: 'en' | 'es',
+  creditsEnabled = true
+): string {
+  if (!creditsEnabled || remaining == null || !Number.isFinite(remaining)) return costLine
+  const leftover = language === 'es'
+    ? `te quedan ${remaining}`
+    : `${remaining} left`
+  return `${costLine} · ${leftover}`
+}
+
+export function scriptQuoteCount(settings: {
+  generationMode?: string
+  scriptTypeConfig?: object
+  variations?: number
+}): number {
+  if (settings.generationMode === 'by_type' && settings.scriptTypeConfig) {
+    const sum = Object.values(settings.scriptTypeConfig).reduce(
+      (total: number, value) => total + (typeof value === 'number' ? value : 0),
+      0
+    )
+    if (sum > 0) return Math.max(1, Math.min(10, sum))
+  }
+  return Math.max(1, Math.min(10, settings.variations || 1))
+}

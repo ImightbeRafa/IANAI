@@ -11,7 +11,9 @@ export interface ComposerCreateAction {
   onClick: () => void
   active?: boolean
   disabled?: boolean
-  /** Shown in title when disabled (e.g. kit not ready). */
+  /** Looks disabled but stays clickable (e.g. open Ofertas). */
+  lookBlocked?: boolean
+  /** Shown on the button when blocked (Primero el kit / Elegí oferta). */
   blockedReason?: string
 }
 
@@ -111,7 +113,7 @@ export default function ChatComposerCreateDock({
         </div>
       ) : null}
       <div className="chat-shell__idle-glass-row">
-        <div className="chat-shell__idle-kit">
+        <div className="chat-shell__idle-kit" data-tour="setup">
           <button
             type="button"
             className={`chat-shell__composer-create${reviewOpen ? ' is-open' : ''}`}
@@ -139,21 +141,26 @@ export default function ChatComposerCreateDock({
             <PanelLeftClose size={15} strokeWidth={2} aria-hidden />
           </button>
         </div>
-        <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle}>
+        <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle} data-tour="verbs">
           {actions.map((action) => {
-            const title = action.disabled && action.blockedReason
-              ? `${action.label} — Primero el kit`
-              : action.label
+            const blockedLabel = action.blockedReason
+            const title = blockedLabel ? `${action.label} — ${blockedLabel}` : action.label
+            const looksBlocked = Boolean(action.disabled || action.lookBlocked)
+            const className = [
+              action.active ? 'is-on' : '',
+              action.lookBlocked && !action.disabled ? 'is-blocked' : '',
+            ].filter(Boolean).join(' ') || undefined
             return (
             <button
               key={action.id}
               type="button"
               disabled={action.disabled}
-              className={action.active ? 'is-on' : undefined}
+              className={className}
               aria-pressed={action.active ? true : false}
+              aria-disabled={looksBlocked ? true : undefined}
               aria-label={title}
               title={title}
-              data-kit-blocked={action.disabled && action.blockedReason ? 'true' : undefined}
+              data-kit-blocked={blockedLabel ? 'true' : undefined}
               onClick={() => {
                 setReviewOpen(false)
                 action.onClick()
@@ -161,8 +168,8 @@ export default function ChatComposerCreateDock({
             >
               {actionIcon(action.id)}
               <span>{action.label}</span>
-              {action.disabled && action.blockedReason ? (
-                <em className="chat-shell__idle-action-block" data-kit-block="true">Primero el kit</em>
+              {blockedLabel ? (
+                <em className="chat-shell__idle-action-block" data-kit-block="true">{blockedLabel}</em>
               ) : null}
             </button>
             )

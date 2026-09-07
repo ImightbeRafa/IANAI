@@ -1,16 +1,24 @@
 import { useEffect, useState } from 'react'
 import { CREDIT_WEIGHTS } from '../../lib/creditsCatalog'
+import { withRemainingBalance } from './chatShellCreditQuote'
 import {
   clampComposerBulkCount,
   fetchBulkAngles,
   runBulkCampaignRequest,
   runBulkScriptsRequest,
+  sanitizeComposerBulkCountDraft,
+  stepComposerBulkCount,
   type AngleBoardItem,
   type BulkAnglesResponse,
   type StyleDna,
 } from './chatShellBulk'
 import ChatShellFlowSheet from './ChatShellFlowSheet'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
+
+export type PackLaunchInfo = {
+  count: number
+  mode: 'scripts' | 'campaign'
+}
 
 interface ChatShellBulkDialogProps {
   open: boolean
@@ -19,8 +27,12 @@ interface ChatShellBulkDialogProps {
   offerId?: string
   sessionId?: string
   initialCount?: number
+  creditsRemaining?: number
+  creditsEnabled?: boolean
   onClose: () => void
-  onDone: (summary: string) => void
+  onLaunch?: (info: PackLaunchInfo) => void
+  onDone: (summary: string, result?: { sessionId?: string }) => void
+  onError?: (message: string) => void
 }
 
 export default function ChatShellBulkDialog({
@@ -30,34 +42,37 @@ export default function ChatShellBulkDialog({
   offerId,
   sessionId,
   initialCount = 10,
+  creditsRemaining,
+  creditsEnabled = false,
   onClose,
+  onLaunch,
   onDone,
+  onError,
 }: ChatShellBulkDialogProps) {
   const t = shellT(language)
   const es = language === 'es'
-  const [count, setCount] = useState(clampComposerBulkCount(initialCount))
+  const [countDraft, setCountDraft] = useState(String(clampComposerBulkCount(initialCount)))
   const [mode, setMode] = useState<'scripts' | 'campaign'>('scripts')
   const [styleDnaId, setStyleDnaId] = useState('')
   const [board, setBoard] = useState<BulkAnglesResponse | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [busy, setBusy] = useState<'angles' | 'run' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [progress, setProgress] = useState<string | null>(null)
   const [step, setStep] = useState<1 | 2>(1)
 
   useEffect(() => {
     if (!open) return
-    setCount(clampComposerBulkCount(initialCount))
+    setCountDraft(String(clampComposerBulkCount(initialCount)))
     setBoard(null)
     setSelected([])
     setError(null)
-    setProgress(null)
     setBusy(null)
     setStep(1)
   }, [open, initialCount])
 
   if (!open) return null
 
+  const count = clampComposerBulkCount(countDraft === '' ? 10 : countDraft)
   const selectedAngles: AngleBoardItem[] = (board?.angles || []).filter((angle) => selected.includes(angle.id))
   const quote = mode === 'campaign' ? board?.quoteCampaign : board?.quoteScripts
   const styleDnas: StyleDna[] = board?.styleDnas || []
@@ -65,23 +80,29 @@ export default function ChatShellBulkDialog({
   const estimatedCredits = mode === 'campaign'
     ? units * (CREDIT_WEIGHTS.guion_oferta + CREDIT_WEIGHTS.image_standard)
     : units * CREDIT_WEIGHTS.guion_oferta
-  // Credits visible from step 1 (count/mode) and again on confirm with quote when ready.
-  const creditsLine = step === 2 && board && quote
-    ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
-    : (es
-      ? `${estimatedCredits} créditos · máximo estimado`
-      : `${estimatedCredits} credits · estimated maximum`)
+  const creditsLine = withRemainingBalance(
+    step === 2 && board && quote
+      ? `${t.bulkQuote}: ${quote.totalCredits} · ${quote.note}`
+      : (es
+        ? `${estimatedCredits} créditos · máximo estimado`
+        : `${estimatedCredits} credits · estimated maximum`),
+    creditsEnabled ? creditsRemaining : null,
+    language,
+    creditsEnabled
+  )
   const canConfirm = step === 2 && Boolean(board) && selectedAngles.length > 0
 
   async function loadAngles() {
     setBusy('angles')
     setError(null)
+    const nextCount = clampComposerBulkCount(countDraft === '' ? 10 : countDraft)
+    setCountDraft(String(nextCount))
     try {
       const next = await fetchBulkAngles({
         brandId,
         offerId,
         sessionId,
-        count,
+        count: nextCount,
         language,
       })
       setBoard(next)
@@ -96,9 +117,17 @@ export default function ChatShellBulkDialog({
 
   async function confirmRun() {
     if (!board || selectedAngles.length === 0 || !canConfirm) return
-    setBusy('run')
-    setError(null)
-    setProgress(es ? 'Generando…' : 'Generating…')
+    const fail = (message: string) => {
+      onLaunch?.({ count: selectedAngles.length, mode })
+      onError?.(message)
+    }
+    if (!sessionId) {
+      fail(es
+        ? 'No hay un chat abierto para guardar el pack.'
+        : 'Open a chat before generating a pack.')
+      return
+    }
+    onLaunch?.({ count: selectedAngles.length, mode })
     try {
       if (mode === 'campaign') {
         const result = await runBulkCampaignRequest({
@@ -111,9 +140,17 @@ export default function ChatShellBulkDialog({
           angleIds: selected,
           styleDnaId: styleDnaId || undefined,
         })
+        if (result.succeededScripts <= 0 && result.succeededPosts <= 0) {
+          onError?.(es
+            ? 'No se pudo generar el pack. Ningún guion se guardó.'
+            : 'Could not generate the pack. No scripts were saved.')
+          return
+        }
         onDone(es
           ? `Pack ${result.packId.slice(0, 8)}: ${result.succeededScripts} guiones y ${result.succeededPosts} posts. ${result.charged} créditos.`
-          : `Pack ${result.packId.slice(0, 8)}: ${result.succeededScripts} scripts and ${result.succeededPosts} posts. ${result.charged} credits.`)
+          : `Pack ${result.packId.slice(0, 8)}: ${result.succeededScripts} scripts and ${result.succeededPosts} posts. ${result.charged} credits.`, {
+          sessionId: result.sessionId,
+        })
       } else {
         const result = await runBulkScriptsRequest({
           brandId,
@@ -124,15 +161,20 @@ export default function ChatShellBulkDialog({
           angles: selectedAngles,
           angleIds: selected,
         })
+        if (result.succeeded <= 0) {
+          onError?.(es
+            ? 'No se pudo generar el pack. Ningún guion se guardó.'
+            : 'Could not generate the pack. No scripts were saved.')
+          return
+        }
         onDone(es
           ? `Pack ${result.packId.slice(0, 8)}: ${result.succeeded} guiones guardados. ${result.charged} créditos.`
-          : `Pack ${result.packId.slice(0, 8)}: ${result.succeeded} scripts saved. ${result.charged} credits.`)
+          : `Pack ${result.packId.slice(0, 8)}: ${result.succeeded} scripts saved. ${result.charged} credits.`, {
+          sessionId: result.sessionId,
+        })
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.bulkFailed)
-    } finally {
-      setBusy(null)
-      setProgress(null)
+      onError?.(err instanceof Error ? err.message : t.bulkFailed)
     }
   }
 
@@ -167,16 +209,37 @@ export default function ChatShellBulkDialog({
       <label className="chat-shell__modal-label" htmlFor="chat-shell-bulk-count">
         {t.bulkCount}
       </label>
-      <input
-        id="chat-shell-bulk-count"
-        className="chat-shell__modal-input"
-        type="number"
-        min={2}
-        max={25}
-        value={count}
-        disabled={Boolean(busy)}
-        onChange={(event) => setCount(clampComposerBulkCount(event.target.value))}
-      />
+      <div className="chat-shell__qty">
+        <button
+          type="button"
+          className="chat-shell__qty-btn"
+          aria-label={es ? 'Menos' : 'Decrease'}
+          disabled={Boolean(busy) || count <= 2}
+          onClick={() => setCountDraft(stepComposerBulkCount(countDraft, -1))}
+        >
+          −
+        </button>
+        <input
+          id="chat-shell-bulk-count"
+          className="chat-shell__modal-input chat-shell__modal-input--qty"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={countDraft}
+          disabled={Boolean(busy)}
+          onChange={(event) => setCountDraft(sanitizeComposerBulkCountDraft(event.target.value))}
+          onBlur={() => setCountDraft(String(clampComposerBulkCount(countDraft === '' ? 10 : countDraft)))}
+        />
+        <button
+          type="button"
+          className="chat-shell__qty-btn"
+          aria-label={es ? 'Más' : 'Increase'}
+          disabled={Boolean(busy) || count >= 25}
+          onClick={() => setCountDraft(stepComposerBulkCount(countDraft, 1))}
+        >
+          +
+        </button>
+      </div>
 
       <div className="chat-shell__bulk-modes">
         <button
@@ -247,7 +310,6 @@ export default function ChatShellBulkDialog({
         <p className="chat-shell__modal-copy">{t.bulkNeedBoard}</p>
       )}
 
-      {progress ? <p className="chat-shell__modal-copy">{progress}</p> : null}
       {error ? <p className="chat-shell__modal-error">{error}</p> : null}
     </ChatShellFlowSheet>
   )

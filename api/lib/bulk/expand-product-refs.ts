@@ -8,12 +8,14 @@ import type { ExpandedProductRef } from './types.js'
 
 export function countExpandNeeded(
   existingCount: number,
-  minDesired = 2,
-  maxExpand = 3
+  _minDesired = 2,
+  _maxExpand = 3
 ): number {
-  const existing = Math.max(0, Math.floor(existingCount))
-  if (existing >= minDesired) return 0
-  return Math.min(maxExpand, Math.max(1, minDesired - existing + 1))
+  void existingCount
+  void _minDesired
+  void _maxExpand
+  // Never invent SKU photos. Kit / offer uploads are the only product refs.
+  return 0
 }
 
 const LIFESTYLE_SCENES = [

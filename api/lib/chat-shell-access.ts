@@ -4,9 +4,15 @@ import { supabaseAdmin } from './supabase-admin.js'
 export const CHAT_SHELL_UNAVAILABLE =
   'Chat is not available for this account'
 
+/** Kill switch only. Invite (`chat_beta_access`) is not required after cutover. */
+export function chatShellAccessFromFlag(enabled: unknown): boolean {
+  return enabled === true
+}
+
 /**
- * Kill switch + invite. Preference never grants access alone.
- * Flag-on without `profiles.chat_beta_access` = denied (Preview shares AIIAN flag).
+ * Kill switch is the only gate. When `app_feature_flags.chat_shell` is on,
+ * every authenticated user has chat-shell (production-open + Preview-open).
+ * Flag off / unreadable fails closed. Gift is a separate production-only path.
  */
 export async function userHasChatShellAccess(userId: string): Promise<boolean> {
   if (!supabaseAdmin || !userId) return false
@@ -16,15 +22,8 @@ export async function userHasChatShellAccess(userId: string): Promise<boolean> {
       .select('enabled')
       .eq('key', 'chat_shell')
       .maybeSingle()
-    if (flagError || flag?.enabled !== true) return false
-
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('chat_beta_access')
-      .eq('id', userId)
-      .maybeSingle()
-    if (profileError || profile?.chat_beta_access !== true) return false
-    return true
+    if (flagError) return false
+    return chatShellAccessFromFlag(flag?.enabled)
   } catch (err) {
     console.error('Chat-shell access check failed:', err)
     return false

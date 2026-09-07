@@ -1,4 +1,5 @@
 import type { AngleCandidate, CTAStrength, SalesChannel, ScriptBrief, ScriptFramework, ScriptSettings } from './types.js'
+import { expandCtaMixSlots } from './cta-mix.js'
 import { getRequestedScriptTypes } from './utils.js'
 
 function ctaDirection(strength: CTAStrength, channel?: SalesChannel): string {
@@ -26,6 +27,10 @@ export function selectScriptBriefs(
   activeSalesChannel?: SalesChannel
 ): ScriptBrief[] {
   const requestedTypes = getRequestedScriptTypes(settings)
+  const ctaSlots = expandCtaMixSlots(settings?.ctaMix, requestedTypes.length, {
+    channel: activeSalesChannel,
+    strength: ctaStrength,
+  })
   const selected: ScriptBrief[] = []
   const usedCombos = new Set<string>()
   const usedIds = new Set<string>()
@@ -58,6 +63,7 @@ export function selectScriptBriefs(
 
     usedIds.add(chosen.id)
     usedCombos.add(`${chosen.hookMechanism}:${chosen.buyerStage}`)
+    const slot = ctaSlots[selected.length] || { channel: activeSalesChannel, strength: ctaStrength }
     selected.push({
       index: selected.length + 1,
       scriptType: scriptType as ScriptFramework,
@@ -80,9 +86,9 @@ export function selectScriptBriefs(
         'internal enums as sales copy: economico, medio, premium, opción económica',
       ],
       cta: {
-        strength: ctaStrength,
-        channel: activeSalesChannel,
-        textDirection: ctaDirection(ctaStrength, activeSalesChannel),
+        strength: slot.strength,
+        channel: slot.channel,
+        textDirection: ctaDirection(slot.strength, slot.channel),
       },
       coreDoubt: chosen.coreDoubt,
       proofToUse: chosen.proofToUse,
