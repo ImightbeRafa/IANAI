@@ -4,7 +4,7 @@ An authenticated user opening `/chat` before `tour_done` sees the tour dialog ti
 
 ## Sub-features
 
-- `tour-mount` shows dialog `Un chat para todo` (ES) / `One chat for everything` (EN) as step 1 of 6.
+- `tour-mount` shows dialog `Un chat para todo` (ES) / `One chat for everything` (EN) as step 1 of 5.
 - `tour-skip` chooses **Saltar y no volver a mostrar** and the dialog closes.
 - `tour-persist` reloads `/chat` and the tour does not remount.
 - `kits-stay` leaves existing sidebar brands/sessions in place after skip.

@@ -1,3 +1,14 @@
+## 2026-09-07 — First-open tour: real chrome + clear feedback CTA
+
+**Area:** chat-shell
+**Files:** `chatShellTourSteps.ts`, `ChatShellTourWizard.tsx`, `ChatShellTourSpotlight.tsx`, `ChatShellPage.tsx`, `ChatShell.tsx`, `ChatSidebar.tsx`, `ChatComposerCreateDock.tsx`, `ChatThread.tsx`, `chat-shell-feature-modals.css`
+
+- First-open wizard is a 5-beat coach-mark on real chrome (composer, folders, IdleBar verbs, kit/Falta chip, feedback FAB). No overlapping 14px tour-mock.
+- Dedicated **Dejar feedback** CTA opens the existing feedback control after `tour_done`. Skip remains **Saltar y no volver a mostrar** (does not wipe brands/kits/chats).
+- **Gift untouched:** `api/lib/credits/chat-shell-gift.ts` / `ensureChatShellOpenGift` not modified. Preview still fail-closed. Tour finish/skip still only writes `tour_done`.
+
+No merge. Invite-all / glass / Post≠Foto / Guiones mix / Hard→Poco texto / tickets / Uso history not reopened.
+
 ## 2026-09-04 — Rail image line: Hard → Poco texto
 
 **Area:** chat-shell

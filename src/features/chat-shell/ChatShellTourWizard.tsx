@@ -1,50 +1,75 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   FolderKanban,
   MessageSquare,
+  MessageSquarePlus,
   Package,
   Palette,
-  Sparkles,
-  ShieldCheck,
   X,
 } from 'lucide-react'
+import ChatShellTourSpotlight from './ChatShellTourSpotlight'
 import {
-  CHAT_SHELL_TOUR_STEPS_EN,
-  CHAT_SHELL_TOUR_STEPS_ES,
+  chatShellTourSteps,
+  type ChatShellTourStepId,
 } from './chatShellTourSteps'
-
-const STEP_ICONS = {
-  single: MessageSquare,
-  folders: FolderKanban,
-  verbs: Package,
-  setup: Palette,
-  keep: ShieldCheck,
-  credits: Sparkles,
-} as const
 
 interface ChatShellTourWizardProps {
   language?: 'es' | 'en'
   onFinish: () => void
   onSkipForever: () => void
+  onStepChange?: (id: ChatShellTourStepId) => void
+  onOpenFeedback?: () => void
+}
+
+function stepIcon(id: ChatShellTourStepId) {
+  switch (id) {
+    case 'single':
+      return MessageSquare
+    case 'folders':
+      return FolderKanban
+    case 'verbs':
+      return Package
+    case 'setup':
+      return Palette
+    case 'feedback':
+      return MessageSquarePlus
+    default: {
+      const _never: never = id
+      return _never
+    }
+  }
 }
 
 export default function ChatShellTourWizard({
   language = 'es',
   onFinish,
   onSkipForever,
+  onStepChange,
+  onOpenFeedback,
 }: ChatShellTourWizardProps) {
   const [index, setIndex] = useState(0)
-  const steps = language === 'en' ? CHAT_SHELL_TOUR_STEPS_EN : CHAT_SHELL_TOUR_STEPS_ES
+  const steps = chatShellTourSteps(language)
   const step = steps[index]
-  const Icon = STEP_ICONS[step.id]
+  const Icon = stepIcon(step.id)
   const last = index === steps.length - 1
   const es = language === 'es'
-  const verbsOn = step.id === 'verbs' || step.id === 'single'
+
+  useEffect(() => {
+    onStepChange?.(step.id)
+  }, [onStepChange, step.id])
+
+  const verbLabels = es
+    ? ['Guiones', 'Post', 'Foto', 'Pack']
+    : ['Scripts', 'Post', 'Photo', 'Pack']
 
   return (
-    <div className="chat-shell__feature-modal" role="dialog" aria-modal="true" aria-labelledby="chat-shell-tour-title">
-      <div className="chat-shell__feature-modal-backdrop" />
-      <div className="chat-shell__feature-modal-card chat-shell__tour-card">
+    <ChatShellTourSpotlight targetSelector={step.target} placement={step.placement}>
+      <div
+        className="chat-shell__feature-modal-card chat-shell__tour-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="chat-shell-tour-title"
+      >
         <button
           type="button"
           className="chat-shell__feature-modal-close"
@@ -66,39 +91,62 @@ export default function ChatShellTourWizard({
         </p>
         <h2 id="chat-shell-tour-title">{step.title}</h2>
         <p className="chat-shell__gift-body">{step.body}</p>
-        <div className="chat-shell__tour-mock" aria-hidden>
-          <div className="chat-shell__tour-mock-sidebar" />
-          <div className="chat-shell__tour-mock-stage">
-            <div className="chat-shell__tour-mock-bubble is-user" />
-            <div className="chat-shell__tour-mock-bubble is-ai" />
-            <div className="chat-shell__tour-mock-kit" data-tour-verbs={step.id === 'verbs' ? 'on' : 'off'}>
-              <span className={verbsOn ? 'is-on' : ''}>{es ? 'Guiones' : 'Scripts'}</span>
-              <span className={step.id === 'verbs' ? 'is-on' : ''}>Post</span>
-              <span className={step.id === 'verbs' ? 'is-on' : ''}>{es ? 'Foto' : 'Photo'}</span>
-              <span className={step.id === 'verbs' ? 'is-on' : ''}>Pack</span>
-            </div>
+        {step.id === 'verbs' ? (
+          <div className="chat-shell__tour-verbs" aria-hidden>
+            {verbLabels.map((label) => (
+              <span key={label}>{label}</span>
+            ))}
           </div>
-        </div>
+        ) : null}
+        {step.creditsNote ? (
+          <p className="chat-shell__tour-credits-note">{step.creditsNote}</p>
+        ) : null}
         <div className="chat-shell__feature-modal-actions">
+          {step.feedbackCta ? (
+            <button
+              type="button"
+              className="chat-shell__feature-modal-primary"
+              onClick={() => (onOpenFeedback ? onOpenFeedback() : onFinish())}
+            >
+              {es ? 'Dejar feedback' : 'Send feedback'}
+            </button>
+          ) : null}
           {!last ? (
-            <button type="button" className="chat-shell__feature-modal-primary" onClick={() => setIndex((v) => v + 1)}>
+            <button
+              type="button"
+              className={step.feedbackCta ? 'chat-shell__feature-modal-secondary' : 'chat-shell__feature-modal-primary'}
+              onClick={() => setIndex((v) => v + 1)}
+            >
               {es ? 'Siguiente' : 'Next'}
             </button>
           ) : (
-            <button type="button" className="chat-shell__feature-modal-primary" onClick={onFinish}>
+            <button
+              type="button"
+              className={step.feedbackCta ? 'chat-shell__feature-modal-secondary' : 'chat-shell__feature-modal-primary'}
+              onClick={onFinish}
+            >
               {es ? 'Listo, a crear' : 'Done, let’s create'}
             </button>
           )}
-          <button type="button" className="chat-shell__feature-modal-secondary" onClick={onSkipForever}>
+          {index > 0 ? (
+            <button
+              type="button"
+              className="chat-shell__tour-back"
+              onClick={() => setIndex((v) => Math.max(0, v - 1))}
+            >
+              {es ? 'Atrás' : 'Back'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="chat-shell__feature-modal-secondary"
+            onClick={onSkipForever}
+            title={es ? 'Saltar no borra marcas, kits ni chats' : 'Skip does not delete brands, kits, or chats'}
+          >
             {es ? 'Saltar y no volver a mostrar' : 'Skip and never show again'}
           </button>
         </div>
-        <p className="chat-shell__gift-feedback">
-          {es
-            ? 'Feedback apreciado — usá el botón de feedback cuando quieras.'
-            : 'Feedback appreciated — use the feedback button anytime.'}
-        </p>
       </div>
-    </div>
+    </ChatShellTourSpotlight>
   )
 }

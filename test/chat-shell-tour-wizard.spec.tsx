@@ -4,8 +4,56 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ChatShellTourWizard from '../src/features/chat-shell/ChatShellTourWizard'
 import ChatShellWelcomeGiftModal from '../src/features/chat-shell/ChatShellWelcomeGiftModal'
+import {
+  CHAT_SHELL_TOUR_STEP_COUNT,
+  CHAT_SHELL_TOUR_STEPS,
+  chatShellTourSteps,
+  clickChatShellFeedbackControl,
+} from '../src/features/chat-shell/chatShellTourSteps'
 
 afterEach(cleanup)
+
+describe('chat-shell tour steps', () => {
+  it('is a short 5-beat tour that spotlights real chrome', () => {
+    expect(CHAT_SHELL_TOUR_STEP_COUNT).toBe(5)
+    expect(CHAT_SHELL_TOUR_STEPS).toHaveLength(5)
+    expect(CHAT_SHELL_TOUR_STEPS.map((step) => step.id)).toEqual([
+      'single',
+      'folders',
+      'verbs',
+      'setup',
+      'feedback',
+    ])
+    expect(CHAT_SHELL_TOUR_STEPS[0].target).toBe('[data-tour="composer"]')
+    expect(CHAT_SHELL_TOUR_STEPS[1].target).toBe('[data-tour="folders"]')
+    expect(CHAT_SHELL_TOUR_STEPS[2].target).toBe('[data-tour="verbs"]')
+    expect(CHAT_SHELL_TOUR_STEPS[3].target).toBe('[data-tour="setup"]')
+    expect(CHAT_SHELL_TOUR_STEPS[4].target).toBe('[data-onboarding="feedback"]')
+    expect(CHAT_SHELL_TOUR_STEPS[4].feedbackCta).toBe(true)
+  })
+
+  it('keeps Spanish / English titles in parity', () => {
+    const es = chatShellTourSteps('es')
+    const en = chatShellTourSteps('en')
+    expect(es[0].title).toBe('Un chat para todo')
+    expect(en[0].title).toBe('One chat for everything')
+    expect(es[2].title).toContain('Guiones')
+    expect(en[2].title).toContain('Scripts')
+    expect(es[4].title).toBe('Contanos qué mejorar')
+    expect(en[4].title).toBe('Tell us what to improve')
+  })
+
+  it('clicks the existing feedback control', () => {
+    const button = document.createElement('button')
+    button.setAttribute('data-onboarding', 'feedback')
+    const onClick = vi.fn()
+    button.addEventListener('click', onClick)
+    document.body.appendChild(button)
+    expect(clickChatShellFeedbackControl()).toBe(true)
+    expect(onClick).toHaveBeenCalledTimes(1)
+    button.remove()
+  })
+})
 
 describe('ChatShellTourWizard', () => {
   it('mounts the first step and skip persists via onSkipForever', async () => {
@@ -16,44 +64,81 @@ describe('ChatShellTourWizard', () => {
       <ChatShellTourWizard language="es" onFinish={onFinish} onSkipForever={onSkipForever} />
     )
     expect(screen.getByRole('dialog', { name: 'Un chat para todo' })).toBeTruthy()
-    expect(screen.getByText('Paso 1 de 6')).toBeTruthy()
+    expect(screen.getByText('Paso 1 de 5')).toBeTruthy()
+    expect(document.querySelector('.chat-shell__tour-mock')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Saltar y no volver a mostrar' }))
     expect(onSkipForever).toHaveBeenCalledTimes(1)
     expect(onFinish).not.toHaveBeenCalled()
   })
 
-  it('advances to the last step then finish', async () => {
+  it('advances to feedback then finish', async () => {
     const user = userEvent.setup()
     const onFinish = vi.fn()
+    const onOpenFeedback = vi.fn()
     render(
-      <ChatShellTourWizard language="es" onFinish={onFinish} onSkipForever={vi.fn()} />
+      <ChatShellTourWizard
+        language="es"
+        onFinish={onFinish}
+        onSkipForever={vi.fn()}
+        onOpenFeedback={onOpenFeedback}
+      />
     )
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       await user.click(screen.getByRole('button', { name: 'Siguiente' }))
     }
-    expect(screen.getByRole('heading', { name: 'Créditos y feedback' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Contanos qué mejorar' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Dejar feedback' })).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Listo, a crear' }))
     expect(onFinish).toHaveBeenCalledTimes(1)
+    expect(onOpenFeedback).not.toHaveBeenCalled()
   })
 
-  it('shows Guiones / Post / Foto / Pack and skip-never-wipes copy', async () => {
+  it('opens feedback from a dedicated CTA without using skip', async () => {
     const user = userEvent.setup()
+    const onFinish = vi.fn()
+    const onOpenFeedback = vi.fn()
     render(
-      <ChatShellTourWizard language="es" onFinish={vi.fn()} onSkipForever={vi.fn()} />
+      <ChatShellTourWizard
+        language="es"
+        onFinish={onFinish}
+        onSkipForever={vi.fn()}
+        onOpenFeedback={onOpenFeedback}
+      />
     )
+    for (let i = 0; i < 4; i++) {
+      await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    }
+    await user.click(screen.getByRole('button', { name: 'Dejar feedback' }))
+    expect(onOpenFeedback).toHaveBeenCalledTimes(1)
+    expect(onFinish).not.toHaveBeenCalled()
+  })
+
+  it('guides through Guiones / Post / Foto / Pack and named Falta copy', async () => {
+    const user = userEvent.setup()
+    const onStepChange = vi.fn()
+    render(
+      <ChatShellTourWizard
+        language="es"
+        onFinish={vi.fn()}
+        onSkipForever={vi.fn()}
+        onStepChange={onStepChange}
+      />
+    )
+    expect(onStepChange).toHaveBeenCalledWith('single')
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(screen.getByRole('heading', { name: 'Marcas y carpetas' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
+    expect(screen.getByRole('heading', { name: 'Guiones, Post, Foto y Pack' })).toBeTruthy()
     expect(screen.getByText('Guiones')).toBeTruthy()
     expect(screen.getByText('Post')).toBeTruthy()
     expect(screen.getByText('Foto')).toBeTruthy()
     expect(screen.getByText('Pack')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Siguiente' }))
-    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
-    expect(screen.getByRole('heading', { name: 'Guiones, Post, Foto y Pack' })).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
-    expect(screen.getByRole('heading', { name: 'Setup de marca' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Lo que falta, con nombre' })).toBeTruthy()
     expect(screen.getByText(/Falta:/)).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: 'Siguiente' }))
-    expect(screen.getByRole('heading', { name: 'Nada se borra al saltar' })).toBeTruthy()
-    expect(screen.getByText(/no borra marcas, kits ni chats/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Saltar y no volver a mostrar' }).getAttribute('title')).toMatch(
+      /no borra marcas, kits ni chats/
+    )
   })
 
   it('renders English copy when language is en', () => {

@@ -202,7 +202,7 @@ export default function ChatSidebar({
   }
 
   return (
-    <aside className="chat-shell__sidebar" aria-label={t.navLabel}>
+    <aside className="chat-shell__sidebar" aria-label={t.navLabel} data-tour="folders">
       <div className="chat-shell__brand">
         <AdvanceWordmark size={22} />
       </div>

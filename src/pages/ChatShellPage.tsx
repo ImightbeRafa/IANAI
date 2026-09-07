@@ -11,6 +11,7 @@ import {
   markChatShellWelcomeSeenClient,
   type ChatShellOpenEnsureResult,
 } from '../features/chat-shell/chatShellOpenApi'
+import { clickChatShellFeedbackControl, type ChatShellTourStepId } from '../features/chat-shell/chatShellTourSteps'
 import { resolveChatShellOnboardingPhase, onboardingPhaseAfterOpenFailure } from '../features/chat-shell/chatShellOnboarding'
 import { invalidateUsageLimitsCache } from '../hooks/useUsageLimits'
 import {
@@ -47,6 +48,7 @@ export default function ChatShellPage() {
   const [theme, setTheme] = useState<ChatShellTheme>(() => getInitialChatShellTheme())
   const [gift, setGift] = useState<ChatShellOpenEnsureResult | null>(null)
   const [phase, setPhase] = useState<OnboardingPhase>('loading')
+  const [tourStep, setTourStep] = useState<ChatShellTourStepId | null>(null)
 
   useLayoutEffect(() => {
     const applied = canAccessChat ? theme : 'obsidian-dark'
@@ -94,6 +96,7 @@ export default function ChatShellPage() {
 
   const dismissGiftSkipTour = () => {
     setPhase('done')
+    setTourStep(null)
     void markChatShellWelcomeSeenClient().catch((err) => console.error(err))
     void markChatShellTourDoneClient().catch((err) => console.error(err))
   }
@@ -105,7 +108,15 @@ export default function ChatShellPage() {
 
   const finishTour = () => {
     setPhase('done')
+    setTourStep(null)
     void markChatShellTourDoneClient().catch((err) => console.error(err))
+  }
+
+  const openFeedbackFromTour = () => {
+    finishTour()
+    window.setTimeout(() => {
+      clickChatShellFeedbackControl()
+    }, 60)
   }
 
   const metaName =
@@ -160,6 +171,7 @@ export default function ChatShellPage() {
         initials={initials}
         userId={user.id}
         onOpenTour={openTour}
+        tourRevealNav={phase === 'tour' && tourStep === 'folders'}
       />
       {phase === 'gift' && gift ? (
         <ChatShellWelcomeGiftModal
@@ -175,6 +187,8 @@ export default function ChatShellPage() {
           language={lang}
           onFinish={finishTour}
           onSkipForever={finishTour}
+          onStepChange={setTourStep}
+          onOpenFeedback={openFeedbackFromTour}
         />
       ) : null}
     </>

@@ -182,62 +182,90 @@ html[data-theme="obsidian-light"] .chat-shell__feature-modal-secondary,
   margin-bottom: 10px;
 }
 
-.chat-shell__tour-mock {
-  display: grid;
-  grid-template-columns: 56px 1fr;
+.chat-shell__tour-spot {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+
+.chat-shell__tour-spot-block,
+.chat-shell__tour-spot-dim {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.chat-shell__tour-spot-block {
+  background: transparent;
+}
+
+.chat-shell__tour-spot-dim {
+  background: rgba(8, 12, 20, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.chat-shell__tour-spot-ring {
+  position: fixed;
+  pointer-events: none;
+  border-radius: 14px;
+  border: 2px solid rgba(56, 189, 248, 0.65);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.12), 0 0 28px rgba(56, 189, 248, 0.22);
+}
+
+.chat-shell__tour-spot-card-wrap {
+  position: fixed;
+  z-index: 82;
+  pointer-events: auto;
+}
+
+.chat-shell__tour-card {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(80vh, 560px);
+  padding: 18px 18px 16px;
+}
+
+.chat-shell__tour-verbs {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  height: 110px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.22);
-  margin: 8px 0 4px;
+  margin: 0 0 12px;
 }
 
-html[data-theme="obsidian-light"] .chat-shell__tour-mock,
-.chat-shell[data-theme="obsidian-light"] .chat-shell__tour-mock {
-  background: rgba(15, 23, 42, 0.04);
-  border-color: rgba(15, 23, 42, 0.08);
-}
-
-.chat-shell__tour-mock-sidebar {
-  background: rgba(56, 189, 248, 0.12);
-}
-
-.chat-shell__tour-mock-stage {
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.chat-shell__tour-mock-bubble {
-  height: 10px;
+.chat-shell__tour-verbs span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  width: 55%;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.12);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
-.chat-shell__tour-mock-bubble.is-ai {
-  width: 72%;
-  background: rgba(56, 189, 248, 0.28);
+.chat-shell__tour-credits-note {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  opacity: 0.78;
 }
 
-.chat-shell__tour-mock-kit {
-  margin-top: auto;
-  display: flex;
-  gap: 4px;
-}
-
-.chat-shell__tour-mock-kit span {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.chat-shell__tour-mock-kit span.is-on {
-  background: #38bdf8;
+.chat-shell__tour-back {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 4px 2px;
+  cursor: pointer;
+  opacity: 0.78;
+  text-align: left;
 }
 
 .chat-shell__home-preview-stage {

@@ -740,7 +740,7 @@ export default memo(function ChatThread({
         )}
       </div>
 
-      <div className="chat-shell__composer-wrap">
+      <div className="chat-shell__composer-wrap" data-tour="composer">
         <input
           ref={offerProductRefInputRef}
           type="file"

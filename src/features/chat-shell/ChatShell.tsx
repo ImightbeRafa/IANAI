@@ -54,6 +54,7 @@ interface ChatShellProps {
   initials: string
   userId: string
   onOpenTour?: () => void
+  tourRevealNav?: boolean
 }
 
 export default function ChatShell({
@@ -63,6 +64,7 @@ export default function ChatShell({
   initials,
   userId,
   onOpenTour,
+  tourRevealNav = false,
 }: ChatShellProps) {
   const navigate = useNavigate()
   const rollout = useChatShellRollout()
@@ -298,6 +300,16 @@ export default function ChatShell({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [brandCreateOpen, settingsOpen, lightbox, railPane])
+
+  useEffect(() => {
+    if (tourRevealNav) {
+      setNavOpen(true)
+      return
+    }
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 820px)').matches) {
+      setNavOpen(false)
+    }
+  }, [tourRevealNav])
 
   const selectRailTab = useCallback((tab: RailTab) => {
     setRailTab(tab)

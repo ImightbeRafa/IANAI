@@ -113,7 +113,7 @@ export default function ChatComposerCreateDock({
         </div>
       ) : null}
       <div className="chat-shell__idle-glass-row">
-        <div className="chat-shell__idle-kit">
+        <div className="chat-shell__idle-kit" data-tour="setup">
           <button
             type="button"
             className={`chat-shell__composer-create${reviewOpen ? ' is-open' : ''}`}
@@ -141,7 +141,7 @@ export default function ChatComposerCreateDock({
             <PanelLeftClose size={15} strokeWidth={2} aria-hidden />
           </button>
         </div>
-        <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle}>
+        <div className="chat-shell__idle-actions" role="toolbar" aria-label={t.kitTitle} data-tour="verbs">
           {actions.map((action) => {
             const blockedLabel = action.blockedReason
             const title = blockedLabel ? `${action.label} — ${blockedLabel}` : action.label

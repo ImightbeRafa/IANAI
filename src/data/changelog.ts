@@ -92,8 +92,15 @@ export const ROADMAP: RoadmapItem[] = [
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '0.1.12',
-    date: '2026-09-04',
+    date: '2026-09-07',
     items: [
+      {
+        category: 'improvement',
+        text: {
+          es: 'La primera vez en el chat, un recorrido corto te muestra carpetas, Guiones / Post / Foto / Pack, el kit y un botón claro para dejar feedback.',
+          en: 'The first time in chat, a short tour shows folders, Scripts / Post / Photo / Pack, the kit, and a clear button to send feedback.',
+        },
+      },
       {
         category: 'feature',
         text: {
