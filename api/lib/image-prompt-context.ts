@@ -3,6 +3,8 @@
  * and Grok's 3-reference budget with deterministic priority.
  */
 
+import { buildSceneRecipe, wantsStudioHeroScene } from './image-scene-recipe.js'
+
 export type ImageReferenceRole = 'product' | 'scene' | 'style'
 
 const SCENE_LABEL_RE = /\b(scene|escena|contexto)\b/i
@@ -93,6 +95,10 @@ export function buildLifestyleCreativeBrief(options: {
   hasSceneRef: boolean
   hasStyleRef: boolean
   scriptContext?: string | null
+  niche?: string | null
+  category?: string | null
+  offerName?: string | null
+  businessContext?: string | null
 }): string {
   const isEs = options.language === 'es'
   const wantsLifestyle =
@@ -102,7 +108,11 @@ export function buildLifestyleCreativeBrief(options: {
     || options.postStyle === 'anuncio-conversion'
     || !options.postStyle
 
-  if (!wantsLifestyle && options.productSubStyle === 'studio-hero' && !options.hasSceneRef) {
+  if (
+    !wantsLifestyle
+    && wantsStudioHeroScene({ productSubStyle: options.productSubStyle })
+    && !options.hasSceneRef
+  ) {
     return isEs
       ? `BRIEF CREATIVO (NO RENDERIZAR): foto de producto limpia y premium. Fidelidad total al producto real. Sin inventar claims.\n\n`
       : `CREATIVE BRIEF (DO NOT RENDER): clean premium product photo. Total fidelity to the real product. No invented claims.\n\n`
@@ -117,13 +127,29 @@ export function buildLifestyleCreativeBrief(options: {
       ? 'Copy / guion: usá solo el texto condensado del usuario; no inventes precio, garantía ni claims.'
       : 'Copy / script: use only the user condensed text; do not invent price, warranty, or claims.')
 
-  const sceneLine = options.hasSceneRef
+  const recipe = buildSceneRecipe({
+    language: options.language,
+    postStyle: options.postStyle,
+    productSubStyle: options.productSubStyle,
+    hasSceneRef: options.hasSceneRef,
+    niche: options.niche,
+    category: options.category,
+    offerName: options.offerName,
+    scriptContext: options.scriptContext,
+    businessContext: options.businessContext,
+  })
+
+  const sceneLine = recipe
     ? (isEs
-      ? 'Escena: inspirate en la referencia de escena (lugar, luz, gente, acción) sin robar el producto de esa foto.'
-      : 'Scene: take place, light, people, and action from the scene reference without stealing its product.')
-    : (isEs
-      ? 'Escena: inventá un entorno lifestyle creíble y premium (uso real del producto: manos, mesada, gym, oficina, baño, calle) con luz natural y props coherentes.'
-      : 'Scene: invent a credible premium lifestyle setting (real product use: hands, counter, gym, office, bathroom, street) with natural light and coherent props.')
+      ? 'Escena: seguí la SCENE RECIPE (lugar fotografiado completo). Luz del producto = luz del entorno.'
+      : 'Scene: follow the SCENE RECIPE (complete photographed place). Product light = environment light.')
+    : options.hasSceneRef
+      ? (isEs
+        ? 'Escena: inspirate en la referencia de escena (lugar, luz, gente, acción) sin robar el producto de esa foto.'
+        : 'Scene: take place, light, people, and action from the scene reference without stealing its product.')
+      : (isEs
+        ? 'Escena: entorno fotografiado creíble y premium con luz coherente y props del nicho.'
+        : 'Scene: credible premium photographed setting with coherent light and niche-fit props.')
 
   const styleLine = options.hasStyleRef
     ? (isEs
@@ -141,23 +167,25 @@ export function buildLifestyleCreativeBrief(options: {
       ? 'Producto: si no hay foto, representalo con honestidad a partir del guion; no inventes empaque falso detallado.'
       : 'Product: if no photo, represent it honestly from the script; do not invent detailed fake packaging.')
 
+  const recipeBlock = recipe ? `${recipe}\n` : ''
+
   return isEs
     ? `BRIEF CREATIVO LIFESTYLE + FIDELIDAD (NO RENDERIZAR):
-Objetivo: un post social rico, natural y premium — no un render de estudio vacío.
+Objetivo: un post social rico en un LUGAR FOTOGRAFIADO COMPLETO — no un vacío de estudio ni podio en void.
 Planificá sujeto, acción, setting, iluminación, props y encuadre social-native.
 ${productLine}
 ${sceneLine}
 ${styleLine}
-${scriptBlock}
-Prohibido: claims inventados, placeholders, logos inventados, amalgamar productos, ignorar el guion.
+${recipeBlock}${scriptBlock}
+Prohibido: claims inventados, placeholders, logos inventados, amalgamar productos, ignorar el guion, fondo limpio / vacío de estudio.
 \n`
     : `LIFESTYLE + FIDELITY CREATIVE BRIEF (DO NOT RENDER):
-Goal: a rich, natural, premium social post — not an empty studio render.
+Goal: a rich social post in a COMPLETE PHOTOGRAPHED PLACE — not a studio void or podium void.
 Plan subject, action, setting, lighting, props, and social-native framing.
 ${productLine}
 ${sceneLine}
 ${styleLine}
-${scriptBlock}
-Forbidden: invented claims, placeholders, invented logos, amalgamating products, ignoring the script.
+${recipeBlock}${scriptBlock}
+Forbidden: invented claims, placeholders, invented logos, amalgamating products, ignoring the script, seamless paper / studio void.
 \n`
 }

@@ -1,3 +1,5 @@
+import { supabase } from '../../lib/supabase'
+
 export function imageExtensionFromMime(mime: string, url = ''): string {
   const type = mime.toLowerCase()
   if (type.includes('jpeg') || type.includes('jpg')) return 'jpg'
@@ -31,30 +33,82 @@ function triggerDownload(href: string, filename: string) {
   link.href = href
   link.download = filename
   link.rel = 'noopener'
+  link.style.display = 'none'
   document.body.appendChild(link)
   link.click()
-  link.remove()
+  window.setTimeout(() => {
+    link.remove()
+  }, 250)
 }
 
-/** Download the stored file bytes. Do not re-encode. Falls back to opening the original URL. */
+function parseSupabaseStoragePublicUrl(url: string): { bucket: string; path: string } | null {
+  try {
+    const parsed = new URL(url)
+    const match = parsed.pathname.match(/\/storage\/v1\/object\/public\/([^/]+)\/(.+)/)
+    if (!match) return null
+    return {
+      bucket: match[1],
+      path: decodeURIComponent(match[2]),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function downloadBlobViaSupabaseClient(url: string): Promise<Blob | null> {
+  const ref = parseSupabaseStoragePublicUrl(url)
+  if (!ref) return null
+  const { data, error } = await supabase.storage.from(ref.bucket).download(ref.path)
+  if (error || !data) return null
+  return data
+}
+
+async function downloadBlobViaFetch(url: string): Promise<Blob | null> {
+  const response = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store' })
+  if (!response.ok) return null
+  return response.blob()
+}
+
+/** Download the stored file bytes. Do not re-encode. Falls back to Supabase client download. */
 export async function downloadShellImage(url: string, filename: string): Promise<void> {
   if (!url) return
+
   if (url.startsWith('data:')) {
     const mime = url.slice(5, url.indexOf(';')) || ''
-    triggerDownload(url, filename.includes('.') ? filename : filenameForShellImage({ label: filename, mime, url }))
+    triggerDownload(
+      url,
+      filename.includes('.') ? filename : filenameForShellImage({ label: filename, mime, url })
+    )
     return
   }
+
+  const named = filename.includes('.')
+    ? filename
+    : filenameForShellImage({ label: filename, url })
+
+  let blob: Blob | null = null
   try {
-    const response = await fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store' })
-    if (!response.ok) throw new Error(`Download failed (${response.status})`)
-    const blob = await response.blob()
-    const named = filename.includes('.')
-      ? filename
-      : filenameForShellImage({ label: filename, mime: blob.type, url })
-    const objectUrl = URL.createObjectURL(blob)
-    triggerDownload(objectUrl, named)
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000)
+    blob = await downloadBlobViaFetch(url)
   } catch {
-    window.open(url, '_blank', 'noopener,noreferrer')
+    blob = null
   }
+
+  if (!blob) {
+    try {
+      blob = await downloadBlobViaSupabaseClient(url)
+    } catch {
+      blob = null
+    }
+  }
+
+  if (!blob) {
+    throw new Error('Download failed')
+  }
+
+  const finalName = named.includes('.')
+    ? named
+    : filenameForShellImage({ label: named, mime: blob.type, url })
+  const objectUrl = URL.createObjectURL(blob)
+  triggerDownload(objectUrl, finalName)
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }

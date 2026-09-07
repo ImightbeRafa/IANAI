@@ -380,6 +380,24 @@ export default function ChatBrandProfileCard({
               {local.logo_url ? <img src={local.logo_url} alt="" /> : null}
             </button>
           </div>
+          <div className="chat-shell__brand-profile-quick-logo">
+            {local.logo_url ? <img src={local.logo_url} alt={t.logo} /> : <div aria-hidden><IconImage size={18} /></div>}
+            <label className="chat-shell__btn">
+              {t.uploadLogo}
+              <input
+                ref={logoRef}
+                hidden
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void onUpload(file, 'logo')
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
           {missing.length ? (
             <div className="chat-shell__brand-profile-missing">
               <span>{t.missing}</span>

@@ -13,11 +13,12 @@ function makeActions(): ComposerCreateAction[] {
     { id: 'scripts', label: 'Guiones', onClick: vi.fn() },
     { id: 'post', label: 'Post', onClick: vi.fn() },
     { id: 'product', label: 'Foto', onClick: vi.fn() },
+    { id: 'bulk', label: 'Pack', onClick: vi.fn() },
   ]
 }
 
 describe('ChatComposerCreateDock', () => {
-  it('keeps the kit and hide control on the composer left, without a transcript card', async () => {
+  it('keeps the kit and hide control on the idle glass row, without a transcript card', async () => {
     const user = userEvent.setup()
     const onHide = vi.fn()
     const onShow = vi.fn()
@@ -38,6 +39,9 @@ describe('ChatComposerCreateDock', () => {
     expect(screen.getByRole('button', { name: 'Guiones' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Post' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Foto' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Pack' })).toBeTruthy()
+    expect(document.querySelector('.chat-shell__idle-glass')).toBeTruthy()
+    expect(document.querySelector('.chat-shell__idle-actions')).toBeTruthy()
     expect(screen.queryByText('Detalle del kit')).toBeNull()
     expect(screen.queryByText('× Ocultar')).toBeNull()
 
@@ -47,7 +51,7 @@ describe('ChatComposerCreateDock', () => {
     expect(actions[0].onClick).not.toHaveBeenCalled()
   })
 
-  it('opens review from the left rail without covering the create actions', async () => {
+  it('opens review from the glass row without covering the create actions', async () => {
     const user = userEvent.setup()
     render(
       <ChatComposerCreateDock
@@ -66,7 +70,7 @@ describe('ChatComposerCreateDock', () => {
     expect(screen.getByRole('button', { name: 'Guiones' })).toBeTruthy()
   })
 
-  it('restores the kit from a single composer-left icon when hidden', async () => {
+  it('restores the kit from a single glass-row icon when hidden', async () => {
     const user = userEvent.setup()
     const onShow = vi.fn()
     render(

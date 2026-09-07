@@ -13,6 +13,7 @@ import {
   requiresProductReferences,
   resolveImagePreferences,
   resolveScriptPostPreferences,
+  shellImageFlowCopy,
   writeImagePreferences,
 } from '../src/features/chat-shell/chatShellImageIntent'
 import {
@@ -254,7 +255,8 @@ describe('buildShellImageGenerateBody', () => {
   })
 
   it('requires refs for product mode and maps venta-directa', () => {
-    expect(requiresProductReferences({ kind: 'product', productSubStyle: 'studio-hero' })).toBe(true)
+    expect(requiresProductReferences({ kind: 'product', productSubStyle: 'studio-hero' })).toBe(false)
+    expect(requiresProductReferences({ kind: 'product', productSubStyle: 'lifestyle' })).toBe(true)
     const body = buildShellImageGenerateBody({
       preferences: {
         style: { kind: 'product', productSubStyle: 'studio-hero' },
@@ -270,6 +272,7 @@ describe('buildShellImageGenerateBody', () => {
     })
     expect(body.postStyle).toBe('product')
     expect(body.productSubStyle).toBe('studio-hero')
+    expect(body.prompt).toBe('')
     expect(body.height).toBe(1920)
 
     const venta = buildShellImageGenerateBody({
@@ -509,5 +512,14 @@ describe('brand visual + condensed post copy', () => {
     expect(shouldSkipPostCondense({ editSource: 'post_optimize', scriptText: raw })).toBe(true)
     expect(shouldSkipPostCondense({ scriptText: 'Gancho corto\nPrueba\nCTA' })).toBe(true)
     expect(shouldSkipPostCondense({ scriptText: raw })).toBe(false)
+  })
+
+  it('uses product-specific userText for rail product foto flows', () => {
+    const copy = shellImageFlowCopy(
+      { style: { kind: 'product', productSubStyle: 'studio-hero' }, aspectRatio: '1:1' },
+      'es'
+    )
+    expect(copy.userText).toMatch(/Foto de producto · Estudio Hero · 1:1/)
+    expect(copy.prompt).toBe('')
   })
 })

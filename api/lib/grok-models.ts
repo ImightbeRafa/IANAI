@@ -6,20 +6,22 @@ export const GROK_RESPONSES_URL = 'https://api.x.ai/v1/responses'
 export const GROK_IMAGE_PROVIDER_MODEL = 'grok-imagine-image-2.0'
 export const GROK_IMAGE_GENERATIONS_URL = 'https://api.x.ai/v1/images/generations'
 export const GROK_IMAGE_EDITS_URL = 'https://api.x.ai/v1/images/edits'
-/** Documented output price per generated image (xAI list). */
+/** Documented output price per generated image (xAI Imagine 2.0 list). */
 export const GROK_IMAGE_COST_USD = 0.04
+/** Documented input/reference image price (xAI Imagine 2.0 list). */
+export const GROK_IMAGE_INPUT_COST_USD = 0.01
 /** Premium social default: max resolution + highest API quality (xAI: low|medium only). */
 export const GROK_IMAGE_DEFAULT_RESOLUTION = '2k' as const
 export const GROK_IMAGE_DEFAULT_QUALITY = 'medium' as const
 
-/** xAI bills each output image; edits also bill each input image at the same rate. */
+/** Official xAI Imagine 2.0 estimate: $0.04/output + $0.01/input (reference) image. */
 export function estimateGrokImageCostUsd(options: {
   outputImages?: number
   referenceCount?: number
 }): number {
   const outputs = Math.max(1, options.outputImages ?? 1)
   const refs = Math.max(0, options.referenceCount ?? 0)
-  return GROK_IMAGE_COST_USD * (outputs + refs)
+  return GROK_IMAGE_COST_USD * outputs + GROK_IMAGE_INPUT_COST_USD * refs
 }
 
 /** Flagship — scripts, assistant, edits. */

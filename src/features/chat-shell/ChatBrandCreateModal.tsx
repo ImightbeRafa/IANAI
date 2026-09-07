@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { validateBrandCreateName } from './chatShellBrandCreate'
+import { parseBrandCreateInput } from './chatShellBrandCreate'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 
 interface ChatBrandCreateModalProps {
@@ -8,7 +8,7 @@ interface ChatBrandCreateModalProps {
   error: string | null
   language?: ChatShellLanguage
   onClose: () => void
-  onSubmit: (name: string) => void | Promise<void>
+  onSubmit: (payload: { name: string; websiteUrl: string | null }) => void | Promise<void>
 }
 
 export default function ChatBrandCreateModal({
@@ -23,11 +23,13 @@ export default function ChatBrandCreateModal({
   const titleId = useId()
   const inputRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
+  const [websiteUrl, setWebsiteUrl] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
     setName('')
+    setWebsiteUrl('')
     setLocalError(null)
     const timer = window.setTimeout(() => inputRef.current?.focus(), 0)
     return () => window.clearTimeout(timer)
@@ -49,13 +51,13 @@ export default function ChatBrandCreateModal({
   if (!open) return null
 
   const submit = () => {
-    const validation = validateBrandCreateName(name)
-    if (validation) {
-      setLocalError(validation)
+    const parsed = parseBrandCreateInput(name, websiteUrl, language)
+    if (!parsed.ok) {
+      setLocalError(parsed.error)
       return
     }
     setLocalError(null)
-    void onSubmit(name.trim())
+    void onSubmit({ name: parsed.name, websiteUrl: parsed.websiteUrl })
   }
 
   return (
@@ -103,6 +105,30 @@ export default function ChatBrandCreateModal({
             }
           }}
         />
+        <label className="chat-shell__modal-label" htmlFor="chat-shell-brand-url">
+          {t.brandModalUrl}
+        </label>
+        <input
+          id="chat-shell-brand-url"
+          className="chat-shell__modal-input"
+          type="url"
+          inputMode="url"
+          value={websiteUrl}
+          disabled={busy}
+          autoComplete="url"
+          placeholder={t.brandModalUrlPlaceholder}
+          onChange={(e) => {
+            setWebsiteUrl(e.target.value)
+            if (localError) setLocalError(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              submit()
+            }
+          }}
+        />
+        <p className="chat-shell__modal-hint">{t.brandModalUrlHint}</p>
         {(localError || error) && (
           <div className="chat-shell__modal-error" role="alert">
             {localError || error}

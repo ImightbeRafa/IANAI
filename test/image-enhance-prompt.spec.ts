@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   appendEnhanceUserDirection,
   buildEnhanceColorOverride,
+  buildEnhanceSystemPrompt,
   normalizeEnhanceColors,
+  resolveEnhanceTier,
   resolveEnhanceUserDirection,
 } from '../api/lib/image-enhance'
 
@@ -41,5 +43,16 @@ describe('enhance prompt helpers', () => {
     expect(prompt).toContain('DIRECCIÓN DEL USUARIO (subordinada a las reglas #0–#4)')
     expect(prompt).toContain('Match the official logo to the product photo.')
     expect(appendEnhanceUserDirection('BASE', '   ')).toBe('BASE')
+  })
+
+  it('polish locks composition and does not claim a new set', () => {
+    const polish = buildEnhanceSystemPrompt({
+      language: 'es',
+      tier: resolveEnhanceTier('polish'),
+      hasProductRef: false,
+    })
+    expect(polish).toMatch(/POLISH/)
+    expect(polish).toMatch(/set original|set nuevo/i)
+    expect(polish).not.toMatch(/SCENE RECIPE/)
   })
 })

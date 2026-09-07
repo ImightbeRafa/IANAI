@@ -16,6 +16,15 @@ const INGEST_FEATURES = new Set([
   'ocr',
 ])
 
+/** Official Grok 4.6 / 4.5 list price per 1M tokens (USD). */
+const GROK_TEXT_INPUT_PER_1M = 2.0
+const GROK_TEXT_OUTPUT_PER_1M = 6.0
+/** Official xAI Imagine 2.0 list prices (USD). */
+const GROK_IMAGE_OUT_USD = 0.04
+const GROK_IMAGE_IN_USD = 0.01
+/** Known Banana Pro ballpark when stored cost is missing. */
+const BANANA_PRO_FALLBACK_USD = 0.12
+
 export type AdminUsageLogRow = {
   id: string
   user_id: string | null
@@ -42,7 +51,12 @@ export type UsageSummaryRow = {
   total_input_tokens: number
   total_output_tokens: number
   total_tokens: number
+  /** Stored logger estimate (may under/over-count vs official list). */
   total_cost_usd: number
+  /** Official-list estimate recomputed for admin display. */
+  estimated_api_cost_usd: number
+  /** Credits charged to users (joined via generation_id). */
+  total_credits: number
 }
 
 export type DailyUsageRow = {
@@ -80,6 +94,22 @@ export type RecentLogRow = {
   source?: string | null
 }
 
+export type CreditsEconomics = {
+  creditsConsumed: number
+  estimatedApiCostUsd: number
+  impliedUsdPerCredit: number | null
+  creditsInCirculation: number
+  creditCogsUsd: number
+  estimateNote: string
+}
+
+export type CreditLedgerRow = {
+  generation_id: string | null
+  credits: number | string | null
+  action?: string | null
+  created_at?: string
+}
+
 function num(value: number | string | null | undefined): number {
   const n = Number(value || 0)
   return Number.isFinite(n) ? n : 0
@@ -110,6 +140,94 @@ export function isMcpToolAuditRow(row: Pick<AdminUsageLogRow, 'feature'>): boole
   return row.feature === 'mcp_tool'
 }
 
+function metaNum(meta: Record<string, unknown> | null | undefined, ...keys: string[]): number | null {
+  if (!meta) return null
+  for (const key of keys) {
+    const raw = meta[key]
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+    if (typeof raw === 'string' && raw.trim() && Number.isFinite(Number(raw))) return Number(raw)
+  }
+  return null
+}
+
+/**
+ * Recompute estimated API $ from official list prices where known.
+ * Labels as estimates in the UI — not an xAI invoice.
+ */
+export function estimateOfficialApiCostUsd(row: AdminUsageLogRow): number {
+  const model = (row.model || '').trim().toLowerCase()
+  const meta = row.metadata || {}
+  const stored = num(row.estimated_cost_usd)
+
+  if (model === 'grok-imagine' || model.startsWith('grok-imagine')) {
+    const refs = Math.max(0, metaNum(meta, 'referenceCount', 'reference_count') ?? 0)
+    const outputs = Math.max(1, metaNum(meta, 'outputImages', 'output_images', 'n') ?? 1)
+    return roundCost(GROK_IMAGE_OUT_USD * outputs + GROK_IMAGE_IN_USD * refs)
+  }
+
+  if (
+    model === 'grok-4.6'
+    || model === 'grok-4.5'
+    || model === 'grok'
+    || model === 'grok-4.3'
+  ) {
+    const input = num(row.input_tokens)
+    const output = num(row.output_tokens)
+    if (input === 0 && output === 0) return roundCost(stored)
+    return roundCost(
+      (input / 1_000_000) * GROK_TEXT_INPUT_PER_1M
+      + (output / 1_000_000) * GROK_TEXT_OUTPUT_PER_1M
+    )
+  }
+
+  if (model === 'nano-banana-pro' || model.includes('banana-pro') || model === 'nano-banana') {
+    if (stored > 0) return roundCost(stored)
+    return BANANA_PRO_FALLBACK_USD
+  }
+
+  return roundCost(stored)
+}
+
+export function buildCreditsByGenerationId(ledger: CreditLedgerRow[]): Map<string, number> {
+  const map = new Map<string, number>()
+  for (const row of ledger) {
+    const gid = typeof row.generation_id === 'string' ? row.generation_id.trim() : ''
+    if (!gid) continue
+    map.set(gid, (map.get(gid) || 0) + num(row.credits))
+  }
+  return map
+}
+
+export function sumLedgerCredits(ledger: CreditLedgerRow[]): number {
+  return ledger.reduce((sum, row) => sum + num(row.credits), 0)
+}
+
+export function buildCreditsEconomics(options: {
+  rows: AdminUsageLogRow[]
+  ledger: CreditLedgerRow[]
+  creditsInCirculation: number
+  creditCogsUsd: number
+}): CreditsEconomics {
+  const estimatedApiCostUsd = roundCost(
+    options.rows
+      .filter((row) => !isMcpToolAuditRow(row))
+      .reduce((sum, row) => sum + estimateOfficialApiCostUsd(row), 0)
+  )
+  const creditsConsumed = sumLedgerCredits(options.ledger)
+  const impliedUsdPerCredit =
+    creditsConsumed > 0 ? roundCost(estimatedApiCostUsd / creditsConsumed) : null
+
+  return {
+    creditsConsumed,
+    estimatedApiCostUsd,
+    impliedUsdPerCredit,
+    creditsInCirculation: Math.max(0, Math.floor(options.creditsInCirculation)),
+    creditCogsUsd: options.creditCogsUsd,
+    estimateNote:
+      'Estimated API $ from official list prices (xAI Imagine 2.0 $0.04/out + $0.01/input; Grok text $2/$6 per 1M; Banana from stored/~$0.12). Not an xAI invoice.',
+  }
+}
+
 function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
   return {
     id: row.id,
@@ -126,8 +244,22 @@ function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
   }
 }
 
-export function aggregateUsageSummary(rows: AdminUsageLogRow[]): UsageSummaryRow[] {
+export function filterUsageRowsBySource(
+  rows: AdminUsageLogRow[],
+  source?: string
+): AdminUsageLogRow[] {
+  const normalized = (source || '').trim().toLowerCase()
+  if (!normalized || normalized === 'all') return rows
+  return rows.filter((row) => resolveUsageLogSource(row) === normalized)
+}
+
+export function aggregateUsageSummary(
+  rows: AdminUsageLogRow[],
+  creditsByGenerationId?: Map<string, number>
+): UsageSummaryRow[] {
   const grouped = new Map<string, UsageSummaryRow>()
+  // Clone so one generation_id is attributed once without mutating the caller's map.
+  const creditsMap = new Map(creditsByGenerationId || [])
 
   for (const row of rows) {
     if (isMcpToolAuditRow(row)) continue
@@ -145,6 +277,8 @@ export function aggregateUsageSummary(rows: AdminUsageLogRow[]): UsageSummaryRow
       total_output_tokens: 0,
       total_tokens: 0,
       total_cost_usd: 0,
+      estimated_api_cost_usd: 0,
+      total_credits: 0,
     }
 
     bucket.total_calls += 1
@@ -154,12 +288,23 @@ export function aggregateUsageSummary(rows: AdminUsageLogRow[]): UsageSummaryRow
     bucket.total_output_tokens += num(row.output_tokens)
     bucket.total_tokens += num(row.total_tokens)
     bucket.total_cost_usd += num(row.estimated_cost_usd)
+    bucket.estimated_api_cost_usd += estimateOfficialApiCostUsd(row)
+    const gid = typeof row.generation_id === 'string' ? row.generation_id.trim() : ''
+    if (gid && creditsMap.has(gid)) {
+      bucket.total_credits += creditsMap.get(gid) || 0
+      // Consume once so multi-log same generation_id does not double-count.
+      creditsMap.delete(gid)
+    }
     grouped.set(key, bucket)
   }
 
   return [...grouped.values()]
-    .map(row => ({ ...row, total_cost_usd: roundCost(row.total_cost_usd) }))
-    .sort((a, b) => b.total_cost_usd - a.total_cost_usd || b.total_calls - a.total_calls)
+    .map(row => ({
+      ...row,
+      total_cost_usd: roundCost(row.total_cost_usd),
+      estimated_api_cost_usd: roundCost(row.estimated_api_cost_usd),
+    }))
+    .sort((a, b) => b.estimated_api_cost_usd - a.estimated_api_cost_usd || b.total_calls - a.total_calls)
 }
 
 export function aggregateDailyUsage(rows: AdminUsageLogRow[]): DailyUsageRow[] {
@@ -173,7 +318,7 @@ export function aggregateDailyUsage(rows: AdminUsageLogRow[]): DailyUsageRow[] {
     const existing = grouped.get(key)
     const bucket = existing || { day, model, total_calls: 0, total_cost_usd: 0 }
     bucket.total_calls += 1
-    bucket.total_cost_usd += num(row.estimated_cost_usd)
+    bucket.total_cost_usd += estimateOfficialApiCostUsd(row)
     grouped.set(key, bucket)
   }
 
@@ -205,7 +350,7 @@ export function aggregateUserUsageStats(rows: AdminUsageLogRow[]): UserUsageStat
     }
 
     bucket.total_calls += 1
-    bucket.total_cost_usd += num(row.estimated_cost_usd)
+    bucket.total_cost_usd += estimateOfficialApiCostUsd(row)
     if (SCRIPT_FEATURES.has(row.feature)) bucket.script_calls += 1
     else if (row.feature === 'description') bucket.description_calls += 1
     else if (IMAGE_FEATURES.has(row.feature)) bucket.image_calls += 1

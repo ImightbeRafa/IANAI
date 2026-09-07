@@ -9,6 +9,7 @@ import {
   GROK_IMAGE_PROVIDER_MODEL,
   estimateGrokImageCostUsd,
 } from './grok-models.js'
+import { prepareGrokImagePrompt } from './grok-image-prompt.js'
 
 export type GrokImageEditResult = {
   imageDataUrl: string
@@ -98,10 +99,11 @@ export async function runGrokImageEdit(options: {
     supportUrls: options.supportImageUrls,
   })
   const aspectRatio = resolveGrokAspectRatio(options.aspectRatio)
+  const prepared = prepareGrokImagePrompt(options.prompt)
 
   const grokRequest: Record<string, unknown> = {
     model: providerModel,
-    prompt: options.prompt,
+    prompt: prepared.prompt,
     n: 1,
     response_format: 'b64_json',
     aspect_ratio: aspectRatio,

@@ -50,7 +50,7 @@ describe('ChatShellScriptCard post preview', () => {
     ))
     await waitFor(() => expect(onGenerateImage).toHaveBeenCalledWith(
       'Headline aprobado\nCTA por mensaje',
-      { density: 'hard', alreadyOptimized: true, referenceImageIds: [] }
+      { density: 'hard', aspectRatio: '1:1', alreadyOptimized: true, referenceImageIds: [] }
     ))
   })
 
@@ -115,7 +115,7 @@ describe('ChatShellScriptCard post preview', () => {
     ))
     await waitFor(() => expect(onGenerateImage).toHaveBeenCalledWith(
       'Poco texto condensado',
-      { density: 'hard', alreadyOptimized: true, referenceImageIds: [] }
+      { density: 'hard', aspectRatio: '1:1', alreadyOptimized: true, referenceImageIds: [] }
     ))
   })
 

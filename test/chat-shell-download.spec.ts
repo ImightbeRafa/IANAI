@@ -6,6 +6,16 @@ import {
   imageExtensionFromMime,
 } from '../src/features/chat-shell/chatShellDownload'
 
+vi.mock('../src/lib/supabase', () => ({
+  supabase: {
+    storage: {
+      from: () => ({
+        download: vi.fn(async () => ({ data: null, error: new Error('not mocked') })),
+      }),
+    },
+  },
+}))
+
 describe('shell image download', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -33,8 +43,8 @@ describe('shell image download', () => {
     })).toBe('ForgeCR.jpg')
   })
 
-  it('downloads original bytes via blob and falls back to opening the url', async () => {
-    const blob = new Blob(['raw-bytes'], { type: 'image/webp' })
+  it('downloads original bytes via blob fetch', async () => {
+    const blob = new Blob(['raw-bytes'], { type: 'image/jpeg' })
     const fetchMock = vi.fn(async () => new Response(blob, { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     const createObjectURL = vi.fn(() => 'blob:workspace-image')
@@ -48,18 +58,18 @@ describe('shell image download', () => {
       return el
     })
 
-    await downloadShellImage('https://cdn.example/gen.webp', 'ForgeCR.webp')
-    expect(fetchMock).toHaveBeenCalledWith('https://cdn.example/gen.webp', {
+    await downloadShellImage('https://cdn.example/gen.jpg', 'ForgeCR.jpg')
+    expect(fetchMock).toHaveBeenCalledWith('https://cdn.example/gen.jpg', {
       mode: 'cors',
       credentials: 'omit',
       cache: 'no-store',
     })
     expect(click).toHaveBeenCalled()
+  })
 
-    fetchMock.mockRejectedValueOnce(new Error('CORS'))
-    const open = vi.fn()
-    vi.stubGlobal('open', open)
-    await downloadShellImage('https://cdn.example/gen.webp', 'ForgeCR.webp')
-    expect(open).toHaveBeenCalledWith('https://cdn.example/gen.webp', '_blank', 'noopener,noreferrer')
+  it('throws when fetch and supabase download both fail', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('CORS') }))
+    await expect(downloadShellImage('https://cdn.example/gen.webp', 'ForgeCR.webp'))
+      .rejects.toThrow('Download failed')
   })
 })

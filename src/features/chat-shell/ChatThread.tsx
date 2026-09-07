@@ -21,14 +21,15 @@ import type {
 } from '../../types'
 import { isScriptContent, parseScripts, type ParsedScript } from '../../utils/scriptParser'
 import {
-  shouldReviewChosenScript,
   type FailedOfferBatch,
   type ImageClarifyState,
   type ScriptClarifyState,
   type ScriptCtaChannel,
 } from './useChatSessionThread'
-import ChatShellReferencePicker from './ChatShellReferencePicker'
-import { catalogOfferReferences, hasSelectedProductReference } from './chatShellReferenceSelection'
+import ChatShellClarifySheet from './ChatShellClarifySheet'
+import { creditQuoteCopy, type CreditQuote } from './chatShellCreditQuote'
+import { type IngredientKind } from './chatShellIngredientsCheck'
+import { catalogOfferReferences } from './chatShellReferenceSelection'
 import {
   buildImageWorkspaces,
   isImageWorkspaceAnchor,
@@ -38,11 +39,6 @@ import {
 } from './chatShellImages'
 import { shouldKeepMountedTranscript } from './chatShellThreadCache'
 import {
-  anuncioStyleChoices,
-  IMAGE_ASPECT_CHOICES,
-  IMAGE_DENSITY_CHOICES,
-  organicStyleChoices,
-  productStyleChoices,
   type ImageClarifyMode,
   type ShellImageAspect,
   type ShellImageDensity,
@@ -81,11 +77,13 @@ interface ChatThreadProps {
     aspectRatio?: ShellImageAspect
     density?: ShellImageDensity
     skipStyleRef?: boolean
+    skipIngredient?: IngredientKind
     useReferences?: boolean
     switchToAnuncio?: boolean
     toggleReferenceId?: string
   }) => void
   onCancelImageClarify?: () => void
+  onBackImageClarify?: () => void
   onSelectImageOffer?: (productId: string) => void
   scriptClarify?: ScriptClarifyState | null
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
@@ -93,10 +91,15 @@ interface ChatThreadProps {
     type?: ScriptFramework | 'mixed'
     count?: number
     ctaChannel?: ScriptCtaChannel
+    confirm?: boolean
   }) => void
   onCancelScriptClarify?: () => void
+  onBackScriptClarify?: () => void
+  creditQuote?: CreditQuote | null
+  onConfirmCreditQuote?: () => void
+  onCancelCreditQuote?: () => void
   onOpenImagesRail?: () => void
-  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style', productId?: string) => void | Promise<void>
+  onUploadOfferReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style' | 'logo', productId?: string) => void | Promise<void>
   onRemoveOfferReference?: (imageId: string) => void | Promise<void>
   offerProductNames?: Record<string, string>
   onPreparePostFromScript?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
@@ -108,6 +111,7 @@ interface ChatThreadProps {
       density?: 'hard' | 'medium'
       referenceImageIds?: string[]
       alreadyOptimized?: boolean
+      aspectRatio?: ShellImageAspect
     }
   ) => void | Promise<void>
   onSaveScript: (
@@ -148,6 +152,9 @@ interface ChatThreadProps {
   setupPlaceholder?: string
   onUploadBrandAsset?: (file: File, kind: 'logo' | 'reference') => void | Promise<void>
   onUploadSetupDocument?: (file: File) => void | Promise<void>
+  /** First-run empty CTA — opens Brand Kit / brand create (not a multi-step tour). */
+  onStartBrandKit?: () => void
+  kitReady?: boolean
 }
 
 function artifactToParsedScript(artifact: MessageArtifact): ParsedScript | null {
@@ -222,11 +229,15 @@ export default memo(function ChatThread({
   imageClarify = null,
   onAnswerImageClarify,
   onCancelImageClarify,
-  onSelectImageOffer,
+  onBackImageClarify,
   scriptClarify = null,
   onLatestVersionChange,
   onAnswerScriptClarify,
   onCancelScriptClarify,
+  onBackScriptClarify,
+  creditQuote = null,
+  onConfirmCreditQuote,
+  onCancelCreditQuote,
   onOpenImagesRail,
   onUploadOfferReference,
   onRemoveOfferReference,
@@ -245,6 +256,8 @@ export default memo(function ChatThread({
   setupPlaceholder,
   onUploadBrandAsset,
   onUploadSetupDocument,
+  onStartBrandKit,
+  kitReady = false,
 }: ChatThreadProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [attachOpen, setAttachOpen] = useState(false)
@@ -348,6 +361,17 @@ export default memo(function ChatThread({
   const canSend = Boolean(session) && !sending && !controlsLocked && Boolean(composer.trim())
   const keepMountedTranscript = shouldKeepMountedTranscript(loadingMessages, visibleMessages.length)
   const showInitialLoader = Boolean(session) && loadingMessages && !keepMountedTranscript && setupTurns.length === 0 && !inlineSetupCard
+  const hasUserOrArtifactMessages = useMemo(() => {
+    return visibleMessages.some((message) => {
+      if (message.role === 'user') return true
+      if (message.artifacts && message.artifacts.length > 0) return true
+      const content = (message.content || '').trim()
+      if (/^¡Hola! Bienvenido a Advance AI|^Hi! Welcome to Advance AI/i.test(content)) return false
+      return content.length > 0
+    })
+  }, [visibleMessages])
+  // First-run: kit incomplete + no real conversation → CTA (not Hola welcome).
+  const showFirstRunCta = Boolean(session) && !kitReady && !hasUserOrArtifactMessages && !showInitialLoader
   const progressKind: ChatShellProgressKind | null = imageBusy
     ? 'image'
     : setupBusy
@@ -359,19 +383,6 @@ export default memo(function ChatThread({
     ? `${walkProgress.current}/${walkProgress.total}${walkProgress.offerName ? ` · ${walkProgress.offerName}` : ''}`
     : undefined
   const threadNotice = localNotice || notice
-
-  const openScriptPostPreview = (scriptKey: string) => {
-    if (!scriptKey) {
-      setLocalNotice(language === 'es'
-        ? 'Primero crea un guion. Después elegís cuál usar y revisás el texto antes de generar el post.'
-        : 'Create a script first. Then choose which one to use and review it before generating the post.')
-      return
-    }
-    setLocalNotice(null)
-    onCancelScriptClarify?.()
-    setPostPreviewScriptKey(scriptKey)
-    setPostPreviewNonce((n) => n + 1)
-  }
 
   useEffect(() => {
     if (loadingMessages) return
@@ -412,7 +423,7 @@ export default memo(function ChatThread({
 
   return (
     <div className="chat-shell__stage">
-      {setupCard}
+      {setupCard && !imageClarify && !scriptClarify && !creditQuote ? setupCard : null}
       <div
         className={`chat-shell__thread${loadingMessages ? ' is-busy' : ''}`}
         role="log"
@@ -421,12 +432,24 @@ export default memo(function ChatThread({
         ref={threadRef}
       >
         {!session ? (
-          <div className="chat-shell__msg chat-shell__msg--ai">
+          <div className="chat-shell__msg chat-shell__msg--ai" data-first-run="true">
             <span className="chat-shell__who">Advance AI</span>
             <div className="chat-shell__status-box">
-              {brand
-                ? t.emptyNoSession.replace('{brand}', brand.name)
-                : t.emptyNoBrand}
+              <p className="chat-shell__empty-line">
+                {brand
+                  ? t.emptyNoSession.replace('{brand}', brand.name)
+                  : t.emptyFirstRunLine}
+              </p>
+              {onStartBrandKit ? (
+                <button
+                  type="button"
+                  className="chat-shell__empty-cta"
+                  data-cta="empezar-marca"
+                  onClick={onStartBrandKit}
+                >
+                  Empezá por tu marca
+                </button>
+              ) : null}
             </div>
           </div>
         ) : showInitialLoader ? (
@@ -436,7 +459,25 @@ export default memo(function ChatThread({
           </div>
         ) : (
           <>
-            {visibleMessages.length === 0 && setupTurns.length === 0 && !setupCard ? (
+            {showFirstRunCta ? (
+              <div className="chat-shell__msg chat-shell__msg--ai" data-first-run="true">
+                <span className="chat-shell__who">Advance AI</span>
+                <div className="chat-shell__status-box">
+                  <p className="chat-shell__empty-line">{t.emptyFirstRunLine}</p>
+                  {onStartBrandKit ? (
+                    <button
+                      type="button"
+                      className="chat-shell__empty-cta"
+                      data-cta="empezar-marca"
+                      onClick={onStartBrandKit}
+                    >
+                      Empezá por tu marca
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {!showFirstRunCta && visibleMessages.length === 0 && setupTurns.length === 0 ? (
               <div className="chat-shell__msg chat-shell__msg--ai">
                 <span className="chat-shell__who">Advance AI</span>
                 <div className="chat-shell__status-box">
@@ -451,11 +492,11 @@ export default memo(function ChatThread({
                 </div>
               </div>
             ) : null}
-            {visibleMessages.map((message) => {
+            {!showFirstRunCta ? visibleMessages.map((message) => {
             if (message.role === 'user') {
               return (
                 <div key={message.id} className="chat-shell__msg chat-shell__msg--user">
-                  <span className="chat-shell__who">You</span>
+                  <span className="chat-shell__who">{t.you}</span>
                   <div className="chat-shell__bubble">{message.content}</div>
                 </div>
               )
@@ -467,7 +508,13 @@ export default memo(function ChatThread({
                 (a.artifact_type === 'script' && a.script?.content)
                 || (a.artifact_type === 'image'
                   && a.product_image?.image_url
-                  && isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces))
+                  && (
+                    isImageWorkspaceAnchor(a.product_image.id, imageWorkspaces)
+                    || (
+                      (a.action_type === 'edit' || a.action_type === 'enhance')
+                      && a.message_id === message.id
+                    )
+                  ))
             )
 
             if (artifacts.length > 0) {
@@ -529,6 +576,7 @@ export default memo(function ChatThread({
                           offerImageUrl={offerImage?.image_url}
                           referenceImages={libraryReferenceImages}
                           imageBusy={imageBusy}
+                          kitGenerateBlocked={!kitReady}
                           onSave={(content, title, opts) =>
                             onSaveScript(content, title, {
                               ...opts,
@@ -605,6 +653,7 @@ export default memo(function ChatThread({
                         savingScript={savingScript}
                         referenceImages={libraryReferenceImages}
                         readOnly={!offerProductId}
+                        kitGenerateBlocked={!kitReady}
                         onSave={offerProductId ? onSaveScript : undefined}
                         onEdit={offerProductId ? onEditScript : undefined}
                         onSaveVersion={offerProductId ? onSaveVersion : undefined}
@@ -640,13 +689,13 @@ export default memo(function ChatThread({
                 <div className="chat-shell__bubble chat-shell__bubble--ai">{message.content}</div>
               </div>
             )
-          })}
+          }) : null}
           {setupTurns.map((turn) => (
               <div
                 key={turn.id}
                 className={`chat-shell__msg ${turn.role === 'user' ? 'chat-shell__msg--user' : 'chat-shell__msg--ai'}`}
               >
-                <span className="chat-shell__who">{turn.role === 'user' ? 'You' : 'Advance AI'}</span>
+                <span className="chat-shell__who">{turn.role === 'user' ? t.you : 'Advance AI'}</span>
                 <div className={`chat-shell__bubble${turn.role === 'assistant' ? ' chat-shell__bubble--ai' : ''}`}>
                   {turn.content}
                 </div>
@@ -698,245 +747,50 @@ export default memo(function ChatThread({
             e.target.value = ''
           }}
         />
-        {(error || threadNotice || voice.error) && (
+        {(error || voice.error || (threadNotice && !scriptClarify && !(imageClarify && !imageBusy))) && (
           <div className={`chat-shell__thread-alert${error || voice.error ? ' is-error' : ''}`} role="status">
             {error || voice.error || threadNotice}
           </div>
         )}
-        {scriptClarify && offerCount > 0 && !(imageClarify && !imageBusy) ? (
-          <div className="chat-shell__clarify" role="group" aria-label="Script options">
+        {creditQuote ? (
+          <div className="chat-shell__clarify" role="group" aria-label={language === 'es' ? 'Cotización de créditos' : 'Credit quote'}>
             <p className="chat-shell__clarify-question">
-              {scriptClarify.step === 'type'
-                ? (language === 'es' ? '¿Qué tipo de guiones querés crear?' : 'What kind of scripts do you want?')
-                : scriptClarify.step === 'count'
-                  ? (language === 'es' ? '¿Cuántas versiones necesitás?' : 'How many versions do you need?')
-                  : (language === 'es' ? '¿A dónde debe llevar el CTA?' : 'Where should the CTA send people?')}
+              {creditQuoteCopy(creditQuote, language).question}
             </p>
             <div className="chat-shell__clarify-chips">
-              {scriptClarify.step === 'type' ? (
-                <>
-                  {([
-                    ['venta_directa', language === 'es' ? 'Venta directa' : 'Direct sale'],
-                    ['educativo', language === 'es' ? 'Educativo' : 'Educational'],
-                    ['storytelling', 'Storytelling'],
-                    ['reconocimiento', language === 'es' ? 'Reconocimiento' : 'Awareness'],
-                    ['mixed', language === 'es' ? 'Mezcla inteligente' : 'Smart mix'],
-                  ] as Array<[ScriptFramework | 'mixed', string]>).map(([type, label]) => (
-                    <button key={type} type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onAnswerScriptClarify?.({ type })}>
-                      {label}
-                    </button>
-                  ))}
-                </>
-              ) : scriptClarify.step === 'count' ? (
-                [1, 2, 3, 5].map((count) => (
-                  <button key={count} type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onAnswerScriptClarify?.({ count })}>
-                    {count}
-                  </button>
-                ))
-              ) : (
-                <>
-                  <button type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onAnswerScriptClarify?.({ ctaChannel: 'website' })}>
-                    {language === 'es' ? 'Comprar en web' : 'Buy on website'}
-                  </button>
-                  <button type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onAnswerScriptClarify?.({ ctaChannel: 'messages' })}>
-                    {language === 'es' ? 'Enviar mensaje' : 'Send a message'}
-                  </button>
-                  <button type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onAnswerScriptClarify?.({ ctaChannel: 'none' })}>
-                    {language === 'es' ? 'Sin CTA' : 'No CTA'}
-                  </button>
-                </>
-              )}
-              <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelScriptClarify?.()}>
-                {language === 'es' ? 'Cancelar' : 'Cancel'}
+              <button type="button" className="chat-shell__btn chat-shell__btn--pill" onClick={() => onConfirmCreditQuote?.()}>
+                {creditQuoteCopy(creditQuote, language).confirm}
+              </button>
+              <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onCancelCreditQuote?.()}>
+                {creditQuoteCopy(creditQuote, language).cancel}
               </button>
             </div>
           </div>
-        ) : imageClarify && !imageBusy ? (
-          <div className="chat-shell__clarify" role="group" aria-label="Image options">
-            {imageClarify.scriptTitle ? (
-              <div className="chat-shell__clarify-selection">
-                <strong>{language === 'es' ? 'Guion seleccionado' : 'Selected script'}</strong>
-                <span>{imageClarify.scriptTitle}</span>
-              </div>
-            ) : null}
-            {imageClarify.step === 'refs' ? (
-              <ChatShellReferencePicker
-                images={imageClarify.referenceImages || []}
-                currentProductId={imageClarify.productId}
-                language={language}
-                busy={imageBusy}
-                onToggle={(id) => onAnswerImageClarify?.({ toggleReferenceId: id })}
-                onUpload={(file, kind) => void onUploadOfferReference?.(file, kind, imageClarify.productId)}
-                onRemove={onRemoveOfferReference}
-              />
-            ) : null}
-            <div className="chat-shell__clarify-chips">
-              {imageClarify.step === 'script' ? (
-                <div className="chat-shell__script-picker">
-                  <p className="chat-shell__script-picker-lead">
-                    {language === 'es' ? 'Elegí el guion que querés convertir en post.' : 'Choose the script you want to turn into a post.'}
-                  </p>
-                  {(imageClarify.scriptChoices || []).map((choice) => (
-                    <button
-                      key={choice.id}
-                      type="button"
-                      className="chat-shell__script-choice"
-                      disabled={imageBusy}
-                      onClick={() => {
-                        if (shouldReviewChosenScript(imageClarify.originText, imageClarify.source)) {
-                          onCancelImageClarify?.()
-                          onSelectImageOffer?.(choice.productId)
-                          openScriptPostPreview(choice.id)
-                          return
-                        }
-                        onAnswerImageClarify?.({ scriptChoiceId: choice.id })
-                      }}
-                    >
-                      <strong>{choice.title}</strong>
-                      {choice.productName ? <span>{choice.productName}</span> : null}
-                      <small>{choice.preview}{choice.scriptText.length > choice.preview.length ? '…' : ''}</small>
-                    </button>
-                  ))}
-                </div>
-              ) : imageClarify.step === 'mode' ? (
-                <>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ mode: 'anuncio' })}
-                  >
-                    {language === 'es' ? 'Anuncio' : 'Ad'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ mode: 'product' })}
-                  >
-                    {language === 'es' ? 'Producto' : 'Product'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ mode: 'organic' })}
-                  >
-                    {language === 'es' ? 'Orgánico' : 'Organic'}
-                  </button>
-                </>
-              ) : imageClarify.step === 'aspect' ? (
-                IMAGE_ASPECT_CHOICES.map((choice) => (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ aspectRatio: choice.id })}
-                  >
-                    {language === 'es' ? choice.labelEs : choice.labelEn}
-                    <small className="chat-shell__pill-hint"> · {choice.hint}</small>
-                  </button>
-                ))
-              ) : imageClarify.step === 'density' ? (
-                IMAGE_DENSITY_CHOICES.map((choice) => (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ density: choice.id })}
-                  >
-                    {language === 'es' ? choice.labelEs : choice.labelEn}
-                    <small className="chat-shell__pill-hint"> · {choice.hint}</small>
-                  </button>
-                ))
-              ) : imageClarify.step === 'styleRef' ? (
-                <>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => offerContextRefInputRef.current?.click()}
-                  >
-                    {language === 'es' ? 'Subir estilo de post' : 'Upload post style'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ skipStyleRef: true })}
-                  >
-                    {language === 'es' ? 'Continuar sin referencia' : 'Continue without reference'}
-                  </button>
-                </>
-              ) : imageClarify.step === 'refs' ? (
-                <>
-                  <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={
-                      imageBusy
-                      || (
-                        Boolean(imageClarify.referencesRequired)
-                        && !hasSelectedProductReference(imageClarify.referenceImages || [])
-                      )
-                    }
-                    onClick={() => onAnswerImageClarify?.({ useReferences: true })}
-                  >
-                    {language === 'es' ? 'Continuar con las seleccionadas' : 'Continue with selected'}
-                  </button>
-                  {!imageClarify.referencesRequired ? (
-                    <button
-                      type="button"
-                      className="chat-shell__btn chat-shell__btn--pill"
-                      disabled={imageBusy}
-                      onClick={() => onAnswerImageClarify?.({ useReferences: false })}
-                    >
-                      {language === 'es' ? 'Crear sin referencias' : 'Create without references'}
-                    </button>
-                  ) : null}
-                  <button type="button" className="chat-shell__btn chat-shell__btn--ghost" onClick={() => onOpenImagesRail?.()}>
-                    {language === 'es' ? 'Administrar biblioteca' : 'Manage library'}
-                  </button>
-                  {imageClarify.referencesRequired && (imageClarify.availableReferenceCount || 0) === 0 ? <button
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ switchToAnuncio: true })}
-                  >
-                    {language === 'es' ? 'Usar Anuncio' : 'Use Ad'}
-                  </button> : null}
-                </>
-              ) : (
-                (imageClarify.mode === 'product'
-                  ? productStyleChoices(language)
-                  : imageClarify.mode === 'organic'
-                    ? organicStyleChoices(language)
-                    : anuncioStyleChoices(language)
-                ).map((choice) => (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    className="chat-shell__btn chat-shell__btn--pill"
-                    disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ styleId: choice.id })}
-                  >
-                    {choice.label}
-                  </button>
-                ))
-              )}
-              <button
-                type="button"
-                className="chat-shell__btn chat-shell__btn--ghost"
-                disabled={imageBusy}
-                onClick={() => onCancelImageClarify?.()}
-              >
-                {language === 'es' ? 'Cancelar' : 'Cancel'}
-              </button>
-            </div>
-          </div>
-        ) : null}
+        ) : (
+        <ChatShellClarifySheet
+          language={language}
+          scriptClarify={scriptClarify && offerCount > 0 ? scriptClarify : null}
+          imageClarify={imageClarify}
+          imageBusy={imageBusy}
+          onAnswerScriptClarify={onAnswerScriptClarify}
+          onCancelScriptClarify={() => {
+            setPostPreviewScriptKey(null)
+            setPostPreviewNonce(0)
+            onCancelScriptClarify?.()
+          }}
+          onBackScriptClarify={onBackScriptClarify}
+          onAnswerImageClarify={onAnswerImageClarify}
+          onCancelImageClarify={() => {
+            setPostPreviewScriptKey(null)
+            setPostPreviewNonce(0)
+            onCancelImageClarify?.()
+          }}
+          onBackImageClarify={onBackImageClarify}
+          onUploadOfferReference={onUploadOfferReference}
+          onRemoveOfferReference={onRemoveOfferReference}
+          onOpenImagesRail={onOpenImagesRail}
+        />
+        )}
         {failedBatch && failedBatch.productIds.length > 0 ? (
           <div className="chat-shell__retry-bar" role="status">
             <span>
@@ -952,8 +806,8 @@ export default memo(function ChatThread({
             </button>
           </div>
         ) : null}
+        {createDock}
         <div className={`chat-shell__composer${voice.isRecording ? ' is-listening' : ''}`}>
-          {createDock}
           {slashCommands.length > 0 ? (
             <ChatSlashCommandPalette
               commands={slashCommands}

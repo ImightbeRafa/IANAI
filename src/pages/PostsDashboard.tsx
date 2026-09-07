@@ -10,6 +10,8 @@ import {
 } from '../services/database'
 import type { Product, RestaurantFormData, Business, ProductType, NewProductFormData, NewServiceFormData, IndumentariaFormData, RealEstateFormData } from '../types'
 import Layout from '../components/Layout'
+import CreditsChip from '../components/CreditsChip'
+import { useUsageLimits } from '../hooks/useUsageLimits'
 import ProductForm from '../components/ProductForm'
 import RestaurantForm from '../components/RestaurantForm'
 import RealEstateForm from '../components/RealEstateForm'
@@ -42,6 +44,7 @@ export default function PostsDashboard() {
   const { language } = useLanguage()
   const navigate = useNavigate()
   const dashData = useDashboardData()
+  const usageLimits = useUsageLimits()
   const [showProductForm, setShowProductForm] = useState(false)
   const [showRestaurantForm, setShowRestaurantForm] = useState(false)
   const [showTypeSelector, setShowTypeSelector] = useState(false)
@@ -82,7 +85,7 @@ export default function PostsDashboard() {
       sharedBy: 'por',
       roleViewer: 'Lector',
       roleEditor: 'Editor',
-      quickTitle: 'Generador Rapido',
+      quickTitle: 'Generador rápido',
       quickSubtitle: 'Crea imagenes sin configurar un negocio o producto primero.',
       quickProduct: 'Foto de producto',
       quickProductDesc: 'Sube una foto y genera una version profesional lista para publicar.',
@@ -350,6 +353,7 @@ export default function PostsDashboard() {
             <p className="text-dark-500 mt-1">{t.subtitle}</p>
           </div>
           <div className="flex items-center gap-3">
+            <CreditsChip usage={usageLimits} />
             {!selectedBusiness && (
               <button
                 onClick={() => setShowBusinessForm(true)}

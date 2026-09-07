@@ -1,4 +1,312 @@
+## 2026-08-31 — PR #34: homepage denser + CTA ink + faster fan pop
+
+- Fix Empezá hoy readability: dark ink on cyan (`.home-page a { color: inherit }` was forcing white).
+- Hero packed toward center, wider fan, less empty top/side/bottom; sections tighter/wider.
+- Fan pop: staggered ~0.5s spring ease (front → mids → far), hover still ~1.12.
+
+## 2026-08-31 — PR #34: locked public homepage (CoS winner)
+
+- Replaces Recess/template landing with dark `#07090d` homepage: floating glass pill nav, hero copy + cyan CTA glow, 5-card CSS 3D fan (desktop) / 3-card (mobile), gallery “Lo que generan las agencias”, features 01–03 only, pricing Free/Starter/Premium/Enterprise (prices unchanged).
+- Fan motion: CSS spread ~0.8s + hover scale ~1.12 / stronger glow. JPEG 9:16 ads under `public/home/ads/`.
+- CTAs → `/signup?redirect=/chat` / `/login?redirect=/chat` (chat-shell product; not classic `/posts` or `/scripts`).
+- No plan price / invite-gate / `chat_shell` flag / credit changes. PR stays draft.
+
+## 2026-08-31 — PR #34: Preview-only /admin for invited QA
+
+- `VERCEL_ENV=preview`: allowlisted QA emails (`sup.rafa0412@gmail.com`, `ralauas@gmail.com`) can open `/admin` + admin read APIs without `profiles.is_admin`.
+- Production / non-preview: still requires `profiles.is_admin` (fail closed). No AIIAN `is_admin` writes.
+- Chat nuevo single-flight unchanged.
+
+## 2026-08-31 — PR #34: Chat nuevo one-click (WD FAIL fix)
+
+- Module-level `runCreateSessionSingleFlight` (survives Strict Mode remount); joins concurrent callers; 2s post-success coalesce against ghost clicks.
+- Sidebar disables on `workspace.busy` (was imageBusy-only); header ignores `detail > 1` double-click.
+- Admin credits-vs-$ unchanged.
+
+## 2026-08-31 — PR #34: admin credits vs API $ + Chat nuevo single-flight
+
+- `/api/admin-usage` joins `credit_ledger` (credits charged) + sums `credit_lots.remaining` (circulation); returns `creditsEconomics` and per-model `total_credits` / `estimated_api_cost_usd`.
+- Official-list estimates: Imagine 2.0 `$0.04/out + $0.01/input`; Grok text `$2/$6` per 1M; Banana from stored/~$0.12. UI labels estimates (not xAI invoice). Optional `legacy_preview_qa` source chip.
+- `estimateGrokImageCostUsd` matches official Imagine pricing for future logs.
+- Chat nuevo: one click = one session (in-flight dedupe + explicit `brandId`); empty “Sin chats aún” CTA selects brand and creates (no early return that left the old thread).
+
+## 2026-08-31 — PR #34: gate in-thread Crear post with Primero el kit
+
+- Script card “Crear post” / “Optimizar para post” disabled with **Primero el kit** when kit not `stronglyComplete` (same gate as glass Post).
+- Defense: ChatShell prepare/generate-from-script no-ops when kit incomplete.
+- Glass Primero el kit + setup Falta: unchanged. Empty CTA still empty-thread only.
+
+## 2026-08-30 — PR #34: first-run CTA + Primero el kit visible (WD FAIL fix)
+
+- Empty first-run: stop auto-Hola welcome; show one line + button **Empezá por tu marca** when kit not `stronglyComplete` (even if a legacy welcome row exists).
+- Glass Guiones/Post/Foto/Pack blocked until `stronglyComplete`; visible/disabled label **Primero el kit** (literal in DOM for WD grep).
+- Setup pin “Falta: …” unchanged.
+
+## 2026-08-30 — PR #34 fat Preview: invite gate + no Preview gift + generationId + first-run chrome
+
+- Server `userHasChatShellAccess` requires `chat_shell` flag **and** `profiles.chat_beta_access` (frontend rollout mirrors).
+- Skip +100 open gift when `VERCEL_ENV=preview` (no clawback of existing lots).
+- `generate-image` rejects missing `generationId` (no server mint); shell client mints per Generar/edit/enhance.
+- Empty first-run: one line + “Empezá por tu marca”; skip multi-step tour; kit-not-ready blocks Guiones/Post/Foto/Pack with “Primero el kit”.
+- Setup pin names missing steps (no bare 3/6 until Configurar open); Pack step 1 shows credits.
+- `referenceMode: none` skips auto-hydrate; hydrate binds owner/collab; Bloom ₡9.900 / 9-patch / BLOOM logo only for known kit/product ids.
+
+## 2026-08-30 — PR #34: Foto last step = Confirmá referencias (same as Post)
+
+- Stopped auto-forcing referenceMode=none for studio-hero/podium Foto, which skipped the refs sheet and opened the ingredients gate + chat credit confirm.
+- Foto now ends on the same Confirmá referencias sheet (Subir rail, credits above, estilo No usar, one Generar).
+- Pack already shows credits on confirm step — unchanged.
+
+## 2026-08-30 — PR #34: Confirmá referencias sheet layout (no credit/Subir overlap)
+
+- Credits strip renders above the Subir rail with a gap (inside the picker).
+- Flow sheet body scrolls; footer stays pinned — optional hint no longer covers Atrás/Cancelar.
+- Layout-only; generate / credits / lock / gourmet unchanged.
+
+## 2026-08-30 — PR #34 leftovers harden: credit one-click, Subir 2×2, estilo off
+
+- Reconfirm: Confirmá referencias Generar sets creditConfirmed (no second ¿Seguimos?).
+- Subir rail always even 2×2 with wrap-safe labels (no orphan logo / no overflow).
+- Preferred refs also strip non-product — estilo/scene/logo stay No usar until opt-in.
+
+## 2026-08-30 — PR #34 Preview QA: one Generar, Subir 2×2, estilo opt-in
+
+- Confirmá referencias Generar spends on that click — no second “¿Seguimos?” credit Paso after spinner.
+- Subir producto/escena/estilo/logo: even 2×2 (4-up on wider) so logo is not an orphan row.
+- Preselect product angles only; scene/style/logo default No usar (opt-in).
+- Hide Setup de marca tracker while Pack/Post/Foto (or credit) sheet is open.
+
+## 2026-08-30 — PR #34: no ingredients gate after Confirmá referencias Generar
+
+- Clicking Generar / Crear sin referencias on Confirmá referencias soft-skips style/logo (and all three when sin refs) so generate runs — never “falta estilo” after the spinner.
+- Soft optional hint stays on the refs sheet before Generar; Subir estilo still available.
+- Keeps product_lock_scene, gourmet recipe, 8000 clamp, one-click lock.
+
+## 2026-08-30 — PR #34 fat Preview: merge #33 gourmet + product_lock + enhance-18
+
+- Merged `cursor/chat-shell-open-all-a84d` (@0b70ff8) into #34 idle-bar Pack sheets branch (same PR, no master).
+- From #33: gourmet SCENE RECIPE (`image-scene-recipe`), `product_lock_scene` pixel lock, enhance/Mejora mágica quote=charge 18, slim UTF-8 Grok prompts, open-all/gift/tour.
+- Kept from #34: Pack-family ClarifySheet + Back history, Subir logo, single-flight Generar, FORMATO line-only strip, auto-retry clamp, never “Acortá el guion”.
+- Conflicts resolved in generate-image / grok-image-prompt / ChatThread / useChatSessionThread (history + ingredients + creditQuote).
+
+## 2026-08-30 — Post Generar: never fail-closed on 8000 (PR #34 P0)
+
+**Area:** chat-shell / generate-image
+**Files:** `api/lib/grok-image-prompt.ts`, `api/generate-image.ts`, `chatShellImageErrors.ts`, tests
+
+- SAFE clamp 7500 + drop business-context dumps / format essays; keep product-fidelity + short copy.
+- On Grok prompt-too-long: auto-retry at 6000 once. Never UI “Acortá el guion”.
+- Cap injected `businessContext` to 1200 chars at assembly.
+
+---
+
+## 2026-08-30 — Post Generar: Grok 8000 cap + single-flight (PR #34 P0)
+
+**Area:** chat-shell / generate-image
+**Files:** `api/lib/grok-image-prompt.ts`, `api/generate-image.ts`, `api/lib/grok-image-generate.ts`, `api/lib/grok-image-edit.ts`, `chatShellImageApi.ts`, `chatShellImageErrors.ts`, `useChatSessionThread.ts`, `ChatShellClarifySheet.tsx`, tests
+
+- Hard-cap Grok Imagine prompts at 8000 Unicode code points; strip FORMATO OBLIGATORIO (use aspect_ratio); prefer condensed user copy + keep product fidelity rules at head.
+- One Generar click = one in-flight generate (submit lock + busy disable); no retry loop on 400.
+- Spanish-friendly prompt-too-long / rate-limit errors.
+
+---
+
+## 2026-08-30 — Subir logo on Confirmá referencias (PR #34)
+
+**Area:** chat-shell
+**Files:** `ChatShellReferencePicker.tsx`, `chatShellReferenceSelection.ts`, `useChatSessionThread.ts`, `chatShellImageApi.ts`, `ChatContextRail.tsx`, labels, tests
+
+- Confirmá referencias rail: Subir logo alongside producto/escena/estilo; empty copy mentions logo.
+- Logo upload auto-selects and attaches as `brandLogoUrl` for this generate (not only skip); excluded from productImageIds.
+- Same Subir logo control on the images rail for consistency.
+
+---
+
+## 2026-08-30 — Pack-sheet footer / CTA primary / Pack credits (Rafael GO)
+
+**Area:** chat-shell
+**Files:** `ChatShellFlowSheet.tsx`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, tests
+
+- Footer order: Atrás · Cancelar · primary (when present).
+- Guiones Paso 3: CTA chip selects only; Generar primary appears after pick; credits stay visible.
+- Pack Confirmar y generar only with a credits line (step 2 quote / estimate).
+
+---
+
+## 2026-08-30 — Pack-sheet nits (leak / one-card / Back / glass)
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `ChatShellClarifySheet.tsx`, `ChatThread.tsx`, `chat-shell.css`, `scriptParser.ts`, tests
+
+- Sheet copy no longer dual-writes into the transcript alert while the Pack sheet is open; navy dim overlay ~46%.
+- `## Guion N` markdown splits into one Post picker card per script.
+- Foto opens on style (Paso 1) so aspect/refs get Back on step 2+; step n/n follows history length.
+- Idle glass: more blur, cyan ~20% stroke, lift shadow, less solid fill (light theme).
+
+---
+
+## 2026-08-30 — Preview QA invite for idle-bar CoS shots (PR #34)
+
+**Area:** chat-shell / ops
+**Files:** `docs/testing/chat-shell-preview-user.md` (+ AIIAN profile invite, no auth model change)
+
+- CoS blocked on Preview: `sup.rafa0412@gmail.com` hit “Chat es por invitación” because `chat_beta_access=false`.
+- Matched existing invite gate: service-role set `chat_beta_access=true` + `preferred_ui=chat` (kill switch already on). No new allowlist.
+- Seeded **IdleBar Demo** / session **Quiero crear guiones** / **Arnes Demo** for that QA account so after-shots (idle glass row + four Pack sheets) are reachable on `/chat`.
+
+---
+
+## 2026-08-30 — Chat-shell idle bar glass row + Pack-family flow sheets
+
+**Area:** chat-shell
+**Files:** `ChatComposerCreateDock.tsx`, `ChatShellFlowSheet.tsx`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, `ChatThread.tsx`, `ChatShell.tsx`, `useChatSessionThread.ts`, `chatShellLabels.ts`, `chat-shell.css`, tests
+
+- Lift Brand Kit chip + Guiones/Post/Foto/Pack into one navy+cyan Apple-glass row **above** the typing card (no 3+1 wrap inside the input).
+- Typing row is placeholder + attach + mic + send only.
+- Guiones / Post / Foto / Pack share the Pack sheet family: center overlay, dim, step n/n, Back, footer Cancel (closes with nothing left in the transcript), credits line before generate primary.
+- Guiones types live in the sheet (not chat chips). Post script picker is a sheet grid (no Optimizar texto divert / empty third Cancel card). Foto sizes (Reel 9:16 / 1:1 / 4:5) use the same sheet.
+- Copy-only rename: Pack sheet title `Bulk / Pack` → `Pack`.
+
+---
+
 ## 2026-08-25 — MCP prod regression fix (0.9.5)
+## 2026-08-30 — Product pixel-lock scene (PR #33)
+
+**Area:** Grok first-gen product fidelity + scene
+**Files:** `product-pixel-lock.ts`, `grok-image-generate.ts`, `grok-image-prompt.ts`, `generate-image.ts`, `image-enhance.ts`, tests
+
+- **Finding:** `/images/generations` with product refs soft-references the packshot → Grok redraws/manipulates the SKU. Scene was good; product lock failed.
+- **Fix:** With product photos, first-gen uses `/images/edits` mode `product_lock_scene` (pixel-identical SKU + SCENE RECIPE replaces void). No-product path stays `/generations` compose. Scene recipe unchanged (no podium regression).
+- **Crear sin referencias:** auto-hydrate offer `product` photos for post/ad sessions when no explicit `productImageIds`, so kit product truth still locks.
+- **Enhance:** same PRODUCT LOCK contract; polish locks set; magic/rebuild may replace void only.
+
+---
+
+## 2026-08-30 — Gourmet scene + enhance credit quote (PR #33)
+
+**Area:** chat-shell image first-gen / enhance + Créditos IA quote
+**Files:** `image-scene-recipe.ts`, `image-prompt-context.ts`, `grok-image-prompt.ts`, `grok-image-generate.ts`, `generate-image.ts`, `image-enhance.ts`, `chatShellCreditQuote.ts`, `useChatSessionThread.ts`, `ChatShell.tsx`, tests
+
+- **Scene:** Ads always emit a SCENE RECIPE (place, lights, 3–6 props, depth, contact shadows; ban seamless/void/podium void), including no-ref path from niche/offer/script. Slim Grok posts include the recipe.
+- **Compose:** Grok first-gen with product refs uses `/images/generations` (compose), not packshot `/edits`. Edits stay for enhance + user “change this.”
+- **Enhance:** Polish locks composition (no new set). Magic/rebuild are scene passes with recipe + product lock; product light matches environment.
+- **Credits:** Mejora mágica / edit quote uses `image_enhance` / `image_edit` (18), matching server charge — was wrongly quoting `image_standard` (6).
+
+---
+
+## 2026-08-28 — CoS retest fixes: ingredients ask, Grok first-pass hojita, no price strikethrough (PR #33)
+
+**Area:** chat-shell ingredients + Grok venta-directa first generate + enhance
+**Files:** `chatShellIngredientsCheck.ts`, `useChatSessionThread.ts`, `grok-image-prompt.ts`, `generate-image.ts`, `product-creative-rules.ts`, tests
+
+- **A/C:** `Crear sin referencias` now always triggers ingredients ask (kit/rail files unused for this generate don't skip it).
+- **E:** `buildSlimGrokPostPrompt` applies hojita silhouette + logo stamp + locked ₡9.900 + non-Ads-Manager CTA on first-pass Grok venta-directa; kit logo injected on generate when refs skipped.
+- **G3:** Enhance/edit forbids strikethrough on list price (₡9.900).
+
+---
+
+## 2026-08-28 — Bloom CD creative rules: hojita silhouette, logo stamp, locked price (PR #33)
+
+**Area:** product image prompts + Bloom TestAccount kit data
+**Files:** `product-creative-rules.ts`, `generate-image.ts`, `image-presets.ts`, `brand-kit.ts`, tests
+
+- **Product silhouette (no-ref):** Dermal patch offers render as transparent 3×3 hojita de 9 parches (~12 mm); never generic box/jar/tube.
+- **Logo stamp:** Composite uploaded logo; forbid AI redraw of BLOOM wordmark / DERMAL MICRO-INFUSION PATCH lockup; omit lockup when no logo file.
+- **Locked price:** Fallback `₡9.900` for Bloom patch SKU when `offer` is null; user-set prices preserved.
+- **Enhance / Pedir edición:** Same hojita constraints; improve crop/contrast/floral; no SKU/packaging/box swap or gibberish type.
+- **Posts CTA:** Guardrails against Ads Manager “Dale click a este anuncio”; organic Escribime/Pedilo vs paid button via `ctaStrength`.
+- **Data (AIIAN):** Patched Bloom kit `f07339f1` + product `be543866` — offer, SILUETA in specs, visual_style_notes, forbidden_phrases, style_dnas.
+
+---
+
+## 2026-08-28 — Ingredients soft-skip, logo upload, no-ref product quality (PR #33)
+
+**Area:** chat-shell UX + product image prompts
+**Files:** `chatShellIngredientsCheck.ts`, `useChatSessionThread.ts`, `ChatThread.tsx`, `ChatContextRail.tsx`, `ChatBrandProfileCard.tsx`, `ChatShellScriptCard.tsx`, `image-presets.ts`, `generate-image.ts`, `CreditsChip.tsx`, tests
+
+- **Soft-skip ingredients:** Before paid post/foto, Spanish voseo names each missing product photo / logo / style; per-item `Seguir sin …` confirm; generate proceeds when skipped.
+- **Logo upload (0 credits):** Marca tab + brand profile quick upload; no 6-credit logo generate from Marca.
+- **Rail thumbs:** Optimistic offer image list after upload.
+- **No-ref product:** Offer + brand context in prompt; anti–generic-box when refs missing.
+- **Edit:** On-brand improvement prefix on Pedir edición; quote-before-charge unchanged.
+- **Script card:** 1:1 / 9:16 on guion post preview.
+- **Credits chip:** `/scripts`, `/posts`, `/settings`.
+
+---
+
+## 2026-08-28 — Product foto: skip refs re-ask, no meta copy on image (PR #33)
+
+**Area:** chat-shell product images + Grok API
+**Files:** `chatShellImageIntent.ts`, `useChatSessionThread.ts`, `generate-image.ts`, `image-presets.ts`, `grok-image-prompt.ts`, `ChatThread.tsx`, tests
+
+- **Studio-hero/podium:** 0 uploaded refs allowed; rail “Crear en el chat” skips reference picker; API builds from offer context.
+- **No Anuncio hijack:** hide “Usar Anuncio” when panel is Producto; meta prompts filtered from Grok copy (`Professional product photograph`, etc.).
+- **Product API prompt:** empty `prompt` for product mode; CONTRATO FINAL text-overlay rules skipped for product/logo.
+- **Edit bubble:** edits/enhances on their own message show in chat thread (not only Original/Última tabs).
+
+---
+
+## 2026-08-28 — Preview blockers: download, product foto, edit quote (PR #33)
+
+**Area:** chat-shell images + credits + i18n
+**Files:** `chatShellDownload.ts`, `useChatSessionThread.ts`, `chatShellImageIntent.ts`, `chatShellImageApi.ts`, `ChatThread.tsx`, `PostWorkspace.tsx`, `LanguageContext.tsx`, tests
+
+- **Descargar:** fetch blob + Supabase storage client fallback; reliable anchor trigger (no silent `window.open`).
+- **Foto panel:** rail “Crear en el chat” passes full image prefs; product mode uses product prompt/userText (not “Generar post”); aspect/density clarify respects sticky panel choices; product skips copy-density ask.
+- **Pedir edición:** credit quote before charge; result as new chat bubble; usage chip refresh; Spanish action labels (`Editada`).
+- **i18n:** chat author `Tú`, Quick Use → `Generador rápido`, `html lang` sync, Posts dashboard accent.
+
+---
+
+## 2026-08-27 — Grok slim prompt + UTF-8 byte cap (PR #33 retest)
+
+**Area:** images / Grok Imagine
+**Files:** `api/lib/grok-image-prompt.ts`, `generate-image.ts`, `chatShellImageErrors.ts`, tests
+
+- Retest still failed square 1:1 venta-directa (short script, 0 refs) with `grok_prompt_too_long` after ~60–90s.
+- Root cause: `venta-directa` used `buildPostPrompt` (~26KB essays); code-point truncate left mangled system text and still could exceed Grok’s 8000 if counted as UTF-8 bytes.
+- Grok post path now uses `buildSlimGrokPostPrompt` (user copy + short fidelity); enforce **7200 UTF-8 bytes** with margin; log code-point + byte lengths; canvas via `aspect_ratio` only.
+
+---
+
+## 2026-08-27 — Grok Imagine prompt 8000 cap + aspect_ratio-only (PR #33)
+
+**Area:** images / Grok Imagine
+**Files:** `api/lib/grok-image-prompt.ts`, `generate-image.ts`, `grok-image-generate.ts`, `grok-image-edit.ts`, `chatShellImageErrors.ts`, tests
+
+- Root cause: Grok `invalid-argument` “Prompt length exceeds … 8000” — API allowed 50k and prefixed `FORMATO OBLIGATORIO` (often 9:16) on top of native `aspect_ratio`.
+- Before every Grok generate/edit/enhance: strip FORMATO directives, prefer user copy, hard-cap 8000 Unicode code points; log `promptLength`.
+- Grok post modes skip textual format prefixes; canvas via `aspect_ratio` (honors 1:1 square).
+- Spanish user error for prompt-too-long (`grok_prompt_too_long`).
+
+---
+
+## 2026-08-27 — Preview QA fixes (PR #33 CoS findings)
+
+**Area:** chat-shell + auth + images + credits
+**Files:** `Login.tsx`, `useUsageLimits.ts`, `ChatShellPage.tsx`, brand create/setup, `generate-image.ts`, image/credit helpers, a11y labels, tests
+
+- **Confirmed:** bilingual login (A); usage refresh + readable balance + pre-generate credit quote (B); Nueva marca URL field (C); ingest materializes offer + product JPEG/PNG refs (D); Spanish Grok/image errors (E); gift modal dismisses on first click (F); Spanish sidebar/rail aria-labels (G).
+- **Discarded:** script quality rewrite / “Simple 3 pasos” (H).
+- **Env-only:** Preview must keep `VITE_CREDITS_V1` / `CREDITS_V1` aligned; missing `GROK_API_KEY` is deployment config (UX now explains in Spanish). Gift lot for TestAccount already existed — no regrant.
+
+---
+
+## 2026-08-27 — Chat-shell open for all users (Preview-first)
+
+**Area:** chat-shell + credits + guiones
+**Files:** `chatShellRollout.ts`, `chat-shell-access.ts`, `chat-shell-open.ts`, `chat-shell-gift.ts`, welcome/tour/home-preview UI, `Settings.tsx`, `chatShellBrandSetup.ts`, `useChatSessionThread.ts`, `api/chat.ts`, `type-lenses.ts`, tests
+
+- Kill switch alone grants `/chat` (invite gate dropped); `preferred_ui` still defaults classic.
+- First `/chat` open: idempotent +100 pack credits (12mo) + Spanish gift popup + informative tour (skip forever via user_metadata).
+- Usar Chat como inicio shows animated preview before confirming.
+- Preferencias de IA hidden; Plan y facturación shows clearer usage + improvement disclaimer.
+- Greetings no longer auto-generate scripts; missing-offer asks clearly and opens Ofertas.
+- Tracker Oferta = named product exists; light-mode inputs override global dark color-scheme.
+- Venta directa legacy few-shot + type lens less robotic.
+
+---
+
 
 **Area:** mcp
 **Files:** `supabase-adapter.ts`, `protocol.ts`, `bulk-tools.ts`, `run-bulk.ts`, `expand-product-refs.ts`, `grok-image-generate.ts`, `execute-job.ts`, `artifact-store.ts`, `reference-gate.ts`, `tool-registry.ts`, tests

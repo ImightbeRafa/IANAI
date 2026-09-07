@@ -4,7 +4,7 @@ import type { ParsedScript } from '../../utils/scriptParser'
 import type { ProductType } from '../../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../../services/database'
 import { parseScriptSections } from './parseScriptSections'
-import { IMAGE_DENSITY_CHOICES } from './chatShellImageIntent'
+import { IMAGE_DENSITY_CHOICES, type ShellImageAspect } from './chatShellImageIntent'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
 import {
   confirmedReferenceImageIds,
@@ -85,14 +85,17 @@ interface ChatShellScriptCardProps {
   onPreparePost?: (scriptText: string, density?: 'hard' | 'medium') => Promise<string>
   onGenerateImage?: (scriptText: string, options?: {
     density?: 'hard' | 'medium'
+    aspectRatio?: ShellImageAspect
     referenceImageIds?: string[]
     alreadyOptimized?: boolean
   }) => void | Promise<void>
-  onUploadPostReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style') => void | Promise<void>
+  onUploadPostReference?: (file: File, kind: 'product' | 'context' | 'scene' | 'style' | 'logo') => void | Promise<void>
   onOpenPostPreview?: () => void
   onLatestVersionChange?: (snapshotKey: string, content: string) => void
   snapshotKey?: string
   openPostPreviewNonce?: number
+  /** When true (kit not stronglyComplete), block Crear post / image generate — same as glass “Primero el kit”. */
+  kitGenerateBlocked?: boolean
 }
 
 const ENHANCE_PROMPT =
@@ -178,6 +181,7 @@ export default function ChatShellScriptCard({
   onLatestVersionChange,
   snapshotKey,
   openPostPreviewNonce = 0,
+  kitGenerateBlocked = false,
 }: ChatShellScriptCardProps) {
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -196,6 +200,7 @@ export default function ChatShellScriptCard({
   const [postPreviewOpen, setPostPreviewOpen] = useState(false)
   const [postDrafts, setPostDrafts] = useState<Partial<Record<'hard' | 'medium', string>>>({})
   const [postDensity, setPostDensity] = useState<'hard' | 'medium'>('hard')
+  const [postAspect, setPostAspect] = useState<ShellImageAspect>('1:1')
   const [preparingPost, setPreparingPost] = useState(false)
   const [savingPost, setSavingPost] = useState(false)
   const [previewRefs, setPreviewRefs] = useState<OfferReferenceImage[]>([])
@@ -429,6 +434,7 @@ export default function ChatShellScriptCard({
   }
 
   const openPostPreview = async (density: 'hard' | 'medium' = postDensity) => {
+    if (kitGenerateBlocked) return
     if (!onGenerateImage || operation) return
     onOpenPostPreview?.()
     const active = versions[activeIndex]
@@ -521,6 +527,7 @@ export default function ChatShellScriptCard({
         .filter((id) => !id.startsWith('url-'))
       await onGenerateImage?.(draft, {
         density: postDensity,
+        aspectRatio: postAspect,
         referenceImageIds,
         alreadyOptimized: true,
       })
@@ -613,6 +620,26 @@ export default function ChatShellScriptCard({
                   }}
                 >
                   {es ? choice.labelEs : choice.labelEn}
+                </button>
+              )
+            })}
+          </div>
+          <div className="chat-shell__post-preview-density" role="radiogroup" aria-label={es ? 'Formato' : 'Format'}>
+            {(['1:1', '9:16'] as const).map((ratio) => {
+              const selected = postAspect === ratio
+              return (
+                <button
+                  key={ratio}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  className={selected ? 'is-on' : ''}
+                  disabled={imageBusy || savingPost}
+                  onClick={() => setPostAspect(ratio)}
+                >
+                  {ratio === '1:1'
+                    ? (es ? 'Post 1:1' : '1:1 post')
+                    : (es ? 'Reel 9:16' : '9:16 reel')}
                 </button>
               )
             })}
@@ -799,12 +826,17 @@ export default function ChatShellScriptCard({
           <button
             type="button"
             className="chat-shell__artifact-action is-primary"
-            disabled={busy || imageBusy || preparingPost}
+            disabled={busy || imageBusy || preparingPost || kitGenerateBlocked}
             onClick={() => void openPostPreview()}
-            title={es ? 'Crear post' : 'Create post'}
+            title={kitGenerateBlocked ? 'Primero el kit' : (es ? 'Crear post' : 'Create post')}
+            data-kit-blocked={kitGenerateBlocked ? 'true' : undefined}
           >
             {imageBusy || preparingPost ? <Loader2 size={13} className="chat-shell__spin" /> : <Wand2 size={13} />}
-            {preparingPost ? (es ? 'Optimizando…' : 'Optimizing…') : (es ? 'Crear post' : 'Create post')}
+            {kitGenerateBlocked
+              ? 'Primero el kit'
+              : preparingPost
+                ? (es ? 'Optimizando…' : 'Optimizing…')
+                : (es ? 'Crear post' : 'Create post')}
           </button>
         ) : null}
         <div className="chat-shell__artifact-menu-wrap">
@@ -841,9 +873,17 @@ export default function ChatShellScriptCard({
                 </button>
               ))}
               {onGenerateImage ? (
-                <button type="button" role="menuitem" disabled={imageBusy || preparingPost} onClick={() => { setMoreOpen(false); void openPostPreview() }}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={imageBusy || preparingPost || kitGenerateBlocked}
+                  title={kitGenerateBlocked ? 'Primero el kit' : undefined}
+                  onClick={() => { setMoreOpen(false); void openPostPreview() }}
+                >
                   <Wand2 size={13} />
-                  {es ? 'Optimizar para post' : 'Optimize for post'}
+                  {kitGenerateBlocked
+                    ? 'Primero el kit'
+                    : (es ? 'Optimizar para post' : 'Optimize for post')}
                 </button>
               ) : null}
               {offerImageId && offerImageUrl && onEditOfferImage ? (

@@ -15,7 +15,9 @@ import {
   MessageCircle,
   Sparkles
 } from 'lucide-react'
+import ChatShellHomePreviewModal from '../features/chat-shell/ChatShellHomePreviewModal'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
+import '../features/chat-shell/chat-shell-feature-modals.css'
 import AdvanceLogo from './AdvanceLogo'
 
 interface LayoutProps {
@@ -29,8 +31,30 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [switchBusy, setSwitchBusy] = useState(false)
+  const [showChatHomePreview, setShowChatHomePreview] = useState(false)
   const rollout = useChatShellRollout()
   const homePath = rollout.effectiveHome === 'chat' ? '/chat' : '/dashboard'
+
+  const switchToClassic = async () => {
+    if (switchBusy) return
+    setSwitchBusy(true)
+    const ok = await rollout.setPreferredUi('classic')
+    setSwitchBusy(false)
+    if (!ok) return
+    navigate('/dashboard')
+    setSidebarOpen(false)
+  }
+
+  const confirmChatAsHome = async () => {
+    setShowChatHomePreview(false)
+    if (switchBusy) return
+    setSwitchBusy(true)
+    const ok = await rollout.setPreferredUi('chat')
+    setSwitchBusy(false)
+    if (!ok) return
+    navigate('/chat')
+    setSidebarOpen(false)
+  }
 
   const handleSignOut = async () => {
     await signOut()
@@ -154,14 +178,11 @@ export default function Layout({ children }: LayoutProps) {
                 disabled={switchBusy}
                 onClick={() => {
                   if (switchBusy) return
-                  const next = rollout.preferredUi === 'chat' ? 'classic' : 'chat'
-                  setSwitchBusy(true)
-                  void rollout.setPreferredUi(next).then((ok) => {
-                    setSwitchBusy(false)
-                    if (!ok) return
-                    navigate(next === 'chat' ? '/chat' : '/dashboard')
-                    setSidebarOpen(false)
-                  })
+                  if (rollout.preferredUi === 'chat') {
+                    void switchToClassic()
+                    return
+                  }
+                  setShowChatHomePreview(true)
                 }}
                 className="flex items-center gap-3 px-4 py-3 w-full text-dark-500 hover:bg-dark-200 hover:text-dark-900 rounded-lg transition-colors"
               >
@@ -204,6 +225,13 @@ export default function Layout({ children }: LayoutProps) {
           {children}
         </main>
       </div>
+      {showChatHomePreview ? (
+        <ChatShellHomePreviewModal
+          language={language === 'en' ? 'en' : 'es'}
+          onCancel={() => setShowChatHomePreview(false)}
+          onConfirm={() => void confirmChatAsHome()}
+        />
+      ) : null}
     </div>
   )
 }

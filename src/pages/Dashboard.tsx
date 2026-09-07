@@ -21,6 +21,8 @@ import BusinessForm from '../components/BusinessForm'
 import ProductTypeSelector from '../components/ProductTypeSelector'
 import ShareProductModal from '../components/ShareProductModal'
 import FeedbackToast from '../components/FeedbackToast'
+import CreditsChip from '../components/CreditsChip'
+import { useUsageLimits } from '../hooks/useUsageLimits'
 import { createBusiness } from '../services/database'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { 
@@ -46,6 +48,7 @@ export default function Dashboard() {
   const { language } = useLanguage()
   const navigate = useNavigate()
   const dashData = useDashboardData()
+  const usageLimits = useUsageLimits()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [showProductForm, setShowProductForm] = useState(false)
@@ -407,6 +410,7 @@ export default function Dashboard() {
             <p className="text-dark-500 mt-1">{t.overview}</p>
           </div>
           <div className="flex items-center gap-3">
+            <CreditsChip usage={usageLimits} />
             {!selectedBusiness && (
               <button 
                 onClick={() => setShowBusinessForm(true)}

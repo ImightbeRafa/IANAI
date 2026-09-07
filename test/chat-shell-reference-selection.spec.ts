@@ -6,6 +6,7 @@ import {
   partitionReferenceCopies,
   postOptimizeVersionLabel,
   preselectOfferReferenceIds,
+  selectedBrandLogoUrl,
   shouldPersistPostOptimizeVersion,
   shouldPromptImageReferences,
   toggleReferenceSelection,
@@ -30,15 +31,21 @@ describe('chat-shell reference selection', () => {
     expect(shouldPromptImageReferences({ styleKind: 'logo' })).toBe(false)
     expect(shouldPromptImageReferences({ styleKind: 'preset', referenceMode: 'use' })).toBe(false)
     expect(shouldPromptImageReferences({ styleKind: 'preset', referenceMode: 'none' })).toBe(false)
+    // Foto studio-hero must still open Confirmá referencias until Generar sets mode.
+    expect(shouldPromptImageReferences({ styleKind: 'product', referenceMode: undefined })).toBe(true)
   })
 
-  it('preselects up to 3 current product angles plus one context and skips generated', () => {
-    expect(preselectOfferReferenceIds(images, 'offer-a')).toEqual(['p1', 'p2', 'p3', 'c1'])
+  it('preselects up to 3 current product angles only — scene/style/logo stay off', () => {
+    expect(preselectOfferReferenceIds(images, 'offer-a')).toEqual(['p1', 'p2', 'p3'])
+    const catalog = withPreselectedReferences(images, 'offer-a')
+    expect(catalog.find((row) => row.id === 'c1')?.selected).toBe(false)
+    expect(catalog.filter((row) => row.selected).map((row) => row.id)).toEqual(['p1', 'p2', 'p3'])
   })
 
-  it('uses exact confirmed IDs without silently adding extra product photos', () => {
+  it('uses exact confirmed product IDs; preferred style/logo stay off until opt-in', () => {
     const catalog = withPreselectedReferences(images, 'offer-a', ['p2', 'c1'])
-    expect(confirmedReferenceImageIds(catalog)).toEqual(['p2', 'c1'])
+    expect(confirmedReferenceImageIds(catalog)).toEqual(['p2'])
+    expect(catalog.find((row) => row.id === 'c1')?.selected).toBe(false)
     expect(hasSelectedProductReference(catalog)).toBe(true)
   })
 
@@ -49,9 +56,10 @@ describe('chat-shell reference selection', () => {
     )).toEqual({ keepIds: ['p1'], copyIds: ['other'] })
   })
 
-  it('caps selection at 4 and labels saved post copy', () => {
+  it('caps selection at 4 when user opts in to more refs', () => {
     const catalog = withPreselectedReferences(images, 'offer-a')
-    const extra = toggleReferenceSelection(catalog, 'p4')
+    const withStyle = toggleReferenceSelection(catalog, 'c1')
+    const extra = toggleReferenceSelection(withStyle, 'p4')
     expect(confirmedReferenceImageIds(extra)).toHaveLength(4)
     expect(postOptimizeVersionLabel('hard', 'es')).toBe('Post · Poco texto')
     expect(shouldPersistPostOptimizeVersion({
@@ -73,5 +81,19 @@ describe('chat-shell reference selection', () => {
     expect(catalog.find((row) => row.id === 'c1')?.kind).toBe('scene')
     expect(catalog.find((row) => row.id === 's1')?.kind).toBe('style')
     expect(catalog.find((row) => row.id === 'legacy')?.kind).toBe('scene')
+  })
+
+  it('classifies logo labels and excludes logo from productImageIds; logo stays off until opt-in', () => {
+    const catalog = catalogOfferReferences([
+      { id: 'p1', product_id: 'offer-a', kind: 'product', image_url: 'https://cdn/p1.webp', label: 'Producto' },
+      { id: 'logo1', product_id: 'offer-a', kind: 'context', image_url: 'https://cdn/logo.webp', label: 'Logo · marca' },
+    ])
+    expect(catalog.find((row) => row.id === 'logo1')?.kind).toBe('logo')
+    const preselected = withPreselectedReferences(catalog, 'offer-a', ['p1', 'logo1'])
+    expect(confirmedReferenceImageIds(preselected)).toEqual(['p1'])
+    expect(selectedBrandLogoUrl(preselected)).toBeUndefined()
+    const optedIn = toggleReferenceSelection(preselected, 'logo1')
+    expect(confirmedReferenceImageIds(optedIn)).toEqual(['p1'])
+    expect(selectedBrandLogoUrl(optedIn)).toBe('https://cdn/logo.webp')
   })
 })

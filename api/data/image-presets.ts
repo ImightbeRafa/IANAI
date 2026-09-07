@@ -1,5 +1,4 @@
-// =============================================
-// VENTA DIRECTA — Master Post Prompt
+import { buildProductSilhouetteBlock } from '../lib/product-creative-rules.js'
 // Director de Arte + Diseñador Gráfico + Copywriter
 // Built dynamically based on aspect ratio.
 // CRITICAL: No pixel values, no dimension annotations — the AI renders them.
@@ -629,19 +628,31 @@ export type ProductSubStyle = 'studio-hero' | 'lifestyle' | 'background-swap' | 
 
 type ProductLayoutBuilder = (aspectRatio: PostAspectRatio, backgroundDescription?: string) => string
 
-function buildProductFoundation(aspectRatio: PostAspectRatio, originalAR?: string): string {
+function buildProductFoundation(
+  aspectRatio: PostAspectRatio,
+  originalAR?: string,
+  hasReferenceImages = true
+): string {
   const isVertical = aspectRatio === '9:16'
   const isSquare = originalAR === '1:1'
   const formatLabel = isSquare ? 'cuadrado (1:1)' : isVertical ? 'vertical (9:16)' : 'vertical (3:4)'
 
-  return `═══════════════════════════════════════════════
-REGLA ABSOLUTA — FIDELIDAD DEL PRODUCTO (NO NEGOCIABLE)
-═══════════════════════════════════════════════
-Se adjuntan fotos del PRODUCTO REAL del usuario.
+  const fidelityBlock = hasReferenceImages
+    ? `Se adjuntan fotos del PRODUCTO REAL del usuario.
 - El producto DEBE verse EXACTAMENTE como en las fotos de referencia: misma forma, silueta, color, textura, proporciones, detalles y acabados.
 - NO inventes, NO rediseñes, NO reimagines, NO estilices el producto. Usa la referencia como fuente de verdad absoluta.
 - NO cartoon, NO 3D fake, NO ilustración, NO vectorización. El resultado debe ser FOTORREALISTA.
-- La forma del producto NO se modifica bajo ninguna circunstancia.
+- La forma del producto NO se modifica bajo ninguna circunstancia.`
+    : `No hay fotos de referencia adjuntas.
+- Generá el producto FOTORREALISTA descrito en CONTEXTO DEL PRODUCTO (nombre, categoría, descripción, oferta).
+- Mostrá la forma real del producto (ej. lámina/plancha de parches, frasco, prenda) — NO una caja sellada genérica si la descripción no es una caja.
+- Debe verse como foto de catálogo premium coherente con la marca y la oferta — NO cartel tipográfico, NO UI de app, NO texto "Generar post" ni "Professional product photograph".
+- NO cartoon, NO 3D fake, NO ilustración. Fotografía real de producto.`
+
+  return `═══════════════════════════════════════════════
+REGLA ABSOLUTA — FIDELIDAD DEL PRODUCTO (NO NEGOCIABLE)
+═══════════════════════════════════════════════
+${fidelityBlock}
 ═══════════════════════════════════════════════
 
 ═══════════════════════════════════════════════
@@ -669,29 +680,41 @@ RESOLUCIÓN: Máxima calidad disponible, detalles nítidos, sin artefactos.
 
 export interface ProductPromptContext {
   name?: string
+  brandName?: string
   category?: string
   description?: string
   targetAudience?: string
   niche?: AnuncioNiche
+  priceOffer?: string
+  differentiation?: string
+  market?: string
+  productSilhouette?: string
 }
 
 function buildProductContextBlock(ctx: ProductPromptContext | undefined, language: string): string {
   if (!ctx) return ''
-  const hasAny = !!(ctx.name || ctx.category || ctx.description || ctx.targetAudience || ctx.niche)
+  const hasAny = !!(ctx.name || ctx.brandName || ctx.category || ctx.description || ctx.targetAudience || ctx.niche || ctx.priceOffer || ctx.differentiation || ctx.productSilhouette)
   if (!hasAny) return ''
   const isES = language === 'es'
   const lines: string[] = []
+  if (ctx.brandName) lines.push(isES ? `- MARCA: ${ctx.brandName}` : `- BRAND: ${ctx.brandName}`)
   if (ctx.name) lines.push(isES ? `- PRODUCTO: ${ctx.name}` : `- PRODUCT: ${ctx.name}`)
   if (ctx.category) lines.push(isES ? `- CATEGORÍA: ${ctx.category}` : `- CATEGORY: ${ctx.category}`)
   if (ctx.description) lines.push(isES ? `- DESCRIPCIÓN: ${ctx.description.slice(0, 400)}` : `- DESCRIPTION: ${ctx.description.slice(0, 400)}`)
+  if (ctx.priceOffer) lines.push(isES ? `- OFERTA / PRECIO: ${ctx.priceOffer.slice(0, 120)}` : `- OFFER / PRICE: ${ctx.priceOffer.slice(0, 120)}`)
+  if (ctx.differentiation) lines.push(isES ? `- DIFERENCIADOR: ${ctx.differentiation.slice(0, 200)}` : `- DIFFERENTIATOR: ${ctx.differentiation.slice(0, 200)}`)
   if (ctx.targetAudience) lines.push(isES ? `- AUDIENCIA: ${ctx.targetAudience}` : `- AUDIENCE: ${ctx.targetAudience}`)
+  if (ctx.market) lines.push(isES ? `- MERCADO: ${ctx.market}` : `- MARKET: ${ctx.market}`)
   if (ctx.niche) lines.push(isES ? `- NICHO DETECTADO: ${ctx.niche}` : `- DETECTED NICHE: ${ctx.niche}`)
+  if (ctx.productSilhouette) {
+    lines.push(isES ? `- SILUETA / FORMA (OBLIGATORIA SIN REFS): ${ctx.productSilhouette.slice(0, 320)}` : `- SILHOUETTE / SHAPE (MANDATORY WITHOUT REFS): ${ctx.productSilhouette.slice(0, 320)}`)
+  }
   const header = isES
     ? '═══════════════════════════════════════════════\nCONTEXTO DEL PRODUCTO (USA ESTA INFORMACIÓN PARA CALIBRAR TODAS LAS DECISIONES VISUALES)\n═══════════════════════════════════════════════'
     : '═══════════════════════════════════════════════\nPRODUCT CONTEXT (USE THIS TO CALIBRATE EVERY VISUAL DECISION)\n═══════════════════════════════════════════════'
   const footer = isES
-    ? 'Adaptá superficies, props, iluminación, paleta y mood a la naturaleza específica de este producto — NO uses defaults genéricos.'
-    : 'Adapt surfaces, props, lighting, palette and mood to the specific nature of this product — do NOT use generic defaults.'
+    ? 'Adaptá superficies, props, iluminación, paleta y mood a la naturaleza específica de este producto — NO uses defaults genéricos ni empaques/cajas que no correspondan a la descripción.'
+    : 'Adapt surfaces, props, lighting, palette and mood to the specific nature of this product — do NOT use generic defaults or packaging/boxes that do not match the description.'
   return `${header}\n${lines.join('\n')}\n\n${footer}\n═══════════════════════════════════════════════\n\n`
 }
 
@@ -1026,6 +1049,8 @@ export interface ProductPromptOptions {
   backgroundDescription?: string
   productContext?: ProductPromptContext
   userInstructions?: string
+  hasReferenceImages?: boolean
+  productSilhouette?: string
 }
 
 export function buildProductPrompt(
@@ -1043,7 +1068,8 @@ export function buildProductPrompt(
     : (options || {})
 
   const normalizedAR: PostAspectRatio = aspectRatio === '1:1' ? '3:4' : aspectRatio
-  const foundation = buildProductFoundation(normalizedAR, aspectRatio)
+  const hasReferenceImages = opts.hasReferenceImages !== false
+  const foundation = buildProductFoundation(normalizedAR, aspectRatio, hasReferenceImages)
   const contextBlock = buildProductContextBlock(opts.productContext, language)
   const nicheOverlay = buildProductNicheOverlay(opts.productContext?.niche, language)
   const renderBlock = buildProductRenderBlock(language)
@@ -1059,11 +1085,18 @@ export function buildProductPrompt(
     ? `FORMATO OBLIGATORIO: Cuadrado 1:1 (1080×1080). La imagen DEBE ser perfectamente cuadrada.\n\n`
     : ''
 
+  const silhouetteSource = opts.productSilhouette || opts.productContext?.productSilhouette
+  const silhouetteBlock = buildProductSilhouetteBlock(
+    silhouetteSource,
+    language === 'es' ? 'es' : 'en',
+    { hasReferenceImages }
+  )
+
   const closing = isES
     ? 'GENERA LA IMAGEN. NO generes texto descriptivo ni justificación. Devuelve SOLO la imagen resultante.'
     : 'GENERATE THE IMAGE. Do NOT output descriptive text or justification. Return ONLY the resulting image.'
 
-  return `${formatOverride}${foundation}${contextBlock}${nicheOverlay}${layout}
+  return `${formatOverride}${foundation}${silhouetteBlock}${contextBlock}${nicheOverlay}${layout}
 
 ${renderBlock}${userBlock}${closing}`
 }

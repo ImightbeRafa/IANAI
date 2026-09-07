@@ -24,6 +24,7 @@ import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
 import { mapEnhanceModeToTier } from './chatShellImageEnhance'
 import { isBrandContextEditRequest, isBrandRuleRequest, isExplicitGenerationRequest, SETUP_COMPOSER_PLACEHOLDER } from './chatShellBrandSetupFlow'
+import { isCasualChatMessage } from './chatShellConversationalReply'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
 import type { ProductImage } from '../../services/database'
 import { useChatShellRollout } from './ChatShellRolloutContext'
@@ -63,6 +64,7 @@ export default function ChatShell({
   const [railTab, setRailTab] = useState<RailTab>('context')
   const [railPane, setRailPane] = useState<RailPane>('index')
   const [brandCreateOpen, setBrandCreateOpen] = useState(false)
+  const pendingWebsiteIngestRef = useRef<{ sessionId: string; url: string } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [lightbox, setLightbox] = useState<{
     url: string
@@ -340,6 +342,10 @@ export default function ChatShell({
       return brandSetup.changeContext(text)
     }
     if (brandSetup.visible && brandSetup.phase !== 'complete' && brandSetup.phase !== 'paused' && !isExplicitGenerationRequest(text)) {
+      // Greetings stay conversational — don't treat "hey" as brand ingest.
+      if (isCasualChatMessage(text)) {
+        return send(text)
+      }
       return brandSetup.reply(text)
     }
     return send(text)
@@ -399,11 +405,11 @@ export default function ChatShell({
     if (!lightbox) return
     const instruction = mode === 'rebuild'
       ? (language === 'es'
-        ? 'Reconstruye el diseño con una composición premium y jerarquía más clara. Conserva exactamente el producto, la marca, el logo, los colores, el texto correcto y todas las reglas guardadas.'
-        : 'Rebuild the design with a premium composition and clearer hierarchy. Preserve the exact product, brand, logo, correct copy, colors, and every saved rule.')
+        ? 'Reconstruye el anuncio en un lugar fotografiado completo (no vacío de estudio). Conserva exactamente el producto, la marca, el logo, el texto y el precio. La luz del producto debe coincidir con el entorno.'
+        : 'Rebuild the ad in a complete photographed place (not a studio void). Preserve the exact product, brand, logo, copy, and price. Product light must match the environment.')
       : (language === 'es'
-        ? 'Mejora la composición, iluminación, tipografía y acabado profesional sin cambiar el producto, la marca, el mensaje ni las reglas guardadas.'
-        : 'Improve composition, lighting, typography, and professional finish without changing the product, brand, message, or saved rules.')
+        ? 'Mejora mágica: si el fondo es un vacío de estudio o podio, reemplazalo por un lugar real coherente con el producto. Conserva producto, marca, logo, texto y precio; alineá la luz del producto al entorno.'
+        : 'Magic enhance: if the background is a studio void or podium, replace it with a real place that fits the product. Keep product, brand, logo, copy, and price; match product light to the environment.')
     await thread.editOfferImage(
       lightbox.productImageId,
       lightbox.url,
@@ -425,10 +431,30 @@ export default function ChatShell({
     setBrandCreateOpen(false)
   }, [workspace.busy])
 
-  const submitBrandCreate = useCallback(async (name: string) => {
-    const ok = await workspace.createBrand(name)
-    if (ok) setBrandCreateOpen(false)
+  const submitBrandCreate = useCallback(async (payload: { name: string; websiteUrl: string | null }) => {
+    const result = await workspace.createBrand(payload.name)
+    if (!result.ok) return
+    setBrandCreateOpen(false)
+    if (payload.websiteUrl) {
+      pendingWebsiteIngestRef.current = {
+        sessionId: result.sessionId,
+        url: payload.websiteUrl,
+      }
+    }
   }, [workspace])
+
+  const brandSetupReplyRef = useRef(brandSetup.reply)
+  brandSetupReplyRef.current = brandSetup.reply
+
+  // After Nueva marca with URL: kick ingest once the new session is active.
+  useEffect(() => {
+    const pending = pendingWebsiteIngestRef.current
+    const sessionId = workspace.activeSession?.id
+    if (!pending || !sessionId || pending.sessionId !== sessionId) return
+    if (brandSetup.busy) return
+    pendingWebsiteIngestRef.current = null
+    void brandSetupReplyRef.current(pending.url)
+  }, [workspace.activeSession?.id, brandSetup.busy])
 
   const handleCreateOffer = useCallback(async (name: string, type: ProductType) => {
     const brand = workspace.activeBrand
@@ -533,7 +559,7 @@ export default function ChatShell({
         activeSessionId={workspace.activeSessionId}
         loadingBusinesses={workspace.loadingBusinesses}
         loadingSessions={workspace.loadingSessions}
-        busy={thread.imageBusy}
+        busy={thread.imageBusy || workspace.busy}
         error={workspace.error}
         notice={workspace.notice}
         onSelectBrand={(brandId) => {
@@ -546,7 +572,7 @@ export default function ChatShell({
           setNavOpen(false)
         }}
         onNewChat={() => void workspace.createSession()}
-        onNewSession={() => void workspace.createSession()}
+        onNewSession={(brandId) => void workspace.createSession(brandId ? { brandId } : undefined)}
         onNewBrand={openBrandCreate}
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
         onDeleteBrand={(brandId) => void workspace.deleteBrand(brandId)}
@@ -628,22 +654,42 @@ export default function ChatShell({
           onEditScript={thread.handleEditScript}
           onSaveVersion={thread.handleSaveVersion}
           language={language}
+          kitReady={brandSetup.snapshot.stronglyComplete}
+          onStartBrandKit={() => {
+            if (!workspace.activeBrand) {
+              openBrandCreate()
+              return
+            }
+            createWidget.show()
+            void brandSetup.askStep('business')
+          }}
           imageClarify={thread.imageClarify}
           onAnswerImageClarify={(answer) => void thread.answerImageClarify(answer)}
           onCancelImageClarify={() => thread.cancelImageClarify()}
+          onBackImageClarify={() => thread.backImageClarify()}
           scriptClarify={thread.scriptClarify}
           onSelectImageOffer={thread.selectImageOffer}
           onLatestVersionChange={thread.registerScriptSnapshot}
           onAnswerScriptClarify={(answer) => void thread.answerScriptClarify(answer)}
           onCancelScriptClarify={() => thread.cancelScriptClarify()}
+          onBackScriptClarify={() => thread.backScriptClarify()}
+          creditQuote={thread.creditQuote}
+          onConfirmCreditQuote={() => void thread.confirmCreditQuote()}
+          onCancelCreditQuote={() => thread.cancelCreditQuote()}
           onOpenImagesRail={() => selectRailTab('images')}
           onUploadOfferReference={(file, kind, productId) => thread.uploadOfferImage(file, productId, kind)}
           onRemoveOfferReference={(imageId) => thread.removeOfferImage(imageId)}
           offerProductNames={Object.fromEntries(thread.brandProducts.map((product) => [product.id, product.name]))}
-          onPreparePostFromScript={(scriptText, density) => thread.prepareScriptForPost(scriptText, density)}
-          onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) =>
+          onPreparePostFromScript={(scriptText, density) => {
+            if (!brandSetup.snapshot.stronglyComplete) {
+              return Promise.reject(new Error('Primero el kit'))
+            }
+            return thread.prepareScriptForPost(scriptText, density)
+          }}
+          onGenerateImageFromScript={(scriptText, productId, scriptTitle, options) => {
+            if (!brandSetup.snapshot.stronglyComplete) return
             void thread.generateImageFromScript(scriptText, productId, scriptTitle, options)
-          }
+          }}
           onOpenOfferImage={openLightbox}
           onEditOfferImage={(productImageId, imageUrl, instruction, productId) =>
             thread.editOfferImage(productImageId, imageUrl, instruction, productId)
@@ -664,79 +710,93 @@ export default function ChatShell({
               available={createWidget.available}
               hidden={createWidget.hidden}
               title={
-                (brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore)
+                brandSetup.snapshot.stronglyComplete
                   ? t.kitReady
-                  : t.kitTitle
+                  : t.kitNotReady
               }
               onHide={createWidget.hide}
               onShow={createWidget.show}
-              actions={[
+              actions={(() => {
+                const kitListo = brandSetup.snapshot.stronglyComplete
+                const blocked = !kitListo
+                const baseDisabled = brandSetup.busy || thread.loadingMessages
+                return [
                 {
-                  id: 'scripts',
+                  id: 'scripts' as const,
                   label: t.createScriptsShort,
                   active: activeCreateAction === 'scripts',
-                  disabled: brandSetup.busy || thread.loadingMessages,
+                  disabled: baseDisabled || blocked,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     thread.cancelImageClarify()
-                    void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                    thread.startScriptsFlow()
                   },
                 },
                 {
-                  id: 'post',
+                  id: 'post' as const,
                   label: t.createPostShort,
                   active: activeCreateAction === 'post',
-                  disabled: brandSetup.busy || thread.loadingMessages,
+                  disabled: baseDisabled || blocked,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     thread.cancelScriptClarify()
-                    void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                    thread.startPostFlow()
                   },
                 },
                 {
-                  id: 'product',
+                  id: 'product' as const,
                   label: t.createProductShort,
                   active: activeCreateAction === 'product',
-                  disabled: brandSetup.busy || thread.loadingMessages,
+                  disabled: baseDisabled || blocked,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     thread.cancelScriptClarify()
-                    patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
-                    void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                    thread.startProductFotoFlow()
                   },
                 },
                 {
-                  id: 'bulk',
+                  id: 'bulk' as const,
                   label: t.createBulkShort,
                   active: false,
-                  disabled: brandSetup.busy || thread.loadingMessages || !workspace.activeBrand,
+                  disabled: baseDisabled || blocked || !workspace.activeBrand,
+                  blockedReason: blocked ? t.kitBlockedHint : undefined,
                   onClick: () => {
+                    if (blocked) return
                     setBulkCount(10)
                     setBulkOpen(true)
                   },
                 },
-              ]}
+              ]
+              })()}
               reviewPanel={(
             <ChatBrandProfileCard
               key={workspace.activeBrand?.id || 'no-brand'}
               language={language}
               facts={brandSetup.facts}
               busy={brandSetup.busy || thread.loadingMessages}
-              confirmed={brandSetup.facts.offerConfirmed || brandSetup.phase === 'complete' || brandSetup.snapshot.offerCore}
+              confirmed={brandSetup.snapshot.stronglyComplete}
               evidence={brandSetup.siteEvidence}
               pages={brandSetup.sitePages}
               showCreateActions={false}
               onSave={brandSetup.saveProfile}
               onUpload={brandSetup.uploadBrandAsset}
               onCreateScripts={() => {
+                if (!brandSetup.snapshot.stronglyComplete) return
                 thread.cancelImageClarify()
-                void handleSend(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+                thread.startScriptsFlow()
               }}
               onCreatePost={() => {
+                if (!brandSetup.snapshot.stronglyComplete) return
                 thread.cancelScriptClarify()
-                void handleSend(language === 'es' ? 'Quiero crear un post' : 'I want to create a post')
+                thread.startPostFlow()
               }}
               onCreateProductPhoto={() => {
+                if (!brandSetup.snapshot.stronglyComplete) return
                 thread.cancelScriptClarify()
-                patchImagePreferences({ style: { kind: 'product', productSubStyle: 'studio-hero' } })
-                void handleSend(language === 'es' ? 'Quiero crear una foto de producto' : 'I want to create a product photo')
+                thread.startProductFotoFlow()
               }}
               onCreateOther={() => void thread.persistTurn(
                 'assistant',
@@ -799,6 +859,7 @@ export default function ChatShell({
         imagePrefs={thread.imagePrefs}
         onPatchImagePreferences={thread.patchImagePreferences}
         onStartLogo={startLogo}
+        onUploadBrandLogo={(file) => void brandSetup.uploadBrandAsset(file, 'logo')}
         scriptSettings={thread.scriptSettings}
         onScriptSettingsChange={thread.setScriptSettings}
         onGenerateScripts={() => void generateScripts()}

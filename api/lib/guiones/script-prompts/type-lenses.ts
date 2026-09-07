@@ -9,8 +9,8 @@ export function getTypeLens(scriptType: ScriptFramework, ctaStrength: CTAStrengt
 
   const lenses: Record<ScriptFramework, string> = {
     venta_directa: isEs
-      ? `TIPO VENTA DIRECTA: elige un subtipo claro: oferta directa, precio/valor, comprador caliente, logistica/riesgo, drop, prueba/hito o caso de uso. Debe vender con claridad y detalles, no con hype. ${salesCta}`
-      : `DIRECT SALE TYPE: choose a clear subtype: direct offer, price/value, hot buyer filter, logistics/risk reversal, drop, proof/milestone, or use case. Sell with clarity and details, not hype. ${salesCta}`,
+      ? `TIPO VENTA DIRECTA: elegí UN subtipo (oferta directa, precio/valor, comprador caliente, logistica/riesgo, drop, prueba/hito o caso de uso) y escribí hablado, con tensión o deseo concreto — no "Comprá tu X de Marca". Diferenciador real, no slogan. Logística solo si aporta. Sin placeholders vacíos. Soná tan natural como desvalidar, pero vendiendo en directo. ${salesCta}`
+      : `DIRECT SALE TYPE: pick ONE subtype (direct offer, price/value, hot buyer, logistics/risk, drop, proof/milestone, or use case) and write spoken copy with concrete desire — not "Buy your X from Brand". Real differentiator, not slogan. Logistics only if it helps. No empty placeholders. Sound as natural as invalidate-alternatives, while selling directly. ${salesCta}`,
     desvalidar_alternativas: isEs
       ? `TIPO DESVALIDAR ALTERNATIVAS: no siempre significa atacar competidores. Ayuda al comprador a decidir mejor. Elige un subtipo: hidden_cost, wrong_fit, checklist, myth_correction, old_way_vs_better_way, use_case_split o spec_process_contrast. Nunca inventes defectos de competidores. Si faltan datos, usa checklist con placeholders.`
       : `INVALIDATE ALTERNATIVES TYPE: this does not always mean attacking competitors. Help the buyer make a smarter decision. Choose one subtype: hidden_cost, wrong_fit, checklist, myth_correction, old_way_vs_better_way, use_case_split, or spec_process_contrast. Never invent competitor flaws. If facts are missing, use a checklist with placeholders.`,
