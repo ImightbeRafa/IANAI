@@ -1,0 +1,123 @@
+/* Advance public space atmosphere — CSS-first, GPU-cheap */
+
+.space-field {
+  --space-cyan: #2de2ff;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  isolation: isolate;
+}
+
+.space-field--fixed {
+  position: fixed;
+}
+
+.space-field__nebula {
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(ellipse 55% 40% at 18% 22%, rgba(45, 226, 255, 0.14), transparent 62%),
+    radial-gradient(ellipse 45% 35% at 82% 18%, rgba(45, 226, 255, 0.09), transparent 58%),
+    radial-gradient(ellipse 60% 50% at 50% 88%, rgba(20, 80, 120, 0.22), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 70% 60%, rgba(45, 226, 255, 0.05), transparent 65%);
+  transform: translateZ(0);
+}
+
+.space-field__stars {
+  position: absolute;
+  inset: 0;
+}
+
+.space-field__star {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.55;
+  transform: translate3d(-50%, -50%, 0);
+  will-change: opacity;
+}
+
+.space-field__star--bright {
+  background: var(--space-cyan);
+  box-shadow: 0 0 6px rgba(45, 226, 255, 0.55);
+}
+
+.space-field--twinkle .space-field__star {
+  animation: space-twinkle var(--twinkle-dur, 4.2s) ease-in-out var(--twinkle-delay, 0s) infinite;
+}
+
+.space-field__shoot {
+  position: absolute;
+  width: 110px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), var(--space-cyan));
+  opacity: 0;
+  transform: rotate(-28deg);
+  filter: drop-shadow(0 0 4px rgba(45, 226, 255, 0.65));
+  will-change: transform, opacity;
+}
+
+.space-field--shoot .space-field__shoot {
+  animation: space-shoot var(--shoot-dur, 7.5s) linear var(--shoot-delay, 0s) infinite;
+}
+
+.space-field__shoot--2 {
+  width: 78px;
+  opacity: 0;
+}
+
+@keyframes space-twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes space-shoot {
+  0%,
+  88% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-28deg) scaleX(0.35);
+  }
+  90% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(-28deg) scaleX(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(52vw, 34vh, 0) rotate(-28deg) scaleX(0.2);
+  }
+}
+
+@media (max-width: 767px) {
+  .space-field__nebula {
+    background:
+      radial-gradient(ellipse 70% 45% at 50% 10%, rgba(45, 226, 255, 0.12), transparent 60%),
+      radial-gradient(ellipse 55% 40% at 20% 70%, rgba(20, 80, 120, 0.18), transparent 65%);
+  }
+
+  .space-field__shoot {
+    width: 72px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .space-field--twinkle .space-field__star,
+  .space-field--shoot .space-field__shoot {
+    animation: none !important;
+  }
+
+  .space-field__star {
+    opacity: 0.45;
+  }
+
+  .space-field__shoot {
+    display: none;
+  }
+}

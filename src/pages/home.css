@@ -1,4 +1,4 @@
-/* Advance public homepage — CoS locked pixel language (tight + readable) */
+/* Advance public homepage — Astra-depth glow-up (tight + alive) */
 
 .home-page {
   --home-bg: #07090d;
@@ -12,11 +12,20 @@
   --home-card: rgba(255, 255, 255, 0.03);
   --home-font: 'Sora', 'Montserrat', system-ui, sans-serif;
   --home-fan-ease: cubic-bezier(0.18, 1.15, 0.28, 1);
+  --home-scroll: 0;
+  position: relative;
   background: var(--home-bg);
   color: var(--home-text);
   font-family: var(--home-font);
   min-height: 100vh;
   overflow-x: clip;
+  isolation: isolate;
+}
+
+.home-page__space {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
 }
 
 .home-page a {
@@ -37,7 +46,7 @@
 /* —— Nav —— */
 .home-nav {
   position: fixed;
-  top: 0.55rem;
+  top: max(0.45rem, env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
   z-index: 40;
@@ -46,7 +55,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.45rem 0.55rem 0.45rem 0.9rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
   background: rgba(12, 16, 22, 0.62);
   backdrop-filter: blur(16px);
@@ -63,6 +72,11 @@
   font-size: 0.95rem;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.home-nav__logo {
+  flex-shrink: 0;
+  line-height: 0;
 }
 
 .home-nav__mark {
@@ -173,18 +187,20 @@
   border-color: transparent;
 }
 
-/* —— Hero: dense centered cluster, fill the viewport —— */
+/* —— Hero: dense composition, no leftover air —— */
 .home-hero {
   position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.55rem;
-  padding: 3.7rem 0.85rem 0;
+  gap: 0.35rem;
+  padding: 3.35rem 0.85rem 0.35rem;
   width: 100%;
   margin: 0 auto;
   min-height: 100svh;
+  min-height: 100dvh;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -205,6 +221,7 @@
   z-index: 2;
   text-align: center;
   flex: 0 0 auto;
+  animation: home-copy-in 0.7s cubic-bezier(0.18, 1.05, 0.28, 1) 0.08s both;
 }
 
 @media (min-width: 960px) {
@@ -221,10 +238,17 @@
 
 .home-hero__title {
   margin: 0;
-  font-size: clamp(2.15rem, 4.6vw, 3.2rem);
-  line-height: 1.02;
+  font-size: clamp(1.85rem, 7.2vw, 2.35rem);
+  line-height: 1.05;
   font-weight: 700;
   letter-spacing: -0.04em;
+}
+
+@media (min-width: 960px) {
+  .home-hero__title {
+    font-size: clamp(2.15rem, 4.6vw, 3.2rem);
+    line-height: 1.02;
+  }
 }
 
 .home-hero__title-accent {
@@ -239,12 +263,20 @@
 }
 
 .home-hero__sub {
-  margin: 0.65rem 0 0;
-  font-size: clamp(1.02rem, 1.5vw, 1.125rem);
-  line-height: 1.4;
+  margin: 0.45rem 0 0;
+  font-size: clamp(0.95rem, 3.4vw, 1.05rem);
+  line-height: 1.35;
   font-weight: 500;
   color: rgba(244, 247, 251, 0.88);
   max-width: 28rem;
+}
+
+@media (min-width: 960px) {
+  .home-hero__sub {
+    margin-top: 0.65rem;
+    font-size: clamp(1.02rem, 1.5vw, 1.125rem);
+    line-height: 1.4;
+  }
 }
 
 @media (max-width: 959px) {
@@ -255,7 +287,13 @@
 }
 
 .home-hero__cta {
-  margin-top: 1rem;
+  margin-top: 0.75rem;
+}
+
+@media (min-width: 960px) {
+  .home-hero__cta {
+    margin-top: 1rem;
+  }
 }
 
 @media (max-width: 959px) {
@@ -263,19 +301,28 @@
     display: flex;
     justify-content: center;
   }
+
+  .home-hero__cta .home-btn {
+    min-height: 2.65rem;
+    padding: 0.55rem 1.25rem;
+    font-size: 0.9rem;
+  }
 }
 
 .home-hero__fan-wrap {
   position: relative;
+  z-index: 2;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: flex-end;
   width: min(100%, 38rem);
   flex: 1 1 auto;
   min-height: 0;
-  height: auto;
+  /* Fill leftover viewport under copy — kill dead black */
+  height: clamp(18rem, calc(100svh - 11.5rem), 34rem);
   margin: 0;
   overflow: hidden;
+  padding-bottom: 0.15rem;
 }
 
 @media (min-width: 960px) {
@@ -288,6 +335,17 @@
     overflow: visible;
     align-items: center;
     padding-bottom: 0;
+  }
+}
+
+@keyframes home-copy-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -311,17 +369,19 @@
   --fan-i: 0;
   position: absolute;
   left: 50%;
-  top: 0;
-  bottom: auto;
-  width: min(78vw, 17rem);
+  top: auto;
+  bottom: 0;
+  width: min(72vw, 15.5rem);
   aspect-ratio: 9 / 16;
-  margin-left: calc(min(78vw, 17rem) / -2);
+  max-height: 92%;
+  width: min(72vw, 15.5rem, calc(92% * 9 / 16));
+  margin-left: calc(min(72vw, 15.5rem, calc(92% * 9 / 16)) / -2);
   border-radius: 1.05rem;
   overflow: hidden;
   background: #111;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  transform-origin: 50% 12%;
+  transform-origin: 50% 88%;
   transform: translate3d(0, 2%, 0) rotate(0deg) scale(0.82);
   opacity: 0.92;
   transition:
@@ -336,7 +396,9 @@
 @media (min-width: 960px) {
   .home-fan__card {
     top: 50%;
+    bottom: auto;
     width: clamp(12.25rem, 16.5vw, 15.25rem);
+    max-height: none;
     margin-left: calc(clamp(12.25rem, 16.5vw, 15.25rem) / -2);
     margin-top: calc(clamp(12.25rem, 16.5vw, 15.25rem) * 16 / 9 / -2);
     transform-origin: 50% 55%;
@@ -485,9 +547,35 @@
 
 /* —— Sections: wider, less air —— */
 .home-section {
+  position: relative;
+  z-index: 4;
   max-width: 1280px;
   margin: 0 auto;
   padding: 2.35rem 1.25rem;
+}
+
+.home-reveal {
+  animation: home-reveal 0.65s cubic-bezier(0.18, 1.05, 0.28, 1) both;
+  animation-timeline: view();
+  animation-range: entry 8% cover 28%;
+}
+
+@keyframes home-reveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@supports not (animation-timeline: view()) {
+  .home-reveal {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 @media (min-width: 960px) {
@@ -696,6 +784,8 @@
 }
 
 .home-final {
+  position: relative;
+  z-index: 4;
   text-align: center;
   padding: 2.25rem 1.25rem 1.5rem;
   max-width: 40rem;
@@ -719,6 +809,8 @@
 }
 
 .home-footer {
+  position: relative;
+  z-index: 4;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1.15rem 1.25rem 1.5rem;
   text-align: center;
@@ -730,5 +822,10 @@
   .home-fan__card {
     transition: none;
     transition-delay: 0ms !important;
+  }
+
+  .home-hero__copy,
+  .home-reveal {
+    animation: none !important;
   }
 }

@@ -1,0 +1,141 @@
+/* Public auth shell — Advance black + cyan, mobile-tight */
+
+.public-auth {
+  --pa-bg: #07090d;
+  --pa-cyan: #2de2ff;
+  --pa-cyan-ink: #041018;
+  --pa-text: #f4f7fb;
+  --pa-muted: rgba(244, 247, 251, 0.62);
+  --pa-font: 'Sora', 'Montserrat', system-ui, sans-serif;
+  position: relative;
+  min-height: 100svh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(1.25rem, env(safe-area-inset-bottom));
+  background: var(--pa-bg);
+  color: var(--pa-text);
+  font-family: var(--pa-font);
+  overflow-x: clip;
+}
+
+.public-auth--compact {
+  align-items: flex-start;
+  padding-top: max(1.25rem, env(safe-area-inset-top));
+}
+
+.public-auth__space {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.public-auth__inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 26.5rem;
+  animation: pa-rise 0.55s cubic-bezier(0.18, 1.05, 0.28, 1) both;
+}
+
+.public-auth__brand {
+  text-align: center;
+  margin-bottom: 1.15rem;
+}
+
+.public-auth__brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.public-auth__wordmark {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.public-auth__subtitle {
+  margin: 0.55rem 0 0;
+  color: var(--pa-muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.public-auth__panel {
+  border-radius: 1.1rem;
+  border: 1px solid rgba(45, 226, 255, 0.28);
+  background: rgba(12, 16, 22, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    0 0 0 1px rgba(45, 226, 255, 0.06),
+    0 18px 48px rgba(0, 0, 0, 0.45);
+  padding: 1.15rem 1.05rem 1.25rem;
+}
+
+@media (min-width: 480px) {
+  .public-auth__panel {
+    padding: 1.35rem 1.35rem 1.45rem;
+  }
+}
+
+/* Soften nested legacy `.card` when used inside shell */
+.public-auth__panel > .card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.public-auth .input-field {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--pa-text);
+}
+
+.public-auth .input-field:focus {
+  border-color: rgba(45, 226, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(45, 226, 255, 0.12);
+}
+
+.public-auth .btn-primary {
+  background: var(--pa-cyan);
+  color: var(--pa-cyan-ink);
+  font-weight: 800;
+  border-radius: 999px;
+  box-shadow: 0 0 22px rgba(45, 226, 255, 0.28);
+}
+
+.public-auth .btn-primary:hover {
+  filter: brightness(1.04);
+}
+
+.public-auth a {
+  color: var(--pa-cyan);
+}
+
+.public-auth a:hover {
+  filter: brightness(1.08);
+}
+
+@keyframes pa-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-auth__inner {
+    animation: none;
+  }
+}

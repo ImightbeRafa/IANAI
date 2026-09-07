@@ -75,6 +75,18 @@ No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit a
 
 No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
 
+## 2026-09-07 — Public site Astra glow-up (space + motion)
+
+**Area:** public homepage + auth
+**Files:** `Home.tsx`, `home.css`, `Login.tsx`, `Signup.tsx`, `ForgotPassword.tsx`, `AdvanceLogo`/`advance-logo.css`, `components/public/*`, `hooks/usePrefersReducedMotion.ts`, `hooks/useHomeScrollProgress.ts`
+
+- Homepage hero: space field (stars + nebula + occasional shooting stars), floating creatives that pop in/out, scroll-organized side rails on desktop, premium logo motion.
+- Mobile homepage: tighter hero stack, fan fills leftover viewport, fewer particles.
+- Login / Signup / ForgotPassword share `PublicAuthShell` (black+cyan glass + space vibe), mobile-safe.
+- `prefers-reduced-motion` disables heavy motion; no chat-shell / gift / invite / Meta changes.
+
+No merge.
+
 ## 2026-09-07 — First-open tour: real chrome + clear feedback CTA
 
 **Area:** chat-shell

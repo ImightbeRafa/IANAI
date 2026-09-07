@@ -1,6 +1,7 @@
 /**
- * Advance public homepage — locked CoS pixel target (PR #34 Preview).
+ * Advance public homepage — content + pricing (locked).
  * Spanish primary; English mirror for language toggle.
+ * Visual motion lives in Home.tsx + public/* components.
  */
 
 export const HOME_CYAN = '#2de2ff'
