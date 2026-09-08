@@ -13,7 +13,6 @@ type Star = {
 }
 
 type SpaceFieldProps = {
-  /** Desktop star count before mobile reduction */
   density?: 'hero' | 'auth'
   className?: string
   fixed?: boolean
@@ -35,10 +34,10 @@ function seededStars(count: number, seed: number): Star[] {
       id: i,
       x: r1 * 100,
       y: r2 * 100,
-      size: 1.15 + r3 * 2.35,
-      delay: r4 * 5.5,
-      dur: 2.8 + r5 * 3.4,
-      bright: r3 > 0.82,
+      size: 1 + r3 * 2.1,
+      delay: r4 * 6,
+      dur: 3 + r5 * 4,
+      bright: r3 > 0.84,
     }
   })
 }
@@ -55,10 +54,29 @@ export default function SpaceField({ density = 'hero', className = '', fixed = f
     return () => mq.removeEventListener('change', sync)
   }, [])
 
-  const stars = useMemo(() => {
-    const base = density === 'auth' ? 56 : 96
-    const count = reduced ? Math.min(28, base) : narrow ? Math.round(base * 0.48) : base
-    return seededStars(count, density === 'auth' ? 42 : 17)
+  const { far, near } = useMemo(() => {
+    const baseFar = density === 'auth' ? 36 : 70
+    const baseNear = density === 'auth' ? 18 : 36
+    const farCount = reduced
+      ? Math.min(18, baseFar)
+      : narrow
+        ? Math.round(baseFar * 0.45)
+        : baseFar
+    const nearCount = reduced
+      ? Math.min(10, baseNear)
+      : narrow
+        ? Math.round(baseNear * 0.4)
+        : baseNear
+    return {
+      far: seededStars(farCount, density === 'auth' ? 11 : 17).map((s) => ({
+        ...s,
+        size: Math.max(0.9, s.size * 0.7),
+      })),
+      near: seededStars(nearCount, density === 'auth' ? 29 : 41).map((s) => ({
+        ...s,
+        size: s.size * 1.15,
+      })),
+    }
   }, [density, narrow, reduced])
 
   const showShoots = !reduced && !narrow
@@ -76,10 +94,10 @@ export default function SpaceField({ density = 'hero', className = '', fixed = f
   return (
     <div className={classes} aria-hidden="true">
       <div className="space-field__nebula" />
-      <div className="space-field__stars">
-        {stars.map((star) => (
+      <div className="space-field__stars space-field__stars--far">
+        {far.map((star) => (
           <span
-            key={star.id}
+            key={`f-${star.id}`}
             className={`space-field__star${star.bright ? ' space-field__star--bright' : ''}`}
             style={{
               left: `${star.x}%`,
@@ -92,33 +110,49 @@ export default function SpaceField({ density = 'hero', className = '', fixed = f
           />
         ))}
       </div>
+      <div className="space-field__stars space-field__stars--near">
+        {near.map((star) => (
+          <span
+            key={`n-${star.id}`}
+            className={`space-field__star${star.bright ? ' space-field__star--bright' : ''}`}
+            style={{
+              left: `${star.x}%`,
+              top: `${star.y}%`,
+              width: `${star.size}px`,
+              height: `${star.size}px`,
+              ['--twinkle-delay' as string]: `${star.delay}s`,
+              ['--twinkle-dur' as string]: `${star.dur * 0.85}s`,
+            }}
+          />
+        ))}
+      </div>
       {showShoots ? (
         <>
           <span
             className="space-field__shoot"
             style={{
-              left: '8%',
-              top: '18%',
-              ['--shoot-delay' as string]: '1.2s',
-              ['--shoot-dur' as string]: '8.4s',
+              left: '6%',
+              top: '16%',
+              ['--shoot-delay' as string]: '1.4s',
+              ['--shoot-dur' as string]: '11s',
             }}
           />
           <span
             className="space-field__shoot space-field__shoot--2"
             style={{
-              left: '55%',
-              top: '8%',
-              ['--shoot-delay' as string]: '4.8s',
-              ['--shoot-dur' as string]: '9.6s',
+              left: '58%',
+              top: '10%',
+              ['--shoot-delay' as string]: '5.6s',
+              ['--shoot-dur' as string]: '13s',
             }}
           />
           <span
-            className="space-field__shoot"
+            className="space-field__shoot space-field__shoot--3"
             style={{
-              left: '22%',
-              top: '62%',
-              ['--shoot-delay' as string]: '7.1s',
-              ['--shoot-dur' as string]: '10.2s',
+              left: '24%',
+              top: '68%',
+              ['--shoot-delay' as string]: '8.8s',
+              ['--shoot-dur' as string]: '12.5s',
             }}
           />
         </>

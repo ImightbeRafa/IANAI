@@ -1,4 +1,4 @@
-/* Advance public space atmosphere — CSS-first, GPU-cheap */
+/* Advance public space atmosphere — layered depth, CSS-first */
 
 .space-field {
   --space-cyan: #2de2ff;
@@ -16,13 +16,13 @@
 
 .space-field__nebula {
   position: absolute;
-  inset: -20%;
+  inset: -25%;
   background:
-    radial-gradient(ellipse 55% 42% at 16% 20%, rgba(45, 226, 255, 0.22), transparent 62%),
-    radial-gradient(ellipse 48% 38% at 84% 16%, rgba(45, 226, 255, 0.16), transparent 58%),
-    radial-gradient(ellipse 70% 55% at 50% 92%, rgba(18, 70, 110, 0.34), transparent 70%),
-    radial-gradient(ellipse 42% 32% at 68% 58%, rgba(45, 226, 255, 0.1), transparent 65%),
-    radial-gradient(ellipse 30% 24% at 40% 40%, rgba(80, 140, 200, 0.08), transparent 70%);
+    radial-gradient(ellipse 58% 44% at 14% 18%, rgba(45, 226, 255, 0.2), transparent 60%),
+    radial-gradient(ellipse 40% 36% at 86% 12%, rgba(45, 226, 255, 0.14), transparent 58%),
+    radial-gradient(ellipse 70% 50% at 48% 95%, rgba(12, 48, 78, 0.38), transparent 68%),
+    radial-gradient(ellipse 36% 28% at 62% 48%, rgba(45, 226, 255, 0.07), transparent 65%),
+    radial-gradient(ellipse 28% 22% at 32% 36%, rgba(90, 140, 190, 0.07), transparent 70%);
   transform: translateZ(0);
 }
 
@@ -31,81 +31,106 @@
   inset: 0;
 }
 
+.space-field__stars--far .space-field__star {
+  opacity: 0.35;
+}
+
+.space-field__stars--near .space-field__star {
+  opacity: 0.85;
+}
+
 .space-field__star {
   position: absolute;
   border-radius: 50%;
   background: #fff;
-  opacity: 0.72;
   transform: translate3d(-50%, -50%, 0);
   will-change: opacity;
-  box-shadow: 0 0 2px rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 2px rgba(255, 255, 255, 0.3);
 }
 
 .space-field__star--bright {
   background: var(--space-cyan);
-  box-shadow: 0 0 8px rgba(45, 226, 255, 0.75), 0 0 14px rgba(45, 226, 255, 0.35);
+  box-shadow: 0 0 7px rgba(45, 226, 255, 0.7), 0 0 14px rgba(45, 226, 255, 0.28);
 }
 
-.space-field--twinkle .space-field__star {
-  animation: space-twinkle var(--twinkle-dur, 4.2s) ease-in-out var(--twinkle-delay, 0s) infinite;
+.space-field--twinkle .space-field__stars--far .space-field__star {
+  animation: space-twinkle-far var(--twinkle-dur, 5.5s) ease-in-out var(--twinkle-delay, 0s) infinite;
+}
+
+.space-field--twinkle .space-field__stars--near .space-field__star {
+  animation: space-twinkle-near var(--twinkle-dur, 3.8s) ease-in-out var(--twinkle-delay, 0s) infinite;
 }
 
 .space-field__shoot {
   position: absolute;
-  width: 110px;
+  width: 120px;
   height: 1.5px;
   border-radius: 999px;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), var(--space-cyan));
   opacity: 0;
-  transform: rotate(-28deg);
-  filter: drop-shadow(0 0 4px rgba(45, 226, 255, 0.65));
+  transform: rotate(-32deg);
+  filter: drop-shadow(0 0 5px rgba(45, 226, 255, 0.7));
   will-change: transform, opacity;
 }
 
 .space-field--shoot .space-field__shoot {
-  animation: space-shoot var(--shoot-dur, 7.5s) linear var(--shoot-delay, 0s) infinite;
+  animation: space-shoot var(--shoot-dur, 9s) linear var(--shoot-delay, 0s) infinite;
 }
 
 .space-field__shoot--2 {
-  width: 78px;
-  opacity: 0;
+  width: 72px;
 }
 
-@keyframes space-twinkle {
+.space-field__shoot--3 {
+  width: 96px;
+  transform: rotate(-38deg);
+}
+
+@keyframes space-twinkle-far {
   0%,
   100% {
-    opacity: 0.25;
+    opacity: 0.15;
   }
   50% {
-    opacity: 0.9;
+    opacity: 0.5;
+  }
+}
+
+@keyframes space-twinkle-near {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
   }
 }
 
 @keyframes space-shoot {
   0%,
-  88% {
+  86% {
     opacity: 0;
-    transform: translate3d(0, 0, 0) rotate(-28deg) scaleX(0.35);
+    transform: translate3d(0, 0, 0) rotate(-32deg) scaleX(0.3);
   }
-  90% {
+  89% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) rotate(-28deg) scaleX(1);
+    transform: translate3d(0, 0, 0) rotate(-32deg) scaleX(1);
   }
   100% {
     opacity: 0;
-    transform: translate3d(52vw, 34vh, 0) rotate(-28deg) scaleX(0.2);
+    transform: translate3d(48vw, 30vh, 0) rotate(-32deg) scaleX(0.15);
   }
 }
 
 @media (max-width: 767px) {
   .space-field__nebula {
     background:
-      radial-gradient(ellipse 70% 45% at 50% 10%, rgba(45, 226, 255, 0.12), transparent 60%),
-      radial-gradient(ellipse 55% 40% at 20% 70%, rgba(20, 80, 120, 0.18), transparent 65%);
+      radial-gradient(ellipse 72% 48% at 50% 8%, rgba(45, 226, 255, 0.14), transparent 58%),
+      radial-gradient(ellipse 55% 40% at 18% 72%, rgba(16, 55, 90, 0.22), transparent 65%);
   }
 
   .space-field__shoot {
-    width: 72px;
+    display: none;
   }
 }
 
@@ -116,7 +141,7 @@
   }
 
   .space-field__star {
-    opacity: 0.45;
+    opacity: 0.4;
   }
 
   .space-field__shoot {

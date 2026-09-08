@@ -4,9 +4,9 @@ import { usePrefersReducedMotion } from './usePrefersReducedMotion'
 /**
  * Tracks how far the hero has scrolled out (0 → 1) and writes
  * `--home-scroll` on the page root for CSS-driven motion.
- * Also toggles `.is-past-hero` so side rails engage.
- * Under prefers-reduced-motion: still toggles past-hero (static rails),
- * but adds `.is-reduced-motion` so marquees/twinkle stay off.
+ * Also toggles `.is-past-hero` so sparse edge ghosts engage.
+ * Under prefers-reduced-motion: still toggles past-hero (static ghosts),
+ * but adds `.is-reduced-motion` so pop/twinkle stay off.
  *
  * `enabled` must flip true only when `.home-page` / `.home-hero` are mounted
  * (Home early-returns during auth load — without `enabled` the effect never rebinds).

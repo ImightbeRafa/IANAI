@@ -107,7 +107,7 @@ export default function Home() {
   return (
     <div className="home-page" ref={pageRef}>
       <SpaceField density="hero" className="home-page__space" />
-      <FloatingCreatives reduced={reduced} railsOnly />
+      <FloatingCreatives reduced={reduced} edgesOnly />
 
       <nav className="home-nav" aria-label="Advance AI">
         <Link to="/" className="home-nav__brand">

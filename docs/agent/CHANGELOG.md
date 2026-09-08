@@ -74,6 +74,17 @@ No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit a
 - Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
 
 No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+## 2026-09-08 — Public site: sparse edge ghosts (kill neat rails)
+
+**Area:** public homepage
+**Files:** `FloatingCreatives.tsx`, `floating-creatives.css`, `home.css`, `SpaceField.tsx`, `space-field.css`, `useHomeScrollProgress.ts`
+
+- Rafael: neat side rails + saturated scroll looked like a product shelf. Replaced with irregular orbital hero floaties + max ~5 quiet edge ghosts (low opacity, desaturated, staggered pop).
+- Mid-page: softer nebula; no dense neon L/R columns beside Galería.
+- Keep mobile musts (H1 clear of sticky nav, no leftover air under CTA), no black card flash, `prefers-reduced-motion` calm static path.
+
+No merge. Chat-shell / gift / tour untouched.
+
 ## 2026-09-08 — Public site WD must-fix: rails + mobile + no black flash
 
 **Area:** public homepage

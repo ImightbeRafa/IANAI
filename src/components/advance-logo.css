@@ -28,14 +28,14 @@
 }
 
 .advance-logo.is-animate .advance-logo__img {
-  filter: drop-shadow(0 0 10px rgba(45, 226, 255, 0.35));
-  animation: advance-logo-glow 3.6s ease-in-out 0.7s infinite;
+  filter: drop-shadow(0 0 12px rgba(45, 226, 255, 0.42));
+  animation: advance-logo-glow 4.2s ease-in-out 0.65s infinite;
 }
 
 @keyframes advance-logo-rise {
   from {
     opacity: 0;
-    transform: translate3d(0, 6px, 0) scale(0.82) rotate(-8deg);
+    transform: translate3d(0, 7px, 0) scale(0.78) rotate(-10deg);
   }
   to {
     opacity: 1;
@@ -46,10 +46,10 @@
 @keyframes advance-logo-glow {
   0%,
   100% {
-    filter: drop-shadow(0 0 8px rgba(45, 226, 255, 0.28));
+    filter: drop-shadow(0 0 8px rgba(45, 226, 255, 0.32));
   }
   50% {
-    filter: drop-shadow(0 0 16px rgba(45, 226, 255, 0.55));
+    filter: drop-shadow(0 0 18px rgba(45, 226, 255, 0.62));
   }
 }
 

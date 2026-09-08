@@ -1,4 +1,5 @@
-/* Floating creatives + scroll-organized side rails */
+/* Floating creatives — irregular orbital floaties + sparse quiet edge ghosts.
+ * Intentionally NOT neat vertical side rails / product shelves. */
 
 .home-floaties {
   position: absolute;
@@ -12,23 +13,23 @@
   --fx: 0%;
   --fy: 0%;
   --frot: 0deg;
-  --fscale: 0.72;
+  --fscale: 0.7;
   position: absolute;
   z-index: 3;
-  width: clamp(5.75rem, 11vw, 8.75rem);
+  width: clamp(4.8rem, 8.5vw, 7.25rem);
   aspect-ratio: 9 / 16;
-  border-radius: 0.7rem;
+  border-radius: 0.65rem;
   overflow: hidden;
-  border: 1px solid rgba(45, 226, 255, 0.35);
-  box-shadow: 0 0 22px rgba(45, 226, 255, 0.18), 0 14px 32px rgba(0, 0, 0, 0.55);
-  opacity: 0.88;
+  border: 1px solid rgba(45, 226, 255, 0.22);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  opacity: 0;
   transform: translate3d(var(--fx), var(--fy), 0) rotate(var(--frot)) scale(var(--fscale));
   will-change: transform, opacity;
   left: 50%;
-  top: 42%;
-  margin-left: calc(clamp(5.75rem, 11vw, 8.75rem) / -2);
+  top: 40%;
+  margin-left: calc(clamp(4.8rem, 8.5vw, 7.25rem) / -2);
   background:
-    linear-gradient(145deg, rgba(45, 226, 255, 0.12), transparent 55%),
+    linear-gradient(145deg, rgba(45, 226, 255, 0.1), transparent 55%),
     #0c1218;
 }
 
@@ -49,248 +50,245 @@
   }
 }
 
-/* Hero scatter — fill empty black with intentional depth */
+/* Irregular orbital scatter — asymmetric, accidental */
 .home-floaty[data-slot='a'] {
-  --fx: -34vw;
-  --fy: -28%;
-  --frot: -14deg;
-  --fscale: 0.88;
-}
-.home-floaty[data-slot='b'] {
-  --fx: 33vw;
-  --fy: -32%;
-  --frot: 12deg;
-  --fscale: 0.82;
-}
-.home-floaty[data-slot='c'] {
-  --fx: -39vw;
-  --fy: 18%;
-  --frot: 8deg;
+  --fx: -41vw;
+  --fy: -34%;
+  --frot: -19deg;
   --fscale: 0.78;
 }
+.home-floaty[data-slot='b'] {
+  --fx: 37vw;
+  --fy: -18%;
+  --frot: 14deg;
+  --fscale: 0.62;
+}
+.home-floaty[data-slot='c'] {
+  --fx: -36vw;
+  --fy: 8%;
+  --frot: 7deg;
+  --fscale: 0.55;
+}
 .home-floaty[data-slot='d'] {
-  --fx: 38vw;
-  --fy: 22%;
-  --frot: -10deg;
-  --fscale: 0.84;
+  --fx: 42vw;
+  --fy: 38%;
+  --frot: -22deg;
+  --fscale: 0.7;
 }
 .home-floaty[data-slot='e'] {
-  --fx: -24vw;
-  --fy: 48%;
-  --frot: -6deg;
-  --fscale: 0.72;
+  --fx: -29vw;
+  --fy: 52%;
+  --frot: 16deg;
+  --fscale: 0.48;
 }
 .home-floaty[data-slot='f'] {
-  --fx: 26vw;
-  --fy: 46%;
-  --frot: 9deg;
-  --fscale: 0.74;
+  --fx: 31vw;
+  --fy: -42%;
+  --frot: -8deg;
+  --fscale: 0.58;
 }
 
 @media (max-width: 959px) {
-  /* Mobile: floaties compete with the fan and read as leftover air — keep desktop-only depth */
   .home-floaties {
     display: none;
   }
-
-  .home-hero__fan-wrap {
-    min-height: calc(100svh - 11.25rem - env(safe-area-inset-top, 0px));
-  }
 }
 
-/* Pop in/out while in hero */
+/* Organic pop — long off periods, staggered, weird */
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='a'] {
-  animation: floaty-pop 5.8s ease-in-out 0s infinite;
+  animation: floaty-weird 9.4s ease-in-out 0.1s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='b'] {
-  animation: floaty-pop 6.4s ease-in-out 0.35s infinite;
+  animation: floaty-weird 11.2s ease-in-out 2.4s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='c'] {
-  animation: floaty-pop 5.6s ease-in-out 0.7s infinite;
+  animation: floaty-weird 8.1s ease-in-out 4.1s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='d'] {
-  animation: floaty-pop 6.1s ease-in-out 0.15s infinite;
+  animation: floaty-weird 10.6s ease-in-out 1.2s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='e'] {
-  animation: floaty-pop 6.8s ease-in-out 1s infinite;
+  animation: floaty-weird 12.4s ease-in-out 5.5s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='f'] {
-  animation: floaty-pop 5.9s ease-in-out 0.5s infinite;
+  animation: floaty-weird 9.8s ease-in-out 3.3s infinite;
 }
 
-@keyframes floaty-pop {
+@keyframes floaty-weird {
   0%,
-  72% {
-    opacity: 0.88;
-    transform: translate3d(var(--fx), var(--fy), 0) rotate(var(--frot)) scale(var(--fscale));
-  }
-  80% {
+  14% {
     opacity: 0;
-    transform: translate3d(var(--fx), calc(var(--fy) - 12px), 0) rotate(var(--frot))
-      scale(calc(var(--fscale) * 0.92));
+    transform: translate3d(var(--fx), calc(var(--fy) + 22px), 0) rotate(var(--frot))
+      scale(calc(var(--fscale) * 0.82));
   }
-  88%,
-  100% {
-    opacity: 0.88;
+  22%,
+  48% {
+    opacity: 0.78;
     transform: translate3d(var(--fx), var(--fy), 0) rotate(var(--frot)) scale(var(--fscale));
+  }
+  58%,
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(var(--fx) + 1.2vw), calc(var(--fy) - 16px), 0)
+      rotate(calc(var(--frot) + 4deg)) scale(calc(var(--fscale) * 0.9));
   }
 }
 
 .home-page.is-past-hero .home-floaty {
   animation: none !important;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  transition: opacity 0.4s ease;
   pointer-events: none;
 }
 
-/* —— Side rails: true L/R edge columns (not the gallery grid) —— */
-.home-side-rails {
+/* —— Sparse edge ghosts (post-hero): quiet, irregular, NOT rails —— */
+.home-edge-ghosts {
   position: fixed;
   inset: 0;
-  z-index: 25;
+  z-index: 6;
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.4s ease, visibility 0.4s ease;
+  transition: opacity 0.55s ease, visibility 0.55s ease;
 }
 
-.home-page.is-past-hero .home-side-rails {
+.home-page.is-past-hero .home-edge-ghosts {
   opacity: 1;
   visibility: visible;
 }
 
-.home-side-rail {
+.home-edge-ghost {
+  --gx: 2%;
+  --gy: 20%;
+  --grot: -12deg;
+  --gscale: 0.55;
+  --gdelay: 0s;
+  --gdur: 14s;
   position: absolute;
-  top: 4.75rem;
-  bottom: 1.25rem;
-  width: 8.75rem;
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 92%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 92%, transparent 100%);
-}
-
-.home-side-rail--left {
-  left: max(0.65rem, env(safe-area-inset-left));
-}
-
-.home-side-rail--right {
-  right: max(0.65rem, env(safe-area-inset-right));
-}
-
-.home-side-rail__track {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  will-change: transform;
-}
-
-.home-page.is-past-hero:not(.is-reduced-motion) .home-side-rail--left .home-side-rail__track {
-  animation: rail-up 26s linear infinite;
-}
-
-.home-page.is-past-hero:not(.is-reduced-motion) .home-side-rail--right .home-side-rail__track {
-  animation: rail-down 30s linear infinite;
-}
-
-.home-side-rail__card {
-  --rail-delay: 0ms;
-  width: 100%;
+  left: var(--gx);
+  top: var(--gy);
+  width: clamp(3.2rem, 4.8vw, 4.6rem);
   aspect-ratio: 9 / 16;
-  border-radius: 0.75rem;
+  border-radius: 0.55rem;
   overflow: hidden;
-  border: 1.5px solid rgba(45, 226, 255, 0.45);
-  box-shadow:
-    0 0 0 1px rgba(45, 226, 255, 0.08),
-    0 0 28px rgba(45, 226, 255, 0.22),
-    0 12px 28px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   background:
-    linear-gradient(145deg, rgba(45, 226, 255, 0.14), transparent 55%),
+    linear-gradient(145deg, rgba(45, 226, 255, 0.04), transparent 55%),
     #0c1218;
   opacity: 0;
-  transform: translate3d(0, 18px, 0) scale(0.92);
+  transform: rotate(var(--grot)) scale(var(--gscale));
+  filter: saturate(0.42) brightness(0.68);
+  will-change: opacity, transform;
 }
 
-.home-page.is-past-hero .home-side-rail__card {
-  animation: rail-card-pop 0.55s cubic-bezier(0.18, 1.15, 0.28, 1) var(--rail-delay) both;
-}
-
-.home-side-rail__card img {
+.home-edge-ghost img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-  opacity: 0;
-  transition: opacity 0.28s ease;
 }
 
-.home-side-rail__card.is-loaded img {
-  opacity: 1;
+/* Irregular edge placements — asymmetric, spaced, calm */
+.home-edge-ghost[data-slot='g0'] {
+  --gx: 1.2%;
+  --gy: 14%;
+  --grot: -18deg;
+  --gscale: 0.52;
+  --gdelay: 0.4s;
+  --gdur: 15.5s;
+}
+.home-edge-ghost[data-slot='g1'] {
+  --gx: auto;
+  --gy: 58%;
+  right: 1.6%;
+  left: auto;
+  --grot: 11deg;
+  --gscale: 0.48;
+  --gdelay: 4.2s;
+  --gdur: 14.2s;
+}
+.home-edge-ghost[data-slot='g2'] {
+  --gx: 2.4%;
+  --gy: 62%;
+  --grot: 8deg;
+  --gscale: 0.42;
+  --gdelay: 7.8s;
+  --gdur: 16.8s;
+}
+.home-edge-ghost[data-slot='g3'] {
+  --gx: auto;
+  --gy: 18%;
+  right: 2.8%;
+  left: auto;
+  --grot: -9deg;
+  --gscale: 0.58;
+  --gdelay: 2.1s;
+  --gdur: 13.6s;
+}
+.home-edge-ghost[data-slot='g4'] {
+  --gx: auto;
+  --gy: 42%;
+  right: 0.6%;
+  left: auto;
+  --grot: 21deg;
+  --gscale: 0.38;
+  --gdelay: 10.4s;
+  --gdur: 17.2s;
 }
 
-@keyframes rail-card-pop {
-  from {
+.home-page.is-past-hero .home-edge-ghosts:not(.is-reduced) .home-edge-ghost {
+  animation: edge-ghost-pop var(--gdur) ease-in-out var(--gdelay) infinite;
+}
+
+@keyframes edge-ghost-pop {
+  0%,
+  22% {
     opacity: 0;
-    transform: translate3d(0, 22px, 0) scale(0.88);
+    transform: rotate(var(--grot)) scale(calc(var(--gscale) * 0.86)) translate3d(0, 16px, 0);
   }
-  to {
-    opacity: 0.95;
-    transform: translate3d(0, 0, 0) scale(1);
+  30%,
+  44% {
+    opacity: 0.22;
+    transform: rotate(var(--grot)) scale(var(--gscale)) translate3d(0, 0, 0);
   }
-}
-
-@keyframes rail-up {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(0, -50%, 0);
-  }
-}
-
-@keyframes rail-down {
-  from {
-    transform: translate3d(0, -50%, 0);
-  }
-  to {
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-/* Give main sections room so rails don't collide with gallery grid */
-@media (min-width: 960px) {
-  .home-page.is-past-hero .home-section,
-  .home-page.is-past-hero .home-final,
-  .home-page.is-past-hero .home-footer {
-    padding-left: max(1.25rem, 10.5rem);
-    padding-right: max(1.25rem, 10.5rem);
+  56%,
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--grot) + 4deg)) scale(calc(var(--gscale) * 0.9))
+      translate3d(0, -12px, 0);
   }
 }
 
 @media (max-width: 959px) {
-  .home-side-rails {
+  .home-edge-ghosts {
     display: none;
   }
 }
 
-/*
- * prefers-reduced-motion:
- * - no twinkle / shooting stars (space-field.css)
- * - no floaty blink / rail marquee / rail pop / logo glow
- * - rails still appear as static edge columns (alive layout, calm motion)
- */
+/* Calm reduced-motion: static whisper presence, no pop */
+.home-page:not(.is-past-hero) .home-floaties.is-reduced .home-floaty,
+.home-page.is-reduced-motion:not(.is-past-hero) .home-floaty {
+  animation: none !important;
+  opacity: 0.26;
+}
+
+.home-page.is-past-hero .home-edge-ghosts.is-reduced .home-edge-ghost,
+.home-page.is-past-hero.is-reduced-motion .home-edge-ghost {
+  animation: none !important;
+  opacity: 0.14;
+  transform: rotate(var(--grot)) scale(var(--gscale));
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .home-floaty {
+  .home-page:not(.is-past-hero) .home-floaty {
     animation: none !important;
-    opacity: 0.4;
+    opacity: 0.26;
   }
 
-  .home-page.is-past-hero .home-side-rail__track {
+  .home-page.is-past-hero .home-edge-ghost {
     animation: none !important;
-  }
-
-  .home-page.is-past-hero .home-side-rail__card {
-    animation: none !important;
-    opacity: 0.88;
-    transform: none;
+    opacity: 0.14;
+    transform: rotate(var(--grot)) scale(var(--gscale));
   }
 }

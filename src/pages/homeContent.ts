@@ -141,7 +141,7 @@ export const HOME_PLANS = [
 ] as const
 
 /**
- * Background creatives for hero floaties / side rails.
+ * Background creatives for hero floaties / sparse edge ghosts.
  * Kept here (not in FloatingCreatives) to avoid pages↔components cycle noise.
  */
 export const HOME_RAIL_SRCS = [

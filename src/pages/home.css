@@ -28,6 +28,12 @@
   z-index: 0;
 }
 
+/* Mid-page: dial nebula down so edges + gallery don’t scream cyan */
+.home-page.is-past-hero .home-page__space .space-field__nebula {
+  opacity: 0.55;
+  transition: opacity 0.55s ease;
+}
+
 .home-page a {
   color: inherit;
   text-decoration: none;
