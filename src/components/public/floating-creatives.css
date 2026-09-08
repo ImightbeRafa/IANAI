@@ -50,42 +50,42 @@
   }
 }
 
-/* Irregular orbital scatter — asymmetric, accidental */
+/* Irregular orbital scatter — accidental, NOT left/right columns */
 .home-floaty[data-slot='a'] {
-  --fx: -41vw;
-  --fy: -34%;
-  --frot: -19deg;
-  --fscale: 0.78;
+  --fx: -34vw;
+  --fy: -38%;
+  --frot: -24deg;
+  --fscale: 0.72;
 }
 .home-floaty[data-slot='b'] {
-  --fx: 37vw;
-  --fy: -18%;
-  --frot: 14deg;
-  --fscale: 0.62;
-}
-.home-floaty[data-slot='c'] {
-  --fx: -36vw;
-  --fy: 8%;
-  --frot: 7deg;
+  --fx: 28vw;
+  --fy: -46%;
+  --frot: 18deg;
   --fscale: 0.55;
 }
-.home-floaty[data-slot='d'] {
-  --fx: 42vw;
-  --fy: 38%;
-  --frot: -22deg;
-  --fscale: 0.7;
-}
-.home-floaty[data-slot='e'] {
-  --fx: -29vw;
-  --fy: 52%;
-  --frot: 16deg;
+.home-floaty[data-slot='c'] {
+  --fx: -48vw;
+  --fy: 18%;
+  --frot: 11deg;
   --fscale: 0.48;
 }
+.home-floaty[data-slot='d'] {
+  --fx: 44vw;
+  --fy: 28%;
+  --frot: -28deg;
+  --fscale: 0.64;
+}
+.home-floaty[data-slot='e'] {
+  --fx: -18vw;
+  --fy: 58%;
+  --frot: 22deg;
+  --fscale: 0.42;
+}
 .home-floaty[data-slot='f'] {
-  --fx: 31vw;
-  --fy: -42%;
-  --frot: -8deg;
-  --fscale: 0.58;
+  --fx: 12vw;
+  --fy: -52%;
+  --frot: -6deg;
+  --fscale: 0.5;
 }
 
 @media (max-width: 959px) {
