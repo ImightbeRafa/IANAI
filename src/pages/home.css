@@ -193,7 +193,7 @@
   border-color: transparent;
 }
 
-/* —— Hero: dense composition, no leftover air —— */
+/* —— Hero: dense composition, intentional mobile breathing room —— */
 .home-hero {
   position: relative;
   z-index: 2;
@@ -203,11 +203,11 @@
   justify-content: flex-start;
   gap: 0.2rem;
   /* Clear sticky nav — H1 must not clip under the pill */
-  padding: calc(5.2rem + env(safe-area-inset-top, 0px)) 0.75rem 0;
+  padding: calc(5.2rem + env(safe-area-inset-top, 0px)) 0.75rem 1.85rem;
   width: 100%;
   margin: 0 auto;
-  min-height: 100svh;
-  min-height: 100dvh;
+  /* Mobile: content-sized — avoid empty 100svh band under a smaller fan */
+  min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -219,6 +219,8 @@
     align-items: stretch;
     gap: 1rem 1.35rem;
     padding: 3.55rem 1.25vw 0;
+    min-height: 100svh;
+    min-height: 100dvh;
     overflow: visible;
   }
 }
@@ -322,15 +324,15 @@
   z-index: 2;
   display: flex;
   justify-content: center;
-  /* Cards hug CTA — fill remaining viewport, no dead band under cards */
   align-items: flex-start;
   width: min(100%, 38rem);
-  flex: 1 1 0;
+  /* Mobile: wrap height = card size (absolute cards need a definite box) */
+  flex: 0 0 auto;
+  --home-fan-w: min(70vw, 13.75rem);
+  height: calc(var(--home-fan-w) * 16 / 9);
   min-height: 0;
-  /* Definite flex height for % card sizing — avoid svh calc mismatch */
-  height: auto;
-  margin: 0.4rem 0 0;
-  overflow: hidden;
+  margin: 1.05rem 0 0;
+  overflow: visible;
   padding-bottom: 0;
 }
 
@@ -378,15 +380,14 @@
   --fan-i: 0;
   position: absolute;
   left: 50%;
-  /* Mobile: anchor to top of fan-wrap so cards sit under CTA */
+  /* Mobile: smaller fan — breathing room CTA→fan and under fan */
   top: 0;
   bottom: auto;
   aspect-ratio: 9 / 16;
-  /* Fill remaining hero — hug bottom, tiny CTA clearance via wrap margin */
-  height: 98%;
-  max-height: 98%;
-  width: auto;
-  max-width: min(88vw, 17.5rem);
+  height: auto;
+  max-height: none;
+  width: var(--home-fan-w, min(70vw, 13.75rem));
+  max-width: var(--home-fan-w, min(70vw, 13.75rem));
   margin-left: 0;
   translate: -50% 0;
   border-radius: 1.05rem;

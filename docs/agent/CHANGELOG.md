@@ -74,6 +74,17 @@ No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit a
 - Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
 
 No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+## 2026-09-08 — Public site: mobile hero smaller fan + breathe
+
+**Area:** public homepage
+**Files:** `home.css`
+
+- Mobile only: shrink hero fan (`~70vw` / 13.75rem), content-sized hero (no forced 100svh empty band).
+- Breathing: CTA→fan ~1rem, calm under fan before Galería (~1.85rem pad).
+- Keep H1 clear of nav; desktop / floaties / edge ghosts / skeleton unchanged.
+
+No merge.
+
 ## 2026-09-08 — Public site: kill mobile hero dead air
 
 **Area:** public homepage
