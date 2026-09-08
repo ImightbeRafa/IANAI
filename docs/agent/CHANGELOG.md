@@ -3,7 +3,7 @@
 **Area:** chat-shell
 **Files:** `ChatSidebar.tsx`, `ChatShell.tsx`, `chatShellSignOut.ts`, `chatShellLabels.ts`, `test/chat-shell-sign-out.spec.tsx`
 
-- Sidebar account footer gains **Cerrar sesión** (EN **Sign out**) next to Configuración — same AuthContext `signOut` → `/login` path as classic `Layout`.
+- Sidebar account footer gains a full-width **Cerrar sesión** row (EN **Sign out**, LogOut icon) under the user card — same AuthContext `signOut` → `/login` path as classic `Layout`.
 - No classic hop required to leave the session. Mobile drawer + desktop sidebar share the same footer control.
 - Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
 
