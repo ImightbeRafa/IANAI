@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { HOME_RAIL_SRCS } from '../../pages/homeContent'
 import './floating-creatives.css'
 
 export type FloatingCreative = {
@@ -28,13 +30,39 @@ type FloatingCreativesProps = {
   floatiesOnly?: boolean
 }
 
+function RailCard({ src, delayMs }: { src: string; delayMs: number }) {
+  const [loaded, setLoaded] = useState(false)
+  return (
+    <div
+      className={`home-side-rail__card${loaded ? ' is-loaded' : ''}`}
+      style={{ ['--rail-delay' as string]: `${delayMs}ms` }}
+    >
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+      />
+    </div>
+  )
+}
+
 export default function FloatingCreatives({
   reduced = false,
   railsOnly = false,
   floatiesOnly = false,
 }: FloatingCreativesProps) {
-  const left = HOME_FLOATING_CREATIVES.filter((c) => c.rail === 'left')
-  const right = HOME_FLOATING_CREATIVES.filter((c) => c.rail === 'right')
+  const leftBase = HOME_RAIL_SRCS.filter((_, i) => i % 2 === 0).map((src, i) => ({
+    id: `L-${i}`,
+    src,
+  }))
+  const rightBase = HOME_RAIL_SRCS.filter((_, i) => i % 2 === 1).map((src, i) => ({
+    id: `R-${i}`,
+    src,
+  }))
+  const left = [...leftBase, ...leftBase]
+  const right = [...rightBase, ...rightBase]
 
   return (
     <>
@@ -59,26 +87,22 @@ export default function FloatingCreatives({
       ) : null}
 
       {!floatiesOnly ? (
-        <div className="home-side-rails" aria-hidden="true">
+        <aside className="home-side-rails" aria-hidden="true">
           <div className="home-side-rail home-side-rail--left">
             <div className="home-side-rail__track">
-              {[...left, ...left].map((item, i) => (
-                <div key={`L-${item.id}-${i}`} className="home-side-rail__card">
-                  <img src={item.src} alt="" loading="lazy" decoding="async" />
-                </div>
+              {left.map((item, i) => (
+                <RailCard key={`${item.id}-${i}`} src={item.src} delayMs={(i % leftBase.length) * 70} />
               ))}
             </div>
           </div>
           <div className="home-side-rail home-side-rail--right">
             <div className="home-side-rail__track">
-              {[...right, ...right].map((item, i) => (
-                <div key={`R-${item.id}-${i}`} className="home-side-rail__card">
-                  <img src={item.src} alt="" loading="lazy" decoding="async" />
-                </div>
+              {right.map((item, i) => (
+                <RailCard key={`${item.id}-${i}`} src={item.src} delayMs={(i % rightBase.length) * 70} />
               ))}
             </div>
           </div>
-        </div>
+        </aside>
       ) : null}
     </>
   )

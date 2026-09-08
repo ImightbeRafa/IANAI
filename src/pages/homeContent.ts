@@ -140,5 +140,20 @@ export const HOME_PLANS = [
   },
 ] as const
 
+/**
+ * Background creatives for hero floaties / side rails.
+ * Kept here (not in FloatingCreatives) to avoid pages↔components cycle noise.
+ */
+export const HOME_RAIL_SRCS = [
+  '/home/ads/dulce-norte.jpg',
+  '/home/ads/forza.jpg',
+  '/home/ads/monte-rojo.jpg',
+  '/home/ads/nido.jpg',
+  '/home/ads/altura.jpg',
+  '/home/ads/aura.jpg',
+  '/home/ads/casa-luna.jpg',
+  '/home/ads/vesper.jpg',
+] as const
+
 /** Post-login from the public homepage. Chat-shell is home after invite-all. */
 export const HOME_AUTH_REDIRECT = '/chat'

@@ -74,6 +74,17 @@ No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit a
 - Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
 
 No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+## 2026-09-08 — Public site WD must-fix: rails + mobile + no black flash
+
+**Area:** public homepage
+**Files:** `Home.tsx`, `home.css`, `homeContent.ts`, `FloatingCreatives.tsx`, `floating-creatives.css`, `useHomeScrollProgress.ts`
+
+- Mobile hero: clear sticky nav (`padding-top` ~4.7rem+safe); fan anchors under CTA (no leftover air).
+- Scroll organize: real fixed L/R vertical side rails (pop-in + marquee); not the gallery grid. Gallery kept as its own section with side padding when rails active.
+- Hero cards: cyan-tint skeleton + `is-loaded` fade — no black placeholder flash.
+- `prefers-reduced-motion`: disables twinkle/shoots/floaty blink/rail marquee/logo glow; rails still show as static edge columns.
+
+No merge. Chat-shell / gift / tour untouched.
 
 ## 2026-09-07 — Public site Astra glow-up (space + motion)
 

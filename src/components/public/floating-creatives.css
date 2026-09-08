@@ -27,6 +27,9 @@
   left: 50%;
   top: 42%;
   margin-left: calc(clamp(5.75rem, 11vw, 8.75rem) / -2);
+  background:
+    linear-gradient(145deg, rgba(45, 226, 255, 0.12), transparent 55%),
+    #0c1218;
 }
 
 .home-floaty img {
@@ -85,33 +88,17 @@
 }
 
 @media (max-width: 959px) {
-  .home-floaty {
-    width: clamp(3.8rem, 20vw, 5.6rem);
-    margin-left: calc(clamp(3.8rem, 20vw, 5.6rem) / -2);
-    top: 52%;
+  /* Mobile: floaties compete with the fan and read as leftover air — keep desktop-only depth */
+  .home-floaties {
+    display: none;
   }
-  .home-floaty[data-slot='a'] {
-    --fx: -40vw;
-    --fy: -18%;
-    --frot: -10deg;
-    --fscale: 0.92;
-  }
-  .home-floaty[data-slot='c'] {
-    --fx: 38vw;
-    --fy: -4%;
-    --frot: 11deg;
-    --fscale: 0.88;
-  }
-  .home-floaty[data-slot='f'] {
-    --fx: -34vw;
-    --fy: 28%;
-    --frot: 7deg;
-    --fscale: 0.8;
+
+  .home-hero__fan-wrap {
+    min-height: calc(100svh - 11.25rem - env(safe-area-inset-top, 0px));
   }
 }
 
 /* Pop in/out while in hero */
-/* Keep floaties visible briefly while organizing */
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='a'] {
   animation: floaty-pop 5.8s ease-in-out 0s infinite;
 }
@@ -125,13 +112,12 @@
   animation: floaty-pop 6.1s ease-in-out 0.15s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='e'] {
-  animation: floaty-pop 6.8s ease-in-out 1.0s infinite;
+  animation: floaty-pop 6.8s ease-in-out 1s infinite;
 }
 .home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='f'] {
   animation: floaty-pop 5.9s ease-in-out 0.5s infinite;
 }
 
-/* Always-on float with brief blink-out — denser presence */
 @keyframes floaty-pop {
   0%,
   72% {
@@ -150,72 +136,82 @@
   }
 }
 
-/* Drift toward rails as hero scrolls away */
-.home-page .home-floaty {
-  --organize: var(--home-scroll, 0);
-}
-
 .home-page.is-past-hero .home-floaty {
   animation: none !important;
   opacity: 0;
   transition: opacity 0.35s ease;
+  pointer-events: none;
 }
 
-/* —— Side rails (desktop): continuous vertical motion —— */
+/* —— Side rails: true L/R edge columns (not the gallery grid) —— */
 .home-side-rails {
   position: fixed;
   inset: 0;
-  z-index: 5;
+  z-index: 25;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.45s ease;
+  visibility: hidden;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
 }
 
 .home-page.is-past-hero .home-side-rails {
   opacity: 1;
+  visibility: visible;
 }
 
 .home-side-rail {
   position: absolute;
-  top: 10vh;
-  bottom: 6vh;
-  width: 7.25rem;
+  top: 4.75rem;
+  bottom: 1.25rem;
+  width: 8.75rem;
   overflow: hidden;
-  mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 90%, transparent);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 92%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 92%, transparent 100%);
 }
 
 .home-side-rail--left {
-  left: 0.55rem;
+  left: max(0.65rem, env(safe-area-inset-left));
 }
 
 .home-side-rail--right {
-  right: 0.55rem;
+  right: max(0.65rem, env(safe-area-inset-right));
 }
 
 .home-side-rail__track {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
   will-change: transform;
 }
 
-.home-page.is-past-hero .home-side-rail--left .home-side-rail__track {
-  animation: rail-up 28s linear infinite;
+.home-page.is-past-hero:not(.is-reduced-motion) .home-side-rail--left .home-side-rail__track {
+  animation: rail-up 26s linear infinite;
 }
 
-.home-page.is-past-hero .home-side-rail--right .home-side-rail__track {
-  animation: rail-down 32s linear infinite;
+.home-page.is-past-hero:not(.is-reduced-motion) .home-side-rail--right .home-side-rail__track {
+  animation: rail-down 30s linear infinite;
 }
 
 .home-side-rail__card {
+  --rail-delay: 0ms;
   width: 100%;
   aspect-ratio: 9 / 16;
-  border-radius: 0.65rem;
+  border-radius: 0.75rem;
   overflow: hidden;
-  border: 1px solid rgba(45, 226, 255, 0.35);
-  box-shadow: 0 0 22px rgba(45, 226, 255, 0.16), 0 10px 24px rgba(0, 0, 0, 0.45);
-  opacity: 0.9;
+  border: 1.5px solid rgba(45, 226, 255, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(45, 226, 255, 0.08),
+    0 0 28px rgba(45, 226, 255, 0.22),
+    0 12px 28px rgba(0, 0, 0, 0.55);
+  background:
+    linear-gradient(145deg, rgba(45, 226, 255, 0.14), transparent 55%),
+    #0c1218;
+  opacity: 0;
+  transform: translate3d(0, 18px, 0) scale(0.92);
+}
+
+.home-page.is-past-hero .home-side-rail__card {
+  animation: rail-card-pop 0.55s cubic-bezier(0.18, 1.15, 0.28, 1) var(--rail-delay) both;
 }
 
 .home-side-rail__card img {
@@ -223,6 +219,23 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+
+.home-side-rail__card.is-loaded img {
+  opacity: 1;
+}
+
+@keyframes rail-card-pop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0) scale(0.88);
+  }
+  to {
+    opacity: 0.95;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 @keyframes rail-up {
@@ -243,23 +256,41 @@
   }
 }
 
-@media (max-width: 1099px) {
+/* Give main sections room so rails don't collide with gallery grid */
+@media (min-width: 960px) {
+  .home-page.is-past-hero .home-section,
+  .home-page.is-past-hero .home-final,
+  .home-page.is-past-hero .home-footer {
+    padding-left: max(1.25rem, 10.5rem);
+    padding-right: max(1.25rem, 10.5rem);
+  }
+}
+
+@media (max-width: 959px) {
   .home-side-rails {
     display: none;
   }
 }
 
+/*
+ * prefers-reduced-motion:
+ * - no twinkle / shooting stars (space-field.css)
+ * - no floaty blink / rail marquee / rail pop / logo glow
+ * - rails still appear as static edge columns (alive layout, calm motion)
+ */
 @media (prefers-reduced-motion: reduce) {
   .home-floaty {
     animation: none !important;
-    opacity: 0.35;
+    opacity: 0.4;
   }
 
   .home-page.is-past-hero .home-side-rail__track {
     animation: none !important;
   }
 
-  .home-side-rails {
-    opacity: 0 !important;
+  .home-page.is-past-hero .home-side-rail__card {
+    animation: none !important;
+    opacity: 0.88;
+    transform: none;
   }
 }

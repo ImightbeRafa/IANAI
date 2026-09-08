@@ -24,7 +24,8 @@ export default function Home() {
   const lang = language === 'en' ? 'en' : 'es'
   const [fanReady, setFanReady] = useState(false)
   const pageRef = useRef<HTMLDivElement>(null)
-  const { reduced } = useHomeScrollProgress(pageRef)
+  const scrollEnabled = !authLoading && !user
+  const { reduced } = useHomeScrollProgress(pageRef, scrollEnabled)
 
   useEffect(() => {
     if (reduced) {
@@ -163,6 +164,16 @@ export default function Home() {
                   alt=""
                   loading={card.slot === 'front' ? 'eager' : 'lazy'}
                   decoding="async"
+                  // React 18 DOM: lowercase attribute avoids unknown-prop warning
+                  {...{ fetchpriority: card.slot === 'front' ? 'high' : 'auto' }}
+                  ref={(el) => {
+                    if (el?.complete && el.naturalWidth > 0) {
+                      el.parentElement?.classList.add('is-loaded')
+                    }
+                  }}
+                  onLoad={(e) => {
+                    e.currentTarget.parentElement?.classList.add('is-loaded')
+                  }}
                 />
               </div>
             ))}
