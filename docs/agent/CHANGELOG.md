@@ -1,3 +1,14 @@
+## 2026-09-08 — Chat-shell: Cerrar sesión from account footer
+
+**Area:** chat-shell
+**Files:** `ChatSidebar.tsx`, `ChatShell.tsx`, `chatShellSignOut.ts`, `chatShellLabels.ts`, `test/chat-shell-sign-out.spec.tsx`
+
+- Sidebar account footer gains **Cerrar sesión** (EN **Sign out**) next to Configuración — same AuthContext `signOut` → `/login` path as classic `Layout`.
+- No classic hop required to leave the session. Mobile drawer + desktop sidebar share the same footer control.
+- Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
+
+No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+
 ## 2026-09-07 — First-open tour: real chrome + clear feedback CTA
 
 **Area:** chat-shell

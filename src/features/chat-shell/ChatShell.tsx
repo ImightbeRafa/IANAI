@@ -4,6 +4,7 @@ import { Menu, PanelRight } from 'lucide-react'
 import type { BrandKit, ChatSession, ProductType } from '../../types'
 import { getBrandKits, createProduct } from '../../services/database'
 import { useLanguage } from '../../contexts/LanguageContext'
+import { useAuth } from '../../contexts/AuthContext'
 import ChatSidebar from './ChatSidebar'
 import ChatBrandCreateModal from './ChatBrandCreateModal'
 import ChatSettingsDialog from './ChatSettingsDialog'
@@ -19,6 +20,7 @@ import { useChatSessionThread } from './useChatSessionThread'
 import { useChatBrandSetup } from './useChatBrandSetup'
 import { useChatCreateWidgetVisibility } from './useChatCreateWidgetVisibility'
 import { shellT } from './chatShellLabels'
+import { signOutFromChatShell } from './chatShellSignOut'
 import { glassVerbBlockHint, kitHardBlocked, resolveGlassVerbBlock } from './chatShellFirstRun'
 import { formatMissingSetupSteps, resolveKitChipTitle } from './chatShellBrandSetup'
 import { resolveHeaderSessionTitle } from './chatShellSidebar'
@@ -67,6 +69,7 @@ export default function ChatShell({
   tourRevealNav = false,
 }: ChatShellProps) {
   const navigate = useNavigate()
+  const { signOut } = useAuth()
   const rollout = useChatShellRollout()
   const [navOpen, setNavOpen] = useState(false)
   const [railOpen, setRailOpen] = useState(false)
@@ -512,6 +515,10 @@ export default function ChatShell({
     })
   }, [navigate, rollout, t.classicConfirm])
 
+  const handleSignOut = useCallback(() => {
+    void signOutFromChatShell({ signOut, navigate })
+  }, [navigate, signOut])
+
   const shellClass = [
     'chat-shell',
     navOpen ? 'is-nav-open' : '',
@@ -649,6 +656,7 @@ export default function ChatShell({
         onDeleteSession={(sessionId) => void workspace.deleteSession(sessionId)}
         onDeleteBrand={(brandId) => void workspace.deleteBrand(brandId)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onSignOut={handleSignOut}
         onOpenTour={onOpenTour}
         onSwitchToClassic={rollout.showSwitch ? handleSwitchToClassic : undefined}
       />
