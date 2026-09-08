@@ -74,6 +74,17 @@ No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit a
 - Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
 
 No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+## 2026-09-08 — Public site: kill mobile hero dead air
+
+**Area:** public homepage
+**Files:** `home.css`
+
+- Mobile fan cards fill remaining hero via flex (`flex: 1 1 0` + `height: 98%`) — removes empty black band under fan.
+- Keep H1 clear of sticky nav (~23px @390×844); CTA→card ~0–3px; air under card ~3px.
+- No change to floaties / edge ghosts / reduced-motion / skeleton flash.
+
+No merge.
+
 ## 2026-09-08 — Public site: sparse edge ghosts (kill neat rails)
 
 **Area:** public homepage
