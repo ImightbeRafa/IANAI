@@ -2339,6 +2339,29 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   gap: 8px;
 }
 
+.chat-shell__composer-wrap.is-drop-target {
+  outline: 2px solid var(--accent, #22d3ee);
+  outline-offset: 2px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent-soft, rgba(34, 211, 238, 0.14)) 55%, transparent);
+}
+
+.chat-shell__composer-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg, #0a0a0a) 55%, transparent);
+  color: var(--accent-muted, #67e8f9);
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
 /* Idle glass row — Brand Kit + Guiones/Post/Foto/Pack above typing card */
 .chat-shell__idle-glass {
   position: relative;
@@ -2493,6 +2516,7 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 .chat-shell__composer {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: 8px;
   width: 100%;
@@ -2685,7 +2709,77 @@ html[data-theme="obsidian-dark"] .chat-shell option {
 }
 
 .chat-shell__composer-chips {
-  display: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  flex: 1 0 100%;
+  padding: 0 2px 2px;
+}
+
+.chat-shell__composer-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 8px 4px 4px;
+  border-radius: 12px;
+  border: 1px solid var(--accent-border, rgba(34, 211, 238, 0.35));
+  background: var(--chip-bg, color-mix(in srgb, var(--accent-soft) 70%, var(--bg-soft)));
+  color: var(--chip-text, var(--text));
+}
+
+.chat-shell__composer-chip img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: var(--bg-soft);
+}
+
+.chat-shell__composer-chip-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-shell__composer-chip-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.chat-shell__composer-chip-role {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent-muted, #67e8f9);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.chat-shell__composer-chip-remove {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted, #8a93a6);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.chat-shell__composer-chip-remove:hover {
+  color: var(--text);
 }
 
 .chat-shell__composer-tools {
