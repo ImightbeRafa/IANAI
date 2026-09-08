@@ -28,6 +28,7 @@ import { parseShellCommand } from './chatShellCommands'
 import { getTextModelPreference } from './textModelPreference'
 import { readAiMemoryEnabled, type BrandVisualFallback } from './chatShellGenerationPreferences'
 import { mapEnhanceModeToTier } from './chatShellImageEnhance'
+import type { ComposerAttachment } from './chatShellComposerAttachments'
 import { isBrandContextEditRequest, isBrandRuleRequest, isExplicitGenerationRequest, SETUP_COMPOSER_PLACEHOLDER } from './chatShellBrandSetupFlow'
 import { isCasualChatMessage } from './chatShellConversationalReply'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
@@ -324,7 +325,10 @@ export default function ChatShell({
   const patchImagePreferences = thread.patchImagePreferences
   const generateScripts = thread.generateScripts
 
-  const handleSend = useCallback(async (text: string) => {
+  const handleSend = useCallback(async (
+    text: string,
+    attachments?: ComposerAttachment[]
+  ) => {
     const fingerprint = text.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
     const now = Date.now()
     if (fingerprint && lastActionRef.current.text === fingerprint && now - lastActionRef.current.at < 900) {
@@ -341,17 +345,17 @@ export default function ChatShell({
       return
     }
     if (command?.id === 'script') {
-      if (command.rest) return send(command.rest)
-      return send(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts')
+      if (command.rest) return send(command.rest, { attachments })
+      return send(language === 'es' ? 'Quiero crear guiones' : 'I want to create scripts', { attachments })
     }
     if (command?.id === 'post') {
-      return send(command.rest ? `post ${command.rest}` : 'post')
+      return send(command.rest ? `post ${command.rest}` : 'post', { attachments })
     }
     if (command?.id === 'product') {
-      return send(command.rest ? `foto de producto ${command.rest}` : 'foto de producto')
+      return send(command.rest ? `foto de producto ${command.rest}` : 'foto de producto', { attachments })
     }
     if (command?.id === 'logo') {
-      return send(command.rest ? `logo ${command.rest}` : 'logo')
+      return send(command.rest ? `logo ${command.rest}` : 'logo', { attachments })
     }
     if (command?.id === 'bulk') {
       const hasOffer = thread.offers.length > 0
@@ -375,11 +379,11 @@ export default function ChatShell({
     if (brandSetup.visible && brandSetup.phase !== 'complete' && brandSetup.phase !== 'paused' && !isExplicitGenerationRequest(text)) {
       // Greetings stay conversational — don't treat "hey" as brand ingest.
       if (isCasualChatMessage(text)) {
-        return send(text)
+        return send(text, { attachments })
       }
       return brandSetup.reply(text)
     }
-    return send(text)
+    return send(text, { attachments })
   }, [navigate, send, brandSetup, language, selectRailTab, thread, workspace.activeSession?.product_id])
 
   const startLogo = useCallback((archetype?: string) => {
@@ -922,7 +926,6 @@ export default function ChatShell({
               )}
             />
           ) : null}
-          onUploadBrandAsset={(file, kind) => void brandSetup.uploadBrandAsset(file, kind)}
           onUploadSetupDocument={(file) => void brandSetup.uploadSetupDocument(file)}
           setupTurns={[]}
           setupPlaceholder={

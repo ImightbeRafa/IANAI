@@ -72,6 +72,13 @@ import {
   type ChatShellLanguage,
 } from './chatShellScriptIntent'
 import {
+  applyPostCampaignScriptDefaults,
+  defaultNlPostCampaignImagePreferences,
+  parseNlPostCampaignIntent,
+  partitionComposerAttachmentRoles,
+} from './chatShellNlPostCampaign'
+import type { ComposerAttachmentRole } from './chatShellComposerAttachments'
+import {
   brandHasRealOffer,
   buildChatShellConversationalReply,
 } from './chatShellConversationalReply'
@@ -290,6 +297,12 @@ export function shouldReviewChosenScript(originText?: string | null, source?: st
 
 export type { ScriptCtaChannel } from './chatShellCtaMix'
 
+export type ComposerTurnAttachment = {
+  dataUrl: string
+  role: ComposerAttachmentRole
+  name: string
+}
+
 export type ScriptClarifyState = {
   sessionId: string
   step: 'type' | 'count' | 'cta'
@@ -300,6 +313,15 @@ export type ScriptClarifyState = {
   remaining: Array<'type' | 'count' | 'cta'>
   /** Prior sheet steps for Pack-family Back (no transcript). */
   history?: ScriptClarifyState[]
+  /** Chat-turn attachments staged with the NL ask (session/temp, not brand kit). */
+  attachments?: ComposerTurnAttachment[]
+  /** NL “N posts” → scripts then images in-thread (not Pack modal). */
+  postCampaign?: boolean
+  /**
+   * `thread` = composer NL campaign (chips above composer, never FlowSheet).
+   * `sheet` = glass Guiones / Pack-family modal (default).
+   */
+  surface?: 'thread' | 'sheet'
 }
 
 export type ScriptClarifyAnswer = {
@@ -469,6 +491,8 @@ export function useChatSessionThread(options: {
       bypassScriptClarify?: boolean
       channelOverride?: 'website' | 'messages'
       creditConfirmed?: boolean
+      attachments?: ComposerTurnAttachment[]
+      postCampaign?: boolean
     }
     imageOptions?: Record<string, unknown>
     editOptions?: {
@@ -492,6 +516,8 @@ export function useChatSessionThread(options: {
     source: string
     referenceMode?: 'use' | 'none'
     referenceImageIds?: string[]
+    kitReferenceUrls?: string[]
+    brandLogoUrlOverride?: string
     alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
@@ -1206,18 +1232,47 @@ export function useChatSessionThread(options: {
       bypassScriptClarify?: boolean
       channelOverride?: 'website' | 'messages'
       creditConfirmed?: boolean
+      attachments?: ComposerTurnAttachment[]
+      postCampaign?: boolean
     }
   ): Promise<{ needOffers?: boolean } | void> => {
     const text = rawText.trim()
     if (!text || !session) return
     if (inFlightSessions.has(session.id)) return
 
-    if (!options?.skipImage) {
+    const turnAttachments = options?.attachments || []
+    const postCampaign = Boolean(
+      options?.postCampaign
+      ?? parseNlPostCampaignIntent(text, language).matched
+    )
+
+    if (!options?.skipImage && !postCampaign) {
       const imageIntent = parseChatShellImageIntent(text, language)
       if (imageIntent.matched && imageIntent.wantsImage) {
         setError(null)
         setFailedBatch(null)
         setScriptClarify(null)
+        // Stage product refs onto the offer before the single-image flow when present.
+        if (turnAttachments.length && (activeImageOfferId || offerProductId)) {
+          const productId = activeImageOfferId || offerProductId
+          if (productId) {
+            for (const attachment of turnAttachments) {
+              await uploadShellOfferImage({
+                userId,
+                sessionId: session.id,
+                productId,
+                dataUrl: attachment.dataUrl,
+                filename: attachment.name,
+                kind: attachment.role,
+              }).then((uploaded) => {
+                setOfferImages((prev) => [uploaded, ...prev.filter((item) => item.id !== uploaded.id)])
+              }).catch((err) => {
+                console.warn('Composer attachment upload skipped', err)
+              })
+            }
+            await refreshOfferImages(session.id, productId, loadRequestRef.current)
+          }
+        }
         await beginImageFlowRef.current({
           productId: activeImageOfferId || offerProductId,
           prompt: text,
@@ -1229,10 +1284,14 @@ export function useChatSessionThread(options: {
       }
     }
 
-    const parsedScriptIntent = parseChatShellScriptIntent(text, language, {
+    const defaults = {
       ...DEFAULT_SCRIPT_SETTINGS,
       model: getTextModelPreference(),
-    })
+    }
+    let parsedScriptIntent = parseChatShellScriptIntent(text, language, defaults)
+    if (postCampaign) {
+      parsedScriptIntent = applyPostCampaignScriptDefaults(parsedScriptIntent, defaults)
+    }
 
     const hasOffer =
       planOfferGenerationWalk(offers).length > 0
@@ -1275,6 +1334,7 @@ export function useChatSessionThread(options: {
       const step = missing[0]
       if (step) {
         setImageClarify(null)
+        // Premise: NL composer campaign never opens Guiones FlowSheet.
         setScriptClarify({
           sessionId: session.id,
           step,
@@ -1283,6 +1343,9 @@ export function useChatSessionThread(options: {
           ctaChannel: ctaChannel || undefined,
           remaining: missing.slice(1),
           history: [],
+          attachments: turnAttachments.length ? turnAttachments : undefined,
+          postCampaign: postCampaign || undefined,
+          surface: 'thread',
         })
         setError(null)
         setNotice(null)
@@ -1387,7 +1450,15 @@ export function useChatSessionThread(options: {
         units: walk.length,
         remaining: usage.creditsRemaining,
       })
-      creditPendingRef.current = { kind: 'scripts', text, sendOptions: options }
+      creditPendingRef.current = {
+        kind: 'scripts',
+        text,
+        sendOptions: {
+          ...options,
+          attachments: turnAttachments.length ? turnAttachments : options?.attachments,
+          postCampaign: postCampaign || options?.postCampaign,
+        },
+      }
       setCreditQuote(quote)
       setError(null)
       setNotice(null)
@@ -1415,7 +1486,19 @@ export function useChatSessionThread(options: {
       ...DEFAULT_SCRIPT_SETTINGS,
       model: getTextModelPreference(),
     }).settings
-    setScriptSettings(scriptSettingsForWalk)
+    const campaignSettings = postCampaign && !options?.forceSettings
+      ? applyPostCampaignScriptDefaults(
+        parseChatShellScriptIntent(generationText, language, {
+          ...DEFAULT_SCRIPT_SETTINGS,
+          model: getTextModelPreference(),
+        }),
+        {
+          ...DEFAULT_SCRIPT_SETTINGS,
+          model: getTextModelPreference(),
+        }
+      ).settings
+      : scriptSettingsForWalk
+    setScriptSettings(campaignSettings)
 
     try {
       const savedUser = await addMessage(originSessionId, 'user', text)
@@ -1449,7 +1532,7 @@ export function useChatSessionThread(options: {
         originSessionId,
         originGen,
         historyForApi,
-        scriptSettingsForWalk,
+        campaignSettings,
         savedUser.id,
         options?.channelOverride
       )
@@ -1482,13 +1565,95 @@ export function useChatSessionThread(options: {
           productIds: failures.map((f) => f.step.productId),
           names: failures.map((f) => f.step.name || f.step.productId),
           userText: text,
-          scriptSettings: scriptSettingsForWalk,
+          scriptSettings: campaignSettings,
         })
         setNotice(
           `Generated ${successes.length}/${walk.length} offers. Failed: ${failures
             .map((f) => f.step.name || f.step.productId)
             .join(', ')}. Retry those offers below.`
         )
+      }
+
+      if (postCampaign && successes.length > 0) {
+        const primary = successes[0]
+        const productId = primary.step.productId
+        const uploadedByRole: Array<{ role: ComposerAttachmentRole; id: string; url: string }> = []
+        for (const attachment of turnAttachments) {
+          try {
+            const uploaded = await uploadShellOfferImage({
+              userId,
+              sessionId: originSessionId,
+              productId,
+              dataUrl: attachment.dataUrl,
+              filename: attachment.name,
+              kind: attachment.role,
+            })
+            uploadedByRole.push({
+              role: attachment.role,
+              id: uploaded.id,
+              url: uploaded.image_url,
+            })
+            if (isLiveThread(
+              activeThreadSessionIdRef.current,
+              sessionGenRef.current,
+              originSessionId,
+              originGen
+            )) {
+              setOfferImages((prev) => [uploaded, ...prev.filter((item) => item.id !== uploaded.id)])
+            }
+          } catch (err) {
+            console.warn('Session attachment upload failed', err)
+          }
+        }
+        if (uploadedByRole.length) {
+          await refreshOfferImages(originSessionId, productId, loadRequestRef.current)
+        }
+        const parts = partitionComposerAttachmentRoles(uploadedByRole)
+        const productRefIds = parts.product.map((item) => item.id!).filter(Boolean)
+        const contextRefIds = parts.context.map((item) => item.id!).filter(Boolean)
+        const referenceImageIds = [...productRefIds, ...contextRefIds]
+        const logoUrl = parts.logo[0]?.url
+        const scripts = parseScripts(primary.content)
+        const scriptBodies = scripts.length > 0
+          ? scripts
+          : [{ index: 1, title: language === 'es' ? 'Post' : 'Post', content: primary.content }]
+        const imagePrefsForCampaign = defaultNlPostCampaignImagePreferences(
+          parseChatShellImageIntent(text, language).preferences
+        )
+        const hasProductRef = productRefIds.length > 0
+        setNotice(language === 'es'
+          ? `Guiones listos. Generando ${scriptBodies.length} post${scriptBodies.length === 1 ? '' : 's'} en el hilo…`
+          : `Scripts ready. Generating ${scriptBodies.length} post${scriptBodies.length === 1 ? '' : 's'} in the thread…`)
+        for (const script of scriptBodies) {
+          if (!isLiveThread(
+            activeThreadSessionIdRef.current,
+            sessionGenRef.current,
+            originSessionId,
+            originGen
+          )) {
+            break
+          }
+          await runImageGenerateRef.current({
+            productId,
+            preferences: imagePrefsForCampaign,
+            prompt: script.content,
+            userText: language === 'es'
+              ? `Post desde guión: ${script.title}`
+              : `Post from script: ${script.title}`,
+            scriptText: script.content,
+            scriptTitle: script.title,
+            source: 'composer',
+            referenceMode: referenceImageIds.length || logoUrl ? 'use' : 'none',
+            referenceImageIds,
+            brandLogoUrlOverride: logoUrl,
+            alreadyOptimized: false,
+            skipStyleRef: true,
+            skippedIngredients: hasProductRef
+              ? ['logo', 'style']
+              : ['logo', 'style', 'productPhoto'],
+            creditConfirmed: true,
+          })
+        }
       }
     } catch (err) {
       console.error(err)
@@ -1522,6 +1687,7 @@ export function useChatSessionThread(options: {
     persistTurn,
     usage.creditsEnabled,
     usage.creditsRemaining,
+    refreshOfferImages,
   ])
 
   const confirmCreditQuote = useCallback(async () => {
@@ -1585,6 +1751,8 @@ export function useChatSessionThread(options: {
         skipImage: true,
         bypassScriptClarify: true,
         channelOverride: channelOverrideFromMix(mix),
+        attachments: scriptClarify.attachments,
+        postCampaign: scriptClarify.postCampaign,
       })
     }
     const advance = async (
@@ -1662,8 +1830,13 @@ export function useChatSessionThread(options: {
           ? 'none' as const
           : scriptClarify.settings.ctaStrength || 'sales' as const,
       }
-      // Last step: select CTA only; primary Generar confirms (credits line visible).
+      // Last step: sheet waits for Generar; thread NL finishes on CTA pick
+      // (cancel-before-spend still happens via credit quote chips in-thread).
       if (scriptClarify.remaining.length === 0) {
+        if (scriptClarify.surface === 'thread') {
+          await finish(settings, mix)
+          return
+        }
         setScriptClarify({
           ...scriptClarify,
           settings,
@@ -1710,6 +1883,7 @@ export function useChatSessionThread(options: {
       },
       remaining: ['count', 'cta'],
       history: [],
+      surface: 'sheet',
     })
   }, [session, offers, language])
 
@@ -3128,6 +3302,7 @@ export function useChatSessionThread(options: {
       settings: scriptSettings,
       remaining: ['count', 'cta'],
       history: [],
+      surface: 'sheet',
     })
   }, [scriptSettings, language, session, offers])
 

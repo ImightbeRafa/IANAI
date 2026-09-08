@@ -44,6 +44,18 @@ import {
   type ShellImageDensity,
 } from './chatShellImageIntent'
 import { shouldShowFirstRunCta } from './chatShellFirstRun'
+import {
+  collectComposerDropFiles,
+  composerAttachmentRejectCopy,
+  composerAttachmentsFromDataTransfer,
+  labelForComposerRole,
+  MAX_COMPOSER_ATTACHMENTS,
+  nextComposerAttachmentRole,
+  scriptClarifyOpensModal,
+  type ComposerAttachment,
+  type ComposerAttachmentRole,
+} from './chatShellComposerAttachments'
+import ChatShellThreadClarify from './ChatShellThreadClarify'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -69,7 +81,10 @@ interface ChatThreadProps {
   onRetryFailedOffers: () => void
   language?: 'en' | 'es'
   walkProgress?: { current: number; total: number; offerName: string } | null
-  onSend: (text: string) => void | Promise<{ needOffers?: boolean; ignored?: boolean } | void>
+  onSend: (
+    text: string,
+    attachments?: ComposerAttachment[]
+  ) => void | Promise<{ needOffers?: boolean; ignored?: boolean } | void>
   onNeedOffers?: () => void
   imageClarify?: ImageClarifyState | null
   onAnswerImageClarify?: (answer: {
@@ -149,7 +164,6 @@ interface ChatThreadProps {
   inlineSetupCard?: ReactNode
   setupTurns?: Array<{ id: string; role: 'user' | 'assistant'; content: string }>
   setupPlaceholder?: string
-  onUploadBrandAsset?: (file: File, kind: 'logo' | 'reference') => void | Promise<void>
   onUploadSetupDocument?: (file: File) => void | Promise<void>
   /** First-run empty CTA — opens Brand Kit / brand create (not a multi-step tour). */
   onStartBrandKit?: () => void
@@ -258,7 +272,6 @@ export default memo(function ChatThread({
   inlineSetupCard,
   setupTurns = [],
   setupPlaceholder,
-  onUploadBrandAsset,
   onUploadSetupDocument,
   onStartBrandKit,
   kitReady = false,
@@ -266,6 +279,8 @@ export default memo(function ChatThread({
 }: ChatThreadProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [attachOpen, setAttachOpen] = useState(false)
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([])
+  const [dragOverComposer, setDragOverComposer] = useState(false)
   const [postPreviewNonce, setPostPreviewNonce] = useState(0)
   const [postPreviewScriptKey, setPostPreviewScriptKey] = useState<string | null>(null)
   const [localNotice, setLocalNotice] = useState<string | null>(null)
@@ -301,11 +316,12 @@ export default memo(function ChatThread({
     [offerImages, offerProductNames]
   )
   const threadRef = useRef<HTMLDivElement>(null)
-  const logoInputRef = useRef<HTMLInputElement>(null)
-  const referenceInputRef = useRef<HTMLInputElement>(null)
   const documentInputRef = useRef<HTMLInputElement>(null)
+  const composerImageInputRef = useRef<HTMLInputElement>(null)
+  const composerAttachRoleRef = useRef<ComposerAttachmentRole>('product')
   const offerProductRefInputRef = useRef<HTMLInputElement>(null)
   const offerContextRefInputRef = useRef<HTMLInputElement>(null)
+  const dragDepthRef = useRef(0)
   const insertTranscript = useCallback((text: string) => {
     if (!sessionKey) return
     setDrafts((prev) => ({
@@ -327,38 +343,57 @@ export default memo(function ChatThread({
     setPostPreviewNonce(0)
     setPostPreviewScriptKey(null)
     setLocalNotice(null)
+    setComposerAttachments([])
+    setDragOverComposer(false)
+    dragDepthRef.current = 0
     voiceDiscard()
   }, [sessionKey, voiceDiscard])
+
+  const stageComposerFiles = useCallback(async (
+    files: FileList | File[] | null | undefined,
+    role: ComposerAttachmentRole = 'product'
+  ) => {
+    const { attachments: created, reject } = await collectComposerDropFiles(
+      files,
+      composerAttachments.length,
+      role
+    )
+    if (reject) {
+      setLocalNotice(composerAttachmentRejectCopy(reject, language === 'en' ? 'en' : 'es'))
+    }
+    if (!created.length) return
+    setComposerAttachments((prev) => [...prev, ...created].slice(0, MAX_COMPOSER_ATTACHMENTS))
+  }, [composerAttachments.length, language])
 
   const submit = () => {
     const text = composer.trim()
     if (!text || sending || !session || loadingMessages || voice.isRecording || voice.isTranscribing) return
     const capturedKey = sessionKey
+    const staged = composerAttachments
     setDrafts((prev) => ({ ...prev, [capturedKey]: '' }))
+    setComposerAttachments([])
     void (async () => {
-      const result = await onSend(text)
+      const result = await onSend(text, staged.length ? staged : undefined)
       if (result && result.ignored) {
         setDrafts((prev) => ({
           ...prev,
           [capturedKey]: (prev[capturedKey] || '').trim() ? prev[capturedKey] : text,
         }))
+        if (staged.length) setComposerAttachments(staged)
         return
       }
       if (result && result.needOffers) onNeedOffers?.()
     })()
   }
 
-  const pickAttach = (kind: 'logo' | 'reference' | 'document') => {
+  const pickAttach = (kind: 'document' | ComposerAttachmentRole) => {
     setAttachOpen(false)
-    if (kind === 'logo') logoInputRef.current?.click()
-    else if (kind === 'reference') referenceInputRef.current?.click()
-    else documentInputRef.current?.click()
-  }
-
-  const handleAttachFiles = (kind: 'logo' | 'reference', files: FileList | null) => {
-    const file = files?.[0]
-    if (!file || !onUploadBrandAsset) return
-    void onUploadBrandAsset(file, kind)
+    if (kind === 'document') {
+      documentInputRef.current?.click()
+      return
+    }
+    composerAttachRoleRef.current = kind
+    composerImageInputRef.current?.click()
   }
 
   const voiceBusy = voice.isRecording || voice.isTranscribing
@@ -740,7 +775,51 @@ export default memo(function ChatThread({
         )}
       </div>
 
-      <div className="chat-shell__composer-wrap" data-tour="composer">
+      <div
+        className={`chat-shell__composer-wrap${dragOverComposer ? ' is-drop-target' : ''}`}
+        data-tour="composer"
+        onDragEnter={(event) => {
+          if (!composerEnabled || loadingMessages) return
+          if (![...event.dataTransfer.types].includes('Files')) return
+          event.preventDefault()
+          dragDepthRef.current += 1
+          setDragOverComposer(true)
+        }}
+        onDragOver={(event) => {
+          if (!composerEnabled || loadingMessages) return
+          if (![...event.dataTransfer.types].includes('Files')) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={() => {
+          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+          if (dragDepthRef.current === 0) setDragOverComposer(false)
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          dragDepthRef.current = 0
+          setDragOverComposer(false)
+          if (!composerEnabled || loadingMessages) return
+          const files = composerAttachmentsFromDataTransfer(event.dataTransfer)
+          void stageComposerFiles(files, 'product')
+        }}
+      >
+        {dragOverComposer ? (
+          <div className="chat-shell__composer-drop-hint" role="status">
+            {t.attachDropHint}
+          </div>
+        ) : null}
+        <input
+          ref={composerImageInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          hidden
+          onChange={(e) => {
+            void stageComposerFiles(e.target.files, composerAttachRoleRef.current)
+            e.target.value = ''
+          }}
+        />
         <input
           ref={offerProductRefInputRef}
           type="file"
@@ -782,10 +861,25 @@ export default memo(function ChatThread({
               </button>
             </div>
           </div>
+        ) : scriptClarify && offerCount > 0 && !scriptClarifyOpensModal(scriptClarify) ? (
+          <ChatShellThreadClarify
+            language={language === 'en' ? 'en' : 'es'}
+            state={scriptClarify}
+            onAnswer={(answer) => onAnswerScriptClarify?.(answer)}
+            onCancel={() => {
+              setPostPreviewScriptKey(null)
+              setPostPreviewNonce(0)
+              onCancelScriptClarify?.()
+            }}
+          />
         ) : (
         <ChatShellClarifySheet
           language={language}
-          scriptClarify={scriptClarify && offerCount > 0 ? scriptClarify : null}
+          scriptClarify={
+            scriptClarify && offerCount > 0 && scriptClarifyOpensModal(scriptClarify)
+              ? scriptClarify
+              : null
+          }
           imageClarify={imageClarify}
           imageBusy={imageBusy}
           creditsRemaining={creditsEnabled ? creditsRemaining : null}
@@ -836,6 +930,42 @@ export default memo(function ChatThread({
               onSelect={insertSlashCommand}
             />
           ) : null}
+          {composerAttachments.length > 0 ? (
+            <div className="chat-shell__composer-chips" aria-label={t.attach}>
+              {composerAttachments.map((attachment) => (
+                <div key={attachment.id} className="chat-shell__composer-chip">
+                  <img src={attachment.dataUrl} alt={attachment.name} />
+                  <div className="chat-shell__composer-chip-meta">
+                    <span className="chat-shell__composer-chip-name">{attachment.name}</span>
+                    <button
+                      type="button"
+                      className="chat-shell__composer-chip-role"
+                      title={t.attachRoleHint}
+                      onClick={() => {
+                        setComposerAttachments((prev) => prev.map((item) => (
+                          item.id === attachment.id
+                            ? { ...item, role: nextComposerAttachmentRole(item.role) }
+                            : item
+                        )))
+                      }}
+                    >
+                      {labelForComposerRole(attachment.role, language === 'en' ? 'en' : 'es')}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="chat-shell__composer-chip-remove"
+                    aria-label={t.attachChipRemove}
+                    onClick={() => {
+                      setComposerAttachments((prev) => prev.filter((item) => item.id !== attachment.id))
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <textarea
             value={composer}
             onChange={(e) => {
@@ -877,76 +1007,49 @@ export default memo(function ChatThread({
             aria-autocomplete={slashCommands.length > 0 ? 'list' : undefined}
           />
           <div className="chat-shell__composer-tools">
-            {onUploadBrandAsset || onUploadSetupDocument ? (
-              <div className="chat-shell__attach">
-                {onUploadBrandAsset ? (
-                  <>
-                    <input
-                      ref={logoInputRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                      hidden
-                      onChange={(e) => {
-                        handleAttachFiles('logo', e.target.files)
-                        e.target.value = ''
-                      }}
-                    />
-                    <input
-                      ref={referenceInputRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                      hidden
-                      onChange={(e) => {
-                        handleAttachFiles('reference', e.target.files)
-                        e.target.value = ''
-                      }}
-                    />
-                  </>
-                ) : null}
-                {onUploadSetupDocument ? (
-                  <input
-                    ref={documentInputRef}
-                    type="file"
-                    accept="application/pdf,text/plain,text/markdown,text/csv,.pdf,.txt,.md,.csv"
-                    hidden
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) void onUploadSetupDocument(file)
-                      e.target.value = ''
-                    }}
-                  />
-                ) : null}
-                <button
-                  type="button"
-                  className="chat-shell__icon-btn"
-                  disabled={!composerEnabled || sending || loadingMessages}
-                  aria-label={t.attach}
-                  title={t.attach}
-                  onClick={() => setAttachOpen((open) => !open)}
-                >
-                  <Paperclip size={16} aria-hidden />
-                </button>
-                {attachOpen ? (
-                  <div className="chat-shell__attach-menu" role="menu">
-                    {onUploadBrandAsset ? (
-                      <>
-                        <button type="button" role="menuitem" onClick={() => pickAttach('logo')}>
-                          {t.attachLogo}
-                        </button>
-                        <button type="button" role="menuitem" onClick={() => pickAttach('reference')}>
-                          {t.attachReference}
-                        </button>
-                      </>
-                    ) : null}
-                    {onUploadSetupDocument ? (
-                      <button type="button" role="menuitem" onClick={() => pickAttach('document')}>
-                        {t.attachDocument}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            <div className="chat-shell__attach">
+              {onUploadSetupDocument ? (
+                <input
+                  ref={documentInputRef}
+                  type="file"
+                  accept="application/pdf,text/plain,text/markdown,text/csv,.pdf,.txt,.md,.csv"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void onUploadSetupDocument(file)
+                    e.target.value = ''
+                  }}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="chat-shell__icon-btn"
+                disabled={!composerEnabled || sending || loadingMessages}
+                aria-label={t.attach}
+                title={t.attach}
+                onClick={() => setAttachOpen((open) => !open)}
+              >
+                <Paperclip size={16} aria-hidden />
+              </button>
+              {attachOpen ? (
+                <div className="chat-shell__attach-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => pickAttach('product')}>
+                    {t.attachProduct}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => pickAttach('logo')}>
+                    {t.attachLogo}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => pickAttach('context')}>
+                    {t.attachContext}
+                  </button>
+                  {onUploadSetupDocument ? (
+                    <button type="button" role="menuitem" onClick={() => pickAttach('document')}>
+                      {t.attachDocument}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               className={`chat-shell__icon-btn chat-shell__mic${voice.isRecording ? ' is-recording' : ''}`}

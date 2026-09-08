@@ -1,3 +1,24 @@
+## 2026-09-08 — PR B tip: NL thread-only clarify + attach size gate
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `ChatThread.tsx`, `ChatShellThreadClarify.tsx`, `chatShellComposerAttachments.ts`, tests
+
+- Premise: NL post/guion campaign was still calling `setScriptClarify` → FlowSheet (Guiones Paso n/n). NL now sets `surface: 'thread'`; glass Guiones keeps `surface: 'sheet'`. Thread chips only — `modal-root` empty on NL CTA clarify.
+- SecureDog: `MAX_COMPOSER_ATTACHMENT_BYTES` (10MB) enforced before FileReader; MIME allowlist only (no extension fallback).
+
+No merge. Astra / name wrap / kit autosave untouched.
+
+## 2026-09-08 — Chat composer drag-drop attach + NL post campaign
+
+**Area:** chat-shell
+**Files:** `chatShellComposerAttachments.ts`, `chatShellNlPostCampaign.ts`, `ChatThread.tsx`, `ChatShell.tsx`, `useChatSessionThread.ts`, `chatShellLabels.ts`, `chat-shell.css`, `test/chat-shell-composer-attachments.spec.ts`, `test/chat-shell-composer-attach-ui.spec.tsx`
+
+- Composer drop zone + paperclip picker stage chat-turn images with typed chips `product|logo|context` (session/temp via `uploadShellOfferImage` — **not** brand kit).
+- NL “Generame N posts…” routes to existing Guiones walk then Post/image generate with attached product refs (`product_lock` path); clarify only missing count/CTA/offer; progress stays in the thread (no Pack modal for this path).
+- Spanish attach copy; Advance cyan drop/chip chrome.
+
+No merge. Astra / Guiones model swap / name wrap / invite-all / gift / live SQL untouched.
+
 ## 2026-09-08 — Chat-shell: Cerrar sesión icon in account footer row
 
 **Area:** chat-shell

@@ -69,4 +69,6 @@ Product next (not this pack):
 6. Browser smoke for `/chat` (folder switch, hide/show widget, dark/light, 390px).
 7. Instrument folder-switch latency and generation stages.
 
+Composer drag-drop + NL post campaign (session/temp attachments → Guiones → posts in-thread) shipped on Preview branch; brand-kit autosave of drops remains out of scope.
+
 Do not invent a second changelog. User-facing notes go in `src/data/changelog.ts`; agent notes go in `docs/agent/CHANGELOG.md`.
