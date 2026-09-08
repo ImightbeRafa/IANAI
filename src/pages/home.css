@@ -201,9 +201,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.35rem;
+  gap: 0.2rem;
   /* Clear sticky nav — H1 must not clip under the pill */
-  padding: calc(5.4rem + env(safe-area-inset-top, 0px)) 0.75rem 0.1rem;
+  padding: calc(5.2rem + env(safe-area-inset-top, 0px)) 0.75rem 0;
   width: 100%;
   margin: 0 auto;
   min-height: 100svh;
@@ -271,9 +271,9 @@
 }
 
 .home-hero__sub {
-  margin: 0.3rem 0 0;
-  font-size: clamp(0.9rem, 3.1vw, 1rem);
-  line-height: 1.3;
+  margin: 0.22rem 0 0;
+  font-size: clamp(0.88rem, 3.1vw, 1rem);
+  line-height: 1.28;
   font-weight: 500;
   color: rgba(244, 247, 251, 0.88);
   max-width: 28rem;
@@ -295,7 +295,7 @@
 }
 
 .home-hero__cta {
-  margin-top: 0.4rem;
+  margin-top: 0.28rem;
 }
 
 @media (min-width: 960px) {
@@ -311,9 +311,9 @@
   }
 
   .home-hero__cta .home-btn {
-    min-height: 2.55rem;
-    padding: 0.5rem 1.2rem;
-    font-size: 0.9rem;
+    min-height: 2.45rem;
+    padding: 0.45rem 1.15rem;
+    font-size: 0.88rem;
   }
 }
 
@@ -322,14 +322,14 @@
   z-index: 2;
   display: flex;
   justify-content: center;
-  /* Cards hug CTA — kill leftover air between button and fan */
+  /* Cards hug CTA — fill remaining viewport, no dead band under cards */
   align-items: flex-start;
   width: min(100%, 38rem);
-  flex: 1 1 auto;
-  /* Explicit height — % max-height on cards needs a definite containing block */
-  height: calc(100svh - 11.5rem - env(safe-area-inset-top, 0px));
-  min-height: 17rem;
-  margin: 0.05rem 0 0;
+  flex: 1 1 0;
+  min-height: 0;
+  /* Definite flex height for % card sizing — avoid svh calc mismatch */
+  height: auto;
+  margin: 0.4rem 0 0;
   overflow: hidden;
   padding-bottom: 0;
 }
@@ -382,9 +382,13 @@
   top: 0;
   bottom: auto;
   aspect-ratio: 9 / 16;
-  max-height: min(96%, 28rem);
-  width: min(78vw, 15.5rem);
-  margin-left: calc(min(78vw, 15.5rem) / -2);
+  /* Fill remaining hero — hug bottom, tiny CTA clearance via wrap margin */
+  height: 98%;
+  max-height: 98%;
+  width: auto;
+  max-width: min(88vw, 17.5rem);
+  margin-left: 0;
+  translate: -50% 0;
   border-radius: 1.05rem;
   overflow: hidden;
   /* Soft skeleton — no black flash while JPEGs decode */
@@ -393,7 +397,7 @@
     linear-gradient(180deg, #121820 0%, #0a0e14 100%);
   border: 1px solid rgba(45, 226, 255, 0.18);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  transform-origin: 50% 12%;
+  transform-origin: 50% 0%;
   transform: translate3d(0, 2%, 0) rotate(0deg) scale(0.82);
   opacity: 0.92;
   transition:
@@ -409,10 +413,13 @@
   .home-fan__card {
     top: 50%;
     bottom: auto;
-    width: clamp(12.25rem, 16.5vw, 15.25rem);
+    height: auto;
     max-height: none;
+    width: clamp(12.25rem, 16.5vw, 15.25rem);
+    max-width: none;
     margin-left: calc(clamp(12.25rem, 16.5vw, 15.25rem) / -2);
     margin-top: calc(clamp(12.25rem, 16.5vw, 15.25rem) * 16 / 9 / -2);
+    translate: none;
     transform-origin: 50% 55%;
     transform: translate3d(0, 4%, 0) rotate(0deg) scale(0.78);
   }
@@ -452,19 +459,19 @@
   --fan-i: 2;
 }
 
-/* Mobile 3-card spread */
+/* Mobile 3-card spread — origin top, scale ≤1 so CTA stays clear */
 .home-fan.is-spread .home-fan__card[data-slot='mid-left'] {
-  transform: translate3d(-52%, 2%, 0) rotate(-12deg) scale(0.94);
+  transform: translate3d(-52%, 1%, 0) rotate(-12deg) scale(0.92);
   opacity: 1;
   z-index: 3;
 }
 .home-fan.is-spread .home-fan__card[data-slot='front'] {
-  transform: translate3d(0, 0, 48px) rotate(0deg) scale(1.02);
+  transform: translate3d(0, 0, 48px) rotate(0deg) scale(1);
   opacity: 1;
   z-index: 5;
 }
 .home-fan.is-spread .home-fan__card[data-slot='mid-right'] {
-  transform: translate3d(52%, 2%, 0) rotate(12deg) scale(0.94);
+  transform: translate3d(52%, 1%, 0) rotate(12deg) scale(0.92);
   opacity: 1;
   z-index: 3;
 }
