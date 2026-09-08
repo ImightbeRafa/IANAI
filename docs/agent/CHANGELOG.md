@@ -1,3 +1,13 @@
+## 2026-09-08 — PR B tip: NL thread-only clarify + attach size gate
+
+**Area:** chat-shell
+**Files:** `useChatSessionThread.ts`, `ChatThread.tsx`, `ChatShellThreadClarify.tsx`, `chatShellComposerAttachments.ts`, tests
+
+- Premise: NL post/guion campaign was still calling `setScriptClarify` → FlowSheet (Guiones Paso n/n). NL now sets `surface: 'thread'`; glass Guiones keeps `surface: 'sheet'`. Thread chips only — `modal-root` empty on NL CTA clarify.
+- SecureDog: `MAX_COMPOSER_ATTACHMENT_BYTES` (10MB) enforced before FileReader; MIME allowlist only (no extension fallback).
+
+No merge. Astra / name wrap / kit autosave untouched.
+
 ## 2026-09-08 — Chat composer drag-drop attach + NL post campaign
 
 **Area:** chat-shell

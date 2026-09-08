@@ -317,6 +317,11 @@ export type ScriptClarifyState = {
   attachments?: ComposerTurnAttachment[]
   /** NL “N posts” → scripts then images in-thread (not Pack modal). */
   postCampaign?: boolean
+  /**
+   * `thread` = composer NL campaign (chips above composer, never FlowSheet).
+   * `sheet` = glass Guiones / Pack-family modal (default).
+   */
+  surface?: 'thread' | 'sheet'
 }
 
 export type ScriptClarifyAnswer = {
@@ -1329,6 +1334,7 @@ export function useChatSessionThread(options: {
       const step = missing[0]
       if (step) {
         setImageClarify(null)
+        // Premise: NL composer campaign never opens Guiones FlowSheet.
         setScriptClarify({
           sessionId: session.id,
           step,
@@ -1339,6 +1345,7 @@ export function useChatSessionThread(options: {
           history: [],
           attachments: turnAttachments.length ? turnAttachments : undefined,
           postCampaign: postCampaign || undefined,
+          surface: 'thread',
         })
         setError(null)
         setNotice(null)
@@ -1823,8 +1830,13 @@ export function useChatSessionThread(options: {
           ? 'none' as const
           : scriptClarify.settings.ctaStrength || 'sales' as const,
       }
-      // Last step: select CTA only; primary Generar confirms (credits line visible).
+      // Last step: sheet waits for Generar; thread NL finishes on CTA pick
+      // (cancel-before-spend still happens via credit quote chips in-thread).
       if (scriptClarify.remaining.length === 0) {
+        if (scriptClarify.surface === 'thread') {
+          await finish(settings, mix)
+          return
+        }
         setScriptClarify({
           ...scriptClarify,
           settings,
@@ -1871,6 +1883,7 @@ export function useChatSessionThread(options: {
       },
       remaining: ['count', 'cta'],
       history: [],
+      surface: 'sheet',
     })
   }, [session, offers, language])
 
@@ -3289,6 +3302,7 @@ export function useChatSessionThread(options: {
       settings: scriptSettings,
       remaining: ['count', 'cta'],
       history: [],
+      surface: 'sheet',
     })
   }, [scriptSettings, language, session, offers])
 

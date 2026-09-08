@@ -11,6 +11,8 @@ export interface ComposerAttachment {
 }
 
 export const MAX_COMPOSER_ATTACHMENTS = 4
+/** Mirror brand-kit upload cap in `imageStorage.ts` (~10MB). */
+export const MAX_COMPOSER_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 const ALLOWED_MIME = new Set([
   'image/png',
@@ -20,9 +22,35 @@ const ALLOWED_MIME = new Set([
   'image/gif',
 ])
 
+export type ComposerAttachmentReject = 'type' | 'size'
+
+/** MIME allowlist only — no extension fallback. */
 export function isAllowedComposerImage(file: File): boolean {
-  if (ALLOWED_MIME.has(file.type)) return true
-  return /\.(png|jpe?g|webp|gif)$/i.test(file.name)
+  return ALLOWED_MIME.has(file.type)
+}
+
+/**
+ * Gate before any FileReader / data URL work.
+ * Returns reject reason or null when the file may be staged.
+ */
+export function composerAttachmentGate(file: File): ComposerAttachmentReject | null {
+  if (!isAllowedComposerImage(file)) return 'type'
+  if (file.size > MAX_COMPOSER_ATTACHMENT_BYTES) return 'size'
+  return null
+}
+
+export function composerAttachmentRejectCopy(
+  reason: ComposerAttachmentReject,
+  language: 'es' | 'en'
+): string {
+  if (reason === 'size') {
+    return language === 'es'
+      ? 'La imagen supera 10 MB. Elegí una más liviana.'
+      : 'Image is over 10 MB. Choose a smaller file.'
+  }
+  return language === 'es'
+    ? 'Solo imágenes PNG, JPEG, WebP o GIF.'
+    : 'Only PNG, JPEG, WebP, or GIF images.'
 }
 
 export function nextComposerAttachmentRole(
@@ -84,7 +112,8 @@ export async function createComposerAttachment(
   file: File,
   role: ComposerAttachmentRole = 'product'
 ): Promise<ComposerAttachment | null> {
-  if (!isAllowedComposerImage(file)) return null
+  // Size + MIME gate MUST run before data URL / FileReader.
+  if (composerAttachmentGate(file)) return null
   const dataUrl = await readFileAsDataUrl(file)
   if (!dataUrl.startsWith('data:')) return null
   return {
@@ -100,16 +129,22 @@ export async function collectComposerDropFiles(
   fileList: FileList | File[] | null | undefined,
   existingCount: number,
   role: ComposerAttachmentRole = 'product'
-): Promise<ComposerAttachment[]> {
+): Promise<{ attachments: ComposerAttachment[]; reject?: ComposerAttachmentReject }> {
   const files = fileList ? Array.from(fileList) : []
   const room = Math.max(0, MAX_COMPOSER_ATTACHMENTS - existingCount)
-  if (room <= 0) return []
+  if (room <= 0) return { attachments: [] }
   const created: ComposerAttachment[] = []
+  let reject: ComposerAttachmentReject | undefined
   for (const file of files.slice(0, room)) {
+    const gate = composerAttachmentGate(file)
+    if (gate) {
+      reject = gate
+      continue
+    }
     const attachment = await createComposerAttachment(file, role)
     if (attachment) created.push(attachment)
   }
-  return created
+  return { attachments: created, reject }
 }
 
 export function composerAttachmentsFromDataTransfer(
@@ -117,4 +152,15 @@ export function composerAttachmentsFromDataTransfer(
 ): File[] {
   if (!dataTransfer?.files?.length) return []
   return Array.from(dataTransfer.files).filter(isAllowedComposerImage)
+}
+
+/**
+ * Premise helper: NL campaign clarify must not open Guiones/Pack FlowSheet.
+ * Sheet surface = glass Guiones button; thread surface = composer NL.
+ */
+export function scriptClarifyOpensModal(
+  state: { surface?: 'thread' | 'sheet' } | null | undefined
+): boolean {
+  if (!state) return false
+  return state.surface !== 'thread'
 }

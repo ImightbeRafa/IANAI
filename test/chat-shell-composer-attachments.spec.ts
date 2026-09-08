@@ -58,10 +58,14 @@ describe('chatShellComposerAttachments', () => {
 
   it('caps staged drops at MAX_COMPOSER_ATTACHMENTS', async () => {
     const files = Array.from({ length: 6 }, (_, i) => fakeImageFile(`p${i}.png`))
-    const created = await collectComposerDropFiles(files, 0, 'product')
+    const { attachments: created } = await collectComposerDropFiles(files, 0, 'product')
     expect(created).toHaveLength(MAX_COMPOSER_ATTACHMENTS)
-    const more = await collectComposerDropFiles(files, MAX_COMPOSER_ATTACHMENTS, 'product')
+    const { attachments: more } = await collectComposerDropFiles(files, MAX_COMPOSER_ATTACHMENTS, 'product')
     expect(more).toHaveLength(0)
+  })
+
+  it('rejects extension-only files without MIME', () => {
+    expect(isAllowedComposerImage(fakeImageFile('looks-like.png', ''))).toBe(false)
   })
 })
 

@@ -46,13 +46,16 @@ import {
 import { shouldShowFirstRunCta } from './chatShellFirstRun'
 import {
   collectComposerDropFiles,
+  composerAttachmentRejectCopy,
   composerAttachmentsFromDataTransfer,
   labelForComposerRole,
   MAX_COMPOSER_ATTACHMENTS,
   nextComposerAttachmentRole,
+  scriptClarifyOpensModal,
   type ComposerAttachment,
   type ComposerAttachmentRole,
 } from './chatShellComposerAttachments'
+import ChatShellThreadClarify from './ChatShellThreadClarify'
 
 interface ChatThreadProps {
   brand: Business | null
@@ -350,10 +353,17 @@ export default memo(function ChatThread({
     files: FileList | File[] | null | undefined,
     role: ComposerAttachmentRole = 'product'
   ) => {
-    const created = await collectComposerDropFiles(files, composerAttachments.length, role)
+    const { attachments: created, reject } = await collectComposerDropFiles(
+      files,
+      composerAttachments.length,
+      role
+    )
+    if (reject) {
+      setLocalNotice(composerAttachmentRejectCopy(reject, language === 'en' ? 'en' : 'es'))
+    }
     if (!created.length) return
     setComposerAttachments((prev) => [...prev, ...created].slice(0, MAX_COMPOSER_ATTACHMENTS))
-  }, [composerAttachments.length])
+  }, [composerAttachments.length, language])
 
   const submit = () => {
     const text = composer.trim()
@@ -851,10 +861,25 @@ export default memo(function ChatThread({
               </button>
             </div>
           </div>
+        ) : scriptClarify && offerCount > 0 && !scriptClarifyOpensModal(scriptClarify) ? (
+          <ChatShellThreadClarify
+            language={language === 'en' ? 'en' : 'es'}
+            state={scriptClarify}
+            onAnswer={(answer) => onAnswerScriptClarify?.(answer)}
+            onCancel={() => {
+              setPostPreviewScriptKey(null)
+              setPostPreviewNonce(0)
+              onCancelScriptClarify?.()
+            }}
+          />
         ) : (
         <ChatShellClarifySheet
           language={language}
-          scriptClarify={scriptClarify && offerCount > 0 ? scriptClarify : null}
+          scriptClarify={
+            scriptClarify && offerCount > 0 && scriptClarifyOpensModal(scriptClarify)
+              ? scriptClarify
+              : null
+          }
           imageClarify={imageClarify}
           imageBusy={imageBusy}
           creditsRemaining={creditsEnabled ? creditsRemaining : null}
