@@ -50,6 +50,28 @@ export function getTotalRequested(settings?: ScriptSettings): number {
   return getRequestedScriptTypes(settings).length
 }
 
+/**
+ * Angle inventory size: enough surplus for diversity without the old floor of 8.
+ * n=1 → 3, n=3 → 6, n=10 → 12.
+ */
+export function angleInventoryNeeded(settings?: ScriptSettings): number {
+  const n = getTotalRequested(settings)
+  return Math.min(Math.max(n * 2, n + 2), 12)
+}
+
+/** Compact JSON for model prompts (no pretty indent / trailing empty noise). */
+export function compactJson(value: unknown): string {
+  return JSON.stringify(value)
+}
+
+/** Adaptive draft completion budget: leave headroom so JSON does not truncate. */
+export function draftMaxTokens(scriptCount: number): number {
+  return Math.min(3600, Math.max(900, 400 + scriptCount * 900))
+}
+
+/** Angle planning completion budget (compact candidate JSON). */
+export const ANGLE_MAX_TOKENS = 1600
+
 export function normalizeConfig(config?: Partial<ScriptTypeConfig>): ScriptTypeConfig {
   return {
     venta_directa: config?.venta_directa ?? 0,

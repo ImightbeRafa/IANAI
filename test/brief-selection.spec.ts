@@ -49,6 +49,8 @@ describe('selectScriptBriefs', () => {
     expect(briefs.map(b => b.scriptType)).toEqual(['venta_directa', 'desvalidar_alternativas', 'desvalidar_alternativas'])
     expect(new Set(briefs.map(b => `${b.hookMechanism}:${b.buyerStage}`)).size).toBe(3)
     expect(briefs.every((brief) => brief.cta.channel === 'messages')).toBe(true)
+    expect(briefs[0].developmentBeats[0]).toBe('Resolvé la duda: direct_offer doubt')
+    expect(briefs[0].cta.textDirection).toBe('Llevá a mandar mensaje/DM con un siguiente paso concreto.')
   })
 
   it('assigns mixed CTA channels per brief when ctaMix sums to the script total', () => {

@@ -1925,6 +1925,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             angleCandidates: structured.angleCandidates,
             briefs: structured.briefs,
             qualityReports: structured.qualityReports,
+            timings: structured.timings,
           }
         })
       } catch (structuredError) {

@@ -231,6 +231,14 @@ export interface ScriptQualityReport {
   repairInstruction?: string
 }
 
+export interface GuionesPipelineTimings {
+  anglesMs: number
+  draftMs: number
+  totalMs: number
+  angleCandidatesRequested: number
+  scriptsDrafted: number
+}
+
 export interface GuionesPipelineResult {
   content: string
   contextProfile: ScriptContextProfile
@@ -239,5 +247,7 @@ export interface GuionesPipelineResult {
   qualityReports: ScriptQualityReport[]
   scripts: GeneratedScript[]
   promptPreview: string
+  /** Stage wall-clock timings (debug / Preview evidence). */
+  timings?: GuionesPipelineTimings
 }
 
