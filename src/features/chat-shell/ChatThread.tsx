@@ -529,17 +529,36 @@ export default memo(function ChatThread({
               </div>
             ) : null}
             {!showFirstRunCta && visibleMessages.length === 0 && setupTurns.length === 0 ? (
-              <div className="chat-shell__msg chat-shell__msg--ai">
+              <div className="chat-shell__msg chat-shell__msg--ai" data-empty-examples="true">
                 <span className="chat-shell__who">Advance AI</span>
                 <div className="chat-shell__status-box">
-                  {offerProductId && activeProduct
-                    ? t.emptyReadyWithOffer.replace(
-                      '{detail}',
-                      offerCount > 1
-                        ? (language === 'es' ? `${offerCount} ofertas` : `${offerCount} offers`)
-                        : (language === 'es' ? `oferta ${activeProduct.name}` : `offer ${activeProduct.name}`)
-                    )
-                    : t.emptyReadyNoOffer}
+                  <p className="chat-shell__empty-line">
+                    {offerProductId && activeProduct
+                      ? t.emptyReadyWithOffer.replace(
+                        '{detail}',
+                        offerCount > 1
+                          ? (language === 'es' ? `${offerCount} ofertas` : `${offerCount} offers`)
+                          : (language === 'es' ? `oferta ${activeProduct.name}` : `offer ${activeProduct.name}`)
+                      )
+                      : t.emptyReadyNoOffer}
+                  </p>
+                  <p className="chat-shell__empty-examples-label">{t.emptyExamplesHint}</p>
+                  <div className="chat-shell__empty-examples" role="group" aria-label={t.emptyExamplesHint}>
+                    {t.emptyExamplePrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="chat-shell__empty-example"
+                        disabled={!composerEnabled || loadingMessages || sending}
+                        onClick={() => {
+                          if (!sessionKey) return
+                          setDrafts((prev) => ({ ...prev, [sessionKey]: prompt }))
+                        }}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             ) : null}
