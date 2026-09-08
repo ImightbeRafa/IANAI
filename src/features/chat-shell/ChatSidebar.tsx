@@ -601,19 +601,18 @@ export default function ChatSidebar({
             >
               <Settings size={15} aria-hidden />
             </button>
+            <button
+              type="button"
+              className="chat-shell__icon-btn chat-shell__icon-btn--ghost"
+              aria-label={t.signOut}
+              title={t.signOut}
+              onClick={onSignOut}
+              data-testid="chat-shell-sign-out"
+            >
+              <LogOut size={15} aria-hidden />
+            </button>
           </div>
         </div>
-        <button
-          type="button"
-          className="chat-shell__sign-out-btn"
-          aria-label={t.signOut}
-          title={t.signOut}
-          onClick={onSignOut}
-          data-testid="chat-shell-sign-out"
-        >
-          <LogOut size={14} aria-hidden />
-          <span>{t.signOut}</span>
-        </button>
       </div>
     </aside>
   )

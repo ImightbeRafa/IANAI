@@ -1088,7 +1088,7 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
-  row-gap: 6px;
+  row-gap: 2px;
   min-width: 0;
 }
 
@@ -1138,35 +1138,12 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   gap: 0;
 }
 
-.chat-shell__sign-out-btn {
-  grid-column: 1 / -1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  width: 100%;
-  margin: 0;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: var(--chat-ui-track);
-  line-height: 1.2;
-  cursor: pointer;
-}
-
-.chat-shell__sign-out-btn:hover {
-  color: var(--text);
-  background: var(--bg-soft);
-  border-color: var(--border);
-}
-
-.chat-shell__sign-out-btn:focus-visible {
-  outline: 2px solid var(--accent, #4f8cff);
-  outline-offset: 1px;
+/* Footer account icons: quiet 15px glyphs, ≥40px hit target */
+.chat-shell__user-icons .chat-shell__icon-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .chat-shell__modal-hint {

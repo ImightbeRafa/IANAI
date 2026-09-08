@@ -128,6 +128,9 @@ describe('chat-shell Cerrar sesión', () => {
     expect(screen.queryByTestId('signed-out-landing')).toBeNull()
     const button = screen.getByRole('button', { name: 'Cerrar sesión' })
     expect(button).toBeTruthy()
+    // Icon-only face: accessible name via aria-label, no visible label text
+    expect(button.textContent?.trim()).toBe('')
+    expect(button.getAttribute('title')).toBe('Cerrar sesión')
 
     await user.click(button)
 
