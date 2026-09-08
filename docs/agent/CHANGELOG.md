@@ -19,6 +19,17 @@ No merge. Astra / name wrap / kit autosave untouched.
 
 No merge. Astra / Guiones model swap / name wrap / invite-all / gift / live SQL untouched.
 
+## 2026-09-08 — Chat-shell polish: footer name, Brand Kit density, empty examples
+
+**Area:** chat-shell
+**Files:** `ChatSidebar.tsx`, `ChatThread.tsx`, `chatShellLabels.ts`, `chat-shell.css`, `test/chat-shell-account-footer.spec.tsx`, `test/chat-shell-empty-examples.spec.tsx`
+
+- Account footer: long display names ellipsize on one line (`title` keeps full name); help / settings / LogOut stay aligned.
+- Idle Brand Kit glass row: quieter border/shadow/padding and lighter verb chrome — same Guiones/Post/Foto/Pack + review/hide behavior.
+- Empty ready thread: GPT/Gemini-style Spanish example prompts fill the composer on click (not first-run brand CTA).
+
+No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit autosave untouched.
+
 ## 2026-09-08 — Chat-shell: Cerrar sesión icon in account footer row
 
 **Area:** chat-shell

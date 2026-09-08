@@ -556,7 +556,7 @@ export default function ChatSidebar({
         <div className="chat-shell__avatar" aria-hidden>{initials}</div>
         <div className="chat-shell__user-copy">
           <div className="chat-shell__user-name">
-            <span className="chat-shell__user-name-text">{displayName}</span>
+            <span className="chat-shell__user-name-text" title={displayName}>{displayName}</span>
           </div>
           <div className="chat-shell__user-meta">
             {usage.loading
