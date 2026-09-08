@@ -35,7 +35,7 @@ function seededStars(count: number, seed: number): Star[] {
       id: i,
       x: r1 * 100,
       y: r2 * 100,
-      size: 1 + r3 * 1.8,
+      size: 1.15 + r3 * 2.35,
       delay: r4 * 5.5,
       dur: 2.8 + r5 * 3.4,
       bright: r3 > 0.82,
@@ -56,8 +56,8 @@ export default function SpaceField({ density = 'hero', className = '', fixed = f
   }, [])
 
   const stars = useMemo(() => {
-    const base = density === 'auth' ? 48 : 72
-    const count = reduced ? Math.min(24, base) : narrow ? Math.round(base * 0.42) : base
+    const base = density === 'auth' ? 56 : 96
+    const count = reduced ? Math.min(28, base) : narrow ? Math.round(base * 0.48) : base
     return seededStars(count, density === 'auth' ? 42 : 17)
   }, [density, narrow, reduced])
 

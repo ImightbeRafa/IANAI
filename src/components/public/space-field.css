@@ -18,10 +18,11 @@
   position: absolute;
   inset: -20%;
   background:
-    radial-gradient(ellipse 55% 40% at 18% 22%, rgba(45, 226, 255, 0.14), transparent 62%),
-    radial-gradient(ellipse 45% 35% at 82% 18%, rgba(45, 226, 255, 0.09), transparent 58%),
-    radial-gradient(ellipse 60% 50% at 50% 88%, rgba(20, 80, 120, 0.22), transparent 70%),
-    radial-gradient(ellipse 40% 30% at 70% 60%, rgba(45, 226, 255, 0.05), transparent 65%);
+    radial-gradient(ellipse 55% 42% at 16% 20%, rgba(45, 226, 255, 0.22), transparent 62%),
+    radial-gradient(ellipse 48% 38% at 84% 16%, rgba(45, 226, 255, 0.16), transparent 58%),
+    radial-gradient(ellipse 70% 55% at 50% 92%, rgba(18, 70, 110, 0.34), transparent 70%),
+    radial-gradient(ellipse 42% 32% at 68% 58%, rgba(45, 226, 255, 0.1), transparent 65%),
+    radial-gradient(ellipse 30% 24% at 40% 40%, rgba(80, 140, 200, 0.08), transparent 70%);
   transform: translateZ(0);
 }
 
@@ -34,14 +35,15 @@
   position: absolute;
   border-radius: 50%;
   background: #fff;
-  opacity: 0.55;
+  opacity: 0.72;
   transform: translate3d(-50%, -50%, 0);
   will-change: opacity;
+  box-shadow: 0 0 2px rgba(255, 255, 255, 0.35);
 }
 
 .space-field__star--bright {
   background: var(--space-cyan);
-  box-shadow: 0 0 6px rgba(45, 226, 255, 0.55);
+  box-shadow: 0 0 8px rgba(45, 226, 255, 0.75), 0 0 14px rgba(45, 226, 255, 0.35);
 }
 
 .space-field--twinkle .space-field__star {

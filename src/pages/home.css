@@ -194,9 +194,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  gap: 0.35rem;
-  padding: 3.35rem 0.85rem 0.35rem;
+  justify-content: space-between;
+  gap: 0.2rem;
+  padding: 3.15rem 0.75rem 0.2rem;
   width: 100%;
   margin: 0 auto;
   min-height: 100svh;
@@ -212,6 +212,8 @@
     align-items: stretch;
     gap: 1rem 1.35rem;
     padding: 3.55rem 1.25vw 0;
+    /* Let floaties breathe into the empty black */
+    overflow: visible;
   }
 }
 
@@ -263,9 +265,9 @@
 }
 
 .home-hero__sub {
-  margin: 0.45rem 0 0;
-  font-size: clamp(0.95rem, 3.4vw, 1.05rem);
-  line-height: 1.35;
+  margin: 0.35rem 0 0;
+  font-size: clamp(0.92rem, 3.2vw, 1.02rem);
+  line-height: 1.32;
   font-weight: 500;
   color: rgba(244, 247, 251, 0.88);
   max-width: 28rem;
@@ -287,7 +289,7 @@
 }
 
 .home-hero__cta {
-  margin-top: 0.75rem;
+  margin-top: 0.55rem;
 }
 
 @media (min-width: 960px) {
@@ -319,10 +321,10 @@
   flex: 1 1 auto;
   min-height: 0;
   /* Fill leftover viewport under copy — kill dead black */
-  height: clamp(18rem, calc(100svh - 11.5rem), 34rem);
+  height: clamp(20rem, calc(100svh - 10.2rem), 36rem);
   margin: 0;
   overflow: hidden;
-  padding-bottom: 0.15rem;
+  padding-bottom: 0;
 }
 
 @media (min-width: 960px) {
@@ -371,11 +373,10 @@
   left: 50%;
   top: auto;
   bottom: 0;
-  width: min(72vw, 15.5rem);
   aspect-ratio: 9 / 16;
-  max-height: 92%;
-  width: min(72vw, 15.5rem, calc(92% * 9 / 16));
-  margin-left: calc(min(72vw, 15.5rem, calc(92% * 9 / 16)) / -2);
+  max-height: 96%;
+  width: min(78vw, 16.5rem, calc(96% * 9 / 16));
+  margin-left: calc(min(78vw, 16.5rem, calc(96% * 9 / 16)) / -2);
   border-radius: 1.05rem;
   overflow: hidden;
   background: #111;

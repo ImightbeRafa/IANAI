@@ -49,13 +49,14 @@
   align-items: center;
   gap: 0.65rem;
   text-decoration: none;
-  color: inherit;
+  color: var(--pa-text);
 }
 
 .public-auth__wordmark {
   font-size: 1.35rem;
   font-weight: 700;
   letter-spacing: -0.03em;
+  color: var(--pa-text);
 }
 
 .public-auth__subtitle {
