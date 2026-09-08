@@ -1,3 +1,14 @@
+## 2026-09-08 — Chat-shell: Cerrar sesión icon in account footer row
+
+**Area:** chat-shell
+**Files:** `ChatSidebar.tsx`, `ChatShell.tsx`, `chatShellSignOut.ts`, `chatShellLabels.ts`, `chat-shell.css`, `test/chat-shell-sign-out.spec.tsx`
+
+- Sidebar account footer: quiet **LogOut** icon in the same row as Cómo funciona / Configuración (icon-only face; `aria-label`/`title` = Cerrar sesión / Sign out). Same AuthContext `signOut` → `/login` as classic `Layout`.
+- Footer icon hit targets ≥40px; no fat labeled sign-out row under the card.
+- Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
+
+No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+
 ## 2026-09-07 — First-open tour: real chrome + clear feedback CTA
 
 **Area:** chat-shell

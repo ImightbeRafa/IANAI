@@ -1119,7 +1119,8 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   letter-spacing: var(--chat-ui-track);
   white-space: nowrap;
   line-height: 1.25;
-  overflow: visible;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1135,6 +1136,14 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   display: flex;
   align-items: center;
   gap: 0;
+}
+
+/* Footer account icons: quiet 15px glyphs, ≥40px hit target */
+.chat-shell__user-icons .chat-shell__icon-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .chat-shell__modal-hint {
