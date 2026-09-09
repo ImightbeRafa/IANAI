@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { clampBulkCount, orchestrateAngles, pickAngles } from './lib/bulk/angle-orchestrator.js'
 import { languageOf, loadBulkRuntime, readBulkBody, requireBulkUser, setBulkCors } from './lib/bulk/http.js'
+import { sanitizeInsights } from './lib/insights.js'
 import { quoteBulkScripts } from './lib/bulk/quotes.js'
 import { deepLinkForPack, runBulkScripts } from './lib/bulk/run-bulk.js'
 import type { AngleBoardItem } from './lib/bulk/types.js'
@@ -24,6 +25,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res,
     })
     if (!runtime) return
+
+    const insights = sanitizeInsights(body.insights)
+    if (insights) {
+      runtime.scene = insights
+      runtime.guidePrompt = insights
+    }
 
     const count = clampBulkCount(body.count)
     const incoming = Array.isArray(body.angles) ? body.angles as AngleBoardItem[] : []

@@ -331,8 +331,9 @@ describe('ChatShellClarifySheet', () => {
     )
     expect(screen.getByRole('dialog', { name: 'Post' })).toBeTruthy()
     expect(screen.getByText(/Confirmá referencias/)).toBeTruthy()
+    expect(screen.getByLabelText(/Insights \(opcional\)/i)).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Generar' }))
-    expect(onAnswer).toHaveBeenCalledWith({ useReferences: true })
+    expect(onAnswer).toHaveBeenCalledWith({ useReferences: true, insights: '' })
     rerender(
       <ChatShellClarifySheet
         language="es"

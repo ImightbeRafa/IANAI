@@ -52,6 +52,7 @@ import {
   type ImageReferenceRole,
 } from './lib/image-prompt-context.js'
 import { buildSceneRecipe } from './lib/image-scene-recipe.js'
+import { insightsThemeBackgroundBlock, sanitizeInsights } from './lib/insights.js'
 import { buildProductPixelLockContract } from './lib/product-pixel-lock.js'
 import {
   buildEditPatchConstraints,
@@ -2005,9 +2006,12 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
           return res.status(400).json({ error: postLanguage === 'es' ? 'Se requiere al menos una imagen del producto para el modo Producto.' : 'At least one product image is required for Product mode.' })
         }
         const productAR = imageParams.aspectRatio === '1:1' ? '1:1' : postAspectRatio
-        const bgDesc = typeof imageParams.backgroundDescription === 'string'
-          ? imageParams.backgroundDescription.slice(0, 500)
-          : undefined
+        const insightsText = sanitizeInsights(imageParams.insights)
+        const bgDescRaw = typeof imageParams.backgroundDescription === 'string'
+          ? imageParams.backgroundDescription.slice(0, 500).trim()
+          : ''
+        // Insights steers theme/backgrounds for Foto when filled (same lane as classic backgroundDescription).
+        const bgDesc = (bgDescRaw || insightsText) || undefined
 
         // Load product context + detect niche so the prompt adapts to the actual product
         let productContext: {
@@ -2195,6 +2199,18 @@ GENERA LA IMAGEN MEJORADA. NO generes texto descriptivo ni justificación. Devue
 - TEXTO VISIBLE: únicamente el copy condensado del usuario. Estructura gancho → desarrollo (1-2 puntos) → CTA. PROHIBIDO volcar el guion, el contexto de negocio o placeholders como [TIEMPO DE ENTREGA].
 - CTA: no usar "Dale click a este anuncio" salvo que el guión lo traiga literal; respetar CTA orgánico vs venta según el modo.
 - LOGO: si hay una imagen de logo adjunta, estamparla tal cual — no redibujar wordmark ni lockup con IA.\n`
+    }
+
+    const insightsForPrompt = sanitizeInsights(imageParams.insights)
+    // Product mode already steers backgrounds via backgroundDescription/Insights above.
+    if (insightsForPrompt && !isLogoMode && !isProductMode) {
+      const insightsBlock = insightsThemeBackgroundBlock(
+        insightsForPrompt,
+        postLanguage === 'en' ? 'en' : 'es'
+      )
+      if (insightsBlock) {
+        enhancedPrompt = `${insightsBlock}\n\n${enhancedPrompt}`
+      }
     }
 
     // =============================================

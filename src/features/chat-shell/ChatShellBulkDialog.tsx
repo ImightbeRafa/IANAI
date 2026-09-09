@@ -13,6 +13,11 @@ import {
   type StyleDna,
 } from './chatShellBulk'
 import ChatShellFlowSheet from './ChatShellFlowSheet'
+import {
+  INSIGHTS_MAX_CHARS,
+  insightsFieldCopy,
+  sanitizeInsights,
+} from './chatShellInsights'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 
 export type PackLaunchInfo = {
@@ -59,6 +64,8 @@ export default function ChatShellBulkDialog({
   const [busy, setBusy] = useState<'angles' | 'run' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [step, setStep] = useState<1 | 2>(1)
+  const [insightsDraft, setInsightsDraft] = useState('')
+  const insightsCopy = insightsFieldCopy(language)
 
   useEffect(() => {
     if (!open) return
@@ -68,6 +75,7 @@ export default function ChatShellBulkDialog({
     setError(null)
     setBusy(null)
     setStep(1)
+    setInsightsDraft('')
   }, [open, initialCount])
 
   if (!open) return null
@@ -129,6 +137,7 @@ export default function ChatShellBulkDialog({
     }
     onLaunch?.({ count: selectedAngles.length, mode })
     try {
+      const insights = sanitizeInsights(insightsDraft)
       if (mode === 'campaign') {
         const result = await runBulkCampaignRequest({
           brandId,
@@ -139,6 +148,7 @@ export default function ChatShellBulkDialog({
           angles: selectedAngles,
           angleIds: selected,
           styleDnaId: styleDnaId || undefined,
+          insights: insights || undefined,
         })
         if (result.succeededScripts <= 0 && result.succeededPosts <= 0) {
           onError?.(es
@@ -160,6 +170,7 @@ export default function ChatShellBulkDialog({
           language,
           angles: selectedAngles,
           angleIds: selected,
+          insights: insights || undefined,
         })
         if (result.succeeded <= 0) {
           onError?.(es
@@ -259,6 +270,21 @@ export default function ChatShellBulkDialog({
           {t.bulkCampaign}
         </button>
       </div>
+
+      <label className="chat-shell__modal-label" htmlFor="chat-shell-pack-insights">
+        {insightsCopy.label}
+        <textarea
+          id="chat-shell-pack-insights"
+          className="chat-shell__modal-input chat-shell__insights-input"
+          rows={2}
+          maxLength={INSIGHTS_MAX_CHARS}
+          value={insightsDraft}
+          disabled={Boolean(busy)}
+          placeholder={insightsCopy.placeholder}
+          onChange={(event) => setInsightsDraft(event.target.value)}
+        />
+        <small className="chat-shell__field-hint">{insightsCopy.hint}</small>
+      </label>
 
       {styleDnas.length > 0 ? (
         <>

@@ -91,6 +91,26 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.13',
+    date: '2026-09-09',
+    items: [
+      {
+        category: 'feature',
+        text: {
+          es: 'Antes de generar Post, Foto o Pack podés escribir Insights opcionales: tema, ambiente o fondo. Si lo dejás vacío, se usa la escena por defecto.',
+          en: 'Before generating Post, Photo, or Pack you can add optional Insights: theme, mood, or background. Leave blank to keep the default scene.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'En Plan y facturación, el historial de uso queda al final de la sección (solo el tuyo).',
+          en: 'In Plan & Billing, usage history sits at the bottom of the section (yours only).',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.12',
     date: '2026-09-07',
     items: [
