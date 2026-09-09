@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { clampBulkCount, orchestrateAngles, pickAngles } from './lib/bulk/angle-orchestrator.js'
 import { countExpandNeeded } from './lib/bulk/expand-product-refs.js'
 import { languageOf, loadBulkRuntime, readBulkBody, requireBulkUser, setBulkCors } from './lib/bulk/http.js'
+import { sanitizeInsights } from './lib/insights.js'
 import { quoteCampaignPack } from './lib/bulk/quotes.js'
 import { deepLinkForPack, runBulkPosts, runBulkScripts } from './lib/bulk/run-bulk.js'
 import { listProductRefUrls } from './lib/bulk/store.js'
@@ -26,6 +27,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res,
     })
     if (!runtime) return
+
+    const insights = sanitizeInsights(body.insights)
+    if (insights) {
+      runtime.scene = insights
+      runtime.guidePrompt = insights
+    }
 
     const count = clampBulkCount(body.count)
     const imageModel = typeof body.imageModel === 'string' ? body.imageModel : 'grok-imagine'

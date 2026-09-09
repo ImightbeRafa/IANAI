@@ -40,6 +40,7 @@ describe('ChatShellBulkDialog Pack sheet', () => {
     )
     expect(screen.getByRole('dialog', { name: 'Pack' })).toBeTruthy()
     expect(screen.queryByText('Bulk / Pack')).toBeNull()
+    expect(screen.getByLabelText(/Insights \(opcional\)/i)).toBeTruthy()
     expect(screen.getByText('Paso 1 de 2')).toBeTruthy()
     expect(screen.getByText(
       'Ángulos distintos por nicho (no el mismo anuncio con otras palabras). Luego confirmás y generamos.'

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import type { ScriptFramework } from '../../types'
 import { CREDIT_WEIGHTS } from '../../lib/creditsCatalog'
 import { scriptQuoteCount, withRemainingBalance } from './chatShellCreditQuote'
@@ -10,6 +11,11 @@ import {
 } from './chatShellCtaMix'
 import ChatShellFlowSheet from './ChatShellFlowSheet'
 import ChatShellReferencePicker from './ChatShellReferencePicker'
+import {
+  INSIGHTS_MAX_CHARS,
+  insightsFieldCopy,
+  sanitizeInsights,
+} from './chatShellInsights'
 import { shellT, type ChatShellLanguage } from './chatShellLabels'
 import {
   anuncioStyleChoices,
@@ -53,6 +59,7 @@ interface ChatShellClarifySheetProps {
     useReferences?: boolean
     switchToAnuncio?: boolean
     toggleReferenceId?: string
+    insights?: string
   }) => void
   onCancelImageClarify?: () => void
   onBackImageClarify?: () => void
@@ -172,6 +179,18 @@ export default function ChatShellClarifySheet({
 }: ChatShellClarifySheetProps) {
   const t = shellT(language)
   const es = language === 'es'
+  const insightsCopy = insightsFieldCopy(language)
+  const [insightsDraft, setInsightsDraft] = useState('')
+
+  useEffect(() => {
+    if (!imageClarify) {
+      setInsightsDraft('')
+      return
+    }
+    if (imageClarify.step === 'refs' || imageClarify.step === 'ingredients') {
+      setInsightsDraft(imageClarify.insights || '')
+    }
+  }, [imageClarify?.sessionId, imageClarify?.step, imageClarify?.insights])
 
   if (scriptClarify) {
     const meta = scriptStepIndex(scriptClarify)
@@ -341,7 +360,10 @@ export default function ChatShellClarifySheet({
             ? {
                 label: es ? 'Crear sin referencias' : 'Create without references',
                 disabled: Boolean(imageBusy),
-                onClick: () => onAnswerImageClarify?.({ useReferences: false }),
+                onClick: () => onAnswerImageClarify?.({
+                  useReferences: false,
+                  insights: sanitizeInsights(insightsDraft),
+                }),
               }
             : imageClarify.step === 'styleRef'
               ? {
@@ -356,7 +378,10 @@ export default function ChatShellClarifySheet({
             ? {
                 label: t.flowGenerate,
                 disabled: Boolean(imageBusy) || !canContinueRefs,
-                onClick: () => onAnswerImageClarify?.({ useReferences: true }),
+                onClick: () => onAnswerImageClarify?.({
+                  useReferences: true,
+                  insights: sanitizeInsights(insightsDraft),
+                }),
               }
             : null
         }
@@ -379,6 +404,23 @@ export default function ChatShellClarifySheet({
             onUpload={(file, kind) => void onUploadOfferReference?.(file, kind, imageClarify.productId)}
             onRemove={onRemoveOfferReference}
           />
+        ) : null}
+
+        {(isRefs || imageClarify.step === 'ingredients') ? (
+          <label className="chat-shell__modal-label" htmlFor="chat-shell-insights">
+            {insightsCopy.label}
+            <textarea
+              id="chat-shell-insights"
+              className="chat-shell__modal-input chat-shell__insights-input"
+              rows={2}
+              maxLength={INSIGHTS_MAX_CHARS}
+              value={insightsDraft}
+              disabled={Boolean(imageBusy)}
+              placeholder={insightsCopy.placeholder}
+              onChange={(event) => setInsightsDraft(event.target.value)}
+            />
+            <small className="chat-shell__field-hint">{insightsCopy.hint}</small>
+          </label>
         ) : null}
 
         {softHint ? (
@@ -468,7 +510,10 @@ export default function ChatShellClarifySheet({
                     type="button"
                     className="chat-shell__btn chat-shell__btn--pill"
                     disabled={imageBusy}
-                    onClick={() => onAnswerImageClarify?.({ skipIngredient: kind })}
+                    onClick={() => onAnswerImageClarify?.({
+                      skipIngredient: kind,
+                      insights: sanitizeInsights(insightsDraft),
+                    })}
                   >
                     {skipIngredientLabel(kind, language)}
                   </button>

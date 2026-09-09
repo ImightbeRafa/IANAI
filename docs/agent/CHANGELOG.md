@@ -1,3 +1,14 @@
+## 2026-09-09 — PR E: Uso history bottom + CSP vercel.live + Insights
+
+**Area:** chat-shell / billing / infra / images
+**Files:** `Settings.tsx`, `UsageHistoryCard.tsx` (placement), `vercel.json`, `chatShellInsights.ts`, `api/lib/insights.ts`, `ChatShellClarifySheet.tsx`, `ChatShellBulkDialog.tsx`, `useChatSessionThread.ts`, `chatShellImageApi.ts`, `chatShellImageIntent.ts`, `chatShellBulk.ts`, `api/generate-image.ts`, `api/bulk-scripts.ts`, `api/bulk-campaign.ts`, tests
+
+- **Uso:** `UsageHistoryCard` moves to the **bottom** of Plan y facturación (after plans / pack / subscription / payment history). Still own rows via `GET /api/my-usage`. Chat-shell settings dialog reuses `SettingsContent`.
+- **CSP:** Preview injects `vercel.live/feedback.js`; without project env we cannot disable injection from the agent. Narrow allowlist only: `script-src`/`connect-src`/`font-src`/`frame-src` add `https://vercel.live` (+ pusher connect for the toolbar). Prefer ops set `VERCEL_PREVIEW_FEEDBACK_ENABLED=0` on Preview and drop the allowlist later. Not `script-src *`.
+- **Insights:** optional textarea on Post/Foto Confirmá referencias (and ingredients) + Pack sheet. Filled text steers theme/backgrounds (`insights` → generate-image; Pack → `runtime.scene`/`guidePrompt`). Empty = unchanged defaults.
+
+No merge. Astra / Fable / Guiones speed / attach / kit autosave / Instagram untouched.
+
 ## 2026-09-08 — PR D: Guiones faster + more coherent Spanish
 
 **Area:** guiones pipeline

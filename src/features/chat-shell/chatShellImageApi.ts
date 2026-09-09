@@ -326,6 +326,7 @@ export async function generateShellOfferImage(options: {
   userText?: string
   source?: string
   referenceMode?: 'use' | 'none'
+  insights?: string
   originSessionId: string
   originGen: number
   activeThreadSessionId: string | null
@@ -364,6 +365,7 @@ export async function generateShellOfferImage(options: {
     brandLogoUrl: options.brandLogoUrl,
     generationId,
     referenceMode: options.referenceMode,
+    insights: options.insights,
   })
 
   let sample: string

@@ -1309,7 +1309,6 @@ export function SettingsContent({
                   <p className="text-xs text-dark-500">{CREDITS_PITCH[language]}</p>
                 </div>
               )}
-              <UsageHistoryCard language={language} />
             </div>
           )}
 
@@ -1566,6 +1565,11 @@ export function SettingsContent({
               </div>
             </div>
           )}
+
+          {/* Uso history stays at the bottom of Plan y facturación (own rows only). */}
+          <div className="mt-6 pt-5 border-t border-dark-100">
+            <UsageHistoryCard language={language} />
+          </div>
         </div>
         )}
 

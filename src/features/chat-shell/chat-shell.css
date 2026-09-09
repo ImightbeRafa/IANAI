@@ -4895,6 +4895,14 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
+.chat-shell__insights-input {
+  display: block;
+  margin-top: 6px;
+  resize: vertical;
+  min-height: 56px;
+  line-height: 1.35;
+}
+
 .chat-shell__qty {
   display: flex;
   align-items: stretch;

@@ -538,6 +538,8 @@ export function buildShellImageGenerateBody(options: {
   generationId?: string
   referenceMode?: 'use' | 'none'
   kitReferenceUrls?: string[]
+  /** Optional theme/background steering (Insights). */
+  insights?: string
 }): Record<string, unknown> {
   const prefs = options.preferences
   if (!prefs.style) {
@@ -570,6 +572,13 @@ export function buildShellImageGenerateBody(options: {
   if (productImageIds[0]) body.productImageId = productImageIds[0]
   const kitReferenceUrls = (options.kitReferenceUrls || []).filter((url) => typeof url === 'string' && url.trim())
   if (kitReferenceUrls.length) body.kitReferenceUrls = kitReferenceUrls.slice(0, 4)
+  const insights = typeof options.insights === 'string' ? options.insights.trim() : ''
+  if (insights) {
+    body.insights = insights.slice(0, 500)
+    if (prefs.style.kind === 'product') {
+      body.backgroundDescription = insights.slice(0, 500)
+    }
+  }
 
   if (prefs.style.kind === 'logo') {
     body.postStyle = 'logo'

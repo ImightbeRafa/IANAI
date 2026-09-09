@@ -145,6 +145,7 @@ export async function runBulkScriptsRequest(body: {
   language: 'es' | 'en'
   angles: AngleBoardItem[]
   angleIds: string[]
+  insights?: string
 }): Promise<BulkScriptsResponse> {
   return postJson('bulk-scripts', body)
 }
@@ -158,6 +159,7 @@ export async function runBulkCampaignRequest(body: {
   angles: AngleBoardItem[]
   angleIds: string[]
   styleDnaId?: string
+  insights?: string
 }): Promise<BulkCampaignResponse> {
   return postJson('bulk-campaign', body)
 }

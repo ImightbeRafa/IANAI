@@ -222,7 +222,10 @@ export type ImageClarifyState = {
     alreadyOptimized?: boolean
     askStyleRef?: boolean
     skipStyleRef?: boolean
+    insights?: string
   }
+  /** Optional theme/background Insights for Post · Foto. */
+  insights?: string
 }
 
 export type ImageScriptChoice = {
@@ -2248,6 +2251,7 @@ export function useChatSessionThread(options: {
     priorClarify?: ImageClarifyState | null
     creditConfirmed?: boolean
     skippedIngredients?: IngredientKind[]
+    insights?: string
   }) => {
     if (!session || imageBusyRef.current) return
     const originSessionId = session.id
@@ -2336,6 +2340,7 @@ export function useChatSessionThread(options: {
           preferredReferenceIds: options.referenceImageIds,
           alreadyOptimized: options.alreadyOptimized,
           history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
+          insights: options.insights || options.priorClarify?.insights,
         })
         setNotice(null)
         return
@@ -2368,6 +2373,7 @@ export function useChatSessionThread(options: {
           referenceImages: catalog,
           alreadyOptimized: options.alreadyOptimized,
           history: options.priorClarify ? pushImageHistory(options.priorClarify) : [],
+          insights: options.insights || options.priorClarify?.insights,
         })
         setNotice(null)
         return
@@ -2448,7 +2454,9 @@ export function useChatSessionThread(options: {
               alreadyOptimized: options.alreadyOptimized,
               askStyleRef: options.askStyleRef,
               skipStyleRef: options.skipStyleRef,
+              insights: options.insights,
             },
+            insights: options.insights,
           })
           setNotice(ingredientsPromptCopy(stillMissing, language))
           return
@@ -2493,6 +2501,7 @@ export function useChatSessionThread(options: {
         userText: options.userText,
         source: options.source,
         referenceMode: referenceMode === 'none' ? 'none' : 'use',
+        insights: options.insights,
         originSessionId,
         originGen,
         activeThreadSessionId: activeThreadSessionIdRef.current,
@@ -2896,6 +2905,7 @@ export function useChatSessionThread(options: {
       toggleReferenceId?: string
       /** From refs sticky: switch Producto → Anuncio without requiring a Ref. */
       switchToAnuncio?: boolean
+      insights?: string
     }
   ) => {
     if (!imageClarify || !session || imageClarify.sessionId !== session.id) return
@@ -2907,6 +2917,7 @@ export function useChatSessionThread(options: {
       await runImageGenerate({
         ...pendingGenerate,
         skippedIngredients: skipped,
+        insights: answer.insights || pendingGenerate.insights || imageClarify.insights,
       })
       return
     }
@@ -3016,6 +3027,7 @@ export function useChatSessionThread(options: {
             ),
             // Refs sheet already showed “N créditos · imagen estándar” — same click spends, no second Paso.
             creditConfirmed: true,
+            insights: answer.insights || pendingClarify.insights,
           })
           return
         } catch (err) {
@@ -3057,6 +3069,7 @@ export function useChatSessionThread(options: {
           source: pendingClarify.source,
           referenceMode: 'none',
           priorClarify: pendingClarify,
+          insights: answer.insights || pendingClarify.insights,
         })
       }
       return
