@@ -4,7 +4,7 @@
 **Files:** `api/lib/model-pricing.ts`, `api/lib/usage-logger.ts`, `api/lib/admin-usage.ts`, `api/admin-usage.ts`, `api/admin-image-performance.ts`, `api/generate-image.ts`, `src/pages/AdminDashboard.tsx`, `vercel.json`, tests
 
 - Admin `/admin` date range now includes **Lifetime** (all `api_usage_logs` since the first row). Aggregates page through the table (1k pages, 250k safety cap) instead of the old 10k hard cut.
-- Shared official list-price catalog (`api/lib/model-pricing.ts`) used by the logger, admin recompute, and GPT Image cost helper. Grok 4.3 is $1.25/$2.50; Gemini 2.5 Flash is $0.30/$2.50 (thinking billed as output); Nano Banana is $0.039/image; long-context Grok ≥200k uses the doubled band.
+- Shared official list-price catalog (`api/lib/model-pricing.ts`) used by the logger, admin recompute, and GPT Image cost helper. Grok 4.3 is $1.25/$2.50; Gemini 2.5 Flash is $0.30/$2.50 (thinking billed as output); Nano Banana is $0.039/image; long-context Grok ≥200k uses the doubled band. Lifetime rows also cover historical IDs (`grok` / grok-3-fast at $3/$15, grok-4-fast at $0.20/$0.50, Imagine video $0.05/sec).
 - Recent activity and image-performance $ use the same official recompute (not stale stored logger $). Coverage line shows first-seen date + interaction count.
 - Source chips refetch the full usage window. Billing still renders when usage is empty.
 

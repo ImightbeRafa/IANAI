@@ -141,6 +141,72 @@ describe('estimateOfficialApiCostUsd', () => {
     ).toBe(0.339)
   })
 
+  it('uses legacy $3/$15 for unlabeled grok rows', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '8a',
+          feature: 'script',
+          model: 'grok',
+          created_at: '2026-02-04T00:04:42.000Z',
+          input_tokens: 2907,
+          output_tokens: 169,
+          estimated_cost_usd: 0.011256,
+        })
+      )
+    ).toBe(0.011256)
+  })
+
+  it('prices grok-4-1-fast-reasoning at $0.20/$0.50', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '8b',
+          feature: 'memory_reflection',
+          model: 'grok-4-1-fast-reasoning',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+          estimated_cost_usd: 0,
+        })
+      )
+    ).toBe(0.7)
+  })
+
+  it('prices Imagine video from duration metadata', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '8c',
+          feature: 'video',
+          model: 'grok-imagine-video',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 0,
+          output_tokens: 0,
+          estimated_cost_usd: 0.25,
+          metadata: { duration: 5 },
+        })
+      )
+    ).toBe(0.25)
+  })
+
+  it('keeps stored Imagine 720p video cost when present', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '8d',
+          feature: 'video',
+          model: 'grok-imagine-video-720p',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 0,
+          output_tokens: 0,
+          estimated_cost_usd: 0.35,
+          metadata: { duration: 5, resolution: '720p' },
+        })
+      )
+    ).toBe(0.35)
+  })
+
   it('uses GPT Image 2 token split from metadata', () => {
     expect(
       estimateOfficialApiCostUsd(
