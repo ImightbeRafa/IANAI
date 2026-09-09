@@ -1,3 +1,14 @@
+## 2026-09-08 — PR D: Guiones faster + more coherent Spanish
+
+**Area:** guiones pipeline
+**Files:** `script-pipeline.ts`, `script-angle-inventory.ts`, `script-output.ts`, `script-briefs.ts`, `script-quality.ts`, category/type lenses, `utils.ts`, `api/chat.ts` debug timings, `test/guiones-faster-coherent.spec.ts`
+
+- Latency: shrink angle inventory (`n*2`/`n+2`, cap 12 — n=1→3 not floor 8); compact JSON prompts; drop type lenses + cap memory/templates on angle call; angle model → `GROK_TEXT_MODEL_EFFICIENT` (grok-4.5); lower `max_tokens` (angles 1600, draft adaptive).
+- Coherence: ES briefs/CTA in voseo Spanish; ban bracket placeholders in lenses + draft rules; scrub English scaffold leaks in repair; unify vos in type lenses.
+- Quote/charge unchanged (`guion_oferta` = 3). Timings exposed on structured `_debug.timings`.
+
+No merge. Astra / PR E / Fable / attach / kit autosave untouched.
+
 ## 2026-09-08 — PR B tip: NL thread-only clarify + attach size gate
 
 **Area:** chat-shell

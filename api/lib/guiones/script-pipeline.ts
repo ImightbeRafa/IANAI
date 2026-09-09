@@ -16,7 +16,7 @@ import type {
   SalesChannel,
   ScriptSettings,
 } from './types.js'
-import { getRequestedScriptTypes } from './utils.js'
+import { angleInventoryNeeded, getRequestedScriptTypes } from './utils.js'
 
 interface RunPipelineInput {
   apiKey: string
@@ -39,6 +39,7 @@ function effectiveCtaStrength(settings: ScriptSettings | undefined, requestedTyp
 }
 
 export async function runGuionesStructuredPipeline(input: RunPipelineInput): Promise<GuionesPipelineResult> {
+  const pipelineStarted = Date.now()
   const requestedTypes = getRequestedScriptTypes(input.scriptSettings)
   const ctaStrength = effectiveCtaStrength(input.scriptSettings, requestedTypes)
   const contextProfile = buildScriptContextProfile({
@@ -58,32 +59,40 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     requestedTypes,
   })
 
+  const anglesStarted = Date.now()
   const angleCandidates = await generateAngleInventory({
     apiKey: input.apiKey,
     profile: contextProfile,
     settings: input.scriptSettings,
     language: input.language,
     categoryLens,
-    typeLenses: uniqueTypeLenses,
+    requestedTypes,
     memoryPrompt,
     templatePrompt,
     recentBriefs: input.scriptSettings?.forceFreshAngles ? [] : undefined,
   })
+  const anglesMs = Date.now() - anglesStarted
+
   const briefs = selectScriptBriefs(
     angleCandidates,
     input.scriptSettings,
     contextProfile.productType,
     ctaStrength,
     input.activeSalesChannel,
+    input.language,
   )
+
+  const draftStarted = Date.now()
   const drafted = await draftScriptsFromBriefs({
     apiKey: input.apiKey,
     briefs,
     profile: contextProfile,
     language: input.language,
     categoryLens,
-    typeLenses: uniqueTypeLenses,
+    ctaStrength,
   })
+  const draftMs = Date.now() - draftStarted
+
   const firstReports = evaluateScriptBatch(drafted, briefs, {
     forbiddenPhrases: input.forbiddenPhrases,
   })
@@ -108,8 +117,8 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
   const promptPreview = [
     categoryLens,
     ...uniqueTypeLenses,
-    memoryPrompt ? `MEMORY:\n${memoryPrompt}` : '',
-    templatePrompt ? `TEMPLATES:\n${templatePrompt}` : '',
+    memoryPrompt ? `MEMORY:\n${memoryPrompt.slice(0, 400)}` : '',
+    templatePrompt ? `TEMPLATES:\n${templatePrompt.slice(0, 400)}` : '',
   ].filter(Boolean).join('\n\n')
 
   return {
@@ -120,6 +129,12 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     qualityReports,
     scripts: cleaned,
     promptPreview,
+    timings: {
+      anglesMs,
+      draftMs,
+      totalMs: Date.now() - pipelineStarted,
+      angleCandidatesRequested: angleInventoryNeeded(input.scriptSettings),
+      scriptsDrafted: cleaned.length,
+    },
   }
 }
-

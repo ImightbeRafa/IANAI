@@ -143,22 +143,42 @@ export function applyQualityScores(scripts: GeneratedScript[], reports: ScriptQu
  * Soft repair: inject missing concrete facts from the brief when available.
  * Never append new bracket placeholders.
  */
+/** Strip English brief-scaffold leaks that sometimes bleed into spoken Spanish. */
+function scrubScaffoldLeaks(text: string): string {
+  return text
+    .replace(/\bResolve doubt:\s*/gi, '')
+    .replace(/\bUse proof:\s*/gi, '')
+    .replace(/\bUse logistics:\s*/gi, '')
+    .replace(/\bDrive to send a message\/DM[^.]*\.?/gi, '')
+    .replace(/\bDrive to click the ad[^.]*\.?/gi, '')
+    .replace(/\bDrive to visit the physical location[^.]*\.?/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 export function repairFailedScripts(scripts: GeneratedScript[], reports: ScriptQualityReport[], briefs: ScriptBrief[]): GeneratedScript[] {
   return scripts.map(script => {
     const report = reports.find(item => item.index === script.index)
-    if (!report || report.passed) return script
     const brief = briefs.find(item => item.index === script.index)
-    if (!brief) return script
-    const missingFacts = brief.mustIncludeFacts
-      .filter((fact) => !fact.includes('['))
-      .filter(fact => !`${script.spokenScript.hook} ${script.spokenScript.development} ${script.spokenScript.ctaOrClose}`.includes(fact))
-      .slice(0, 3)
-    if (missingFacts.length === 0) return script
-    return {
+    const scrubbed = {
       ...script,
       spokenScript: {
-        ...script.spokenScript,
-        development: `${script.spokenScript.development} ${missingFacts.join('. ')}.`,
+        hook: scrubScaffoldLeaks(script.spokenScript.hook),
+        development: scrubScaffoldLeaks(script.spokenScript.development),
+        ctaOrClose: scrubScaffoldLeaks(script.spokenScript.ctaOrClose),
+      },
+    }
+    if (!report || report.passed || !brief) return scrubbed
+    const missingFacts = brief.mustIncludeFacts
+      .filter((fact) => !fact.includes('['))
+      .filter(fact => !`${scrubbed.spokenScript.hook} ${scrubbed.spokenScript.development} ${scrubbed.spokenScript.ctaOrClose}`.includes(fact))
+      .slice(0, 3)
+    if (missingFacts.length === 0) return scrubbed
+    return {
+      ...scrubbed,
+      spokenScript: {
+        ...scrubbed.spokenScript,
+        development: `${scrubbed.spokenScript.development} ${missingFacts.join('. ')}.`,
       },
     }
   })

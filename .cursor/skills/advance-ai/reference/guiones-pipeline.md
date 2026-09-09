@@ -10,14 +10,18 @@ Always check which path is triggered before modifying prompt behavior.
 ## Structured pipeline stages
 
 ```
-1. buildScriptContextProfile     → normalize business/product facts
-2. generateAngleInventory        → AI generates angle candidates
-3. selectScriptBriefs            → pick diverse briefs per requested types
-4. draftScriptsFromBriefs        → generate scripts from briefs
-5. evaluateScriptBatch           → quality gate scoring
-6. repairFailedScripts           → fix scripts that fail quality gate
+1. buildScriptContextProfile     → normalize business/product facts (local)
+2. generateAngleInventory        → AI (grok-4.5 efficient): compact angle candidates
+3. selectScriptBriefs            → pick diverse briefs per requested types (local, language-aware)
+4. draftScriptsFromBriefs        → AI (grok-4.6): generate scripts from locked briefs
+5. evaluateScriptBatch           → quality gate scoring (local)
+6. repairFailedScripts           → soft fact inject + scrub EN scaffold leaks (local)
 7. renderScriptsAsText           → format output for frontend parser
 ```
+
+Latency notes (PR D): angle inventory size is `min(max(n*2, n+2), 12)` (was `max(n*3, 8)`);
+prompts use compact JSON; angle call omits full type lenses and caps memory/templates at 400 chars.
+`_debug.timings` reports `anglesMs` / `draftMs` / `totalMs`.
 
 Supporting modules:
 - `script-prompts/category-lenses.ts` — per product type (product, service, restaurant, etc.)
