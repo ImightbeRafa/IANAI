@@ -53,6 +53,7 @@ import {
 } from './lib/image-prompt-context.js'
 import { buildSceneRecipe } from './lib/image-scene-recipe.js'
 import { insightsThemeBackgroundBlock, sanitizeInsights } from './lib/insights.js'
+import { estimateGptImageCostUsd } from './lib/model-pricing.js'
 import { buildProductPixelLockContract } from './lib/product-pixel-lock.js'
 import {
   buildEditPatchConstraints,
@@ -519,14 +520,11 @@ function extractOpenAIUsage(result: Record<string, unknown>): OpenAIImageUsage |
 
 function calculateOpenAIImageCost(usage: OpenAIImageUsage | null): number | undefined {
   if (!usage) return undefined
-  const textInputTokens = usage.input_tokens_details?.text_tokens || 0
-  const imageInputTokens = usage.input_tokens_details?.image_tokens || 0
-  const imageOutputTokens = usage.output_tokens || 0
-  if (textInputTokens === 0 && imageInputTokens === 0 && imageOutputTokens === 0) return undefined
-
-  return (textInputTokens / 1_000_000) * 5.00
-    + (imageInputTokens / 1_000_000) * 8.00
-    + (imageOutputTokens / 1_000_000) * 30.00
+  return estimateGptImageCostUsd({
+    textInputTokens: usage.input_tokens_details?.text_tokens || 0,
+    imageInputTokens: usage.input_tokens_details?.image_tokens || 0,
+    imageOutputTokens: usage.output_tokens || 0,
+  })
 }
 
 function buildOpenAIReferencePrompt(basePrompt: string, refs: InlineImageRef[]): string {
