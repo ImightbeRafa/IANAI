@@ -76,10 +76,19 @@ interface RecentLog {
   generation_id?: string | null
   total_tokens: number
   estimated_cost_usd: number
+  stored_cost_usd?: number
   success: boolean
   created_at: string
   metadata?: Record<string, unknown> | null
   source?: string | null
+}
+
+interface UsageCoverage {
+  from: string | null
+  to: string
+  rowCount: number
+  truncated: boolean
+  lifetime: boolean
 }
 
 interface ImageModelPerformance {
@@ -211,19 +220,19 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
 
 // Cost per 1M tokens or per image (for reference display)
 const MODEL_PRICING: Record<string, string> = {
-  'grok': '$3/1M in, $15/1M out',
-  'grok-4.3': '$2/1M in, $6/1M out',
-  'grok-4.5': '$2/1M in, $6/1M out',
-  'grok-4.6': '$2/1M in, $6/1M out',
-  'whisper-1': '~$0.006/min',
-  'gemini': '$0.15/1M in, $0.60/1M out',
-  'nano-banana': '~$0.02/image',
-  'nano-banana-pro': '~$0.134 (1K/2K) · ~$0.24 (4K) + tokens',
+  'grok': '$2/1M in, $6/1M out (≥200k: $4/$12)',
+  'grok-4.3': '$1.25/1M in, $2.50/1M out (≥200k: $2.50/$5)',
+  'grok-4.5': '$2/1M in, $6/1M out (≥200k: $4/$12)',
+  'grok-4.6': '$2/1M in, $6/1M out (≥200k: $4/$12)',
+  'whisper-1': '$0.006/min',
+  'gemini': '$0.30/1M in, $2.50/1M out (thinking in output)',
+  'nano-banana': '$0.039/image + $0.30/1M in',
+  'nano-banana-pro': '$0.134 (1K/2K) · $0.24 (4K) + $2/$12/$120 per 1M',
   'gpt-image-2': '$5/1M text in, $8/1M image in, $30/1M image out',
   'grok-imagine': '$0.04/output · +$0.01/input image',
   'pdf-parse': 'Free (local)',
   'web-scraper': 'Free (local)',
-  'gemini-2.5-flash': '$0.15/1M in, $0.60/1M out, $3.50/1M think',
+  'gemini-2.5-flash': '$0.30/1M in, $2.50/1M out (thinking in output)',
 }
 
 function formatImageLogDetail(log: RecentLog): string {
@@ -301,7 +310,8 @@ export default function AdminDashboard({
   const [recentLogs, setRecentLogs] = useState<RecentLog[]>([])
   const [creditsEconomics, setCreditsEconomics] = useState<CreditsEconomics | null>(null)
   const [imageModelPerformance, setImageModelPerformance] = useState<ImageModelPerformance[]>([])
-  const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
+  const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d' | 'lifetime'>('lifetime')
+  const [usageCoverage, setUsageCoverage] = useState<UsageCoverage | null>(null)
   const [campaigns, setCampaigns] = useState<ReferralCampaign[]>([])
   const [referralSignups, setReferralSignups] = useState<ReferralSignup[]>([])
   const [metaAdvanzeOpen, setMetaAdvanzeOpen] = useState(false)
@@ -343,11 +353,15 @@ export default function AdminDashboard({
       creditsConsumed: 'Créditos consumidos',
       creditsCirculation: 'Créditos en circulación',
       impliedPerCredit: '$ / crédito (implícito)',
-      estimateDisclaimer: 'Estimaciones con precios de lista — no es la factura de xAI.',
+      estimateDisclaimer: 'Estimaciones con precios de lista oficiales (xAI / Gemini / OpenAI) — no es una factura.',
       refresh: 'Actualizar',
       last7days: 'Últimos 7 días',
       last30days: 'Últimos 30 días',
       last90days: 'Últimos 90 días',
+      lifetime: 'Todo el historial',
+      coverageSince: 'Desde',
+      coverageRows: 'interacciones',
+      truncated: 'Mostrando las primeras 250,000 llamadas. Los totales pueden estar incompletos.',
       script: 'Guiones',
       description: 'Descripciones',
       image: 'Imágenes',
@@ -369,7 +383,6 @@ export default function AdminDashboard({
       brand_extraction: 'Extracción de Marca',
       ingest: 'Ingesta',
       ingestHint: 'URLs, marca, PDF, auto-llenado y OCR',
-      truncated: 'Mostrando las últimas 10,000 llamadas en este rango. Los totales pueden estar incompletos.',
       reply: 'Respuestas a Clientes',
       ocr: 'OCR de Imágenes',
       logo: 'Generador de Logos',
@@ -407,11 +420,14 @@ export default function AdminDashboard({
       creditsConsumed: 'Credits consumed',
       creditsCirculation: 'Credits in circulation',
       impliedPerCredit: 'Implied $/credit',
-      estimateDisclaimer: 'Estimates from list prices — not an xAI invoice.',
+      estimateDisclaimer: 'Estimates from official list prices (xAI / Gemini / OpenAI) — not a provider invoice.',
       refresh: 'Refresh',
       last7days: 'Last 7 days',
       last30days: 'Last 30 days',
       last90days: 'Last 90 days',
+      lifetime: 'Lifetime',
+      coverageSince: 'Since',
+      coverageRows: 'interactions',
       script: 'Scripts',
       description: 'Descriptions',
       image: 'Images',
@@ -433,7 +449,7 @@ export default function AdminDashboard({
       brand_extraction: 'Brand Extraction',
       ingest: 'Ingest',
       ingestHint: 'URLs, brand, PDF, auto-fill, and OCR',
-      truncated: 'Showing the latest 10,000 calls in this range. Totals may be incomplete.',
+      truncated: 'Showing the first 250,000 calls. Totals may be incomplete.',
       reply: 'Client Replies',
       ocr: 'Image OCR',
       logo: 'Logo Generator',
@@ -455,10 +471,14 @@ export default function AdminDashboard({
   const t = labels[language]
 
   const usageWindow = () => {
+    const endIso = new Date().toISOString()
+    if (dateRange === 'lifetime') {
+      return { startDate: null as Date | null, startIso: '', endIso, lifetime: true }
+    }
     const days = dateRange === '7d' ? 7 : dateRange === '90d' ? 90 : 30
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - days)
-    return { startDate, startIso: startDate.toISOString(), endIso: new Date().toISOString() }
+    return { startDate, startIso: startDate.toISOString(), endIso, lifetime: false }
   }
 
   const LOG_PAGE_SIZE = 20
@@ -467,13 +487,14 @@ export default function AdminDashboard({
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) throw new Error(language === 'es' ? 'Sesión no encontrada' : 'No active session')
 
-    const { startIso, endIso } = usageWindow()
+    const { startIso, endIso, lifetime } = usageWindow()
     const params = new URLSearchParams({
-      start_date: startIso,
       end_date: endIso,
       offset: String(opts?.offset || 0),
       limit: String(LOG_PAGE_SIZE),
     })
+    if (lifetime) params.set('lifetime', '1')
+    else params.set('start_date', startIso)
     if (opts?.search?.trim()) params.set('search', opts.search.trim())
     if (opts?.logsOnly) params.set('logs_only', '1')
     if (opts?.source && opts.source !== 'all') params.set('source', opts.source)
@@ -490,6 +511,7 @@ export default function AdminDashboard({
       hasMore?: boolean
       truncated?: boolean
       creditsEconomics?: CreditsEconomics
+      coverage?: UsageCoverage
     }
     if (!resp.ok) {
       throw new Error(body.error || (language === 'es'
@@ -506,7 +528,7 @@ export default function AdminDashboard({
     setError('')
 
     try {
-      const { startDate } = usageWindow()
+      const { startDate, startIso, endIso, lifetime } = usageWindow()
 
       try {
         const usageData = await fetchUsageFromApi({ offset: 0, source: logSource })
@@ -517,6 +539,7 @@ export default function AdminDashboard({
         setCreditsEconomics(usageData.creditsEconomics || null)
         setHasMoreLogs(Boolean(usageData.hasMore))
         setUsageTruncated(Boolean(usageData.truncated))
+        setUsageCoverage(usageData.coverage || null)
         setLogPage(0)
         setLogSearch('')
       } catch (usageErr) {
@@ -528,6 +551,7 @@ export default function AdminDashboard({
         setCreditsEconomics(null)
         setHasMoreLogs(false)
         setUsageTruncated(false)
+        setUsageCoverage(null)
         setError(usageErr instanceof Error ? usageErr.message : 'Failed to load usage data')
       }
 
@@ -574,7 +598,10 @@ export default function AdminDashboard({
           }
 
           const imagePerformanceApiUrl = adminApiUrl('admin-image-performance')
-          const imagePerfResp = await fetch(`${imagePerformanceApiUrl}?start_date=${encodeURIComponent(startDate.toISOString())}&end_date=${encodeURIComponent(new Date().toISOString())}`, {
+          const imagePerfParams = new URLSearchParams({ end_date: endIso })
+          if (lifetime) imagePerfParams.set('lifetime', '1')
+          else if (startDate) imagePerfParams.set('start_date', startIso)
+          const imagePerfResp = await fetch(`${imagePerformanceApiUrl}?${imagePerfParams.toString()}`, {
             headers: { 'Authorization': `Bearer ${adminSession.access_token}` }
           })
           if (imagePerfResp.ok) {
@@ -616,7 +643,7 @@ export default function AdminDashboard({
     } else {
       setLoading(false)
     }
-  }, [isAdmin, dateRange])
+  }, [isAdmin, dateRange, logSource])
 
   const fetchLogs = async (search: string, source: UsageSourceFilter = logSource) => {
     setLogSearch(search)
@@ -758,9 +785,10 @@ export default function AdminDashboard({
             {/* Date Range Selector */}
             <select
               value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as '7d' | '30d' | '90d')}
+              onChange={(e) => setDateRange(e.target.value as '7d' | '30d' | '90d' | 'lifetime')}
               className="px-3 py-2 bg-dark-50 text-dark-900 border border-dark-200 rounded-lg text-sm"
             >
+              <option value="lifetime">{t.lifetime}</option>
               <option value="7d">{t.last7days}</option>
               <option value="30d">{t.last30days}</option>
               <option value="90d">{t.last90days}</option>
@@ -789,6 +817,16 @@ export default function AdminDashboard({
           </div>
         )}
 
+        {usageCoverage && !error && (
+          <p className="text-xs text-dark-400 mb-4">
+            {dateRange === 'lifetime' ? t.lifetime : dateRange === '7d' ? t.last7days : dateRange === '90d' ? t.last90days : t.last30days}
+            {usageCoverage.from
+              ? ` · ${t.coverageSince} ${new Date(usageCoverage.from).toLocaleDateString(language === 'es' ? 'es-CR' : 'en-US')}`
+              : ''}
+            {` · ${usageCoverage.rowCount.toLocaleString()} ${t.coverageRows}`}
+          </p>
+        )}
+
         <div className="admin-dash__status">
           <div className="admin-dash__status-card">
             <div className="admin-dash__status-label">Kill switch</div>
@@ -814,11 +852,6 @@ export default function AdminDashboard({
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="w-8 h-8 animate-spin text-primary-500" />
           </div>
-        ) : usageSummary.length === 0 ? (
-          <div className="text-center py-20">
-            <BarChart3 className="w-16 h-16 text-dark-300 mx-auto mb-4" />
-            <p className="text-dark-500">{t.noData}</p>
-          </div>
         ) : (
           <>
             {/* Stats Cards */}
@@ -834,6 +867,9 @@ export default function AdminDashboard({
                   ${(creditsEconomics?.estimatedApiCostUsd ?? totalCost).toFixed(4)}
                 </p>
                 <p className="text-xs text-dark-400 mt-2">{t.estimateDisclaimer}</p>
+                {usageSummary.length === 0 && (
+                  <p className="text-xs text-dark-400 mt-2">{t.noData}</p>
+                )}
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -1742,7 +1778,7 @@ export default function AdminDashboard({
                     <button
                       key={chip.id}
                       type="button"
-                      onClick={() => { if (logSource !== chip.id) void fetchLogs(logSearch, chip.id) }}
+                      onClick={() => { if (logSource !== chip.id) setLogSource(chip.id) }}
                       className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors ${
                         logSource === chip.id
                           ? 'bg-primary-900/20 text-primary-400 border-primary-500'
@@ -1799,7 +1835,14 @@ export default function AdminDashboard({
                           </div>
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right text-dark-700">{log.total_tokens?.toLocaleString() || '-'}</td>
-                        <td className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right font-medium text-dark-900" title={`$${Number(log.estimated_cost_usd).toFixed(6)}`}>
+                        <td
+                          className="px-3 sm:px-6 py-3 text-xs sm:text-sm text-right font-medium text-dark-900"
+                          title={
+                            log.stored_cost_usd != null
+                              ? `list $${Number(log.estimated_cost_usd).toFixed(6)} · stored $${Number(log.stored_cost_usd).toFixed(6)}`
+                              : `$${Number(log.estimated_cost_usd).toFixed(6)}`
+                          }
+                        >
                           ${Number(log.estimated_cost_usd).toFixed(4)}
                         </td>
                         <td className="px-3 sm:px-6 py-3 text-center">

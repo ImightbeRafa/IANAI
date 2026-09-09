@@ -1,4 +1,7 @@
-export const ADMIN_USAGE_MAX_ROWS = 10000
+import { ESTIMATE_DISCLAIMER, estimateApiCostUsd } from './model-pricing.js'
+
+export const ADMIN_USAGE_PAGE_SIZE = 1000
+export const ADMIN_USAGE_MAX_ROWS = 250_000
 
 const IMAGE_FEATURES = new Set(['image', 'edit', 'enhance', 'logo'])
 const SCRIPT_FEATURES = new Set([
@@ -15,15 +18,6 @@ const INGEST_FEATURES = new Set([
   'paste_organize',
   'ocr',
 ])
-
-/** Official Grok 4.6 / 4.5 list price per 1M tokens (USD). */
-const GROK_TEXT_INPUT_PER_1M = 2.0
-const GROK_TEXT_OUTPUT_PER_1M = 6.0
-/** Official xAI Imagine 2.0 list prices (USD). */
-const GROK_IMAGE_OUT_USD = 0.04
-const GROK_IMAGE_IN_USD = 0.01
-/** Known Banana Pro ballpark when stored cost is missing. */
-const BANANA_PRO_FALLBACK_USD = 0.12
 
 export type AdminUsageLogRow = {
   id: string
@@ -88,6 +82,7 @@ export type RecentLogRow = {
   generation_id?: string | null
   total_tokens: number
   estimated_cost_usd: number
+  stored_cost_usd: number
   success: boolean
   created_at: string
   metadata?: Record<string, unknown> | null
@@ -101,6 +96,14 @@ export type CreditsEconomics = {
   creditsInCirculation: number
   creditCogsUsd: number
   estimateNote: string
+}
+
+export type UsageCoverage = {
+  from: string | null
+  to: string
+  rowCount: number
+  truncated: boolean
+  lifetime: boolean
 }
 
 export type CreditLedgerRow = {
@@ -140,52 +143,21 @@ export function isMcpToolAuditRow(row: Pick<AdminUsageLogRow, 'feature'>): boole
   return row.feature === 'mcp_tool'
 }
 
-function metaNum(meta: Record<string, unknown> | null | undefined, ...keys: string[]): number | null {
-  if (!meta) return null
-  for (const key of keys) {
-    const raw = meta[key]
-    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
-    if (typeof raw === 'string' && raw.trim() && Number.isFinite(Number(raw))) return Number(raw)
-  }
-  return null
-}
-
 /**
- * Recompute estimated API $ from official list prices where known.
- * Labels as estimates in the UI — not an xAI invoice.
+ * Recompute estimated API $ from official list prices.
+ * Labels as estimates in the UI — not a provider invoice.
  */
-export function estimateOfficialApiCostUsd(row: AdminUsageLogRow): number {
-  const model = (row.model || '').trim().toLowerCase()
-  const meta = row.metadata || {}
-  const stored = num(row.estimated_cost_usd)
-
-  if (model === 'grok-imagine' || model.startsWith('grok-imagine')) {
-    const refs = Math.max(0, metaNum(meta, 'referenceCount', 'reference_count') ?? 0)
-    const outputs = Math.max(1, metaNum(meta, 'outputImages', 'output_images', 'n') ?? 1)
-    return roundCost(GROK_IMAGE_OUT_USD * outputs + GROK_IMAGE_IN_USD * refs)
-  }
-
-  if (
-    model === 'grok-4.6'
-    || model === 'grok-4.5'
-    || model === 'grok'
-    || model === 'grok-4.3'
-  ) {
-    const input = num(row.input_tokens)
-    const output = num(row.output_tokens)
-    if (input === 0 && output === 0) return roundCost(stored)
-    return roundCost(
-      (input / 1_000_000) * GROK_TEXT_INPUT_PER_1M
-      + (output / 1_000_000) * GROK_TEXT_OUTPUT_PER_1M
-    )
-  }
-
-  if (model === 'nano-banana-pro' || model.includes('banana-pro') || model === 'nano-banana') {
-    if (stored > 0) return roundCost(stored)
-    return BANANA_PRO_FALLBACK_USD
-  }
-
-  return roundCost(stored)
+export function estimateOfficialApiCostUsd(row: Pick<
+  AdminUsageLogRow,
+  'model' | 'input_tokens' | 'output_tokens' | 'estimated_cost_usd' | 'metadata'
+>): number {
+  return estimateApiCostUsd({
+    model: row.model,
+    inputTokens: num(row.input_tokens),
+    outputTokens: num(row.output_tokens),
+    estimatedCostUsd: row.estimated_cost_usd,
+    metadata: row.metadata,
+  })
 }
 
 export function buildCreditsByGenerationId(ledger: CreditLedgerRow[]): Map<string, number> {
@@ -223,8 +195,7 @@ export function buildCreditsEconomics(options: {
     impliedUsdPerCredit,
     creditsInCirculation: Math.max(0, Math.floor(options.creditsInCirculation)),
     creditCogsUsd: options.creditCogsUsd,
-    estimateNote:
-      'Estimated API $ from official list prices (xAI Imagine 2.0 $0.04/out + $0.01/input; Grok text $2/$6 per 1M; Banana from stored/~$0.12). Not an xAI invoice.',
+    estimateNote: ESTIMATE_DISCLAIMER,
   }
 }
 
@@ -236,7 +207,8 @@ function toRecentLog(row: AdminUsageLogRow): RecentLogRow {
     model: row.model,
     generation_id: row.generation_id || null,
     total_tokens: num(row.total_tokens),
-    estimated_cost_usd: roundCost(num(row.estimated_cost_usd)),
+    estimated_cost_usd: estimateOfficialApiCostUsd(row),
+    stored_cost_usd: roundCost(num(row.estimated_cost_usd)),
     success: row.success !== false,
     created_at: row.created_at,
     metadata: row.metadata || {},
@@ -368,6 +340,68 @@ export function aggregateUserUsageStats(rows: AdminUsageLogRow[]): UserUsageStat
   return [...grouped.values()]
     .map(row => ({ ...row, total_cost_usd: roundCost(row.total_cost_usd) }))
     .sort((a, b) => b.total_cost_usd - a.total_cost_usd || b.total_calls - a.total_calls)
+}
+
+export function resolveAdminUsageWindow(opts: {
+  startDate?: string
+  endDate?: string
+  lifetime?: boolean
+}): { startIso: string | null; endIso: string; lifetime: boolean } {
+  const endDate = opts.endDate ? new Date(opts.endDate) : new Date()
+  if (Number.isNaN(endDate.getTime())) {
+    throw new Error('Invalid end_date')
+  }
+  if (opts.lifetime) {
+    return { startIso: null, endIso: endDate.toISOString(), lifetime: true }
+  }
+  const startDate = opts.startDate
+    ? new Date(opts.startDate)
+    : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000)
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error('Invalid start_date')
+  }
+  return { startIso: startDate.toISOString(), endIso: endDate.toISOString(), lifetime: false }
+}
+
+export async function fetchAllPagedRows<T>(
+  fetchPage: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>
+): Promise<{ rows: T[]; truncated: boolean }> {
+  const rows: T[] = []
+  let from = 0
+  while (from < ADMIN_USAGE_MAX_ROWS) {
+    const to = Math.min(from + ADMIN_USAGE_PAGE_SIZE - 1, ADMIN_USAGE_MAX_ROWS - 1)
+    const { data, error } = await fetchPage(from, to)
+    if (error) throw new Error(error.message)
+    const batch = data || []
+    rows.push(...batch)
+    if (batch.length < ADMIN_USAGE_PAGE_SIZE) {
+      return { rows, truncated: false }
+    }
+    from += ADMIN_USAGE_PAGE_SIZE
+  }
+  return { rows, truncated: true }
+}
+
+export function buildUsageCoverage(options: {
+  rows: Array<{ created_at: string }>
+  startIso: string | null
+  endIso: string
+  lifetime: boolean
+  truncated: boolean
+  oldestCreatedAt?: string | null
+}): UsageCoverage {
+  const oldestFromRows = options.rows.reduce<string | null>((min, row) => {
+    if (!row.created_at) return min
+    if (!min || row.created_at < min) return row.created_at
+    return min
+  }, null)
+  return {
+    from: options.oldestCreatedAt || oldestFromRows || options.startIso,
+    to: options.endIso,
+    rowCount: options.rows.length,
+    truncated: options.truncated,
+    lifetime: options.lifetime,
+  }
 }
 
 export function paginateUsageLogs(

@@ -1,17 +1,17 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { supabaseAdmin } from './lib/supabase-admin.js'
 import { resolveAdminDashboardAccess } from './lib/preview-admin.js'
+import {
+  estimateOfficialApiCostUsd,
+  fetchAllPagedRows,
+  resolveAdminUsageWindow,
+  type AdminUsageLogRow,
+} from './lib/admin-usage.js'
 
-type UsageLogRow = {
-  id: string
-  generation_id: string | null
-  model: string
-  feature: string
-  total_tokens: number | null
-  estimated_cost_usd: number | string | null
-  success: boolean | null
-  created_at: string
-}
+type UsageLogRow = Pick<
+  AdminUsageLogRow,
+  'id' | 'generation_id' | 'model' | 'feature' | 'total_tokens' | 'estimated_cost_usd' | 'success' | 'created_at' | 'input_tokens' | 'output_tokens' | 'metadata'
+>
 
 type PostRow = {
   id: string
@@ -93,32 +93,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'Admin access required' })
   }
 
-  const endDate = typeof req.query.end_date === 'string' ? new Date(req.query.end_date) : new Date()
-  const startDate = typeof req.query.start_date === 'string'
-    ? new Date(req.query.start_date)
-    : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000)
-
-  const startIso = startDate.toISOString()
-  const endIso = endDate.toISOString()
+  let window
+  try {
+    window = resolveAdminUsageWindow({
+      startDate: typeof req.query.start_date === 'string' ? req.query.start_date : '',
+      endDate: typeof req.query.end_date === 'string' ? req.query.end_date : '',
+      lifetime: req.query.lifetime === '1',
+    })
+  } catch {
+    return res.status(400).json({ error: 'Invalid start_date or end_date' })
+  }
+  const { startIso, endIso } = window
 
   const imageFeatures = ['image', 'logo', 'edit', 'enhance']
 
-  const [{ data: logs, error: logsError }, { data: posts, error: postsError }] = await Promise.all([
-    supabase
-      .from('api_usage_logs')
-      .select('id, generation_id, model, feature, total_tokens, estimated_cost_usd, success, created_at')
-      .in('feature', imageFeatures)
-      .gte('created_at', startIso)
-      .lte('created_at', endIso),
-    supabase
-      .from('posts')
-      .select('id, generation_id, model, rating, status, created_at')
-      .gte('created_at', startIso)
-      .lte('created_at', endIso),
-  ])
-
-  if (logsError) return res.status(500).json({ error: 'Failed to fetch image usage logs', details: logsError.message })
-  if (postsError) return res.status(500).json({ error: 'Failed to fetch posts', details: postsError.message })
+  let logs: UsageLogRow[]
+  let posts: PostRow[]
+  try {
+    const [logPage, postPage] = await Promise.all([
+      fetchAllPagedRows<UsageLogRow>(async (from, to) => {
+        let query = supabase
+          .from('api_usage_logs')
+          .select('id, generation_id, model, feature, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata')
+          .in('feature', imageFeatures)
+          .order('created_at', { ascending: false })
+        if (startIso) query = query.gte('created_at', startIso)
+        query = query.lte('created_at', endIso)
+        return query.range(from, to)
+      }),
+      fetchAllPagedRows<PostRow>(async (from, to) => {
+        let query = supabase
+          .from('posts')
+          .select('id, generation_id, model, rating, status, created_at')
+          .order('created_at', { ascending: false })
+        if (startIso) query = query.gte('created_at', startIso)
+        query = query.lte('created_at', endIso)
+        return query.range(from, to)
+      }),
+    ])
+    logs = logPage.rows
+    posts = postPage.rows
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch image performance'
+    return res.status(500).json({ error: message })
+  }
 
   const rows = new Map<string, PerformanceRow>()
   const getRow = (model: string) => {
@@ -134,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (log.success) row.successes += 1
     else row.failures += 1
     row.total_tokens += Number(log.total_tokens || 0)
-    row.total_cost_usd += Number(log.estimated_cost_usd || 0)
+    row.total_cost_usd += estimateOfficialApiCostUsd(log)
     if (!log.generation_id) row.uncorrelated_logs += 1
     else {
       const existing = logsByGeneration.get(log.generation_id) || []

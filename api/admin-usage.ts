@@ -3,14 +3,17 @@ import { supabaseAdmin } from './lib/supabase-admin.js'
 import { CREDIT_COGS_USD } from './lib/credits/catalog.js'
 import { resolveAdminDashboardAccess } from './lib/preview-admin.js'
 import {
-  ADMIN_USAGE_MAX_ROWS,
   aggregateDailyUsage,
   aggregateUsageSummary,
   aggregateUserUsageStats,
   buildCreditsByGenerationId,
   buildCreditsEconomics,
+  buildUsageCoverage,
+  estimateOfficialApiCostUsd,
+  fetchAllPagedRows,
   filterUsageRowsBySource,
   paginateUsageLogs,
+  resolveAdminUsageWindow,
   resolveUsageLogSource,
   type AdminUsageLogRow,
   type CreditLedgerRow,
@@ -22,49 +25,77 @@ function queryString(value: string | string[] | undefined): string {
   return typeof value === 'string' ? value : ''
 }
 
+function applyCreatedAtRange<T extends { gte: (column: string, value: string) => T; lte: (column: string, value: string) => T }>(
+  query: T,
+  startIso: string | null,
+  endIso: string
+): T {
+  const bounded = startIso ? query.gte('created_at', startIso) : query
+  return bounded.lte('created_at', endIso)
+}
+
 async function fetchCreditLedger(
   supabase: NonNullable<typeof supabaseAdmin>,
-  startIso: string,
+  startIso: string | null,
   endIso: string
 ): Promise<CreditLedgerRow[]> {
-  const { data, error } = await supabase
-    .from('credit_ledger')
-    .select('generation_id, credits, action, created_at')
-    .gte('created_at', startIso)
-    .lte('created_at', endIso)
-    .limit(ADMIN_USAGE_MAX_ROWS)
-
-  if (error) {
-    console.warn('admin-usage credit_ledger read failed:', error.message)
+  try {
+    const { rows } = await fetchAllPagedRows<CreditLedgerRow>(async (from, to) => {
+      let query = supabase
+        .from('credit_ledger')
+        .select('generation_id, credits, action, created_at')
+        .order('created_at', { ascending: false })
+      query = applyCreatedAtRange(query, startIso, endIso)
+      return query.range(from, to)
+    })
+    return rows
+  } catch (error) {
+    console.warn('admin-usage credit_ledger read failed:', error instanceof Error ? error.message : error)
     return []
   }
-  return (data || []) as CreditLedgerRow[]
 }
 
 async function fetchCreditsInCirculation(
   supabase: NonNullable<typeof supabaseAdmin>
 ): Promise<number> {
   const nowIso = new Date().toISOString()
-  const { data, error } = await supabase
-    .from('credit_lots')
-    .select('remaining, expires_at')
-    .gt('remaining', 0)
-    .limit(ADMIN_USAGE_MAX_ROWS)
-
-  if (error) {
-    console.warn('admin-usage credit_lots read failed:', error.message)
+  try {
+    const { rows } = await fetchAllPagedRows<{ remaining?: number; expires_at?: string | null }>(async (from, to) => {
+      return supabase
+        .from('credit_lots')
+        .select('remaining, expires_at')
+        .gt('remaining', 0)
+        .order('created_at', { ascending: true })
+        .range(from, to)
+    })
+    let total = 0
+    for (const row of rows) {
+      const remaining = Number(row.remaining || 0)
+      if (!Number.isFinite(remaining) || remaining <= 0) continue
+      if (row.expires_at && row.expires_at <= nowIso) continue
+      total += remaining
+    }
+    return total
+  } catch (error) {
+    console.warn('admin-usage credit_lots read failed:', error instanceof Error ? error.message : error)
     return 0
   }
+}
 
-  let total = 0
-  for (const row of data || []) {
-    const remaining = Number((row as { remaining?: number }).remaining || 0)
-    if (!Number.isFinite(remaining) || remaining <= 0) continue
-    const expiresAt = (row as { expires_at?: string | null }).expires_at
-    if (expiresAt && expiresAt <= nowIso) continue
-    total += remaining
-  }
-  return total
+async function fetchOldestUsageAt(
+  supabase: NonNullable<typeof supabaseAdmin>,
+  startIso: string | null,
+  endIso: string
+): Promise<string | null> {
+  let query = supabase
+    .from('api_usage_logs')
+    .select('created_at')
+    .order('created_at', { ascending: true })
+    .limit(1)
+  query = applyCreatedAtRange(query, startIso, endIso)
+  const { data, error } = await query
+  if (error) return null
+  return (data?.[0] as { created_at?: string } | undefined)?.created_at || null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -104,17 +135,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'Admin access required' })
   }
 
-  const endDate = queryString(req.query.end_date) ? new Date(queryString(req.query.end_date)) : new Date()
-  const startDate = queryString(req.query.start_date)
-    ? new Date(queryString(req.query.start_date))
-    : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000)
-
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+  let window
+  try {
+    window = resolveAdminUsageWindow({
+      startDate: queryString(req.query.start_date),
+      endDate: queryString(req.query.end_date),
+      lifetime: queryString(req.query.lifetime) === '1',
+    })
+  } catch {
     return res.status(400).json({ error: 'Invalid start_date or end_date' })
   }
-
-  const startIso = startDate.toISOString()
-  const endIso = endDate.toISOString()
+  const { startIso, endIso, lifetime } = window
   const search = queryString(req.query.search).trim()
   const source = queryString(req.query.source).trim().toLowerCase()
   const offset = Math.max(0, Number(queryString(req.query.offset) || 0) || 0)
@@ -125,11 +156,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (logsOnly) {
       let query = supabase
         .from('api_usage_logs')
-        .select('id, user_email, feature, model, generation_id, total_tokens, estimated_cost_usd, success, created_at, metadata, source')
-        .gte('created_at', startIso)
-        .lte('created_at', endIso)
+        .select('id, user_email, feature, model, generation_id, input_tokens, output_tokens, total_tokens, estimated_cost_usd, success, created_at, metadata, source')
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1)
+      query = applyCreatedAtRange(query, startIso, endIso)
 
       if (search) {
         query = query.ilike('user_email', `%${search}%`)
@@ -152,7 +182,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           model: row.model,
           generation_id: row.generation_id || null,
           total_tokens: Number(row.total_tokens || 0),
-          estimated_cost_usd: Number(row.estimated_cost_usd || 0),
+          estimated_cost_usd: estimateOfficialApiCostUsd(row),
+          stored_cost_usd: Number(row.estimated_cost_usd || 0),
           success: row.success !== false,
           created_at: row.created_at,
           metadata: row.metadata || {},
@@ -162,17 +193,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
-    const { data, error } = await supabase
-      .from('api_usage_logs')
-      .select(LOG_SELECT)
-      .gte('created_at', startIso)
-      .lte('created_at', endIso)
-      .order('created_at', { ascending: false })
-      .limit(ADMIN_USAGE_MAX_ROWS)
-
-    if (error) return res.status(500).json({ error: 'Failed to fetch usage logs', details: error.message })
-
-    const rows = (data || []) as AdminUsageLogRow[]
+    const [{ rows, truncated }, oldestCreatedAt] = await Promise.all([
+      fetchAllPagedRows<AdminUsageLogRow>(async (from, to) => {
+        let query = supabase
+          .from('api_usage_logs')
+          .select(LOG_SELECT)
+          .order('created_at', { ascending: false })
+        query = applyCreatedAtRange(query, startIso, endIso)
+        return query.range(from, to)
+      }),
+      fetchOldestUsageAt(supabase, startIso, endIso),
+    ])
     const scopedRows = filterUsageRowsBySource(rows, source)
     const [ledger, creditsInCirculation] = await Promise.all([
       fetchCreditLedger(supabase, startIso, endIso),
@@ -205,7 +236,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
       logs: page.logs,
       hasMore: page.hasMore,
-      truncated: rows.length >= ADMIN_USAGE_MAX_ROWS,
+      truncated,
+      coverage: buildUsageCoverage({
+        rows,
+        startIso,
+        endIso,
+        lifetime,
+        truncated,
+        oldestCreatedAt,
+      }),
     })
   } catch (err) {
     console.error('Admin usage error:', err)

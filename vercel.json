@@ -1,5 +1,11 @@
 {
   "functions": {
+    "api/admin-usage.ts": {
+      "maxDuration": 60
+    },
+    "api/admin-image-performance.ts": {
+      "maxDuration": 60
+    },
     "api/transcribe-audio.ts": {
       "maxDuration": 30
     },

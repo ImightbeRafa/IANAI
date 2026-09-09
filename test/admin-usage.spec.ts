@@ -5,8 +5,11 @@ import {
   aggregateUserUsageStats,
   buildCreditsByGenerationId,
   buildCreditsEconomics,
+  buildUsageCoverage,
   estimateOfficialApiCostUsd,
+  fetchAllPagedRows,
   paginateUsageLogs,
+  resolveAdminUsageWindow,
   resolveUsageLogSource,
   type AdminUsageLogRow,
 } from '../api/lib/admin-usage'
@@ -41,7 +44,7 @@ describe('estimateOfficialApiCostUsd', () => {
     ).toBe(0.06)
   })
 
-  it('uses Grok text $2/$6 per 1M', () => {
+  it('uses Grok text $2/$6 per 1M below the 200k long-context band', () => {
     expect(
       estimateOfficialApiCostUsd(
         log({
@@ -49,15 +52,15 @@ describe('estimateOfficialApiCostUsd', () => {
           feature: 'script',
           model: 'grok-4.6',
           created_at: '2026-08-14T10:00:00.000Z',
-          input_tokens: 1_000_000,
-          output_tokens: 1_000_000,
+          input_tokens: 100_000,
+          output_tokens: 100_000,
           estimated_cost_usd: 9,
         })
       )
-    ).toBe(8)
+    ).toBe(0.8)
   })
 
-  it('uses Banana stored cost when present', () => {
+  it('uses Banana stored cost when tokens are missing', () => {
     expect(
       estimateOfficialApiCostUsd(
         log({
@@ -66,9 +69,93 @@ describe('estimateOfficialApiCostUsd', () => {
           model: 'nano-banana-pro',
           created_at: '2026-08-14T10:00:00.000Z',
           estimated_cost_usd: 0.134,
+          input_tokens: 0,
+          output_tokens: 0,
         })
       )
     ).toBe(0.134)
+  })
+
+  it('uses official Grok 4.3 $1.25/$2.50 not the 4.6 band', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '4',
+          feature: 'script',
+          model: 'grok-4.3',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 100_000,
+          output_tokens: 100_000,
+          estimated_cost_usd: 8,
+        })
+      )
+    ).toBe(0.375)
+  })
+
+  it('applies Grok long-context rates when prompt is >= 200k', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '5',
+          feature: 'script',
+          model: 'grok-4.6',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 200_000,
+          output_tokens: 1_000,
+          estimated_cost_usd: 0.4,
+        })
+      )
+    ).toBe(0.812)
+  })
+
+  it('uses Gemini 2.5 Flash $0.30/$2.50 including thinking as output', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '6',
+          feature: 'brand_extraction',
+          model: 'gemini-2.5-flash',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 1_000_000,
+          output_tokens: 500_000,
+          estimated_cost_usd: 0.15,
+          metadata: { thinkingTokens: 500_000 },
+        })
+      )
+    ).toBe(2.8)
+  })
+
+  it('uses official Flash Image $0.039 + input tokens', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '7',
+          feature: 'image',
+          model: 'nano-banana',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 1_000_000,
+          output_tokens: 0,
+          estimated_cost_usd: 0.02,
+        })
+      )
+    ).toBe(0.339)
+  })
+
+  it('uses GPT Image 2 token split from metadata', () => {
+    expect(
+      estimateOfficialApiCostUsd(
+        log({
+          id: '8',
+          feature: 'image',
+          model: 'gpt-image-2',
+          created_at: '2026-08-14T10:00:00.000Z',
+          input_tokens: 0,
+          output_tokens: 0,
+          estimated_cost_usd: 0,
+          metadata: { textInputTokens: 1_000_000, imageInputTokens: 1_000_000, imageOutputTokens: 1_000_000 },
+        })
+      )
+    ).toBe(43)
   })
 })
 
@@ -170,7 +257,7 @@ describe('buildCreditsEconomics', () => {
     expect(economics.estimatedApiCostUsd).toBe(0.04)
     expect(economics.impliedUsdPerCredit).toBeCloseTo(0.04 / 6, 6)
     expect(economics.creditsInCirculation).toBe(100)
-    expect(economics.estimateNote.toLowerCase()).toContain('not an xai invoice')
+    expect(economics.estimateNote.toLowerCase()).toContain('not a provider invoice')
   })
 })
 
@@ -195,7 +282,7 @@ describe('aggregateUserUsageStats', () => {
     const stats = aggregateUserUsageStats([
       log({ id: '1', feature: 'script', model: 'grok-4.6', created_at: '2026-08-14T10:00:00.000Z', estimated_cost_usd: 0.08, input_tokens: 0, output_tokens: 0 }),
       log({ id: '2', feature: 'script_edit', model: 'grok-4.6', created_at: '2026-08-14T11:00:00.000Z', estimated_cost_usd: 0.02, input_tokens: 0, output_tokens: 0 }),
-      log({ id: '3', feature: 'brand_extraction', model: 'gemini-2.5-flash', created_at: '2026-08-14T12:00:00.000Z', estimated_cost_usd: 0.04 }),
+      log({ id: '3', feature: 'brand_extraction', model: 'gemini-2.5-flash', created_at: '2026-08-14T12:00:00.000Z', estimated_cost_usd: 0.04, input_tokens: 0, output_tokens: 0 }),
       log({ id: '4', feature: 'url_fetch', model: 'web-scraper', created_at: '2026-08-14T13:00:00.000Z', estimated_cost_usd: 0 }),
       log({ id: '5', feature: 'image', model: 'nano-banana', created_at: '2026-08-14T14:00:00.000Z', estimated_cost_usd: 0.03, success: false }),
       log({ id: '6', feature: 'reply', model: 'grok-4.6', created_at: '2026-08-14T15:00:00.000Z', estimated_cost_usd: 0.01, input_tokens: 0, output_tokens: 0 }),
@@ -252,6 +339,58 @@ describe('paginateUsageLogs', () => {
 
     const qa = paginateUsageLogs(rows, { source: 'legacy_preview_qa', limit: 10 })
     expect(qa.logs.map((row) => row.id)).toEqual(['4'])
+  })
+})
+
+describe('resolveAdminUsageWindow', () => {
+  it('omits start bound for lifetime', () => {
+    const window = resolveAdminUsageWindow({ lifetime: true, endDate: '2026-09-09T00:00:00.000Z' })
+    expect(window.lifetime).toBe(true)
+    expect(window.startIso).toBeNull()
+    expect(window.endIso).toBe('2026-09-09T00:00:00.000Z')
+  })
+
+  it('defaults to 30 days when start is omitted', () => {
+    const window = resolveAdminUsageWindow({ endDate: '2026-09-09T00:00:00.000Z' })
+    expect(window.lifetime).toBe(false)
+    expect(window.startIso).toBe('2026-08-10T00:00:00.000Z')
+  })
+})
+
+describe('fetchAllPagedRows', () => {
+  it('walks pages until a short page and flags the safety cap', async () => {
+    const pages = [
+      Array.from({ length: 1000 }, (_, i) => ({ id: `a${i}` })),
+      Array.from({ length: 2 }, (_, i) => ({ id: `b${i}` })),
+    ]
+    const first = await fetchAllPagedRows(async (from) => {
+      const page = from === 0 ? pages[0] : pages[1]
+      return { data: page, error: null }
+    })
+    expect(first.rows).toHaveLength(1002)
+    expect(first.truncated).toBe(false)
+  })
+})
+
+describe('buildUsageCoverage', () => {
+  it('prefers the oldest created_at for lifetime windows', () => {
+    const coverage = buildUsageCoverage({
+      rows: [
+        { created_at: '2026-08-14T10:00:00.000Z' },
+        { created_at: '2025-03-01T00:00:00.000Z' },
+      ],
+      startIso: null,
+      endIso: '2026-09-09T00:00:00.000Z',
+      lifetime: true,
+      truncated: false,
+      oldestCreatedAt: '2025-01-15T00:00:00.000Z',
+    })
+    expect(coverage).toMatchObject({
+      from: '2025-01-15T00:00:00.000Z',
+      rowCount: 2,
+      lifetime: true,
+      truncated: false,
+    })
   })
 })
 
