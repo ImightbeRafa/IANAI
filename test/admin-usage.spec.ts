@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  aggregateDailyTotals,
   aggregateDailyUsage,
   aggregateUsageSummary,
+  findPeakUsageDay,
   aggregateUserUsageStats,
   buildCreditsByGenerationId,
   buildCreditsEconomics,
@@ -340,6 +342,17 @@ describe('aggregateDailyUsage', () => {
       '2026-08-14:web-scraper:1',
       '2026-08-13:web-scraper:1',
     ])
+
+    const totals = aggregateDailyTotals(daily)
+    expect(totals).toEqual([
+      { day: '2026-08-14', total_calls: 2, total_cost_usd: 0.2 },
+      { day: '2026-08-13', total_calls: 1, total_cost_usd: 0 },
+    ])
+    expect(findPeakUsageDay(totals)).toEqual({
+      day: '2026-08-14',
+      total_calls: 2,
+      total_cost_usd: 0.2,
+    })
   })
 })
 

@@ -4,6 +4,7 @@
  */
 
 import { maskEmail } from '../brand-kit-resolve.js'
+import { estimateApiCostUsd } from '../model-pricing.js'
 
 export const ADMIN_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'] as const
 export type AdminTicketStatus = (typeof ADMIN_TICKET_STATUSES)[number]
@@ -395,6 +396,14 @@ export async function mcpAdminGetUsage(
   return {
     logs: logs.map((row) => ({
       ...row,
+      stored_cost_usd: Number(row.estimated_cost_usd || 0),
+      estimated_cost_usd: estimateApiCostUsd({
+        model: row.model,
+        inputTokens: Number(row.input_tokens || 0),
+        outputTokens: Number(row.output_tokens || 0),
+        estimatedCostUsd: row.estimated_cost_usd,
+        metadata: row.metadata,
+      }),
       user_email: null,
       user_email_masked: maskEmail(row.user_email),
     })),

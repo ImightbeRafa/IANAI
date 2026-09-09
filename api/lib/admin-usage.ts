@@ -60,6 +60,12 @@ export type DailyUsageRow = {
   total_cost_usd: number
 }
 
+export type DailyTotalRow = {
+  day: string
+  total_calls: number
+  total_cost_usd: number
+}
+
 export type UserUsageStatsRow = {
   user_id: string
   user_email: string
@@ -297,6 +303,28 @@ export function aggregateDailyUsage(rows: AdminUsageLogRow[]): DailyUsageRow[] {
   return [...grouped.values()]
     .map(row => ({ ...row, total_cost_usd: roundCost(row.total_cost_usd) }))
     .sort((a, b) => b.day.localeCompare(a.day) || a.model.localeCompare(b.model))
+}
+
+export function aggregateDailyTotals(rows: DailyUsageRow[]): DailyTotalRow[] {
+  const grouped = new Map<string, DailyTotalRow>()
+  for (const row of rows) {
+    const existing = grouped.get(row.day) || { day: row.day, total_calls: 0, total_cost_usd: 0 }
+    existing.total_calls += row.total_calls
+    existing.total_cost_usd += row.total_cost_usd
+    grouped.set(row.day, existing)
+  }
+  return [...grouped.values()]
+    .map(row => ({ ...row, total_cost_usd: roundCost(row.total_cost_usd) }))
+    .sort((a, b) => b.day.localeCompare(a.day))
+}
+
+export function findPeakUsageDay(rows: DailyTotalRow[]): DailyTotalRow | null {
+  if (rows.length === 0) return null
+  return rows.reduce((peak, row) => {
+    if (row.total_cost_usd > peak.total_cost_usd) return row
+    if (row.total_cost_usd === peak.total_cost_usd && row.total_calls > peak.total_calls) return row
+    return peak
+  })
 }
 
 export function aggregateUserUsageStats(rows: AdminUsageLogRow[]): UserUsageStatsRow[] {

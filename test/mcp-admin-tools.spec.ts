@@ -205,6 +205,36 @@ describe('mcp admin gate', () => {
     })
   })
 
+  it('recomputes admin usage $ from official list prices', async () => {
+    const store = createStore()
+    store.listUsage = async () => [{
+      id: 'log-imagine',
+      user_id: 'user-a',
+      user_email: 'ryan@example.com',
+      feature: 'edit',
+      model: 'grok-imagine',
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      estimated_cost_usd: 0.12,
+      success: true,
+      created_at: '2026-08-25T00:00:00.000Z',
+      metadata: { referenceCount: 2, source: 'mcp' },
+      source: 'mcp',
+    }]
+
+    const usage = await dispatchAdminTool({
+      name: 'admin_get_usage',
+      args: { startDate: '2026-08-01T00:00:00.000Z', endDate: '2026-08-31T00:00:00.000Z' },
+      store,
+    }) as {
+      logs: Array<{ estimated_cost_usd: number; stored_cost_usd: number }>
+    }
+
+    expect(usage.logs[0].stored_cost_usd).toBe(0.12)
+    expect(usage.logs[0].estimated_cost_usd).toBe(0.06)
+  })
+
   it('builds a structured Cursor brief from the ticket', () => {
     const brief = buildCursorFixBrief(sampleTicket)
     expect(brief.ticketId).toBe('ticket-1')

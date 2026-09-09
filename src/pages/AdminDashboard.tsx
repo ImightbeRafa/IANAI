@@ -57,6 +57,12 @@ interface DailyUsage {
   total_cost_usd: number
 }
 
+interface DailyTotal {
+  day: string
+  total_calls: number
+  total_cost_usd: number
+}
+
 interface CreditsEconomics {
   creditsConsumed: number
   estimatedApiCostUsd: number
@@ -227,6 +233,40 @@ const MODEL_INFO: Record<string, { name: string; color: string }> = {
   'pdf-parse': { name: 'PDF Parser', color: 'bg-amber-500' },
   'web-scraper': { name: 'Web Scraper', color: 'bg-teal-500' },
   'gemini-2.5-flash': { name: 'Gemini 2.5 Flash', color: 'bg-sky-500' },
+  'grok-imagine-video-1.5': { name: 'Grok Imagine Video 1.5', color: 'bg-rose-500' },
+  mcp: { name: 'MCP (audit)', color: 'bg-slate-400' },
+}
+
+function resolveModelInfo(model: string): { name: string; color: string } {
+  if (MODEL_INFO[model]) return MODEL_INFO[model]
+  if (model.includes('kling')) return { name: 'Kling Video', color: 'bg-red-500' }
+  if (model.startsWith('grok-imagine-video')) return { name: 'Grok Imagine Video', color: 'bg-rose-500' }
+  if (model.startsWith('grok-imagine')) return { name: 'Grok Imagine 2.0', color: 'bg-pink-500' }
+  if (model.startsWith('grok-4-1-fast') || model.startsWith('grok-4-fast')) {
+    return { name: 'Grok 4 Fast', color: 'bg-cyan-500' }
+  }
+  if (model.startsWith('whisper')) return { name: 'Whisper', color: 'bg-green-500' }
+  if (model.startsWith('gemini')) return { name: 'Gemini Flash', color: 'bg-sky-500' }
+  return { name: model, color: 'bg-gray-400' }
+}
+
+function listPriceFor(model: string): string {
+  if (MODEL_PRICING[model]) return MODEL_PRICING[model]
+  if (model.includes('kling')) return '$0.07/sec (fallback when stored $ is 0)'
+  if (model.startsWith('grok-imagine-video')) {
+    return model.includes('1.5') ? '$0.08/sec' : '$0.05/sec'
+  }
+  if (model.startsWith('grok-imagine')) return MODEL_PRICING['grok-imagine']
+  if (model.startsWith('grok-4-1-fast') || model.startsWith('grok-4-fast')) {
+    return MODEL_PRICING['grok-4-1-fast-reasoning']
+  }
+  if (model.startsWith('grok-3-mini')) return MODEL_PRICING['grok-3-mini-fast']
+  if (model.startsWith('grok-3')) return MODEL_PRICING['grok-3-fast']
+  if (model.startsWith('whisper')) return MODEL_PRICING['whisper-1']
+  if (model.startsWith('gemini')) return MODEL_PRICING['gemini-2.5-flash']
+  if (model.includes('banana-pro')) return MODEL_PRICING['nano-banana-pro']
+  if (model.includes('gpt-image')) return MODEL_PRICING['gpt-image-2']
+  return '-'
 }
 
 // Cost per 1M tokens or per image (for reference display)
@@ -267,11 +307,11 @@ function formatImageLogDetail(log: RecentLog): string {
 }
 
 function ModelChip({ model }: { model: string }) {
-  const info = MODEL_INFO[model]
+  const info = resolveModelInfo(model)
   return (
     <span className="admin-dash__chip" title={model}>
-      <span className={`admin-dash__dot ${info?.color || 'bg-gray-400'}`} />
-      {info?.name || model}
+      <span className={`admin-dash__dot ${info.color}`} />
+      {info.name}
     </span>
   )
 }
@@ -295,6 +335,12 @@ function SourceBadge({ source }: { source: string }) {
       {label}
     </span>
   )
+}
+
+function formatUtcDay(day: string, language: string): string {
+  const [year, month, date] = day.split('-').map(Number)
+  if (!year || !month || !date) return day
+  return new Date(year, month - 1, date).toLocaleDateString(language === 'es' ? 'es-CR' : 'en-US')
 }
 
 function formatLogTime(iso: string, language: string) {
@@ -324,6 +370,8 @@ export default function AdminDashboard({
   const [error, setError] = useState('')
   const [usageSummary, setUsageSummary] = useState<UsageSummary[]>([])
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
+  const [dailyTotals, setDailyTotals] = useState<DailyTotal[]>([])
+  const [peakDay, setPeakDay] = useState<DailyTotal | null>(null)
   const [recentLogs, setRecentLogs] = useState<RecentLog[]>([])
   const [creditsEconomics, setCreditsEconomics] = useState<CreditsEconomics | null>(null)
   const [imageModelPerformance, setImageModelPerformance] = useState<ImageModelPerformance[]>([])
@@ -376,6 +424,8 @@ export default function AdminDashboard({
       last30days: 'Últimos 30 días',
       last90days: 'Últimos 90 días',
       lifetime: 'Todo el historial',
+      peakDay: 'Día pico',
+      peakDayHint: 'Día con mayor costo API en el rango',
       coverageSince: 'Desde',
       coverageRows: 'interacciones',
       truncated: 'Mostrando las primeras 250,000 llamadas. Los totales pueden estar incompletos.',
@@ -443,6 +493,8 @@ export default function AdminDashboard({
       last30days: 'Last 30 days',
       last90days: 'Last 90 days',
       lifetime: 'Lifetime',
+      peakDay: 'Peak day',
+      peakDayHint: 'Highest API-cost day in this range',
       coverageSince: 'Since',
       coverageRows: 'interactions',
       script: 'Scripts',
@@ -523,6 +575,8 @@ export default function AdminDashboard({
       error?: string
       summary?: UsageSummary[]
       daily?: DailyUsage[]
+      dailyTotals?: DailyTotal[]
+      peakDay?: DailyTotal | null
       userStats?: UserUsageStats[]
       logs?: RecentLog[]
       hasMore?: boolean
@@ -551,6 +605,8 @@ export default function AdminDashboard({
         const usageData = await fetchUsageFromApi({ offset: 0, source: logSource })
         setUsageSummary(usageData.summary || [])
         setDailyUsage(usageData.daily || [])
+        setDailyTotals(usageData.dailyTotals || [])
+        setPeakDay(usageData.peakDay || null)
         setUserStats(usageData.userStats || [])
         setRecentLogs(usageData.logs || [])
         setCreditsEconomics(usageData.creditsEconomics || null)
@@ -563,6 +619,8 @@ export default function AdminDashboard({
         console.error('Failed to fetch admin usage:', usageErr)
         setUsageSummary([])
         setDailyUsage([])
+        setDailyTotals([])
+        setPeakDay(null)
         setUserStats([])
         setRecentLogs([])
         setCreditsEconomics(null)
@@ -736,6 +794,27 @@ export default function AdminDashboard({
     return acc
   }, {} as Record<string, { calls: number; cost: number }>)
 
+  const modelRows = Object.entries(byModel).sort((a, b) => b[1].cost - a[1].cost || b[1].calls - a[1].calls)
+  const featureRows = Object.entries(byFeature).sort((a, b) => b[1].cost - a[1].cost || b[1].calls - a[1].calls)
+
+  const resolvedDailyTotals = dailyTotals.length > 0
+    ? dailyTotals
+    : Object.values(dailyUsage.reduce((acc, row) => {
+        const existing = acc[row.day] || { day: row.day, total_calls: 0, total_cost_usd: 0 }
+        existing.total_calls += row.total_calls
+        existing.total_cost_usd += Number(row.total_cost_usd)
+        acc[row.day] = existing
+        return acc
+      }, {} as Record<string, DailyTotal>))
+      .sort((a, b) => b.day.localeCompare(a.day))
+
+  const resolvedPeak = peakDay || resolvedDailyTotals.reduce<DailyTotal | null>((max, row) => {
+    if (!max || row.total_cost_usd > max.total_cost_usd) return row
+    return max
+  }, null)
+
+  const dailyTrendRows = resolvedDailyTotals.slice(0, dateRange === 'lifetime' ? 30 : 14)
+
   // Billing calculations
   const activePaidSubs = allSubscriptions.filter(s => (s.status === 'active' || s.status === 'trialing') && s.plan !== 'free')
   const cancelledSubs = allSubscriptions.filter(s => s.status === 'cancelled')
@@ -872,7 +951,7 @@ export default function AdminDashboard({
         ) : (
           <>
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="p-2 bg-green-900/20 rounded-lg">
@@ -897,6 +976,23 @@ export default function AdminDashboard({
                   <span className="text-dark-500 text-sm">{t.totalCalls}</span>
                 </div>
                 <p className="admin-dash__metric">{totalCalls.toLocaleString()}</p>
+              </div>
+
+              <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2 bg-orange-900/20 rounded-lg">
+                    <TrendingUp className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <span className="text-dark-500 text-sm">{t.peakDay}</span>
+                </div>
+                <p className="admin-dash__metric">
+                  {resolvedPeak ? `$${resolvedPeak.total_cost_usd.toFixed(4)}` : '—'}
+                </p>
+                <p className="text-xs text-dark-400 mt-2">
+                  {resolvedPeak
+                    ? `${formatUtcDay(resolvedPeak.day, language)} · ${resolvedPeak.total_calls.toLocaleString()} ${t.calls.toLowerCase()}`
+                    : t.peakDayHint}
+                </p>
               </div>
 
               <div className="bg-dark-100 rounded-xl p-6 shadow-sm border border-dark-100">
@@ -1545,13 +1641,13 @@ export default function AdminDashboard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-dark-100">
-                    {Object.entries(byModel).map(([model, data]) => (
+                    {modelRows.map(([model, data]) => (
                       <tr key={model} className="hover:bg-dark-50">
                         <td className="px-3 sm:px-6 py-3 sm:py-4">
                           <div className="flex items-center gap-2 sm:gap-3">
-                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${MODEL_INFO[model]?.color || 'bg-gray-400'}`} />
+                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${resolveModelInfo(model).color}`} />
                             <span className="font-medium text-dark-900 text-sm sm:text-base">
-                              {MODEL_INFO[model]?.name || model}
+                              {resolveModelInfo(model).name}
                             </span>
                           </div>
                         </td>
@@ -1559,7 +1655,7 @@ export default function AdminDashboard({
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.tokens.toLocaleString()}</td>
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-700 text-sm">{data.credits.toLocaleString()}</td>
                         <td className="px-3 sm:px-6 py-3 sm:py-4 text-right font-medium text-dark-900 text-sm">${data.cost.toFixed(4)}</td>
-                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-500 text-xs sm:text-sm">{MODEL_PRICING[model] || '-'}</td>
+                        <td className="px-3 sm:px-6 py-3 sm:py-4 text-right text-dark-500 text-xs sm:text-sm">{listPriceFor(model)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1609,8 +1705,8 @@ export default function AdminDashboard({
                       <tr key={row.model} className="hover:bg-dark-50">
                         <td className="px-3 sm:px-5 py-3">
                           <div className="flex items-center gap-2">
-                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${MODEL_INFO[row.model]?.color || 'bg-gray-400'}`} />
-                            <span className="font-medium text-dark-900 text-sm">{MODEL_INFO[row.model]?.name || row.model}</span>
+                            <div className={`w-3 h-3 rounded-full flex-shrink-0 ${resolveModelInfo(row.model).color}`} />
+                            <span className="font-medium text-dark-900 text-sm">{resolveModelInfo(row.model).name}</span>
                           </div>
                         </td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">{row.attempts.toLocaleString()}</td>
@@ -1641,7 +1737,7 @@ export default function AdminDashboard({
                   </h2>
                 </div>
                 <div className="p-6 space-y-4">
-                  {Object.entries(byFeature).map(([feature, data]) => (
+                  {featureRows.map(([feature, data]) => (
                     <div key={feature} className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         {feature === 'script' && <FileText className="w-5 h-5 text-blue-500" />}
@@ -1688,14 +1784,20 @@ export default function AdminDashboard({
                   </h2>
                 </div>
                 <div className="p-6 max-h-64 overflow-y-auto">
-                  {dailyUsage.slice(0, 14).map((day, i) => (
-                    <div key={`${day.day}-${day.model}-${i}`} className="flex items-center justify-between py-2 border-b border-dark-50 last:border-0">
+                  {dailyTrendRows.map((day) => (
+                    <div key={day.day} className="flex items-center justify-between py-2 border-b border-dark-50 last:border-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm text-dark-500">{new Date(day.day).toLocaleDateString()}</span>
-                        <ModelChip model={day.model} />
+                        <span className="text-sm text-dark-500">
+                          {formatUtcDay(day.day, language)}
+                        </span>
+                        {resolvedPeak?.day === day.day && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-orange-500">
+                            {t.peakDay}
+                          </span>
+                        )}
                       </div>
                       <div className="text-right">
-                        <span className="text-sm font-medium text-dark-700">{day.total_calls} calls</span>
+                        <span className="text-sm font-medium text-dark-700">{day.total_calls} {t.calls.toLowerCase()}</span>
                         <span className="text-xs text-dark-400 ml-2">${Number(day.total_cost_usd).toFixed(4)}</span>
                       </div>
                     </div>

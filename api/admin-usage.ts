@@ -3,9 +3,11 @@ import { supabaseAdmin } from './lib/supabase-admin.js'
 import { CREDIT_COGS_USD } from './lib/credits/catalog.js'
 import { resolveAdminDashboardAccess } from './lib/preview-admin.js'
 import {
+  aggregateDailyTotals,
   aggregateDailyUsage,
   aggregateUsageSummary,
   aggregateUserUsageStats,
+  findPeakUsageDay,
   buildCreditsByGenerationId,
   buildCreditsEconomics,
   buildUsageCoverage,
@@ -223,10 +225,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : ledger
     const creditsByGenerationId = buildCreditsByGenerationId(scopedLedger)
     const page = paginateUsageLogs(rows, { search, offset, limit, source })
+    const daily = aggregateDailyUsage(scopedRows)
+    const dailyTotals = aggregateDailyTotals(daily)
 
     return res.status(200).json({
       summary: aggregateUsageSummary(scopedRows, creditsByGenerationId),
-      daily: aggregateDailyUsage(scopedRows),
+      daily,
+      dailyTotals,
+      peakDay: findPeakUsageDay(dailyTotals),
       userStats: aggregateUserUsageStats(scopedRows),
       creditsEconomics: buildCreditsEconomics({
         rows: scopedRows,
