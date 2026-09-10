@@ -1,6 +1,7 @@
 /**
- * Advance public homepage — locked CoS pixel target (PR #34 Preview).
+ * Advance public homepage — content + pricing (locked).
  * Spanish primary; English mirror for language toggle.
+ * Visual motion lives in Home.tsx + public/* components.
  */
 
 export const HOME_CYAN = '#2de2ff'
@@ -137,6 +138,21 @@ export const HOME_PLANS = [
     popular: false,
     contact: true,
   },
+] as const
+
+/**
+ * Background creatives for hero floaties / sparse edge ghosts.
+ * Kept here (not in FloatingCreatives) to avoid pages↔components cycle noise.
+ */
+export const HOME_RAIL_SRCS = [
+  '/home/ads/dulce-norte.jpg',
+  '/home/ads/forza.jpg',
+  '/home/ads/monte-rojo.jpg',
+  '/home/ads/nido.jpg',
+  '/home/ads/altura.jpg',
+  '/home/ads/aura.jpg',
+  '/home/ads/casa-luna.jpg',
+  '/home/ads/vesper.jpg',
 ] as const
 
 /** Post-login from the public homepage. Chat-shell is home after invite-all. */

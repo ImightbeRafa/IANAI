@@ -74,6 +74,62 @@ No merge. Drag-over already on master (#38). Guiones speed / Uso / Astra / kit a
 - Behavioral test: signed-in harness → click Cerrar sesión → observed landing `Logged out at /login`.
 
 No merge. Attach / Guiones / Astra / credits / Instagram / invite-all / live SQL untouched.
+## 2026-09-08 — Public site: mobile hero smaller fan + breathe
+
+**Area:** public homepage
+**Files:** `home.css`
+
+- Mobile only: shrink hero fan (`~70vw` / 13.75rem), content-sized hero (no forced 100svh empty band).
+- Breathing: CTA→fan ~1rem, calm under fan before Galería (~1.85rem pad).
+- Keep H1 clear of nav; desktop / floaties / edge ghosts / skeleton unchanged.
+
+No merge.
+
+## 2026-09-08 — Public site: kill mobile hero dead air
+
+**Area:** public homepage
+**Files:** `home.css`
+
+- Mobile fan cards fill remaining hero via flex (`flex: 1 1 0` + `height: 98%`) — removes empty black band under fan.
+- Keep H1 clear of sticky nav (~23px @390×844); CTA→card ~0–3px; air under card ~3px.
+- No change to floaties / edge ghosts / reduced-motion / skeleton flash.
+
+No merge.
+
+## 2026-09-08 — Public site: sparse edge ghosts (kill neat rails)
+
+**Area:** public homepage
+**Files:** `FloatingCreatives.tsx`, `floating-creatives.css`, `home.css`, `SpaceField.tsx`, `space-field.css`, `useHomeScrollProgress.ts`
+
+- Rafael: neat side rails + saturated scroll looked like a product shelf. Replaced with irregular orbital hero floaties + max ~5 quiet edge ghosts (low opacity, desaturated, staggered pop).
+- Mid-page: softer nebula; no dense neon L/R columns beside Galería.
+- Keep mobile musts (H1 clear of sticky nav, no leftover air under CTA), no black card flash, `prefers-reduced-motion` calm static path.
+
+No merge. Chat-shell / gift / tour untouched.
+
+## 2026-09-08 — Public site WD must-fix: rails + mobile + no black flash
+
+**Area:** public homepage
+**Files:** `Home.tsx`, `home.css`, `homeContent.ts`, `FloatingCreatives.tsx`, `floating-creatives.css`, `useHomeScrollProgress.ts`
+
+- Mobile hero: clear sticky nav (`padding-top` ~4.7rem+safe); fan anchors under CTA (no leftover air).
+- Scroll organize: real fixed L/R vertical side rails (pop-in + marquee); not the gallery grid. Gallery kept as its own section with side padding when rails active.
+- Hero cards: cyan-tint skeleton + `is-loaded` fade — no black placeholder flash.
+- `prefers-reduced-motion`: disables twinkle/shoots/floaty blink/rail marquee/logo glow; rails still show as static edge columns.
+
+No merge. Chat-shell / gift / tour untouched.
+
+## 2026-09-07 — Public site Astra glow-up (space + motion)
+
+**Area:** public homepage + auth
+**Files:** `Home.tsx`, `home.css`, `Login.tsx`, `Signup.tsx`, `ForgotPassword.tsx`, `AdvanceLogo`/`advance-logo.css`, `components/public/*`, `hooks/usePrefersReducedMotion.ts`, `hooks/useHomeScrollProgress.ts`
+
+- Homepage hero: space field (stars + nebula + occasional shooting stars), floating creatives that pop in/out, scroll-organized side rails on desktop, premium logo motion.
+- Mobile homepage: tighter hero stack, fan fills leftover viewport, fewer particles.
+- Login / Signup / ForgotPassword share `PublicAuthShell` (black+cyan glass + space vibe), mobile-safe.
+- `prefers-reduced-motion` disables heavy motion; no chat-shell / gift / invite / Meta changes.
+
+No merge.
 
 ## 2026-09-07 — First-open tour: real chrome + clear feedback CTA
 

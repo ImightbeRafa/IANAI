@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
+import AdvanceLogo from '../components/AdvanceLogo'
+import FloatingCreatives from '../components/public/FloatingCreatives'
+import SpaceField from '../components/public/SpaceField'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
 import { authHomePath } from '../features/chat-shell/chatShellRollout'
+import { useHomeScrollProgress } from '../hooks/useHomeScrollProgress'
 import {
   HOME_AUTH_REDIRECT,
   HOME_FAN_CARDS,
@@ -13,28 +17,21 @@ import {
 } from './homeContent'
 import './home.css'
 
-function CyanMark({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
-      <path d="M12 2.2 22 20.8H2L12 2.2Z" />
-    </svg>
-  )
-}
-
 export default function Home() {
   const { language } = useLanguage()
   const { user, loading: authLoading } = useAuth()
   const { loading: rolloutLoading, canAccessChat } = useChatShellRollout()
   const lang = language === 'en' ? 'en' : 'es'
   const [fanReady, setFanReady] = useState(false)
+  const pageRef = useRef<HTMLDivElement>(null)
+  const scrollEnabled = !authLoading && !user
+  const { reduced } = useHomeScrollProgress(pageRef, scrollEnabled)
 
   useEffect(() => {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reduce) {
+    if (reduced) {
       setFanReady(true)
       return
     }
-    // Let the stacked pose paint, then pop-spread (fast carousel feel).
     let cancelled = false
     const id = window.requestAnimationFrame(() => {
       window.setTimeout(() => {
@@ -45,7 +42,7 @@ export default function Home() {
       cancelled = true
       window.cancelAnimationFrame(id)
     }
-  }, [])
+  }, [reduced])
 
   const t = {
     es: {
@@ -108,10 +105,13 @@ export default function Home() {
   }
 
   return (
-    <div className="home-page">
+    <div className="home-page" ref={pageRef}>
+      <SpaceField density="hero" className="home-page__space" />
+      <FloatingCreatives reduced={reduced} edgesOnly />
+
       <nav className="home-nav" aria-label="Advance AI">
         <Link to="/" className="home-nav__brand">
-          <CyanMark className="home-nav__mark" />
+          <AdvanceLogo size={22} className="home-nav__logo is-animate" decorative />
           <span>Advance AI</span>
         </Link>
         <div className="home-nav__links">
@@ -130,6 +130,7 @@ export default function Home() {
       </nav>
 
       <section className="home-hero" aria-label="Hero">
+        <FloatingCreatives reduced={reduced} floatiesOnly />
         <div className="home-hero__copy">
           <h1 className="home-hero__title">
             {t.heroTitle}{' '}
@@ -158,14 +159,29 @@ export default function Home() {
                   .join(' ')}
                 data-slot={card.slot}
               >
-                <img src={card.src} alt="" loading={card.slot === 'front' ? 'eager' : 'lazy'} decoding="async" />
+                <img
+                  src={card.src}
+                  alt=""
+                  loading={card.slot === 'front' ? 'eager' : 'lazy'}
+                  decoding="async"
+                  // React 18 DOM: lowercase attribute avoids unknown-prop warning
+                  {...{ fetchpriority: card.slot === 'front' ? 'high' : 'auto' }}
+                  ref={(el) => {
+                    if (el?.complete && el.naturalWidth > 0) {
+                      el.parentElement?.classList.add('is-loaded')
+                    }
+                  }}
+                  onLoad={(e) => {
+                    e.currentTarget.parentElement?.classList.add('is-loaded')
+                  }}
+                />
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="home-section" aria-labelledby="gallery-title">
+      <section className="home-section home-reveal" aria-labelledby="gallery-title">
         <p className="home-kicker">{t.galleryKicker}</p>
         <h2 id="gallery-title" className="home-section__title">
           {t.galleryTitle}
@@ -182,7 +198,11 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="home-section" id="features" aria-labelledby="features-title">
+      <section
+        className="home-section home-reveal"
+        id="features"
+        aria-labelledby="features-title"
+      >
         <p className="home-kicker">{t.featuresKicker}</p>
         <h2 id="features-title" className="home-section__title">
           {t.featuresTitle}
@@ -198,7 +218,11 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="home-section" id="pricing" aria-labelledby="pricing-title">
+      <section
+        className="home-section home-reveal"
+        id="pricing"
+        aria-labelledby="pricing-title"
+      >
         <p className="home-kicker">{t.pricingKicker}</p>
         <h2 id="pricing-title" className="home-section__title">
           {t.pricingTitle}
@@ -241,7 +265,7 @@ export default function Home() {
         <p className="home-pricing__note">{t.creditNote}</p>
       </section>
 
-      <section className="home-final">
+      <section className="home-final home-reveal">
         <h2 className="home-final__title">{t.finalTitle}</h2>
         <p className="home-final__sub">{t.finalSub}</p>
         <Link to={chatSignup} className="home-btn home-btn--primary">

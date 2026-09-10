@@ -1,4 +1,4 @@
-/* Advance public homepage — CoS locked pixel language (tight + readable) */
+/* Advance public homepage — Astra-depth glow-up (tight + alive) */
 
 .home-page {
   --home-bg: #07090d;
@@ -12,11 +12,26 @@
   --home-card: rgba(255, 255, 255, 0.03);
   --home-font: 'Sora', 'Montserrat', system-ui, sans-serif;
   --home-fan-ease: cubic-bezier(0.18, 1.15, 0.28, 1);
+  --home-scroll: 0;
+  position: relative;
   background: var(--home-bg);
   color: var(--home-text);
   font-family: var(--home-font);
   min-height: 100vh;
   overflow-x: clip;
+  isolation: isolate;
+}
+
+.home-page__space {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Mid-page: dial nebula down so edges + gallery don’t scream cyan */
+.home-page.is-past-hero .home-page__space .space-field__nebula {
+  opacity: 0.55;
+  transition: opacity 0.55s ease;
 }
 
 .home-page a {
@@ -37,7 +52,7 @@
 /* —— Nav —— */
 .home-nav {
   position: fixed;
-  top: 0.55rem;
+  top: max(0.45rem, env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
   z-index: 40;
@@ -46,7 +61,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.45rem 0.55rem 0.45rem 0.9rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.85rem;
   border-radius: 999px;
   background: rgba(12, 16, 22, 0.62);
   backdrop-filter: blur(16px);
@@ -63,6 +78,11 @@
   font-size: 0.95rem;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.home-nav__logo {
+  flex-shrink: 0;
+  line-height: 0;
 }
 
 .home-nav__mark {
@@ -173,18 +193,21 @@
   border-color: transparent;
 }
 
-/* —— Hero: dense centered cluster, fill the viewport —— */
+/* —— Hero: dense composition, intentional mobile breathing room —— */
 .home-hero {
   position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.55rem;
-  padding: 3.7rem 0.85rem 0;
+  gap: 0.2rem;
+  /* Clear sticky nav — H1 must not clip under the pill */
+  padding: calc(5.2rem + env(safe-area-inset-top, 0px)) 0.75rem 1.85rem;
   width: 100%;
   margin: 0 auto;
-  min-height: 100svh;
+  /* Mobile: content-sized — avoid empty 100svh band under a smaller fan */
+  min-height: 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -196,6 +219,9 @@
     align-items: stretch;
     gap: 1rem 1.35rem;
     padding: 3.55rem 1.25vw 0;
+    min-height: 100svh;
+    min-height: 100dvh;
+    overflow: visible;
   }
 }
 
@@ -205,6 +231,7 @@
   z-index: 2;
   text-align: center;
   flex: 0 0 auto;
+  animation: home-copy-in 0.7s cubic-bezier(0.18, 1.05, 0.28, 1) 0.08s both;
 }
 
 @media (min-width: 960px) {
@@ -221,10 +248,17 @@
 
 .home-hero__title {
   margin: 0;
-  font-size: clamp(2.15rem, 4.6vw, 3.2rem);
-  line-height: 1.02;
+  font-size: clamp(1.7rem, 6.6vw, 2.2rem);
+  line-height: 1.06;
   font-weight: 700;
   letter-spacing: -0.04em;
+}
+
+@media (min-width: 960px) {
+  .home-hero__title {
+    font-size: clamp(2.15rem, 4.6vw, 3.2rem);
+    line-height: 1.02;
+  }
 }
 
 .home-hero__title-accent {
@@ -239,12 +273,20 @@
 }
 
 .home-hero__sub {
-  margin: 0.65rem 0 0;
-  font-size: clamp(1.02rem, 1.5vw, 1.125rem);
-  line-height: 1.4;
+  margin: 0.22rem 0 0;
+  font-size: clamp(0.88rem, 3.1vw, 1rem);
+  line-height: 1.28;
   font-weight: 500;
   color: rgba(244, 247, 251, 0.88);
   max-width: 28rem;
+}
+
+@media (min-width: 960px) {
+  .home-hero__sub {
+    margin-top: 0.65rem;
+    font-size: clamp(1.02rem, 1.5vw, 1.125rem);
+    line-height: 1.4;
+  }
 }
 
 @media (max-width: 959px) {
@@ -255,7 +297,13 @@
 }
 
 .home-hero__cta {
-  margin-top: 1rem;
+  margin-top: 0.28rem;
+}
+
+@media (min-width: 960px) {
+  .home-hero__cta {
+    margin-top: 1rem;
+  }
 }
 
 @media (max-width: 959px) {
@@ -263,19 +311,29 @@
     display: flex;
     justify-content: center;
   }
+
+  .home-hero__cta .home-btn {
+    min-height: 2.45rem;
+    padding: 0.45rem 1.15rem;
+    font-size: 0.88rem;
+  }
 }
 
 .home-hero__fan-wrap {
   position: relative;
+  z-index: 2;
   display: flex;
   justify-content: center;
   align-items: flex-start;
   width: min(100%, 38rem);
-  flex: 1 1 auto;
+  /* Mobile: wrap height = card size (absolute cards need a definite box) */
+  flex: 0 0 auto;
+  --home-fan-w: min(70vw, 13.75rem);
+  height: calc(var(--home-fan-w) * 16 / 9);
   min-height: 0;
-  height: auto;
-  margin: 0;
-  overflow: hidden;
+  margin: 1.05rem 0 0;
+  overflow: visible;
+  padding-bottom: 0;
 }
 
 @media (min-width: 960px) {
@@ -288,6 +346,17 @@
     overflow: visible;
     align-items: center;
     padding-bottom: 0;
+  }
+}
+
+@keyframes home-copy-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -311,17 +380,25 @@
   --fan-i: 0;
   position: absolute;
   left: 50%;
+  /* Mobile: smaller fan — breathing room CTA→fan and under fan */
   top: 0;
   bottom: auto;
-  width: min(78vw, 17rem);
   aspect-ratio: 9 / 16;
-  margin-left: calc(min(78vw, 17rem) / -2);
+  height: auto;
+  max-height: none;
+  width: var(--home-fan-w, min(70vw, 13.75rem));
+  max-width: var(--home-fan-w, min(70vw, 13.75rem));
+  margin-left: 0;
+  translate: -50% 0;
   border-radius: 1.05rem;
   overflow: hidden;
-  background: #111;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* Soft skeleton — no black flash while JPEGs decode */
+  background:
+    linear-gradient(145deg, rgba(45, 226, 255, 0.14), transparent 52%),
+    linear-gradient(180deg, #121820 0%, #0a0e14 100%);
+  border: 1px solid rgba(45, 226, 255, 0.18);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  transform-origin: 50% 12%;
+  transform-origin: 50% 0%;
   transform: translate3d(0, 2%, 0) rotate(0deg) scale(0.82);
   opacity: 0.92;
   transition:
@@ -336,9 +413,14 @@
 @media (min-width: 960px) {
   .home-fan__card {
     top: 50%;
+    bottom: auto;
+    height: auto;
+    max-height: none;
     width: clamp(12.25rem, 16.5vw, 15.25rem);
+    max-width: none;
     margin-left: calc(clamp(12.25rem, 16.5vw, 15.25rem) / -2);
     margin-top: calc(clamp(12.25rem, 16.5vw, 15.25rem) * 16 / 9 / -2);
+    translate: none;
     transform-origin: 50% 55%;
     transform: translate3d(0, 4%, 0) rotate(0deg) scale(0.78);
   }
@@ -349,6 +431,8 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  /* Stay visible — skeleton bg underneath kills black flash during decode */
+  opacity: 1;
 }
 
 .home-fan__card--front {
@@ -376,19 +460,19 @@
   --fan-i: 2;
 }
 
-/* Mobile 3-card spread */
+/* Mobile 3-card spread — origin top, scale ≤1 so CTA stays clear */
 .home-fan.is-spread .home-fan__card[data-slot='mid-left'] {
-  transform: translate3d(-52%, 2%, 0) rotate(-12deg) scale(0.94);
+  transform: translate3d(-52%, 1%, 0) rotate(-12deg) scale(0.92);
   opacity: 1;
   z-index: 3;
 }
 .home-fan.is-spread .home-fan__card[data-slot='front'] {
-  transform: translate3d(0, 0, 48px) rotate(0deg) scale(1.02);
+  transform: translate3d(0, 0, 48px) rotate(0deg) scale(1);
   opacity: 1;
   z-index: 5;
 }
 .home-fan.is-spread .home-fan__card[data-slot='mid-right'] {
-  transform: translate3d(52%, 2%, 0) rotate(12deg) scale(0.94);
+  transform: translate3d(52%, 1%, 0) rotate(12deg) scale(0.92);
   opacity: 1;
   z-index: 3;
 }
@@ -485,9 +569,35 @@
 
 /* —— Sections: wider, less air —— */
 .home-section {
+  position: relative;
+  z-index: 4;
   max-width: 1280px;
   margin: 0 auto;
   padding: 2.35rem 1.25rem;
+}
+
+.home-reveal {
+  animation: home-reveal 0.65s cubic-bezier(0.18, 1.05, 0.28, 1) both;
+  animation-timeline: view();
+  animation-range: entry 8% cover 28%;
+}
+
+@keyframes home-reveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@supports not (animation-timeline: view()) {
+  .home-reveal {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 @media (min-width: 960px) {
@@ -531,7 +641,9 @@
   border-radius: 0.75rem;
   overflow: hidden;
   aspect-ratio: 3 / 4;
-  background: #10141a;
+  background:
+    linear-gradient(145deg, rgba(45, 226, 255, 0.1), transparent 55%),
+    #10141a;
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -696,6 +808,8 @@
 }
 
 .home-final {
+  position: relative;
+  z-index: 4;
   text-align: center;
   padding: 2.25rem 1.25rem 1.5rem;
   max-width: 40rem;
@@ -719,6 +833,8 @@
 }
 
 .home-footer {
+  position: relative;
+  z-index: 4;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1.15rem 1.25rem 1.5rem;
   text-align: center;
@@ -730,5 +846,10 @@
   .home-fan__card {
     transition: none;
     transition-delay: 0ms !important;
+  }
+
+  .home-hero__copy,
+  .home-reveal {
+    animation: none !important;
   }
 }
