@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { checkUsageLimit, incrementUsage } from '../auth.js'
 import { generationUuidFromApproval } from '../credits/generation-id.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { runGrokImageGenerate } from '../grok-image-generate.js'
+import { runGrokPostFirstGen } from '../grok-image-generate.js'
 import { logApiUsage, estimateTokens } from '../usage-logger.js'
 import type { McpArtifactStore } from '../mcp/artifact-store.js'
 import type { McpBrandContext } from '../mcp/user-tools.js'
@@ -225,12 +225,12 @@ export async function runBulkPosts(options: {
     apiKey: xaiKey(),
     existingUrls: runtime.productRefUrls?.length ? runtime.productRefUrls : undefined,
   })
+  // Product URLs lock the SKU. DNA/logo are support only — never the edits base.
   // MCP: confirmed (or offer) product refs only — no silent kit-logo / Style DNA URL union.
-  // Web: keep legacy union for chat-shell bulk UX.
-  const refs = runtime.source === 'mcp'
-    ? expandedPack.refs.filter(Boolean)
+  const productRefs = expandedPack.refs.filter(Boolean)
+  const supportRefs = runtime.source === 'mcp'
+    ? []
     : [
-        ...expandedPack.refs,
         ...(dna?.referenceUrls || []),
         runtime.ctx.brandKit?.logoUrl || '',
       ].filter(Boolean)
@@ -242,7 +242,12 @@ export async function runBulkPosts(options: {
     const generationId = generationUuidFromApproval(packId, `image:${absoluteIndex + 1}`)
     const approach = POST_APPROACHES[absoluteIndex % POST_APPROACHES.length]
     const script = options.scripts?.find((row) => row.angleId === angle.id)
-    const rotated = refs.length ? [refs[i % refs.length], refs[(i + 1) % refs.length]].filter(Boolean) : []
+    const rotatedProduct = productRefs.length
+      ? [...new Set([
+          productRefs[i % productRefs.length],
+          productRefs[(i + 1) % productRefs.length],
+        ].filter(Boolean))]
+      : []
     const limit = await checkUsageLimit(runtime.user.id, 'image', { imageModel })
     if (!limit.allowed) {
       items.push({
@@ -268,12 +273,14 @@ export async function runBulkPosts(options: {
         runtime.guidePrompt ? `Additional user direction: ${runtime.guidePrompt}` : '',
         'No fake logos or unreadable text. Match product fidelity from refs.',
       ].filter(Boolean).join('. ')
-      const generated = await runGrokImageGenerate({
+      const generated = await runGrokPostFirstGen({
         apiKey: xaiKey(),
         prompt,
         aspectRatio: runtime.aspectRatio || '9:16',
         aspectRatioFallback: runtime.aspectRatioFallback === true,
-        referenceImageUrls: rotated.slice(0, 3),
+        productReferenceUrls: rotatedProduct.slice(0, 3),
+        supportReferenceUrls: supportRefs.slice(0, 3),
+        language: runtime.language,
       })
       const saved = await runtime.artifactStore.saveImageArtifact({
         userId: runtime.user.id,
@@ -290,6 +297,8 @@ export async function runBulkPosts(options: {
           styleDnaId: dna?.id || null,
           resolution: generated.resolution,
           quality: generated.quality,
+          grokMode: generated.mode,
+          lockApplied: generated.lockApplied,
         },
       })
       await logApiUsage({
@@ -301,7 +310,14 @@ export async function runBulkPosts(options: {
         costOverrideUsd: generated.estimatedCostUsd,
         generationId,
         source: runtime.source,
-        metadata: { action: 'bulk_post', packId, angleId: angle.id, approach },
+        metadata: {
+          action: 'bulk_post',
+          packId,
+          angleId: angle.id,
+          approach,
+          grokMode: generated.mode,
+          lockApplied: generated.lockApplied,
+        },
       })
       try {
         const incrementResult = await incrementUsage(runtime.user.id, 'image', {

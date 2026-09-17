@@ -1,4 +1,16 @@
-## 2026-09-09 — Admin lifetime usage + official list-price costs
+## 2026-09-17 — GAP-01: MCP/bulk product-lock first-gen (edits + PRODUCT LOCK)
+
+**Area:** api / MCP / bulk images
+**Files:** `api/lib/grok-image-generate.ts`, `api/lib/mcp/execute-tools.ts`, `api/lib/bulk/run-bulk.ts`, `api/lib/bulk/expand-product-refs.ts`, `docs/operations/mcp-user-tools.md`, `test/mcp-product-lock-gap-01.spec.ts`
+
+- **Finding:** Website post first-gen (PR #33) routes product photos to Grok `/images/edits` `product_lock_scene` with the PRODUCT LOCK contract. MCP `execute_image_generate` and shared `runBulkPosts` called `/images/generations` with a thin lifestyle prompt and no lock (`resolveGrokImageApiMode` existed but was unused on that path).
+- **Fix:** Shared `runGrokPostFirstGen()` — product refs → edits + injected PRODUCT LOCK (SKU not redrawn); no product ref → generations compose. Wired to MCP image generate, MCP/web bulk, and the dead expand-ref caller. Logo/DNA URLs are support only (never the edits base).
+- **Out of scope:** GAP-02 post-with-copy, GAP-04 byte-copy ingest, `create_offer`, registry 0.10.0, Meta posting, credit prices.
+- Tests: fetch-mocked D6/D7/E3 request-shape probe (`test/mcp-product-lock-gap-01.spec.ts`).
+
+No user-facing changelog (MCP/bot path; website lock already shipped).
+
+
 
 **Area:** api / frontend / billing
 **Files:** `api/lib/model-pricing.ts`, `api/lib/usage-logger.ts`, `api/lib/admin-usage.ts`, `api/admin-usage.ts`, `api/admin-image-performance.ts`, `api/generate-image.ts`, `src/pages/AdminDashboard.tsx`, `vercel.json`, tests
