@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { waitUntil } from '@vercel/functions'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage, isAdminUser } from './lib/auth.js'
 import { userHasProductAccess } from './lib/product-access.js'
 import { resolveAuthorizedSessionImage, isUuid } from './lib/session-access.js'
@@ -7,7 +8,14 @@ import {
   authorizeProductImageForSession,
   normalizeProductImageIdList,
 } from './lib/image-access.js'
-import { logApiUsage } from './lib/usage-logger.js'
+import { logApiUsage as writeApiUsage } from './lib/usage-logger.js'
+import { usageTimingMetadata } from './lib/usage-timings.js'
+import {
+  beginOrReplayShellImageJob,
+  getImageJob,
+  jobToHttpPayload,
+  setImageJobScheduler,
+} from './lib/image-jobs.js'
 import { checkRateLimit } from './lib/rate-limit.js'
 import { GoogleGenAI } from '@google/genai'
 import { buildPostPrompt, buildPresetPrompt, buildProductPrompt, buildAnuncioPrompt, buildLogoPrompt, detectProductNiche } from './data/image-presets.js'
@@ -549,24 +557,111 @@ Solicitud del usuario: `
 
 // PostAspectRatio type and buildPostPrompt (Venta Directa) imported from ./data/image-presets.js
 
+function createJsonCollector(): {
+  state: { statusCode: number; body: unknown }
+  res: VercelResponse
+} {
+  const state = { statusCode: 200, body: null as unknown }
+  const res = {
+    status(code: number) {
+      state.statusCode = code
+      return this
+    },
+    json(data: unknown) {
+      state.body = data
+      return this
+    },
+    setHeader() {
+      return this
+    },
+    end() {
+      return this
+    },
+  }
+  return { state, res: res as unknown as VercelResponse }
+}
+
+setImageJobScheduler((work) => {
+  waitUntil(
+    work().catch((err) => {
+      console.error('shell image job', err instanceof Error ? err.message : err)
+    })
+  )
+})
+
+async function pollImageJob(req: VercelRequest, res: VercelResponse, user: { id: string }) {
+  const generationId = typeof req.query?.generationId === 'string'
+    ? req.query.generationId
+    : typeof req.body?.generationId === 'string' ? req.body.generationId : ''
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(generationId)) {
+    return res.status(400).json({ error: 'generationId is required', code: 'generation_id_required' })
+  }
+  const job = await getImageJob(generationId)
+  if (!job) return res.status(404).json({ error: 'Job not found', jobId: generationId, status: 'running' })
+  if (job.userId && job.userId !== user.id) {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+  return res.status(200).json(jobToHttpPayload(job))
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end()
   }
 
+  const user = await requireAuth(req, res)
+  if (!user) return
+
+  if (req.method === 'GET' || (req.method === 'POST' && req.body?.action === 'poll')) {
+    return pollImageJob(req, res, user)
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  // Verify user authentication
-  const user = await requireAuth(req, res)
-  if (!user) return // Response already sent by requireAuth
+  const body = req.body && typeof req.body === 'object' ? req.body as Record<string, unknown> : {}
+  const incomingGenerationId = typeof body.generationId === 'string' ? body.generationId.trim() : ''
+  const asyncRequested = body.async === true && body._imageJobInner !== true
+    && body.action !== 'poll'
+  if (asyncRequested && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(incomingGenerationId)) {
+    const innerReq = { ...req, body: { ...body, async: false, _imageJobInner: true } } as VercelRequest
+    const result = await beginOrReplayShellImageJob({
+      jobId: incomingGenerationId,
+      userId: user.id,
+      run: async () => {
+        const collector = createJsonCollector()
+        await runGenerateImage(innerReq, collector.res, user)
+        const payload = (collector.state.body && typeof collector.state.body === 'object')
+          ? collector.state.body as Record<string, unknown>
+          : {}
+        return { statusCode: collector.state.statusCode, body: payload }
+      },
+    })
+    return res.status(result.httpStatus).json(result.body)
+  }
 
+  return runGenerateImage(req, res, user)
+}
+
+async function runGenerateImage(
+  req: VercelRequest,
+  res: VercelResponse,
+  user: { id: string; email?: string }
+) {
+  const requestStarted = Date.now()
+  const logApiUsage = (params: Parameters<typeof writeApiUsage>[0]) => writeApiUsage({
+    ...params,
+    metadata: usageTimingMetadata({
+      durationMs: Date.now() - requestStarted,
+      stageTimings: { imageMs: Date.now() - requestStarted },
+      extra: params.metadata,
+    }),
+  })
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Request body is required' })
@@ -656,6 +751,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const generationId = generationIdOk
       ? incomingGenerationId
       : (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+
+    if (action !== 'poll' && generationIdOk) {
+      const existingJob = await getImageJob(generationId)
+      if (existingJob && existingJob.userId && existingJob.userId !== user.id) {
+        return res.status(403).json({ error: 'Access denied' })
+      }
+      if (existingJob?.status === 'completed') {
+        return res.status(200).json(jobToHttpPayload(existingJob))
+      }
+    }
 
     const MAX_PROMPT_LENGTH = 50_000
     if (imageParams.prompt && typeof imageParams.prompt === 'string' && imageParams.prompt.length > MAX_PROMPT_LENGTH) {

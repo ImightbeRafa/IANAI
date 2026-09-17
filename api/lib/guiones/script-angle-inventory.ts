@@ -1,4 +1,4 @@
-import type { AngleCandidate, Language, ScriptContextProfile, ScriptSettings } from './types.js'
+import type { AngleCandidate, Language, ScriptContextProfile, ScriptFramework, ScriptSettings } from './types.js'
 import {
   ANGLE_MAX_TOKENS,
   angleInventoryNeeded,
@@ -127,28 +127,41 @@ export async function generateAngleInventory(input: GenerateAngleInventoryInput)
   const memory = (input.memoryPrompt || '').slice(0, 400)
   const templates = (input.templatePrompt || '').slice(0, 400)
   const system = isEs
-    ? `Eres un estratega senior de guiones para videos cortos. Creá candidatos de ángulo, NO guiones finales. Responde SOLO JSON válido {"candidates":[...]}.`
-    : `You are a senior short-form video script strategist. Create angle candidates, NOT final scripts. Return ONLY valid JSON {"candidates":[...]}.`
+    ? `Eres un estratega senior de guiones para videos cortos. Creá candidatos de ángulo, NO guiones finales. Responde SOLO JSON válido {"candidates":[...]}.
+
+REGLAS:
+- Usá solo hechos del perfil; nunca inventes claims.
+- Cada candidato debe variar hookMechanism, buyerStage, coreDoubt y proofToUse cuando sea posible.
+- Si faltan datos, omití ese hecho — no inventes ni uses placeholders entre corchetes.
+- Cubrí estos tipos solicitados: ${requested.join(', ')}.
+
+LENTE DE CATEGORÍA:
+${input.categoryLens}
+
+Campos por candidato: id, scriptType, hookMechanism, buyerStage (cold|warm|hot), audienceSegment, coreDoubt, proofToUse[], logisticsToUse[], hookDraft, whyItCouldWin, score (1-10).
+hookMechanism ejemplos: direct_offer | alternative_invalidation | checklist | hidden_cost | use_case_split | myth_busting | process_certainty | social_proof | price_location | story_scene | options_menu | proof_milestone | logistics_risk_reversal`
+    : `You are a senior short-form video script strategist. Create angle candidates, NOT final scripts. Return ONLY valid JSON {"candidates":[...]}.
+
+RULES:
+- Use only facts from the profile; never invent claims.
+- Each candidate must vary hookMechanism, buyerStage, coreDoubt and proofToUse where possible.
+- If facts are missing, omit that fact — do not invent or use bracket placeholders.
+- Cover these requested types: ${requested.join(', ')}.
+
+CATEGORY LENS:
+${input.categoryLens}
+
+Fields per candidate: id, scriptType, hookMechanism, buyerStage (cold|warm|hot), audienceSegment, coreDoubt, proofToUse[], logisticsToUse[], hookDraft, whyItCouldWin, score (1-10).
+hookMechanism examples: direct_offer | alternative_invalidation | checklist | hidden_cost | use_case_split | myth_busting | process_certainty | social_proof | price_location | story_scene | options_menu | proof_milestone | logistics_risk_reversal`
   const user = `${isEs ? 'Creá' : 'Create'} ${needed} ${isEs ? 'candidatos de ángulo únicos' : 'unique angle candidates'}.
 
-${isEs ? 'REGLAS' : 'RULES'}:
-- ${isEs ? 'Usá solo hechos del perfil; nunca inventes claims.' : 'Use only facts from the profile; never invent claims.'}
-- ${isEs ? 'Cada candidato debe variar hookMechanism, buyerStage, coreDoubt y proofToUse cuando sea posible.' : 'Each candidate must vary hookMechanism, buyerStage, coreDoubt and proofToUse where possible.'}
-- ${isEs ? 'Si faltan datos, omití ese hecho — no inventes ni uses placeholders entre corchetes.' : 'If facts are missing, omit that fact — do not invent or use bracket placeholders.'}
-- ${isEs ? 'Cubrí estos tipos solicitados' : 'Cover these requested types'}: ${requested.join(', ')}.
-- ${isEs ? 'No reutilices estos briefs recientes' : 'Do not reuse these recent briefs'}: ${(input.recentBriefs || []).join(' | ') || 'none'}.
-
-${isEs ? 'LENTE DE CATEGORÍA' : 'CATEGORY LENS'}:
-${input.categoryLens}
+${isEs ? 'No reutilices estos briefs recientes' : 'Do not reuse these recent briefs'}: ${(input.recentBriefs || []).join(' | ') || 'none'}.
 
 ${isEs ? 'PERFIL' : 'PROFILE'}:
 ${compactJson(compactProfileForAngles(input.profile))}
 
 ${memory ? `${isEs ? 'MEMORIA' : 'MEMORY'}:\n${memory}` : ''}
-${templates ? `${isEs ? 'PLANTILLAS' : 'TEMPLATES'}:\n${templates}` : ''}
-
-Campos por candidato: id, scriptType, hookMechanism, buyerStage (cold|warm|hot), audienceSegment, coreDoubt, proofToUse[], logisticsToUse[], hookDraft, whyItCouldWin, score (1-10).
-hookMechanism ejemplos: direct_offer | alternative_invalidation | checklist | hidden_cost | use_case_split | myth_busting | process_certainty | social_proof | price_location | story_scene | options_menu | proof_milestone | logistics_risk_reversal`
+${templates ? `${isEs ? 'PLANTILLAS' : 'TEMPLATES'}:\n${templates}` : ''}`
 
   let text = ''
   try {
@@ -170,4 +183,45 @@ hookMechanism ejemplos: direct_offer | alternative_invalidation | checklist | hi
   return rawCandidates
     .slice(0, Math.max(needed, requested.length))
     .map((candidate, index) => normalizeCandidate(candidate, index, (requested[index % requested.length] || 'venta_directa') as AngleCandidate['scriptType']))
+}
+
+const LOCAL_HOOKS = [
+  'direct_offer',
+  'pain_scene',
+  'myth_busting',
+  'price_location',
+  'social_proof',
+  'process_certainty',
+] as const
+
+/**
+ * Deterministic angle candidates from the context profile — used when the
+ * inventory Grok call is skipped (count ≤ GUIONES_SKIP_ANGLES_MAX_COUNT).
+ */
+export function buildLocalAngleCandidates(
+  profile: ScriptContextProfile,
+  requestedTypes: string[],
+  language: Language
+): AngleCandidate[] {
+  const types = (requestedTypes.length ? requestedTypes : ['venta_directa']) as ScriptFramework[]
+  const isEs = language === 'es'
+  return types.map((scriptType, index) => {
+    const pain = profile.pains[index] || profile.pains[0] || ''
+    const desire = profile.desires[index] || profile.desires[0] || ''
+    const objection = profile.objections[index] || profile.objections[0] || ''
+    const offer = profile.offerFacts[index] || profile.offerFacts[0] || ''
+    return normalizeCandidate({
+      id: `local_${index + 1}`,
+      scriptType,
+      hookMechanism: LOCAL_HOOKS[index % LOCAL_HOOKS.length],
+      buyerStage: index % 3 === 0 ? 'cold' : index % 3 === 1 ? 'warm' : 'hot',
+      audienceSegment: profile.audienceSegments[0] || (isEs ? 'audiencia principal' : 'primary audience'),
+      coreDoubt: objection || pain || (isEs ? 'por qué vale la pena' : 'why this is worth buying'),
+      proofToUse: profile.proof.slice(0, 4),
+      logisticsToUse: profile.logistics.slice(0, 3),
+      hookDraft: offer || desire || pain,
+      whyItCouldWin: isEs ? 'brief local desde lentes de tipo' : 'local brief from type lenses',
+      score: 8,
+    }, index, scriptType)
+  })
 }

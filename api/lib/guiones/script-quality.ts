@@ -1,4 +1,5 @@
 import type { GeneratedScript, ScriptBrief, ScriptQualityReport } from './types.js'
+import { spokenTimingWarning } from './script-timing.js'
 
 const GENERIC_PHRASES = [
   'alta calidad',
@@ -68,6 +69,7 @@ export function evaluateScriptBatch(
       ...forbiddenHits(fullText, kitForbidden),
       ...enumLeaks,
     ]
+    const timingWarning = spokenTimingWarning(script)
     const detailCount = countDetails(fullText)
     const brief = briefs.find(item => item.index === script.index)
     const combo = `${script.hookMechanism}:${script.buyerStage}`
@@ -118,6 +120,7 @@ export function evaluateScriptBatch(
       unresolvedPlaceholders: placeholders,
       forbiddenPhrases,
       repairInstruction,
+      ...(timingWarning ? { timingWarning } : {}),
     }
   })
 }

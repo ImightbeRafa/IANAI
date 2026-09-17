@@ -1656,12 +1656,29 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   padding-top: 0;
 }
 
-.chat-shell__script-section-label {
+.chat-shell__script-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 4px;
+}
+
+.chat-shell__script-section-label {
+  margin: 0;
   font-size: 0.72rem;
   font-weight: 650;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--accent-muted);
+}
+
+.chat-shell__script-section-time {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
+  white-space: nowrap;
 }
 
 .chat-shell[data-theme="obsidian-light"] .chat-shell__script-section-label {
@@ -1673,10 +1690,17 @@ html[data-theme="obsidian-dark"] .chat-shell option {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.55;
+  max-width: 68ch;
   color: var(--text);
   font-family: var(--font-sans);
+}
+
+.chat-shell__artifact-offer-foot {
+  padding: 8px 2px 0;
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
 }
 
 /* Legacy chip class retained for safety; sections are the primary look */

@@ -89,7 +89,7 @@ describe('parseScriptSections', () => {
 
   it('returns a single unmarked section when no markers exist', () => {
     expect(parseScriptSections('Plain script body')).toEqual([
-      { kind: 'other', label: '', body: 'Plain script body' },
+      { kind: 'other', label: '', body: 'Plain script body', seconds: null },
     ])
   })
 

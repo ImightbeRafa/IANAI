@@ -1,8 +1,15 @@
 import type { GeneratedScript, Language, ScriptBrief, ScriptContextProfile, ScriptFramework } from './types.js'
 import { compactJson, draftMaxTokens, safeJsonParse, typeLabel } from './utils.js'
-import { GROK_API_URL, GROK_TEXT_MODEL } from '../grok-models.js'
+import {
+  GROK_API_URL,
+  GROK_TEXT_MODEL_EFFICIENT,
+  resolveGrokTextModel,
+  type GrokTextModelId,
+} from '../grok-models.js'
 import { getTypeLens } from './script-prompts/type-lenses.js'
 import type { CTAStrength } from './types.js'
+import { attachSpokenTiming } from './script-timing.js'
+import type { CloseLabel, ScriptSectionsDto } from './script-sections-parse.js'
 
 interface DraftScriptsInput {
   apiKey: string
@@ -11,6 +18,29 @@ interface DraftScriptsInput {
   language: Language
   categoryLens: string
   ctaStrength?: CTAStrength
+  /** UI/legacy model field — efficient drafts grok-4.5, best drafts grok-4.6. */
+  draftModel?: string
+}
+
+const ORGANIC_OR_AWARENESS: ScriptFramework[] = [
+  'reconocimiento',
+  'educativo',
+  'storytelling',
+  'tendencia',
+  'engagement',
+]
+
+export function resolveGuionesDraftModel(input?: string | null): GrokTextModelId {
+  const resolved = resolveGrokTextModel(input)
+  if (resolved === GROK_TEXT_MODEL_EFFICIENT) {
+    return resolveGrokTextModel(process.env.GUIONES_DRAFT_MODEL_EFFICIENT, GROK_TEXT_MODEL_EFFICIENT)
+  }
+  return resolved
+}
+
+export function closeSectionLabel(scriptType: ScriptFramework, language: Language): CloseLabel {
+  if (ORGANIC_OR_AWARENESS.includes(scriptType)) return language === 'es' ? 'CIERRE' : 'CLOSE'
+  return 'CTA'
 }
 
 /** Slim profile for drafting — facts the copywriter needs, no empty noise. */
@@ -74,7 +104,12 @@ export function draftPromptCharEstimate(input: {
   }
 }
 
-async function callDraft(apiKey: string, messages: Array<{ role: string; content: string }>, maxTokens: number): Promise<string> {
+async function callDraft(
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens: number
+): Promise<string> {
   const response = await fetch(GROK_API_URL, {
     method: 'POST',
     headers: {
@@ -82,7 +117,7 @@ async function callDraft(apiKey: string, messages: Array<{ role: string; content
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: GROK_TEXT_MODEL,
+      model,
       messages,
       temperature: 0.75,
       max_tokens: maxTokens,
@@ -114,14 +149,13 @@ export async function draftScriptsFromBriefs(input: DraftScriptsInput): Promise<
   const maxTokens = draftMaxTokens(input.briefs.length)
   const uniqueTypes = Array.from(new Set(input.briefs.map((b) => b.scriptType))) as ScriptFramework[]
   const typeLenses = uniqueTypes.map((type) => getTypeLens(type, input.ctaStrength || input.profile.ctaStrength, input.language))
+  const draftModel = resolveGuionesDraftModel(input.draftModel)
 
-  const system = isEs
+  const role = isEs
     ? `Eres un copywriter senior de videos cortos en español centroamericano (voseo natural: vos/elegí/escribí). Escribí guiones hablados desde briefs bloqueados. No cambies la estrategia. Responde SOLO JSON válido {"scripts":[...]}.`
     : `You are a senior short-form video copywriter. Write scripts from locked briefs. Do not change strategy. Return ONLY valid JSON {"scripts":[...]}.`
 
-  const user = `${isEs ? 'Escribí exactamente' : 'Write exactly'} ${input.briefs.length} ${isEs ? 'guiones' : 'scripts'}.
-
-${isEs ? 'REGLAS' : 'RULES'}:
+  const staticRules = `${isEs ? 'REGLAS' : 'RULES'}:
 - ${isEs ? 'Cada guion ejecuta su brief bloqueado. No agregues otra idea.' : 'Each script executes its locked brief. Do not add another idea.'}
 - ${isEs ? 'Usá mustIncludeFacts cuando existan. Si falta un dato, omitilo — NUNCA escribas placeholders entre corchetes como [PRECIO].' : 'Use mustIncludeFacts when present. If a fact is missing, omit it — NEVER write bracket placeholders like [PRICE].'}
 - ${isEs ? 'No repitas hookMechanism ni buyerStage entre guiones si el brief ya los separó.' : 'Do not repeat hookMechanism or buyerStage across scripts if the briefs separated them.'}
@@ -134,7 +168,13 @@ ${isEs ? 'LENTE CATEGORÍA' : 'CATEGORY LENS'}:
 ${input.categoryLens}
 
 ${isEs ? 'LENTES TIPO (solo los del lote)' : 'TYPE LENSES (batch only)'}:
-${typeLenses.join('\n\n')}
+${typeLenses.join('\n\n')}`
+
+  const system = `${role}
+
+${staticRules}`
+
+  const user = `${isEs ? 'Escribí exactamente' : 'Write exactly'} ${input.briefs.length} ${isEs ? 'guiones' : 'scripts'}.
 
 ${isEs ? 'PERFIL' : 'PROFILE'}:
 ${compactJson(compactProfileForDraft(input.profile))}
@@ -144,7 +184,7 @@ ${compactJson(input.briefs.map(compactBriefForDraft))}
 
 Campos por script: index, title, scriptType, hookMechanism, buyerStage, spokenScript:{hook,development,ctaOrClose}, qualityScore.`
 
-  const text = await callDraft(input.apiKey, [
+  const text = await callDraft(input.apiKey, draftModel, [
     { role: 'system', content: system },
     { role: 'user', content: user },
   ], maxTokens)
@@ -155,18 +195,64 @@ Campos por script: index, title, scriptType, hookMechanism, buyerStage, spokenSc
   return input.briefs.map(brief => normalizeScript(parsed.scripts?.find(script => script.index === brief.index) || {}, brief, input.language))
 }
 
-export function renderScriptsAsText(scripts: GeneratedScript[], language: Language): string {
+function quoteTitle(title: string): string {
+  const cleaned = (title || '').replace(/^["“]|["”]$/g, '').trim()
+  return cleaned ? `"${cleaned}"` : ''
+}
+
+export function renderOneScriptAsText(script: GeneratedScript, language: Language): string {
   const isEs = language === 'es'
-  return scripts.map(script => {
-    const type = typeLabel(script.scriptType, language)
-    const hookLabel = isEs ? 'GANCHO' : 'HOOK'
-    const devLabel = isEs ? 'DESARROLLO' : 'DEVELOPMENT'
-    const ctaLabel = ['reconocimiento', 'educativo', 'storytelling', 'tendencia', 'engagement'].includes(script.scriptType)
-      ? (isEs ? 'CIERRE' : 'CLOSE')
-      : 'CTA'
-    return `${isEs ? 'OPCION' : 'OPTION'} #${script.index} - ${type} - ${script.title}
-[${hookLabel}]: ${script.spokenScript.hook}
-[${devLabel}]: ${script.spokenScript.development}
-[${ctaLabel}]: ${script.spokenScript.ctaOrClose}`
-  }).join('\n\n')
+  const type = typeLabel(script.scriptType, language)
+  const timed = script.timing || attachSpokenTiming(script, language).timing!
+  const hookLabel = isEs ? 'GANCHO' : 'HOOK'
+  const devLabel = isEs ? 'DESARROLLO' : 'DEVELOPMENT'
+  const ctaLabel = closeSectionLabel(script.scriptType, language)
+  const title = quoteTitle(script.title)
+  const header = `${isEs ? 'OPCIÓN' : 'OPTION'} #${script.index} — ${type}${title ? ` — ${title}` : ''}`
+  return `${header}
+[${hookLabel} · ~${timed.hookSeconds} s]
+${script.spokenScript.hook}
+
+[${devLabel} · ~${timed.developmentSeconds} s]
+${script.spokenScript.development}
+
+[${ctaLabel} · ~${timed.ctaSeconds} s]
+${script.spokenScript.ctaOrClose}`
+}
+
+export function renderScriptsAsText(scripts: GeneratedScript[], language: Language): string {
+  return scripts.map((script) => renderOneScriptAsText(script, language)).join('\n\n')
+}
+
+export function toScriptSectionsDto(script: GeneratedScript, language: Language): ScriptSectionsDto {
+  const timed = script.timing || attachSpokenTiming(script, language).timing!
+  const isEs = language === 'es'
+  const closeLabel = closeSectionLabel(script.scriptType, language)
+  return {
+    index: script.index,
+    title: script.title,
+    scriptType: script.scriptType,
+    scriptTypeLabel: typeLabel(script.scriptType, language),
+    hook: {
+      label: isEs ? 'GANCHO' : 'HOOK',
+      text: script.spokenScript.hook,
+      seconds: timed.hookSeconds,
+    },
+    development: {
+      label: isEs ? 'DESARROLLO' : 'DEVELOPMENT',
+      text: script.spokenScript.development,
+      seconds: timed.developmentSeconds,
+    },
+    close: {
+      label: closeLabel,
+      text: script.spokenScript.ctaOrClose,
+      seconds: timed.ctaSeconds,
+    },
+    totalSeconds: timed.totalSeconds,
+    content: renderOneScriptAsText(script, language),
+  }
+}
+
+export function scriptsToSectionsDto(scripts: GeneratedScript[], language: Language): ScriptSectionsDto[] {
+  return scripts.map((script) => toScriptSectionsDto(script, language))
 }

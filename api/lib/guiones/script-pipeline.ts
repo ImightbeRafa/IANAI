@@ -1,11 +1,12 @@
-import { generateAngleInventory } from './script-angle-inventory.js'
+import { generateAngleInventory, buildLocalAngleCandidates } from './script-angle-inventory.js'
 import { selectScriptBriefs } from './script-briefs.js'
 import { buildScriptContextProfile } from './script-context-profile.js'
-import { draftScriptsFromBriefs, renderScriptsAsText } from './script-output.js'
+import { draftScriptsFromBriefs, renderScriptsAsText, resolveGuionesDraftModel } from './script-output.js'
 import { getCategoryLens } from './script-prompts/category-lenses.js'
 import { getTypeLens } from './script-prompts/type-lenses.js'
 import { applyQualityScores, evaluateScriptBatch, repairFailedScripts } from './script-quality.js'
 import { injectRelevantScriptMemory } from './script-memory.js'
+import { attachSpokenTiming } from './script-timing.js'
 import type {
   BusinessContextLike,
   ContextDocumentData,
@@ -16,7 +17,7 @@ import type {
   SalesChannel,
   ScriptSettings,
 } from './types.js'
-import { angleInventoryNeeded, getRequestedScriptTypes } from './utils.js'
+import { angleInventoryNeeded, getRequestedScriptTypes, shouldSkipAngleInventory } from './utils.js'
 
 interface RunPipelineInput {
   apiKey: string
@@ -60,17 +61,20 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
   })
 
   const anglesStarted = Date.now()
-  const angleCandidates = await generateAngleInventory({
-    apiKey: input.apiKey,
-    profile: contextProfile,
-    settings: input.scriptSettings,
-    language: input.language,
-    categoryLens,
-    requestedTypes,
-    memoryPrompt,
-    templatePrompt,
-    recentBriefs: input.scriptSettings?.forceFreshAngles ? [] : undefined,
-  })
+  const skipAngles = shouldSkipAngleInventory(input.scriptSettings)
+  const angleCandidates = skipAngles
+    ? buildLocalAngleCandidates(contextProfile, requestedTypes, input.language)
+    : await generateAngleInventory({
+      apiKey: input.apiKey,
+      profile: contextProfile,
+      settings: input.scriptSettings,
+      language: input.language,
+      categoryLens,
+      requestedTypes,
+      memoryPrompt,
+      templatePrompt,
+      recentBriefs: input.scriptSettings?.forceFreshAngles ? [] : undefined,
+    })
   const anglesMs = Date.now() - anglesStarted
 
   const briefs = selectScriptBriefs(
@@ -82,6 +86,7 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     input.language,
   )
 
+  const draftModel = resolveGuionesDraftModel(input.scriptSettings?.model)
   const draftStarted = Date.now()
   const drafted = await draftScriptsFromBriefs({
     apiKey: input.apiKey,
@@ -90,6 +95,7 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     language: input.language,
     categoryLens,
     ctaStrength,
+    draftModel,
   })
   const draftMs = Date.now() - draftStarted
 
@@ -104,14 +110,17 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
   // Strip any lingering unresolved placeholders before save (fail-soft for callers).
   const cleaned = scripts.map((script) => {
     const strip = (value: string) => value.replace(/\[[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9 _./-]{1,60}\]/g, '').replace(/\s{2,}/g, ' ').trim()
-    return {
+    return attachSpokenTiming({
       ...script,
       spokenScript: {
         hook: strip(script.spokenScript.hook),
         development: strip(script.spokenScript.development),
         ctaOrClose: strip(script.spokenScript.ctaOrClose),
       },
-    }
+    }, input.language)
+  })
+  const finalReports = evaluateScriptBatch(cleaned, briefs, {
+    forbiddenPhrases: input.forbiddenPhrases,
   })
   const content = renderScriptsAsText(cleaned, input.language)
   const promptPreview = [
@@ -126,15 +135,17 @@ export async function runGuionesStructuredPipeline(input: RunPipelineInput): Pro
     contextProfile,
     angleCandidates,
     briefs,
-    qualityReports,
+    qualityReports: finalReports,
     scripts: cleaned,
     promptPreview,
     timings: {
       anglesMs,
       draftMs,
       totalMs: Date.now() - pipelineStarted,
-      angleCandidatesRequested: angleInventoryNeeded(input.scriptSettings),
+      angleCandidatesRequested: skipAngles ? 0 : angleInventoryNeeded(input.scriptSettings),
       scriptsDrafted: cleaned.length,
+      skippedAngles: skipAngles,
+      draftModel,
     },
   }
 }

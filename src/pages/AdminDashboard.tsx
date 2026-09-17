@@ -99,6 +99,7 @@ interface UsageCoverage {
 
 interface ImageModelPerformance {
   model: string
+  action?: string
   attempts: number
   successes: number
   failures: number
@@ -113,6 +114,8 @@ interface ImageModelPerformance {
   cost_per_upvote_usd: number | null
   uncorrelated_logs: number
   uncorrelated_posts: number
+  duration_p50_ms?: number | null
+  duration_p90_ms?: number | null
 }
 
 interface UserUsageStats {
@@ -1681,12 +1684,15 @@ export default function AdminDashboard({
                   <thead className="bg-dark-50">
                     <tr>
                       <th className="px-3 sm:px-5 py-3 text-left text-xs font-medium text-dark-500 uppercase">{t.model}</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Acción' : 'Action'}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Intentos' : 'Attempts'}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.success}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.failed}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Posts' : 'Posts'}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{t.cost}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Costo/ok' : 'Cost/ok'}</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">p50</th>
+                      <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">p90</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Arriba' : 'Up'}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? 'Abajo' : 'Down'}</th>
                       <th className="px-3 py-3 text-right text-xs font-medium text-dark-500 uppercase">{language === 'es' ? '% arriba' : 'Up %'}</th>
@@ -1697,24 +1703,27 @@ export default function AdminDashboard({
                   <tbody className="divide-y divide-dark-100">
                     {imageModelPerformance.length === 0 ? (
                       <tr>
-                        <td colSpan={12} className="px-5 py-6 text-sm text-dark-400 text-center">
+                        <td colSpan={15} className="px-5 py-6 text-sm text-dark-400 text-center">
                           {language === 'es' ? 'Sin datos de imagen en este rango.' : 'No image data in this range.'}
                         </td>
                       </tr>
                     ) : imageModelPerformance.map(row => (
-                      <tr key={row.model} className="hover:bg-dark-50">
+                      <tr key={`${row.model}:${row.action || 'image'}`} className="hover:bg-dark-50">
                         <td className="px-3 sm:px-5 py-3">
                           <div className="flex items-center gap-2">
                             <div className={`w-3 h-3 rounded-full flex-shrink-0 ${resolveModelInfo(row.model).color}`} />
                             <span className="font-medium text-dark-900 text-sm">{resolveModelInfo(row.model).name}</span>
                           </div>
                         </td>
+                        <td className="px-3 py-3 text-xs text-dark-500">{row.action || 'image'}</td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">{row.attempts.toLocaleString()}</td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">{row.successes.toLocaleString()}</td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">{row.failures.toLocaleString()}</td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">{row.posts_generated.toLocaleString()}</td>
                         <td className="px-3 py-3 text-sm text-right font-medium text-dark-900">${row.total_cost_usd.toFixed(4)}</td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">${row.avg_cost_success_usd.toFixed(4)}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.duration_p50_ms == null ? '-' : `${Math.round(row.duration_p50_ms)}ms`}</td>
+                        <td className="px-3 py-3 text-sm text-right text-dark-700">{row.duration_p90_ms == null ? '-' : `${Math.round(row.duration_p90_ms)}ms`}</td>
                         <td className="px-3 py-3 text-sm text-right text-emerald-600">{row.upvotes}</td>
                         <td className="px-3 py-3 text-sm text-right text-red-500">{row.downvotes}</td>
                         <td className="px-3 py-3 text-sm text-right text-dark-700">{row.upvote_rate === null ? '-' : `${(row.upvote_rate * 100).toFixed(1)}%`}</td>

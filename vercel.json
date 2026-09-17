@@ -12,6 +12,9 @@
     "api/analyze-style.ts": {
       "maxDuration": 60
     },
+    "api/chat.ts": {
+      "maxDuration": 120
+    },
     "api/generate-image.ts": {
       "maxDuration": 180
     },

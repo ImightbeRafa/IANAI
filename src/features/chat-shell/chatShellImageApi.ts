@@ -107,6 +107,60 @@ type ImageApiResult = {
   model?: string
   providerModel?: string
   generationId?: string
+  jobId?: string
+  status?: string
+}
+
+const SHELL_IMAGE_POLL_MS = 1_500
+const SHELL_IMAGE_POLL_TIMEOUT_MS = 180_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function sampleFromImagePayload(json: ImageApiResult): string {
+  return json.result?.sample || json.imageUrl || ''
+}
+
+async function postImageApi(token: string, body: Record<string, unknown>): Promise<{
+  ok: boolean
+  status: number
+  json: ImageApiResult
+}> {
+  const res = await fetch(IMAGE_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  })
+  const json = (await res.json().catch(() => ({}))) as ImageApiResult
+  return { ok: res.ok, status: res.status, json }
+}
+
+async function pollShellImageJob(
+  token: string,
+  generationId: string,
+  language: 'en' | 'es'
+): Promise<ImageApiResult> {
+  const started = Date.now()
+  while (Date.now() - started < SHELL_IMAGE_POLL_TIMEOUT_MS) {
+    await sleep(SHELL_IMAGE_POLL_MS)
+    const polled = await postImageApi(token, { action: 'poll', generationId })
+    if (polled.status === 404) continue
+    if (!polled.ok) {
+      const raw = [polled.json.error, polled.json.details, polled.json.code].filter(Boolean).join(' ')
+      throw new Error(friendlyImageError(raw || 'Image generation failed', language))
+    }
+    if (polled.json.status === 'failed') {
+      throw new Error(friendlyImageError(String(polled.json.error || 'Image generation failed'), language))
+    }
+    if (polled.json.status === 'completed' || sampleFromImagePayload(polled.json)) {
+      return polled.json
+    }
+  }
+  throw new Error(friendlyImageError('Image generation timed out', language))
 }
 
 async function callGenerateImageDetailed(body: Record<string, unknown>): Promise<{
@@ -116,30 +170,31 @@ async function callGenerateImageDetailed(body: Record<string, unknown>): Promise
   generationId?: string
 }> {
   const token = await getAccessToken()
-  const res = await fetch(IMAGE_API, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
-  const json = (await res.json()) as ImageApiResult
-  if (!res.ok) {
-    const language = body.language === 'en' ? 'en' : 'es'
-    const raw = [json.error, json.details, json.code].filter(Boolean).join(' ')
+  const language = body.language === 'en' ? 'en' : 'es'
+  const posted = await postImageApi(token, { ...body, async: true })
+  if (!posted.ok) {
+    const raw = [posted.json.error, posted.json.details, posted.json.code].filter(Boolean).join(' ')
     throw new Error(friendlyImageError(raw || 'Image generation failed', language))
   }
-  const sample = json.result?.sample || json.imageUrl
+  let json = posted.json
+  const generationId = typeof json.generationId === 'string' && json.generationId
+    ? json.generationId
+    : typeof body.generationId === 'string' ? body.generationId : ''
+  if (json.status === 'running' || (!sampleFromImagePayload(json) && json.status !== 'failed' && generationId)) {
+    json = await pollShellImageJob(token, generationId, language)
+  }
+  if (json.status === 'failed') {
+    throw new Error(friendlyImageError(String(json.error || 'Image generation failed'), language))
+  }
+  const sample = sampleFromImagePayload(json)
   if (!sample) {
-    const language = body.language === 'en' ? 'en' : 'es'
     throw new Error(friendlyImageError('No image returned', language))
   }
   return {
     sample,
     model: json.model,
     providerModel: json.providerModel,
-    generationId: json.generationId,
+    generationId: json.generationId || generationId,
   }
 }
 

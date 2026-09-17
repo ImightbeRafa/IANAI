@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, ImageIcon, ThumbsUp, ThumbsDown, FileText } from 'lucide-react'
+import { parseScriptSections } from '../features/chat-shell/parseScriptSections'
 import type { ParsedScript } from '../utils/scriptParser'
 import type { ProductType } from '../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal, rateScript } from '../services/database'
@@ -118,7 +119,15 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
   }
 
   const handleCopy = (versionIndex: number) => {
-    navigator.clipboard.writeText(getVersionContent(versionIndex))
+    const text = getVersionContent(versionIndex)
+    const sections = parseScriptSections(text)
+    const labeled = sections
+      .filter((section) => section.body)
+      .map((section) => section.label
+        ? `[${section.label.toUpperCase()}${section.seconds ? ` · ~${section.seconds} s` : ''}]\n${section.body}`
+        : section.body)
+      .join('\n\n')
+    navigator.clipboard.writeText(labeled || text)
     setCopiedVersion(versionIndex)
     setTimeout(() => setCopiedVersion(null), 2000)
   }
@@ -642,10 +651,34 @@ export default function ScriptCard({ script, language, onSave, onEdit, onSaveVer
   }
 
   const formatContent = (text: string) => {
-    return text.replace(/\[(GANCHO[S]?|HOOK[S]?|DESARROLLO|DEVELOPMENT|CTA|CIERRE|CLOSE)(?:\s*[AB])?\]/gi, (match) => `{{CHIP:${match}}}`)
+    return text.replace(/\[(GANCHO[S]?|HOOK[S]?|DESARROLLO|DEVELOPMENT|CTA|CIERRE|CLOSE)(?:\s*[AB])?(?:\s*[-–—·:]\s*[^\]]*)?\]/gi, (match) => `{{CHIP:${match}}}`)
   }
 
   const renderContent = (text: string) => {
+    const sections = parseScriptSections(text)
+    if (sections.length && sections.some((section) => section.kind !== 'other' || section.label)) {
+      return (
+        <div className="space-y-3">
+          {sections.map((section, i) => (
+            <section key={`${section.kind}-${i}`}>
+              {section.label ? (
+                <div className="flex items-baseline justify-between gap-2 mb-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-primary-400">
+                    {section.label}
+                  </span>
+                  {section.seconds ? (
+                    <span className="text-[10px] text-dark-400">~{section.seconds} s</span>
+                  ) : null}
+                </div>
+              ) : null}
+              {section.body ? (
+                <p className="text-sm text-dark-700 leading-relaxed whitespace-pre-wrap">{section.body}</p>
+              ) : null}
+            </section>
+          ))}
+        </div>
+      )
+    }
     const parts = formatContent(text).split(/(\{\{CHIP:[^}]+\}\})/g)
     return parts.map((part, i) => {
       const chipMatch = part.match(/\{\{CHIP:(.+)\}\}/)

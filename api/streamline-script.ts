@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, incrementUsage } from './lib/auth.js'
 import { logApiUsage, estimateTokens } from './lib/usage-logger.js'
+import { usageTimingMetadata } from './lib/usage-timings.js'
 import {
   GROK_TEXT_MODEL_EFFICIENT,
   grokChatComplete,
@@ -27,6 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!user) return
 
   try {
+    const requestStarted = Date.now()
     let generationId: string | undefined
     const {
       script,
@@ -124,15 +126,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       outputTokens,
       generationId,
       success: true,
-      metadata: {
-        action: 'streamline_script',
-        postStyle,
-        language,
-        textDensity,
-        hasProductContext: !!safeContext,
-        endpoint: completion.endpoint,
-        sessionBound,
-      }
+      metadata: usageTimingMetadata({
+        durationMs: Date.now() - requestStarted,
+        stageTimings: { streamlineMs: Date.now() - requestStarted },
+        extra: {
+          action: 'streamline_script',
+          postStyle,
+          language,
+          textDensity,
+          hasProductContext: !!safeContext,
+          endpoint: completion.endpoint,
+          sessionBound,
+        },
+      }),
     })
 
     if (sessionBound) {
@@ -151,7 +157,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       model: GROK_TEXT_MODEL_EFFICIENT,
       generationId,
       success: false,
-      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      metadata: usageTimingMetadata({
+        durationMs: Date.now() - requestStarted,
+        stageTimings: { streamlineMs: Date.now() - requestStarted },
+      }),
     })
 
     return res.status(500).json({

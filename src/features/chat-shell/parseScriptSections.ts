@@ -1,13 +1,13 @@
+import { parseScriptSectionsFromText } from '../../utils/scriptSections'
+
 export type ScriptSectionKind = 'gancho' | 'desarrollo' | 'cierre' | 'other'
 
 export interface ScriptSection {
   kind: ScriptSectionKind
   label: string
   body: string
+  seconds?: number | null
 }
-
-const SECTION_MARKER_RE =
-  /\[(GANCHO[S]?|HOOK[S]?|DESARROLLO|DEVELOPMENT|CTA|CIERRE|CLOSE)(?:\s*[AB])?\]/gi
 
 /** Normalize display labels — drop A/B suffixes (e.g. "Gancho A" → "Gancho"). */
 export function normalizeSectionLabel(kind: ScriptSectionKind, rawInner: string): string {
@@ -37,7 +37,7 @@ export function classifySectionMarker(rawInner: string): {
   kind: ScriptSectionKind
   label: string
 } {
-  // Accept bracketed or bare markers from callers.
+  // Accept bracketed or bare markers from callers, including `[GANCHO - 3 seg]`.
   const key = rawInner
     .trim()
     .replace(/^\[/, '')
@@ -45,6 +45,7 @@ export function classifySectionMarker(rawInner: string): {
     .trim()
     .toUpperCase()
     .replace(/\s+[AB]$/, '')
+    .replace(/\s*[-–—·:].*$/, '')
   if (key.startsWith('GANCHO') || key.startsWith('HOOK')) {
     return { kind: 'gancho', label: normalizeSectionLabel('gancho', rawInner) }
   }
@@ -68,30 +69,11 @@ export function stripLeadingColon(body: string): string {
  * section header + body blocks. Unmarked leading text becomes a body-only section.
  */
 export function parseScriptSections(text: string): ScriptSection[] {
-  const source = text.replace(/\r\n/g, '\n')
-  if (!source.trim()) return []
-
-  const matches = [...source.matchAll(SECTION_MARKER_RE)]
-  if (matches.length === 0) {
-    return [{ kind: 'other', label: '', body: stripLeadingColon(source) }]
-  }
-
-  const sections: ScriptSection[] = []
-  const firstIndex = matches[0].index ?? 0
-  const leading = stripLeadingColon(source.slice(0, firstIndex))
-  if (leading) {
-    sections.push({ kind: 'other', label: '', body: leading })
-  }
-
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i]
-    const start = (match.index ?? 0) + match[0].length
-    const end = i + 1 < matches.length ? (matches[i + 1].index ?? source.length) : source.length
-    const rawBody = source.slice(start, end).replace(/^\s*\n/, '')
-    const body = stripLeadingColon(rawBody)
-    const { kind, label } = classifySectionMarker(match[1] || match[0])
-    sections.push({ kind, label, body })
-  }
-
-  return sections
+  const parsed = parseScriptSectionsFromText(text)
+  return parsed.map((section) => ({
+    kind: section.kind,
+    label: section.displayLabel,
+    body: section.text,
+    seconds: section.seconds,
+  }))
 }

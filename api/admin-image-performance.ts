@@ -7,6 +7,7 @@ import {
   resolveAdminUsageWindow,
   type AdminUsageLogRow,
 } from './lib/admin-usage.js'
+import { durationMsFromMetadata, percentileNearestRank } from './lib/usage-timings.js'
 
 type UsageLogRow = Pick<
   AdminUsageLogRow,
@@ -24,6 +25,7 @@ type PostRow = {
 
 type PerformanceRow = {
   model: string
+  action: string
   attempts: number
   successes: number
   failures: number
@@ -38,11 +40,15 @@ type PerformanceRow = {
   cost_per_upvote_usd: number | null
   uncorrelated_logs: number
   uncorrelated_posts: number
+  duration_p50_ms: number | null
+  duration_p90_ms: number | null
+  _durations: number[]
 }
 
-function emptyRow(model: string): PerformanceRow {
+function emptyRow(model: string, action = 'image'): PerformanceRow {
   return {
     model,
+    action,
     attempts: 0,
     successes: 0,
     failures: 0,
@@ -57,6 +63,9 @@ function emptyRow(model: string): PerformanceRow {
     cost_per_upvote_usd: null,
     uncorrelated_logs: 0,
     uncorrelated_posts: 0,
+    duration_p50_ms: null,
+    duration_p90_ms: null,
+    _durations: [],
   }
 }
 
@@ -139,20 +148,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const rows = new Map<string, PerformanceRow>()
-  const getRow = (model: string) => {
-    const key = model || 'unknown'
-    if (!rows.has(key)) rows.set(key, emptyRow(key))
+  const getRow = (model: string, action = 'image') => {
+    const key = `${model || 'unknown'}::${action || 'image'}`
+    if (!rows.has(key)) rows.set(key, emptyRow(model || 'unknown', action || 'image'))
     return rows.get(key)!
   }
 
   const logsByGeneration = new Map<string, UsageLogRow[]>()
   for (const log of (logs || []) as UsageLogRow[]) {
-    const row = getRow(log.model)
+    const action = typeof (log.metadata as { action?: unknown } | null)?.action === 'string'
+      ? String((log.metadata as { action?: string }).action)
+      : log.feature
+    const row = getRow(log.model, action)
     row.attempts += 1
     if (log.success) row.successes += 1
     else row.failures += 1
     row.total_tokens += Number(log.total_tokens || 0)
     row.total_cost_usd += estimateOfficialApiCostUsd(log)
+    const durationMs = durationMsFromMetadata(log.metadata)
+    if (durationMs != null) row._durations.push(durationMs)
     if (!log.generation_id) row.uncorrelated_logs += 1
     else {
       const existing = logsByGeneration.get(log.generation_id) || []
@@ -164,7 +178,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   for (const post of (posts || []) as PostRow[]) {
     const correlatedLog = post.generation_id ? logsByGeneration.get(post.generation_id)?.[0] : null
     const model = correlatedLog?.model || post.model || 'unknown'
-    const row = getRow(model)
+    const action = typeof (correlatedLog?.metadata as { action?: unknown } | null)?.action === 'string'
+      ? String((correlatedLog?.metadata as { action?: string }).action)
+      : 'image'
+    const row = getRow(model, action)
 
     if (post.status === 'completed') row.posts_generated += 1
     if (post.rating === 5) row.upvotes += 1
@@ -174,13 +191,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const performance = [...rows.values()]
-    .map(row => ({
-      ...row,
-      total_cost_usd: Number(row.total_cost_usd.toFixed(6)),
-      avg_cost_success_usd: row.successes > 0 ? Number((row.total_cost_usd / row.successes).toFixed(6)) : 0,
-      upvote_rate: row.rated_count > 0 ? Number((row.upvotes / row.rated_count).toFixed(4)) : null,
-      cost_per_upvote_usd: row.upvotes > 0 ? Number((row.total_cost_usd / row.upvotes).toFixed(6)) : null,
-    }))
+    .map(row => {
+      const sorted = row._durations.slice().sort((a, b) => a - b)
+      return {
+        model: row.model,
+        action: row.action,
+        attempts: row.attempts,
+        successes: row.successes,
+        failures: row.failures,
+        total_tokens: row.total_tokens,
+        total_cost_usd: Number(row.total_cost_usd.toFixed(6)),
+        avg_cost_success_usd: row.successes > 0 ? Number((row.total_cost_usd / row.successes).toFixed(6)) : 0,
+        posts_generated: row.posts_generated,
+        upvotes: row.upvotes,
+        downvotes: row.downvotes,
+        rated_count: row.rated_count,
+        upvote_rate: row.rated_count > 0 ? Number((row.upvotes / row.rated_count).toFixed(4)) : null,
+        cost_per_upvote_usd: row.upvotes > 0 ? Number((row.total_cost_usd / row.upvotes).toFixed(6)) : null,
+        uncorrelated_logs: row.uncorrelated_logs,
+        uncorrelated_posts: row.uncorrelated_posts,
+        duration_p50_ms: percentileNearestRank(sorted, 50),
+        duration_p90_ms: percentileNearestRank(sorted, 90),
+      }
+    })
     .sort((a, b) => b.total_cost_usd - a.total_cost_usd)
 
   return res.status(200).json({ performance })

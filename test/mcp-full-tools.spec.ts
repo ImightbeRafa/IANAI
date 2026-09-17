@@ -71,7 +71,15 @@ function artifactStore(): McpArtifactStore {
     async listOwnedScripts() {
       return [{
         id: 'sc1',
-        content: 'Hook.\nDevelopment with ₡9.900.\nCTA.',
+        content: `OPCIÓN #1 — Venta Directa — "Tiras"
+[GANCHO · ~3 s]
+Hook line.
+
+[DESARROLLO · ~8 s]
+Development with ₡9.900.
+
+[CTA · ~2 s]
+CTA.`,
         title: 'Sample',
         offerId: 'p1',
         sessionId: 's1',
@@ -318,5 +326,27 @@ describe('mcp 0.8 remaining tools', () => {
     expect(text).toContain('grok_chat')
     expect(text).not.toContain('Open deepLink')
     expect(text).toContain('optionalAdvancePage')
+  })
+
+  it('A9 list_scripts returns sections[] DTO next to content', async () => {
+    const listed = await handleMcpJsonRpc({
+      body: {
+        jsonrpc: '2.0',
+        id: 90,
+        method: 'tools/call',
+        params: { name: 'list_scripts', arguments: { brandId: 'b1' } },
+      },
+      user: { id: 'user-a' },
+      db,
+      artifactStore: artifactStore(),
+    })
+    const text = (listed.result as { content: Array<{ text: string }> }).content[0].text
+    const payload = JSON.parse(text) as {
+      scripts: Array<{ content: string; sections: Array<{ hook: { label: string; seconds: number } }> }>
+    }
+    expect(payload.scripts).toHaveLength(1)
+    expect(payload.scripts[0].sections[0].hook.label).toBe('GANCHO')
+    expect(payload.scripts[0].sections[0].hook.seconds).toBe(3)
+    expect(payload.scripts[0].content).toContain('[GANCHO · ~3 s]')
   })
 })

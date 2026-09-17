@@ -17,6 +17,22 @@ Body two here with enough text to be a script.`
     expect(parts[1].index).toBe(2)
   })
 
+  it('splits GUIÓN/OPCIÓN clustered blobs into one row per option', () => {
+    const content = `### GUIÓN/OPCIÓN #1 — [Estilo: Venta Directa] — "Parche, no pastilla"
+[GANCHO - 3 seg]: Dormís mal.
+[DESARROLLO - 25 seg]: Cada parche.
+[CTA - 4 seg]: Envianos un mensaje.
+
+### GUIÓN/OPCIÓN #2 — [Estilo: Venta Directa] — "30 noches de calma"
+[GANCHO - 3 seg]: Treinta noches.
+[DESARROLLO - 28 seg]: Sleeping Patches.
+[CTA - 4 seg]: Escribinos LISTO.`
+    const parts = splitOfferScriptContent(content, 'Sleeping Patches')
+    expect(parts).toHaveLength(2)
+    expect(parts[0].title).toMatch(/Parche/)
+    expect(parts[1].title).toMatch(/30 noches/)
+  })
+
   it('falls back to a single script without headers', () => {
     const parts = splitOfferScriptContent('Just one plain script body.', 'Offer')
     expect(parts).toEqual([

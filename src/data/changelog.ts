@@ -91,6 +91,26 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.14',
+    date: '2026-09-17',
+    items: [
+      {
+        category: 'improvement',
+        text: {
+          es: 'Los guiones del chat se ven en tarjetas separadas: Gancho, Desarrollo y Cierre, cada uno con su tiempo aproximado. Copiar lleva el guion limpio, listo para leer.',
+          en: 'Chat scripts now show as separate cards: Hook, Development, and Close, each with an approximate time. Copy gives you the clean labeled script.',
+        },
+      },
+      {
+        category: 'improvement',
+        text: {
+          es: 'Más rápido / Mejor calidad ahora sí cambia cómo se escriben los guiones en el chat. Pedir uno o dos guiones responde más rápido.',
+          en: 'Faster / Best quality now actually changes how chat scripts are written. Asking for one or two scripts comes back quicker.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.13',
     date: '2026-09-09',
     items: [
