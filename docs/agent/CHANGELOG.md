@@ -1,3 +1,16 @@
+## 2026-09-17 — PLAN: guiones formatting, generation speed, image UX, MCP parity (docs only)
+
+**Area:** docs / operations
+**Files:** `docs/operations/advance-quality-speed-ux-plan.md`
+
+- Plan + proposals only (Fable 5.1 advisor; Grok 4.6 implements after Rafael GO per phase; no Sol/Codex). No production code.
+- Root cause of the "clustered blob" script card: chat-shell defaults to the **legacy** `/api/chat` path (`useStructuredPipeline: false`); the model improvises `### GUIÓN/OPCIÓN #1 — [Estilo: …]` + `[GANCHO - 3 seg]:`; `parseScripts` cannot split `GUIÓN/OPCIÓN` and `parseScriptSections` only matches bare `[GANCHO]`. Structured pipeline already has `spokenScript.{hook,development,ctaOrClose}` but `/api/chat` ships only flattened `content`.
+- P0 proposal: structured default for chat-shell, canonical text v2 (label on own line, `~N s` chips from a local spoken-seconds estimator), tolerant shared parser (api + src mirror with parity fixtures), top-level `scripts[]` DTO on `/api/chat` + MCP `sections[]`, one card per option, clean copy; latency instrumentation (`durationMs` + stage timings in `api_usage_logs.metadata`), honor Mejor calidad/Más rápido in the structured draft, skip angle inventory for ≤ 2 scripts, skip/merge `streamline-script`, async shell image jobs, pin `api/chat` `maxDuration`.
+- P1–P3: SSE progress, image card fixes (`imageStatus` reset, aspect box, pending card, 390px), chat-drop NL edit with fail-closed product-lock policy by `sourceRole`/`editKind`, lock evidence (`grokMode`/`lockApplied`) on web + MCP, scratch brand for zero-context, optional `nano-banana` compose lane (no-product-ref only), `grok-4-1-fast-reasoning` bake-off, enhancement backlog.
+- Constraints kept: JPEG-only creatives, `2k` for deliverables, product lock never bypassed, no Meta posting, no credit price changes without Rafael.
+
+No user-facing changelog (plan only). Companion: PR #43 (Content-bot MCP gaps GAP-02/04/05).
+
 ## 2026-09-17 — GAP-01: MCP/bulk product-lock first-gen (edits + PRODUCT LOCK)
 
 **Area:** api / MCP / bulk images
