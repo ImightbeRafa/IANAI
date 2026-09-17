@@ -1,6 +1,6 @@
 import { checkUsageLimit, incrementUsage } from '../auth.js'
 import { generationUuidFromApproval } from '../credits/generation-id.js'
-import { runGrokImageGenerate } from '../grok-image-generate.js'
+import { runGrokPostFirstGen } from '../grok-image-generate.js'
 import { logApiUsage } from '../usage-logger.js'
 import { listProductRefUrls, saveExpandedProductRef } from './store.js'
 import { imageCreditsEach } from './quotes.js'
@@ -49,7 +49,7 @@ export async function expandProductRefs(options: {
     if (!limit.allowed) break
     try {
       // Internal expand path opts into 4:5→3:4; fail-closed default still applies to user EXECUTE.
-      const generated = await runGrokImageGenerate({
+      const generated = await runGrokPostFirstGen({
         apiKey: options.apiKey,
         prompt: [
           `Alternate lifestyle product reference for ${options.brandName}`,
@@ -59,7 +59,8 @@ export async function expandProductRefs(options: {
         ].join('. '),
         aspectRatio: '4:5',
         aspectRatioFallback: true,
-        referenceImageUrls: refs.slice(0, 2),
+        productReferenceUrls: refs.slice(0, 2),
+        language: 'es',
       })
       const saved = await saveExpandedProductRef({
         userId: options.userId,

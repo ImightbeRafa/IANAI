@@ -16,7 +16,8 @@ import { isCreditsV1Enabled } from '../credits/catalog.js'
 import { logApiUsage, estimateTokens } from '../usage-logger.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { runGrokImageGenerate } from '../grok-image-generate.js'
+import { runGrokPostFirstGen } from '../grok-image-generate.js'
+import { normalizeImageReferenceRole } from '../image-prompt-context.js'
 import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
 import {
   buildEnhanceSystemPrompt,
@@ -54,7 +55,7 @@ import { assertMcpCarouselSlideCount } from './limits.js'
 import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 import { mcpGuideImage } from './guide-packs.js'
-import type { McpArtifactStore } from './artifact-store.js'
+import type { McpArtifactStore, McpOwnedImage } from './artifact-store.js'
 import type {
   CTAStrength,
   GenerationMode,
@@ -127,14 +128,14 @@ function referenceImageIds(value: unknown): string[] {
     .map((id) => id.trim()))].slice(0, 4)
 }
 
-async function resolveOwnedReferenceUrls(options: {
+async function resolveOwnedReferenceImages(options: {
   artifactStore: McpArtifactStore
   userId: string
   brandId: string
   offerId: string
   imageIds: string[]
-}): Promise<string[]> {
-  const urls: string[] = []
+}): Promise<McpOwnedImage[]> {
+  const images: McpOwnedImage[] = []
   for (const imageId of options.imageIds) {
     const image = await options.artifactStore.getOwnedProductImage({
       userId: options.userId,
@@ -143,9 +144,47 @@ async function resolveOwnedReferenceUrls(options: {
       imageId,
     })
     if (!image) throw new Error(`Reference image ${imageId} not found for this brand/offer`)
-    urls.push(image.imageUrl)
+    images.push(image)
   }
-  return urls
+  return images
+}
+
+async function resolveOwnedReferenceUrls(options: {
+  artifactStore: McpArtifactStore
+  userId: string
+  brandId: string
+  offerId: string
+  imageIds: string[]
+}): Promise<string[]> {
+  const images = await resolveOwnedReferenceImages(options)
+  return images.map((image) => image.imageUrl)
+}
+
+/**
+ * Split owned refs into product vs support URLs for Grok first-gen.
+ * When `productImageId` is set, that SKU URL is always `productUrls[0]`
+ * (edits API base) even if a kind=generated/unknown ref appears first.
+ */
+export function partitionOwnedImageRefs(options: {
+  images: McpOwnedImage[]
+  productImageId?: string
+}): { productUrls: string[]; supportUrls: string[] } {
+  const productUrls: string[] = []
+  const supportUrls: string[] = []
+  const skuId = options.productImageId?.trim() || ''
+  let skuUrl: string | undefined
+  for (const image of options.images) {
+    const isSku = Boolean(skuId && image.id === skuId)
+    if (isSku) {
+      skuUrl = image.imageUrl
+      continue
+    }
+    const role = normalizeImageReferenceRole({ kind: image.kind, label: image.label })
+    if (role === 'product') productUrls.push(image.imageUrl)
+    else supportUrls.push(image.imageUrl)
+  }
+  if (skuUrl) productUrls.unshift(skuUrl)
+  return { productUrls, supportUrls }
 }
 
 async function publicImageUrlToDataUrl(imageUrl: string): Promise<string> {
@@ -630,6 +669,7 @@ export async function mcpExecuteImageGenerate(options: {
         aspectRatio: boundWithOffer.aspectRatio,
         aspectRatioFallback: boundWithOffer.aspectRatioFallback,
         referenceImageIds: selectedReferenceIds,
+        productImageId,
         guidePrompt,
         sessionIdArg,
         approvalRequestId,
@@ -673,6 +713,7 @@ async function runImageGenerateBody(options: {
   aspectRatio: string
   aspectRatioFallback?: boolean
   referenceImageIds: string[]
+  productImageId?: string
   guidePrompt?: string
   sessionIdArg?: string
   approvalRequestId: string
@@ -701,19 +742,26 @@ async function runImageGenerateBody(options: {
     kit?.visualStyleNotes ? `Visual rules: ${kit.visualStyleNotes}` : '',
   ].filter(Boolean).join('. ')
   // Confirmed IDs only — never silent-union kit/guide refs after user confirm.
-  const refs = await resolveOwnedReferenceUrls({
+  const ownedRefs = await resolveOwnedReferenceImages({
     artifactStore: options.artifactStore,
     userId: options.user.id,
     brandId: options.brandId,
     offerId: options.offerId,
     imageIds: options.referenceImageIds,
   })
+  const { productUrls, supportUrls } = partitionOwnedImageRefs({
+    images: ownedRefs,
+    productImageId: options.productImageId,
+  })
 
-  const generated = await runGrokImageGenerate({
+  const generated = await runGrokPostFirstGen({
     apiKey: xaiKey(),
     prompt,
     aspectRatio: appliedAspectRatio,
-    referenceImageUrls: refs,
+    aspectRatioFallback: options.aspectRatioFallback === true,
+    productReferenceUrls: productUrls,
+    supportReferenceUrls: supportUrls,
+    language: 'es',
   })
 
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
@@ -736,6 +784,8 @@ async function runImageGenerateBody(options: {
       quality: generated.quality,
       providerModel: generated.providerModel,
       aspectRatio: generated.aspectRatio,
+      grokMode: generated.mode,
+      lockApplied: generated.lockApplied,
     },
   })
 
@@ -756,6 +806,8 @@ async function runImageGenerateBody(options: {
       sessionId,
       resolution: generated.resolution,
       quality: generated.quality,
+      grokMode: generated.mode,
+      lockApplied: generated.lockApplied,
       chargedCredits: options.quote,
     },
   })
@@ -788,6 +840,8 @@ async function runImageGenerateBody(options: {
     aspectRatio: generated.aspectRatio,
     resolution: generated.resolution,
     quality: generated.quality,
+    grokMode: generated.mode,
+    lockApplied: generated.lockApplied,
     estimatedCostUsd: generated.estimatedCostUsd,
     prompt,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
