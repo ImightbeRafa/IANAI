@@ -1,0 +1,150 @@
+/* Advance public space atmosphere — layered depth, CSS-first */
+
+.space-field {
+  --space-cyan: #2de2ff;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  isolation: isolate;
+}
+
+.space-field--fixed {
+  position: fixed;
+}
+
+.space-field__nebula {
+  position: absolute;
+  inset: -25%;
+  background:
+    radial-gradient(ellipse 58% 44% at 14% 18%, rgba(45, 226, 255, 0.2), transparent 60%),
+    radial-gradient(ellipse 40% 36% at 86% 12%, rgba(45, 226, 255, 0.14), transparent 58%),
+    radial-gradient(ellipse 70% 50% at 48% 95%, rgba(12, 48, 78, 0.38), transparent 68%),
+    radial-gradient(ellipse 36% 28% at 62% 48%, rgba(45, 226, 255, 0.07), transparent 65%),
+    radial-gradient(ellipse 28% 22% at 32% 36%, rgba(90, 140, 190, 0.07), transparent 70%);
+  transform: translateZ(0);
+}
+
+.space-field__stars {
+  position: absolute;
+  inset: 0;
+}
+
+.space-field__stars--far .space-field__star {
+  opacity: 0.35;
+}
+
+.space-field__stars--near .space-field__star {
+  opacity: 0.85;
+}
+
+.space-field__star {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate3d(-50%, -50%, 0);
+  will-change: opacity;
+  box-shadow: 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+.space-field__star--bright {
+  background: var(--space-cyan);
+  box-shadow: 0 0 7px rgba(45, 226, 255, 0.7), 0 0 14px rgba(45, 226, 255, 0.28);
+}
+
+.space-field--twinkle .space-field__stars--far .space-field__star {
+  animation: space-twinkle-far var(--twinkle-dur, 5.5s) ease-in-out var(--twinkle-delay, 0s) infinite;
+}
+
+.space-field--twinkle .space-field__stars--near .space-field__star {
+  animation: space-twinkle-near var(--twinkle-dur, 3.8s) ease-in-out var(--twinkle-delay, 0s) infinite;
+}
+
+.space-field__shoot {
+  position: absolute;
+  width: 120px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), var(--space-cyan));
+  opacity: 0;
+  transform: rotate(-32deg);
+  filter: drop-shadow(0 0 5px rgba(45, 226, 255, 0.7));
+  will-change: transform, opacity;
+}
+
+.space-field--shoot .space-field__shoot {
+  animation: space-shoot var(--shoot-dur, 9s) linear var(--shoot-delay, 0s) infinite;
+}
+
+.space-field__shoot--2 {
+  width: 72px;
+}
+
+.space-field__shoot--3 {
+  width: 96px;
+  transform: rotate(-38deg);
+}
+
+@keyframes space-twinkle-far {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes space-twinkle-near {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
+@keyframes space-shoot {
+  0%,
+  86% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-32deg) scaleX(0.3);
+  }
+  89% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(-32deg) scaleX(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(48vw, 30vh, 0) rotate(-32deg) scaleX(0.15);
+  }
+}
+
+@media (max-width: 767px) {
+  .space-field__nebula {
+    background:
+      radial-gradient(ellipse 72% 48% at 50% 8%, rgba(45, 226, 255, 0.14), transparent 58%),
+      radial-gradient(ellipse 55% 40% at 18% 72%, rgba(16, 55, 90, 0.22), transparent 65%);
+  }
+
+  .space-field__shoot {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .space-field--twinkle .space-field__star,
+  .space-field--shoot .space-field__shoot {
+    animation: none !important;
+  }
+
+  .space-field__star {
+    opacity: 0.4;
+  }
+
+  .space-field__shoot {
+    display: none;
+  }
+}

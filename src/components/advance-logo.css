@@ -22,6 +22,48 @@
   object-fit: contain;
 }
 
+/* Public-site premium mark motion (nav / auth) */
+.advance-logo.is-animate .advance-logo__mark {
+  animation: advance-logo-rise 0.7s cubic-bezier(0.18, 1.15, 0.28, 1) both;
+}
+
+.advance-logo.is-animate .advance-logo__img {
+  filter: drop-shadow(0 0 12px rgba(45, 226, 255, 0.42));
+  animation: advance-logo-glow 4.2s ease-in-out 0.65s infinite;
+}
+
+@keyframes advance-logo-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 7px, 0) scale(0.78) rotate(-10deg);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes advance-logo-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 8px rgba(45, 226, 255, 0.32));
+  }
+  50% {
+    filter: drop-shadow(0 0 18px rgba(45, 226, 255, 0.62));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .advance-logo.is-animate .advance-logo__mark,
+  .advance-logo.is-animate .advance-logo__img {
+    animation: none !important;
+  }
+
+  .advance-logo.is-animate .advance-logo__img {
+    filter: drop-shadow(0 0 8px rgba(45, 226, 255, 0.3));
+  }
+}
+
 html[data-theme="obsidian-dark"] .advance-logo__img,
 .chat-shell[data-theme="obsidian-dark"] .advance-logo__img {
   filter: drop-shadow(0 1px 8px rgba(56, 189, 248, 0.22));

@@ -1,0 +1,294 @@
+/* Floating creatives — irregular orbital floaties + sparse quiet edge ghosts.
+ * Intentionally NOT neat vertical side rails / product shelves. */
+
+.home-floaties {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.home-floaty {
+  --fx: 0%;
+  --fy: 0%;
+  --frot: 0deg;
+  --fscale: 0.7;
+  position: absolute;
+  z-index: 3;
+  width: clamp(4.8rem, 8.5vw, 7.25rem);
+  aspect-ratio: 9 / 16;
+  border-radius: 0.65rem;
+  overflow: hidden;
+  border: 1px solid rgba(45, 226, 255, 0.22);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translate3d(var(--fx), var(--fy), 0) rotate(var(--frot)) scale(var(--fscale));
+  will-change: transform, opacity;
+  left: 50%;
+  top: 40%;
+  margin-left: calc(clamp(4.8rem, 8.5vw, 7.25rem) / -2);
+  background:
+    linear-gradient(145deg, rgba(45, 226, 255, 0.1), transparent 55%),
+    #0c1218;
+}
+
+.home-floaty img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.home-floaty--desktop-only {
+  display: none;
+}
+
+@media (min-width: 960px) {
+  .home-floaty--desktop-only {
+    display: block;
+  }
+}
+
+/* Irregular orbital scatter — accidental, NOT left/right columns */
+.home-floaty[data-slot='a'] {
+  --fx: -34vw;
+  --fy: -38%;
+  --frot: -24deg;
+  --fscale: 0.72;
+}
+.home-floaty[data-slot='b'] {
+  --fx: 28vw;
+  --fy: -46%;
+  --frot: 18deg;
+  --fscale: 0.55;
+}
+.home-floaty[data-slot='c'] {
+  --fx: -48vw;
+  --fy: 18%;
+  --frot: 11deg;
+  --fscale: 0.48;
+}
+.home-floaty[data-slot='d'] {
+  --fx: 44vw;
+  --fy: 28%;
+  --frot: -28deg;
+  --fscale: 0.64;
+}
+.home-floaty[data-slot='e'] {
+  --fx: -18vw;
+  --fy: 58%;
+  --frot: 22deg;
+  --fscale: 0.42;
+}
+.home-floaty[data-slot='f'] {
+  --fx: 12vw;
+  --fy: -52%;
+  --frot: -6deg;
+  --fscale: 0.5;
+}
+
+@media (max-width: 959px) {
+  .home-floaties {
+    display: none;
+  }
+}
+
+/* Organic pop — long off periods, staggered, weird */
+.home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='a'] {
+  animation: floaty-weird 9.4s ease-in-out 0.1s infinite;
+}
+.home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='b'] {
+  animation: floaty-weird 11.2s ease-in-out 2.4s infinite;
+}
+.home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='c'] {
+  animation: floaty-weird 8.1s ease-in-out 4.1s infinite;
+}
+.home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='d'] {
+  animation: floaty-weird 10.6s ease-in-out 1.2s infinite;
+}
+.home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='e'] {
+  animation: floaty-weird 12.4s ease-in-out 5.5s infinite;
+}
+.home-page:not(.is-past-hero) .home-floaties:not(.is-reduced) .home-floaty[data-slot='f'] {
+  animation: floaty-weird 9.8s ease-in-out 3.3s infinite;
+}
+
+@keyframes floaty-weird {
+  0%,
+  14% {
+    opacity: 0;
+    transform: translate3d(var(--fx), calc(var(--fy) + 22px), 0) rotate(var(--frot))
+      scale(calc(var(--fscale) * 0.82));
+  }
+  22%,
+  48% {
+    opacity: 0.78;
+    transform: translate3d(var(--fx), var(--fy), 0) rotate(var(--frot)) scale(var(--fscale));
+  }
+  58%,
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(var(--fx) + 1.2vw), calc(var(--fy) - 16px), 0)
+      rotate(calc(var(--frot) + 4deg)) scale(calc(var(--fscale) * 0.9));
+  }
+}
+
+.home-page.is-past-hero .home-floaty {
+  animation: none !important;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+/* —— Sparse edge ghosts (post-hero): quiet, irregular, NOT rails —— */
+.home-edge-ghosts {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.55s ease, visibility 0.55s ease;
+}
+
+.home-page.is-past-hero .home-edge-ghosts {
+  opacity: 1;
+  visibility: visible;
+}
+
+.home-edge-ghost {
+  --gx: 2%;
+  --gy: 20%;
+  --grot: -12deg;
+  --gscale: 0.55;
+  --gdelay: 0s;
+  --gdur: 14s;
+  position: absolute;
+  left: var(--gx);
+  top: var(--gy);
+  width: clamp(3.2rem, 4.8vw, 4.6rem);
+  aspect-ratio: 9 / 16;
+  border-radius: 0.55rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  background:
+    linear-gradient(145deg, rgba(45, 226, 255, 0.04), transparent 55%),
+    #0c1218;
+  opacity: 0;
+  transform: rotate(var(--grot)) scale(var(--gscale));
+  filter: saturate(0.42) brightness(0.68);
+  will-change: opacity, transform;
+}
+
+.home-edge-ghost img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Irregular edge placements — asymmetric, spaced, calm */
+.home-edge-ghost[data-slot='g0'] {
+  --gx: 1.2%;
+  --gy: 14%;
+  --grot: -18deg;
+  --gscale: 0.52;
+  --gdelay: 0.4s;
+  --gdur: 15.5s;
+}
+.home-edge-ghost[data-slot='g1'] {
+  --gx: auto;
+  --gy: 58%;
+  right: 1.6%;
+  left: auto;
+  --grot: 11deg;
+  --gscale: 0.48;
+  --gdelay: 4.2s;
+  --gdur: 14.2s;
+}
+.home-edge-ghost[data-slot='g2'] {
+  --gx: 2.4%;
+  --gy: 62%;
+  --grot: 8deg;
+  --gscale: 0.42;
+  --gdelay: 7.8s;
+  --gdur: 16.8s;
+}
+.home-edge-ghost[data-slot='g3'] {
+  --gx: auto;
+  --gy: 18%;
+  right: 2.8%;
+  left: auto;
+  --grot: -9deg;
+  --gscale: 0.58;
+  --gdelay: 2.1s;
+  --gdur: 13.6s;
+}
+.home-edge-ghost[data-slot='g4'] {
+  --gx: auto;
+  --gy: 42%;
+  right: 0.6%;
+  left: auto;
+  --grot: 21deg;
+  --gscale: 0.38;
+  --gdelay: 10.4s;
+  --gdur: 17.2s;
+}
+
+.home-page.is-past-hero .home-edge-ghosts:not(.is-reduced) .home-edge-ghost {
+  animation: edge-ghost-pop var(--gdur) ease-in-out var(--gdelay) infinite;
+}
+
+@keyframes edge-ghost-pop {
+  0%,
+  22% {
+    opacity: 0;
+    transform: rotate(var(--grot)) scale(calc(var(--gscale) * 0.86)) translate3d(0, 16px, 0);
+  }
+  30%,
+  44% {
+    opacity: 0.22;
+    transform: rotate(var(--grot)) scale(var(--gscale)) translate3d(0, 0, 0);
+  }
+  56%,
+  100% {
+    opacity: 0;
+    transform: rotate(calc(var(--grot) + 4deg)) scale(calc(var(--gscale) * 0.9))
+      translate3d(0, -12px, 0);
+  }
+}
+
+@media (max-width: 959px) {
+  .home-edge-ghosts {
+    display: none;
+  }
+}
+
+/* Calm reduced-motion: static whisper presence, no pop */
+.home-page:not(.is-past-hero) .home-floaties.is-reduced .home-floaty,
+.home-page.is-reduced-motion:not(.is-past-hero) .home-floaty {
+  animation: none !important;
+  opacity: 0.26;
+}
+
+.home-page.is-past-hero .home-edge-ghosts.is-reduced .home-edge-ghost,
+.home-page.is-past-hero.is-reduced-motion .home-edge-ghost {
+  animation: none !important;
+  opacity: 0.14;
+  transform: rotate(var(--grot)) scale(var(--gscale));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page:not(.is-past-hero) .home-floaty {
+    animation: none !important;
+    opacity: 0.26;
+  }
+
+  .home-page.is-past-hero .home-edge-ghost {
+    animation: none !important;
+    opacity: 0.14;
+    transform: rotate(var(--grot)) scale(var(--gscale));
+  }
+}

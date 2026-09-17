@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Mail, Lock, User, AlertCircle, CheckCircle, Inbox, Eye, EyeOff, Gift } from 'lucide-react'
-import AdvanceLogo from '../components/AdvanceLogo'
+import PublicAuthShell from '../components/public/PublicAuthShell'
 import { CHAT_SHELL_AUTH_HOME } from '../features/chat-shell/chatShellRollout'
 import { safeAppReturnPath } from '../lib/oauthReturnPath'
 
@@ -99,70 +99,52 @@ export default function Signup() {
   // Show success message after signup
   if (emailSent) {
     return (
-      <div className="min-h-screen bg-dark-50 flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-3 mb-4">
-              <AdvanceLogo size={48} />
-              <span className="text-2xl font-bold text-dark-900">Advance AI</span>
-            </div>
+      <PublicAuthShell>
+        <div className="card text-center py-8">
+          <div className="w-16 h-16 bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-8 h-8 text-green-600" />
           </div>
-
-          <div className="card text-center py-8">
-            <div className="w-16 h-16 bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <CheckCircle className="w-8 h-8 text-green-600" />
-            </div>
-            <h2 className="text-xl font-semibold text-dark-900 mb-2">Check your email</h2>
-            <p className="text-dark-600 mb-4">
-              We've sent a verification link to <strong>{email}</strong>
-            </p>
-            <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-4 mb-6">
-              <div className="flex items-start gap-3">
-                <Inbox className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="text-left">
-                  <p className="text-sm text-amber-800 font-medium">Don't see it?</p>
-                  <p className="text-sm text-amber-700">Check your spam or junk folder. The email may take a few minutes to arrive.</p>
-                </div>
+          <h2 className="text-xl font-semibold text-dark-900 mb-2">Check your email</h2>
+          <p className="text-dark-600 mb-4">
+            We've sent a verification link to <strong>{email}</strong>
+          </p>
+          <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-4 mb-6">
+            <div className="flex items-start gap-3">
+              <Inbox className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="text-left">
+                <p className="text-sm text-amber-800 font-medium">Don't see it?</p>
+                <p className="text-sm text-amber-700">Check your spam or junk folder. The email may take a few minutes to arrive.</p>
               </div>
             </div>
-            <Link 
-              to={loginHref} 
-              className="text-primary-600 hover:text-primary-700 font-medium text-sm"
-            >
-              Back to login
-            </Link>
           </div>
+          <Link
+            to={loginHref}
+            className="text-primary-600 hover:text-primary-700 font-medium text-sm"
+          >
+            Back to login
+          </Link>
         </div>
-      </div>
+      </PublicAuthShell>
     )
   }
 
   return (
-    <div className="min-h-screen bg-dark-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-3 mb-4">
-            <AdvanceLogo size={48} />
-            <span className="text-2xl font-bold text-dark-900">Advance AI</span>
-          </div>
-          <p className="text-dark-500">Crea tu cuenta para comenzar</p>
-        </div>
-
-        {referralCode && (
-          <div className="mb-4 p-4 bg-gradient-to-r from-purple-900/30 to-primary-900/30 border border-purple-500/30 rounded-xl">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-500/20 rounded-full flex items-center justify-center flex-shrink-0">
-                <Gift className="w-5 h-5 text-purple-400" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-purple-300">Meta AdVance Partner</p>
-                <p className="text-xs text-purple-400/80">3 meses gratis de Premium al registrarte</p>
-              </div>
+    <PublicAuthShell subtitle="Crea tu cuenta para comenzar" compact>
+      {referralCode && (
+        <div className="mb-4 p-4 bg-gradient-to-r from-cyan-900/30 to-primary-900/30 border border-cyan-500/30 rounded-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-cyan-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+              <Gift className="w-5 h-5 text-cyan-300" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-cyan-200">Meta AdVance Partner</p>
+              <p className="text-xs text-cyan-300/80">3 meses gratis de Premium al registrarte</p>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        <div className="card">
+      <div className="card">
           {/* Google Sign-In Button */}
           <button
             type="button"
@@ -184,7 +166,7 @@ export default function Signup() {
               <div className="w-full border-t border-dark-200"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-dark-100 text-dark-500">o regístrate con email</span>
+              <span className="px-2 bg-transparent text-dark-500">o regístrate con email</span>
             </div>
           </div>
 
@@ -331,7 +313,6 @@ export default function Signup() {
             </Link>
           </p>
         </div>
-      </div>
-    </div>
+    </PublicAuthShell>
   )
 }
