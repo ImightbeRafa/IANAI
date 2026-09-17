@@ -160,20 +160,30 @@ async function resolveOwnedReferenceUrls(options: {
   return images.map((image) => image.imageUrl)
 }
 
-function partitionOwnedImageRefs(options: {
+/**
+ * Split owned refs into product vs support URLs for Grok first-gen.
+ * When `productImageId` is set, that SKU URL is always `productUrls[0]`
+ * (edits API base) even if a kind=generated/unknown ref appears first.
+ */
+export function partitionOwnedImageRefs(options: {
   images: McpOwnedImage[]
   productImageId?: string
 }): { productUrls: string[]; supportUrls: string[] } {
   const productUrls: string[] = []
   const supportUrls: string[] = []
+  const skuId = options.productImageId?.trim() || ''
+  let skuUrl: string | undefined
   for (const image of options.images) {
-    const forcedProduct = Boolean(options.productImageId && image.id === options.productImageId)
-    const role = forcedProduct
-      ? 'product'
-      : normalizeImageReferenceRole({ kind: image.kind, label: image.label })
+    const isSku = Boolean(skuId && image.id === skuId)
+    if (isSku) {
+      skuUrl = image.imageUrl
+      continue
+    }
+    const role = normalizeImageReferenceRole({ kind: image.kind, label: image.label })
     if (role === 'product') productUrls.push(image.imageUrl)
     else supportUrls.push(image.imageUrl)
   }
+  if (skuUrl) productUrls.unshift(skuUrl)
   return { productUrls, supportUrls }
 }
 

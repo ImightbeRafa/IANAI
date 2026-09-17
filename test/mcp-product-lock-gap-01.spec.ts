@@ -10,12 +10,16 @@ import {
 } from '../api/lib/grok-models'
 import { hasProductPixelLockLanguage } from '../api/lib/product-pixel-lock'
 import { normalizeImageReferenceRole } from '../api/lib/image-prompt-context'
+import { partitionOwnedImageRefs } from '../api/lib/mcp/execute-tools'
+import type { McpOwnedImage } from '../api/lib/mcp/artifact-store'
 
 /** 1×1 PNG — data URLs skip the SSRF fetch so only the xAI request is mocked. */
 const PRODUCT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 const SUPPORT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP8z8BQz0AEYBxgAAAQ6wH+8wW3OQAAAABJRU5ErkJggg=='
+const GENERATED_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAYAAABWKLW/AAAAD0lEQVR42mNgYGD4z0AEYBxgAAD4AQH+2n8HAAAAAElFTkSuQmCC'
 
 const TINY_B64 = 'aaa'
 
@@ -191,9 +195,53 @@ describe('MCP / bulk Grok first-gen lock (GAP-01 D6 / D7 / E3)', () => {
 })
 
 describe('MCP owned-ref role split (product vs context)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
   it('kind=product and explicit productImageId are product; context/scene are support', () => {
     expect(normalizeImageReferenceRole({ kind: 'product', label: 'Focus packshot' })).toBe('product')
     expect(normalizeImageReferenceRole({ kind: 'context', label: 'baño escena' })).toBe('scene')
     expect(normalizeImageReferenceRole({ kind: 'context', label: 'style layout' })).toBe('style')
+  })
+
+  it('SD-01: productImageId SKU is first edits base even when a generated ref is listed first', async () => {
+    const generated: McpOwnedImage = {
+      id: 'img-generated',
+      imageUrl: GENERATED_PNG,
+      offerId: 'offer-1',
+      kind: 'generated',
+      label: 'prior ad',
+    }
+    const sku: McpOwnedImage = {
+      id: 'img-sku',
+      imageUrl: PRODUCT_PNG,
+      offerId: 'offer-1',
+      kind: 'product',
+      label: 'Focus packshot',
+    }
+    const split = partitionOwnedImageRefs({
+      images: [generated, sku],
+      productImageId: 'img-sku',
+    })
+    expect(split.productUrls[0]).toBe(PRODUCT_PNG)
+    expect(split.productUrls).toEqual([PRODUCT_PNG, GENERATED_PNG])
+
+    const { captured } = stubGrokFetch()
+    const result = await runGrokPostFirstGen({
+      apiKey: 'test-key',
+      prompt: 'Photoreal lifestyle ad still for PatchHouse featuring Focus patches.',
+      aspectRatio: '9:16',
+      productReferenceUrls: split.productUrls,
+      supportReferenceUrls: split.supportUrls,
+      language: 'es',
+    })
+    expect(captured[0].url).toBe(GROK_IMAGE_EDITS_URL)
+    expect(captured[0].body.images?.[0]?.url).toBe(PRODUCT_PNG)
+    expect(captured[0].body.images?.[1]?.url).toBe(GENERATED_PNG)
+    expect(hasProductPixelLockLanguage(captured[0].body.prompt || '')).toBe(true)
+    expect(result.lockApplied).toBe(true)
+    expect(result.mode).toBe('product_lock_scene')
   })
 })

@@ -5,6 +5,7 @@
 
 - **Finding:** Website post first-gen (PR #33) routes product photos to Grok `/images/edits` `product_lock_scene` with the PRODUCT LOCK contract. MCP `execute_image_generate` and shared `runBulkPosts` called `/images/generations` with a thin lifestyle prompt and no lock (`resolveGrokImageApiMode` existed but was unused on that path).
 - **Fix:** Shared `runGrokPostFirstGen()` — product refs → edits + injected PRODUCT LOCK (SKU not redrawn); no product ref → generations compose. Wired to MCP image generate, MCP/web bulk, and the dead expand-ref caller. Logo/DNA URLs are support only (never the edits base).
+- **SD-01:** `partitionOwnedImageRefs` always puts `productImageId` SKU URL at `productUrls[0]` (edits base) even when a `kind=generated`/unknown ref is listed first in `referenceImageIds`.
 - **Out of scope:** GAP-02 post-with-copy, GAP-04 byte-copy ingest, `create_offer`, registry 0.10.0, Meta posting, credit prices.
 - Tests: fetch-mocked D6/D7/E3 request-shape probe (`test/mcp-product-lock-gap-01.spec.ts`).
 
