@@ -12,6 +12,7 @@ import { logApiUsage as writeApiUsage } from './lib/usage-logger.js'
 import { usageTimingMetadata } from './lib/usage-timings.js'
 import {
   beginOrReplayShellImageJob,
+  canAccessShellImageJob,
   getImageJob,
   jobToHttpPayload,
   setImageJobScheduler,
@@ -598,7 +599,7 @@ async function pollImageJob(req: VercelRequest, res: VercelResponse, user: { id:
   }
   const job = await getImageJob(generationId)
   if (!job) return res.status(404).json({ error: 'Job not found', jobId: generationId, status: 'running' })
-  if (job.userId && job.userId !== user.id) {
+  if (!canAccessShellImageJob(job, user.id)) {
     return res.status(403).json({ error: 'Access denied' })
   }
   return res.status(200).json(jobToHttpPayload(job))
@@ -754,7 +755,7 @@ async function runGenerateImage(
 
     if (action !== 'poll' && generationIdOk) {
       const existingJob = await getImageJob(generationId)
-      if (existingJob && existingJob.userId && existingJob.userId !== user.id) {
+      if (existingJob && !canAccessShellImageJob(existingJob, user.id)) {
         return res.status(403).json({ error: 'Access denied' })
       }
       if (existingJob?.status === 'completed') {

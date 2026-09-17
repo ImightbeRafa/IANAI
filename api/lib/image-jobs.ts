@@ -70,6 +70,30 @@ function asShellImageJob(value: unknown): ShellImageJob | null {
   }
 }
 
+/** Prefer the DB `user_id` column over `result_json.userId` when the column is present. */
+export function overlayShellImageJobUserId(job: ShellImageJob, columnUserId: unknown): ShellImageJob {
+  const fromColumn = typeof columnUserId === 'string' ? columnUserId.trim() : ''
+  if (fromColumn) return { ...job, userId: fromColumn }
+  return job
+}
+
+/** Fail closed: missing job owner or missing requester is a denial. */
+export function canAccessShellImageJob(job: ShellImageJob | null | undefined, userId: string): boolean {
+  if (!job) return false
+  if (!userId) return false
+  if (!job.userId) return false
+  return job.userId === userId
+}
+
+function deniedShellImageJob(): BeginShellImageJobResult {
+  return {
+    httpStatus: 403,
+    body: { error: 'Access denied' },
+    claimed: false,
+    replayed: false,
+  }
+}
+
 async function supabaseGetJob(jobId: string): Promise<ShellImageJob | null> {
   const db = getSupabaseAdmin()
   if (!db || !jobId) return null
@@ -81,8 +105,8 @@ async function supabaseGetJob(jobId: string): Promise<ShellImageJob | null> {
     .maybeSingle()
   if (error || !data) return null
   const parsed = asShellImageJob(data.result_json)
-  if (parsed) return parsed
-  return null
+  if (!parsed) return null
+  return overlayShellImageJobUserId(parsed, data.user_id)
 }
 
 async function supabaseSetJob(job: ShellImageJob): Promise<void> {
@@ -280,13 +304,8 @@ export async function beginOrReplayShellImageJob(options: {
   run: () => Promise<ShellImageJobRunResult>
 }): Promise<BeginShellImageJobResult> {
   const existing = await getImageJob(options.jobId)
-  if (existing && existing.userId && existing.userId !== options.userId) {
-    return {
-      httpStatus: 403,
-      body: { error: 'Access denied' },
-      claimed: false,
-      replayed: false,
-    }
+  if (existing && !canAccessShellImageJob(existing, options.userId)) {
+    return deniedShellImageJob()
   }
   if (isReplayableCompletedJob(existing) && existing) {
     return {
@@ -306,6 +325,9 @@ export async function beginOrReplayShellImageJob(options: {
   }
   const { claimed, job } = await claimImageJob({ jobId: options.jobId, userId: options.userId })
   if (!claimed) {
+    if (!canAccessShellImageJob(job, options.userId)) {
+      return deniedShellImageJob()
+    }
     return {
       httpStatus: 200,
       body: jobToHttpPayload(job),

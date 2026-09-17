@@ -1,3 +1,14 @@
+## 2026-09-17 — SD-01: fail-closed image job ownership on claim/replay
+
+**Area:** api / images
+**Files:** `api/lib/image-jobs.ts`, `api/generate-image.ts`, `test/chat-shell-image-jobs.spec.ts`
+
+- **Finding:** `beginOrReplayShellImageJob` returned 200 + `jobToHttpPayload` on a lost claim (`!claimed`) with no owner check. Concurrent claim on a shared `generationId` could leak another user's image job. Ownership gates used truthy `job.userId &&` (fail-open when empty). `supabaseGetJob` trusted `result_json.userId` and ignored column `user_id`.
+- **Fix:** `canAccessShellImageJob` fail-closes when owner or requester `userId` is missing. Replay, running, and `!claimed` paths return 403 on mismatch. Poll + sync existing-job gates in `generate-image.ts` use the same helper. `overlayShellImageJobUserId` prefers DB `user_id` over JSON.
+- Tests: cross-user replay denial, missing-owner fail-closed, claim-race `!claimed` 403, same-owner lost-claim 200, column overlay.
+
+No user-facing changelog (authz; no UI change).
+
 ## 2026-09-17 — Phase 0: guiones format v2 + latency (structured default)
 
 **Area:** guiones / chat-shell / api / MCP
