@@ -1,3 +1,14 @@
+## 2026-09-17 — Advance MCP Content-bot plan + acceptance-test matrix (docs only)
+
+**Area:** MCP / docs
+**Files:** `docs/operations/advance-mcp-content-bot-plan.md`
+
+- Plan-only audit of MCP 0.9.5 vs website flows for the Content bot (brand kit, product/context attach, scripts, individual + bulk Story 9:16 posts). No production code; implementation locked to Grok 4.6 after Rafael GO.
+- **Finding (blocker):** MCP `execute_image_generate` and `runBulkPosts` (MCP + web bulk) send product refs to Grok `/images/generations` with no `PRODUCT LOCK` contract — the same failure PR #33 fixed for the web post path (`/images/edits` `product_lock_scene`). Confirmed by a fetch-mocked vitest probe; `resolveGrokImageApiMode` exists but `runGrokImageGenerate` never calls it.
+- Gap list (GAP-01…08), acceptance matrix (auth/tenant, brand kit, attach without mutation, 9:16 JPEG, bulk, no-Meta), recommended `execute_post_generate` + `create_offer`/`update_offer` + byte-copy ingest, shared `runGrokPostFirstGen` helper, registry → `0.10.0`.
+
+No user-facing changelog.
+
 ## 2026-09-09 — Admin lifetime usage + official list-price costs
 
 **Area:** api / frontend / billing
