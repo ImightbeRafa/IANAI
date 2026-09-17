@@ -15,11 +15,15 @@ import {
 } from './data/organic-script-prompts.js'
 import { buildWinningScriptDnaPrompt } from './data/winning-script-dna.js'
 import { runGuionesStructuredPipeline } from './lib/guiones/script-pipeline.js'
+import { scriptsToSectionsDto } from './lib/guiones/script-output.js'
 import { GROK_TEXT_MODEL, grokChatComplete, resolveGrokTextModel } from './lib/grok-models.js'
 import { resolveAuthorizedSessionProduct, isUuid } from './lib/session-access.js'
 import { userHasProductAccess } from './lib/product-access.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { resolveChatGenerationId } from './lib/credits/chat-generation-id.js'
+import { usageTimingMetadata } from './lib/usage-timings.js'
+
+export const maxDuration = 120
 
 const ORGANIC_FRAMEWORKS: readonly OrganicScriptFramework[] = ['educativo', 'storytelling', 'tendencia', 'engagement'] as const
 function isOrganicKey(key: string): key is OrganicScriptFramework {
@@ -1599,6 +1603,7 @@ Do NOT copy the scripts verbatim — adapt the structure and style to the curren
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestStarted = Date.now()
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -1897,28 +1902,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           scriptTemplatesPrompt,
         })
 
+        const scriptsDto = scriptsToSectionsDto(structured.scripts, language)
         await logApiUsage({
           userId: user.id,
           userEmail: user.email,
           feature: usageAction,
-          model: chatModel,
+          model: structured.timings?.draftModel || chatModel,
           inputTokens: estimateTokens(JSON.stringify(structured.contextProfile) + structured.promptPreview),
           outputTokens: estimateTokens(structured.content),
           success: true,
-          metadata: {
-            productType,
-            variations: scriptSettings?.variations,
-            structuredPipeline: true,
-            briefs: structured.briefs.length,
-          }
+          generationId: chatGenerationId,
+          metadata: usageTimingMetadata({
+            durationMs: Date.now() - requestStarted,
+            stageTimings: {
+              anglesMs: structured.timings?.anglesMs,
+              draftMs: structured.timings?.draftMs,
+            },
+            extra: {
+              productType,
+              variations: scriptSettings?.variations,
+              structuredPipeline: true,
+              briefs: structured.briefs.length,
+              skippedAngles: structured.timings?.skippedAngles === true,
+              draftModel: structured.timings?.draftModel,
+            },
+          }),
         })
 
         await incrementUsage(user.id, usageAction, { generationId: chatGenerationId })
 
         return res.status(200).json({
           content: structured.content,
+          scripts: scriptsDto,
           remaining: remaining - 1,
-          model: chatModel,
+          model: structured.timings?.draftModel || chatModel,
           _debug: {
             systemPrompt: structured.promptPreview,
             contextProfile: structured.contextProfile,
@@ -1962,13 +1979,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       inputTokens: usage.prompt_tokens || estimateTokens(systemPrompt + messages.map(m => m.content).join('')),
       outputTokens: usage.completion_tokens || estimateTokens(content),
       success: true,
-      metadata: {
-        productType,
-        variations: scriptSettings?.variations,
-        brandKitId: resolvedBrandKit?.id,
-        brandKitName: resolvedBrandKit?.name,
-        grokEndpoint: grok.endpoint,
-      }
+      generationId: chatGenerationId,
+      metadata: usageTimingMetadata({
+        durationMs: Date.now() - requestStarted,
+        extra: {
+          productType,
+          variations: scriptSettings?.variations,
+          brandKitId: resolvedBrandKit?.id,
+          brandKitName: resolvedBrandKit?.name,
+          grokEndpoint: grok.endpoint,
+          structuredPipeline: false,
+        },
+      }),
     })
 
     // Increment usage counter after successful generation
@@ -1984,7 +2006,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       feature: usageAction,
       model: chatModel,
       success: false,
-      errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      generationId: chatGenerationId,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      metadata: usageTimingMetadata({
+        durationMs: Date.now() - requestStarted,
+      }),
     })
 
     return res.status(500).json({ 

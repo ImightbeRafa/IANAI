@@ -59,6 +59,18 @@ export function angleInventoryNeeded(settings?: ScriptSettings): number {
   return Math.min(Math.max(n * 2, n + 2), 12)
 }
 
+/** Skip the Grok angle call when count is small (local briefs are enough). */
+export function skipAngleInventoryMaxCount(): number {
+  const raw = Number(process.env.GUIONES_SKIP_ANGLES_MAX_COUNT ?? '2')
+  if (!Number.isFinite(raw) || raw < 0) return 2
+  return Math.floor(raw)
+}
+
+export function shouldSkipAngleInventory(settings?: ScriptSettings): boolean {
+  if (settings?.forceFreshAngles) return false
+  return getTotalRequested(settings) <= skipAngleInventoryMaxCount()
+}
+
 /** Compact JSON for model prompts (no pretty indent / trailing empty noise). */
 export function compactJson(value: unknown): string {
   return JSON.stringify(value)

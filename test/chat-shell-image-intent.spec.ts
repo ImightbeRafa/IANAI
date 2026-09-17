@@ -21,6 +21,7 @@ import {
   collectBrandGenerateVisual,
   looksLikeCondensedPostCopy,
   shouldSkipPostCondense,
+  shouldSkipStreamlineForImage,
   stripUnresolvedPlaceholders,
 } from '../src/features/chat-shell/chatShellGenerationPreferences'
 
@@ -548,6 +549,17 @@ describe('brand visual + condensed post copy', () => {
     expect(shouldSkipPostCondense({ editSource: 'post_optimize', scriptText: raw })).toBe(true)
     expect(shouldSkipPostCondense({ scriptText: 'Gancho corto\nPrueba\nCTA' })).toBe(true)
     expect(shouldSkipPostCondense({ scriptText: raw })).toBe(false)
+  })
+
+  it('L4 skips streamline for short copy and product/logo stills', () => {
+    const raw = 'Arnés ForgeCR\nCompresión médica\nEnvío [TIEMPO DE ENTREGA]\nEscribinos y un poco más de texto para pasar de 48 palabras fácilmente en este bloque de prueba extendido para no disparar condensed.'
+    expect(shouldSkipStreamlineForImage({ scriptText: 'Corto', styleKind: 'preset' })).toBe(true)
+    expect(shouldSkipStreamlineForImage({ scriptText: raw, styleKind: 'product' })).toBe(true)
+    expect(shouldSkipStreamlineForImage({ scriptText: raw, styleKind: 'logo' })).toBe(true)
+    expect(shouldSkipStreamlineForImage({
+      scriptText: `${raw}\n${raw}\n${raw}`,
+      styleKind: 'preset',
+    })).toBe(false)
   })
 
   it('uses product-specific userText for rail product foto flows', () => {

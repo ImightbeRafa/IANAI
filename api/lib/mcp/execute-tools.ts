@@ -13,8 +13,9 @@ import {
   quoteLegacyActionCredits,
 } from '../auth.js'
 import { isCreditsV1Enabled } from '../credits/catalog.js'
-import { logApiUsage, estimateTokens } from '../usage-logger.js'
+import { usageTimingMetadata } from '../usage-timings.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
+import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import { runGrokPostFirstGen } from '../grok-image-generate.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
@@ -118,6 +119,7 @@ function scriptSettingsFromArgs(args: Record<string, unknown>): ScriptSettings {
     ctaStrength,
     useStructuredPipeline: true,
     forceFreshAngles: args.forceFreshAngles === true,
+    model: typeof args.model === 'string' ? args.model : undefined,
   }
 }
 
@@ -435,6 +437,7 @@ async function runScriptGenerateBody(options: {
   ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
   quote: number
 }): Promise<Record<string, unknown>> {
+  const pipelineStarted = Date.now()
   const scriptGenerationId = generationIdFromApproval(options.approvalRequestId, 'script')
   const ctx = options.ctxPreview
   const offer = ctx.offers.find((o) => o.id === options.offerId)!
@@ -479,6 +482,7 @@ async function runScriptGenerateBody(options: {
   })
 
   const text = pipeline.content || JSON.stringify(pipeline.scripts || [], null, 2)
+  const persistStarted = Date.now()
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
     brandId: options.brandId,
@@ -496,24 +500,37 @@ async function runScriptGenerateBody(options: {
     approvalRequestId: options.approvalRequestId,
   })
 
+  const persistMs = Date.now() - persistStarted
+  const sections = scriptsToSectionsDto(pipeline.scripts || [], options.language)
+
   await logApiUsage({
     userId: options.user.id,
     userEmail: options.user.email || undefined,
     feature: 'script',
-    model: GROK_TEXT_MODEL,
+    model: pipeline.timings?.draftModel || GROK_TEXT_MODEL,
     inputTokens: estimateTokens(text),
     outputTokens: estimateTokens(text),
     success: true,
     generationId: scriptGenerationId,
     source: 'mcp',
-    metadata: {
-      action: 'mcp_execute_script_generate',
-      source: 'mcp',
-      brandId: options.brandId,
-      approvalRequestId: options.approvalRequestId,
-      sessionId,
-      chargedCredits: options.quote,
-    },
+    metadata: usageTimingMetadata({
+      durationMs: Date.now() - pipelineStarted,
+      stageTimings: {
+        anglesMs: pipeline.timings?.anglesMs,
+        draftMs: pipeline.timings?.draftMs,
+        persistMs,
+      },
+      extra: {
+        action: 'mcp_execute_script_generate',
+        source: 'mcp',
+        brandId: options.brandId,
+        approvalRequestId: options.approvalRequestId,
+        sessionId,
+        chargedCredits: options.quote,
+        skippedAngles: pipeline.timings?.skippedAngles === true,
+        draftModel: pipeline.timings?.draftModel,
+      },
+    }),
   })
   const charged = await chargeMcpCredits({
     userId: options.user.id,
@@ -534,6 +551,7 @@ async function runScriptGenerateBody(options: {
     messageId: saved.messageId,
     scriptId: saved.scriptId,
     scripts: pipeline.scripts || null,
+    sections,
     content: text,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
   }, charged, options.quote, 'execute_script_generate')
@@ -721,6 +739,7 @@ async function runImageGenerateBody(options: {
   ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
   quote: number
 }): Promise<Record<string, unknown>> {
+  const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
   const appliedAspectRatio = resolveGrokAspectRatio(options.aspectRatio, {
     allowFallback: options.aspectRatioFallback === true,
@@ -764,6 +783,7 @@ async function runImageGenerateBody(options: {
     language: 'es',
   })
 
+  const persistStarted = Date.now()
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
     userId: options.user.id,
     brandId: options.brandId,
@@ -798,18 +818,22 @@ async function runImageGenerateBody(options: {
     costOverrideUsd: generated.estimatedCostUsd,
     generationId: imageGenerationId,
     source: 'mcp',
-    metadata: {
-      action: 'mcp_execute_image_generate',
-      source: 'mcp',
-      brandId: options.brandId,
-      approvalRequestId: options.approvalRequestId,
-      sessionId,
-      resolution: generated.resolution,
-      quality: generated.quality,
-      grokMode: generated.mode,
-      lockApplied: generated.lockApplied,
-      chargedCredits: options.quote,
-    },
+    metadata: usageTimingMetadata({
+      durationMs: Date.now() - imageStarted,
+      stageTimings: { imageMs: Date.now() - imageStarted, persistMs: Date.now() - persistStarted },
+      extra: {
+        action: 'mcp_execute_image_generate',
+        source: 'mcp',
+        brandId: options.brandId,
+        approvalRequestId: options.approvalRequestId,
+        sessionId,
+        resolution: generated.resolution,
+        quality: generated.quality,
+        grokMode: generated.mode,
+        lockApplied: generated.lockApplied,
+        chargedCredits: options.quote,
+      },
+    }),
   })
   const charged = await chargeMcpCredits({
     userId: options.user.id,
@@ -1057,6 +1081,7 @@ async function runImageEditBody(options: {
   ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
   quote: number
 }): Promise<Record<string, unknown>> {
+  const imageStarted = Date.now()
   const source = await resolveMcpSourceImage({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -1121,13 +1146,17 @@ async function runImageEditBody(options: {
     costOverrideUsd: generated.estimatedCostUsd,
     generationId,
     source: 'mcp',
-    metadata: {
-      action: 'mcp_execute_image_edit',
-      source: 'mcp',
-      brandId: options.brandId,
-      approvalRequestId: options.approvalRequestId,
-      sessionId,
-    },
+    metadata: usageTimingMetadata({
+      durationMs: Date.now() - imageStarted,
+      stageTimings: { imageMs: Date.now() - imageStarted },
+      extra: {
+        action: 'mcp_execute_image_edit',
+        source: 'mcp',
+        brandId: options.brandId,
+        approvalRequestId: options.approvalRequestId,
+        sessionId,
+      },
+    }),
   })
   const charged = await chargeMcpCredits({
     userId: options.user.id,
@@ -1327,6 +1356,7 @@ async function runImageEnhanceBody(options: {
   ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
   quote: number
 }): Promise<Record<string, unknown>> {
+  const imageStarted = Date.now()
   const source = await resolveMcpSourceImage({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -1393,14 +1423,18 @@ async function runImageEnhanceBody(options: {
     costOverrideUsd: generated.estimatedCostUsd,
     generationId,
     source: 'mcp',
-    metadata: {
-      action: 'mcp_execute_image_enhance',
-      source: 'mcp',
-      brandId: options.brandId,
-      approvalRequestId: options.approvalRequestId,
-      sessionId,
-      enhanceTier: options.enhanceTier,
-    },
+    metadata: usageTimingMetadata({
+      durationMs: Date.now() - imageStarted,
+      stageTimings: { imageMs: Date.now() - imageStarted },
+      extra: {
+        action: 'mcp_execute_image_enhance',
+        source: 'mcp',
+        brandId: options.brandId,
+        approvalRequestId: options.approvalRequestId,
+        sessionId,
+        enhanceTier: options.enhanceTier,
+      },
+    }),
   })
   const charged = await chargeMcpCredits({
     userId: options.user.id,

@@ -2,7 +2,7 @@
  * MCP GUIDE + EXECUTE for bulk diverse generation.
  */
 
-import { quoteLegacyActionCredits } from '../auth.js'
+import { sectionsFromStoredContent } from '../guiones/script-sections-parse.js'
 import {
   clampBulkCount,
   orchestrateAngles,
@@ -473,6 +473,7 @@ export async function mcpExecuteBulkScripts(options: {
               angleId: item.angleId,
               title: item.title,
               content: item.content,
+              sections: item.content ? sectionsFromStoredContent(item.content) : [],
               scriptId: item.scriptId,
               messageId: item.messageId,
               charged: item.charged,
@@ -512,6 +513,7 @@ export async function mcpExecuteBulkScripts(options: {
           angleId: item.angleId,
           title: item.title,
           content: item.content,
+          sections: item.content ? sectionsFromStoredContent(item.content) : [],
           scriptId: item.scriptId,
           messageId: item.messageId,
           charged: item.charged,

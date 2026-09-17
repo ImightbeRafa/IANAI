@@ -107,3 +107,16 @@ export function shouldSkipPostCondense(options: {
   if (options.editSource === 'post_optimize') return true
   return Boolean(options.scriptText && looksLikeCondensedPostCopy(options.scriptText))
 }
+
+/** Skip /api/streamline-script for short copy and product/logo stills (P0). */
+export function shouldSkipStreamlineForImage(options: {
+  scriptText?: string | null
+  styleKind?: string | null
+  alreadyOptimized?: boolean
+  editSource?: string | null
+}): boolean {
+  if (shouldSkipPostCondense(options)) return true
+  if (options.styleKind === 'product' || options.styleKind === 'logo') return true
+  const text = options.scriptText || ''
+  return text.length > 0 && text.length <= 320
+}

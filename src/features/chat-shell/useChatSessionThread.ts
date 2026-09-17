@@ -40,6 +40,7 @@ import type {
   ScriptGenerationSettings,
 } from '../../types'
 import { isScriptContent, parseScripts } from '../../utils/scriptParser'
+import type { ScriptSectionsDto } from '../../utils/scriptSections'
 import { useUsageLimits, invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
 import {
   buildCreditQuote,
@@ -64,6 +65,7 @@ import {
   collectBrandGenerateVisual,
   resolveBrandKitIdForSession,
   shouldSkipPostCondense,
+  shouldSkipStreamlineForImage,
   stripUnresolvedPlaceholders,
   type BrandVisualFallback,
 } from './chatShellGenerationPreferences'
@@ -1062,13 +1064,13 @@ export function useChatSessionThread(options: {
   const persistOfferSuccess = useCallback(async (options: {
     originSessionId: string
     savedUserId: string
-    success: { step: PlannedOfferStep; content: string; product: Product }
+    success: { step: PlannedOfferStep; content: string; product: Product; scripts?: ScriptSectionsDto[] }
   }) => {
     const { originSessionId, success } = options
     const offerName = success.step.name || success.product.name || `Script ${success.step.ordinal}`
     const assistantContent = `### ${success.step.ordinal}. ${offerName}\n\n${success.content}`
     const savedAi = await addMessage(originSessionId, 'assistant', assistantContent)
-    const scripts = splitOfferScriptContent(success.content, offerName)
+    const scripts = splitOfferScriptContent(success.content, offerName, success.scripts)
     const ranked = assignGlobalScriptOrdinals([{
       success,
       offerName,
@@ -1193,7 +1195,7 @@ export function useChatSessionThread(options: {
         const savedAi = await persistOfferSuccess({
           originSessionId,
           savedUserId,
-          success: { step, content: ai.content, product },
+          success: { step, content: ai.content, product, scripts: ai.scripts },
         })
         results.push({ ok: true, step, content: ai.content, product, savedAi })
         if (isLiveThread(
@@ -2383,9 +2385,10 @@ export function useChatSessionThread(options: {
       const brandLogoUrl = options.brandLogoUrlOverride || brandVisual.brandLogoUrl
       let prompt = options.prompt
       let scriptText = options.scriptText
-      if (scriptText && !shouldSkipPostCondense({
+      if (scriptText && !shouldSkipStreamlineForImage({
         scriptText,
         alreadyOptimized: options.alreadyOptimized,
+        styleKind: prefs.style?.kind,
       })) {
         try {
           scriptText = stripUnresolvedPlaceholders(await streamlineScriptForPost({

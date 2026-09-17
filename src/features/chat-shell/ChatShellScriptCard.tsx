@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Check, BookmarkPlus, Loader2, Pencil, X, Send, Wand2, Anchor, Sparkles, MoreHorizontal } from 'lucide-react'
 import type { ParsedScript } from '../../utils/scriptParser'
+import {
+  bodyOnlyCopyText,
+  labeledCopyText,
+  parseScriptBatch,
+  type ParsedScriptOption,
+} from '../../utils/scriptSections'
 import type { ProductType } from '../../types'
 import { getScriptsByMessage, getScriptVersions, recordAiSignal } from '../../services/database'
 import { parseScriptSections } from './parseScriptSections'
@@ -179,18 +185,59 @@ function operationCopy(
   }
 }
 
-function renderScriptSections(text: string) {
-  const sections = parseScriptSections(text)
+function optionFromDisplay(
+  text: string,
+  fallback: ParsedScript
+): ParsedScriptOption {
+  const batch = parseScriptBatch(text)
+  if (batch.length >= 1) {
+    return {
+      ...batch[0],
+      index: fallback.index || batch[0].index,
+      title: batch[0].title || fallback.title,
+      scriptTypeLabel: batch[0].scriptTypeLabel || fallback.scriptTypeLabel || '',
+    }
+  }
+  const sections = parseScriptSections(text).map((section) => ({
+    kind: section.kind,
+    label: section.label,
+    displayLabel: section.label,
+    text: section.body,
+    seconds: section.seconds ?? null,
+  }))
+  if (typeof console !== 'undefined' && (!sections.length || sections.every((s) => s.kind === 'other'))) {
+    console.debug('script_sections_unparsed')
+  }
+  return {
+    index: fallback.index,
+    title: fallback.title,
+    scriptTypeLabel: fallback.scriptTypeLabel || '',
+    headerLine: '',
+    sections,
+    content: text,
+    totalSeconds: fallback.totalSeconds || 0,
+  }
+}
+
+function renderScriptSections(option: ParsedScriptOption) {
+  const sections = option.sections.length
+    ? option.sections
+    : [{ kind: 'other' as const, label: '', displayLabel: '', text: option.content, seconds: null }]
   return sections.map((section, i) => (
     <section
       key={`${section.kind}-${i}`}
-      className={`chat-shell__script-section${section.label ? '' : ' is-unmarked'}`}
+      className={`chat-shell__script-section${section.displayLabel || section.label ? '' : ' is-unmarked'}`}
     >
-      {section.label ? (
-        <h4 className="chat-shell__script-section-label">{section.label}</h4>
+      {section.displayLabel || section.label ? (
+        <div className="chat-shell__script-section-head">
+          <h4 className="chat-shell__script-section-label">{section.displayLabel || section.label}</h4>
+          {section.seconds != null && section.seconds > 0 ? (
+            <span className="chat-shell__script-section-time">~{section.seconds} s</span>
+          ) : null}
+        </div>
       ) : null}
-      {section.body ? (
-        <p className="chat-shell__script-section-body">{section.body}</p>
+      {section.text ? (
+        <p className="chat-shell__script-section-body">{section.text}</p>
       ) : null}
     </section>
   ))
@@ -334,13 +381,24 @@ export default function ChatShellScriptCard({
     })
   }, [postPreviewOpen, catalogFromProps, productId])
 
+  const parsedOption = useMemo(
+    () => optionFromDisplay(displayContent, script),
+    [displayContent, script]
+  )
+
   const sectionNodes = useMemo(
-    () => renderScriptSections(displayContent),
-    [displayContent]
+    () => renderScriptSections(parsedOption),
+    [parsedOption]
   )
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(displayContent)
+    await navigator.clipboard.writeText(labeledCopyText(parsedOption, language))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
+
+  const handleCopyBody = async () => {
+    await navigator.clipboard.writeText(bodyOnlyCopyText(parsedOption) || displayContent)
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
   }
@@ -719,12 +777,15 @@ export default function ChatShellScriptCard({
     <article ref={cardRef} className={`chat-shell__artifact${operation ? ' is-busy' : ''}`} aria-busy={Boolean(operation || preparingPost)}>
       <header className="chat-shell__artifact-head">
         <div className="chat-shell__artifact-title-row">
-          <strong className="chat-shell__artifact-title">{script.title || 'Script'}</strong>
-          {productName ? (
-            <span className="chat-shell__artifact-offer">{productName}</span>
-          ) : null}
+          <strong className="chat-shell__artifact-title">
+            {language === 'es' ? 'Opción' : 'Option'} {script.index}
+            {parsedOption.scriptTypeLabel ? ` · ${parsedOption.scriptTypeLabel}` : ''}
+            {parsedOption.title ? ` · “${parsedOption.title.replace(/^["“]|["”]$/g, '')}”` : script.title ? ` · ${script.title}` : ''}
+          </strong>
         </div>
-        <span className="chat-shell__artifact-index">#{script.index}</span>
+        <span className="chat-shell__artifact-index">
+          {parsedOption.totalSeconds ? `~${parsedOption.totalSeconds} s · ` : ''}#{script.index}
+        </span>
       </header>
 
       {showEdit && (
@@ -926,11 +987,15 @@ export default function ChatShellScriptCard({
                   onClick={() => { setMoreOpen(false); void openPostPreview() }}
                 >
                   <Wand2 size={13} />
-                  {kitGenerateBlocked
-                    ? kitBlockedHint
-                    : (es ? 'Optimizar para post' : 'Optimize for post')}
-                </button>
-              ) : null}
+            {kitGenerateBlocked
+              ? kitBlockedHint
+              : (es ? 'Optimizar para post' : 'Optimize for post')}
+          </button>
+        ) : null}
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); void handleCopyBody() }}>
+                <Copy size={13} />
+                {es ? 'Copiar solo texto' : 'Copy body only'}
+              </button>
               {offerImageId && offerImageUrl && onEditOfferImage ? (
                 <button type="button" role="menuitem" disabled={imageBusy} onClick={() => { setMoreOpen(false); setShowImageEdit(true) }}>
                   <Pencil size={13} />
@@ -941,6 +1006,9 @@ export default function ChatShellScriptCard({
           )}
         </div>
       </div>
+      {productName ? (
+        <footer className="chat-shell__artifact-offer-foot">{productName}</footer>
+      ) : null}
     </article>
   )
 }

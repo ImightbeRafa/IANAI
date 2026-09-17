@@ -1,3 +1,27 @@
+## 2026-09-17 — SD-01: fail-closed image job ownership on claim/replay
+
+**Area:** api / images
+**Files:** `api/lib/image-jobs.ts`, `api/generate-image.ts`, `test/chat-shell-image-jobs.spec.ts`
+
+- **Finding:** `beginOrReplayShellImageJob` returned 200 + `jobToHttpPayload` on a lost claim (`!claimed`) with no owner check. Concurrent claim on a shared `generationId` could leak another user's image job. Ownership gates used truthy `job.userId &&` (fail-open when empty). `supabaseGetJob` trusted `result_json.userId` and ignored column `user_id`.
+- **Fix:** `canAccessShellImageJob` fail-closes when owner or requester `userId` is missing. Replay, running, and `!claimed` paths return 403 on mismatch. Poll + sync existing-job gates in `generate-image.ts` use the same helper. `overlayShellImageJobUserId` prefers DB `user_id` over JSON.
+- Tests: cross-user replay denial, missing-owner fail-closed, claim-race `!claimed` 403, same-owner lost-claim 200, column overlay.
+
+No user-facing changelog (authz; no UI change).
+
+## 2026-09-17 — Phase 0: guiones format v2 + latency (structured default)
+
+**Area:** guiones / chat-shell / api / MCP
+**Files:** `api/lib/guiones/script-output.ts`, `script-timing.ts`, `script-sections-parse.ts`, `script-pipeline.ts`, `api/chat.ts`, `api/generate-image.ts`, `api/lib/image-jobs.ts`, `api/lib/usage-timings.ts`, `src/utils/scriptSections.ts`, `ChatShellScriptCard.tsx`, `src/features/chat-shell/chatShellImageApi.ts`, MCP execute/list tools, tests A1–A9 + L1–L5
+
+- Chat-shell guiones always send `useStructuredPipeline: true` (classic toggle unchanged). Canonical text v2: labels on own lines, `~N s` from local spoken-seconds (ES 2.6 / EN 2.8 wps), not model-guessed.
+- Tolerant parser (api + SPA mirror) splits `### GUIÓN/OPCIÓN` clustered blobs into one card per option. `/api/chat` ships top-level `scripts[]` DTO; MCP `execute_script_generate` / `list_scripts` / bulk items add `sections[]`.
+- Latency: `durationMs` + `stageTimings` (`anglesMs`, `draftMs`, `streamlineMs`, `imageMs`, `persistMs`) in `api_usage_logs.metadata`. Admin image-performance shows p50/p90 per model+action. `api/chat` `maxDuration` pinned to 120s.
+- Speed toggle honored on structured draft (`efficient` → grok-4.5, `best` → grok-4.6). Skip angle inventory when count ≤ 2 (`GUIONES_SKIP_ANGLES_MAX_COUNT`). Skip `/api/streamline-script` for ≤320 chars or product/logo stills.
+- Chat-shell images: `generationId` job + `waitUntil` + poll; replay completed jobs without a second charge.
+
+Out of scope (hold): P1 NL chat-drop edit, SSE progress, scratch brand, nano-banana lane, P2/P3.
+
 ## 2026-09-17 — GAP-01: MCP/bulk product-lock first-gen (edits + PRODUCT LOCK)
 
 **Area:** api / MCP / bulk images

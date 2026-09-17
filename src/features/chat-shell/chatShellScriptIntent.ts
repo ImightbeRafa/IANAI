@@ -463,8 +463,9 @@ export function parseChatShellScriptIntent(
 
   if (fresh) {
     settings.forceFreshAngles = true
-    settings.useStructuredPipeline = true
   }
+
+  settings.useStructuredPipeline = true
 
   const expectedCount =
     settings.generationMode === 'by_type'

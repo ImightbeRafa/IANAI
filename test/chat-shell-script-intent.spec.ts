@@ -151,6 +151,12 @@ describe('parseChatShellScriptIntent', () => {
     ).toBe('none')
   })
 
+  it('enables structured pipeline for plain "Quiero crear guiones"', () => {
+    const intent = parseChatShellScriptIntent('Quiero crear guiones', 'es', DEFAULT_SCRIPT_SETTINGS)
+    expect(intent.settings.useStructuredPipeline).toBe(true)
+    expect(DEFAULT_SCRIPT_SETTINGS.useStructuredPipeline).toBe(false)
+  })
+
   it('enables fresh angles + structured pipeline', () => {
     const intent = parseChatShellScriptIntent(
       'generame 2 venta con ángulos frescos',

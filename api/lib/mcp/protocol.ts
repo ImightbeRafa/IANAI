@@ -2,6 +2,7 @@
  * Minimal MCP JSON-RPC host for Grok Custom Connector.
  */
 
+import { sectionsFromStoredContent } from '../guiones/script-sections-parse.js'
 import { listEnabledMcpTools, getMcpTool } from './tool-registry.js'
 import {
   dispatchAdminTool,
@@ -867,6 +868,7 @@ async function dispatchEnabledTool(options: {
           scriptId: script.id,
           title: script.title,
           content: script.content,
+          sections: sectionsFromStoredContent(script.content || ''),
           offerId: script.offerId,
           sessionId: script.sessionId,
           createdAt: script.createdAt || null,

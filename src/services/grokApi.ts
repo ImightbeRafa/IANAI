@@ -1,6 +1,7 @@
 import type { Message, ScriptGenerationSettings, ProductType, ContextDocument, Business, Product } from '../types'
 import { mintShellGenerationId } from '../features/chat-shell/shellGenerationId'
 import { supabase } from '../lib/supabase'
+import type { ScriptSectionsDto } from '../utils/scriptSections'
 
 const CHAT_API_URL = import.meta.env.PROD ? '/api/chat' : 'http://localhost:3000/api/chat'
 const EDIT_SCRIPT_API_URL = import.meta.env.PROD ? '/api/edit-script' : 'http://localhost:3000/api/edit-script'
@@ -159,7 +160,11 @@ export async function sendMessageToGrok(
   scriptTemplateIds?: string[],
   sessionId?: string,
   generationId?: string
-): Promise<{ content: string; _debug?: { systemPrompt: string; contextProfile?: unknown; angleCandidates?: unknown[]; briefs?: unknown[]; qualityReports?: unknown[] } }> {
+): Promise<{
+  content: string
+  scripts?: ScriptSectionsDto[]
+  _debug?: { systemPrompt: string; contextProfile?: unknown; angleCandidates?: unknown[]; briefs?: unknown[]; qualityReports?: unknown[] }
+}> {
   const { data: { session } } = await supabase.auth.getSession()
   const token = session?.access_token
 
@@ -211,6 +216,7 @@ export async function sendMessageToGrok(
 
   return {
     content: data.content || 'No response generated',
+    scripts: Array.isArray(data.scripts) ? data.scripts : undefined,
     _debug: data._debug
   }
 }

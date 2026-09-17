@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { compactProfileForAngles } from '../api/lib/guiones/script-angle-inventory'
+import { buildLocalAngleCandidates, compactProfileForAngles } from '../api/lib/guiones/script-angle-inventory'
 import { selectScriptBriefs } from '../api/lib/guiones/script-briefs'
 import { buildScriptContextProfile } from '../api/lib/guiones/script-context-profile'
-import { compactBriefForDraft, compactProfileForDraft, draftPromptCharEstimate } from '../api/lib/guiones/script-output'
+import { compactBriefForDraft, compactProfileForDraft, draftPromptCharEstimate, resolveGuionesDraftModel, scriptsToSectionsDto } from '../api/lib/guiones/script-output'
 import { getCategoryLens } from '../api/lib/guiones/script-prompts/category-lenses'
 import { getTypeLens } from '../api/lib/guiones/script-prompts/type-lenses'
 import { repairFailedScripts } from '../api/lib/guiones/script-quality'
@@ -12,6 +12,7 @@ import {
   angleInventoryNeeded,
   compactJson,
   draftMaxTokens,
+  shouldSkipAngleInventory,
 } from '../api/lib/guiones/utils'
 import { CREDIT_WEIGHTS } from '../api/lib/credits/catalog'
 import { GROK_TEXT_MODEL_EFFICIENT } from '../api/lib/grok-models'
@@ -188,5 +189,53 @@ describe('guiones Spanish coherence', () => {
 describe('guiones quote/charge unchanged', () => {
   it('keeps guion_oferta at 3 credits', () => {
     expect(CREDIT_WEIGHTS.guion_oferta).toBe(3)
+  })
+})
+
+describe('A4 scripts[] DTO + L2/L3 toggle and skip angles', () => {
+  it('builds top-level scripts DTO with hook/development/close/totalSeconds', () => {
+    const script: GeneratedScript = {
+      index: 1,
+      title: 'Parche, no pastilla',
+      scriptType: 'venta_directa',
+      hookMechanism: 'direct_offer',
+      buyerStage: 'hot',
+      spokenScript: {
+        hook: 'Dormís mal.',
+        development: 'El parche trabaja de noche.',
+        ctaOrClose: 'Escribinos.',
+      },
+      qualityScore: 8,
+      timing: { hookSeconds: 3, developmentSeconds: 12, ctaSeconds: 2, totalSeconds: 17 },
+    }
+    const [dto] = scriptsToSectionsDto([script], 'es')
+    expect(dto).toMatchObject({
+      index: 1,
+      title: 'Parche, no pastilla',
+      scriptType: 'venta_directa',
+      hook: { label: 'GANCHO', text: 'Dormís mal.', seconds: 3 },
+      development: { label: 'DESARROLLO', text: 'El parche trabaja de noche.', seconds: 12 },
+      close: { label: 'CTA', text: 'Escribinos.', seconds: 2 },
+      totalSeconds: 17,
+    })
+    expect(dto.content).toContain('[GANCHO · ~3 s]')
+    expect(dto.content).toContain('Dormís mal.')
+  })
+
+  it('routes efficient drafts to grok-4.5 and best to grok-4.6', () => {
+    expect(resolveGuionesDraftModel('efficient')).toBe('grok-4.5')
+    expect(resolveGuionesDraftModel('best')).toBe('grok-4.6')
+  })
+
+  it('skips angle inventory for count ≤ 2 unless fresh angles', () => {
+    expect(shouldSkipAngleInventory({ ...settings, variations: 1 })).toBe(true)
+    expect(shouldSkipAngleInventory({ ...settings, variations: 2 })).toBe(true)
+    expect(shouldSkipAngleInventory({ ...settings, variations: 3 })).toBe(false)
+    expect(shouldSkipAngleInventory({ ...settings, variations: 2, forceFreshAngles: true })).toBe(false)
+
+    const local = buildLocalAngleCandidates(sampleProfile(), ['venta_directa', 'educativo'], 'es')
+    expect(local).toHaveLength(2)
+    expect(local[0].scriptType).toBe('venta_directa')
+    expect(local[1].scriptType).toBe('educativo')
   })
 })

@@ -32,7 +32,7 @@ export interface ScriptTypeConfig {
 export interface ScriptSettings {
   framework: ScriptFramework
   variations: number
-  model?: 'grok'
+  model?: 'grok' | 'best' | 'efficient' | string
   generationMode?: GenerationMode
   scriptTypeConfig?: ScriptTypeConfig
   ctaStrength?: CTAStrength
@@ -213,6 +213,12 @@ export interface GeneratedScript {
     ctaOrClose: string
   }
   qualityScore: number
+  timing?: {
+    hookSeconds: number
+    developmentSeconds: number
+    ctaSeconds: number
+    totalSeconds: number
+  }
 }
 
 export interface ScriptQualityReport {
@@ -229,6 +235,8 @@ export interface ScriptQualityReport {
   unresolvedPlaceholders?: string[]
   forbiddenPhrases?: string[]
   repairInstruction?: string
+  /** Warning only — sales scripts over 40 spoken seconds. */
+  timingWarning?: string
 }
 
 export interface GuionesPipelineTimings {
@@ -237,6 +245,8 @@ export interface GuionesPipelineTimings {
   totalMs: number
   angleCandidatesRequested: number
   scriptsDrafted: number
+  skippedAngles?: boolean
+  draftModel?: string
 }
 
 export interface GuionesPipelineResult {
