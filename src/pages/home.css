@@ -55,6 +55,11 @@
   box-shadow: 0 0 0 1px rgba(45, 226, 255, 0.08), 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
+/* Never paint the hollow glass pill (old auth-loading skeleton). */
+.home-nav:empty {
+  display: none;
+}
+
 .home-nav__brand {
   display: inline-flex;
   align-items: center;

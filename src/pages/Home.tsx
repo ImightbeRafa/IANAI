@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
-import { authHomePath } from '../features/chat-shell/chatShellRollout'
+import { resolveHomeRedirect } from '../lib/homeRouteGate'
 import {
   HOME_AUTH_REDIRECT,
   HOME_FAN_CARDS,
@@ -26,26 +25,6 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth()
   const { loading: rolloutLoading, canAccessChat } = useChatShellRollout()
   const lang = language === 'en' ? 'en' : 'es'
-  const [fanReady, setFanReady] = useState(false)
-
-  useEffect(() => {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reduce) {
-      setFanReady(true)
-      return
-    }
-    // Let the stacked pose paint, then pop-spread (fast carousel feel).
-    let cancelled = false
-    const id = window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        if (!cancelled) setFanReady(true)
-      }, 40)
-    })
-    return () => {
-      cancelled = true
-      window.cancelAnimationFrame(id)
-    }
-  }, [])
 
   const t = {
     es: {
@@ -94,17 +73,15 @@ export default function Home() {
 
   const chatSignup = `/signup?redirect=${encodeURIComponent(HOME_AUTH_REDIRECT)}`
   const chatLogin = `/login?redirect=${encodeURIComponent(HOME_AUTH_REDIRECT)}`
+  const redirectTo = resolveHomeRedirect({
+    authLoading,
+    hasUser: Boolean(user),
+    rolloutLoading,
+    canAccessChat,
+  })
 
-  if (authLoading || (user && rolloutLoading)) {
-    return (
-      <div className="home-page" aria-busy="true">
-        <div className="home-nav" />
-      </div>
-    )
-  }
-
-  if (user) {
-    return <Navigate to={authHomePath(canAccessChat)} replace />
+  if (redirectTo) {
+    return <Navigate to={redirectTo} replace />
   }
 
   return (
@@ -145,7 +122,7 @@ export default function Home() {
         </div>
 
         <div className="home-hero__fan-wrap">
-          <div className={`home-fan${fanReady ? ' is-spread' : ''}`} aria-hidden="true">
+          <div className="home-fan is-spread" aria-hidden="true">
             {HOME_FAN_CARDS.map((card) => (
               <div
                 key={card.id}
@@ -158,7 +135,13 @@ export default function Home() {
                   .join(' ')}
                 data-slot={card.slot}
               >
-                <img src={card.src} alt="" loading={card.slot === 'front' ? 'eager' : 'lazy'} decoding="async" />
+                <img
+                  src={card.src}
+                  alt=""
+                  loading={card.slot === 'front' ? 'eager' : 'lazy'}
+                  fetchPriority={card.slot === 'front' ? 'high' : 'low'}
+                  decoding="async"
+                />
               </div>
             ))}
           </div>

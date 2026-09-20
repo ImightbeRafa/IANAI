@@ -75,7 +75,7 @@ Optional API pairing on Preview: `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` fo
 
 Env changes require a **new Preview redeploy** (existing deployment keeps old build-time `VITE_*` values).
 
-FOUC script in `index.html` only runs on `/chat` and cannot blank `/` or `/login`.
+FOUC script in `index.html` paints `/` with `#07090d` + hero preload, and sets chat theme on `/chat` only. It cannot blank `/login`.
 
 ## Out of P0
 

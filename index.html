@@ -5,11 +5,23 @@
     <link rel="icon" type="image/webp" href="/logo-mark-32.webp" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="google" content="notranslate" />
-    <!-- Chat-shell FOUC guard: theme class before paint on /chat only -->
+    <!-- First-paint: home canvas + LCP preload on `/`; chat FOUC guard on `/chat` -->
     <script>
       (function () {
         try {
           var path = location.pathname || '';
+          if (path === '/' || path === '') {
+            document.documentElement.classList.add('home-route');
+            document.documentElement.style.background = '#07090d';
+            document.documentElement.style.colorScheme = 'dark';
+            var preload = document.createElement('link');
+            preload.rel = 'preload';
+            preload.as = 'image';
+            preload.href = '/home/ads/casa-luna.jpg';
+            preload.setAttribute('fetchpriority', 'high');
+            document.head.appendChild(preload);
+            return;
+          }
           if (!/^\/chat(?:\/|$)/.test(path)) return;
           var key = 'ianai.chat-shell.theme';
           var stored = null;
@@ -26,6 +38,9 @@
       })();
     </script>
     <style>
+      html.home-route,
+      html.home-route body,
+      html.home-route #root { background: #07090d; }
       html.chat-shell-route { background: #0b0f14; }
       html.chat-shell-route,
       html.chat-shell-route body,

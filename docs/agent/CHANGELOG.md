@@ -1,3 +1,14 @@
+## 2026-09-20 — Homepage: no empty-nav loading flash
+
+**Area:** frontend
+**Files:** `src/pages/Home.tsx`, `src/lib/homeRouteGate.ts`, `index.html`, `test/home-route-gate.spec.ts`
+
+- `/` no longer renders the hollow `.home-nav` glass pill while `authLoading` / chat rollout resolve. That empty bar was the “semi loaded” flash on advanceai.studio.
+- Public landing paints immediately. Signed-in redirect to `/chat` or `/dashboard` happens only after auth + rollout are known (`resolveHomeRedirect`).
+- Hero fan starts already spread (no stacked “phone” pose on first paint / reload). `.home-nav:empty { display: none }` as a CSS guard.
+- First paint on `/`: `home-route` sets canvas `#07090d` before JS; preloads `casa-luna.jpg` with `fetchpriority=high`. Chat FOUC guard unchanged.
+- Tests cover anonymous loading, signed-in wait, and `/chat` vs `/dashboard` redirects.
+
 ## 2026-09-17 — SD-01: fail-closed image job ownership on claim/replay
 
 **Area:** api / images
