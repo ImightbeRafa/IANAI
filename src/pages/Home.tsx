@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
@@ -26,26 +25,6 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth()
   const { loading: rolloutLoading, canAccessChat } = useChatShellRollout()
   const lang = language === 'en' ? 'en' : 'es'
-  const [fanReady, setFanReady] = useState(false)
-
-  useEffect(() => {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reduce) {
-      setFanReady(true)
-      return
-    }
-    // Let the stacked pose paint, then pop-spread (fast carousel feel).
-    let cancelled = false
-    const id = window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        if (!cancelled) setFanReady(true)
-      }, 40)
-    })
-    return () => {
-      cancelled = true
-      window.cancelAnimationFrame(id)
-    }
-  }, [])
 
   const t = {
     es: {
@@ -143,7 +122,7 @@ export default function Home() {
         </div>
 
         <div className="home-hero__fan-wrap">
-          <div className={`home-fan${fanReady ? ' is-spread' : ''}`} aria-hidden="true">
+          <div className="home-fan is-spread" aria-hidden="true">
             {HOME_FAN_CARDS.map((card) => (
               <div
                 key={card.id}

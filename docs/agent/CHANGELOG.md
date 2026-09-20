@@ -5,6 +5,7 @@
 
 - `/` no longer renders the hollow `.home-nav` glass pill while `authLoading` / chat rollout resolve. That empty bar was the “semi loaded” flash on advanceai.studio.
 - Public landing paints immediately. Signed-in redirect to `/chat` or `/dashboard` happens only after auth + rollout are known (`resolveHomeRedirect`).
+- Hero fan starts already spread (no stacked “phone” pose on first paint / reload). `.home-nav:empty { display: none }` as a CSS guard.
 - First paint on `/`: `home-route` sets canvas `#07090d` before JS; preloads `casa-luna.jpg` with `fetchpriority=high`. Chat FOUC guard unchanged.
 - Tests cover anonymous loading, signed-in wait, and `/chat` vs `/dashboard` redirects.
 
