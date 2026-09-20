@@ -91,6 +91,19 @@ export const ROADMAP: RoadmapItem[] = [
 //
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.1.15',
+    date: '2026-09-20',
+    items: [
+      {
+        category: 'fix',
+        text: {
+          es: 'La página de inicio ya no muestra una barra vacía al cargar. Entra directo a la landing.',
+          en: 'The homepage no longer flashes an empty bar while loading. You go straight to the landing.',
+        },
+      },
+    ],
+  },
+  {
     version: '0.1.14',
     date: '2026-09-17',
     items: [

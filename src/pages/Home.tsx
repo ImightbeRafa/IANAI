@@ -3,7 +3,7 @@ import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { useChatShellRollout } from '../features/chat-shell/ChatShellRolloutContext'
-import { authHomePath } from '../features/chat-shell/chatShellRollout'
+import { resolveHomeRedirect } from '../lib/homeRouteGate'
 import {
   HOME_AUTH_REDIRECT,
   HOME_FAN_CARDS,
@@ -94,17 +94,15 @@ export default function Home() {
 
   const chatSignup = `/signup?redirect=${encodeURIComponent(HOME_AUTH_REDIRECT)}`
   const chatLogin = `/login?redirect=${encodeURIComponent(HOME_AUTH_REDIRECT)}`
+  const redirectTo = resolveHomeRedirect({
+    authLoading,
+    hasUser: Boolean(user),
+    rolloutLoading,
+    canAccessChat,
+  })
 
-  if (authLoading || (user && rolloutLoading)) {
-    return (
-      <div className="home-page" aria-busy="true">
-        <div className="home-nav" />
-      </div>
-    )
-  }
-
-  if (user) {
-    return <Navigate to={authHomePath(canAccessChat)} replace />
+  if (redirectTo) {
+    return <Navigate to={redirectTo} replace />
   }
 
   return (
@@ -158,7 +156,13 @@ export default function Home() {
                   .join(' ')}
                 data-slot={card.slot}
               >
-                <img src={card.src} alt="" loading={card.slot === 'front' ? 'eager' : 'lazy'} decoding="async" />
+                <img
+                  src={card.src}
+                  alt=""
+                  loading={card.slot === 'front' ? 'eager' : 'lazy'}
+                  fetchPriority={card.slot === 'front' ? 'high' : 'low'}
+                  decoding="async"
+                />
               </div>
             ))}
           </div>
