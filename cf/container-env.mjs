@@ -4,13 +4,15 @@
 //
 // VERCEL_ENV is deliberately excluded: APP_ENV replaces it on Cloudflare.
 //
-// ADVANCE_RUNTIME is not actually forwarded by the Worker (server.mjs sets it
-// itself, and the Dockerfile sets it too) — it's listed here only so the
-// "every process.env.X read in api/ must be in CONTAINER_ENV_KEYS" test
-// doesn't need a second special case alongside VERCEL_ENV.
+// ADVANCE_RUNTIME is deliberately excluded too (round-6 operator review,
+// item F): server.mjs now stamps it unconditionally on every boot, so no
+// Worker var or env value could ever be used to switch the handler's
+// fail-closed 503 gate off by forwarding a spoofed value. It's still read in
+// api/mcp-guide-analysis.ts (process.env.ADVANCE_RUNTIME), so the "every
+// process.env.X read in api/ must be in CONTAINER_ENV_KEYS" test carries an
+// explicit, documented exception for it, same as VERCEL_ENV.
 export const CONTAINER_ENV_KEYS = Object.freeze([
   'APP_ENV',
-  'ADVANCE_RUNTIME',
   'ENABLE_CRONS',
   'CRON_SECRET',
   'SUPABASE_URL',
@@ -49,11 +51,11 @@ export function getContainerEnvVars(source) {
   return out
 }
 
-// Fail closed: crons run ONLY when ENABLE_CRONS is the exact string '1'
-// (after trim). Anything else — unset, '', '0', 'true', 'TRUE', 'yes', ... —
-// means crons stay off. This is deliberately not a loose truthy check: SD-01
-// required a single unambiguous "on" value so a typo or a truthy-but-wrong
-// string (e.g. 'true') can never accidentally enable the preview cron.
-export function cronsEnabled(source) {
-  return (source.ENABLE_CRONS ?? '').trim() === '1'
-}
+// cronsEnabled moved to api/lib/crons-enabled.ts (round-6 operator review,
+// item E) — the one shared implementation used by both the Worker-side gate
+// (cf/worker-core.ts's handleScheduled, which imports it directly) and the
+// handler-level guard in api/mcp-guide-analysis.ts. It's NOT re-exported
+// from here: this file is loaded directly by plain Node in
+// scripts/parity/env-diff.mjs (no bundler, no TS loader), which can't
+// resolve an extensionless import of a .ts file — only the bundled/
+// transpiled consumers (the Worker build, vitest) can.

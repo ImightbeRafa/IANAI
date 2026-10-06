@@ -13,6 +13,17 @@
 
 const CLOCK_SKEW_SECONDS = 60
 
+// Round-6 operator review, item B. Cached keys get a ~1h TTL: after that,
+// the NEXT request refetches even for a previously-known kid (key rotation
+// should be picked up eventually without waiting for an unknown-kid miss).
+const JWKS_CACHE_TTL_MS = 60 * 60 * 1000
+// An unknown kid triggers at most one refetch per team domain per this
+// window — a flood of requests with a bogus/unknown kid (or a slow-rolling
+// rotation where many requests arrive before the new JWKS is fetched) must
+// never cause a fetch per request; this is a negative cache / minimum
+// refetch interval, not a retry budget.
+const JWKS_MIN_REFETCH_INTERVAL_MS = 60 * 1000
+
 // Hardcoded allowlist, exported so it's visible in review and in tests.
 // Case-insensitive match against the JWT's `email` claim.
 export const ACCESS_ALLOWED_EMAILS = Object.freeze(['rafa04128@gmail.com', 'rafaeser@gmail.com'])
@@ -35,10 +46,27 @@ interface Jwk {
   [key: string]: unknown
 }
 
+interface JwksCacheEntry {
+  keys: Map<string, CryptoKey>
+  fetchedAtMs: number
+  lastRefetchAttemptMs: number
+  /** Shared by concurrent misses so N simultaneous requests cause exactly 1 fetch. */
+  inFlight: Promise<Map<string, CryptoKey>> | null
+}
+
 // Module-level JWKS cache, keyed by team domain. Real deployments only ever
 // use one team domain, but keying by it (rather than a single slot) keeps
 // tests from stepping on each other when they use different domains.
-const jwksCache = new Map<string, Map<string, CryptoKey>>()
+const jwksCache = new Map<string, JwksCacheEntry>()
+
+// Test-only: clears the module-level cache between test files/describe
+// blocks that reuse the same team domain (most tests instead sidestep this
+// by generating a fresh team domain per test via uniqueTeamDomain() — this
+// export exists for the handful of cache-timing tests that deliberately
+// want to control a single domain's cache state across multiple calls).
+export function __resetJwksCacheForTests(): void {
+  jwksCache.clear()
+}
 
 const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
@@ -101,16 +129,50 @@ async function fetchJwks(teamDomain: string, fetchImpl: FetchLike): Promise<Map<
   return keys
 }
 
-// Cache hit on `kid` -> no fetch. Cache miss (including a cold cache) ->
-// fetch exactly once, update the cache, then look up again. A `kid` that's
-// still missing after that one refetch is treated as unknown — no retry.
-async function getSigningKey(teamDomain: string, kid: string, fetchImpl: FetchLike): Promise<CryptoKey | null> {
-  const cached = jwksCache.get(teamDomain)
-  if (cached?.has(kid)) return cached.get(kid) ?? null
+// Cache hit on `kid`, within the TTL -> no fetch. Past the TTL (even for a
+// previously-known kid) -> unconditional refetch, never throttled — this is
+// a scheduled refresh, not a response to a suspicious/unknown kid. A cache
+// miss on `kid` with a cache that's still within its TTL is throttled to at
+// most one refetch attempt per JWKS_MIN_REFETCH_INTERVAL_MS per team domain
+// (the "unknown kid" case: a bogus/old kid, or a rotation this process
+// hasn't picked up yet) — inside that window, no fetch happens at all and
+// the kid is treated as unknown. Concurrent misses that land while a fetch
+// is already in flight all await the SAME promise instead of each starting
+// their own.
+async function getSigningKey(
+  teamDomain: string,
+  kid: string,
+  fetchImpl: FetchLike,
+  nowMs: number
+): Promise<CryptoKey | null> {
+  const entry = jwksCache.get(teamDomain)
 
-  const keys = await fetchJwks(teamDomain, fetchImpl)
-  jwksCache.set(teamDomain, keys)
-  return keys.get(kid) ?? null
+  if (entry && nowMs - entry.fetchedAtMs < JWKS_CACHE_TTL_MS) {
+    if (entry.keys.has(kid)) return entry.keys.get(kid) ?? null
+    if (!entry.inFlight && nowMs - entry.lastRefetchAttemptMs < JWKS_MIN_REFETCH_INTERVAL_MS) {
+      return null
+    }
+  }
+
+  if (entry?.inFlight) {
+    const keys = await entry.inFlight
+    return keys.get(kid) ?? null
+  }
+
+  const fetchPromise = fetchJwks(teamDomain, fetchImpl)
+  const nextEntry: JwksCacheEntry = entry
+    ? { ...entry, lastRefetchAttemptMs: nowMs, inFlight: fetchPromise }
+    : { keys: new Map(), fetchedAtMs: 0, lastRefetchAttemptMs: nowMs, inFlight: fetchPromise }
+  jwksCache.set(teamDomain, nextEntry)
+
+  try {
+    const keys = await fetchPromise
+    jwksCache.set(teamDomain, { keys, fetchedAtMs: nowMs, lastRefetchAttemptMs: nowMs, inFlight: null })
+    return keys.get(kid) ?? null
+  } catch (err) {
+    jwksCache.set(teamDomain, { ...nextEntry, inFlight: null })
+    throw err
+  }
 }
 
 export async function verifyAccessJwt(
@@ -143,10 +205,11 @@ export async function verifyAccessJwt(
   if (typeof header?.kid !== 'string' || !header.kid) return false
 
   const fetchImpl = deps.fetchImpl ?? (fetch as unknown as FetchLike)
+  const nowMs = deps.now ? deps.now() : Date.now()
 
   let key: CryptoKey | null
   try {
-    key = await getSigningKey(teamDomain as string, header.kid, fetchImpl)
+    key = await getSigningKey(teamDomain as string, header.kid, fetchImpl, nowMs)
   } catch {
     return false
   }
@@ -176,7 +239,7 @@ export async function verifyAccessJwt(
   // expires, which is not acceptable for a gate like this. nbf stays
   // optional: only checked when present, same as the JWT spec treats it.
   if (typeof payload.exp !== 'number') return false
-  const nowSeconds = Math.floor((deps.now ? deps.now() : Date.now()) / 1000)
+  const nowSeconds = Math.floor(nowMs / 1000)
   if (nowSeconds > payload.exp + CLOCK_SKEW_SECONDS) return false
   if (typeof payload.nbf === 'number' && nowSeconds < payload.nbf - CLOCK_SKEW_SECONDS) return false
 

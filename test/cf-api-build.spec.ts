@@ -131,6 +131,28 @@ describe('build-api end to end (real handlers, no DB)', () => {
     expect(await res.json()).toEqual({ error: 'Crons disabled on this runtime' })
   }, 20_000)
 
+  // Round-6 operator review, item F: server.mjs now stamps ADVANCE_RUNTIME
+  // unconditionally (not just when unset) — this proves that even if a
+  // Worker/env somehow set a different value, the real adapter overwrites
+  // it on boot, so the handler's fail-closed 503 gate can't be spoofed off.
+  it('mcp-guide-analysis still 503s even if ADVANCE_RUNTIME=vercel was set in the adapter env', async () => {
+    adapter = await startAdapter({
+      apiDir: DIST_API,
+      staticDir: resolve(ROOT, 'test/fixtures/cf-static-missing'),
+      env: {
+        VITE_SUPABASE_URL: 'https://example.supabase.co',
+        CRON_SECRET: 'test-cron',
+        ADVANCE_RUNTIME: 'vercel',
+      },
+    })
+
+    const res = await fetch(`${adapter.baseUrl}/api/mcp-guide-analysis`, {
+      headers: { Authorization: 'Bearer test-cron' },
+    })
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'Crons disabled on this runtime' })
+  }, 20_000)
+
   it('mcp-guide-analysis behaves normally on the CF container runtime once ENABLE_CRONS=1', async () => {
     adapter = await startAdapter({
       apiDir: DIST_API,

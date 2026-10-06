@@ -34,8 +34,12 @@ export function diffEnv(root) {
   const workerOnlyKeys = new Set(WORKER_ONLY_VAR_NAMES)
   const relevantNames = sortedUnique([...VERCEL_ENV_NAMES, ...apiNames])
 
+  // VERCEL_ENV and ADVANCE_RUNTIME are both read in api/ but deliberately
+  // never forwarded by the Worker — ADVANCE_RUNTIME is stamped unconditionally
+  // by server.mjs itself (round-6 operator review, item F), precisely so no
+  // Worker var could ever be used to spoof it off.
   const missingFromContainer = relevantNames.filter(
-    (name) => name !== 'VERCEL_ENV' && !containerKeys.has(name)
+    (name) => name !== 'VERCEL_ENV' && name !== 'ADVANCE_RUNTIME' && !containerKeys.has(name)
   )
 
   const wranglerVarNames = sortedUnique([

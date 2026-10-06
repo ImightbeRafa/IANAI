@@ -1,6 +1,6 @@
 import { webcrypto } from 'node:crypto'
-import { describe, expect, it, vi } from 'vitest'
-import { ACCESS_ALLOWED_EMAILS, verifyAccessJwt } from '../cf/access-jwt'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ACCESS_ALLOWED_EMAILS, verifyAccessJwt, __resetJwksCacheForTests } from '../cf/access-jwt'
 import { handleFetch, handleScheduled, type WorkerEnv } from '../cf/worker-core'
 
 const subtle = webcrypto.subtle as unknown as SubtleCrypto
@@ -270,7 +270,17 @@ describe('verifyAccessJwt', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
-  it('a kid that only appears after key rotation passes once refetched (refetch exercised once)', async () => {
+  // Round-6 operator review, item B: an unknown kid is now throttled to at
+  // most one refetch attempt per 60s per team domain (negative cache), so
+  // this test must advance the injected clock past that window between the
+  // old-kid and new-kid calls — without it, the second call would (new,
+  // correct behavior) see "still within the throttle window" and return
+  // null with NO fetch, which would make this specific rotation scenario
+  // fail closed until the window lapses. That's the intended fix (a flood
+  // of unknown/rotated-away kids must not cause a fetch per request); this
+  // test demonstrates the refetch DOES still happen once that window has
+  // passed, not that it happens immediately.
+  it('a kid that only appears after key rotation passes once refetched, 60s+ after the first fetch', async () => {
     const teamDomain = uniqueTeamDomain()
     const aud = 'test-aud-value'
     const env: WorkerEnv = {
@@ -294,16 +304,118 @@ describe('verifyAccessJwt', () => {
       return new Response(JSON.stringify({ keys }), { status: 200 })
     })
 
+    let clockMs = Date.now()
+    const now = () => clockMs
+
     const oldToken = await signJwt(oldPriv, { alg: 'RS256', kid: oldKid }, validPayload(aud, teamDomain))
     const reqOld = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': oldToken } })
-    expect(await verifyAccessJwt(reqOld, env, { fetchImpl })).toBe(true)
+    expect(await verifyAccessJwt(reqOld, env, { fetchImpl, now })).toBe(true)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
 
     rotated = true
+    clockMs += 61_000
     const newToken = await signJwt(newPriv, { alg: 'RS256', kid: newKid }, validPayload(aud, teamDomain))
     const reqNew = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': newToken } })
-    expect(await verifyAccessJwt(reqNew, env, { fetchImpl })).toBe(true)
+    expect(await verifyAccessJwt(reqNew, env, { fetchImpl, now })).toBe(true)
     expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('JWKS cache timing (round-6 operator review, item B)', () => {
+  afterEach(() => __resetJwksCacheForTests())
+
+  it('an unknown kid twice within 60s causes exactly 1 fetch', async () => {
+    const { teamDomain, aud, env, fetchImpl } = await setup()
+    const { privateKey: strangerKey } = await generateKeyPair()
+    let clockMs = Date.now()
+    const now = () => clockMs
+
+    const token1 = await signJwt(strangerKey, { alg: 'RS256', kid: 'unknown-1' }, validPayload(aud, teamDomain))
+    const req1 = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token1 } })
+    expect(await verifyAccessJwt(req1, env, { fetchImpl, now })).toBe(false)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    clockMs += 30_000
+    const token2 = await signJwt(strangerKey, { alg: 'RS256', kid: 'unknown-2' }, validPayload(aud, teamDomain))
+    const req2 = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token2 } })
+    expect(await verifyAccessJwt(req2, env, { fetchImpl, now })).toBe(false)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unknown kid retried after 60s causes a second fetch', async () => {
+    const { teamDomain, aud, env, fetchImpl } = await setup()
+    const { privateKey: strangerKey } = await generateKeyPair()
+    let clockMs = Date.now()
+    const now = () => clockMs
+
+    const token1 = await signJwt(strangerKey, { alg: 'RS256', kid: 'unknown-1' }, validPayload(aud, teamDomain))
+    const req1 = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token1 } })
+    expect(await verifyAccessJwt(req1, env, { fetchImpl, now })).toBe(false)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    clockMs += 61_000
+    const token2 = await signJwt(strangerKey, { alg: 'RS256', kid: 'unknown-2' }, validPayload(aud, teamDomain))
+    const req2 = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token2 } })
+    expect(await verifyAccessJwt(req2, env, { fetchImpl, now })).toBe(false)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('a known kid within the 1h TTL causes 0 refetches, no matter how many verifications', async () => {
+    const { privateKey, kid, teamDomain, aud, env, fetchImpl } = await setup()
+    let clockMs = Date.now()
+    const now = () => clockMs
+    // A long-lived exp — this test advances the injected clock by up to 30
+    // minutes, which must not make the token itself look expired.
+    const token = await signJwt(
+      privateKey,
+      { alg: 'RS256', kid },
+      validPayload(aud, teamDomain, { exp: nowSeconds() + 3 * 60 * 60 })
+    )
+
+    for (let i = 0; i < 3; i++) {
+      clockMs += 10 * 60 * 1000 // +10 min each time, well under the 1h TTL
+      const req = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token } })
+      expect(await verifyAccessJwt(req, env, { fetchImpl, now })).toBe(true)
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('a known kid refetches once the 1h TTL has elapsed', async () => {
+    const { privateKey, kid, teamDomain, aud, env, fetchImpl } = await setup()
+    let clockMs = Date.now()
+    const now = () => clockMs
+    // Long-lived exp — this test advances the injected clock by 61 minutes,
+    // which must not make the token itself look expired.
+    const token = await signJwt(
+      privateKey,
+      { alg: 'RS256', kid },
+      validPayload(aud, teamDomain, { exp: nowSeconds() + 3 * 60 * 60 })
+    )
+
+    const req1 = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token } })
+    expect(await verifyAccessJwt(req1, env, { fetchImpl, now })).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    clockMs += 61 * 60 * 1000 // +61 min, past the 1h TTL
+    const req2 = new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token } })
+    expect(await verifyAccessJwt(req2, env, { fetchImpl, now })).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('N concurrent requests with an uncached kid cause exactly 1 fetch', async () => {
+    const { privateKey, kid, teamDomain, aud, env, fetchImpl } = await setup()
+    const token = await signJwt(privateKey, { alg: 'RS256', kid }, validPayload(aud, teamDomain))
+    const makeReq = () => new Request('https://worker.test/', { headers: { 'Cf-Access-Jwt-Assertion': token } })
+
+    const results = await Promise.all([
+      verifyAccessJwt(makeReq(), env, { fetchImpl }),
+      verifyAccessJwt(makeReq(), env, { fetchImpl }),
+      verifyAccessJwt(makeReq(), env, { fetchImpl }),
+      verifyAccessJwt(makeReq(), env, { fetchImpl }),
+      verifyAccessJwt(makeReq(), env, { fetchImpl }),
+    ])
+    expect(results).toEqual([true, true, true, true, true])
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -352,6 +464,62 @@ describe('handleFetch Access JWT gate (preview only)', () => {
     const res = await handleFetch(req, env, containerFetch)
     expect(res.status).toBe(200)
     expect(containerFetch).toHaveBeenCalledTimes(1)
+  })
+
+  describe('gate selector: enforce unless production (round-6 operator review, item A)', () => {
+    // The original gate only enforced when APP_ENV === 'preview' exactly —
+    // failing OPEN for every other value (unset, a typo, a future env name
+    // nobody anticipated). It's now inverted: enforce for everything that
+    // isn't production, using api/lib/app-env.ts's own
+    // trim+lowercase normalization, so there's one place deciding what
+    // "production" means.
+    it.each([
+      ['unset', undefined],
+      ['empty string', ''],
+      ["'Preview'", 'Preview'],
+      ["'prod'", 'prod'],
+      ["'staging'", 'staging'],
+    ])('APP_ENV=%s is enforced: 403 without a JWT, 200 with a valid one', async (_label, appEnv) => {
+      const { privateKey, kid, teamDomain, aud, fetchImpl } = await setup()
+      const containerFetch = vi.fn(async () => new Response('ok', { status: 200 }))
+      const env: WorkerEnv = {
+        ASSETS: { fetch: vi.fn() },
+        APP_ENV: appEnv,
+        ACCESS_TEAM_DOMAIN: teamDomain,
+        ACCESS_AUD: aud,
+      }
+
+      const unauthed = await handleFetch(new Request('https://worker.test/api/chat'), env, containerFetch, {
+        fetchImpl,
+      })
+      expect(unauthed.status).toBe(403)
+      expect(containerFetch).not.toHaveBeenCalled()
+
+      const token = await signJwt(privateKey, { alg: 'RS256', kid }, validPayload(aud, teamDomain))
+      const authed = await handleFetch(
+        new Request('https://worker.test/api/chat', { headers: { 'Cf-Access-Jwt-Assertion': token } }),
+        env,
+        containerFetch,
+        { fetchImpl }
+      )
+      expect(authed.status).toBe(200)
+      expect(containerFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([["' PRODUCTION'", ' PRODUCTION'], ["'production'", 'production']])(
+      'APP_ENV=%s is unaffected: no header still passes, no JWT verification attempted',
+      async (_label, appEnv) => {
+        const containerFetch = vi.fn(async () => new Response('ok', { status: 200 }))
+        const fetchImpl = vi.fn()
+        const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: appEnv }
+        const res = await handleFetch(new Request('https://worker.test/api/chat'), env, containerFetch, {
+          fetchImpl,
+        })
+        expect(res.status).toBe(200)
+        expect(containerFetch).toHaveBeenCalledTimes(1)
+        expect(fetchImpl).not.toHaveBeenCalled()
+      }
+    )
   })
 
   it('scheduled() with APP_ENV=preview is unaffected by JWT logic — governed only by ENABLE_CRONS', async () => {

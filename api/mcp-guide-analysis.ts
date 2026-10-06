@@ -6,6 +6,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { timingSafeEqual } from 'node:crypto'
 import { processNextMcpUrlIntake } from './lib/mcp/url-analysis-worker.js'
+import { getDeadlineSignal } from './lib/request-deadline.js'
+import { cronsEnabled } from './lib/crons-enabled.js'
 
 export const maxDuration = 60
 
@@ -39,7 +41,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(405).json({ error: 'Method not allowed' })
     return
   }
-  if (isCloudflareContainerRuntime() && process.env.ENABLE_CRONS !== '1') {
+  // Round-6 operator review, item E: uses the SAME shared cronsEnabled()
+  // the Worker's handleScheduled gate uses (api/lib/crons-enabled.ts) —
+  // not a second, slightly different `!== '1'` comparison. The raw
+  // comparison this replaced disagreed with cronsEnabled() on inputs like
+  // ' 1 ' or '1\n' (cronsEnabled trims; `!== '1'` does not), which would
+  // have let the Worker gate and this handler gate reach different
+  // conclusions about whether crons are enabled for the exact same value.
+  if (isCloudflareContainerRuntime() && !cronsEnabled(process.env)) {
     res.status(503).json({ error: 'Crons disabled on this runtime' })
     return
   }
@@ -49,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const result = await processNextMcpUrlIntake()
+    const result = await processNextMcpUrlIntake(getDeadlineSignal(req))
     res.status(200).json({ ok: true, ...result })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Worker failed'

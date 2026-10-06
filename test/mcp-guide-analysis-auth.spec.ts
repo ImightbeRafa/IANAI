@@ -130,13 +130,27 @@ describe('mcp-guide-analysis auth', () => {
       expect(processNextMcpUrlIntake).not.toHaveBeenCalled()
     })
 
-    it.each(['0', 'true'])('503s with ENABLE_CRONS=%s', async (value) => {
+    // Round-6 operator review, item E: the same truth table as
+    // test/cf-worker-core.spec.ts's CRONS_ENABLED_TRUTH_TABLE, run through
+    // THIS gate instead — both must agree on every value, since both now
+    // call the same api/lib/crons-enabled.ts. ' 1 ' and '1\n' trim to '1'
+    // and so must NOT 503 here, matching the Worker side.
+    it.each(['', '0', 'true', 'TRUE', 'yes', '01', '1.0'])('503s with ENABLE_CRONS=%s', async (value) => {
       process.env.ADVANCE_RUNTIME = 'cloudflare-container'
       process.env.ENABLE_CRONS = value
       const { req, res } = fakeReqRes('GET', { authorization: 'Bearer s3cret-test' })
       await handler(req, res)
       expect(res.statusCode).toBe(503)
       expect(processNextMcpUrlIntake).not.toHaveBeenCalled()
+    })
+
+    it.each([' 1 ', '1\n'])('does NOT 503 with ENABLE_CRONS=%j (trims to "1", same as the Worker gate)', async (value) => {
+      process.env.ADVANCE_RUNTIME = 'cloudflare-container'
+      process.env.ENABLE_CRONS = value
+      const { req, res } = fakeReqRes('GET', { authorization: 'Bearer s3cret-test' })
+      await handler(req, res)
+      expect(res.statusCode).toBe(200)
+      expect(processNextMcpUrlIntake).toHaveBeenCalledTimes(1)
     })
 
     it('200s with ENABLE_CRONS=1 and a valid Bearer', async () => {

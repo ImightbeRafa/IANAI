@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { CRON_PATHS, handleFetch, handleScheduled, type WorkerEnv } from '../cf/worker-core'
-import { CONTAINER_ENV_KEYS, cronsEnabled, getContainerEnvVars } from '../cf/container-env.mjs'
+import { CONTAINER_ENV_KEYS, getContainerEnvVars } from '../cf/container-env.mjs'
+import { cronsEnabled } from '../api/lib/crons-enabled'
 import { parseJsonc, scanProcessEnvNames } from '../scripts/parity/lib.mjs'
 import { VERCEL_ENV_NAMES } from '../scripts/parity/vercel-env-names.mjs'
 
@@ -15,20 +16,36 @@ function makeFakeContainer(impl?: (req: Request) => Promise<Response>) {
   )
 }
 
+// Round-6 operator review, item E: the full truth table, including the
+// near-misses a naive `!== '1'` comparison would get wrong in the OPPOSITE
+// direction (' 1 ' and '1\n' trim down to '1', so a non-trimming comparison
+// would wrongly treat them as disabled when cronsEnabled correctly enables
+// them — this is why api/mcp-guide-analysis.ts now calls this same function
+// instead of its own comparison; see test/mcp-guide-analysis-auth.spec.ts
+// for the handler-side half of this truth table).
+const CRONS_ENABLED_TRUTH_TABLE: Array<[string, string | undefined, boolean]> = [
+  ['unset', undefined, false],
+  ['empty string', '', false],
+  ["'0'", '0', false],
+  ["'1'", '1', true],
+  ["' 1 ' (trims to '1')", ' 1 ', true],
+  ["'1\\n' (trims to '1')", '1\n', true],
+  ["'true'", 'true', false],
+  ["'TRUE'", 'TRUE', false],
+  ["'yes'", 'yes', false],
+  ["'01'", '01', false],
+  ["'1.0'", '1.0', false],
+]
+
 describe('cronsEnabled (fail closed)', () => {
-  it.each([undefined, '', '0', 'true', 'TRUE', 'yes'])('is false for %s', (v) => {
-    expect(cronsEnabled({ ENABLE_CRONS: v })).toBe(false)
+  it.each(CRONS_ENABLED_TRUTH_TABLE)('%s -> %s', (_label, value, expected) => {
+    expect(cronsEnabled({ ENABLE_CRONS: value })).toBe(expected)
   })
 
-  it('is false for APP_ENV=preview with any of those values too', () => {
-    for (const v of [undefined, '', '0', 'true', 'TRUE', 'yes']) {
-      expect(cronsEnabled({ APP_ENV: 'preview', ENABLE_CRONS: v })).toBe(false)
+  it('APP_ENV=preview does not change any result in the truth table', () => {
+    for (const [, value, expected] of CRONS_ENABLED_TRUTH_TABLE) {
+      expect(cronsEnabled({ APP_ENV: 'preview', ENABLE_CRONS: value })).toBe(expected)
     }
-  })
-
-  it('is true only for the exact string "1"', () => {
-    expect(cronsEnabled({ ENABLE_CRONS: '1' })).toBe(true)
-    expect(cronsEnabled({ APP_ENV: 'preview', ENABLE_CRONS: '1' })).toBe(true)
   })
 })
 
@@ -37,26 +54,40 @@ describe('handleScheduled', () => {
     ({ ASSETS: { fetch: vi.fn() }, ...extra }) as WorkerEnv
 
   // Gate truth table: every value here must be a no-op (0 container calls).
-  // Only '1' may ever reach the container. This is the fail-closed
-  // guarantee SD-01 requires — a truthy-but-wrong string like 'true' must
-  // never enable the preview cron.
-  it.each([
-    ['unset', undefined],
-    ['empty string', ''],
-    ["'0'", '0'],
-    ["'true'", 'true'],
-    ["'TRUE'", 'TRUE'],
-    ["'yes'", 'yes'],
-  ])('is a no-op when ENABLE_CRONS is %s', async (_label, value) => {
-    const fakeContainer = makeFakeContainer()
-    const result = await handleScheduled(
-      { cron: '* * * * *' },
-      env({ ENABLE_CRONS: value, CRON_SECRET: 'x' }),
-      fakeContainer
-    )
-    expect(fakeContainer).toHaveBeenCalledTimes(0)
-    expect(result).toEqual({ skipped: true })
-  })
+  // Only a value cronsEnabled() treats as true may ever reach the
+  // container. This is the fail-closed guarantee SD-01 requires — a
+  // truthy-but-wrong string like 'true' must never enable the preview
+  // cron. Uses the SAME CRONS_ENABLED_TRUTH_TABLE as the pure-function
+  // tests above (round-6 operator review, item E: "run through BOTH call
+  // sites") — see test/mcp-guide-analysis-auth.spec.ts for the handler
+  // gate's half of this same table.
+  it.each(CRONS_ENABLED_TRUTH_TABLE.filter(([, , expected]) => !expected))(
+    'is a no-op when ENABLE_CRONS is %s',
+    async (_label, value) => {
+      const fakeContainer = makeFakeContainer()
+      const result = await handleScheduled(
+        { cron: '* * * * *' },
+        env({ ENABLE_CRONS: value, CRON_SECRET: 'x' }),
+        fakeContainer
+      )
+      expect(fakeContainer).toHaveBeenCalledTimes(0)
+      expect(result).toEqual({ skipped: true })
+    }
+  )
+
+  it.each(CRONS_ENABLED_TRUTH_TABLE.filter(([, , expected]) => expected))(
+    'calls the container exactly once when ENABLE_CRONS is %s',
+    async (_label, value) => {
+      const fakeContainer = makeFakeContainer()
+      const result = await handleScheduled(
+        { cron: '* * * * *' },
+        env({ ENABLE_CRONS: value, CRON_SECRET: 'test-cron-secret' }),
+        fakeContainer
+      )
+      expect(fakeContainer).toHaveBeenCalledTimes(1)
+      expect(result.skipped).toBe(false)
+    }
+  )
 
   it.each([
     ['unset', undefined],
@@ -114,10 +145,15 @@ describe('handleScheduled', () => {
   })
 })
 
+// None of the tests in this describe block are about the Access gate
+// (that's test/cf-access-jwt.spec.ts's job, including the round-6 "enforce
+// unless production" selector) — they're about routing/headers/IP
+// forwarding, so every env here sets APP_ENV: 'production' to stay
+// unaffected by the gate and keep testing exactly one thing at a time.
 describe('handleFetch', () => {
   it('routes /api/* to the container and applies security headers', async () => {
     const fakeContainer = makeFakeContainer()
-    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() } }
+    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: 'production' }
     const res = await handleFetch(new Request('http://worker.test/api/chat'), env, fakeContainer)
     expect(fakeContainer).toHaveBeenCalledTimes(1)
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff')
@@ -129,14 +165,14 @@ describe('handleFetch', () => {
       async () =>
         new Response('ok', { status: 200, headers: { 'X-Frame-Options': 'SAMEORIGIN' } })
     )
-    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() } }
+    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: 'production' }
     const res = await handleFetch(new Request('http://worker.test/api/chat'), env, fakeContainer)
     expect(res.headers.get('X-Frame-Options')).toBe('SAMEORIGIN')
   })
 
   it('routes both oauth-protected-resource paths to the container', async () => {
     const fakeContainer = makeFakeContainer()
-    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() } }
+    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: 'production' }
     await handleFetch(new Request('http://worker.test/.well-known/oauth-protected-resource'), env, fakeContainer)
     await handleFetch(
       new Request('http://worker.test/.well-known/oauth-protected-resource/api/mcp'),
@@ -151,7 +187,7 @@ describe('handleFetch', () => {
     const assetsFetch = vi.fn(
       async () => new Response('<html>spa</html>', { status: 200, headers: { 'content-type': 'text/html' } })
     )
-    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch } }
+    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch }, APP_ENV: 'production' }
     const res = await handleFetch(new Request('http://worker.test/chat/abc'), env, fakeContainer)
     expect(fakeContainer).toHaveBeenCalledTimes(0)
     expect(assetsFetch).toHaveBeenCalledTimes(1)
@@ -164,7 +200,7 @@ describe('handleFetch', () => {
     const assetsFetch = vi.fn(
       async () => new Response('<html>spa</html>', { status: 200, headers: { 'content-type': 'text/html' } })
     )
-    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch } }
+    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch }, APP_ENV: 'production' }
     const res = await handleFetch(new Request('http://worker.test/assets/missing.js'), env, fakeContainer)
     expect(res.status).toBe(404)
     expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8')
@@ -176,7 +212,7 @@ describe('handleFetch', () => {
       async () =>
         new Response("console.log('x')", { status: 200, headers: { 'content-type': 'text/javascript' } })
     )
-    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch } }
+    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch }, APP_ENV: 'production' }
     const res = await handleFetch(new Request('http://worker.test/assets/app.js'), env, fakeContainer)
     expect(res.status).toBe(200)
     expect(await res.text()).toBe("console.log('x')")
@@ -186,7 +222,7 @@ describe('handleFetch', () => {
     const fakeContainer = vi.fn(async () => {
       throw new Error('boom')
     })
-    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() } }
+    const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: 'production' }
     const res = await handleFetch(new Request('http://worker.test/api/chat'), env, fakeContainer)
     expect(res.status).toBe(503)
     expect(await res.json()).toEqual({ error: 'Container unavailable' })
@@ -195,7 +231,7 @@ describe('handleFetch', () => {
   describe('client IP headers forwarded to the container (SD-09)', () => {
     it('replaces a spoofed X-Forwarded-For / X-Real-IP with CF-Connecting-IP', async () => {
       const fakeContainer = makeFakeContainer()
-      const env: WorkerEnv = { ASSETS: { fetch: vi.fn() } }
+      const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: 'production' }
       const inbound = new Request('http://worker.test/api/chat', {
         headers: {
           'X-Forwarded-For': '6.6.6.6',
@@ -214,7 +250,7 @@ describe('handleFetch', () => {
 
     it('removes both headers entirely when CF-Connecting-IP is absent', async () => {
       const fakeContainer = makeFakeContainer()
-      const env: WorkerEnv = { ASSETS: { fetch: vi.fn() } }
+      const env: WorkerEnv = { ASSETS: { fetch: vi.fn() }, APP_ENV: 'production' }
       const inbound = new Request('http://worker.test/api/chat', {
         headers: { 'X-Forwarded-For': '6.6.6.6', 'X-Real-IP': '6.6.6.6' },
       })
@@ -244,6 +280,14 @@ describe('getContainerEnvVars', () => {
       APP_ENV: 'preview',
     })
   })
+
+  // Round-6 operator review, item F: even if a Worker env somehow carried
+  // ADVANCE_RUNTIME (it never should — wrangler.jsonc doesn't set it), the
+  // Worker must never forward it to the container.
+  it('drops ADVANCE_RUNTIME even if the Worker env has it', () => {
+    const result = getContainerEnvVars({ ADVANCE_RUNTIME: 'cloudflare-container', APP_ENV: 'preview' })
+    expect(result).toEqual({ APP_ENV: 'preview' })
+  })
 })
 
 describe('env key coverage', () => {
@@ -253,10 +297,14 @@ describe('env key coverage', () => {
     }
   })
 
-  it('every process.env.X name read in api/ (other than VERCEL_ENV) is in CONTAINER_ENV_KEYS', () => {
+  // VERCEL_ENV and ADVANCE_RUNTIME are both read in api/ but deliberately
+  // excluded from CONTAINER_ENV_KEYS — see the CONTAINER_ENV_KEYS header
+  // comment in cf/container-env.mjs for why each is a documented exception
+  // rather than an oversight.
+  it('every process.env.X name read in api/ (other than VERCEL_ENV/ADVANCE_RUNTIME) is in CONTAINER_ENV_KEYS', () => {
     const names = scanProcessEnvNames(resolve(ROOT, 'api'))
     for (const name of names) {
-      if (name === 'VERCEL_ENV') continue
+      if (name === 'VERCEL_ENV' || name === 'ADVANCE_RUNTIME') continue
       expect(CONTAINER_ENV_KEYS).toContain(name)
     }
   })
@@ -266,6 +314,13 @@ describe('env key coverage', () => {
     expect(CONTAINER_ENV_KEYS).toContain('ENABLE_CRONS')
     expect(CONTAINER_ENV_KEYS).not.toContain('VERCEL_ENV')
     expect(CONTAINER_ENV_KEYS).not.toContain('DISABLE_CRONS')
+  })
+
+  // Round-6 operator review, item F: ADVANCE_RUNTIME must never be
+  // forwarded by the Worker — server.mjs stamps it itself, unconditionally,
+  // so no Worker var could spoof the handler's fail-closed 503 gate off.
+  it('excludes ADVANCE_RUNTIME even though api/mcp-guide-analysis.ts reads it', () => {
+    expect(CONTAINER_ENV_KEYS).not.toContain('ADVANCE_RUNTIME')
   })
 })
 

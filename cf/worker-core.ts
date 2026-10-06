@@ -7,8 +7,9 @@ import {
   isHtmlEntryPath,
   isContainerPath,
 } from './http-rules.mjs'
-import { cronsEnabled } from './container-env.mjs'
 import { verifyAccessJwt, type AccessJwtVerifyDeps } from './access-jwt'
+import { isProductionAppEnv } from '../api/lib/app-env'
+import { cronsEnabled } from '../api/lib/crons-enabled'
 
 export interface WorkerEnv {
   ASSETS: { fetch(request: Request): Promise<Response> }
@@ -71,11 +72,17 @@ export async function handleFetch(
   containerFetch: ContainerFetch,
   deps: HandleFetchDeps = {}
 ): Promise<Response> {
-  // Preview only: every request (assets and container alike) must carry a
-  // valid Cloudflare Access JWT. Production is completely unaffected — this
-  // check doesn't even run there. scheduled() never calls this function, so
+  // Enforced on every env EXCEPT production (round-6 operator review, item
+  // A) — inverted from the original "only when APP_ENV==='preview'" check,
+  // which failed OPEN on any odd/unexpected value (a typo, an unset var, a
+  // future staging-like env never anticipated here would all have skipped
+  // the gate). Uses the exact same trim+lowercase normalization as
+  // api/lib/app-env.ts's isProductionAppEnv, so there's only one place that
+  // decides what "production" means — never a second parallel string
+  // comparison. Production is still completely unaffected: no header
+  // required, no network call. scheduled() never calls this function, so
   // crons stay governed only by ENABLE_CRONS (see handleScheduled below).
-  if (env.APP_ENV === 'preview') {
+  if (!isProductionAppEnv({ APP_ENV: env.APP_ENV })) {
     const authorized = await verifyAccessJwt(request, env, deps)
     if (!authorized) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
@@ -112,7 +119,7 @@ export async function handleScheduled(
   const cron = controller.cron
 
   // Fail closed: only ENABLE_CRONS === '1' runs anything. See
-  // cf/container-env.mjs's cronsEnabled for why this isn't a truthy check.
+  // api/lib/crons-enabled.ts for why this isn't a truthy check.
   if (!cronsEnabled(env)) {
     console.log(`[cf-cron] skipped (ENABLE_CRONS!=='1') cron=${cron}`)
     return { skipped: true }
