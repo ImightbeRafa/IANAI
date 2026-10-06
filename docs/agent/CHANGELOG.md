@@ -1,3 +1,28 @@
+## 2026-10-06 — Cloudflare Containers: operator-review fixes to the SD-04 raw-stream cap and SD-03 Access JWT
+
+**Area:** infra / api
+**Files:** `server.mjs`, `cf/access-jwt.ts`, `test/cf-server-adapter.spec.ts`, `test/cf-access-jwt.spec.ts`, `test/cf-api-build.spec.ts`, `test/fixtures/cf-api/raw-stream-delayed.js` (new), `docs/operations/cloudflare-containers.md`, `docs/operations/cloudflare-parity-checklist.md`
+
+- **Critical fix:** the raw-stream (`bodyParser:false`) 10 MiB counter from the previous revision attached a bare `req.on('data', ...)` *before* the handler ran, switching the real stream into flowing mode immediately. Since `api/parse-pdf.ts` (like every handler) awaits something (`supabase.auth.getUser`) before ever touching the request stream, chunks — or even `'end'` — could fire with nobody listening, silently truncating or hanging the request in production; the test fixture read immediately, so it didn't catch this. Fixed by pulling data via the real stream's `'readable'` event into a counting `PassThrough`, with the handler's later stream calls redirected to that proxy. A naive `req.pipe()` doesn't work here either — proven empirically, since Node's own flow-control internally calls the same public `req.read`/`req.resume`/`req.pause` methods we need to repoint for the handler.
+- `cf/access-jwt.ts` now requires `exp` to be present and numeric (previously optional, same as `nbf`) — a token with no expiry isn't acceptable for this gate. `nbf` stays optional.
+- `test/cf-api-build.spec.ts` now asserts the route-deadline manifest's actual values for real routes (not just that every value is a number), and that the manifest itself 404s if requested as an API route.
+- The per-route deadline timer is now also cleared on an early connection close, not just on a normal response finish.
+
+## 2026-10-06 — Cloudflare Containers: security-review hardening (SecureDog FAILED High → fixed)
+
+**Area:** infra / api / security
+**Files:** `cf/container-env.mjs`, `cf/worker-core.ts`, `cf/access-jwt.ts` (new), `wrangler.jsonc`, `api/mcp-guide-analysis.ts`, `server.mjs`, `scripts/build-api.mjs`, `scripts/parity/env-diff.mjs`, `api/lib/mcp/url-analysis-worker.ts`, `Dockerfile`, `.gitignore`, `.dockerignore`, `package.json`, `api/lib/preview-admin.ts`, `.cursor/skills/verify-advance/*`, `test/*` (new/updated specs), `docs/operations/cloudflare-containers.md`, `docs/operations/cloudflare-parity-checklist.md`
+
+- **SD-01 (High, fixed):** cron gating replaced `DISABLE_CRONS` (loose truthy check) with fail-closed `ENABLE_CRONS === '1'` exactly, in three independent layers — `cf/container-env.mjs`'s `cronsEnabled`, `wrangler.jsonc`'s `env.preview.triggers.crons: []`, and a new handler-level guard in `api/mcp-guide-analysis.ts` (503 when running in the CF container without `ENABLE_CRONS='1'`, keyed off a Vercel-never-sets `ADVANCE_RUNTIME` marker that `server.mjs`/the Dockerfile set).
+- **SD-02:** `.gitignore`/`.dockerignore` now also exclude `.dev.vars*`/`.env*` (keeping `.env.example` tracked).
+- **SD-03 (decision reversed — added):** `cf/access-jwt.ts` verifies the Cloudflare Access `Cf-Access-Jwt-Assertion` JWT (RS256, JWKS-cached, `aud`/`iss`/`exp`/`nbf`, hardcoded email allowlist) in the Worker before routing, only when `APP_ENV==='preview'` — WebCrypto only, no new dependency, no bypass.
+- **SD-04:** per-route deadlines matching Vercel's `maxDuration` (504 on expiry, handler never aborted, no crash on a late write), Node `requestTimeout`/`headersTimeout`, and a new 10 MiB cap on `bodyParser:false` raw streams.
+- **SD-05:** documented the minimal Preview secret set — explicitly never `TILOPAY_WEBHOOK_SECRET`/`CRON_SECRET`/`TICKETS_*` on Preview.
+- **SD-06:** `processNextMcpUrlIntake`'s final status updates are now lease-guarded (`.eq('status','processing').eq('claimed_at', row.claimed_at)`), closing the double-processing window the container's lack of a 60s kill opened up.
+- **SD-07:** Dockerfile pins `node:22-slim` by digest instead of floating on the tag.
+- **SD-09:** the Worker rewrites `X-Forwarded-For`/`X-Real-IP` from the trusted `CF-Connecting-IP` before forwarding to the container, rather than passing through whatever a client sent.
+- Tidy: `@cloudflare/containers` moved to `devDependencies`; removed the unused `isPreviewRuntime` alias; `verify-advance` now requires an explicit `ADVANCE_VERIFY_BASE_URL` in preview mode (no legacy Vercel default).
+
 ## 2026-10-06 — Cloudflare Containers adapter (Phase 1, code + docs only, nothing deployed)
 
 **Area:** infra / api
@@ -5,7 +30,7 @@
 
 - Added a plain `node:http` adapter (`server.mjs`) that runs the existing Vercel-style `api/**` handlers unchanged inside a Cloudflare Container, reproducing `@vercel/node`'s request/response helpers (lazy `req.query`/`req.cookies`/`req.body`, `res.status/json/send/redirect`), body-size limits, `waitUntil` draining on SIGTERM, and static/SPA fallback serving.
 - Added the Cloudflare Worker (`src/cf-container-worker.ts`, Betsy pattern) with testable core logic in `cf/worker-core.ts` (no `cloudflare:*` imports): routes `/api/*` and the two `oauth-protected-resource` rewrites to the container, everything else to Static Assets, and forwards the `* * * * *` cron with `DISABLE_CRONS` gating.
-- `DISABLE_CRONS=1` on both `vars` blocks in `wrangler.jsonc` until cutover — the Vercel cron stays the only writer. `api/mcp-guide-analysis.ts` auth is now a timing-safe compare and accepts a plain `Bearer <CRON_SECRET>` (the `x-vercel-cron` branch was already dead code).
+- `DISABLE_CRONS=1` on both `vars` blocks in `wrangler.jsonc` until cutover — the Vercel cron stays the only writer. (Superseded later in this same PR: the SecureDog review found this loose-truthy gate insufficient and replaced it with the fail-closed `ENABLE_CRONS === '1'` gate — see the 2026-10-06 "security-review hardening" entry above, SD-01. `wrangler.jsonc` no longer sets `DISABLE_CRONS` at all.) `api/mcp-guide-analysis.ts` auth is now a timing-safe compare and accepts a plain `Bearer <CRON_SECRET>` (the `x-vercel-cron` branch was already dead code).
 - New `APP_ENV` (`api/lib/app-env.ts`) is a platform-agnostic deployment-environment class alongside `VERCEL_ENV` (APP_ENV takes precedence); `preview-admin.ts`, `chat-shell-gift.ts`, and the client `previewAdmin.ts` now read either, plus an explicit `VITE_PREVIEW_HOSTS` allowlist.
 - `scripts/parity/*` diff env var names between the real Vercel project, the api/src source, and the container/wrangler config (`npm run parity:env`), and generate the route table (`npm run parity:routes`). Tilopay webhook replay and upload-limits scripts are non-writing/local-only by design — see their header comments and `docs/operations/cloudflare-parity-checklist.md`.
 - `vercel.json` is byte-for-byte unchanged; Vercel prod and Preview keep working from this branch unmodified.
