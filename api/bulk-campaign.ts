@@ -7,6 +7,7 @@ import { quoteCampaignPack } from './lib/bulk/quotes.js'
 import { deepLinkForPack, runBulkPosts, runBulkScripts } from './lib/bulk/run-bulk.js'
 import { listProductRefUrls } from './lib/bulk/store.js'
 import type { AngleBoardItem } from './lib/bulk/types.js'
+import { getDeadlineSignal } from './lib/request-deadline.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   setBulkCors(res)
@@ -62,7 +63,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       imageModel,
       expandCount: countExpandNeeded(refs.length),
     })
-    const scripts = await runBulkScripts({ runtime, angles })
+    const deadlineSignal = getDeadlineSignal(req)
+    const scripts = await runBulkScripts({ runtime, angles, signal: deadlineSignal })
     const succeeded = scripts.items.filter((item) => !item.error && item.content)
     const posts = succeeded.length
       ? await runBulkPosts({
@@ -71,6 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           scripts: succeeded,
           imageModel,
           styleDnaId,
+          signal: deadlineSignal,
         })
       : { packId: scripts.packId, sessionId: scripts.sessionId, items: [], expanded: [], succeeded: 0, charged: 0 }
 

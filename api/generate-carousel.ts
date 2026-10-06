@@ -9,6 +9,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, checkUsageLimit, incrementUsage, deductBonusImage } from './lib/auth.js'
 import { logApiUsage } from './lib/usage-logger.js'
 import { checkRateLimit } from './lib/rate-limit.js'
+import { getDeadlineSignal } from './lib/request-deadline.js'
 import { isCreditsV1Enabled } from './lib/credits/catalog.js'
 import {
   GEMINI_CAROUSEL_IMAGE_MODEL,
@@ -82,6 +83,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
+    // Round-6 operator review, item C: undefined on Vercel; only ever
+    // aborted once the CF container's per-route deadline fires. Checked
+    // right before the per-slide charging loop below (not before the
+    // generation call itself — that's the "no charge happens before the
+    // work" case this handler already is, so skipping the charge on abort
+    // needs no refund logic).
+    const deadlineSignal = getDeadlineSignal(req)
+
     const generated: OrganicCarouselResult = await runOrganicCarouselGenerate({
       userId: user.id,
       subtype,
@@ -99,6 +108,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       contextReferenceImages: body.contextReferenceImages,
       carouselReferenceImages: body.carouselReferenceImages,
     })
+
+    if (deadlineSignal?.aborted) return // adapter already sent 504 — skip every slide charge and the usage log below
 
     let charged = 0
     for (let i = 0; i < generated.succeeded; i++) {

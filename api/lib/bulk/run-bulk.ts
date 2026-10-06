@@ -63,6 +63,15 @@ export async function runBulkScripts(options: {
   angles: AngleBoardItem[]
   /** Stable position in the pack, used for idempotent per-item credit UUIDs on resume. */
   indexOffset?: number
+  /**
+   * Round-6 operator review, item C. Checked at the TOP of each loop
+   * iteration, before that item's own checkUsageLimit/generate/charge —
+   * never mid-item — so stopping here never needs a refund: every item
+   * already pushed to `items` stays charged and intact, and the handler's
+   * existing partial-success response shape (succeeded < angles.length)
+   * already covers "fewer items than requested" for other reasons too.
+   */
+  signal?: AbortSignal
 }): Promise<{
   packId: string
   sessionId: string
@@ -84,6 +93,7 @@ export async function runBulkScripts(options: {
 
   const items: BulkScriptItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
+    if (options.signal?.aborted) break
     const angle = angles[i]
     const generationId = generationUuidFromApproval(packId, `script:${(options.indexOffset || 0) + i + 1}`)
     const limit = await checkUsageLimit(runtime.user.id, 'script')
@@ -192,6 +202,8 @@ export async function runBulkPosts(options: {
   styleDnaId?: string | null
   /** Stable position in the pack, used for idempotent per-item credit UUIDs on resume. */
   indexOffset?: number
+  /** Round-6 operator review, item C — see runBulkScripts' doc comment. */
+  signal?: AbortSignal
 }): Promise<{
   packId: string
   sessionId: string
@@ -237,6 +249,7 @@ export async function runBulkPosts(options: {
 
   const items: BulkPostItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
+    if (options.signal?.aborted) break
     const angle = angles[i]
     const absoluteIndex = (options.indexOffset || 0) + i
     const generationId = generationUuidFromApproval(packId, `image:${absoluteIndex + 1}`)

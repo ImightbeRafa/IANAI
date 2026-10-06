@@ -22,6 +22,7 @@ import { userHasProductAccess } from './lib/product-access.js'
 import { requireChatShellAccess } from './lib/chat-shell-access.js'
 import { resolveChatGenerationId } from './lib/credits/chat-generation-id.js'
 import { usageTimingMetadata } from './lib/usage-timings.js'
+import { getDeadlineSignal } from './lib/request-deadline.js'
 
 export const maxDuration = 120
 
@@ -1604,6 +1605,13 @@ Do NOT copy the scripts verbatim — adapt the structure and style to the curren
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestStarted = Date.now()
+  // Round-6 operator review, item C: undefined on Vercel (server.mjs never
+  // ran), so this and every check below are no-ops there — behavior is
+  // unchanged. On the CF container, aborted only once the per-route
+  // deadline has fired; checked right before the credit charge below so a
+  // slow Grok call that outlives the deadline doesn't charge the user for
+  // a generation the client already got a 504 for.
+  const deadlineSignal = getDeadlineSignal(req)
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -1902,6 +1910,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           scriptTemplatesPrompt,
         })
 
+        // Round-6 operator review, item C: the deadline may have fired
+        // during the (potentially long) structured pipeline call above —
+        // the adapter already sent the client its 504 in that case, so
+        // skip the charge and the usage log entirely rather than writing
+        // for a response nobody can see.
+        if (deadlineSignal?.aborted) return
+
         const scriptsDto = scriptsToSectionsDto(structured.scripts, language)
         await logApiUsage({
           userId: user.id,
@@ -1970,6 +1985,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
     const content = grok.content || 'No response generated'
     const usage = grok.usage
+
+    // Round-6 operator review, item C — same as the structured-pipeline
+    // branch above: skip the charge and usage log if the deadline fired
+    // during the Grok call.
+    if (deadlineSignal?.aborted) return
 
     await logApiUsage({
       userId: user.id,
