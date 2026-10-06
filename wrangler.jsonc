@@ -1,0 +1,131 @@
+{
+  // Advance AI on Cloudflare Workers + Containers. The Worker serves Static
+  // Assets for everything except /api/* (and the two oauth-protected-resource
+  // rewrites), which it forwards to the AdvanceAiContainer. See
+  // docs/operations/cloudflare-containers.md.
+  "name": "advance-ai",
+  "main": "src/cf-container-worker.ts",
+  "compatibility_date": "2026-09-25",
+  // No *.workers.dev subdomain and no preview URLs until Cloudflare Access is
+  // in front of the preview environment (see env.preview below).
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Static Assets are uploaded from the host-built `dist/` (not the Docker
+  // build's copy). The deploy step must run, e.g.:
+  //   VITE_APP_ENV=production VITE_SUPABASE_URL=... VITE_SUPABASE_ANON_KEY=... VITE_CREDITS_V1=... npm run build
+  // before `wrangler deploy`. The Docker-built dist/ is only the container's
+  // own fallback copy, not what Cloudflare serves at the edge.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Deviation from a run_worker_first path array: with an array, asset
+    // requests never reach the Worker, so it can't add security headers or
+    // 404 missing /assets/* files. `true` costs one Worker invocation per
+    // asset request in exchange for both.
+    "run_worker_first": true
+  },
+
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  // Fail closed: no ENABLE_CRONS here means cf/container-env.mjs's
+  // cronsEnabled() is false, so the Worker's scheduled() handler is a no-op
+  // even though this trigger fires every minute. ENABLE_CRONS is set to "1"
+  // (plus a CF-only CRON_SECRET, distinct from Vercel's) only at cutover, in
+  // the same window as removing the Vercel cron — never both live.
+  "vars": {
+    "APP_ENV": "production"
+  },
+
+  "containers": [
+    {
+      "class_name": "AdvanceAiContainer",
+      "image": "./Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 2,
+      "image_vars": {
+        "VITE_APP_ENV": "production"
+      }
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "ADVANCE_AI_CONTAINER", "class_name": "AdvanceAiContainer" }
+    ]
+  },
+
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AdvanceAiContainer"] }
+  ],
+
+  // Every block is repeated explicitly for env.preview: vars, durable_objects
+  // and containers do not inherit from the top level, and assets/triggers/
+  // migrations are repeated too so this file doesn't depend on wrangler's
+  // inheritance rules at all.
+  "env": {
+    "preview": {
+      "name": "advance-ai-preview",
+      // GO flips this to true only after Cloudflare Access is in front of
+      // this environment (see docs/operations/cloudflare-containers.md).
+      "workers_dev": false,
+      "preview_urls": false,
+
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": true
+      },
+
+      // Explicitly empty, not inherited from the top level: Preview never
+      // fires the cron trigger at all (belt-and-suspenders on top of the
+      // ENABLE_CRONS fail-closed gate — see cf/worker-core.ts).
+      "triggers": {
+        "crons": []
+      },
+
+      // ACCESS_TEAM_DOMAIN / ACCESS_AUD are Worker-only — read by
+      // cf/access-jwt.ts in handleFetch, never forwarded to the container
+      // (see CONTAINER_ENV_KEYS / scripts/parity/env-diff.mjs's
+      // WORKER_ONLY_VAR_NAMES). Non-secret placeholders; the real values
+      // come with the Access application once it exists. A value
+      // containing "REPLACE" is treated as unconfigured (fails closed, no
+      // network call) by cf/access-jwt.ts.
+      "vars": {
+        "APP_ENV": "preview",
+        "ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM.cloudflareaccess.com",
+        "ACCESS_AUD": "REPLACE_WITH_ACCESS_APP_AUD"
+      },
+
+      "containers": [
+        {
+          "class_name": "AdvanceAiContainer",
+          "image": "./Dockerfile",
+          "instance_type": "standard-2",
+          "max_instances": 2,
+          "image_vars": {
+            "VITE_APP_ENV": "preview"
+          }
+        }
+      ],
+
+      "durable_objects": {
+        "bindings": [
+          { "name": "ADVANCE_AI_CONTAINER", "class_name": "AdvanceAiContainer" }
+        ]
+      },
+
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["AdvanceAiContainer"] }
+      ]
+    }
+  }
+
+  // No routes and no secrets here. Secret *names* (never values) are listed
+  // in docs/operations/cloudflare-containers.md; set them with
+  // `wrangler secret put <NAME>` (and `--env preview` for Preview).
+}

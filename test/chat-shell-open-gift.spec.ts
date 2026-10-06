@@ -23,7 +23,9 @@ describe('chat-shell open gift', () => {
   it('grants only when VERCEL_ENV=production (fail-closed elsewhere)', () => {
     const prevEnv = process.env.VERCEL_ENV
     const prevFlag = process.env.CHAT_SHELL_OPEN_GIFT
+    const prevAppEnv = process.env.APP_ENV
     delete process.env.CHAT_SHELL_OPEN_GIFT
+    delete process.env.APP_ENV
 
     process.env.VERCEL_ENV = 'preview'
     expect(shouldSkipChatShellOpenGift()).toBe(true)
@@ -47,5 +49,36 @@ describe('chat-shell open gift', () => {
     else process.env.VERCEL_ENV = prevEnv
     if (prevFlag === undefined) delete process.env.CHAT_SHELL_OPEN_GIFT
     else process.env.CHAT_SHELL_OPEN_GIFT = prevFlag
+    if (prevAppEnv === undefined) delete process.env.APP_ENV
+    else process.env.APP_ENV = prevAppEnv
+  })
+
+  it('APP_ENV takes precedence over VERCEL_ENV and supports its own flag/staging cases', () => {
+    const prevEnv = process.env.VERCEL_ENV
+    const prevFlag = process.env.CHAT_SHELL_OPEN_GIFT
+    const prevAppEnv = process.env.APP_ENV
+    delete process.env.CHAT_SHELL_OPEN_GIFT
+
+    process.env.APP_ENV = 'preview'
+    process.env.VERCEL_ENV = 'production'
+    expect(shouldSkipChatShellOpenGift()).toBe(true)
+
+    process.env.APP_ENV = 'production'
+    delete process.env.VERCEL_ENV
+    expect(shouldSkipChatShellOpenGift()).toBe(false)
+
+    process.env.APP_ENV = 'staging'
+    expect(shouldSkipChatShellOpenGift()).toBe(true)
+
+    process.env.APP_ENV = 'production'
+    process.env.CHAT_SHELL_OPEN_GIFT = '0'
+    expect(shouldSkipChatShellOpenGift()).toBe(true)
+
+    if (prevEnv === undefined) delete process.env.VERCEL_ENV
+    else process.env.VERCEL_ENV = prevEnv
+    if (prevFlag === undefined) delete process.env.CHAT_SHELL_OPEN_GIFT
+    else process.env.CHAT_SHELL_OPEN_GIFT = prevFlag
+    if (prevAppEnv === undefined) delete process.env.APP_ENV
+    else process.env.APP_ENV = prevAppEnv
   })
 })

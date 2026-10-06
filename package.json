@@ -9,7 +9,13 @@
     "dev:vercel": "vercel dev",
     "test": "vitest run",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:api": "node scripts/build-api.mjs",
+    "start": "node server.mjs",
+    "typecheck:worker": "tsc -p tsconfig.cf-worker.json",
+    "parity:routes": "node scripts/parity/route-table.mjs --out docs/operations/cloudflare-route-table.md",
+    "parity:checklist": "node scripts/parity/route-table.mjs --inline docs/operations/cloudflare-parity-checklist.md",
+    "parity:env": "node scripts/parity/env-diff.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
@@ -30,6 +36,8 @@
     }
   },
   "devDependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "@cloudflare/workers-types": "5.20261006.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.4",
@@ -39,6 +47,7 @@
     "@vercel/node": "^5.5.31",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "esbuild": "^0.21.5",
     "happy-dom": "^20.11.2",
     "postcss": "^8.4.45",
     "tailwindcss": "^3.4.10",

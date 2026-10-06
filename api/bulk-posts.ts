@@ -6,6 +6,7 @@ import { countExpandNeeded } from './lib/bulk/expand-product-refs.js'
 import { deepLinkForPack, runBulkPosts } from './lib/bulk/run-bulk.js'
 import { listProductRefUrls } from './lib/bulk/store.js'
 import type { AngleBoardItem } from './lib/bulk/types.js'
+import { getDeadlineSignal } from './lib/request-deadline.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   setBulkCors(res)
@@ -60,6 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       scripts,
       imageModel,
       styleDnaId,
+      signal: getDeadlineSignal(req),
     })
     return res.status(result.succeeded > 0 ? 200 : 402).json({
       packId: result.packId,

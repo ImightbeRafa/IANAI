@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-api
+.wrangler
 *.local
 *.tsbuildinfo
 # Local Supabase CLI artifacts; keep versioned migrations tracked
@@ -32,6 +34,11 @@ supabase/config.toml
 .env
 .env.local
 .env.*.local
+.env*
+!.env.example
+# Cloudflare Workers local dev vars (wrangler dev --local secret store)
+.dev.vars
+.dev.vars.*
 
 # Verification run artifacts (keep the README)
 .cursor/skills/verify-advance/evidence/runs/

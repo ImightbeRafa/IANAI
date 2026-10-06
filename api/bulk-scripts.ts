@@ -5,6 +5,7 @@ import { sanitizeInsights } from './lib/insights.js'
 import { quoteBulkScripts } from './lib/bulk/quotes.js'
 import { deepLinkForPack, runBulkScripts } from './lib/bulk/run-bulk.js'
 import type { AngleBoardItem } from './lib/bulk/types.js'
+import { getDeadlineSignal } from './lib/request-deadline.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   setBulkCors(res)
@@ -52,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })).angles
     const angles = pickAngles(board, selected, count)
     const quote = quoteBulkScripts(angles.length)
-    const result = await runBulkScripts({ runtime, angles })
+    const result = await runBulkScripts({ runtime, angles, signal: getDeadlineSignal(req) })
     return res.status(result.succeeded > 0 ? 200 : 402).json({
       packId: result.packId,
       sessionId: result.sessionId,

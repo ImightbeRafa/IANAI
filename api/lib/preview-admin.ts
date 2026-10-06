@@ -4,6 +4,8 @@
  * Do not write profiles.is_admin on AIIAN for these accounts.
  */
 
+import { isPreviewAppEnv, type AppEnvSource } from './app-env.js'
+
 export const PREVIEW_ADMIN_EMAILS = [
   'sup.rafa0412@gmail.com',
   'ralauas@gmail.com',
@@ -19,20 +21,18 @@ export function isPreviewAdminEmail(email?: string | null): boolean {
   return (PREVIEW_ADMIN_EMAILS as readonly string[]).includes(normalized)
 }
 
-/** True only when Vercel reports preview. Fail closed otherwise. */
-export function isVercelPreviewRuntime(
-  env: { VERCEL_ENV?: string } = process.env
-): boolean {
-  return (env.VERCEL_ENV || '').toLowerCase() === 'preview'
+/** True only when the deployment environment is preview (APP_ENV, falling back to VERCEL_ENV). Fail closed otherwise. */
+export function isVercelPreviewRuntime(env: AppEnvSource = process.env): boolean {
+  return isPreviewAppEnv(env)
 }
 
 /**
  * Preview QA may open /admin without profiles.is_admin.
- * Never true on production / development / unset VERCEL_ENV.
+ * Never true on production / development / unset APP_ENV / VERCEL_ENV.
  */
 export function hasPreviewAdminAllowlistAccess(options: {
   email?: string | null
-  env?: { VERCEL_ENV?: string }
+  env?: AppEnvSource
 }): boolean {
   if (!isVercelPreviewRuntime(options.env)) return false
   return isPreviewAdminEmail(options.email)
@@ -41,7 +41,7 @@ export function hasPreviewAdminAllowlistAccess(options: {
 export function resolveAdminDashboardAccess(options: {
   profileIsAdmin: boolean
   email?: string | null
-  env?: { VERCEL_ENV?: string }
+  env?: AppEnvSource
 }): boolean {
   if (options.profileIsAdmin === true) return true
   return hasPreviewAdminAllowlistAccess(options)
