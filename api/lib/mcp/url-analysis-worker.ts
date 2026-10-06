@@ -23,6 +23,7 @@ export type ClaimedUrlIntake = {
   source_url: string
   status: string
   attempt_count: number
+  claimed_at: string
 }
 
 export type UrlAnalysisWorkerResult =
@@ -146,6 +147,11 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       warnings: analysis.warnings.slice(0, 20),
     }
 
+    // Lease-guarded: only write if this row is still the one we claimed
+    // (same id, still 'processing', same claimed_at). If a stale-reclaim by
+    // another runner has since claimed it again, claimed_at will have
+    // moved and this update matches zero rows instead of clobbering the
+    // newer runner's in-flight work.
     const { error: doneError } = await db
       .from('mcp_url_intakes')
       .update({
@@ -158,6 +164,8 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
         error_message: null,
       })
       .eq('id', row.id)
+      .eq('status', 'processing')
+      .eq('claimed_at', row.claimed_at)
     if (doneError) throw doneError
 
     await logApiUsage({
@@ -183,6 +191,8 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
     const message = sanitizeWorkerError(err)
     const attempts = Number(row.attempt_count) || 1
     const terminal = attempts >= MCP_URL_ANALYSIS_MAX_ATTEMPTS
+    // Same lease guard as the success path: only write if this is still
+    // the row (and the claim) we started with.
     const { error: failError } = await db
       .from('mcp_url_intakes')
       .update({
@@ -193,6 +203,8 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
         updated_at: new Date().toISOString(),
       })
       .eq('id', row.id)
+      .eq('status', 'processing')
+      .eq('claimed_at', row.claimed_at)
     if (failError) console.error('failed to mark intake failure', failError)
 
     await logApiUsage({
