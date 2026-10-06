@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
+import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -51,5 +52,60 @@ describe('cf server lifecycle', () => {
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'Not found' })
     await adapter.stop()
+  })
+
+  describe('request/headers timeouts (env-overridable for tests)', () => {
+    it('a slow upload dripping chunks within REQUEST_TIMEOUT_MS still succeeds', async () => {
+      const adapter = await startAdapter({ apiDir: API_DIR, env: { REQUEST_TIMEOUT_MS: '1500' } })
+      const url = new URL(adapter.baseUrl)
+      const body = JSON.stringify({ x: 1 })
+
+      const status = await new Promise<number>((resolvePromise, rejectPromise) => {
+        const req = http.request(
+          {
+            host: url.hostname,
+            port: Number(url.port),
+            path: '/api/echo',
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+          },
+          (res) => {
+            res.on('data', () => {})
+            res.on('end', () => resolvePromise(res.statusCode ?? 0))
+          }
+        )
+        req.on('error', rejectPromise)
+        let i = 0
+        const writeNext = () => {
+          if (i >= body.length) {
+            req.end()
+            return
+          }
+          req.write(body[i])
+          i++
+          setTimeout(writeNext, 40)
+        }
+        writeNext()
+      })
+
+      expect(status).toBe(200)
+      await adapter.stop()
+    }, 10_000)
+
+    it('a waitUntil job that outlives REQUEST_TIMEOUT_MS still completes', async () => {
+      const adapter = await startAdapter({ apiDir: API_DIR, env: { REQUEST_TIMEOUT_MS: '300' } })
+
+      const start = await fetch(`${adapter.baseUrl}/api/bg-start?id=rt1&ms=600`)
+      expect(start.status).toBe(202)
+
+      let state: string | null = null
+      for (let i = 0; i < 60 && state !== 'done'; i++) {
+        await new Promise((r) => setTimeout(r, 50))
+        const poll = await fetch(`${adapter.baseUrl}/api/bg-status?id=rt1`)
+        state = (await poll.json()).state
+      }
+      expect(state).toBe('done')
+      await adapter.stop()
+    }, 10_000)
   })
 })

@@ -311,7 +311,7 @@ describe('cf server adapter', () => {
   })
 
   describe('raw stream', () => {
-    it('bypasses the limit entirely when bodyParser is false', async () => {
+    it('bypasses the parsed-body limit when bodyParser is false (still under the 10 MiB raw-stream cap)', async () => {
       const bytes = randomBytes(5_242_880)
       const sha256 = createHash('sha256').update(bytes).digest('hex')
       const res = await request('/api/raw-stream', {
@@ -322,6 +322,151 @@ describe('cf server adapter', () => {
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ bodyIsUndefined: true, length: 5_242_880, sha256 })
     })
+
+    it('accepts exactly 10 MiB on a raw stream, sha256 intact', async () => {
+      const bytes = randomBytes(10_485_760)
+      const sha256 = createHash('sha256').update(bytes).digest('hex')
+      const res = await request('/api/raw-stream', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: bytes,
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ bodyIsUndefined: true, length: 10_485_760, sha256 })
+    }, 20_000)
+
+    it('rejects a raw stream one byte over 10 MiB (Content-Length known upfront)', async () => {
+      const res = await request('/api/raw-stream', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: randomBytes(10_485_761),
+      })
+      expect(res.status).toBe(413)
+      expect(await res.json()).toEqual({ error: 'Payload too large' })
+    }, 20_000)
+
+    it('rejects a chunked raw stream over 10 MiB with no Content-Length', async () => {
+      const status = await new Promise<number>((resolvePromise, rejectPromise) => {
+        const url = new URL(adapter.baseUrl)
+        const req = http.request(
+          {
+            host: url.hostname,
+            port: url.port,
+            path: '/api/raw-stream',
+            method: 'POST',
+            headers: { 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' },
+          },
+          (res) => {
+            res.on('data', () => {})
+            res.on('end', () => resolvePromise(res.statusCode ?? 0))
+          }
+        )
+        req.on('error', () => resolvePromise(0))
+        req.write(Buffer.alloc(10_485_761))
+        req.end()
+      })
+      expect(status).toBe(413)
+    }, 20_000)
+  })
+
+  // These mirror api/parse-pdf.ts's real shape: an await (e.g.
+  // supabase.auth.getUser) happens before the handler ever touches the
+  // request stream, so the proxy counting bytes must never switch the
+  // stream into flowing mode itself — only the handler's own later
+  // req.on('data') may do that. See test/fixtures/cf-api/raw-stream-delayed.js.
+  describe('raw stream (handler attaches listeners late, like parse-pdf.ts)', () => {
+    it('a 5 MiB body sent well before the handler attaches still arrives with exact length and sha256', async () => {
+      const bytes = randomBytes(5_242_880)
+      const sha256 = createHash('sha256').update(bytes).digest('hex')
+      const res = await request('/api/raw-stream-delayed', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: bytes,
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ bodyIsUndefined: true, length: 5_242_880, sha256 })
+    }, 20_000)
+
+    it('accepts exactly 10 MiB with the handler attaching late', async () => {
+      const bytes = randomBytes(10_485_760)
+      const sha256 = createHash('sha256').update(bytes).digest('hex')
+      const res = await request('/api/raw-stream-delayed', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: bytes,
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ bodyIsUndefined: true, length: 10_485_760, sha256 })
+    }, 20_000)
+
+    it('rejects a chunked body over 10 MiB even though the handler attaches late', async () => {
+      const status = await new Promise<number>((resolvePromise) => {
+        const url = new URL(adapter.baseUrl)
+        const req = http.request(
+          {
+            host: url.hostname,
+            port: url.port,
+            path: '/api/raw-stream-delayed',
+            method: 'POST',
+            headers: { 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' },
+          },
+          (res) => {
+            res.on('data', () => {})
+            res.on('end', () => resolvePromise(res.statusCode ?? 0))
+          }
+        )
+        req.on('error', () => resolvePromise(0))
+        req.write(Buffer.alloc(10_485_761))
+        req.end()
+      })
+      expect(status).toBe(413)
+    }, 20_000)
+
+    it('a tiny 3-byte body that finishes long before the handler attaches still arrives intact', async () => {
+      const bytes = new Uint8Array([1, 2, 3])
+      const sha256 = createHash('sha256').update(bytes).digest('hex')
+      const res = await request('/api/raw-stream-delayed', {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream' },
+        body: bytes,
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ bodyIsUndefined: true, length: 3, sha256 })
+    })
+  })
+
+  describe('route deadlines (per-route maxDuration)', () => {
+    it('a handler that responds within its deadline gives 200', async () => {
+      const res = await request('/api/slow?ms=50')
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ slept: 50 })
+    })
+
+    it('a handler slower than its deadline gives 504, and the handler writing afterward does not crash the server', async () => {
+      const res = await request('/api/slow?ms=700')
+      expect(res.status).toBe(504)
+      expect(await res.json()).toEqual({ error: 'Gateway Timeout' })
+
+      // The fixture's own sleep(700) + res.json() call is still pending at
+      // this point; give it time to run (and no-op) before proving the
+      // server is still alive.
+      await new Promise((r) => setTimeout(r, 800))
+      const after = await request('/api/echo')
+      expect(after.status).toBe(200)
+    }, 10_000)
+
+    it('a waitUntil job scheduled before the deadline still completes after the 504', async () => {
+      const res = await request('/api/slow-waituntil?id=deadline1&ms=400')
+      expect(res.status).toBe(504)
+
+      let state: string | null = null
+      for (let i = 0; i < 60 && state !== 'done'; i++) {
+        await new Promise((r) => setTimeout(r, 50))
+        const poll = await request('/api/bg-status?id=deadline1')
+        state = (await poll.json()).state
+      }
+      expect(state).toBe('done')
+    }, 10_000)
   })
 
   describe('rewrites', () => {
