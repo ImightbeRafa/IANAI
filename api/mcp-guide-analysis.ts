@@ -4,19 +4,25 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { timingSafeEqual } from 'node:crypto'
 import { processNextMcpUrlIntake } from './lib/mcp/url-analysis-worker.js'
 
 export const maxDuration = 60
 
+function safeEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a)
+  const y = Buffer.from(b)
+  return x.length === y.length && timingSafeEqual(x, y)
+}
+
 function authorizeCron(req: VercelRequest): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) return false
-  const auth = req.headers.authorization || ''
-  if (auth === `Bearer ${secret}`) return true
-  // Vercel Cron sends Authorization: Bearer <CRON_SECRET> when configured
-  const vercelCron = req.headers['x-vercel-cron']
-  if (vercelCron && auth === `Bearer ${secret}`) return true
-  return false
+  const raw = req.headers.authorization
+  const auth = (Array.isArray(raw) ? raw[0] : raw) || ''
+  // Vercel Cron and the Cloudflare cron Worker both send
+  // Authorization: Bearer <CRON_SECRET>; x-vercel-cron is not required.
+  return safeEqual(auth, `Bearer ${secret}`)
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

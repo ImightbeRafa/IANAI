@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-api
+.git
+.cursor
+.windsurf
+.vercel
+.wrangler
+docs
+supabase
+test
+*.log
+*.tsbuildinfo
+.env
+.env.*
