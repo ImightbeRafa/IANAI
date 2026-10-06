@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-api
+.wrangler
 *.local
 *.tsbuildinfo
 # Local Supabase CLI artifacts; keep versioned migrations tracked
