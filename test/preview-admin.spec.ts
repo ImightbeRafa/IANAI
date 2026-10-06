@@ -7,6 +7,7 @@ import {
 } from '../api/lib/preview-admin'
 import {
   isPreviewDeploy,
+  parsePreviewHosts,
   resolveClientAdminAccess,
 } from '../src/lib/previewAdmin'
 
@@ -54,6 +55,20 @@ describe('preview admin allowlist (server)', () => {
       env: { VERCEL_ENV: 'preview' },
     })).toBe(true)
   })
+
+  it('APP_ENV drives preview detection the same way as VERCEL_ENV', () => {
+    expect(isVercelPreviewRuntime({ APP_ENV: 'preview' })).toBe(true)
+    expect(isVercelPreviewRuntime({ APP_ENV: 'production', VERCEL_ENV: 'preview' })).toBe(false)
+
+    expect(hasPreviewAdminAllowlistAccess({
+      email: 'sup.rafa0412@gmail.com',
+      env: { APP_ENV: 'preview' },
+    })).toBe(true)
+    expect(hasPreviewAdminAllowlistAccess({
+      email: 'sup.rafa0412@gmail.com',
+      env: { APP_ENV: 'production' },
+    })).toBe(false)
+  })
 })
 
 describe('preview admin allowlist (client)', () => {
@@ -81,5 +96,39 @@ describe('preview admin allowlist (client)', () => {
       email: 'sup.rafa0412@gmail.com',
       vercelEnv: 'production',
     })).toBe(false)
+  })
+
+  it('detects preview via appEnv and an explicit preview-hosts allowlist', () => {
+    expect(isPreviewDeploy({ appEnv: 'preview' })).toBe(true)
+    expect(isPreviewDeploy({ appEnv: 'production', vercelEnv: 'preview' })).toBe(false)
+    expect(isPreviewDeploy({
+      appEnv: '',
+      hostname: 'preview.example.test',
+      previewHosts: 'preview.example.test, other.example.test',
+    })).toBe(true)
+    expect(isPreviewDeploy({
+      appEnv: '',
+      hostname: 'PREVIEW.EXAMPLE.TEST',
+      previewHosts: 'preview.example.test, other.example.test',
+    })).toBe(true)
+    expect(isPreviewDeploy({
+      appEnv: '',
+      hostname: 'evil-preview.example.test',
+      previewHosts: 'preview.example.test, other.example.test',
+    })).toBe(false)
+    expect(isPreviewDeploy({
+      appEnv: '',
+      hostname: 'preview.example.test',
+      previewHosts: '',
+    })).toBe(false)
+    expect(isPreviewDeploy({
+      appEnv: 'production',
+      hostname: 'preview.example.test',
+      previewHosts: 'preview.example.test',
+    })).toBe(false)
+  })
+
+  it('parsePreviewHosts trims, lowercases and drops empties', () => {
+    expect(parsePreviewHosts(' a.test , ,B.test ')).toEqual(['a.test', 'b.test'])
   })
 })

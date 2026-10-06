@@ -4,6 +4,7 @@
  */
 
 import { getSupabaseAdmin } from '../supabase-admin.js'
+import { isProductionAppEnv } from '../app-env.js'
 import { deterministicGenerationUuid } from './generation-id.js'
 import { getCreditRemaining } from './consume.js'
 import { isCreditsV1Enabled } from './catalog.js'
@@ -41,8 +42,7 @@ function readUserMetaFlag(
  * Opt out on production with CHAT_SHELL_OPEN_GIFT=0.
  */
 export function shouldSkipChatShellOpenGift(): boolean {
-  const vercelEnv = (process.env.VERCEL_ENV || '').toLowerCase()
-  if (vercelEnv !== 'production') return true
+  if (!isProductionAppEnv()) return true
   const flag = (process.env.CHAT_SHELL_OPEN_GIFT || '1').trim().toLowerCase()
   return flag === '0' || flag === 'false' || flag === 'off'
 }
