@@ -29,8 +29,17 @@ export type ClaimedUrlIntake = {
 export type UrlAnalysisWorkerResult =
   | { processed: false; reason: 'empty' | 'db_unavailable' }
   | { processed: true; intakeId: string; status: 'ready' | 'failed'; brandKitId?: string | null }
+  // Round-6 operator review, item G: a clean early stop with no kit write,
+  // no final status update, and no usage log — either because a second
+  // runner's stale-reclaim has already taken this row (lease_lost), or
+  // because the per-route deadline (api/lib/request-deadline.ts) fired
+  // first (deadline_exceeded). Either way the row is simply left at
+  // status='processing' with its original claimed_at, same as a crash
+  // would leave it — the existing stale-reclaim window is what picks it
+  // back up, not this function.
+  | { processed: true; intakeId: string; status: 'skipped'; reason: 'lease_lost' | 'deadline_exceeded' }
 
-export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult> {
+export async function processNextMcpUrlIntake(signal?: AbortSignal): Promise<UrlAnalysisWorkerResult> {
   const db = getSupabaseAdmin()
   if (!db) return { processed: false, reason: 'db_unavailable' }
 
@@ -93,6 +102,30 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       ]
     }
 
+    // Round-6 operator review, item G: re-check the lease right before
+    // writing anything brand-kit-shaped. runSiteAnalysis above can take
+    // long enough (no maxDuration kill on the container, §8 of the ops
+    // doc) to run past the stale-reclaim window; a second runner may have
+    // already reclaimed this same row and be mid-flight on it. Writing the
+    // kit here without rechecking would race or duplicate that work, same
+    // class of bug SD-06 already fixed for the final status update — this
+    // closes the same gap one step earlier, before any write happens at
+    // all (not just before the LAST write).
+    if (signal?.aborted) {
+      return { processed: true, intakeId: row.id, status: 'skipped', reason: 'deadline_exceeded' }
+    }
+    const { data: stillLeased, error: leaseCheckError } = await db
+      .from('mcp_url_intakes')
+      .select('id')
+      .eq('id', row.id)
+      .eq('status', 'processing')
+      .eq('claimed_at', row.claimed_at)
+      .maybeSingle()
+    if (leaseCheckError) throw leaseCheckError
+    if (!stillLeased) {
+      return { processed: true, intakeId: row.id, status: 'skipped', reason: 'lease_lost' }
+    }
+
     let appliedBrandKitId: string | null = existingKit?.id ?? null
     if (existingKit?.id) {
       if (Object.keys(kitPatch).length > 0) {
@@ -147,12 +180,20 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       warnings: analysis.warnings.slice(0, 20),
     }
 
+    // Round-6 operator review, item G: honor the deadline right before the
+    // final write too — the kit write above may itself have taken a while.
+    if (signal?.aborted) {
+      return { processed: true, intakeId: row.id, status: 'skipped', reason: 'deadline_exceeded' }
+    }
+
     // Lease-guarded: only write if this row is still the one we claimed
     // (same id, still 'processing', same claimed_at). If a stale-reclaim by
     // another runner has since claimed it again, claimed_at will have
     // moved and this update matches zero rows instead of clobbering the
-    // newer runner's in-flight work.
-    const { error: doneError } = await db
+    // newer runner's in-flight work. `.select('id')` (round-6 operator
+    // review, item G) makes that "zero rows" case observable instead of
+    // silently falling through to logApiUsage as if the write had landed.
+    const { data: doneRows, error: doneError } = await db
       .from('mcp_url_intakes')
       .update({
         status: 'ready',
@@ -166,7 +207,11 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       .eq('id', row.id)
       .eq('status', 'processing')
       .eq('claimed_at', row.claimed_at)
+      .select('id')
     if (doneError) throw doneError
+    if (!doneRows || doneRows.length === 0) {
+      return { processed: true, intakeId: row.id, status: 'skipped', reason: 'lease_lost' }
+    }
 
     await logApiUsage({
       userId: row.user_id,
@@ -192,8 +237,11 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
     const attempts = Number(row.attempt_count) || 1
     const terminal = attempts >= MCP_URL_ANALYSIS_MAX_ATTEMPTS
     // Same lease guard as the success path: only write if this is still
-    // the row (and the claim) we started with.
-    const { error: failError } = await db
+    // the row (and the claim) we started with. `.select('id')` (round-6
+    // operator review, item G) surfaces a lease-lost zero-row result the
+    // same way the success path does, instead of logging usage for a
+    // write that never actually landed.
+    const { data: failRows, error: failError } = await db
       .from('mcp_url_intakes')
       .update({
         status: terminal ? 'failed' : 'pending_analysis',
@@ -205,24 +253,32 @@ export async function processNextMcpUrlIntake(): Promise<UrlAnalysisWorkerResult
       .eq('id', row.id)
       .eq('status', 'processing')
       .eq('claimed_at', row.claimed_at)
+      .select('id')
     if (failError) console.error('failed to mark intake failure', failError)
+    const leaseLostOnFailure = !failError && (!failRows || failRows.length === 0)
 
-    await logApiUsage({
-      userId: row.user_id,
-      feature: 'brand_extraction',
-      model: SITE_ANALYSIS_MODEL,
-      success: false,
-      errorMessage: message,
-      source: 'cron',
-      metadata: {
-        action: 'mcp_guide_url_analysis',
+    if (!leaseLostOnFailure) {
+      await logApiUsage({
+        userId: row.user_id,
+        feature: 'brand_extraction',
+        model: SITE_ANALYSIS_MODEL,
+        success: false,
+        errorMessage: message,
         source: 'cron',
-        intakeId: row.id,
-        businessId: row.business_id,
-        attempt: attempts,
-        terminal,
-      },
-    }).catch(() => undefined)
+        metadata: {
+          action: 'mcp_guide_url_analysis',
+          source: 'cron',
+          intakeId: row.id,
+          businessId: row.business_id,
+          attempt: attempts,
+          terminal,
+        },
+      }).catch(() => undefined)
+    }
+
+    if (leaseLostOnFailure) {
+      return { processed: true, intakeId: row.id, status: 'skipped', reason: 'lease_lost' }
+    }
 
     if (!terminal) {
       // Leave as pending for next cron tick

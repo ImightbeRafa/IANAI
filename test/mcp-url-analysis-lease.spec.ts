@@ -38,6 +38,7 @@ vi.mock('../api/lib/supabase-admin.js', () => ({
 
 import { getSupabaseAdmin } from '../api/lib/supabase-admin.js'
 import { assertPublicHttpUrl } from '../api/lib/url-safety.js'
+import { logApiUsage } from '../api/lib/usage-logger.js'
 import { processNextMcpUrlIntake } from '../api/lib/mcp/url-analysis-worker.js'
 
 const CLAIMED_AT = '2026-01-01T00:00:00.000Z'
@@ -71,15 +72,30 @@ function selectChain(result: { data: unknown; error: unknown }) {
 interface UpdateRecord {
   patch: Record<string, unknown>
   eq: unknown[][]
+  selected: boolean
 }
 
-function makeUpdateRecorder(records: UpdateRecord[], result: { error: unknown } = { error: null }) {
+// Round-6 operator review, item G: the real code now chains `.select('id')`
+// after every mcp_url_intakes `.update(...).eq()...`, so the thenable this
+// returns must resolve with `data` too (an array of updated rows) — not
+// just `error` — since that's exactly what the code now inspects to detect
+// a lease-lost zero-row update. Defaults to "1 row matched" (lease held)
+// so every pre-existing test keeps its original "happy path" meaning
+// unless it explicitly opts into `{ data: [] }` to simulate lease loss.
+function makeUpdateRecorder(
+  records: UpdateRecord[],
+  result: { error: unknown; data: unknown[] | null } = { error: null, data: [{ id: 'updated-row' }] }
+) {
   return (patch: Record<string, unknown>) => {
-    const record: UpdateRecord = { patch, eq: [] }
+    const record: UpdateRecord = { patch, eq: [], selected: false }
     records.push(record)
     const builder: any = {
       eq: (...args: unknown[]) => {
         record.eq.push(args)
+        return builder
+      },
+      select: () => {
+        record.selected = true
         return builder
       },
       then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
@@ -89,7 +105,15 @@ function makeUpdateRecorder(records: UpdateRecord[], result: { error: unknown } 
   }
 }
 
-function makeFakeDb(row: ReturnType<typeof claimedRow>, intakeUpdates: UpdateRecord[]) {
+function makeFakeDb(
+  row: ReturnType<typeof claimedRow>,
+  intakeUpdates: UpdateRecord[],
+  opts: {
+    leaseStillHeldBeforeKitWrite?: boolean
+    updateResult?: { error: unknown; data: unknown[] | null }
+  } = {}
+) {
+  const leaseStillHeldBeforeKitWrite = opts.leaseStillHeldBeforeKitWrite ?? true
   return {
     rpc: vi.fn(async () => ({ data: row, error: null })),
     from: vi.fn((table: string) => {
@@ -100,7 +124,13 @@ function makeFakeDb(row: ReturnType<typeof claimedRow>, intakeUpdates: UpdateRec
         return { select: () => selectChain({ data: { id: 'kit-1' }, error: null }) }
       }
       if (table === 'mcp_url_intakes') {
-        return { update: makeUpdateRecorder(intakeUpdates) }
+        return {
+          // The round-6 lease recheck before the kit write — a plain
+          // select, not the update() chain above.
+          select: () =>
+            selectChain({ data: leaseStillHeldBeforeKitWrite ? { id: row.id } : null, error: null }),
+          update: makeUpdateRecorder(intakeUpdates, opts.updateResult),
+        }
       }
       throw new Error(`unexpected table ${table}`)
     }),
@@ -110,6 +140,7 @@ function makeFakeDb(row: ReturnType<typeof claimedRow>, intakeUpdates: UpdateRec
 describe('processNextMcpUrlIntake lease guard (SD-06)', () => {
   beforeEach(() => {
     vi.mocked(assertPublicHttpUrl).mockReset()
+    vi.mocked(logApiUsage).mockClear()
   })
 
   afterEach(() => {
@@ -127,6 +158,7 @@ describe('processNextMcpUrlIntake lease guard (SD-06)', () => {
     expect(result).toEqual({ processed: true, intakeId: row.id, status: 'ready', brandKitId: 'kit-1' })
     expect(intakeUpdates).toHaveLength(1)
     expect(intakeUpdates[0].patch.status).toBe('ready')
+    expect(intakeUpdates[0].selected).toBe(true)
     expect(intakeUpdates[0].eq).toEqual([
       ['id', row.id],
       ['status', 'processing'],
@@ -174,5 +206,82 @@ describe('processNextMcpUrlIntake lease guard (SD-06)', () => {
       ['status', 'processing'],
       ['claimed_at', row.claimed_at],
     ])
+  })
+
+  // Round-6 operator review, item G.
+  describe('lease recheck before the kit write, and .select(id) on the final updates', () => {
+    it('lease lost before the kit write: no kit write, no final update, no usage log', async () => {
+      const row = claimedRow()
+      const intakeUpdates: UpdateRecord[] = []
+      const fakeDb = makeFakeDb(row, intakeUpdates, { leaseStillHeldBeforeKitWrite: false })
+      vi.mocked(getSupabaseAdmin).mockReturnValue(fakeDb as any)
+
+      const result = await processNextMcpUrlIntake()
+
+      expect(result).toEqual({ processed: true, intakeId: row.id, status: 'skipped', reason: 'lease_lost' })
+      // No update to mcp_url_intakes happened at all (not the final
+      // status update) — and brand_kits was never written either, since
+      // this fake db's brand_kits table exposes only `select`, so any
+      // write attempt would have thrown "unexpected" rather than silently
+      // succeeding.
+      expect(intakeUpdates).toHaveLength(0)
+      expect(logApiUsage).not.toHaveBeenCalled()
+    })
+
+    it('the final success update returning 0 rows (lease lost) skips the usage log', async () => {
+      const row = claimedRow()
+      const intakeUpdates: UpdateRecord[] = []
+      const fakeDb = makeFakeDb(row, intakeUpdates, { updateResult: { error: null, data: [] } })
+      vi.mocked(getSupabaseAdmin).mockReturnValue(fakeDb as any)
+
+      const result = await processNextMcpUrlIntake()
+
+      expect(result).toEqual({ processed: true, intakeId: row.id, status: 'skipped', reason: 'lease_lost' })
+      expect(intakeUpdates).toHaveLength(1) // the update WAS attempted — it just matched 0 rows
+      expect(logApiUsage).not.toHaveBeenCalled()
+    })
+
+    it('the final failure update returning 0 rows (lease lost) skips the usage log', async () => {
+      const row = claimedRow({ attempt_count: 1 })
+      const intakeUpdates: UpdateRecord[] = []
+      const fakeDb = makeFakeDb(row, intakeUpdates, { updateResult: { error: null, data: [] } })
+      vi.mocked(getSupabaseAdmin).mockReturnValue(fakeDb as any)
+      vi.mocked(assertPublicHttpUrl).mockImplementation(() => {
+        throw new Error('blocked url')
+      })
+
+      const result = await processNextMcpUrlIntake()
+
+      expect(result).toEqual({ processed: true, intakeId: row.id, status: 'skipped', reason: 'lease_lost' })
+      expect(logApiUsage).not.toHaveBeenCalled()
+    })
+
+    it('an aborted deadline signal before the kit write stops cleanly with no writes and no usage log', async () => {
+      const row = claimedRow()
+      const intakeUpdates: UpdateRecord[] = []
+      const fakeDb = makeFakeDb(row, intakeUpdates)
+      vi.mocked(getSupabaseAdmin).mockReturnValue(fakeDb as any)
+      const controller = new AbortController()
+      controller.abort()
+
+      const result = await processNextMcpUrlIntake(controller.signal)
+
+      expect(result).toEqual({ processed: true, intakeId: row.id, status: 'skipped', reason: 'deadline_exceeded' })
+      expect(intakeUpdates).toHaveLength(0)
+      expect(logApiUsage).not.toHaveBeenCalled()
+    })
+
+    it('happy path (lease held throughout, signal never aborted) is unchanged', async () => {
+      const row = claimedRow()
+      const intakeUpdates: UpdateRecord[] = []
+      const fakeDb = makeFakeDb(row, intakeUpdates)
+      vi.mocked(getSupabaseAdmin).mockReturnValue(fakeDb as any)
+      const controller = new AbortController()
+
+      const result = await processNextMcpUrlIntake(controller.signal)
+
+      expect(result).toEqual({ processed: true, intakeId: row.id, status: 'ready', brandKitId: 'kit-1' })
+      expect(logApiUsage).toHaveBeenCalledTimes(1)
+    })
   })
 })
