@@ -26,10 +26,6 @@ export function isVercelPreviewRuntime(env: AppEnvSource = process.env): boolean
   return isPreviewAppEnv(env)
 }
 
-// Kept as an alias so call sites can read it as "is this a preview runtime"
-// without implying Vercel specifically (Cloudflare preview counts too).
-export const isPreviewRuntime = isVercelPreviewRuntime
-
 /**
  * Preview QA may open /admin without profiles.is_admin.
  * Never true on production / development / unset APP_ENV / VERCEL_ENV.

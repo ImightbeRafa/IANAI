@@ -13,3 +13,4 @@ test
 *.tsbuildinfo
 .env
 .env.*
+.dev.vars*

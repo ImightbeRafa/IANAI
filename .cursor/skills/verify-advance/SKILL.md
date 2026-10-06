@@ -25,15 +25,17 @@ Hard locks (every run):
 
 Preferred target for PR #35 is **Preview** (already serves `/chat` + `/api/*`).
 
-`ADVANCE_VERIFY_BASE_URL` is the supported way to target any origin in preview
-mode — a Cloudflare Preview Worker, `advanceai.studio` behind a CF domain
-later, or a local container (`ADVANCE_VERIFY_TARGET=preview
-ADVANCE_VERIFY_BASE_URL=http://127.0.0.1:8080`). Preview mode starts **no**
-process regardless of which origin it points at. When unset, the helper logs
-a warning and falls back to the legacy Vercel Preview URL below.
+`ADVANCE_VERIFY_BASE_URL` is **required** in preview mode — there is no
+default origin. Point it at the Cloudflare preview Worker origin (once a
+browser session behind Access can reach it) or a local container
+(`ADVANCE_VERIFY_TARGET=preview ADVANCE_VERIFY_BASE_URL=http://127.0.0.1:8080`).
+Preview mode starts **no** process regardless of which origin it points at.
+If it's unset (and no prior `launch` wrote a state file), the helper exits
+with a clear error instead of silently falling back to anything — there is
+no legacy Vercel default anymore.
 
 ```bash
-export ADVANCE_VERIFY_BASE_URL="${ADVANCE_VERIFY_BASE_URL:-https://ianai-git-cursor-chat-shell-prod-69817a-rafas-projects-3ea2e797.vercel.app}"
+export ADVANCE_VERIFY_BASE_URL="<cloudflare preview origin or local container URL>"
 export ADVANCE_VERIFY_TARGET="${ADVANCE_VERIFY_TARGET:-preview}"
 node .cursor/skills/verify-advance/helpers/verify-advance.mjs launch
 ```
@@ -59,7 +61,7 @@ Env names (never commit values):
 
 | Name | Use |
 |------|-----|
-| `ADVANCE_VERIFY_BASE_URL` | Preview or local origin (CF preview Worker, `advanceai.studio`, or a local container); unset falls back to the legacy Vercel Preview URL |
+| `ADVANCE_VERIFY_BASE_URL` | **Required** in preview mode: the CF preview Worker origin or a local container URL. No default — unset exits with an error. |
 | `ADVANCE_VERIFY_TARGET` | `preview` or `local` |
 | `ADVANCE_VERIFY_PORT` | Local Vite port (default `5173`) |
 | `ADVANCE_VERIFY_EMAIL` / `ADVANCE_VERIFY_PASSWORD` | QA sign-in (any signed-in AIIAN user when the kill switch is on) |

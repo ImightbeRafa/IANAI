@@ -13,10 +13,6 @@ const STATE_DIR = process.env.ADVANCE_VERIFY_STATE_DIR || '/tmp/verify-advance'
 const STATE_FILE = join(STATE_DIR, 'instance.json')
 const EVIDENCE_ROOT = join(ROOT, '.cursor/skills/verify-advance/evidence/runs')
 const ARTIFACTS = '/opt/cursor/artifacts'
-// Legacy default from the Vercel era. ADVANCE_VERIFY_BASE_URL is the
-// supported way to target a Cloudflare preview origin or a local container.
-const LEGACY_VERCEL_PREVIEW =
-  'https://ianai-git-cursor-chat-shell-prod-69817a-rafas-projects-3ea2e797.vercel.app'
 
 function log(...args) {
   console.log(...args)
@@ -41,8 +37,11 @@ function baseUrl() {
   const fromEnv = (process.env.ADVANCE_VERIFY_BASE_URL || '').replace(/\/$/, '')
   const fromState = readState()?.url
   if (fromEnv || fromState) return fromEnv || fromState
-  log('[verify-advance] ADVANCE_VERIFY_BASE_URL unset; using legacy Vercel Preview default')
-  return LEGACY_VERCEL_PREVIEW
+  die(
+    'ADVANCE_VERIFY_BASE_URL is required in preview mode (no default origin — ' +
+      'point it at the Cloudflare preview Worker or a local container). ' +
+      `Or run launch with ADVANCE_VERIFY_TARGET=local first, which writes ${STATE_FILE}.`
+  )
 }
 
 function targetMode() {
