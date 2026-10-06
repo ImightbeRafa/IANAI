@@ -25,6 +25,13 @@ Hard locks (every run):
 
 Preferred target for PR #35 is **Preview** (already serves `/chat` + `/api/*`).
 
+`ADVANCE_VERIFY_BASE_URL` is the supported way to target any origin in preview
+mode — a Cloudflare Preview Worker, `advanceai.studio` behind a CF domain
+later, or a local container (`ADVANCE_VERIFY_TARGET=preview
+ADVANCE_VERIFY_BASE_URL=http://127.0.0.1:8080`). Preview mode starts **no**
+process regardless of which origin it points at. When unset, the helper logs
+a warning and falls back to the legacy Vercel Preview URL below.
+
 ```bash
 export ADVANCE_VERIFY_BASE_URL="${ADVANCE_VERIFY_BASE_URL:-https://ianai-git-cursor-chat-shell-prod-69817a-rafas-projects-3ea2e797.vercel.app}"
 export ADVANCE_VERIFY_TARGET="${ADVANCE_VERIFY_TARGET:-preview}"
@@ -32,6 +39,10 @@ node .cursor/skills/verify-advance/helpers/verify-advance.mjs launch
 ```
 
 Ready when the helper prints `READY url=<…>` and writes `/tmp/verify-advance/instance.json`. Preview launch starts **no** process.
+
+The MCP OAuth protected-resource metadata always reports
+`resource: https://advanceai.studio/api/mcp`, regardless of which origin
+actually served the request — that does not change with this host move.
 
 Local SPA (auth still hits AIIAN; AI generation will 404 without `npm run dev:vercel`):
 
@@ -48,7 +59,7 @@ Env names (never commit values):
 
 | Name | Use |
 |------|-----|
-| `ADVANCE_VERIFY_BASE_URL` | Preview or local origin |
+| `ADVANCE_VERIFY_BASE_URL` | Preview or local origin (CF preview Worker, `advanceai.studio`, or a local container); unset falls back to the legacy Vercel Preview URL |
 | `ADVANCE_VERIFY_TARGET` | `preview` or `local` |
 | `ADVANCE_VERIFY_PORT` | Local Vite port (default `5173`) |
 | `ADVANCE_VERIFY_EMAIL` / `ADVANCE_VERIFY_PASSWORD` | QA sign-in (any signed-in AIIAN user when the kill switch is on) |

@@ -1,3 +1,15 @@
+## 2026-10-06 — Cloudflare Containers adapter (Phase 1, code + docs only, nothing deployed)
+
+**Area:** infra / api
+**Files:** `server.mjs`, `Dockerfile`, `.dockerignore`, `wrangler.jsonc`, `cf/http-rules.mjs`, `cf/container-env.mjs`, `cf/worker-core.ts`, `src/cf-container-worker.ts`, `scripts/build-api.mjs`, `scripts/parity/*`, `api/lib/app-env.ts`, `api/mcp-guide-analysis.ts`, `api/lib/preview-admin.ts`, `api/lib/credits/chat-shell-gift.ts`, `src/lib/previewAdmin.ts`, `docs/operations/cloudflare-containers.md`, `docs/operations/cloudflare-route-table.md`, `docs/operations/cloudflare-parity-checklist.md`
+
+- Added a plain `node:http` adapter (`server.mjs`) that runs the existing Vercel-style `api/**` handlers unchanged inside a Cloudflare Container, reproducing `@vercel/node`'s request/response helpers (lazy `req.query`/`req.cookies`/`req.body`, `res.status/json/send/redirect`), body-size limits, `waitUntil` draining on SIGTERM, and static/SPA fallback serving.
+- Added the Cloudflare Worker (`src/cf-container-worker.ts`, Betsy pattern) with testable core logic in `cf/worker-core.ts` (no `cloudflare:*` imports): routes `/api/*` and the two `oauth-protected-resource` rewrites to the container, everything else to Static Assets, and forwards the `* * * * *` cron with `DISABLE_CRONS` gating.
+- `DISABLE_CRONS=1` on both `vars` blocks in `wrangler.jsonc` until cutover — the Vercel cron stays the only writer. `api/mcp-guide-analysis.ts` auth is now a timing-safe compare and accepts a plain `Bearer <CRON_SECRET>` (the `x-vercel-cron` branch was already dead code).
+- New `APP_ENV` (`api/lib/app-env.ts`) is a platform-agnostic deployment-environment class alongside `VERCEL_ENV` (APP_ENV takes precedence); `preview-admin.ts`, `chat-shell-gift.ts`, and the client `previewAdmin.ts` now read either, plus an explicit `VITE_PREVIEW_HOSTS` allowlist.
+- `scripts/parity/*` diff env var names between the real Vercel project, the api/src source, and the container/wrangler config (`npm run parity:env`), and generate the route table (`npm run parity:routes`). Tilopay webhook replay and upload-limits scripts are non-writing/local-only by design — see their header comments and `docs/operations/cloudflare-parity-checklist.md`.
+- `vercel.json` is byte-for-byte unchanged; Vercel prod and Preview keep working from this branch unmodified.
+
 ## 2026-09-17 — SD-01: fail-closed image job ownership on claim/replay
 
 **Area:** api / images
