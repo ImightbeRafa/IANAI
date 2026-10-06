@@ -15,6 +15,14 @@ function safeEqual(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
+// server.mjs sets this; Vercel never does. Used only to fail closed on the
+// CF container when crons haven't been enabled there (see SD-01):
+// api/mcp-guide-analysis.ts never keys off anything Vercel-specific, so the
+// Vercel path (no ADVANCE_RUNTIME) is completely unaffected by this gate.
+function isCloudflareContainerRuntime(): boolean {
+  return process.env.ADVANCE_RUNTIME === 'cloudflare-container'
+}
+
 function authorizeCron(req: VercelRequest): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) return false
@@ -29,6 +37,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store')
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' })
+    return
+  }
+  if (isCloudflareContainerRuntime() && process.env.ENABLE_CRONS !== '1') {
+    res.status(503).json({ error: 'Crons disabled on this runtime' })
     return
   }
   if (!authorizeCron(req)) {

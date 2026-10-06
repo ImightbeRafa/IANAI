@@ -7,17 +7,22 @@ import {
   isHtmlEntryPath,
   isContainerPath,
 } from './http-rules.mjs'
-import { cronsDisabled } from './container-env.mjs'
+import { cronsEnabled } from './container-env.mjs'
+import { verifyAccessJwt, type AccessJwtVerifyDeps } from './access-jwt'
 
 export interface WorkerEnv {
   ASSETS: { fetch(request: Request): Promise<Response> }
   CRON_SECRET?: string
-  DISABLE_CRONS?: string
+  ENABLE_CRONS?: string
   APP_ENV?: string
+  ACCESS_TEAM_DOMAIN?: string
+  ACCESS_AUD?: string
   [key: string]: unknown
 }
 
 export type ContainerFetch = (request: Request, env: WorkerEnv) => Promise<Response>
+
+export type HandleFetchDeps = AccessJwtVerifyDeps
 
 export const CRON_PATHS: Record<string, readonly string[]> = {
   '* * * * *': ['/api/mcp-guide-analysis'],
@@ -41,17 +46,48 @@ export function withSecurityHeaders(
   return out
 }
 
+// Builds a new Request for the container with the client-IP headers
+// rewritten rather than trusted as-is: any inbound X-Forwarded-For /
+// X-Real-IP is dropped (a client can set those to anything), then both are
+// set from CF-Connecting-IP — the header Cloudflare itself sets at the edge
+// and that a client cannot spoof — when present. If CF-Connecting-IP is
+// absent (e.g. in tests), both headers are left unset rather than forwarding
+// a possibly-spoofed value. The incoming Request is never mutated.
+function withTrustedClientIpHeaders(request: Request): Request {
+  const headers = new Headers(request.headers)
+  headers.delete('X-Forwarded-For')
+  headers.delete('X-Real-IP')
+  const connectingIp = request.headers.get('CF-Connecting-IP')
+  if (connectingIp) {
+    headers.set('X-Forwarded-For', connectingIp)
+    headers.set('X-Real-IP', connectingIp)
+  }
+  return new Request(request, { headers })
+}
+
 export async function handleFetch(
   request: Request,
   env: WorkerEnv,
-  containerFetch: ContainerFetch
+  containerFetch: ContainerFetch,
+  deps: HandleFetchDeps = {}
 ): Promise<Response> {
+  // Preview only: every request (assets and container alike) must carry a
+  // valid Cloudflare Access JWT. Production is completely unaffected — this
+  // check doesn't even run there. scheduled() never calls this function, so
+  // crons stay governed only by ENABLE_CRONS (see handleScheduled below).
+  if (env.APP_ENV === 'preview') {
+    const authorized = await verifyAccessJwt(request, env, deps)
+    if (!authorized) {
+      return Response.json({ error: 'Forbidden' }, { status: 403 })
+    }
+  }
+
   const pathname = new URL(request.url).pathname
 
   if (isContainerPath(pathname)) {
     let res: Response
     try {
-      res = await containerFetch(request, env)
+      res = await containerFetch(withTrustedClientIpHeaders(request), env)
     } catch {
       res = Response.json({ error: 'Container unavailable' }, { status: 503 })
     }
@@ -75,8 +111,10 @@ export async function handleScheduled(
 ): Promise<{ skipped: boolean; results?: unknown[] }> {
   const cron = controller.cron
 
-  if (cronsDisabled(env)) {
-    console.log(`[cf-cron] skipped (DISABLE_CRONS) cron=${cron}`)
+  // Fail closed: only ENABLE_CRONS === '1' runs anything. See
+  // cf/container-env.mjs's cronsEnabled for why this isn't a truthy check.
+  if (!cronsEnabled(env)) {
+    console.log(`[cf-cron] skipped (ENABLE_CRONS!=='1') cron=${cron}`)
     return { skipped: true }
   }
 

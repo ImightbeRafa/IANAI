@@ -12,6 +12,15 @@ import { CONTAINER_ENV_KEYS } from '../../cf/container-env.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '../..')
 
+// Vars that exist in wrangler.jsonc but are deliberately never forwarded to
+// the container — they're consumed by the Worker itself (cf/access-jwt.ts,
+// via cf/worker-core.ts's handleFetch) before a request ever reaches
+// containerFetch. Listed here, not in CONTAINER_ENV_KEYS, so
+// wranglerVarsNotForwarded's "must be empty" invariant stays meaningful
+// (an *unexpected* unforwarded var is still a real finding) instead of
+// being satisfied by accident.
+export const WORKER_ONLY_VAR_NAMES = Object.freeze(['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD'])
+
 function sortedUnique(names) {
   return [...new Set(names)].sort()
 }
@@ -22,6 +31,7 @@ export function diffEnv(root) {
   const wrangler = parseJsonc(readFileSync(resolve(root, 'wrangler.jsonc'), 'utf8'))
 
   const containerKeys = new Set(CONTAINER_ENV_KEYS)
+  const workerOnlyKeys = new Set(WORKER_ONLY_VAR_NAMES)
   const relevantNames = sortedUnique([...VERCEL_ENV_NAMES, ...apiNames])
 
   const missingFromContainer = relevantNames.filter(
@@ -32,12 +42,15 @@ export function diffEnv(root) {
     ...Object.keys(wrangler.vars ?? {}),
     ...Object.keys(wrangler.env?.preview?.vars ?? {}),
   ])
-  const wranglerVarsNotForwarded = wranglerVarNames.filter((name) => !containerKeys.has(name))
+  const wranglerVarsNotForwarded = wranglerVarNames.filter(
+    (name) => !containerKeys.has(name) && !workerOnlyKeys.has(name)
+  )
+  const workerOnlyVarsPresent = wranglerVarNames.filter((name) => workerOnlyKeys.has(name))
 
   const usedNames = new Set([...apiNames, ...viteNames])
   const unusedVercelNames = sortedUnique(VERCEL_ENV_NAMES.filter((name) => !usedNames.has(name)))
 
-  return { missingFromContainer, wranglerVarsNotForwarded, unusedVercelNames }
+  return { missingFromContainer, wranglerVarsNotForwarded, unusedVercelNames, workerOnlyVarsPresent }
 }
 
 // Per-name table for the 17 audited Vercel names: is it forwarded to the
@@ -72,7 +85,7 @@ function renderNameTable(rows) {
 }
 
 function main() {
-  const { missingFromContainer, wranglerVarsNotForwarded, unusedVercelNames } = diffEnv(ROOT)
+  const { missingFromContainer, wranglerVarsNotForwarded, unusedVercelNames, workerOnlyVarsPresent } = diffEnv(ROOT)
   const nameTable = buildVercelNameTable(ROOT)
 
   console.log(renderNameTable(nameTable))
@@ -80,6 +93,7 @@ function main() {
   console.log('[env-diff] missingFromContainer:', missingFromContainer)
   console.log('[env-diff] wranglerVarsNotForwarded:', wranglerVarsNotForwarded)
   console.log('[env-diff] unusedVercelNames:', unusedVercelNames)
+  console.log('[env-diff] workerOnlyVarsPresent (expected, never forwarded):', workerOnlyVarsPresent)
 
   if (missingFromContainer.length > 0 || wranglerVarsNotForwarded.length > 0) {
     console.error('[env-diff] FAIL: missingFromContainer and wranglerVarsNotForwarded must both be empty')

@@ -31,11 +31,13 @@
     "crons": ["* * * * *"]
   },
 
-  // Flip DISABLE_CRONS to "0" only at cutover, in the same window as removing
-  // the Vercel cron — otherwise both crons could run as two writers.
+  // Fail closed: no ENABLE_CRONS here means cf/container-env.mjs's
+  // cronsEnabled() is false, so the Worker's scheduled() handler is a no-op
+  // even though this trigger fires every minute. ENABLE_CRONS is set to "1"
+  // (plus a CF-only CRON_SECRET, distinct from Vercel's) only at cutover, in
+  // the same window as removing the Vercel cron — never both live.
   "vars": {
-    "APP_ENV": "production",
-    "DISABLE_CRONS": "1"
+    "APP_ENV": "production"
   },
 
   "containers": [
@@ -79,13 +81,24 @@
         "run_worker_first": true
       },
 
+      // Explicitly empty, not inherited from the top level: Preview never
+      // fires the cron trigger at all (belt-and-suspenders on top of the
+      // ENABLE_CRONS fail-closed gate — see cf/worker-core.ts).
       "triggers": {
-        "crons": ["* * * * *"]
+        "crons": []
       },
 
+      // ACCESS_TEAM_DOMAIN / ACCESS_AUD are Worker-only — read by
+      // cf/access-jwt.ts in handleFetch, never forwarded to the container
+      // (see CONTAINER_ENV_KEYS / scripts/parity/env-diff.mjs's
+      // WORKER_ONLY_VAR_NAMES). Non-secret placeholders; the real values
+      // come with the Access application once it exists. A value
+      // containing "REPLACE" is treated as unconfigured (fails closed, no
+      // network call) by cf/access-jwt.ts.
       "vars": {
         "APP_ENV": "preview",
-        "DISABLE_CRONS": "1"
+        "ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM.cloudflareaccess.com",
+        "ACCESS_AUD": "REPLACE_WITH_ACCESS_APP_AUD"
       },
 
       "containers": [

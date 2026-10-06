@@ -3,9 +3,15 @@
 // values live here. Shared by the Worker, the parity scripts and tests.
 //
 // VERCEL_ENV is deliberately excluded: APP_ENV replaces it on Cloudflare.
+//
+// ADVANCE_RUNTIME is not actually forwarded by the Worker (server.mjs sets it
+// itself, and the Dockerfile sets it too) — it's listed here only so the
+// "every process.env.X read in api/ must be in CONTAINER_ENV_KEYS" test
+// doesn't need a second special case alongside VERCEL_ENV.
 export const CONTAINER_ENV_KEYS = Object.freeze([
   'APP_ENV',
-  'DISABLE_CRONS',
+  'ADVANCE_RUNTIME',
+  'ENABLE_CRONS',
   'CRON_SECRET',
   'SUPABASE_URL',
   'SUPABASE_SECRET_KEY',
@@ -43,7 +49,11 @@ export function getContainerEnvVars(source) {
   return out
 }
 
-export function cronsDisabled(source) {
-  const v = (source.DISABLE_CRONS ?? '').trim().toLowerCase()
-  return v === '1' || v === 'true'
+// Fail closed: crons run ONLY when ENABLE_CRONS is the exact string '1'
+// (after trim). Anything else — unset, '', '0', 'true', 'TRUE', 'yes', ... —
+// means crons stay off. This is deliberately not a loose truthy check: SD-01
+// required a single unambiguous "on" value so a typo or a truthy-but-wrong
+// string (e.g. 'true') can never accidentally enable the preview cron.
+export function cronsEnabled(source) {
+  return (source.ENABLE_CRONS ?? '').trim() === '1'
 }
