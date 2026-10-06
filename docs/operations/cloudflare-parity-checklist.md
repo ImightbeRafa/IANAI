@@ -21,8 +21,20 @@ by hand once Cloudflare Access is in front of the Preview environment.
 
 Tags, exactly one per item:
 
-- `[verified locally]` — proven today, against `server.mjs` directly (not
-  inside Docker), by a test in this PR.
+- `[verified locally]` — proven today by **real code against real HTTP**:
+  a test that spins up the actual `server.mjs` (via `startAdapter`) and
+  makes real requests against it (`test/cf-server-adapter.spec.ts`,
+  `test/cf-server-lifecycle.spec.ts`, `test/cf-api-build.spec.ts`), or a
+  pure function/data check with no mocks at all (reading real compiled
+  output, real `wrangler.jsonc`, scanning real source). Narrower than it
+  used to read here (round-6 operator review, item I) — see
+  `[unit (mocked)]` below for the tests that don't meet this bar.
+- `[unit (mocked)]` — a vitest test against mocked `req`/`res`, a mocked
+  Supabase client, a stubbed JWKS fetch, or a fake Worker binding
+  (`ASSETS`/container `fetch`, both `vi.fn()`). Real assertions on real
+  logic, but never a real HTTP round trip and never a real external
+  dependency — weaker evidence than `[verified locally]`, and every row
+  below that carries it also says what's still open because of that gap.
 - `[local, identical image]` — must be re-run against the *same Docker image
   digest* as the Preview deployment (`docker build` once, deploy that
   digest, then run the same script/test against `docker run` of that
@@ -39,35 +51,39 @@ Tags, exactly one per item:
   *by design*), so the thing being proven can **never** be exercised
   against Preview, only against a local instance of the identical image.
 
-## Local container runs (operator, 2026-10-06: current revision = this SD round; older run at commit `c42301b`)
+## Local container runs (operator, 2026-10-06: current revision = round-6 operator-review smoke; superseded runs kept below for the record)
 
-**A current-revision run now exists.** The run below (image `08029107…`)
-was captured **after** this revision's SD-01…SD-09 security-review fixes
-(fail-closed `ENABLE_CRONS` replacing `DISABLE_CRONS`, the Cloudflare Access
-JWT gate, per-route deadlines, the 10 MiB raw-stream cap, the
-guide-analysis lease guard, the pinned base image, `X-Forwarded-For`
-rewriting) and against the same pinned base digest as the Dockerfile
-(`node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392`).
-The **older** run (image `a05d43e…`, kept below for the record) predates
-all of those fixes and is superseded by this one wherever the two overlap
-— it remains useful only as a secondary data point for the plain
-boot/serve/`sharp`/`pdf-parse`/`waitUntil` behavior that didn't change.
+**A current-revision run now exists, covering the round-6 operator-review
+items (A–J).** The run below (image `81fb6224…`) supersedes the previous
+round's run (image `08029107…`, now the "previous" run, kept for the
+record) wherever the two overlap; `08029107…` itself superseded the
+oldest run (image `a05d43e…`, commit `c42301b`, still kept for the record
+below that). None of the three predates the pinned base digest
+(`node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392`),
+which has been stable across all of them.
 
-- **Build:** `sudo docker build --platform linux/amd64 -t advance-ai:sd-r5 .`
-  from the pinned base
-  `node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392`;
-  the build log shows `sharp ok 8.18.3` and `pdf-parse ok`.
-- **Image ID (current revision):** `sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`
-- **Image ID (older run, pre-SD-01…SD-09, kept for the record):** `sha256:a05d43e25efd6860b02bac70e976f6a406e08e82831ecaa4abf4a0ced1af1db1`
-- **Run flags (current revision):** `-e APP_ENV=preview` only, **no secrets
-  of any kind** set, `ENABLE_CRONS` unset, bound to `127.0.0.1` only.
-  Operator harness: `/workspace/reports/advance-cf/smoke/container-smoke-r5.sh`
-  + `route-sweep.mjs`.
+- **Build:** `sudo docker build --platform linux/amd64 -t advance-ai:r6 .`
+  from the same pinned base
+  `node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392`.
+- **Image ID (current revision, round-6 operator review):** `sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`
+- **Image ID (previous run, round-5/SD-01…SD-09, kept for the record):** `sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`
+- **Image ID (oldest run, pre-SD-01…SD-09, kept for the record):** `sha256:a05d43e25efd6860b02bac70e976f6a406e08e82831ecaa4abf4a0ced1af1db1`
+- **Run flags (current revision):** the main container was started with
+  `-e APP_ENV=preview -e ADVANCE_RUNTIME=vercel` (**no secrets of any
+  kind**) — a deliberate adversarial flag, not an oversight: it's evidence
+  for item F (server.mjs stamps `ADVANCE_RUNTIME=cloudflare-container`
+  unconditionally on boot, so a Worker-forwarded or otherwise-set env
+  value can't spoof the cron guard off) — the cron guard still returned
+  503 with this flag set (see §2 below). Bound to `127.0.0.1` only.
+  Operator harness: `/workspace/reports/advance-cf/smoke/container-smoke-r6.sh`
+  + `semaphore-hold.mjs` + `route-sweep.mjs`.
 - **Evidence logs (operator-only, not in this repo):**
-  - Current revision (`08029107…`):
+  - Current revision (`81fb6224…`):
+    `/workspace/reports/advance-cf/logs/r6/container-smoke.log`.
+  - Previous run (`08029107…`):
     `/workspace/reports/advance-cf/logs/r5/container-smoke.log` and
     `/workspace/reports/advance-cf/logs/r5/container-sweep.log`.
-  - Older run (`a05d43e…`, commit `c42301b`):
+  - Oldest run (`a05d43e…`, commit `c42301b`):
     `/workspace/reports/advance-cf/logs/container-smoke.log`, produced by
     `/workspace/reports/advance-cf/smoke/container-smoke.sh` +
     `route-sweep.mjs`.
@@ -143,14 +159,19 @@ human in a browser once Preview is behind Access.
 ### Local container sweep (no auth, no secrets) — operator, 2026-10-06
 
 Copied from
-`/workspace/reports/advance-cf/logs/r5/container-sweep.log`'s route sweep
-(`route-sweep.mjs`) against
-the **current-revision** image
-`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`,
-container run with **no secrets at all**, `APP_ENV=preview`, `ENABLE_CRONS`
-unset. "Unauth request" is the method the sweep actually sent with no
-`Authorization` header; "PUT status" is the same route hit with `PUT` (also
-unauthenticated). (Supersedes the earlier sweep against the older image
+`/workspace/reports/advance-cf/logs/r6/container-smoke.log`'s route sweep
+(`route-sweep.mjs`) against the **current-revision** image
+`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`,
+container run with **no secrets at all**, `APP_ENV=preview`,
+`ADVANCE_RUNTIME=vercel` (deliberately, item F — see the "Local container
+runs" box above), `ENABLE_CRONS` unset. "Unauth request" is the method the
+sweep actually sent with no `Authorization` header; "PUT status" is the
+same route hit with `PUT` (also unauthenticated). The round-6 sweep is
+**row-for-row identical** to the previous run's sweep (image `08029107…`,
+`/workspace/reports/advance-cf/logs/r5/container-sweep.log`) — nothing in
+this table changed between rounds, including `/api/mcp-guide-analysis`
+still reading 503 despite `ADVANCE_RUNTIME=vercel` being set this time.
+(That previous sweep in turn superseded the oldest one against image
 `a05d43e…`, which predates SD-01's CF-runtime gate.)
 
 | Route | Unauth request | Status | Body (first 80 chars) | PUT status |
@@ -195,16 +216,23 @@ unauthenticated). (Supersedes the earlier sweep against the older image
 | `/api/transcribe-audio` | POST | 401 | `{"error":"Missing or invalid Authorization header"}` | 405 |
 
 **`/api/mcp-guide-analysis` now 503, not 401 — confirmed in the real image,
-by design.** Against the older image this row read `401
-{"error":"Unauthorized"}` (the plain `authorizeCron()` check). Against the
-current-revision image it now reads `503 {"error":"Crons disabled on this
+by design.** Against the oldest image this row read `401
+{"error":"Unauthorized"}` (the plain `authorizeCron()` check). Against
+image `08029107…` it reads `503 {"error":"Crons disabled on this
 runtime"}` — SD-01's CF-runtime handler guard (§2 below) runs *before* the
 auth check and fires first, since `ENABLE_CRONS` is unset in this run. This
-is the intended fail-closed behavior, not a regression. **PASS (local
-container)**, `[local, identical image]`, image `08029107…`.
+is the intended fail-closed behavior, not a regression. **Re-confirmed on
+the current-revision image (`81fb6224…`), this time with
+`ADVANCE_RUNTIME=vercel` deliberately set on the container (item F) — still
+503**, which is the stronger claim (see §2). **PASS (local container)**,
+`[local, identical image]`, images `08029107…` and `81fb6224…`
+(`/workspace/reports/advance-cf/logs/r6/container-smoke.log`, "route
+sweep").
 
-**PASS (local container)**, `[local, identical image]`, image `08029107…`,
-for the unauthenticated/wrong-method shape of every row: **34 of 38**
+**PASS (local container)**, `[local, identical image]`, images
+`08029107…` and `81fb6224…` (the round-6 sweep is row-for-row identical —
+see the "Local container sweep" section above), for the
+unauthenticated/wrong-method shape of every row: **34 of 38**
 routes return 401 or 403 or 503 before any DB access (32 × 401, 1 × 503 for
 `/api/mcp-guide-analysis`, plus `/api/tilopay/webhook`'s 403 from its
 query-secret check); `/api/mcp-oauth-metadata` returns 200 (it's the public
@@ -240,14 +268,22 @@ SecureDog failed this High on the first cut: the original gate
 could leave it open. It's now fail-closed in three independent layers (see
 `docs/operations/cloudflare-containers.md` §6 for the full writeup):
 
-- **Worker `scheduled()` gate.** `cronsEnabled(env)` returns true **only**
-  for the exact string `'1'` — **PASS (local)**, `test/cf-worker-core.spec.ts`
-  (`cronsEnabled (fail closed)` describe block, plus the `handleScheduled`
-  gate truth table: `undefined`, `''`, `'0'`, `'true'`, `'TRUE'`, `'yes'`
-  all give 0 container calls, with or without `APP_ENV=preview`; only
-  `'1'` gives exactly 1 call with the right `Authorization: Bearer
+- **Worker `scheduled()` gate.** `cronsEnabled(env)` (now `api/lib/crons-enabled.ts`,
+  the single shared implementation — round-6 operator review, item E) returns
+  true **only** for the exact string `'1'` — the pure-function truth table
+  (`undefined`, `''`, `'0'`, `' 1 '`, `'1\n'`, `'true'`, `'TRUE'`, `'yes'`,
+  `'01'`, `'1.0'`) is **PASS (local)**, `test/cf-worker-core.spec.ts`
+  (`cronsEnabled (fail closed)` describe block, importing directly from
+  `api/lib/crons-enabled.ts`) — no mocks, pure string logic.
+  `[verified locally]`. The
+  `handleScheduled` truth table layered on top of it (same input values;
+  only `'1'` gives exactly 1 call with the right `Authorization: Bearer
   <CRON_SECRET>` header; `'1'` with `CRON_SECRET` unset rejects with 0
-  calls). `[verified locally]`
+  calls) is `test/cf-worker-core.spec.ts`'s `handleScheduled` describe
+  block — but that test injects a fake container fetch (`vi.fn()`), not a
+  real one, so (round-6 operator review, item I: this was previously
+  mis-tagged `[verified locally]`) it's `[unit (mocked)]` — real logic,
+  real assertions, but never a real HTTP round trip to a real container.
 - **`wrangler.jsonc` triggers.** `env.preview.triggers.crons` is explicitly
   `[]`, not inherited from the top-level `["* * * * *"]`, and neither env
   block sets `ENABLE_CRONS` at all (it's added only at cutover) —
@@ -258,16 +294,29 @@ could leave it open. It's now fail-closed in three independent layers (see
 - **Handler-level guard.** `api/mcp-guide-analysis.ts` returns `503
   {"error":"Crons disabled on this runtime"}` when
   `process.env.ADVANCE_RUNTIME === 'cloudflare-container'` (set only by
-  `server.mjs`/the Dockerfile, never Vercel) and `ENABLE_CRONS !== '1'` —
-  **PASS (local)**, `test/mcp-guide-analysis-auth.spec.ts` ("CF container
-  runtime gate (SD-01)" block: no marker + Bearer + `x-vercel-cron` → 200
-  exactly as before; no marker + Bearer only → 200; CF marker with
-  `ENABLE_CRONS` unset/`'0'`/`'true'` → 503, worker never called; CF marker
-  + `ENABLE_CRONS='1'` + valid Bearer → 200; CF marker + `ENABLE_CRONS='1'`
-  + bad Bearer → 401) and `test/cf-api-build.spec.ts` (the same gate
-  through the real compiled handler via the real `server.mjs`: 503 without
-  `ENABLE_CRONS`, 401 unauth / 200 `db_unavailable` with `ENABLE_CRONS=1`).
-  `[verified locally]`. Confirmed again against the real built image
+  `server.mjs`/the Dockerfile, never Vercel) and the shared
+  `cronsEnabled(process.env)` (round-6 operator review, item E — this
+  handler no longer has its own separate `!== '1'` comparison) is false.
+  Two different kinds of test back this, and they're tagged differently
+  (round-6 operator review, item I — this bullet previously lumped both
+  under one `[verified locally]` tag):
+  - `test/mcp-guide-analysis-auth.spec.ts` ("CF container runtime gate
+    (SD-01)" block, plus the full `cronsEnabled` truth table: no marker +
+    Bearer + `x-vercel-cron` → 200 exactly as before; no marker + Bearer
+    only → 200; CF marker with `ENABLE_CRONS` unset/`''`/`'0'`/`'true'`/
+    `'TRUE'`/`'yes'`/`'01'`/`'1.0'` → 503, worker never called; CF marker
+    with `ENABLE_CRONS=' 1 '`/`'1\n'` (trims to `'1'`) → 200, worker called,
+    matching the Worker-side truth table; CF marker + `ENABLE_CRONS='1'` +
+    valid Bearer → 200; CF marker + `ENABLE_CRONS='1'` + bad Bearer → 401)
+    calls the handler directly against **mocked `req`/`res`** objects (a
+    plain object literal, not a real HTTP request) — `[unit (mocked)]`.
+  - `test/cf-api-build.spec.ts` (the same gate through the real compiled
+    handler, via the real `server.mjs` started by `startAdapter` and a real
+    `fetch()`: 503 without `ENABLE_CRONS`, 401 unauth / 200
+    `db_unavailable` with `ENABLE_CRONS=1`, and 503 even when the adapter's
+    own env carries `ADVANCE_RUNTIME=vercel` — item F's unconditional
+    stamp) is real code against real HTTP — `[verified locally]`.
+  Confirmed again against the previous round's real built image
   (`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`):
   both a plain unauthenticated request and a bogus `Bearer` + `x-vercel-cron`
   request return `503 {"error":"Crons disabled on this runtime"}` with
@@ -277,7 +326,20 @@ could leave it open. It's now fail-closed in three independent layers (see
   `/workspace/reports/advance-cf/logs/r5/container-smoke.log` ("CF cron
   guard") and
   `/workspace/reports/advance-cf/logs/r5/container-sweep.log` ("route
-  sweep"). `[local, identical image]`. The
+  sweep"). `[local, identical image]`.
+  **Round-6 operator review, item F — confirmed with an adversarial flag,
+  not just absence of one.** The current-revision image
+  (`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`)
+  was started with `-e ADVANCE_RUNTIME=vercel` set on the main container
+  (deliberately, to try to spoof the marker) — the cron guard still
+  returned `503 {"error":"Crons disabled on this runtime"}` for both the
+  plain unauthenticated request and the bogus `Bearer` + `x-vercel-cron`
+  request, proving `server.mjs` really does overwrite whatever
+  `ADVANCE_RUNTIME` value it's started with rather than only setting it
+  when unset. **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("container
+  started with -e ADVANCE_RUNTIME=vercel", "CF cron guard"). `[local,
+  identical image]`. The
   remaining `ENABLE_CRONS='1'` + valid-secret 200 path still needs a
   locally generated test `CRON_SECRET` (never a real one — Preview never
   gets `CRON_SECRET` at all, `docs/operations/cloudflare-containers.md`
@@ -289,18 +351,34 @@ could leave it open. It's now fail-closed in three independent layers (see
   CF-only `CRON_SECRET` go on the prod Worker in the **same window** as
   removing `vercel.json`'s `crons` block — see "Cutover checklist
   additions" below.
-- **Lock-safety — fixed, not just reported (SD-06).** `claim_mcp_url_intake`
-  uses `FOR UPDATE SKIP LOCKED LIMIT 1` plus a stale reclaim after
+- **Lock-safety — fixed, not just reported (SD-06), and extended one step
+  earlier (round-6 operator review, item G).** `claim_mcp_url_intake` uses
+  `FOR UPDATE SKIP LOCKED LIMIT 1` plus a stale reclaim after
   `greatest(300s, 60s)` (`supabase/migrations/072…sql`) — two concurrent
   runners claim *different* pending rows, never the same one; that part
   was already safe. What used to be a reported-only residual risk — the
   final `ready`/`failed` update being keyed only by `id`, with no lease
-  check — is now fixed: both updates add `.eq('status',
-  'processing').eq('claimed_at', row.claimed_at)`, so a stale-reclaim
-  update matches zero rows instead of clobbering newer work. **PASS
-  (local)**, `test/mcp-url-analysis-lease.spec.ts` (fake Supabase client
-  asserting the exact filter chain on both the success and the
-  terminal/non-terminal failure updates). `[verified locally]`
+  check — is fixed: both updates add `.eq('status',
+  'processing').eq('claimed_at', row.claimed_at).select('id')`, so a
+  stale-reclaim update matches zero rows (observable via the returned row
+  count, not just inferred) instead of clobbering newer work — and a
+  zero-row result now skips `logApiUsage` too, rather than logging a
+  write that never landed. This revision also adds a lease **recheck right
+  before the brand-kit write**, not just before the final status update —
+  closing the same race one step earlier — and an optional deadline
+  `AbortSignal` (`api/lib/request-deadline.ts`) checked at both of those
+  same two points, so a timed-out run stops cleanly instead of racing a
+  write after the client already got its 504. **PASS (local)**,
+  `test/mcp-url-analysis-lease.spec.ts` — a **mocked Supabase client**
+  (plain object literals standing in for `.eq()`/`.select()`/`.update()`
+  chains, asserting the exact filter chain and the lease-lost/deadline-
+  aborted early-exit paths), not a real database — `[unit (mocked)]`
+  (round-6 operator review, item I: this was previously tagged
+  `[verified locally]`, which overstated it). Status for an actual
+  concurrent-runner race against the real shared AIIAN database: PENDING,
+  needs a real-DB check on Preview once it exists — no local/CI
+  environment can safely reproduce two real runners racing the same row
+  without secrets.
 
 ## 3. Long `waitUntil` jobs finish, no double credit charge
 
@@ -333,6 +411,11 @@ could leave it open. It's now fail-closed in three independent layers (see
   replacing) the older run's actual drained-task proof above. **PASS
   (local container)**,
   `/workspace/reports/advance-cf/logs/r5/container-sweep.log` ("SIGTERM
+  drain"). `[local, identical image]`. Confirmed clean again on the
+  current-revision image (`81fb6224…`): `[server] shutting down` /
+  `[server] drained 0 background task(s)`, same no-error/no-hang result.
+  **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("SIGTERM
   drain"). `[local, identical image]`.
 - generate-image (180s), carousel (240s), bulk-posts/bulk-campaign (300s),
   MCP execute: all already attach `.catch` to their `waitUntil`'d promise
@@ -354,6 +437,29 @@ could leave it open. It's now fail-closed in three independent layers (see
   maxDuration)" block: a `waitUntil` job scheduled before a 100ms deadline
   still shows `done` via `bg-status` well after the `504` was returned).
   `[verified locally]`
+- **Round-6 operator review, item C — confirmed inside the real image.**
+  A fixture handler that sleeps past its deadline, then calls
+  `res.status(200).json({late:true})` anyway, gave `{"error":"Gateway
+  Timeout"} 504` from the adapter and the fixture's own post-write marker
+  (`{"id":"lw1","state":"post-write-ran"}`) still showed up on a follow-up
+  poll — the late write was a safe no-op and the handler's code after it
+  still ran to completion, not just in the vitest fixture. A second
+  fixture reading `req.__cfDeadlineSignal` (the real image, the real
+  `getDeadlineSignal` mechanism) showed `504` plus `{"id":"ab1","state":
+  "charge-skipped"}` for a slow request past its deadline, and `{"charged":
+  true} 200` plus `{"id":"ab2","state":"charged"}` for a fast one — the
+  abort signal fires only when the deadline actually fires, same as the
+  vitest coverage. **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("late write
+  after 504", "abort signal after 504", "abort signal, fast request").
+  `[local, identical image]`.
+- **Round-6 operator review, item D — confirmed inside the real image.**
+  The container's own log was checked for `MaxListenersExceededWarning`
+  after the late-read raw-stream fixtures ran (including the 9.5 MiB
+  late-read case, the exact size that reproduced the original bug) and
+  found **zero** warning lines. **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("warnings
+  in container log (expect none)": `0`). `[local, identical image]`.
 
 ## 4. sharp JPEG re-encode (`api/lib/generated-image-jpeg.ts`)
 
@@ -368,10 +474,14 @@ Inside the built image, `dist-api/lib/generated-image-jpeg.js`'s
 `magic: "ffd8ff"` is the JPEG SOI marker, `format: "jpeg"` comes from
 re-decoding the output bytes, and `vips: "8.18.3"` confirms `sharp`'s
 native binding loaded on `linux/amd64` inside the container. Re-confirmed
-against the current-revision image
-(`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`)
+against the image `sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`
 with the identical result. **PASS (local container)**,
 `/workspace/reports/advance-cf/logs/r5/container-smoke.log` ("sharp JPEG
+re-encode"). `[local, identical image]`. Re-confirmed again against the
+current-revision image
+(`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`),
+identical output. **PASS (local container)**,
+`/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("sharp JPEG
 re-encode"). `[local, identical image]`.
 
 The full `/api/generate-image` path with a real provider (Grok/Gemini/
@@ -391,10 +501,13 @@ behind Access]`.
   else, including rejecting a chunked body with no `content-length` —
   **PASS (local)**, `test/cf-server-adapter.spec.ts` ("limits" and "raw
   stream" blocks). `[verified locally]`
-- Unauthenticated 401-before-DB at exactly the limit, 413 at limit+1, for
-  the real handlers (`extract-pdf`, `analyze-style`, `chat`) — run against
-  the current-revision image
-  (`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`):
+- At exactly the limit, the full body must be accepted and handed to the
+  real handler (`extract-pdf`, `analyze-style`, `chat`); at limit+1, the
+  adapter must reject with 413. Run against the previous round's image
+  (`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`),
+  back when "accepted" happened to always mean exactly 401 (no pre-auth
+  gate existed yet, so the handler's own auth check was the only thing
+  that could answer):
 
   | route | limit (bytes) | at-limit status | +1 byte status |
   |---|---|---|---|
@@ -405,37 +518,92 @@ behind Access]`.
   exit 0. **PASS (local container)**,
   `/workspace/reports/advance-cf/logs/r5/container-smoke.log`
   ("upload-limits.mjs"). `[local, identical image]`.
+  **Operator-found bug, round-7/8 fix, re-run round-6 (this image):** once
+  item H's pre-auth gate shipped, `extract-pdf`'s at-limit probe (sent with
+  a dummy Bearer to get past that gate) started answering `500` on this
+  no-secrets box — `requireAuth` never got a chance to reject the dummy
+  token, because `createSupabaseAdmin`-style config checks run first in
+  that handler and this container has zero secrets. `atLimitOk: atLimit
+  === 401` was the wrong criterion all along: it happened to work only
+  because every handler tried so far answered exactly 401. Fixed in
+  `scripts/parity/upload-limits.mjs` to `atLimit !== 413 && atLimit !==
+  503` for elevated-limit routes (any non-413/503 status proves the
+  adapter accepted the full body) while `/api/chat` keeps the original
+  exact-401 check (no dummy auth is ever sent there). Re-run against the
+  current-revision image
+  (`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`):
+
+  | route | limit (bytes) | at-limit status | +1 byte status | note |
+  |---|---|---|---|---|
+  | `/api/extract-pdf` | 10485760 | 500 (PASS) | 413 (PASS) | any non-413/503 status proves the adapter accepted the full at-limit body |
+  | `/api/analyze-style` | 26214400 | 401 (PASS) | 413 (PASS) | any non-413/503 status proves the adapter accepted the full at-limit body |
+  | `/api/chat` | 4718592 | 401 (PASS) | 413 (PASS) | default-limit route, no dummy auth sent: must be exactly 401 from the handler |
+
+  exit 0. The `500` for `extract-pdf` is exactly the expected "handler
+  reached, no secrets configured" result, not a failure. **PASS (local
+  container)**, `/workspace/reports/advance-cf/logs/r6/container-smoke.log`
+  ("upload-limits.mjs"). `[local, identical image]`.
 - `pdf-parse` extracting text from a real, LibreOffice-generated PDF inside
   the image: `node --input-type=module -e "..."` against `pdf-parse`
   directly gave `{"numpages":1,"text":"Advance parity PDF ok\nSecond line
   for pdf-parse."}` — real text extraction, not a stub. Re-confirmed
-  against the current-revision image with the identical result. **PASS
+  against image `08029107…` with the identical result. **PASS
   (local container)**,
   `/workspace/reports/advance-cf/logs/r5/container-smoke.log` ("pdf-parse
+  on a real PDF"). `[local, identical image]`. Re-confirmed again against
+  the current-revision image (`81fb6224…`), identical result. **PASS
+  (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("pdf-parse
   on a real PDF"). `[local, identical image]`.
 - `parse-pdf.ts` (the `bodyParser: false` raw-stream handler) hit with a raw
-  `POST` of that same real PDF and no `Authorization` header gave
+  `POST` of that same real **small** PDF and no `Authorization` header gave
   `{"error":"Missing authorization"} 401` — confirms the untouched-stream
   path reaches the real handler and the handler's own auth check runs
-  normally, not just that the adapter's body limiter leaves it alone.
+  normally (the body is small enough that item H's pre-auth gate never
+  applies), not just that the adapter's body limiter leaves it alone.
   Re-confirmed against the current-revision image with the identical
   result. **PASS (local container)**,
-  `/workspace/reports/advance-cf/logs/r5/container-smoke.log` ("real
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("real
   /api/parse-pdf, small PDF, no auth"). `[local, identical image]`.
-- Two more real-`/api/parse-pdf` cases against the current-revision image:
-  a request with `Content-Length` set to 10 MiB + 1 (no auth) gave
-  `{"error":"Payload too large"} 413` — the adapter's cap rejects it before
-  the handler's own auth check gets a chance to run. A **chunked** body of
+- **Round-6 operator review, item H — the pre-auth gate itself, against
+  real routes, real bodies, no auth, on the current-revision image.** Once
+  a body crosses `DEFAULT_BODY_LIMIT` (4.5 MiB) on an elevated-limit route
+  with no `Authorization: Bearer` header present at all, the **adapter**
+  now answers 401 before the handler (or the 413 size check) ever runs —
+  distinct from the handler's own 401, and distinct from the pre-gate
+  behavior this superseded (see the next bullet):
+  - `/api/parse-pdf`, a real 6 MB body, no Bearer → `{"error":"Missing
+    authorization"} 401` from the adapter (the harness recorded ~3.8 MB
+    actually transmitted before the connection was cut — consistent with
+    the adapter rejecting mid-stream rather than draining the rest).
+  - `/api/extract-pdf`, a real 9 MiB JSON-ish body, no Bearer →
+    `{"error":"Missing authorization"} 401` from the adapter.
+  - `/api/analyze-style`, a real 9 MiB **chunked** body, no Bearer →
+    `{"error":"Missing authorization"} 401` from the adapter.
+  - `/api/parse-pdf`, 10 MiB + 1 with a known `Content-Length` and a
+    **dummy Bearer** (needed to get past the gate and reach the real
+    413 size check) → `{"error":"Payload too large"} 413`.
+  **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("real
+  /api/parse-pdf, 6 MB, NO Bearer", "real /api/extract-pdf, 9 MiB
+  JSON-ish, NO Bearer", "real /api/analyze-style, 9 MiB chunked, NO
+  Bearer", "real /api/parse-pdf, 10 MiB + 1, dummy Bearer"). `[local,
+  identical image]`.
+- **Superseded by the bullet above, kept for the record.** Before item H's
+  pre-auth gate existed, the previous round found: a request with
+  `Content-Length` set to 10 MiB + 1 (no auth at all) gave `{"error":
+  "Payload too large"} 413` — the adapter's size cap rejected it before
+  the handler's own auth check got a chance to run; a **chunked** body of
   10 MiB + 1 (no auth, no `Content-Length`) gave `{"error":"Missing
-  authorization"} 401`, **not** 413 — this is expected, not a failure of
-  the cap: `parse-pdf.ts`'s own auth check runs synchronously and responds
-  before the adapter has read enough of the chunked body to detect it's
-  over the limit, so the 401 wins the race. This real-handler scenario does
-  not by itself prove the chunked-413 cap works — that path is proven
-  below by the delayed-reader fixture test instead, which has no
-  competing auth check to short-circuit it. **PASS (local container)**,
-  `/workspace/reports/advance-cf/logs/r5/container-smoke.log` ("real
-  /api/parse-pdf, 10 MiB + 1 with Content-Length" and "real
+  authorization"} 401` instead of 413 — `parse-pdf.ts`'s own auth check
+  ran synchronously and answered before the adapter had read enough of the
+  chunked body to detect it was over the limit, so the 401 won the race.
+  That race no longer exists for a large chunked body with no auth at all
+  (the pre-auth gate now answers 401 first, deterministically, well before
+  the race could happen) — this older result is not re-claimed as current
+  behavior, just kept here as the "before" picture. **PASS (local
+  container)**, `/workspace/reports/advance-cf/logs/r5/container-smoke.log`
+  ("real /api/parse-pdf, 10 MiB + 1 with Content-Length" and "real
   /api/parse-pdf, 10 MiB + 1 chunked"). `[local, identical image]`.
 - The delayed-reader raw-stream fixture
   (`test/fixtures/cf-api/raw-stream-delayed.js`, the same one
@@ -456,6 +624,55 @@ behind Access]`.
   container)**,
   `/workspace/reports/advance-cf/logs/r5/container-smoke.log` ("delayed-reader
   raw stream inside the image"). `[local, identical image]`.
+- **Re-run against the current-revision image, with item D's backpressure
+  fix and item H's pre-auth gate both exercised together.** Same fixture,
+  extended: a 3-byte body, a 5 MiB body, a **9.5 MiB** body (the exact size
+  that reproduced the `MaxListenersExceededWarning` bug item D fixed), and
+  an exactly-10-MiB body all came back `200` with sha256 intact; the 5 MiB
+  body throttled to 1 MiB/s again came back `200` with sha256 intact; the
+  **same 5 MiB body with no `Authorization` header at all** now gave
+  `{"error":"Missing authorization"} 401` (the pre-auth gate, item H —
+  this specific case wasn't exercised against a real image before this
+  round); a **chunked** 10 MiB + 1 body **with a dummy Bearer** (needed to
+  get past the gate and reach the real 413 check) gave `{"error":"Payload
+  too large"} 413`; the container's own log showed **zero**
+  `MaxListenersExceededWarning` lines across all of this (item D); `/api/health`
+  was confirmed still up afterward. **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("late-read
+  three.bin"/"five.bin"/"ninehalf.bin"/"ten.bin", "five.bin throttled",
+  "five.bin NO Bearer", "over.bin chunked, dummy Bearer", "warnings in
+  container log"). `[local, identical image]`.
+- **Round-6 operator review, item H — global in-flight body-bytes
+  semaphore, against the real image** (`MAX_INFLIGHT_BODY_BYTES=2097152`,
+  a small injected cap, via `semaphore-hold.mjs`): request A (1.5 MiB)
+  held open; request B (1.5 MiB) sent while A was still in flight →
+  `503 {"error":"Server busy"}`; A then finished → `200
+  {"bodyType":"buffer","length":1572864}`; a follow-up request C (1.5 MiB)
+  → `200 {"bodyType":"buffer","length":1572864}`, confirming the budget
+  fully released (A's own usage, and B's rejected attempt, which should
+  never have been added to the budget at all). **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log` ("semaphore
+  inside the image"). `[local, identical image]`.
+- **Round-6 operator review, item H — trailing-slash deadline-manifest
+  normalization.** `/api/chat/` (trailing slash) routed to the real
+  `chat.js` handler and got `{"error":"Missing or invalid Authorization
+  header"} 401` from the handler — confirming the route itself resolves
+  correctly with a trailing slash against the real image. The
+  deadline-manifest lookup normalization specifically (that `/api/chat/`
+  gets `chat`'s real 120s deadline rather than silently falling back to
+  the 300s default) is **not** provable by this smoke test — a 401 returns
+  near-instantly regardless of which deadline applies, so this container
+  run can't distinguish "got the right 120s deadline" from "got the wrong
+  300s default." That normalization is proven by
+  `test/cf-server-adapter.spec.ts`'s dedicated real-HTTP vitest test
+  instead (a fixture with no module-level `maxDuration`, deadline supplied
+  only via an injected manifest, hit with and without a trailing slash,
+  both producing a `504` well under the 300s default). **PASS (local
+  container)**, `/workspace/reports/advance-cf/logs/r6/container-smoke.log`
+  ("/api/chat/ trailing slash"), route resolution only — `[local, identical
+  image]`. **PASS (local)**, `test/cf-server-adapter.spec.ts` ("trailing-slash
+  normalization before the deadline-manifest lookup" block) for the
+  deadline value itself — `[verified locally]`.
 - Authenticated parse/extract end-to-end (a real signed-in user uploading a
   PDF and getting real extracted content back) still needs a real request.
   Status: **PENDING**, `[needs browser session behind Access]`.
@@ -550,8 +767,8 @@ query equality against `TILOPAY_WEBHOOK_SECRET`, not HMAC (the pre-existing
   (local)**, `test/cf-parity-scripts.spec.ts` ("tilopay-webhook-replay
   guard"). `[verified locally]`
 - GET health-ish (200), wrong-secret POST (403), missing-secret POST (403)
-  — re-run against the current-revision image
-  (`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`),
+  — re-run against image
+  `sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`,
   all 3/3 passed, identical to the older run:
 
   ```
@@ -567,7 +784,12 @@ query equality against `TILOPAY_WEBHOOK_SECRET`, not HMAC (the pre-existing
   `--write` mode exists in the script," there was also no way for any of
   these three requests to reach a database even if the script had tried —
   the webhook handler's own secret check (which these three all fail) runs
-  before any Supabase call regardless.
+  before any Supabase call regardless. **Unchanged, re-confirmed again**
+  against the current-revision image
+  (`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`):
+  the same 3/3 PASS, exit 0. **PASS (local container)**,
+  `/workspace/reports/advance-cf/logs/r6/container-smoke.log`
+  ("tilopay-webhook-replay.mjs"). `[local, identical image]`.
 - **There is deliberately no `--write` mode.** A request with the real
   secret writes `payment_transactions` (even a no-email request writes an
   `error_no_email` audit row). `TILOPAY_WEBHOOK_SECRET` is **never set on
@@ -646,11 +868,27 @@ metadata/execute/approve/poll, admin pages, credits ledger.
   `Cache-Control: public, max-age=0, must-revalidate`; a real static asset
   (`/assets/app.js`) serves with its own content-type and the same
   cache-control; a missing `/assets/*` path 404s instead of falling back to
-  the SPA html — **PASS (local)**, `test/cf-server-adapter.spec.ts` ("SPA
-  and static files" block) and `test/cf-worker-core.spec.ts`
-  ("handleFetch" block, which also proves the Worker preserves a security
-  header the container already set and never calls the container for
-  non-API paths). `[verified locally]`
+  the SPA html — proven against the **real container's own static
+  serving** (`server.mjs`'s `handleStatic`, the Docker-built `dist/`
+  fallback copy, §5 of the ops doc), real code against real HTTP: **PASS
+  (local)**, `test/cf-server-adapter.spec.ts` ("SPA and static files"
+  block). `[verified locally]`.
+  Separately — and this is a **different code path, not the same
+  behavior re-proven twice** — `cf/worker-core.ts`'s `handleFetch` has its
+  own routing/security-header logic for requests the Worker sends to
+  `env.ASSETS` (Cloudflare's Static Assets binding, uploaded from the
+  host-built `dist/` at deploy time per §5, never the Docker image). The
+  container's real static serving above does **not** cover this: it's
+  `env.ASSETS.fetch()`, a real Cloudflare binding that only exists at
+  Worker runtime. `test/cf-worker-core.spec.ts`'s `handleFetch` block
+  proves the equivalent routing/header logic against a **fake `ASSETS.fetch`**
+  (`vi.fn()`), not a real binding — `[unit (mocked)]` (round-6 operator
+  review, item I: previously tagged `[verified locally]`, which implied
+  more than a fake binding can prove). The real Worker-to-ASSETS path has
+  never been exercised against an actual Cloudflare Worker runtime.
+  Status: **PENDING**, `[needs browser session behind Access]` once
+  Preview exists (or, at minimum, a `wrangler dev`/`workers_dev` smoke test
+  — neither has happened in this PR).
 - Security headers (`X-Content-Type-Options`, `X-Frame-Options`,
   `X-XSS-Protection`, HSTS, `Referrer-Policy`, `Permissions-Policy`, and the
   CSP derived byte-for-byte from `vercel.json` minus `vercel.live`/pusher
@@ -691,11 +929,19 @@ metadata/execute/approve/poll, admin pages, credits ledger.
   inbound one) that deletes any inbound `X-Forwarded-For`/`X-Real-IP` and
   sets both from `CF-Connecting-IP` when present, or leaves both unset if
   it's absent — so a client can't spoof its apparent IP to anything in the
-  container that trusts those headers. **PASS (local)**,
+  container that trusts those headers. Proven against `cf/worker-core.ts`'s
+  real `handleFetch` logic, but with a **fake container `fetch`**
+  (`vi.fn()`) standing in for the real Cloudflare Container binding —
   `test/cf-worker-core.spec.ts` ("client IP headers forwarded to the
   container (SD-09)" block: a spoofed `X-Forwarded-For`/`X-Real-IP` is
   replaced by the real `CF-Connecting-IP` value; both are removed entirely
-  when `CF-Connecting-IP` is absent). `[verified locally]`
+  when `CF-Connecting-IP` is absent). `[unit (mocked)]` (round-6 operator
+  review, item I: previously tagged `[verified locally]`). What this
+  doesn't cover: whether Cloudflare's real edge actually sets
+  `CF-Connecting-IP` the way assumed here, and whether the real container
+  (not a fake) receives the rewritten headers intact — both need a real
+  Preview request. Status: **PENDING**, `[needs browser session behind
+  Access]`.
 
 ## 11. Env var NAME parity
 
@@ -785,45 +1031,68 @@ Names only, everywhere — this script and its tests never read an actual
 secret value. Regenerate this table with `npm run parity:env` if
 `CONTAINER_ENV_KEYS`, `wrangler.jsonc`, or the api/src source changes.
 
-## 12. Cloudflare Access JWT gate (SD-03 — decision reversed: ADD)
+## 12. Cloudflare Access JWT gate (SD-03 — decision reversed: ADD; selector inverted and JWKS caching hardened, round-6 operator review, items A/B)
 
 An earlier pass of this work deliberately left the code Access-unaware
 ("nothing here validates `Cf-Access-Jwt-Assertion`"). SecureDog's review
 reversed that: `cf/access-jwt.ts` now verifies the `Cf-Access-Jwt-Assertion`
-header in the Worker, before routing (both container **and** asset paths),
-**only when `env.APP_ENV === 'preview'`** — production is unaffected, and
-`scheduled()` never runs through this check (crons are governed solely by
-§2's `ENABLE_CRONS` gate). Full writeup: `docs/operations/cloudflare-containers.md`
-§11.
+header in the Worker, before routing (both container **and** asset paths).
+The gate selector was inverted in this round (item A): it now enforces on
+**every env except production** (`!isProductionAppEnv({ APP_ENV: env.APP_ENV })`,
+`api/lib/app-env.ts` — the same normalization Vercel-side code uses, not a
+second comparison), rather than the original "only when
+`APP_ENV === 'preview'` exactly," which failed **open** for any unexpected
+value (unset, a typo, a future env name). Production is still completely
+unaffected, and `scheduled()` never runs through this check (crons are
+governed solely by §2's `ENABLE_CRONS` gate). Full writeup:
+`docs/operations/cloudflare-containers.md` §11.
 
-- RS256-only, JWKS-fetched-and-cached, `aud`/`iss`/`exp` (required,
-  60s skew)/`nbf` (optional, checked only when present), and a hardcoded
-  case-insensitive email allowlist (`ACCESS_ALLOWED_EMAILS`) — every
-  failure mode fails closed with 403: wrong `aud`, wrong `iss`, expired,
-  a missing or non-numeric `exp`, `nbf` in the future, a signature from
-  the wrong key, an unknown `kid` even after one refetch, `alg: 'none'` or
-  `'HS256'`, a missing header, unset/placeholder
-  `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` (the literal string `REPLACE` counts as
-  placeholder, no network call made), and a non-allowlisted email. A valid
-  token with an uppercase email variant still passes (case-insensitive
-  match). JWKS is cached after the first fetch (no refetch on a second
-  request for an already-known `kid`), and an unknown `kid` that only
-  exists after a simulated key rotation passes once refetched (exactly one
-  extra fetch call, not an unbounded retry loop). **PASS (local)**,
-  `test/cf-access-jwt.spec.ts` (26 cases against a locally generated
-  RS256 keypair, `crypto.subtle` end to end — real signatures, real
-  verification, a stubbed JWKS fetch) and the `handleFetch` wiring cases in
-  the same file (valid token → container/ASSETS called; no token → 403,
-  neither called; `APP_ENV='production'` with no header → 200, unaffected;
-  `scheduled()` with `APP_ENV='preview'` → unaffected by JWT logic, still
-  governed only by `ENABLE_CRONS`). `[verified locally]`
+- RS256-only, `aud`/`iss`/`exp` (required, 60s skew)/`nbf` (optional,
+  checked only when present), and a hardcoded case-insensitive email
+  allowlist (`ACCESS_ALLOWED_EMAILS`) — every failure mode fails closed
+  with 403: wrong `aud`, wrong `iss`, expired, a missing or non-numeric
+  `exp`, `nbf` in the future, a signature from the wrong key, an unknown
+  `kid` even after one refetch, `alg: 'none'` or `'HS256'`, a missing
+  header, unset/placeholder `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` (the literal
+  string `REPLACE` counts as placeholder, no network call made), and a
+  non-allowlisted email. A valid token with an uppercase email variant
+  still passes (case-insensitive match). The gate-selector truth table
+  (APP_ENV unset/`''`/`'Preview'`/`'prod'`/`'staging'` → enforced;
+  `' PRODUCTION'`/`'production'` → unaffected, no JWT verification
+  attempted at all) is covered too. **PASS (local)**, `test/cf-access-jwt.spec.ts`
+  — real signatures and real verification against a **locally generated**
+  RS256 keypair via `crypto.subtle` (not Cloudflare's real keys), with the
+  JWKS **fetch itself stubbed** (`fetchImpl`, a `vi.fn()`) rather than a
+  real network call to `cdn-cgi/access/certs` — `[unit (mocked)]` (round-6
+  operator review, item I: previously tagged `[verified locally]`, which
+  overstated it — the crypto is real, the network dependency is not).
+- **JWKS caching, hardened (round-6 operator review, item B).** Cached
+  keys now carry a ~1h TTL (`JWKS_CACHE_TTL_MS`) — even a previously-known
+  `kid` refetches once that elapses, not just on a cache miss. An unknown
+  `kid` is throttled to at most one refetch attempt per team domain per
+  60s (`JWKS_MIN_REFETCH_INTERVAL_MS`) — a flood of requests with a bogus
+  or not-yet-rotated-in `kid` no longer causes a fetch per request.
+  Concurrent misses on an uncached `kid` share ONE in-flight fetch
+  promise instead of each starting their own. All timing goes through the
+  injectable `deps.now`. **PASS (local)**, `test/cf-access-jwt.spec.ts`
+  ("JWKS cache timing" block: unknown kid twice within 60s → 1 fetch;
+  after 60s → 2; a known kid within the TTL → 0 refetches across 3
+  verifications; after the TTL → 1 refetch; 5 concurrent requests with an
+  uncached kid → exactly 1 fetch; the pre-existing key-rotation test now
+  advances the injected clock past the 60s throttle window between the
+  old-kid and new-kid calls, since within that window a second
+  unknown-kid lookup is now correctly throttled to 0 fetches — the
+  fetch-count expectation there legitimately changed because of this
+  fix, not a regression). Same stubbed-`fetchImpl` caveat as above —
+  `[unit (mocked)]`.
 - The real thing — an actual Cloudflare Access login producing a real JWT,
   verified against the real `cdn-cgi/access/certs` JWKS for a real team
-  domain — has not been exercised, because no Access application exists
-  yet (`wrangler.jsonc`'s `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` are still the
-  `REPLACE_WITH_...` placeholders, which fail closed by construction — see
-  `docs/operations/cloudflare-containers.md` §15 item 5). Status:
-  **PENDING**, `[needs browser session behind Access]`.
+  domain, through the real gate-selector logic against a real Preview
+  deployment — has not been exercised, because no Access application
+  exists yet (`wrangler.jsonc`'s `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` are
+  still the `REPLACE_WITH_...` placeholders, which fail closed by
+  construction — see `docs/operations/cloudflare-containers.md` §15 item
+  5). Status: **PENDING**, `[needs browser session behind Access]`.
 
 ## 13. Dependency placement (tidy)
 

@@ -1,3 +1,44 @@
+## 2026-10-06 — Cloudflare Containers: round-6 container-image smoke, docs only
+
+**Area:** docs
+**Files:** `docs/operations/cloudflare-parity-checklist.md`, `docs/operations/cloudflare-containers.md`
+
+Docs-only follow-up: recorded the operator's round-6 container smoke
+(`/workspace/reports/advance-cf/logs/r6/container-smoke.log`, image
+`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`,
+supersedes `08029107…`, which stays on record). Confirms items A–J against
+the real image: the cron guard still 503s with `ADVANCE_RUNTIME=vercel`
+deliberately set (item F); the pre-auth gate against real
+`parse-pdf`/`extract-pdf`/`analyze-style` requests with no Bearer (item H);
+zero `MaxListenersExceededWarning` lines across the raw-stream fixtures,
+including the 9.5 MiB case (item D); the late-write-after-504 guard and the
+deadline abort signal, both via real fixtures (item C); the in-flight
+body-bytes semaphore under a small injected cap (item H); `/api/chat/`'s
+trailing slash routing (item H — the deadline-manifest value itself stays
+proven by vitest, not this smoke); `sharp`/`pdf-parse`/the Tilopay
+replay/`SIGTERM` drain/route sweep, unchanged from the previous round.
+Updated the "Pre-cutover hardening" list in `cloudflare-containers.md`:
+removed the pre-auth semaphore item (done, item H) and added a note that
+handlers without the deadline signal wired still run to completion after a
+504 (§8's general guarantee), not just the two `waitUntil`-based ones
+already listed as deliberately unwired.
+
+## 2026-10-06 — Cloudflare Containers: round-6 operator review (gate selector, JWKS caching, raw-stream backpressure, deadline abort signal, lease recheck, semaphore + pre-auth gate, parity-tag honesty)
+
+**Area:** infra / api / security
+**Files:** `cf/worker-core.ts`, `cf/access-jwt.ts`, `cf/container-env.mjs` (+ `.d.mts`), `api/lib/crons-enabled.ts` (new), `api/lib/request-deadline.ts` (new), `api/mcp-guide-analysis.ts`, `api/lib/mcp/url-analysis-worker.ts`, `server.mjs`, `api/chat.ts`, `api/generate-carousel.ts`, `api/bulk-posts.ts`, `api/bulk-campaign.ts`, `api/bulk-scripts.ts`, `api/lib/bulk/run-bulk.ts`, `scripts/parity/env-diff.mjs`, `test/*` (new/updated specs, new fixtures), `docs/operations/cloudflare-containers.md`, `docs/operations/cloudflare-parity-checklist.md`, `/workspace/reports/advance-cf/phase0-deploy-steps.md`
+
+- **Item A:** the Access JWT gate selector is inverted — enforces on every env except production (`!isProductionAppEnv(...)`, `api/lib/app-env.ts`), not just when `APP_ENV === 'preview'` exactly, which failed open on any unanticipated value.
+- **Item B:** `cf/access-jwt.ts`'s JWKS cache gets a ~1h TTL (even a known `kid` refetches once it elapses), a 60s-per-team-domain throttle on unknown-`kid` refetches (negative cache, not a retry budget), and one shared in-flight fetch promise for concurrent misses.
+- **Item C:** `server.mjs`'s response-write guard now also covers header-mutating calls (`setHeader`/`writeHead`/`removeHeader`/`appendHeader`) and `res.json`/`send`/`redirect`, not just `write`/`end`; a per-request `AbortSignal` (`api/lib/request-deadline.ts`'s `getDeadlineSignal`) is aborted only when the deadline fires and is wired into `api/chat.ts`, `api/generate-carousel.ts`, and the three bulk handlers (via `api/lib/bulk/run-bulk.ts`'s per-item loop guard) so a charge/write is skipped cleanly once the client already has its 504. Deliberately not wired into `api/mcp.ts`/`api/generate-image.ts` — their real work runs inside `waitUntil`, a separate lifecycle.
+- **Item D (fixed, not just reported):** the raw-stream backpressure pump no longer registers a fresh `counter.once('drain', ...)` per backpressure event (was producing `MaxListenersExceededWarning` on large late-read uploads) — one persistent `waitingForDrain` flag + listener, and `pause()`/`resume()` on the real stream are gone entirely (they were no-ops anyway, since no `'data'` listener is ever attached to it).
+- **Item E:** `cronsEnabled` has exactly one implementation now, `api/lib/crons-enabled.ts`, imported directly by both `cf/worker-core.ts` and `api/mcp-guide-analysis.ts` — the handler previously had its own `!== '1'` comparison that disagreed with the Worker gate on inputs like `' 1 '`/`'1\n'`.
+- **Item F:** `ADVANCE_RUNTIME` is excluded from `CONTAINER_ENV_KEYS` (never forwarded by the Worker) and `server.mjs` now stamps it unconditionally on every boot, not only when unset.
+- **Item G:** `processNextMcpUrlIntake` rechecks its lease right before the brand-kit write (not just before the final status update), both the success and failure updates now `.select('id')` to detect a zero-row (lease-lost) match instead of assuming it never happens, and an optional deadline signal is honored at both points.
+- **Item H:** a global in-flight body-bytes semaphore (`MAX_INFLIGHT_BODY_BYTES`, default 256 MiB) in `server.mjs`, a pre-auth `Authorization: Bearer` presence gate on bodies over 4.5 MiB for elevated-limit routes, and a trailing-slash normalization fix for the per-route deadline manifest lookup.
+- **Item I:** introduced the `[unit (mocked)]` parity tag and re-tagged every checklist row that was mocked (mocked req/res, mocked Supabase, stubbed JWKS, fake Worker bindings) but previously claimed `[verified locally]`.
+- **Item J:** `docs/operations/cloudflare-containers.md` §4b and `/workspace/reports/advance-cf/phase0-deploy-steps.md` now state plainly that Preview holds the prod AIIAN service-role key and every Preview write hits prod data.
+
 ## 2026-10-06 — Cloudflare Containers: operator-review fixes to the SD-04 raw-stream cap and SD-03 Access JWT
 
 **Area:** infra / api

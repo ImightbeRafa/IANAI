@@ -42,7 +42,7 @@ browser requests); it's governed purely by `ENABLE_CRONS` (§6).
 |---|---|
 | `server.mjs` | Node adapter: Vercel-compatible req/res helpers, routes `/api/<segments>.js` from `dist-api/`, static/SPA fallback, `waitUntil` tracking + SIGTERM drain, per-route deadlines (§8), Node `requestTimeout`/`headersTimeout` (§8), a 10 MiB cap on raw-stream (`bodyParser:false`) handlers (§7). |
 | `cf/http-rules.mjs` (+ `.d.mts`) | CSP/security headers, path classification (`isApiPath`, `isContainerPath`, `isSpaFallbackPath`, `rewriteToApi`), `parseSizeLimit`. Imported by both `server.mjs` (Node) and the Worker (bundled by wrangler). |
-| `cf/container-env.mjs` (+ `.d.mts`) | `CONTAINER_ENV_KEYS` (names only), `getContainerEnvVars`, `cronsEnabled` (fail-closed on `ENABLE_CRONS==='1'`, §6). |
+| `cf/container-env.mjs` (+ `.d.mts`) | `CONTAINER_ENV_KEYS` (names only, excludes `ADVANCE_RUNTIME` — round-6 item F), `getContainerEnvVars`. `cronsEnabled` moved out to `api/lib/crons-enabled.ts` (round-6 item E) — no longer exported from here. |
 | `cf/access-jwt.ts` | Cloudflare Access JWT verification (`verifyAccessJwt`) for the preview-only gate (§11). WebCrypto only, no new dependency, no `cloudflare:*` import. |
 | `cf/worker-core.ts` | Pure Worker logic (`handleFetch`, `handleScheduled`, `withSecurityHeaders`) — no `cloudflare:*` imports, so it's unit-testable with a fake container fetch. Also strips/replaces `X-Forwarded-For`/`X-Real-IP` with `CF-Connecting-IP` before forwarding to the container (§12). |
 | `src/cf-container-worker.ts` | Thin Betsy-pattern wrapper: the `AdvanceAiContainer` class and the real Worker `fetch`/`scheduled` exports. Excluded from the root `tsconfig.json`; typechecked separately via `tsconfig.cf-worker.json` / `npm run typecheck:worker`. |
@@ -50,7 +50,9 @@ browser requests); it's governed purely by `ENABLE_CRONS` (§6).
 | `wrangler.jsonc` | Worker + Container + cron + Static Assets config, with `env.preview` repeating every block explicitly. `env.preview.triggers.crons` is explicitly `[]` (§6); `env.preview.vars` carries the non-secret `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` placeholders (§11), which are Worker-only and never forwarded to the container. |
 | `Dockerfile` / `.dockerignore` | Builds `dist/` + `dist-api/` and runs `server.mjs` on port 8080. Base image pinned by digest (§14). |
 | `scripts/parity/*` | Read-only/local-only parity tooling — see `scripts/parity/README.md`. |
-| `api/lib/app-env.ts` | `resolveAppEnv`/`isProductionAppEnv`/`isPreviewAppEnv` — `APP_ENV`, falling back to `VERCEL_ENV`. |
+| `api/lib/app-env.ts` | `resolveAppEnv`/`isProductionAppEnv`/`isPreviewAppEnv` — `APP_ENV`, falling back to `VERCEL_ENV`. Imported directly by `cf/worker-core.ts` for the Access gate selector (§11, round-6 item A). |
+| `api/lib/crons-enabled.ts` | The one shared `cronsEnabled` implementation (round-6 item E) — imported directly by `cf/worker-core.ts` (bundled into the Worker) and by `api/mcp-guide-analysis.ts` (compiled into `dist-api/lib/` for the container). |
+| `api/lib/request-deadline.ts` | `getDeadlineSignal(req)` — reads the per-request `AbortSignal` `server.mjs` sets on deadline (§8, round-6 item C); `undefined` on Vercel. |
 
 ## 3. Local build and run
 
@@ -74,23 +76,39 @@ pass for that anymore. Then run the parity scripts against that container
 (see `scripts/parity/README.md`).
 
 **Local container evidence:** the operator has now rebuilt and re-run the
-sequence above against the current revision, image
-`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`,
+sequence above against the **current revision**, image
+`sha256:81fb6224346b85108d71a01fb40e353eb60acf47a3f32fe72e9e5309820825f6`,
 built from the pinned base
 `node:22-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392`
-(§14) — this run **does** cover the SD-01…SD-09 changes (`ENABLE_CRONS`
-fail-closed, including the `/api/mcp-guide-analysis` 503-before-401 guard
-confirmed live, the raw-stream cap via the delayed-reader fixture, `sharp`/
-`pdf-parse`, the Tilopay replay, and a clean `SIGTERM` shutdown). The full
+(§14) — this run covers the round-6 operator-review items (A–J): the cron
+guard still 503s even with `ADVANCE_RUNTIME=vercel` deliberately set on the
+container (item F); the pre-auth gate against real routes with no Bearer
+(item H); the raw-stream backpressure fix with zero
+`MaxListenersExceededWarning` lines, including the 9.5 MiB case that
+originally reproduced it (item D); the deadline abort signal and the
+late-write-after-504 guard, both via real fixtures in the image (item C);
+the in-flight body-bytes semaphore under a small injected cap (item H);
+`/api/chat/`'s trailing slash routing (item H; the deadline-manifest value
+itself is proven by vitest, not this smoke — see the checklist); and
+`sharp`/`pdf-parse`/the Tilopay replay/`SIGTERM` drain, unchanged. The full
 results are in `docs/operations/cloudflare-parity-checklist.md`.
 
-An **older** run against commit `c42301b`, image
+The **previous** run, image
+`sha256:08029107de5fa4c986c147b839d970139d5a534d43d40a5b7956c09d5c674aa1`,
+covered the SD-01…SD-09 changes (`ENABLE_CRONS` fail-closed, including the
+`/api/mcp-guide-analysis` 503-before-401 guard confirmed live, the
+raw-stream cap via the delayed-reader fixture, `sharp`/`pdf-parse`, the
+Tilopay replay, and a clean `SIGTERM` shutdown) and is superseded by the
+current run above wherever the two overlap; it remains on record in the
+checklist for the parts it covers that weren't repeated this round (the
+actual background-job-draining proof for `waitUntil`, and the
+security-headers/SPA/container-user checks).
+
+The **oldest** run against commit `c42301b`, image
 `sha256:a05d43e25efd6860b02bac70e976f6a406e08e82831ecaa4abf4a0ced1af1db1`,
-predates all of those SD-01…SD-09 changes and is superseded by the run
-above wherever the two overlap; it remains on record in the checklist
-only for the parts it covers that weren't repeated in this round (the
-actual background-job-draining proof for `waitUntil`, and the security-
-headers/SPA/container-user checks).
+predates all of the above and is superseded by both newer runs wherever
+they overlap; it remains on record for the same reason the previous run
+does.
 
 ## 4. Secrets
 
@@ -116,8 +134,34 @@ dropped, in case either provider comes back.
 
 ### 4b. Minimal Preview secret set (SD-05)
 
-Preview QA needs far fewer secrets than prod, and some of prod's secrets
-must **never** be on Preview at all. Set only:
+**State this plainly, not just by implication: Preview holds the PROD
+AIIAN Supabase service-role/secret key (`SUPABASE_SECRET_KEY`), because the
+database is shared — there is no separate "Preview database."** Every
+write Preview QA makes (chat generations, image generations, the credits
+ledger, MCP intakes, Storage uploads) lands in the exact same `lstzfxsdmggkoaxfawny`
+project prod reads from. This is a deliberate, already-made decision (see
+`docs/operations/chat-shell-environments.md` and the "AIIAN" policy
+referenced in AGENTS.md), not an oversight to fix here — but it means the
+barriers below are load-bearing, not cosmetic:
+
+- **Cloudflare Access (§11)** is the only thing standing between an
+  anonymous internet request and a handler that can write to prod data.
+- **The minimal secret set below** is the second barrier — every secret
+  that would let Preview trigger a *irreversible or billable* side effect
+  on infrastructure Preview shouldn't touch (a cron run, a real webhook
+  write, a real ticket relay) is simply never configured there at all, so
+  the corresponding handler fails closed by construction rather than by
+  convention.
+- **QA discipline is the third barrier, and it's a process control, not a
+  technical one:** QA must touch only a dedicated test brand/user it
+  created for this purpose, and must clean up (delete test rows/images) it
+  creates afterward. Nothing in this PR enforces that technically — Access
+  + the secret set stop Preview from reaching things it shouldn't; they do
+  not stop a signed-in QA session from writing real-looking rows into the
+  real database under a test identity.
+
+Given all of that, Preview QA needs far fewer secrets than prod, and some
+of prod's secrets must **never** be on Preview at all. Set only:
 
 - **Supabase URL**, under the name the code actually reads first:
   `SUPABASE_URL` (`api/lib/supabase-admin.ts` reads `SUPABASE_URL`, falling
@@ -138,15 +182,23 @@ must **never** be on Preview at all. Set only:
   `create-checkout` needs to be exercised — **or none at all** if it
   doesn't.
 
-**Explicitly do NOT set on Preview:** `TILOPAY_WEBHOOK_SECRET`,
-`CRON_SECRET`, `TICKETS_EVENT_WEBHOOK_URL`, `TICKETS_WEBHOOK_SECRET`. These
+**Explicitly do NOT set on Preview — the full list:** `CRON_SECRET`,
+`TILOPAY_WEBHOOK_SECRET`, `TICKETS_EVENT_WEBHOOK_URL`,
+`TICKETS_WEBHOOK_SECRET`, `ENABLE_CRONS`, `ADVANCE_RUNTIME`. The first four
 gate things that must not run against the shared AIIAN database from
 Preview (webhook success-path writes, the cron worker, ticket relays) —
 leaving them unset means the corresponding handlers fail closed (403/503)
 rather than someone having to remember not to trigger them. The parity
 checklist tags the specific checks this blocks as `[local signed fixture]`
 — proven locally against the identical image with a locally generated test
-secret and fixtures, never against Preview.
+secret and fixtures, never against Preview. `ENABLE_CRONS` is never a
+secret but belongs on this list anyway: Preview's Worker never needs its
+own live cron, and `env.preview.triggers.crons` being `[]` already makes
+the point moot (§6). `ADVANCE_RUNTIME` isn't a `wrangler secret put` value
+at all — it's set by `server.mjs`/the Dockerfile unconditionally on every
+boot (round-6 operator review, item F) — listed here only so this is the
+single place that enumerates every CF-runtime-only marker, not because
+anyone could set it via Worker config even if they tried.
 
 ## 5. Static Assets are host-built, not Docker-built
 
@@ -172,12 +224,14 @@ SecureDog failed that High: a typo'd or mis-cased value (`'true'` instead of
 `'1'`, or simply forgetting to set it) could leave the gate open. The fix is
 fail-closed in three independent layers:
 
-1. **Worker `scheduled()`:** `cf/container-env.mjs`'s `cronsEnabled(env)`
-   returns true **only** for the exact string `'1'` (after trim) —
-   `undefined`, `''`, `'0'`, `'true'`, `'TRUE'`, `'yes'` are all false, with
-   or without `APP_ENV=preview`. Neither `wrangler.jsonc` env block sets
-   `ENABLE_CRONS` at all right now — it gets added, set to `"1"`, only at
-   cutover (§15).
+1. **Worker `scheduled()`:** `api/lib/crons-enabled.ts`'s `cronsEnabled(env)`
+   (round-6 operator review, item E — the ONE shared implementation; see
+   below) returns true **only** for the exact string `'1'` (after trim) —
+   `undefined`, `''`, `'0'`, `' 1 '` (trims to `'1'` → true), `'1\n'` (same),
+   `'true'`, `'TRUE'`, `'yes'`, `'01'`, `'1.0'` are all false except the two
+   trim-to-`'1'` cases, with or without `APP_ENV=preview`. Neither
+   `wrangler.jsonc` env block sets `ENABLE_CRONS` at all right now — it gets
+   added, set to `"1"`, only at cutover (§15).
 2. **`wrangler.jsonc` triggers:** `env.preview.triggers.crons` is
    explicitly `[]` (not inherited from the top-level `["* * * * *"]`) —
    Preview's Worker never even receives a scheduled event to evaluate.
@@ -185,13 +239,29 @@ fail-closed in three independent layers:
 3. **Handler-level guard:** `api/mcp-guide-analysis.ts` returns `503
    {"error":"Crons disabled on this runtime"}` when running on the CF
    container (`process.env.ADVANCE_RUNTIME === 'cloudflare-container'`,
-   set only by `server.mjs`/the Dockerfile, never by Vercel) **and**
-   `process.env.ENABLE_CRONS !== '1'`. This means even a direct `curl` to
-   the container's `/api/mcp-guide-analysis` with a stolen/leaked
-   `CRON_SECRET` can't run the worker while crons are disabled — the gate
-   doesn't depend on the Worker's routing at all. The Vercel path (no
-   `ADVANCE_RUNTIME`) is completely unaffected: same `authorizeCron()`
-   check as before, same 200/401 behavior.
+   set only by `server.mjs`/the Dockerfile, **unconditionally** on every
+   boot since round-6 operator review item F — never by Vercel) **and**
+   the SAME `cronsEnabled(process.env)` from (1) is false — not a second,
+   independent `!== '1'` string comparison, which (before this round)
+   disagreed with (1) on inputs like `' 1 '`/`'1\n'` that trim down to
+   `'1'`. This means even a direct `curl` to the container's
+   `/api/mcp-guide-analysis` with a stolen/leaked `CRON_SECRET` can't run
+   the worker while crons are disabled — the gate doesn't depend on the
+   Worker's routing at all. The Vercel path (no `ADVANCE_RUNTIME`) is
+   completely unaffected: same `authorizeCron()` check as before, same
+   200/401 behavior.
+
+**One shared implementation, not two (round-6 operator review, item E).**
+`api/lib/crons-enabled.ts` is the only place this trim-and-exact-match
+logic lives. It's imported directly by `cf/worker-core.ts` (bundled into
+the Worker by wrangler) and by `api/mcp-guide-analysis.ts` (compiled into
+`dist-api/lib/crons-enabled.js` by `scripts/build-api.mjs`, since the
+Dockerfile runtime stage never copies `cf/*`). `cf/container-env.mjs` no
+longer exports its own `cronsEnabled` at all — it was removed rather than
+kept as a thin re-export, because `cf/container-env.mjs` is loaded by
+plain, unbundled Node in `scripts/parity/env-diff.mjs`, which can't resolve
+an extensionless import of a `.ts` file the way the Worker bundle and
+vitest's transform both can.
 
 At cutover: set `ENABLE_CRONS: "1"` **and** a **CF-only `CRON_SECRET`**
 (distinct from Vercel's) on the prod Worker in the same window as removing
@@ -227,6 +297,28 @@ this revision also closes.
   pdf.ts` does `await supabase.auth.getUser(token)` first, same as every
   other handler) never loses chunks — or even the `'end'` event — that
   arrived during that await.
+- **Global in-flight body-bytes semaphore (round-6 operator review, item
+  H).** A single container instance (§1) handling many concurrent uploads
+  previously had no aggregate backpressure beyond each request's own
+  per-route limit. `server.mjs` now tracks total bytes committed to
+  in-flight request bodies — parsed and raw-stream alike — across ALL
+  concurrent requests, capped at `MAX_INFLIGHT_BODY_BYTES` (default 256
+  MiB, env-overridable). A known `Content-Length` reserves its declared
+  size upfront; a chunked body (no `Content-Length`) reserves
+  incrementally as chunks arrive. Either way, a reservation that would
+  exceed the cap gets `503 {"error":"Server busy"}` instead of being read;
+  the reservation releases exactly once — on the body finishing, erroring,
+  or the connection closing — never leaked and never double-released.
+- **Pre-auth gate on large bodies (round-6 operator review, item H).** For
+  any route configured above the default 4.5 MiB limit (the raw-stream
+  10 MiB cap, or a `sizeLimit` like `'10mb'`/`'25mb'`), once the actual or
+  declared body size crosses 4.5 MiB, the adapter requires an
+  `Authorization: Bearer <something>` header to be **present** (shape
+  only — the adapter never validates the token; the handler's own auth
+  check still runs normally afterward) before reading further. No header
+  → `401 {"error":"Missing authorization"}`, without draining the rest of
+  a large unauthenticated upload first. A small body on the same route, or
+  a large body WITH the header, is unaffected.
 - **Query:** `querystring.parse` on the raw search string, which is what
   `url.parse(url, true).query` does internally on Vercel. Repeated keys
   become arrays; a bare `?flag` becomes `''`.
@@ -260,15 +352,63 @@ module's own `export const maxDuration` (or `config.maxDuration`) wins if
 present; otherwise `server.mjs` reads `dist-api/_route-deadlines.json`, a
 manifest `scripts/build-api.mjs` generates at build time from
 `vercel.json`'s `functions[...].maxDuration` (vercel.json itself isn't
-shipped in the runtime image). A route with neither gets **300s**, Vercel's
-Fluid-compute platform default. When a deadline elapses with no response
-sent yet, the adapter responds `504 {"error":"Gateway Timeout"}` itself —
-but it does **not** abort the handler: the handler keeps running (and any
-`waitUntil` work it already scheduled keeps running to completion
-independent of the request/response). If the handler eventually tries to
-write a response after the 504 already went out, that write is a silent
-no-op (the adapter wraps `res.end`/`res.write` to check `writableEnded`
-first) instead of crashing the process with `ERR_STREAM_WRITE_AFTER_END`.
+shipped in the runtime image) — keyed by route with no trailing slash
+(round-6 operator review, item H: a request to `/api/chat/`, trailing
+slash included, is normalized before this lookup too, or it silently fell
+back to the 300s default instead of chat's real 120s). A route with
+neither gets **300s**, Vercel's Fluid-compute platform default. When a
+deadline elapses with no response sent yet, the adapter responds
+`504 {"error":"Gateway Timeout"}` itself — but it does **not** abort the
+handler: the handler keeps running (and any `waitUntil` work it already
+scheduled keeps running to completion independent of the request/response).
+
+**After a 504, every further write from the handler is a safe no-op
+(round-6 operator review, item C — extended, not just the original
+write/end guard).** `res.write`/`res.end` already no-op once the response
+is `writableEnded`; this revision extends the same idea to
+`res.setHeader`/`res.writeHead`/`res.removeHeader`/`res.appendHeader` (Node
+throws `ERR_HTTP_HEADERS_SENT` on these specifically, unlike write/end,
+which Node itself already tolerates) and to `res.json`/`res.send`/
+`res.redirect` (which now check `res.headersSent` — or an internal
+`timedOut` flag, covering the vanishingly narrow window between the
+deadline firing and headers actually flipping to sent — and short-circuit
+before attempting anything). None of this applies to a still-open,
+not-yet-timed-out response: `res.write` mid-SSE-stream (`api/chat.ts`
+today doesn't stream, but the guard doesn't special-case any route) keeps
+working exactly as before.
+
+**A per-request `AbortSignal`, exposed via `api/lib/request-deadline.ts`'s
+`getDeadlineSignal(req)` (round-6 operator review, item C).** Aborted ONLY
+when the deadline fires, never on a normal finish/close. Vercel never sets
+the underlying property, so `getDeadlineSignal` returns `undefined` there
+and every caller's behavior is unchanged. Wired into the handlers whose
+charge/write points were straightforward to find and gate:
+
+- `api/chat.ts` — checked right before `logApiUsage`/`incrementUsage`,
+  once after the structured-pipeline branch and once after the plain Grok
+  call; both charges happen strictly *after* the (potentially long) AI
+  call, so skipping them on abort never needs a refund.
+- `api/generate-carousel.ts` — checked once, before the per-slide
+  `incrementUsage` loop; same "charge happens after the work" shape.
+- `api/bulk-posts.ts` / `api/bulk-campaign.ts` / `api/bulk-scripts.ts` —
+  the signal is passed into `runBulkScripts`/`runBulkPosts`
+  (`api/lib/bulk/run-bulk.ts`), which check it at the TOP of each
+  per-angle loop iteration, before that item's own `checkUsageLimit`/
+  generate/charge. Stopping there never needs a refund either: every item
+  already pushed into the result stayed fully charged, and the handlers'
+  existing partial-success response shape already covers "fewer items
+  than requested" for other reasons.
+- `api/mcp-guide-analysis.ts` → `processNextMcpUrlIntake` — see §9 below.
+
+**Deliberately NOT wired, and why (this is the "skip it, document it"
+case the task explicitly allows):** `api/mcp.ts`'s MCP `execute_*` jobs and
+`api/generate-image.ts`'s chat-shell image jobs both do their real work
+inside `waitUntil`, whose lifecycle is already independent of the
+request/response (that's the whole point of `waitUntil` — see above). The
+deadline firing on the *request* doesn't mean the *background job* should
+stop; wiring the request's `AbortSignal` into waitUntil'd work would
+conflate two different lifecycles for no benefit. These two keep their
+existing `.catch`-based safety net and nothing else.
 
 **Node server timeouts.** `server.requestTimeout` (default 120000ms) bounds
 how long Node waits to finish *receiving* a request (headers + body) before
@@ -281,23 +421,47 @@ env-overridable (`REQUEST_TIMEOUT_MS`, `HEADERS_TIMEOUT_MS`) — used by tests
 that need a short timeout to fire quickly, not meant to be changed in
 production.
 
-## 9. Guide-analysis lock-safety — now lease-guarded (SD-06)
+## 9. Guide-analysis lock-safety — now lease-guarded (SD-06), extended one step earlier (round-6 operator review, item G)
 
 `processNextMcpUrlIntake` claims a row via the `claim_mcp_url_intake` RPC
 (`supabase/migrations/072…sql`) using `FOR UPDATE SKIP LOCKED LIMIT 1` plus a
 stale reclaim after `greatest(300s, 60s)`. Two concurrent runners therefore
 claim *different* pending rows, never the same one — that part was already
-safe. What this revision fixes: the final `ready`/`failed`/`pending_analysis`
+safe. What SD-06 fixed: the final `ready`/`failed`/`pending_analysis`
 update used to be keyed only by `id`, with no check that this runner still
 held the lease. On Vercel, `maxDuration: 60` bounded a run short enough that
 this rarely mattered; the container has no such kill (§8), so a run that
 somehow took longer than the stale-reclaim window could have had its row
 reclaimed by a second runner and then had its *own*, now-stale write
 clobber the second runner's in-flight work. Both the success and failure
-updates now add `.eq('status', 'processing').eq('claimed_at',
+updates add `.eq('status', 'processing').eq('claimed_at',
 row.claimed_at)` — if a stale-reclaim has since moved `claimed_at`, the
-update matches zero rows instead of overwriting newer work. See
-`test/mcp-url-analysis-lease.spec.ts`.
+update matches zero rows instead of overwriting newer work.
+
+**This round closes the same gap one step earlier and makes "zero rows" an
+observable outcome, not an inferred one.** Three additions:
+
+1. A **lease recheck right before the brand-kit write** (the `businesses`/
+   `brand_kits` update/insert), not just before the final status update —
+   `runSiteAnalysis` can itself run long; if a stale-reclaim happened
+   *during* that call, writing the kit afterward without rechecking would
+   race the second runner's in-flight work the same way the final-update
+   bug used to.
+2. **`.select('id')` on both the success and failure updates**, so a
+   zero-row match (lease lost) is read from the actual response instead of
+   assumed never to happen — and `logApiUsage` is now skipped in that
+   case, rather than logging a usage event for a write that never landed.
+3. An **optional deadline `AbortSignal`** (`api/lib/request-deadline.ts`,
+   §8), checked at the same two points above — a timed-out run stops
+   cleanly (no kit write, no final update, no usage log) rather than
+   racing a write the client can no longer see the result of.
+
+Any of these three stopping early leaves the row exactly where a crash
+would have left it — `status='processing'`, original `claimed_at` — so the
+existing stale-reclaim window is what picks it back up, not this function
+retrying internally. See `test/mcp-url-analysis-lease.spec.ts` — a mocked
+Supabase client, not a real database (the parity checklist tags this
+`[unit (mocked)]`, with a real-DB concurrent-runner check still PENDING).
 
 This is on top of — not instead of — §6's `ENABLE_CRONS` gate, which is the
 primary reason this worker won't run on Preview/un-cutover-prod at all.
@@ -322,25 +486,44 @@ even with Orchestrator sign-off — only against the identical image locally,
 with a locally generated test secret (tagged `[local signed fixture]` in
 the checklist).
 
-## 11. Cloudflare Access JWT gate (SD-03 — decision reversed: ADD)
+## 11. Cloudflare Access JWT gate (SD-03 — decision reversed: ADD; selector + JWKS caching hardened, round-6 operator review, items A/B)
 
 An earlier pass of this work deliberately left Access-awareness out of the
 code ("nothing here validates `Cf-Access-Jwt-Assertion`"). SecureDog's
 review reversed that decision: Preview needs an **actual** gate in front of
 it, not just a plan to put Cloudflare Access in front of it later with no
 verification on this side. `cf/access-jwt.ts` now verifies the
-`Cf-Access-Jwt-Assertion` header **in the Worker**, before routing, **only
-when `env.APP_ENV === 'preview'`** — production is completely unaffected,
-and `scheduled()` never goes through this check at all (crons are governed
-solely by §6).
+`Cf-Access-Jwt-Assertion` header **in the Worker**, before routing.
+
+**Gate selector, inverted (item A).** The original selector enforced
+**only when `env.APP_ENV === 'preview'` exactly** — which fails **open**
+for every other value: unset, a typo, a future staging-like env name
+nobody anticipated here would all have skipped the gate silently. It now
+enforces on **every env except production** —
+`!isProductionAppEnv({ APP_ENV: env.APP_ENV })`, the exact same
+trim+lowercase normalization `api/lib/app-env.ts` already uses elsewhere,
+imported directly rather than re-implemented as a second string
+comparison. Production remains completely unaffected (no header required,
+no network call attempted at all), and `scheduled()` never goes through
+this check regardless of env (crons are governed solely by §6).
 
 What it checks, failing closed (403) on any failure:
 
 - **RS256 only** — `alg: 'none'`, `'HS256'`, etc. are all rejected.
-- **JWKS** fetched from `https://<ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`,
-  cached in-module keyed by team domain; an unrecognized `kid` triggers
-  exactly one refetch (to pick up key rotation) before giving up — no
-  unbounded retry loop.
+- **JWKS**, fetched from `https://<ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`
+  and cached in-module keyed by team domain, hardened in this round (item
+  B):
+  - Cached keys carry a **~1 hour TTL** — even a previously-known `kid`
+    triggers a refetch once that elapses, not only on a cache miss.
+  - An unrecognized `kid` is throttled to **at most one refetch attempt
+    per team domain per 60 seconds** — a negative cache, not a retry
+    budget. A flood of requests with a bogus or not-yet-rotated-in `kid`
+    causes one fetch, not one per request.
+  - Concurrent misses on the same uncached `kid` share **one in-flight
+    fetch promise** instead of each starting their own.
+  - All of the above timing goes through the injectable `deps.now` (a
+    test-only cache-reset export, `__resetJwksCacheForTests`, also
+    exists, documented in the file).
 - **`aud`** (string or array) must contain `ACCESS_AUD`; **`iss`** must be
   exactly `https://<ACCESS_TEAM_DOMAIN>`.
 - **`exp` is required** — a token with no `exp` claim, or a non-numeric
@@ -405,20 +588,41 @@ the Dockerfile's header comment.
 
 ### Pre-cutover hardening (not done in this PR — tracked, not implemented)
 
-- **Pre-auth semaphore / concurrency cap on expensive routes.** Not added.
-  A single container instance (§1) handling unlimited concurrent heavy
-  requests (image generation, bulk jobs) has no backpressure today beyond
-  whatever the provider APIs themselves impose.
-- **`waitUntil` concurrency cap.** Not added. `server.mjs`'s background
-  tracking (§8) has no ceiling on how many promises can be in flight at
-  once; a burst of long-running jobs could accumulate unboundedly in the
-  `pending` set before a drain.
+- **`waitUntil` concurrency cap.** Still not added. `server.mjs`'s
+  background tracking (§8) has no ceiling on how many promises can be in
+  flight at once; a burst of long-running jobs could accumulate
+  unboundedly in the `pending` set before a drain. (Item H's semaphore —
+  see §7 — bounds in-flight REQUEST BODY bytes, not in-flight background
+  job count — a different resource, not a substitute for this. The
+  pre-auth semaphore / concurrency cap that used to be listed here is
+  **done**, not pending — round-6 operator review, item H.)
 - **Tilopay webhook secret compare is a plain `!==`, not constant-time**
-  (pre-existing finding, SD-08, not changed in this PR). `api/mcp-guide-
-  analysis.ts`'s `CRON_SECRET` check already uses `timingSafeEqual`
-  (`api/mcp-guide-analysis.ts`'s `safeEqual`) — the Tilopay webhook
-  (`api/tilopay/webhook.ts`'s `secret !== WEBHOOK_SECRET`) should switch to
-  the same pattern before cutover.
+  (pre-existing finding, SD-08, still not changed in this PR).
+  `api/mcp-guide-analysis.ts`'s `CRON_SECRET` check already uses
+  `timingSafeEqual` (`api/mcp-guide-analysis.ts`'s `safeEqual`) — the
+  Tilopay webhook (`api/tilopay/webhook.ts`'s `secret !== WEBHOOK_SECRET`)
+  should switch to the same pattern before cutover.
+- **Deadline `AbortSignal` deliberately not wired into `api/mcp.ts` or
+  `api/generate-image.ts` (round-6 operator review, item C — see §8 for
+  the full reasoning).** Both do their real work inside `waitUntil`, a
+  lifecycle that's already independent of the request/response; wiring
+  the request's abort signal into background work would conflate two
+  different lifecycles. Not a gap to close before cutover — a deliberate
+  scope boundary, listed here so it's not mistaken for an oversight. **Note
+  this doesn't make them unsafe on their own**: like every handler that
+  doesn't check the signal at all (not just these two), §8's general
+  guarantee still applies — the adapter's deadline never aborts a handler,
+  it only stops waiting for one. A handler with no signal check simply
+  keeps running to completion after a 504 has already gone out, exactly as
+  it would if the signal didn't exist — it just can't skip its own
+  charge/write in that case, which is the whole reason items C/G wire the
+  signal into the handlers where that charge/write point was easy to find
+  and gate (§8's list) rather than wiring it everywhere by default.
+- **Lease-lost / deadline-exceeded early exits in
+  `processNextMcpUrlIntake` (§9) are only proven against a mocked
+  Supabase client.** A real two-runner race against the shared AIIAN
+  database has never been exercised (and can't be, safely, outside
+  Preview). Needs a real-DB check once Preview exists.
 
 ## 15. Cutover / retirement checklist
 
