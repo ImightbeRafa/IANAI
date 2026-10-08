@@ -284,6 +284,22 @@ export interface PackItem {
   generationId: string
   leaseUntil?: string
   updatedAt: string
+  /** Model cost spent on this item so far (all attempts), USD. */
+  costUsd?: number
+  /** Wall time per step of the latest run, ms. */
+  timings?: PackItemTimings
+  /** Scene generations spent in the latest scene step (1 + retries). */
+  sceneAttempts?: number
+  /** Set when credits were charged for `generationId`. */
+  chargedAt?: string
+}
+
+export interface PackItemTimings {
+  copyMs?: number
+  sceneMs?: number
+  sceneCheckMs?: number
+  renderMs?: number
+  chargeMs?: number
 }
 
 export interface Pack {
@@ -309,8 +325,13 @@ export interface PackStore {
   createPack(pack: Pack, items: PackItem[]): Promise<void>
   getPack(packId: string, userId: string): Promise<{ pack: Pack; items: PackItem[] } | null>
   updatePack(packId: string, patch: Partial<Pack>): Promise<void>
-  /** Atomically lease up to `limit` items that need work and are not leased. */
-  leaseItems(packId: string, limit: number, leaseMs: number): Promise<PackItem[]>
+  /**
+   * Atomically lease up to `limit` items that need work (status not done/failed)
+   * and are not leased (or whose lease expired), lowest `index` first.
+   * `excludeIds` are skipped (items deferred by this caller).
+   */
+  leaseItems(packId: string, limit: number, leaseMs: number, opts?: { excludeIds?: string[] }): Promise<PackItem[]>
+  /** Patch an item. A present-but-undefined `leaseUntil` clears the lease. */
   updateItem(itemId: string, patch: Partial<PackItem>): Promise<void>
 }
 
@@ -320,6 +341,9 @@ export interface ModelGateway {
   json<T>(input: { system: string; user: string; model?: string; maxTokens?: number; temperature?: number }): Promise<{ data: T; costUsd: number; model: string }>
   /** Vision JSON (images as URLs or data URLs). */
   visionJson<T>(input: { system: string; user: string; images: string[]; model?: string }): Promise<{ data: T; costUsd: number; model: string }>
-  /** Text-free scene; `refs[0]` is the product reference when present. */
-  scene(input: { prompt: string; refs: string[]; ratio: AspectRatio; draft: boolean }): Promise<{ bytes: Uint8Array; mimeType: string; costUsd: number; model: string; productLocked: boolean }>
+  /**
+   * Text-free scene; `refs` are product references (refs[0] = hero, product lock).
+   * `styleRefs` are optional style anchors (e.g. the pack's first scene), never a product lock.
+   */
+  scene(input: { prompt: string; refs: string[]; ratio: AspectRatio; draft: boolean; styleRefs?: string[]; language?: AdLanguage }): Promise<{ bytes: Uint8Array; mimeType: string; costUsd: number; model: string; productLocked: boolean }>
 }

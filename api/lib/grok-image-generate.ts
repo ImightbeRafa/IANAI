@@ -18,6 +18,8 @@ import {
   GROK_IMAGE_GENERATIONS_URL,
   GROK_IMAGE_PROVIDER_MODEL,
   estimateGrokImageCostUsd,
+  type GrokImageQuality,
+  type GrokImageResolution,
 } from './grok-models.js'
 import { resolveGrokAspectRatio } from './grok-image-edit.js'
 import { prepareGrokImagePrompt } from './grok-image-prompt.js'
@@ -31,8 +33,8 @@ export type GrokImageGenerateResult = {
   imageDataUrl: string
   providerModel: string
   estimatedCostUsd: number
-  resolution: typeof GROK_IMAGE_DEFAULT_RESOLUTION
-  quality: typeof GROK_IMAGE_DEFAULT_QUALITY
+  resolution: GrokImageResolution
+  quality: GrokImageQuality
   aspectRatio: string
   mode: GrokImageApiMode
   endpoint: typeof GROK_IMAGE_GENERATIONS_URL | typeof GROK_IMAGE_EDITS_URL
@@ -57,6 +59,10 @@ export type GrokPostFirstGenOptions = {
    */
   referenceImageUrls?: string[]
   language?: string | null
+  /** Output size. Default '2k' (premium social). '1k' = cheaper draft. */
+  resolution?: GrokImageResolution
+  /** API quality. Default 'medium' (highest xAI offers). */
+  quality?: GrokImageQuality
 }
 
 /**
@@ -193,6 +199,8 @@ export async function runGrokPostFirstGen(
   }
   // Product first so /edits treats the SKU as the edit base — never logo-only.
   const refs = [...productData, ...supportData].slice(0, 3)
+  const resolution: GrokImageResolution = options.resolution ?? GROK_IMAGE_DEFAULT_RESOLUTION
+  const quality: GrokImageQuality = options.quality ?? GROK_IMAGE_DEFAULT_QUALITY
 
   const body: Record<string, unknown> = {
     model: GROK_IMAGE_PROVIDER_MODEL,
@@ -200,8 +208,8 @@ export async function runGrokPostFirstGen(
     n: 1,
     response_format: 'b64_json',
     aspect_ratio: aspectRatio,
-    resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
-    quality: GROK_IMAGE_DEFAULT_QUALITY,
+    resolution,
+    quality,
   }
   if (grokApi.attachReferences) {
     attachGrokImageRefs(body, refs)
@@ -234,9 +242,10 @@ export async function runGrokPostFirstGen(
     providerModel: GROK_IMAGE_PROVIDER_MODEL,
     estimatedCostUsd: estimateGrokImageCostUsd({
       referenceCount: refs.length,
+      resolution,
     }),
-    resolution: GROK_IMAGE_DEFAULT_RESOLUTION,
-    quality: GROK_IMAGE_DEFAULT_QUALITY,
+    resolution,
+    quality,
     aspectRatio,
     mode: grokApi.mode,
     endpoint: grokApi.endpoint,
