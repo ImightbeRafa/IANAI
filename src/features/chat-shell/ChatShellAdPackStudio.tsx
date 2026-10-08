@@ -27,7 +27,6 @@ import {
   hookLabel,
   quoteLine,
   readableDnaNote,
-  selectionIsPrefix,
   sourceLabel,
   uploadKindLabel,
   type FactRow,
@@ -409,7 +408,8 @@ export default function ChatShellAdPackStudio({
       const res = await api.start({
         dna: confirmedDna,
         offer,
-        size: enabledCount,
+        size: angles.length,
+        angleIds: angles.filter((a) => enabled.has(a.id)).map((a) => a.id),
         ratios,
         businessId: prefill?.businessId,
         brandKitId: prefill?.brandKitId,
@@ -443,7 +443,6 @@ export default function ChatShellAdPackStudio({
 
   const dnaView = dna
   const confirmedN = confirmedFactCount(rows, gapDrafts)
-  const prefixOk = selectionIsPrefix(angles, enabled)
   const creditsNote = creditsEnabled && creditsRemaining != null ? ` · ${t.creditsLeft(creditsRemaining)}` : ''
   const notEnough = creditsEnabled && creditsRemaining != null && quote != null && quote.credits > creditsRemaining
 
@@ -649,7 +648,6 @@ export default function ChatShellAdPackStudio({
                 {creditsNote}
                 {angles.length ? <span className="chat-shell__adpack-muted"> · {t.selected(enabledCount, angles.length)}</span> : null}
               </p>
-              {!prefixOk && enabledCount ? <p className="chat-shell__adpack-hint is-warn">{t.prefixNote(enabledCount)}</p> : null}
               {!enabledCount && angles.length ? <p className="chat-shell__adpack-hint is-warn">{t.minAngles}</p> : null}
               {notEnough ? <p className="chat-shell__adpack-hint is-warn">{t.insufficient(quote!.credits, creditsRemaining ?? undefined)}</p> : null}
 

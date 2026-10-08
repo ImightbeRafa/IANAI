@@ -217,6 +217,7 @@ export async function dispatchAdPackTool(options: {
           dna: args.dna,
           offer: args.offer,
           size: args.size,
+          angleIds: args.angleIds,
           ratios: args.ratios,
           businessId: args.businessId,
           brandKitId: args.brandKitId,

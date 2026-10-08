@@ -422,6 +422,14 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number): AdPackStatu
 // Service
 // ---------------------------------------------------------------------------
 
+function parseAngleIds(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value) || value.length > MAX_PACK_SIZE || !value.every((v) => typeof v === 'string' && v.length > 0 && v.length <= 120)) {
+    throw bad('angleIds must be an array of angle id strings')
+  }
+  return value.length ? [...new Set(value as string[])] : undefined
+}
+
 export interface AdPackService {
   ingestDna(input: { userId: string; source?: AdPackSource } & AdPackIngestDnaRequest): Promise<AdPackIngestDnaResponse>
   confirmDna(input: { userId: string; dna: unknown; edits: unknown }): Promise<AdPackConfirmDnaResponse>
@@ -432,6 +440,8 @@ export interface AdPackService {
     dna: unknown
     offer: unknown
     size?: unknown
+    /** Angle-board selection: ids from planAngles with the same size. */
+    angleIds?: unknown
     ratios?: unknown
     businessId?: unknown
     brandKitId?: unknown
@@ -597,8 +607,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
         }
       }
-      const planned = planPack({ dna, offer, size, ratios, userId: input.userId, source: input.source, businessId, brandKitId, ids: { packId } })
-      if (!planned.items.length) throw bad('No angles could be planned for this offer')
+      const angleIds = parseAngleIds(input.angleIds)
+      const planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, ids: { packId } })
+      if (!planned.items.length) throw bad(angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
       await requireCredits(input.userId, planned.pack.size)
       try {
         await deps.store.createPack(planned.pack, planned.items)

@@ -70,6 +70,8 @@ export interface PlanPackInput {
   dna: BrandDna
   offer: OfferInput
   size?: number
+  /** Keep only these planned angle ids (angle-board selection). Ids are deterministic for the same dna/offer/size/seed. */
+  angleIds?: string[]
   ratios?: AspectRatio[]
   userId: string
   source: Pack['source']
@@ -86,7 +88,9 @@ export function itemGenerationId(packId: string, index: number, attempt = 0): st
 
 export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] } {
   const packId = input.ids?.packId ?? randomUUID()
-  const angles = planAngles({ dna: input.dna, offer: input.offer, size: input.size, language: input.dna.language, seed: input.seed })
+  const planned = planAngles({ dna: input.dna, offer: input.offer, size: input.size, language: input.dna.language, seed: input.seed })
+  const keep = input.angleIds?.length ? new Set(input.angleIds) : null
+  const angles = keep ? planned.filter((a) => keep.has(a.id)) : planned
   const ratios = input.ratios?.length ? [...new Set(input.ratios)] : [...DEFAULT_RATIOS]
   const ts = nowIso()
   const pack: Pack = {

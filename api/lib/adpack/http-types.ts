@@ -96,6 +96,8 @@ export interface AdPackStartRequest {
   dna: BrandDna
   offer: OfferInput
   size?: number
+  /** Angle-board selection (ids from `angles` with the same `size`). */
+  angleIds?: string[]
   ratios?: AspectRatio[]
   businessId?: string
   brandKitId?: string

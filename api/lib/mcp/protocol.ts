@@ -249,6 +249,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           dna: adpackDna,
           offer: adpackOffer,
           size: adpackSize,
+          angleIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of angle ids from adpack_angles (same size).' },
           ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] } },
           businessId: { type: 'string' },
           brandKitId: { type: 'string' },

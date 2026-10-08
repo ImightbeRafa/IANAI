@@ -458,14 +458,16 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
 
     async start(body) {
       await delay(500)
-      const size = Math.min(20, Math.max(1, Math.round(body.size ?? 10)))
+      const boardSize = Math.min(20, Math.max(1, Math.round(body.size ?? 10)))
+      const keep = body.angleIds?.length ? new Set(body.angleIds) : null
+      const angles = mockAngles(boardSize).filter((a) => !keep || keep.has(a.id))
+      const size = angles.length
       const quote = quoteFor(size)
       if (credits < quote.credits) {
         throw new AdPackApiError(402, { error: 'Not enough AI credits for this pack', code: 'INSUFFICIENT_CREDITS', creditsRequired: quote.credits, remaining: credits })
       }
       const at = now()
       const price = body.dna.facts.find((f) => f.key === 'price' && f.confirmed)?.value
-      const angles = mockAngles(size)
       const pack: SimPack = {
         id: uuid(),
         ratios: body.ratios?.length ? body.ratios : ['1:1', '4:5', '9:16'],
