@@ -287,12 +287,27 @@ export function selectCrawlLinks(
       const score = termScore - depth - (parsed.search ? 2 : 0)
       return { url: parsed.href, score }
     })
-    .filter((item): item is { url: string; score: number } => Boolean(item) && item.score > 0)
+    .filter((item): item is { url: string; score: number } => item !== null && item.score > 0)
     .sort((a, b) => b.score - a.score)
   return unique(scored.map((item) => item.url).filter((url) => url !== home.href), limit)
 }
 
-async function fetchText(url: string, timeoutMs = 12_000): Promise<string> {
+/** Fetches page/CSS text for the crawler. Injectable via `runSiteAnalysis({ fetchText })`. */
+export type SiteFetchText = (url: string, timeoutMs?: number) => Promise<string>
+
+/**
+ * Replaces the Gemini synthesis call (e.g. with the Ad Pack ModelGateway or a test fake).
+ * Must resolve to the raw JSON object `{ facts, evidence }` described by the system prompt.
+ */
+export type SiteSynthesize = (input: {
+  system: string
+  user: string
+  model: string
+  temperature: number
+  maxTokens: number
+}) => Promise<{ raw: Record<string, unknown>; usage?: SiteAnalysisUsage }>
+
+export async function fetchSiteText(url: string, timeoutMs = 12_000): Promise<string> {
   const response = await fetchPublicUrl(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; AdvanceAI-SiteAnalyzer/1.0)',
@@ -306,7 +321,7 @@ async function fetchText(url: string, timeoutMs = 12_000): Promise<string> {
   return response.text()
 }
 
-async function fetchPageSignals(url: string): Promise<{ page: PageSignals; usedReader: boolean }> {
+async function fetchPageSignals(url: string, fetchText: SiteFetchText): Promise<{ page: PageSignals; usedReader: boolean }> {
   const html = await fetchText(url)
   const page = extractPageSignals(html, url)
   if (page.text.length >= 400) return { page, usedReader: false }
@@ -326,7 +341,7 @@ async function fetchPageSignals(url: string): Promise<{ page: PageSignals; usedR
   return { page, usedReader: false }
 }
 
-async function crawlSite(url: string): Promise<{
+async function crawlSite(url: string, fetchText: SiteFetchText): Promise<{
   pages: PageSignals[]
   attempted: Array<{ url: string; title: string; ok: boolean }>
   cssText: string
@@ -351,7 +366,7 @@ async function crawlSite(url: string): Promise<{
   }
   const childUrls = selectCrawlLinks(home.url, home.links)
   const childResults = await Promise.allSettled(childUrls.map(async (childUrl) => {
-    return fetchPageSignals(childUrl)
+    return fetchPageSignals(childUrl, fetchText)
   }))
   const pages = [home]
   const attempted = [{ url: home.url, title: home.title, ok: true }]
@@ -420,7 +435,8 @@ async function synthesizeSite(
   language: string,
   notes: string,
   pages: PageSignals[],
-  cssText: string
+  cssText: string,
+  synthesize?: SiteSynthesize
 ): Promise<{ facts: Record<string, unknown>; evidence: Record<string, SiteFieldEvidence>; usage: SiteAnalysisUsage }> {
   const colors = unique([...pages.flatMap((page) => page.colors), ...extractColors(cssText)], 30)
   const fonts = unique([...pages.flatMap((page) => page.fonts), ...extractFonts(cssText)], 16)
@@ -480,21 +496,40 @@ IMAGE CANDIDATES: ${images.join(', ') || 'ninguna'}
 
 ${pageContent}`
 
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error('AI service not configured')
-  const ai = new GoogleGenAI({ apiKey })
-  const result = await ai.models.generateContent({
-    model: SITE_ANALYSIS_MODEL,
-    contents: [{ role: 'user', parts: [{ text: userContent }] }],
-    config: {
-      systemInstruction,
+  let parsed: Record<string, unknown>
+  let usage: SiteAnalysisUsage
+  if (synthesize) {
+    const injected = await synthesize({
+      system: systemInstruction,
+      user: userContent,
+      model: SITE_ANALYSIS_MODEL,
       temperature: 0.15,
-      maxOutputTokens: 8192,
-      responseMimeType: 'application/json',
-    },
-  })
-  const text = result.candidates?.[0]?.content?.parts?.map((part) => 'text' in part ? part.text || '' : '').join('') || ''
-  const parsed = parseJsonObject(text)
+      maxTokens: 8192,
+    })
+    parsed = injected.raw && typeof injected.raw === 'object' ? injected.raw : {}
+    usage = injected.usage || { input: 0, output: 0, thinking: 0 }
+  } else {
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) throw new Error('AI service not configured')
+    const ai = new GoogleGenAI({ apiKey })
+    const result = await ai.models.generateContent({
+      model: SITE_ANALYSIS_MODEL,
+      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      config: {
+        systemInstruction,
+        temperature: 0.15,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+      },
+    })
+    const text = result.candidates?.[0]?.content?.parts?.map((part) => 'text' in part ? part.text || '' : '').join('') || ''
+    parsed = parseJsonObject(text)
+    usage = {
+      input: result.usageMetadata?.promptTokenCount || 0,
+      output: result.usageMetadata?.candidatesTokenCount || 0,
+      thinking: result.usageMetadata?.thoughtsTokenCount || 0,
+    }
+  }
   const facts = parsed.facts && typeof parsed.facts === 'object' && !Array.isArray(parsed.facts)
     ? parsed.facts as Record<string, unknown>
     : {}
@@ -506,11 +541,7 @@ ${pageContent}`
   return {
     facts,
     evidence: normalizeEvidence(parsed.evidence),
-    usage: {
-      input: result.usageMetadata?.promptTokenCount || 0,
-      output: result.usageMetadata?.candidatesTokenCount || 0,
-      thinking: result.usageMetadata?.thoughtsTokenCount || 0,
-    },
+    usage,
   }
 }
 
@@ -520,6 +551,10 @@ export async function runSiteAnalysis(options: {
   notes?: string
   /** When set, attempt to rehost extracted logo into Advance storage. */
   rehostLogoForUserId?: string
+  /** Seam: replace the SSRF-guarded page/CSS fetch (tests, alternate runtimes). Default: `fetchSiteText`. */
+  fetchText?: SiteFetchText
+  /** Seam: replace the Gemini synthesis call (Ad Pack ModelGateway, tests). Default: direct Gemini. */
+  synthesize?: SiteSynthesize
 }): Promise<{ analysis: SiteAnalysisResult; usage: SiteAnalysisUsage; normalizedUrl: string }> {
   const normalizedUrl = assertPublicHttpUrl(options.url.trim()).href
   if (!normalizedUrl.startsWith('https:')) {
@@ -528,13 +563,14 @@ export async function runSiteAnalysis(options: {
   const language = options.language === 'en' ? 'en' : 'es'
   const notes = typeof options.notes === 'string' ? options.notes.slice(0, 4_000) : ''
 
-  const crawled = await crawlSite(normalizedUrl)
+  const crawled = await crawlSite(normalizedUrl, options.fetchText || fetchSiteText)
   const synthesized = await synthesizeSite(
     normalizedUrl,
     language,
     notes,
     crawled.pages,
-    crawled.cssText
+    crawled.cssText,
+    options.synthesize
   )
   const assets = {
     logoCandidates: unique(crawled.pages.flatMap((page) => page.logoCandidates), 12),

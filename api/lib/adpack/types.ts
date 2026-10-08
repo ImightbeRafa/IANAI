@@ -104,6 +104,12 @@ export interface BrandDna {
   /** Missing facts that would materially improve ads, e.g. ["price", "delivery_time"]. */
   gaps: FactKey[]
   sources: Array<{ kind: FactSource; url?: string; fetchedAt: string; ok: boolean; note?: string }>
+  /** Real product photos from uploads / offer form (first = hero). Added by DNA ingest. */
+  productImageUrls?: string[]
+  /** Style references (website hero images, Instagram posts, reference ads). Not product locks. */
+  referenceImageUrls?: string[]
+  /** Ingest notes for the UI, e.g. `conflict:price: "₡9.900" (website) vs "₡8.900" (instagram)`. */
+  notes?: string[]
 }
 
 // ---------------------------------------------------------------------------
