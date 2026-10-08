@@ -123,6 +123,9 @@ function offerBadge(ctx: Ctx, x: number, y: number, maxW: number, align: Align, 
     size: sz(ctx, big ? 50 : 38),
     min: sz(ctx, big ? 30 : 24),
     lines: 2,
+    // One line at a slightly smaller size reads better than "₡5.900 · 3 / por ₡15.000".
+    prefer: 1,
+    preferMin: sz(ctx, big ? 36 : 28),
     lh: 1.12,
     padX: sz(ctx, big ? 34 : 30),
     padY: sz(ctx, big ? 22 : 20),
@@ -300,7 +303,9 @@ const offerGraphic: Template = (ctx) => {
     mid.push(...c.nodes)
     y = bottom(c.box) + sz(ctx, 16)
   }
-  const badge = offerBadge(ctx, safe.x, y + (ctx.copy.bullets.length ? sz(ctx, 14) : 0), ctx.product ? leftW : safe.w * 0.8, 'left', true)
+  // Badge stays in the left column too: the scene's product stands in the right half and a
+  // wider badge covered its label (live benchmark).
+  const badge = offerBadge(ctx, safe.x, y + (ctx.copy.bullets.length ? sz(ctx, 14) : 0), leftW, 'left', true)
   if (badge) {
     mid.push(...badge.nodes)
     y = bottom(badge.box)
@@ -318,7 +323,7 @@ const offerGraphic: Template = (ctx) => {
 }
 
 const beforeAfter: Template = (ctx) => {
-  const { safe, tall, W } = ctx.frame
+  const { safe, W } = ctx.frame
   const warnings: string[] = []
   const labels = ctx.language === 'en' ? ['Before', 'After'] : ['Antes', 'Después']
   const logo = logoSlot(ctx, 'left')
@@ -339,7 +344,7 @@ const beforeAfter: Template = (ctx) => {
       x,
       y: 0,
       maxW: w,
-      align: tall ? 'left' : 'center',
+      align: 'center',
       fill,
       font: headingFont(ctx),
       size: sz(ctx, 36),
@@ -350,7 +355,7 @@ const beforeAfter: Template = (ctx) => {
     })
     const parts: Pill[] = [l]
     if (bullet) {
-      const c = chip(ctx, bullet, x, 0, w, tall ? 'left' : 'center', undefined, isAfter)
+      const c = chip(ctx, bullet, x, 0, w, 'center', undefined, isAfter)
       parts.push(c)
     }
     return parts
@@ -363,53 +368,33 @@ const beforeAfter: Template = (ctx) => {
     }
     return y - sz(ctx, 14)
   }
-  let split: { kind: 'v'; x: number } | { kind: 'h'; y: number }
-  if (!tall) {
-    const gutter = sz(ctx, 34)
-    const colW = Math.round((safe.w - gutter * 2) / 2)
-    const left = half(labels[0], beforeFill, b0, safe.x, colW, false)
-    const rightX = W / 2 + gutter
-    const rightParts = half(labels[1], afterFill, b1, rightX, safe.x + safe.w - rightX, true)
-    const hOf = (ps: Pill[]) => ps.reduce((a, p) => a + p.box.h, 0) + sz(ctx, 14) * (ps.length - 1)
-    const blockH = Math.max(hOf(left), hOf(rightParts))
-    const top = regionBottom - blockH
-    if (top < regionTop) fits = false
-    stack(left, top + blockH - hOf(left))
-    stack(rightParts, top + blockH - hOf(rightParts))
-    nodes.push(...left.flatMap((p) => p.nodes), ...rightParts.flatMap((p) => p.nodes))
-    split = { kind: 'v', x: W / 2 }
-  } else {
-    const splitY = Math.round(Math.min(Math.max(ctx.frame.H / 2, regionTop + 220), regionBottom - 220))
-    const top = half(labels[0], beforeFill, b0, safe.x, safe.w, false)
-    const bot = half(labels[1], afterFill, b1, safe.x, safe.w, true)
-    const hOf = (ps: Pill[]) => ps.reduce((a, p) => a + p.box.h, 0) + sz(ctx, 14) * (ps.length - 1)
-    const topStart = splitY - sz(ctx, 30) - hOf(top)
-    if (topStart < regionTop) fits = false
-    stack(top, topStart)
-    const botEnd = stack(bot, splitY + sz(ctx, 30) + sz(ctx, 46))
-    if (botEnd > regionBottom) fits = false
-    nodes.push(...top.flatMap((p) => p.nodes), ...bot.flatMap((p) => p.nodes))
-    split = { kind: 'h', y: splitY }
-  }
+  // Always a left/right split: the scene is generated once with a left "before" / right "after"
+  // composition and cover-fit to every ratio, so a top/bottom split at 9:16 would contradict it.
+  const gutter = sz(ctx, 34)
+  const colW = Math.round((safe.w - gutter * 2) / 2)
+  const left = half(labels[0], beforeFill, b0, safe.x, colW, false)
+  const rightX = W / 2 + gutter
+  const rightParts = half(labels[1], afterFill, b1, rightX, safe.x + safe.w - rightX, true)
+  const hOf = (ps: Pill[]) => ps.reduce((a, p) => a + p.box.h, 0) + sz(ctx, 14) * (ps.length - 1)
+  const blockH = Math.max(hOf(left), hOf(rightParts))
+  const top = regionBottom - blockH
+  if (top < regionTop) fits = false
+  stack(left, top + blockH - hOf(left))
+  stack(rightParts, top + blockH - hOf(rightParts))
+  nodes.push(...left.flatMap((p) => p.nodes), ...rightParts.flatMap((p) => p.nodes))
+  const split = { x: W / 2 }
   // Divider + arrow badge (decorative, no text).
   const d = sz(ctx, 78)
-  if (split.kind === 'v') {
-    const y0 = regionTop
-    const y1 = Math.max(y0 + 10, regionBottom)
-    // Divider only between the header and the label/action block, never through text.
-    const lineTop = head.bottom + sz(ctx, 24)
-    const lineBottom = Math.min(action.top, ...nodes.filter((n) => n.kind === 'rect' && n.layer === 'over').map((n) => n.box.y)) - sz(ctx, 24)
-    nodes.unshift({ kind: 'rect', layer: 'under', box: { x: Math.round(split.x - 3), y: lineTop, w: 6, h: Math.max(0, lineBottom - lineTop) }, color: WHITE, radius: 3, alpha: 0.95 })
-    const cy = lineBottom - lineTop > d * 1.5 ? Math.round((lineTop + lineBottom) / 2) : Math.round(y0 + (y1 - y0) * 0.35)
-    const cb = { x: Math.round(split.x - d / 2), y: cy - d / 2, w: d, h: d }
-    nodes.push({ kind: 'rect', layer: 'over', box: cb, color: WHITE, radius: d / 2, shadow: 'strong' })
-    nodes.push({ kind: 'icon', icon: 'arrow_right', box: cb, color: ctx.palette.chipIcon })
-  } else {
-    nodes.unshift({ kind: 'rect', layer: 'under', box: { x: 0, y: split.y - 3, w: W, h: 6 }, color: WHITE, radius: 0, alpha: 0.95 })
-    const cb = { x: Math.round(W - safe.x - d), y: split.y - d / 2, w: d, h: d }
-    nodes.push({ kind: 'rect', layer: 'over', box: cb, color: WHITE, radius: d / 2, shadow: 'strong' })
-    nodes.push({ kind: 'icon', icon: 'arrow_down', box: cb, color: ctx.palette.chipIcon })
-  }
+  const y0 = regionTop
+  const y1 = Math.max(y0 + 10, regionBottom)
+  // Divider only between the header and the label/action block, never through text.
+  const lineTop = head.bottom + sz(ctx, 24)
+  const lineBottom = Math.min(action.top, ...nodes.filter((n) => n.kind === 'rect' && n.layer === 'over').map((n) => n.box.y)) - sz(ctx, 24)
+  nodes.unshift({ kind: 'rect', layer: 'under', box: { x: Math.round(split.x - 3), y: lineTop, w: 6, h: Math.max(0, lineBottom - lineTop) }, color: WHITE, radius: 3, alpha: 0.95 })
+  const cy = lineBottom - lineTop > d * 1.5 ? Math.round((lineTop + lineBottom) / 2) : Math.round(y0 + (y1 - y0) * 0.35)
+  const cb = { x: Math.round(split.x - d / 2), y: cy - d / 2, w: d, h: d }
+  nodes.push({ kind: 'rect', layer: 'over', box: cb, color: WHITE, radius: d / 2, shadow: 'strong' })
+  nodes.push({ kind: 'icon', icon: 'arrow_right', box: cb, color: ctx.palette.chipIcon })
   return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], logoBox: logo.box, fits, warnings }
 }
 
@@ -426,7 +411,9 @@ const howToSteps: Template = (ctx) => {
   const regionBottom = action.top - sz(ctx, 36)
   const steps = ctx.copy.bullets.slice(0, 4)
   if (!steps.length) warnings.push('how_to_steps: no bullets → no step cards')
-  const cardW = Math.round(tall ? safe.w : safe.w * 0.68)
+  // Cards stay in the left ~60% at every ratio: the scene puts the product in the right third,
+  // and full-width cards at 9:16 covered the label (live benchmark).
+  const cardW = Math.round(safe.w * (tall ? 0.6 : 0.62))
   const cards: Node[] = []
   let y = regionTop
   steps.forEach((s, i) => {
@@ -614,7 +601,9 @@ const explainer: Template = (ctx) => {
     const rowHs = Array.from({ length: rows }, (_, r) => Math.max(...built.filter((_, i) => Math.floor(i / 2) === r).map((c) => c.box.h)))
     const gridH = rowHs.reduce((a, b) => a + b, 0) + gap * (rows - 1)
     const productH = ctx.product ? Math.max(0, regionBottom - regionTop - gridH - gap) : 0
-    const gridTop = ctx.product ? regionBottom - gridH : regionTop + Math.max(0, (regionBottom - regionTop - gridH) / 2)
+    // Bottom-anchored: with a cutout the product sits above the grid; without one the scene's
+    // product is centered, so a mid-frame grid would cover its label (live benchmark).
+    const gridTop = regionBottom - gridH
     if (gridH > regionBottom - regionTop || (ctx.product && productH < ctx.frame.H * 0.2)) fits = false
     let y = gridTop
     rowHs.forEach((rh, r) => {

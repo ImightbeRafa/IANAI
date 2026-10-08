@@ -24,8 +24,8 @@ import {
   type CopyContext,
   type RawModelCopy,
 } from './copy-shared.js'
-import { buildOfferLine, mergeFacts } from './facts.js'
-import { archetypeBlock, IAN_CORE_RULES, registerInstruction } from './ian-rules.js'
+import { buildOfferLine, extractNumericClaims, mergeFacts, numbersInFacts } from './facts.js'
+import { archetypeBlock, IAN_CORE_RULES, REGISTER_CTA_VERBS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, formatGuidance, headlineMaxWords, UNIVERSAL_AD_RULES } from './patterns.js'
 import { errorMessage, mapWithConcurrency } from './util.js'
 
@@ -42,17 +42,19 @@ export function offerLineFor(dna: BrandDna, offer: OfferInput, language: AdLangu
  */
 export const COPY_CRAFT_RULES: Record<AdLanguage, string> = {
   es: `OFICIO (lo que separa un anuncio que vende de uno genérico):
-- Titular = la situación, dolor, deseo o dato duro del comprador, dicho como lo diría él. Nunca una etiqueta de catálogo ("Sérum de noche", "Paso a paso", "Calidad premium") ni el nombre del producto solo.
-- Cada pieza aporta algo NUEVO: el subtítulo no repite el titular ni los chips; los chips no repiten el subtítulo; el caption no copia los chips literalmente ni repite la línea de oferta.
-- Chips = resultado o dato concreto (ingrediente con su %, cantidad, tiempo, paso real), ≤ 4 palabras. Nada de adjetivos sueltos ("Calidad", "Natural", "Lo mejor").
-- Subtítulo = la razón para creer (el porqué funciona o el diferenciador), no una lista de ingredientes repetida en todos los anuncios.
-- Caption: abre con el gancho en otras palabras, responde la objeción principal con un hecho confirmado, cierra con el CTA. Frases cortas.`,
+- UNA idea por anuncio: elegí 1–2 hechos foco (*) como prueba central y construí todo alrededor. No recorras la lista de hechos (envíos, pagos, variantes, ingredientes) en un mismo anuncio; el precio/paquete ya lo muestra la línea de oferta.
+- Titular (se lee en 3 s) = la situación o el dolor concreto del comprador + algo específico (el tipo de producto, un dato confirmado o un momento/lugar preciso), dicho como lo diría él. Nada genérico ("Tu rutina ideal", "Calidad que se nota"), nunca una etiqueta de catálogo ni el nombre del producto solo.
+- Dolores, deseos y frases de clientes describen al COMPRADOR, no son resultados del producto: no afirmes que el producto quita un dolor o logra un deseo ("no se estira", "sin dolor", "dura más", "menos azúcar", "para cocina y baño"…) salvo que lo diga un hecho confirmado. Lo que el producto ES y HACE sale solo de los hechos confirmados; "Qué es" es contexto, no una fuente de afirmaciones.
+- CERO repetición: cada dato aparece UNA sola vez entre titular, subtítulo, chips y caption. Subtítulo = la razón para creer (un dato distinto al del titular). Chips = datos concretos nuevos (ingrediente con %, cantidad, tiempo, paso real); nada de adjetivos sueltos ("Calidad", "Natural").
+- Caption (va debajo de la imagen; quien lo lee ya vio titular, chips y precio): NO repite titular, chips ni oferta. Aporta lo que la imagen no dice: responde la objeción principal o explica el cómo/por qué con un hecho confirmado y cierra con el CTA. 2–4 frases cortas.
+- Variá la estructura del titular dentro del pack (situación, pregunta, dato, cita); "No compres…" como mucho en un anuncio del pack.`,
   en: `CRAFT (what separates an ad that sells from a generic one):
-- Headline = the buyer's situation, pain, desire or hard fact, said the way they would say it. Never a catalog label ("Night serum", "Step by step", "Premium quality") or the bare product name.
-- Every piece adds something NEW: the subline does not repeat the headline or chips; chips do not repeat the subline; the caption does not copy the chips verbatim or repeat the offer line.
-- Chips = a concrete outcome or data point (ingredient with its %, quantity, time, real step), ≤ 4 words. No lone adjectives ("Quality", "Natural", "The best").
-- Subline = the reason to believe (why it works or the differentiator), not the same ingredient list in every ad.
-- Caption: open with the hook in other words, answer the main objection with a confirmed fact, close with the CTA. Short sentences.`,
+- ONE idea per ad: pick 1–2 focus facts (*) as the central proof and build everything around them. Do not walk through the facts list (shipping, payments, variants, ingredients) in one ad; the offer line already shows price/bundle.
+- Headline (read in 3 s) = the buyer's concrete situation or pain + something specific (the product type, a confirmed fact or a precise moment/place), said the way they would say it. Nothing generic ("Your ideal routine", "Quality you can feel"), never a catalog label or the bare product name.
+- Pains, desires and customer phrases describe the BUYER, they are not product results: never claim the product removes a pain or delivers a desire ("won't stretch", "pain-free", "lasts longer", "less sugar"…) unless a confirmed fact says so. What the product IS and DOES comes only from confirmed facts; "What it is" is context, not a source of claims.
+- ZERO repetition: each fact appears ONCE across headline, subline, chips and caption. Subline = the reason to believe (a different fact than the headline). Chips = new concrete data (ingredient with %, quantity, time, real step); no lone adjectives ("Quality", "Natural").
+- Caption (sits below the image; the reader already saw headline, chips and price): does NOT repeat the headline, chips or offer. It adds what the image does not say: answer the main objection or explain how/why with a confirmed fact, then the CTA. 2–4 short sentences.
+- Vary the headline structure across the pack (situation, question, data point, quote); "Don't buy…" at most once per pack.`,
 }
 
 /** Headlines/sublines already used in the pack, so parallel ads don't converge on one line. */
@@ -93,11 +95,11 @@ function outputContract(ctx: CopyContext): string {
         'LÍMITES DUROS (se verifican por código; si te pasás, el anuncio se descarta):',
         `- headline: el GANCHO, ≤ ${hMax} palabras y ≤ ${L.headlineChars} caracteres. Filtra y segmenta.`,
         `- subline: opcional, ≤ ${L.sublineWords} palabras; desarrolla, no repite el headline.`,
-        `- bullets: 0–${L.maxBullets} chips de ≤ ${L.bulletWords} palabras cada uno (beneficios tangibles o pasos).`,
-        `- cta: ≤ ${L.ctaWords} palabras, orden fría y directa.`,
+        `- bullets: 0–${L.maxBullets} chips de ≤ ${L.bulletWords} palabras (sin contar y/de/en/con) y ≤ ${L.bulletChars} caracteres cada uno (datos tangibles o pasos; si un hecho es más largo, usá solo su parte clave).`,
+        `- cta: ≤ ${L.ctaWords} palabras y ≤ ${L.ctaChars} caracteres, orden fría y directa en el trato de la marca (ej.: "${REGISTER_CTA_VERBS[ctx.dna.register ?? 'tuteo'][0]} para pedir"). Todo el anuncio (también caption y script) usa ese mismo trato.`,
         `- caption: ${L.captionMinChars}–${L.captionMaxChars} caracteres; gancho + certeza (datos confirmados, logística) + CTA. Sin saludos, sin hashtags de relleno.`,
         `- script: tríada hablada para versión UGC: hook ≤ ${L.scriptHookWords} palabras, development ≤ ${L.scriptDevelopmentWords}, cta ≤ ${L.scriptCtaWords}.`,
-        '- sceneBrief: en inglés, SOLO lo visual (escena, producto real visible y grande, luz, encuadre, espacio libre para el texto). PROHIBIDO pedir texto, letras, números, logos, carteles o etiquetas escritas en la escena.',
+        '- sceneBrief: en inglés, 1–2 frases SOLO visuales y concretas para ESTE anuncio: el lugar real donde se usa el producto, superficie, 1–2 props, luz, encuadre. No hables de texto, espacio para texto, logos ni etiquetas (el sistema maneja el diseño).',
         `- ${offerLineNote}`,
         '- usedFactKeys: claves de la lista de hechos que usaste.',
       ]
@@ -107,11 +109,11 @@ function outputContract(ctx: CopyContext): string {
         'HARD LIMITS (checked by code; exceeding them discards the ad):',
         `- headline: the HOOK, ≤ ${hMax} words and ≤ ${L.headlineChars} characters. Filters and segments.`,
         `- subline: optional, ≤ ${L.sublineWords} words; develops, never repeats the headline.`,
-        `- bullets: 0–${L.maxBullets} chips of ≤ ${L.bulletWords} words each (tangible benefits or steps).`,
-        `- cta: ≤ ${L.ctaWords} words, cold and direct instruction.`,
+        `- bullets: 0–${L.maxBullets} chips of ≤ ${L.bulletWords} words (not counting and/of/in/with) and ≤ ${L.bulletChars} characters each (tangible data or steps; if a fact is longer, use only its key part).`,
+        `- cta: ≤ ${L.ctaWords} words and ≤ ${L.ctaChars} characters, cold and direct instruction (e.g. "Message us to order").`,
         `- caption: ${L.captionMinChars}–${L.captionMaxChars} characters; hook + certainty (confirmed data, logistics) + CTA. No greetings, no filler hashtags.`,
         `- script: spoken triad for a UGC version: hook ≤ ${L.scriptHookWords} words, development ≤ ${L.scriptDevelopmentWords}, cta ≤ ${L.scriptCtaWords}.`,
-        '- sceneBrief: in English, VISUALS ONLY (setting, real product visible and large, light, framing, empty space for text). NEVER ask for text, letters, numbers, logos, signs or written labels in the scene.',
+        '- sceneBrief: in English, 1–2 concrete VISUAL sentences for THIS ad: the real place where the product is used, surface, 1–2 props, light, framing. Do not mention text, space for text, logos or labels (the system handles layout).',
         `- ${offerLineNote}`,
         '- usedFactKeys: keys from the facts list you used.',
       ]
@@ -138,17 +140,21 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[] 
   ].join('\n\n')
 
   const disclaimer = getRequiredDisclaimer(dna.category, angle.format, language)
+  // A quote with a number that no confirmed fact backs ("me dura casi dos meses") would fail the
+  // fact checker if quoted, so it never reaches the prompt.
+  const confirmedNums = numbersInFacts(ctx.confirmed)
+  const phrases = redactList(dna.customerPhrases, ctx).filter((p) => extractNumericClaims(p).every((c) => confirmedNums.has(c.value)))
   const brandLines = [
     `${es ? 'Marca' : 'Brand'}: ${dna.brandName}`,
     `${es ? 'Producto/oferta' : 'Product/offer'}: ${ctx.offer.name}`,
-    dna.oneLiner ? `${es ? 'Qué es' : 'What it is'}: ${redactUnconfirmed(dna.oneLiner, ctx)}` : '',
+    dna.oneLiner ? `${es ? 'Qué es (contexto)' : 'What it is (context)'}: ${redactUnconfirmed(dna.oneLiner, ctx)}` : '',
     dna.voice ? `${es ? 'Voz de marca' : 'Brand voice'}: ${redactUnconfirmed(dna.voice, ctx)}` : '',
     dna.audience?.length ? `${es ? 'Audiencia' : 'Audience'}: ${redactList(dna.audience, ctx).join(' | ')}` : '',
-    dna.customerPhrases?.length
+    phrases.length
       ? es
-        ? `Frases reales de clientes (voz del cliente, NO hechos del producto): ${redactList(dna.customerPhrases, ctx).join(' | ')}
+        ? `Frases reales de clientes (voz del cliente, NO hechos del producto): ${phrases.join(' | ')}
   Úsalas para inspirar el gancho o cítalas entre comillas como opinión de un cliente ("…", dice una clienta). Nunca las conviertas en promesas o chips del producto.`
-        : `Real customer phrases (customer voice, NOT product facts): ${redactList(dna.customerPhrases, ctx).join(' | ')}
+        : `Real customer phrases (customer voice, NOT product facts): ${phrases.join(' | ')}
   Use them to inspire the hook or quote them in quotation marks as a customer's words ("…", says a customer). Never turn them into product promises or chips.`
       : '',
   ].filter(Boolean)

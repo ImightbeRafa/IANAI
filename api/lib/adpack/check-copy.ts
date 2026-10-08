@@ -19,9 +19,9 @@ import {
   type RawModelCopy,
 } from './copy-shared.js'
 import { extractNumericClaims, numbersInFacts } from './facts.js'
-import { IAN_CORE_RULES, registerInstruction } from './ian-rules.js'
+import { IAN_CORE_RULES, REGISTER_DRIFT_MARKERS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, headlineMaxWords } from './patterns.js'
-import { normalizeText, textSimilarity, wordCount } from './util.js'
+import { contentWordCount, normalizeText, textSimilarity, wordCount } from './util.js'
 
 export interface CheckAdCopyOptions {
   dna: BrandDna
@@ -114,6 +114,21 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
 
   checkFacts(copy, ctx, fields, push)
 
+  // Spanish register drift (e.g. voseo "Escribinos" in an usted brand). Customer quotes in
+  // quotation marks are the customer's own words and are not checked.
+  if (options.language === 'es') {
+    const own = options.dna.register ?? 'tuteo'
+    for (const { field, text } of fields) {
+      if (field === 'offerLine') continue
+      const unquoted = text.replace(/["“”«»][^"“”«»]*["“”«»]/g, ' ')
+      for (const other of Object.keys(REGISTER_DRIFT_MARKERS) as Array<keyof typeof REGISTER_DRIFT_MARKERS>) {
+        if (other === own) continue
+        const m = unquoted.match(REGISTER_DRIFT_MARKERS[other])
+        if (m) push('register', field, `"${m[0]}" is ${other}; this brand writes in ${own}`)
+      }
+    }
+  }
+
   // Forbidden phrases (brand list)
   for (const phrase of options.dna.forbiddenPhrases ?? []) {
     const p = normalizeText(phrase)
@@ -138,11 +153,22 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
     if (hit.ruleId === 'missing_disclaimer' || hit.ruleId === 'format_not_allowed') push('compliance', 'caption', `${hit.ruleId}: ${hit.detail}`)
   }
 
+  // Repetition inside the ad: the caption sits under the image, so restating a chip or the
+  // subline word for word adds nothing (judge's lowest criterion in the live benchmark).
+  const cap = normalizeText(copy.caption ?? '')
+  for (const piece of [...(copy.bullets ?? []), copy.subline ?? '']) {
+    const p = normalizeText(piece).replace(/[.!?¡¿]+$/g, '').trim()
+    if (p && contentWordCount(piece) >= 2 && cap.includes(p)) push('duplicate_message', 'caption', `Caption repeats "${piece}" from the image`)
+  }
+
   // Near-duplicates vs other copies in the pack
   for (const other of options.otherCopies ?? []) {
     if (!other || other === copy) continue
     if (copy.headline && other.headline && (normalizeText(copy.headline) === normalizeText(other.headline) || textSimilarity(copy.headline, other.headline) >= 0.6)) {
       push('duplicate_message', 'headline', `Headline too similar to "${other.headline}"`)
+    } else if (copy.headline && other.headline && sameOpener(copy.headline, other.headline)) {
+      // Live benchmark: 3 of 10 headlines in a pack opened with "No compres…".
+      push('duplicate_message', 'headline', `Headline opens like "${other.headline}"; use a different structure`)
     }
     const a = `${copy.headline} ${copy.subline ?? ''}`
     const b = `${other.headline} ${other.subline ?? ''}`
@@ -153,6 +179,15 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
   }
 
   return { ok: issues.length === 0, issues }
+}
+
+/** Same first two words (ignoring punctuation/case/accents), e.g. "No compres sérum…" vs "No compres café…". */
+export function sameOpener(a: string, b: string): boolean {
+  const words = (s: string) => normalizeText(s).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean)
+  const wa = words(a)
+  const wb = words(b)
+  if (wa.length < 3 || wb.length < 3) return false
+  return wa[0] === wb[0] && wa[1] === wb[1]
 }
 
 function checkEmptyAndLength(
@@ -174,11 +209,13 @@ function checkEmptyAndLength(
   if ((copy.bullets ?? []).length > L.maxBullets) push('too_long', 'bullets', `${copy.bullets.length} bullets (max ${L.maxBullets})`)
   for (const b of copy.bullets ?? []) {
     if (!b.trim()) push('empty_field', 'bullets', 'Empty bullet')
-    else if (wordCount(b) > L.bulletWords) push('too_long', 'bullets', `Bullet "${b}" has ${wordCount(b)} words (max ${L.bulletWords})`)
+    else if (contentWordCount(b) > L.bulletWords) push('too_long', 'bullets', `Bullet "${b}" has ${contentWordCount(b)} words (max ${L.bulletWords})`)
+    else if (b.length > L.bulletChars) push('too_long', 'bullets', `Bullet "${b}" has ${b.length} chars (max ${L.bulletChars})`)
   }
   const minBullets = FORMAT_PATTERNS[angle.format].bulletsAreSteps ? 2 : 0
   if ((copy.bullets ?? []).length < minBullets) push('empty_field', 'bullets', `Format ${angle.format} needs at least ${minBullets} steps`)
-  if (wordCount(copy.cta) > L.ctaWords) push('too_long', 'cta', `CTA has ${wordCount(copy.cta)} words (max ${L.ctaWords})`)
+  if (contentWordCount(copy.cta) > L.ctaWords) push('too_long', 'cta', `CTA has ${contentWordCount(copy.cta)} words (max ${L.ctaWords})`)
+  else if ((copy.cta ?? '').length > L.ctaChars) push('too_long', 'cta', `CTA has ${copy.cta.length} chars (max ${L.ctaChars})`)
   if ((copy.caption ?? '').length > L.captionMaxChars) push('too_long', 'caption', `Caption has ${copy.caption.length} chars (max ${L.captionMaxChars})`)
   if ((copy.offerLine ?? '').length > L.offerLineChars) push('too_long', 'offerLine', `Offer line has ${copy.offerLine!.length} chars (max ${L.offerLineChars})`)
   if ((copy.sceneBrief ?? '').length > L.sceneBriefMaxChars) push('too_long', 'sceneBrief', `Scene brief has ${copy.sceneBrief.length} chars (max ${L.sceneBriefMaxChars})`)
@@ -280,8 +317,8 @@ export async function repairAdCopy(input: RepairAdCopyInput): Promise<RepairAdCo
     IAN_CORE_RULES[language],
     registerInstruction(dna.register, language),
     language === 'es'
-      ? `Corrige SOLO los campos indicados de este anuncio. No toques los demás. Límites: headline ≤ ${headlineMaxWords(angle.format)} palabras; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} de ≤ ${L.bulletWords} palabras; cta ≤ ${L.ctaWords}; caption ${L.captionMinChars}–${L.captionMaxChars} caracteres; sceneBrief solo visual, sin pedir texto/letras/logos. Responde SOLO JSON con los campos corregidos.`
-      : `Fix ONLY the listed fields of this ad. Do not touch the rest. Limits: headline ≤ ${headlineMaxWords(angle.format)} words; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} of ≤ ${L.bulletWords} words; cta ≤ ${L.ctaWords}; caption ${L.captionMinChars}–${L.captionMaxChars} chars; sceneBrief visual only, never ask for text/letters/logos. Reply with JSON only containing the fixed fields.`,
+      ? `Corrige SOLO los campos indicados de este anuncio. No toques los demás. Límites: headline ≤ ${headlineMaxWords(angle.format)} palabras; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} de ≤ ${L.bulletWords} palabras y ≤ ${L.bulletChars} caracteres; cta ≤ ${L.ctaWords} palabras y ≤ ${L.ctaChars} caracteres; nada se repite entre titular, subtítulo, chips y caption; mantené el trato de la marca; caption ${L.captionMinChars}–${L.captionMaxChars} caracteres; sceneBrief solo visual, sin pedir texto/letras/logos. Responde SOLO JSON con los campos corregidos.`
+      : `Fix ONLY the listed fields of this ad. Do not touch the rest. Limits: headline ≤ ${headlineMaxWords(angle.format)} words; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} of ≤ ${L.bulletWords} words and ≤ ${L.bulletChars} chars; cta ≤ ${L.ctaWords} words and ≤ ${L.ctaChars} chars; nothing repeats across headline, subline, chips and caption; caption ${L.captionMinChars}–${L.captionMaxChars} chars; sceneBrief visual only, never ask for text/letters/logos. Reply with JSON only containing the fixed fields.`,
   ].join('\n\n')
   const user = [
     factsAllowlistBlock(ctx),

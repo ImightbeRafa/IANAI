@@ -25,6 +25,7 @@ export interface CheckSceneOutput extends SceneCheckResult {
 interface RawSceneCheck {
   productMatches?: unknown
   strayText?: unknown
+  borders?: unknown
   headlineSpace?: unknown
   score?: unknown
   notes?: unknown
@@ -43,7 +44,7 @@ const asBool = (v: unknown): boolean | null => {
 export function buildSceneCheckPrompt(hasRef: boolean, language: AdLanguage): { system: string; user: string } {
   const system = [
     'You are a strict QA reviewer for social-media ad images. Reply with JSON only.',
-    'Schema: {"productMatches": boolean|null, "strayText": boolean, "headlineSpace": boolean, "score": number (0-1), "notes": string}',
+    'Schema: {"productMatches": boolean|null, "strayText": boolean, "borders": boolean, "headlineSpace": boolean, "score": number (0-1), "notes": string}',
   ].join('\n')
   const user = [
     hasRef
@@ -53,6 +54,7 @@ export function buildSceneCheckPrompt(hasRef: boolean, language: AdLanguage): { 
       ? 'productMatches: true only if the product in the scene is the same product as the reference — identical shape, proportions, colors and label design. A different, redrawn or distorted product is false. If the label faces the camera, its graphic and brand wording must be there as in the reference: a blank, missing or rewritten label is false.'
       : '',
     'strayText: true if there is ANY text, letters, numbers, logos, watermarks or signage anywhere other than the printed label of the product itself, or if the product label text looks garbled.',
+    'borders: true if the photo does not fill the whole frame: blank, white or solid bars at the top/bottom/sides, a frame or border, letterboxing, or a collage of separate panels (a single photo split down the middle for a before/after comparison is fine).',
     'headlineSpace: true if the upper third has clean, low-detail space where a headline could be overlaid.',
     'score: overall usability as an ad background (0 = unusable, 1 = perfect).',
     `notes: one short sentence in ${language === 'es' ? 'Spanish' : 'English'} explaining the main problem, or empty.`,
@@ -71,14 +73,16 @@ export async function checkScene(input: CheckSceneInput): Promise<CheckSceneOutp
   const productMatches = hasRef ? asBool(raw.productMatches) : null
   const strayText = asBool(raw.strayText)
   const headlineSpace = asBool(raw.headlineSpace)
+  const borders = asBool(raw.borders)
   const n = Number(raw.score)
   const score = Number.isFinite(n) ? Math.max(0, Math.min(1, n > 1 && n <= 10 ? n / 10 : n)) : 0.5
-  const ok = productMatches !== false && strayText !== true && headlineSpace !== false
+  const ok = productMatches !== false && strayText !== true && borders !== true && headlineSpace !== false
   const notes = typeof raw.notes === 'string' && raw.notes.trim() ? raw.notes.trim().slice(0, 300) : undefined
   return {
     ok,
     productMatches,
     strayText,
+    borders,
     score,
     ...(notes ? { notes } : {}),
     costUsd: res.costUsd ?? 0,

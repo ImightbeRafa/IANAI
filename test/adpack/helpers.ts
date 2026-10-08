@@ -16,7 +16,7 @@ export function goodSerumCopy(overrides: Partial<AdCopy> = {}): AdCopy {
     offerLine: '₡12.900 · 2 por ₡22.000',
     cta: 'Pedí el tuyo',
     caption:
-      'Poros que se notan en cada foto. Este sérum combina niacinamida 5% y aloe vera: 2 gotas en la noche sobre piel limpia. Envíos a todo Costa Rica por Correos y pagás con SINPE Móvil o tarjeta. Escribinos y pedí el tuyo.',
+      '¿Ya probaste sérums y no notaste nada? Este se aplica de noche sobre piel limpia y no deja sensación pegajosa. Envíos a todo Costa Rica por Correos y pagás con SINPE Móvil o tarjeta. Escribinos y pedí el tuyo.',
     script: {
       hook: 'Si los poros se te notan en cada foto, mirá esto.',
       development: 'Niacinamida 5% y aloe vera. Dos gotas en la noche sobre piel limpia y se absorbe rápido, sin dejar pegajoso.',

@@ -38,7 +38,7 @@ describe('buildScenePrompt', () => {
     const copy = goodSerumCopy()
     const plain = buildScenePrompt({ copy, angle, dna: c.dna, offer: c.offer })
     expect(plain).not.toMatch(/style reference/)
-    expect(plain).toMatch(/Product to show/)
+    expect(plain).toMatch(/Show the product object only/)
     const locked = buildScenePrompt({ copy, angle, dna: c.dna, offer: { ...c.offer, productImageUrls: [PRODUCT_REF] }, anchor: { imageUrl: 'https://x.test/a.png' } })
     expect(locked).toMatch(/attached product photo/)
     expect(locked).toMatch(/style reference/)

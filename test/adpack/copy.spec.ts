@@ -60,7 +60,7 @@ function goodHandler(call: JsonCall) {
     ...base,
     headline: HEADLINES[i],
     subline: SUBLINES[i],
-    caption: `${CAPTION_OPENERS[i]} Niacinamida 5% y aloe vera. Envíos a todo Costa Rica por Correos. Escribinos y pedí el tuyo.${
+    caption: `${CAPTION_OPENERS[i]} Con aloe vera, sin sensación pegajosa. Envíos a todo Costa Rica por Correos. Escribinos y pedí el tuyo.${
       call.user.includes('FORMATO: before_after') ? ' Resultados pueden variar.' : ''
     }`,
     offerLine: 'MODEL SHOULD NOT SET THIS ₡1',
@@ -123,7 +123,7 @@ describe('copy prompt', () => {
     expect(p.system).toContain('MÉTODO IAN')
     expect(p.system).toContain('CERO SALUDOS')
     expect(p.system).toContain('≤ 6 palabras')
-    expect(p.system).toContain('PROHIBIDO pedir texto')
+    expect(p.system).toContain('No hables de texto')
     expect(p.user).toContain('ALLOWLIST')
     expect(p.user).toContain('Venta directa')
     expect(p.user).toContain('FORMATO: offer_graphic')
