@@ -20,6 +20,9 @@ import type {
   PackStatus,
   RenderedAd,
 } from './types.js'
+import type { AdPackDeliverable, AdPackFailureView } from './status-summary.js'
+
+export type { AdPackDeliverable, AdPackDeliverableAd, AdPackFailureView, AdPackRetryCall } from './status-summary.js'
 
 export type AdPackErrorCode =
   | 'BAD_INPUT'
@@ -148,6 +151,8 @@ export interface AdPackStartRequest {
 
 export interface AdPackStatusRequest {
   packId: string
+  /** Language of `summary` / failure reasons (default: the pack's DNA language). */
+  language?: AdLanguage
 }
 
 export interface AdPackEditTextRequest {
@@ -262,6 +267,16 @@ export interface AdPackStatusResponse {
   offerId?: string
   /** Web-app link to the brand folder where the finished ads are saved (when linked to a brand). */
   deepLink?: string
+  /** Language of `summary` and failure reasons. */
+  language: AdLanguage
+  /** One short human line: "7/10 listos · 1 falló (producto no coincidía) · ~40 s restantes". */
+  summary: string
+  /** Estimated seconds left (from this pack's per-step timings), only while moreWork. */
+  etaSeconds?: number
+  /** Failed ads: plain-language reason + the exact adpack_regenerate call to retry. */
+  failures?: AdPackFailureView[]
+  /** Once finished (done / partial): links per ratio + captions per ad, numbered captionsText, deepLink. */
+  deliverable?: AdPackDeliverable
   createdAt: string
   updatedAt: string
 }

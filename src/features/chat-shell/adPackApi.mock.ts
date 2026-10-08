@@ -396,6 +396,8 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
       items,
       moreWork: status === 'running',
       leaseActive: false,
+      language: 'es',
+      summary: `${counts.done}/${items.length} listos${counts.failed ? ` · ${counts.failed} ${counts.failed === 1 ? 'falló' : 'fallaron'}` : ''}${status === 'running' ? '' : ' · pack terminado'}`,
       createdAt: pack.createdAt,
       updatedAt: new Date(at).toISOString(),
     }

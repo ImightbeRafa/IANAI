@@ -377,14 +377,21 @@ describe('saved-brand doors (web + MCP parity)', () => {
     expect(wStatus.deepLink).toBe(`https://advanceai.studio/chat?brand=${BIZ_A}&adpack=${wPackId}`)
     expect(wStatus.items.every((i) => i.libraryImageIds?.length === 3)).toBe(true)
     expect(mStatus.deepLink).toBe(`https://advanceai.studio/chat?brand=${BIZ_A}&adpack=${mPackId}`)
-    const results = mStatus.results as Array<{ caption: string; images: Record<string, string>; savedToLibrary: boolean }>
-    expect(results).toHaveLength(10)
-    for (const r of results) {
-      expect(Object.keys(r.images).sort()).toEqual(['1:1', '4:5', '9:16'])
-      expect(Object.values(r.images).every((u) => u.startsWith('https://'))).toBe(true)
+    const deliverable = mStatus.deliverable as { ads: Array<{ caption: string; links: Record<string, string> }>; captionsText: string; deepLink: string }
+    expect(deliverable.ads).toHaveLength(10)
+    for (const r of deliverable.ads) {
+      expect(Object.keys(r.links).sort()).toEqual(['1:1', '4:5', '9:16'])
+      expect(Object.values(r.links).every((u) => u.startsWith('https://'))).toBe(true)
       expect(r.caption.length).toBeGreaterThan(20)
-      expect(r.savedToLibrary).toBe(true)
     }
+    expect(deliverable.deepLink).toBe(mStatus.deepLink)
+    expect(deliverable.captionsText).toMatch(/^1\. Anuncio 1/)
+    expect(deliverable.captionsText).toContain('\n\n10. Anuncio 10')
+    expect(deliverable.captionsText).toContain(deliverable.ads[9].caption)
+    // Web status carries the same deliverable shape (shared builder).
+    expect(wStatus.deliverable!.ads).toHaveLength(10)
+    expect(wStatus.deliverable!.deepLink).toBe(wStatus.deepLink)
+    expect(wStatus.summary).toBe(mStatus.summary)
     expect(String(mStatus.instructionsForGrok)).toContain(String(mStatus.deepLink))
 
     // product_images rows: 10 ads × 3 ratios, kind generated, linked to the offer, per door.
@@ -473,5 +480,27 @@ describe('MCP registry: adpack_from_brand + happy path descriptions', () => {
     expect(start).toContain('~2 min per 10 ads')
     expect(start).toContain('brandId')
     expect(getMcpTool('adpack_status')!.description).toContain('deepLink')
+    // Poll cadence, stop condition, deliverable presentation, no invented ids, price gap.
+    const status = getMcpTool('adpack_status')!.description
+    expect(status).toContain('~20-30 s')
+    expect(status).toContain('STOP as soon as moreWork=false')
+    expect(status).toContain('captionsText')
+    expect(status).toContain('failures[]')
+    expect(start).toMatch(/Never invent brandId, offerId or approvalRequestId/)
+    expect(start).toContain('missingPrice')
+    expect(fromBrand).toContain('missingPrice=true')
+    expect(getMcpTool('adpack_regenerate')!.description).toContain('failures[].retry.call')
+  })
+
+  it('adpack_from_brand flags a missing price and tells Grok to ask the user before starting', async () => {
+    const env = savedEnv()
+    const priced = await callMcp(env, USER_A, 'adpack_from_brand', { brandId: BIZ_A, offerId: PROD_A })
+    expect(priced.payload.missingPrice).toBe(false)
+    expect(String(priced.payload.nextStep)).not.toMatch(/^BEFORE starting/)
+    const bucket = await callMcp(env, USER_A, 'adpack_from_brand', { brandId: BIZ_A, offerId: PROD_A_BUCKET })
+    expect(bucket.payload.gaps).toContain('price')
+    expect(bucket.payload.missingPrice).toBe(true)
+    expect(String(bucket.payload.nextStep)).toMatch(/^BEFORE starting: tell the user the offer has no concrete price/)
+    expect(String(bucket.payload.nextStep)).toContain(`offerId: "${PROD_A_BUCKET}"`)
   })
 })

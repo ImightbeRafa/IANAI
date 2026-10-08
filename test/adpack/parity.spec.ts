@@ -134,7 +134,7 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     const mPlanned = structure(mcp, mPackId)
     const mStatus1 = await callMcp(mcp, USER_A, 'adpack_status', { packId: mPackId })
     const mStatus2 = await callMcp(mcp, USER_A, 'adpack_status', { packId: mPackId })
-    const mItem0 = (mStatus2.payload.items as Array<{ itemId: string }>)[0]
+    const mItem0 = (mStatus2.payload.deliverable as { ads: Array<{ itemId: string }> }).ads[0]
     const mEdit = await callMcp(mcp, USER_A, 'adpack_edit_text', { packId: mPackId, itemId: mItem0.itemId, copy: { headline: 'Piel suave cada noche' } })
     expect(mEdit.isError).toBe(false)
 
@@ -156,8 +156,13 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     const w2 = wStatus2.body as AdPackStatusResponse
     expect(w1.progress).toEqual(mStatus1.payload.progress)
     expect(w2.progress).toEqual(mStatus2.payload.progress)
-    expect(w1.items.map((i) => i.status)).toEqual((mStatus1.payload.items as Array<{ status: string }>).map((i) => i.status))
-    expect(w1.items.map((i) => i.headline)).toEqual((mStatus1.payload.items as Array<{ headline: string }>).map((i) => i.headline))
+    // Shared builder: identical summary / deliverable through both doors (ids and URLs differ per pack).
+    const scrub = (v: unknown) => JSON.parse(JSON.stringify(v).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, 'ID').replace(/https:\/\/[^"]+/g, 'URL'))
+    expect(mStatus1.payload.summary).toBe(w1.summary)
+    expect(w1.summary).toBe('10/10 listos · pack terminado')
+    expect(scrub(mStatus1.payload.deliverable)).toEqual(scrub(w1.deliverable))
+    expect(w1.deliverable!.ads.map((a) => a.headline)).toEqual(w1.items.map((i) => i.headline))
+    expect(mStatus1.payload.items).toBeUndefined() // finished: the deliverable replaces per-ad rows
     expect(w2.status).toBe('done')
     expect(mStatus2.payload.status).toBe('done')
     expect(w2.moreWork).toBe(false)
@@ -405,11 +410,14 @@ describe('MCP adpack_* tools', () => {
     expect((other.payload.error as { code: string }).code).toBe('NOT_FOUND')
 
     const status = await callMcp(env, USER_A, 'adpack_status', { packId })
-    expect(status.payload).toMatchObject({ packId, status: 'done', moreWork: false })
-    const items = status.payload.items as Array<{ status: string; headline: string; renders: Array<{ ratio: string; imageUrl: string }> }>
-    expect(items).toHaveLength(10)
-    expect(items.every((i) => i.status === 'done' && i.headline && i.renders.length === 3)).toBe(true)
-    expect(items[0].renders.map((r) => r.ratio)).toEqual(['1:1', '4:5', '9:16'])
+    expect(status.payload).toMatchObject({ packId, status: 'done', moreWork: false, summary: '10/10 listos · pack terminado' })
+    const ads = (status.payload.deliverable as { ads: Array<{ index: number; headline: string; caption: string; links: Record<string, string> }> }).ads
+    expect(ads).toHaveLength(10)
+    expect(ads.map((a) => a.index)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(ads.every((a) => a.headline && a.caption && Object.keys(a.links).length === 3)).toBe(true)
+    expect(Object.keys(ads[0].links)).toEqual(['1:1', '4:5', '9:16'])
+    expect(status.payload.retryAfterMs).toBeUndefined()
+    expect(String(status.payload.instructionsForGrok)).toContain('No vuelvas a llamar adpack_status')
   })
 
   it('adpack_regenerate requires approval and charges one more ad; adpack_edit_text is free', async () => {
@@ -417,7 +425,7 @@ describe('MCP adpack_* tools', () => {
     const { started } = await mcpStartApproved(env, USER_A, startArgs(serum.dna))
     const packId = String(started.payload.packId)
     const status = await callMcp(env, USER_A, 'adpack_status', { packId })
-    const itemId = (status.payload.items as Array<{ itemId: string }>)[2].itemId
+    const itemId = (status.payload.deliverable as { ads: Array<{ itemId: string }> }).ads[2].itemId
 
     const edit = await callMcp(env, USER_A, 'adpack_edit_text', { packId, itemId, copy: { cta: 'Pedilo hoy' } })
     expect(edit.isError).toBe(false)

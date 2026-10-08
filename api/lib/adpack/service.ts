@@ -52,6 +52,7 @@ import { DEFAULT_PACK_SIZE, MAX_PACK_SIZE, planAngles } from './plan-angles.js'
 import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
+import { buildStatusExtras } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { AdLanguage, AspectRatio, BrandDna, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
@@ -440,12 +441,22 @@ function libraryIdsFor(item: PackItem): string[] {
   return (item.renders ?? []).map((r) => saved.get(r.imageUrl)).filter((id): id is string => Boolean(id))
 }
 
-function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string): AdPackStatusResponse {
+function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string, language?: AdLanguage): AdPackStatusResponse {
   const progress: PackProgress = summarizePack(pack, items)
   const perAd = quotePack(1).perAd
   // Charges for the current attempt of each ad (a regenerate clears `chargedAt` until it is re-charged).
   const chargedCredits = items.filter((i) => i.chargedAt).length * perAd
   const leaseActive = items.some((i) => i.leaseUntil && Date.parse(i.leaseUntil) > nowMs && i.status !== 'done' && i.status !== 'failed')
+  const moreWork = !TERMINAL_PACK.has(pack.status) && progress.pending > 0
+  const deepLink = pack.businessId ? deepLinkForAdPack(appOrigin, pack.businessId, pack.id) : undefined
+  const extras = buildStatusExtras({
+    packId: pack.id,
+    status: pack.status,
+    items,
+    moreWork,
+    language: language ?? (pack.dna?.language === 'en' ? 'en' : 'es'),
+    deepLink,
+  })
   return {
     packId: pack.id,
     status: pack.status,
@@ -456,10 +467,11 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     chargedCredits,
     progress: { total: progress.total, done: progress.done, failed: progress.failed, pending: progress.pending, counts: progress.counts },
     items: items.map(toItemView),
-    moreWork: !TERMINAL_PACK.has(pack.status) && progress.pending > 0,
+    moreWork,
     leaseActive,
-    ...(pack.businessId ? { businessId: pack.businessId, deepLink: deepLinkForAdPack(appOrigin, pack.businessId, pack.id) } : {}),
+    ...(pack.businessId && deepLink ? { businessId: pack.businessId, deepLink } : {}),
     ...(pack.offer?.productId ? { offerId: pack.offer.productId } : {}),
+    ...extras,
     createdAt: pack.createdAt,
     updatedAt: pack.updatedAt,
   }
@@ -510,12 +522,12 @@ export interface AdPackService {
     /** Fixed id for idempotent create (MCP: the approval id). */
     packId?: string
   }): Promise<AdPackStartResponse>
-  getStatus(input: { userId: string; packId: unknown; appOrigin?: string }): Promise<AdPackStatusResponse>
+  getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
    * getStatus, but first runs a short inline advance when work remains and no worker holds a lease,
    * and saves finished renders to the offer library once the pack completes (idempotent).
    */
-  pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number; appOrigin?: string }): Promise<AdPackStatusResponse>
+  pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
   editText(input: { userId: string; packId: unknown; itemId: unknown; copy: unknown }): Promise<AdPackEditTextResponse>
   regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown }): Promise<AdPackRegenerateResponse>
@@ -689,7 +701,8 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
   const getStatus: AdPackService['getStatus'] = async (input) => {
     const packId = parsePackId(input.packId)
     const { pack, items } = await load(input.userId, packId)
-    return toStatusView(pack, items, now(), input.appOrigin ?? deps.appOrigin)
+    const language = input.language === 'es' || input.language === 'en' ? input.language : undefined
+    return toStatusView(pack, items, now(), input.appOrigin ?? deps.appOrigin, language)
   }
 
   const quoteFor = (size: number): AdPackQuote => {

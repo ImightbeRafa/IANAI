@@ -51,6 +51,10 @@ function scheduleAdvance(service: AdPackService, userId: string, packId: string)
   })
 }
 
+/** Poll cadence suggested to the host while a pack runs (background work continues between polls). */
+export const ADPACK_POLL_AFTER_MS = 20_000
+
+/** Compact per-ad row (no copy blocks / DNA): captions live once, in `deliverable`. */
 function compactItem(item: AdPackItemView) {
   return {
     itemId: item.id,
@@ -58,56 +62,52 @@ function compactItem(item: AdPackItemView) {
     status: item.status,
     format: item.format,
     headline: item.headline ?? null,
-    caption: item.copy?.caption ?? null,
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl })),
     charged: item.charged,
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
-    ...(item.error ? { error: item.error } : {}),
+    ...(item.error ? { error: item.error.slice(0, 160) } : {}),
   }
 }
 
-/** Finished ads ready to share without the web UI: PNG per ratio + caption text. */
-function shareableResults(status: AdPackStatusResponse) {
-  return status.items
-    .filter((i) => i.status === 'done' && i.renders.length)
-    .map((i) => ({
-      index: i.index,
-      headline: i.headline ?? null,
-      caption: i.copy?.caption ?? '',
-      images: Object.fromEntries(i.renders.map((r) => [r.ratio, r.imageUrl])) as Record<string, string>,
-      savedToLibrary: (i.libraryImageIds?.length ?? 0) >= i.renders.length,
-    }))
-}
-
-function statusPayload(status: AdPackStatusResponse, language: 'es' | 'en' = 'es') {
-  const { done, failed, total } = status.progress
-  const statusMessage = status.moreWork
-    ? `Advance está creando tu pack de anuncios: ${done}/${total} listos. / Advance is building your ad pack: ${done}/${total} ready.`
-    : status.status === 'cancelled'
-      ? 'Pack cancelado. / Pack cancelled.'
-      : `Pack listo: ${done}/${total} anuncios${failed ? ` (${failed} fallaron)` : ''}. / Pack ready: ${done}/${total} ads${failed ? ` (${failed} failed)` : ''}.`
-  const finished = !status.moreWork && (status.status === 'done' || status.status === 'partial')
+/** Same `summary` / `etaSeconds` / `failures` / `deliverable` as the web `status` (built once in the service). */
+function statusPayload(status: AdPackStatusResponse) {
+  const es = status.language !== 'en'
+  const finished = Boolean(status.deliverable)
+  const failedHint = status.failures?.length
+    ? es
+      ? ' Para los que fallaron, explicá el motivo y ofrecé reintentar con la llamada exacta de failures[].retry.call (cuesta 1 anuncio de créditos, requiere confirmación).'
+      : ' For failed ads, explain the reason and offer to retry with the exact failures[].retry.call (costs one ad of credits, needs confirmation).'
+    : ''
   return {
     packId: status.packId,
     status: status.status,
+    summary: status.summary,
     progress: status.progress,
     quotedCredits: status.quotedCredits,
     chargedCredits: status.chargedCredits,
     moreWork: status.moreWork,
-    items: status.items.map(compactItem),
-    statusMessage,
+    ...(status.etaSeconds !== undefined ? { etaSeconds: status.etaSeconds } : {}),
+    // While running: per-ad rows (finished ads already have links). Once finished: the deliverable replaces them.
+    ...(finished ? {} : { items: status.items.map(compactItem) }),
+    ...(status.failures?.length ? { failures: status.failures } : {}),
+    ...(status.deliverable ? { deliverable: status.deliverable } : {}),
     ...(status.deepLink ? { deepLink: status.deepLink } : {}),
+    statusMessage: status.summary,
     ...(status.moreWork
-      ? { retryAfterMs: 4_000, nextTool: 'adpack_status', instructionsForGrok: language === 'en' ? 'Poll adpack_status with this packId until moreWork=false, then show each ad image.' : 'Llamá adpack_status con este packId hasta moreWork=false y luego mostrá cada imagen.' }
-      : {}),
-    ...(finished
       ? {
-        results: shareableResults(status),
-        instructionsForGrok: language === 'en'
-          ? `Share each result: show the PNG (images["4:5"] for feed, images["9:16"] for stories, images["1:1"] square) and paste its caption as the post text. ${status.deepLink ? `All ads are also saved in the brand folder: ${status.deepLink}` : ''}`.trim()
-          : `Compartí cada resultado: mostrá el PNG (images["4:5"] para feed, images["9:16"] para historias, images["1:1"] cuadrado) y pegá su caption como texto del post. ${status.deepLink ? `Todos los anuncios quedaron guardados en la carpeta de la marca: ${status.deepLink}` : ''}`.trim(),
+        retryAfterMs: ADPACK_POLL_AFTER_MS,
+        nextTool: 'adpack_status',
+        instructionsForGrok: es
+          ? `Decile al usuario el resumen ("${status.summary}"). Volvé a llamar adpack_status con este packId en ~20-30 s (no más seguido); el trabajo sigue en segundo plano. Pará cuando moreWork=false.${failedHint}`
+          : `Tell the user the summary ("${status.summary}"). Call adpack_status again with this packId in ~20-30 s (not more often); work continues in the background. Stop when moreWork=false.${failedHint}`,
       }
-      : {}),
+      : finished
+        ? {
+          instructionsForGrok: es
+            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + links (4:5 feed, 9:16 historias, 1:1 cuadrado) + su caption. Ofrecé deliverable.captionsText para copiar todo junto.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}`
+            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + links (4:5 feed, 9:16 stories, 1:1 square) + its caption. Offer deliverable.captionsText to copy all captions at once.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}`,
+        }
+        : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }
 }
 
@@ -223,12 +223,17 @@ export async function dispatchAdPackTool(options: {
           brandKitId: args.brandKitId,
           refresh: args.refresh,
         })
+        const missingPrice = res.gaps.includes('price')
+        const startCall = `adpack_start { brandId: "${res.brandId}"${res.offerId ? `, offerId: "${res.offerId}"` : ''}, size, brief? }`
         return {
           ...res,
+          missingPrice,
           nextTool: 'adpack_start',
-          nextStep: res.gaps.length
-            ? `Tell the user which facts are missing (${res.gaps.join(', ')}) — ads will simply not mention them. Then call adpack_start with { brandId: "${res.brandId}"${res.offerId ? `, offerId: "${res.offerId}"` : ''}, size, brief? } (no need to pass dna/offer).`
-            : `Ready. Call adpack_start with { brandId: "${res.brandId}"${res.offerId ? `, offerId: "${res.offerId}"` : ''}, size, brief? } (no need to pass dna/offer).`,
+          nextStep: missingPrice
+            ? `BEFORE starting: tell the user the offer has no concrete price, so no ad will show a price${res.gaps.length > 1 ? `, and that these facts are also missing: ${res.gaps.filter((g) => g !== 'price').join(', ')}` : ''}. Ask if they want to add the price to the offer in AdvanceAI first or continue without it. Only then call ${startCall} (use these exact ids; no dna/offer needed).`
+            : res.gaps.length
+              ? `Tell the user which facts are missing (${res.gaps.join(', ')}) — ads will simply not mention them. Then call ${startCall} (use these exact ids; no dna/offer needed).`
+              : `Ready. Call ${startCall} (use these exact ids; no dna/offer needed).`,
         }
       }
       case 'adpack_dna_confirm':
@@ -301,16 +306,17 @@ export async function dispatchAdPackTool(options: {
           nextTool: 'adpack_status',
           estimatedSeconds: Math.max(60, Math.round(started.quote.size * 12)),
           ...(linkedBrandId(args) ? { deepLink: deepLinkForAdPack(options.appOrigin, linkedBrandId(args) as string, started.packId) } : {}),
-          message: 'Pack started (~2 min per 10 ads). Poll adpack_status with packId until moreWork=false; credits are charged per finished ad. When done, share each image URL + caption and the brand-folder deepLink.',
+          retryAfterMs: ADPACK_POLL_AFTER_MS,
+          message: 'Pack started (~2 min per 10 ads). Tell the user it is running, then poll adpack_status with this packId every ~20-30 s until moreWork=false; credits are charged per finished ad. When done, present deliverable.ads (links + captions), captionsText and the brand-folder deepLink.',
         }, 'adpack_start')
         await finalize({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', input, approvalRequestId, result })
         scheduleAdvance(service, userId, started.packId)
         return result
       }
       case 'adpack_status': {
-        const status = await service.pollStatus({ userId, packId: args.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, appOrigin: options.appOrigin })
+        const status = await service.pollStatus({ userId, packId: args.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, appOrigin: options.appOrigin, language: args.language })
         if (status.moreWork) scheduleAdvance(service, userId, status.packId)
-        return statusPayload(status, args.language === 'en' ? 'en' : 'es')
+        return statusPayload(status)
       }
       case 'adpack_edit_text': {
         const res = await service.editText({ userId, packId: args.packId, itemId: args.itemId, copy: args.copy })

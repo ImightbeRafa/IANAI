@@ -100,7 +100,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
       return { result: started, backgroundPackId: started.packId }
     }
     case 'status': {
-      const status = await service.pollStatus({ userId, packId: body.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS })
+      const status = await service.pollStatus({ userId, packId: body.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, language: body.language })
       return { result: status, backgroundPackId: status.moreWork ? status.packId : undefined }
     }
     case 'edit_text':

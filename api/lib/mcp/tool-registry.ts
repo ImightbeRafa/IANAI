@@ -396,7 +396,9 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack for an EXISTING brand (happy path): list_brands → adpack_from_brand {brandId, offerId?} (optional, to review gaps) → adpack_start {brandId, offerId, size, brief?} → the user confirms in chat (confirm_execute) → poll adpack_status until moreWork=false → share the image links, captions and the brand-folder deepLink. ' +
       'This tool builds the Brand DNA + offer from what the owner already saved (brand, brand kit voice/colors/logo/forbidden phrases, offer form, real product photos, stored site analysis) — no URLs or uploads needed, no credits. ' +
-      'Returns {dna, offer, gaps, notes, quote}. Only facts the owner typed are confirmed and only confirmed facts are used for prices/claims (a price appears only if the offer has a concrete price); tell the user the gaps, ads will simply not mention them.',
+      'Returns {dna, offer, gaps, notes, quote, missingPrice}. Only facts the owner typed are confirmed and only confirmed facts are used for prices/claims (a price appears only if the offer has a concrete price). ' +
+      'Before adpack_start, show the user the gaps; if missingPrice=true say clearly that no ad will show a price and ask whether to add it first or continue. ' +
+      'Never invent brandId/offerId: use ids returned by list_brands / list_offers / this tool.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -449,8 +451,9 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'Ad Pack: start a pack of sell-ready static ads (credits per finished ad). For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
+      'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
       'Guarantees: only confirmed facts are used for prices/claims; images keep the real product photo; text on the image is rendered exactly (never drawn by the image model). Takes ~2 min per 10 ads. ' +
-      'Returns packId; poll adpack_status until moreWork=false.',
+      'Returns packId; then poll adpack_status every ~20-30 s until moreWork=false.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -460,8 +463,10 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'read',
     description:
-      'Ad Pack: progress of a pack by packId — per-ad status, headline, caption and direct PNG URLs (1:1 / 4:5 / 9:16). Polling also resumes work, so keep polling (about every 4 s; ~2 min per 10 ads) until moreWork=false. ' +
-      'When done it returns results[] (images per ratio + caption text to paste) and deepLink to the brand folder where every ad is saved with the offer; share those with the user.',
+      'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
+      'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
+      'When finished it returns deliverable {ads[{index, format, headline, caption, links{1:1,4:5,9:16}}], captionsText, deepLink}: present it as a numbered list of links + captions, offer captionsText to copy all captions, and share the deepLink (brand folder where every ad is saved). ' +
+      'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -481,7 +486,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Ad Pack: regenerate one ad (mode scene = new image, copy = new text + image). Costs one ad of credits: in-chat confirmation via confirm_execute, then retry with approvalRequestId and poll adpack_status.',
+      'Ad Pack: regenerate one ad (mode scene = new image, copy = new text + image). Use the exact call from adpack_status failures[].retry.call for a failed ad. Costs one ad of credits: in-chat confirmation via confirm_execute, then retry with approvalRequestId (never invent it) and poll adpack_status every ~20-30 s.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,

@@ -81,6 +81,8 @@ function status(partial: Partial<AdPackStatusResponse> = {}, items: AdPackItemVi
     items,
     moreWork: false,
     leaseActive: false,
+    language: 'es',
+    summary: `${done}/${items.length} listos · pack terminado`,
     createdAt: '',
     updatedAt: '',
     ...partial,
