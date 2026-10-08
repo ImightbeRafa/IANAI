@@ -27,8 +27,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await requireAuth(req, res)
   if (!user) return
 
+  const requestStarted = Date.now()
   try {
-    const requestStarted = Date.now()
     let generationId: string | undefined
     const {
       script,
