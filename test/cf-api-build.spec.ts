@@ -1,16 +1,30 @@
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { startAdapter } from './helpers/cf-server'
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const DIST_API = resolve(ROOT, 'dist-api')
+// A private output dir per run (gitignored .vitest-tmp/, still under ROOT so the compiled
+// files resolve node_modules): `npm run build:api`, another vitest run or another suite
+// never rm -rf / rewrite the directory these tests are reading.
+const DIST_API_REL = `.vitest-tmp/dist-api-${process.pid}-${Date.now().toString(36)}`
+const DIST_API = resolve(ROOT, DIST_API_REL)
 
 beforeAll(() => {
-  execFileSync(process.execPath, ['scripts/build-api.mjs'], { cwd: ROOT, stdio: 'pipe' })
+  execFileSync(process.execPath, ['scripts/build-api.mjs', '--outdir', DIST_API_REL], { cwd: ROOT, stdio: 'pipe' })
 }, 120_000)
+
+afterAll(() => {
+  rmSync(DIST_API, { recursive: true, force: true })
+  // Drop the parent too when no concurrent run still uses it.
+  try {
+    rmdirSync(resolve(ROOT, '.vitest-tmp'))
+  } catch {
+    // not empty (another run) or already gone
+  }
+})
 
 describe('build-api.mjs', () => {
   it('compiles the expected files', () => {
@@ -94,7 +108,7 @@ describe('build-api.mjs', () => {
       [
         '--input-type=module',
         '-e',
-        "import * as m from './dist-api/parse-pdf.js'; console.log(JSON.stringify(m.config)); console.log(typeof m.default)",
+        `import * as m from './${DIST_API_REL}/parse-pdf.js'; console.log(JSON.stringify(m.config)); console.log(typeof m.default)`,
       ],
       { cwd: ROOT, env: { PATH: process.env.PATH ?? '' }, encoding: 'utf8' }
     )
@@ -109,7 +123,7 @@ describe('build-api.mjs', () => {
       [
         '--input-type=module',
         '-e',
-        "import * as m from './dist-api/extract-pdf.js'; console.log(JSON.stringify(m.config)); console.log(typeof m.default)",
+        `import * as m from './${DIST_API_REL}/extract-pdf.js'; console.log(JSON.stringify(m.config)); console.log(typeof m.default)`,
       ],
       { cwd: ROOT, env: { PATH: process.env.PATH ?? '' }, encoding: 'utf8' }
     )

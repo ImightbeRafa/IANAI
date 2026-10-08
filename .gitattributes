@@ -1,0 +1,7 @@
+# Line endings that must stay LF on every checkout, including Windows with
+# core.autocrlf=true: a CRLF shebang breaks ESM imports of the .mjs scripts
+# (test/cf-parity-scripts.spec.ts) and CRLF breaks sh / Docker builds.
+*.mjs text eol=lf
+*.sh text eol=lf
+scripts/** text eol=lf
+Dockerfile text eol=lf

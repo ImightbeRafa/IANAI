@@ -26,27 +26,48 @@ export function walkApiHandlers(root) {
   return out.sort()
 }
 
+// Deterministic (sorted) walk. Entries that are neither a plain file nor a
+// directory (symlinks, cloud-sync reparse points) are resolved with statSync.
 function walkFiles(dir, ext) {
   const out = []
   function walk(d) {
-    for (const entry of readdirSync(d, { withFileTypes: true })) {
+    const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const entry of entries) {
       const full = join(d, entry.name)
-      if (entry.isDirectory()) {
+      let isDir = entry.isDirectory()
+      let isFile = entry.isFile()
+      if (!isDir && !isFile) {
+        const info = statSync(full, { throwIfNoEntry: false })
+        isDir = Boolean(info?.isDirectory())
+        isFile = Boolean(info?.isFile())
+      }
+      if (isDir) {
         walk(full)
         continue
       }
-      if (entry.isFile() && entry.name.endsWith(ext)) out.push(full)
+      if (isFile && entry.name.endsWith(ext)) out.push(full)
     }
   }
   if (statSync(dir, { throwIfNoEntry: false })?.isDirectory()) walk(dir)
   return out
 }
 
+// A file removed between the walk and the read (editor temp file, concurrent
+// checkout) is skipped instead of failing the whole scan.
+function readSource(file) {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return ''
+    throw err
+  }
+}
+
 export function scanProcessEnvNames(dir) {
   const names = new Set()
   const re = /process\.env\.([A-Z0-9_]+)|process\.env\[['"]([A-Z0-9_]+)['"]\]/g
   for (const file of walkFiles(dir, '.ts')) {
-    const text = readFileSync(file, 'utf8')
+    const text = readSource(file)
     for (const m of text.matchAll(re)) {
       names.add(m[1] || m[2])
     }
@@ -59,7 +80,7 @@ export function scanViteEnvNames(dir) {
   const re = /import\.meta\.env\.(VITE_[A-Z0-9_]+)/g
   for (const ext of ['.ts', '.tsx']) {
     for (const file of walkFiles(dir, ext)) {
-      const text = readFileSync(file, 'utf8')
+      const text = readSource(file)
       for (const m of text.matchAll(re)) {
         names.add(m[1])
       }

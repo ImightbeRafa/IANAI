@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 dist-api
+# private per-run build output of test/cf-api-build.spec.ts
+.vitest-tmp
 .wrangler
 *.local
 *.tsbuildinfo

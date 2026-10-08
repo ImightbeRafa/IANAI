@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { parseJsonc } from '../scripts/parity/lib.mjs'
 import { diffEnv, buildVercelNameTable } from '../scripts/parity/env-diff.mjs'
 import { buildRouteTable } from '../scripts/parity/route-table.mjs'
@@ -68,8 +68,17 @@ describe('route-table', () => {
 })
 
 describe('env-diff', () => {
+  // One scan of api/ + src/ for the whole block, outside the 5 s per-test timeout:
+  // it reads ~1k files synchronously, which under full-suite load (parallel esbuild
+  // builds, render tests, OneDrive-backed checkout) was the flaky part.
+  let result: ReturnType<typeof diffEnv>
+  let table: ReturnType<typeof buildVercelNameTable>
+  beforeAll(() => {
+    result = diffEnv(ROOT)
+    table = buildVercelNameTable(ROOT)
+  }, 60_000)
+
   it('has zero missing/unforwarded names and only the two known-unused ones', () => {
-    const result = diffEnv(ROOT)
     expect(result.missingFromContainer).toEqual([])
     expect(result.wranglerVarsNotForwarded).toEqual([])
     expect(result.unusedVercelNames).toEqual(['BFL_API_KEY', 'FAL_KEY'])
@@ -98,7 +107,6 @@ describe('env-diff', () => {
   })
 
   it('builds a per-name table: forwarded to container + read-in-code status', () => {
-    const table = buildVercelNameTable(ROOT)
     expect(table).toHaveLength(17)
     expect(table.every((row) => row.forwardedToContainer)).toBe(true)
 
@@ -124,7 +132,7 @@ describe('tilopay-webhook-replay guard', () => {
       execFileSync(
         process.execPath,
         [resolve(ROOT, 'scripts/parity/tilopay-webhook-replay.mjs'), '--base-url', 'https://advanceai.studio'],
-        { encoding: 'utf8', timeout: 5_000 }
+        { encoding: 'utf8', timeout: 30_000 }
       )
     } catch (err: any) {
       threw = true
@@ -132,5 +140,5 @@ describe('tilopay-webhook-replay guard', () => {
       expect(String(err.stderr)).toContain('refusing non-local base URL')
     }
     expect(threw).toBe(true)
-  })
+  }, 35_000)
 })

@@ -9,8 +9,12 @@ import { startAdapter } from './helpers/cf-server'
 
 const API_DIR = resolve(fileURLToPath(new URL('./fixtures/cf-api', import.meta.url)))
 
+// Windows has no POSIX signals: child.kill('SIGTERM') hard-terminates the process, so the
+// graceful drain handler in server.mjs never runs (exit code null). The container runs Linux.
+const SIGTERM_UNSUPPORTED = process.platform === 'win32'
+
 describe('cf server lifecycle', () => {
-  it('drains background work on SIGTERM before exiting', async () => {
+  it.skipIf(SIGTERM_UNSUPPORTED)('drains background work on SIGTERM before exiting', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cf-drain-'))
     const file = join(dir, 'drain.txt')
     const adapter = await startAdapter({ apiDir: API_DIR })
@@ -26,7 +30,7 @@ describe('cf server lifecycle', () => {
     rmSync(dir, { recursive: true, force: true })
   }, 10_000)
 
-  it('gives up after SHUTDOWN_DRAIN_MS and still exits cleanly', async () => {
+  it.skipIf(SIGTERM_UNSUPPORTED)('gives up after SHUTDOWN_DRAIN_MS and still exits cleanly', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cf-drain-timeout-'))
     const file = join(dir, 'never.txt')
     const adapter = await startAdapter({ apiDir: API_DIR, env: { SHUTDOWN_DRAIN_MS: '100' } })
