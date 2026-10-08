@@ -64,7 +64,7 @@ export function serumCopyFor(user: string) {
     ...goodSerumCopy(),
     headline: HEADLINES[i],
     subline: SUBLINES[i],
-    caption: `${CAPTION_OPENERS[i]} Niacinamida 5% y aloe vera. Envíos a todo Costa Rica por Correos. Escribinos y pedí el tuyo.${
+    caption: `${CAPTION_OPENERS[i]} Con aloe vera, sin sensación pegajosa. Envíos a todo Costa Rica por Correos. Escribinos y pedí el tuyo.${
       user.includes('FORMATO: before_after') ? ' Resultados pueden variar.' : ''
     }`,
     sceneBrief: `Amber dropper bottle on wet stone beside a ${propFor(i)}, soft light, empty space at the top.`,

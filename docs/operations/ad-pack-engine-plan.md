@@ -68,12 +68,12 @@ Out of scope now: Meta account connection, video generation, auto-publishing.
 | Phase | State |
 |---|---|
 | 0 Contract + benchmark set | Done (`types.ts`, 30 fictional offers) |
-| 1 Copy engine | Done; live judge gate **not yet met** (33% ≥7 at baseline; tuned rules unmeasured — xAI credits ran out) |
+| 1 Copy engine | Done; facts gate **met** (0 shipped issues / 399 ads); judge gate **not met**: 33% → 50% (grok-4.5, 30 offers) → 67% (stricter fast judge, 10 offers) vs 80% target |
 | 2 Render engine | Done (7 formats × 3 ratios, exact text, contrast/safe-zone tests) |
 | 3 Brand DNA | Done (website + IG best-effort + uploads). IG blocks server fetches → UI asks for screenshots |
 | 4 Scene/check/runner/store | Done; migration `082_ad_packs.sql` **not applied** |
 | 5 Web + MCP doors | Done (`/api/ad-pack`, `adpack_*` tools, parity tests, registry 0.10.0) |
 | 6 Studio UI | Done behind `VITE_ADPACK_STUDIO=true`; dev harness `/dev/adpack-studio` |
-| 7 Live benchmark | Partial (1 full pack: 10/10, 311 s, $0.72 baseline) — re-run `npx tsx scripts/adpack-bench.ts --env-file .env` after xAI top-up |
+| 7 Live benchmark | Partial (2026-10-08, `ad-pack-benchmark-2026-10.md`): 3 categories pass time/cost/scene gates (107–127 s, $0.32–0.44, 29/30 scenes); copy judge 67% < 80%; 4th/5th category and final 30-offer copy run blocked by xAI 403 (credits) |
 
-Before enabling in prod: apply 082, re-run benchmark until gates pass, copy `api/lib/adpack/render/fonts/` in the CF Dockerfile.
+Before enabling in prod: apply 082, finish the 30-offer copy run + 5-category packs with the final code until the copy gate passes, copy `api/lib/adpack/render/fonts/` in the CF Dockerfile.

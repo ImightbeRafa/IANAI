@@ -213,6 +213,7 @@ export interface CopyCheckIssue {
     | 'greeting'
     | 'duplicate_message'
     | 'placeholder'
+    | 'register'
   field: keyof AdCopy | 'script'
   detail: string
 }
@@ -241,6 +242,8 @@ export interface SceneCheckResult {
   ok: boolean
   productMatches: boolean | null
   strayText: boolean | null
+  /** Blank bars / borders / letterboxing / collage panels (the scene must be full-bleed). */
+  borders?: boolean | null
   /** 0–1 */
   score: number
   notes?: string
