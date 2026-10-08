@@ -50,7 +50,7 @@ export function buildSceneCheckPrompt(hasRef: boolean, language: AdLanguage): { 
       ? 'Image 1 is the generated scene. Image 2 is the real product reference photo.'
       : 'Image 1 is the generated scene. There is no product reference: set productMatches to null.',
     hasRef
-      ? 'productMatches: true only if the product in the scene is the same product as the reference — identical shape, proportions, colors and label design. A different, redrawn or distorted product is false.'
+      ? 'productMatches: true only if the product in the scene is the same product as the reference — identical shape, proportions, colors and label design. A different, redrawn or distorted product is false. If the label faces the camera, its graphic and brand wording must be there as in the reference: a blank, missing or rewritten label is false.'
       : '',
     'strayText: true if there is ANY text, letters, numbers, logos, watermarks or signage anywhere other than the printed label of the product itself, or if the product label text looks garbled.',
     'headlineSpace: true if the upper third has clean, low-detail space where a headline could be overlaid.',

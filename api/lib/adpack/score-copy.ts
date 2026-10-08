@@ -77,6 +77,9 @@ export async function scoreAdCopy(input: ScoreAdCopyInput): Promise<ScoreAdCopyR
     criteria,
     registerInstruction(dna.register, language),
     es
+      ? 'customerQuotes son frases reales de clientes: citarlas como voz del cliente es fiel a los hechos; convertirlas en promesa del producto no lo es. offerLine la pone el sistema desde hechos confirmados.'
+      : 'customerQuotes are real customer words: quoting them as customer voice is faithful; turning them into product promises is not. offerLine is set by the system from confirmed facts.',
+    es
       ? 'Responde SOLO JSON: {"criteria":{"hook_filters":0,...},"overall":0,"reasons":["frase corta por cada punto débil"]}'
       : 'Reply with JSON only: {"criteria":{"hook_filters":0,...},"overall":0,"reasons":["short phrase per weak point"]}',
   ].join('\n\n')
@@ -85,6 +88,7 @@ export async function scoreAdCopy(input: ScoreAdCopyInput): Promise<ScoreAdCopyR
     category: dna.category,
     angle: { archetype: angle.archetype, hookType: angle.hookType, format: angle.format, message: angle.message, target: angle.target },
     confirmedFacts: confirmedFacts(input.offer ? mergeFacts(dna, input.offer) : dna.facts).map((f) => ({ key: f.key, value: f.value })),
+    customerQuotes: dna.customerPhrases ?? [],
     copy,
   })
   const res = await gateway.json<{ criteria?: Record<string, unknown>; overall?: unknown; reasons?: unknown }>({

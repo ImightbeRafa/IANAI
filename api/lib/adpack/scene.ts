@@ -9,19 +9,23 @@
 import { SCENE_NO_TEXT_CLAUSE } from './copy-shared.js'
 import { getFormatPattern } from './patterns.js'
 import { imageSize } from './image-size.js'
+import { copySpaceHint } from './render/frame.js'
 import { escapeRegExp } from './util.js'
 import type { AdAngle, AdCopy, AspectRatio, BrandDna, ModelGateway, OfferInput } from './types.js'
 
 /** Ratio every scene is generated at (tallest; cover-fit to the others). */
 export const SCENE_RATIO: AspectRatio = '9:16'
+/** Copy-space hint follows the main feed ratio (4:5): its layout is the one most ads are judged in. */
+export const SCENE_SPACE_RATIO: AspectRatio = '4:5'
 
 export const SCENE_STRICT_NO_TEXT =
   'STRICT: no text, letters, numbers, logos, watermarks, signage, captions, price tags or UI anywhere in the image. Packaging text must remain exactly as in the product photo only; never add, invent or rewrite any lettering.'
 
 export const SCENE_COMPOSITION_RULES = [
-  'Composition: main subject centered with generous margins on every side (the image is cropped to 1:1, 4:5 and 9:16), nothing important near the edges.',
+  'Composition: the image is center-cropped to 1:1, 4:5 and 9:16, so the top and bottom 20% may be cut; keep the product and any face inside the middle band (roughly 25%–80% of the height) with margins, nothing important near the edges.',
   'Keep the upper third clean, calm negative space for a headline overlay; leave a quiet band at the bottom for a button.',
-  'Realistic photography, social-ad quality: sharp focus on the product, natural lighting, true-to-life colors and materials, no illustration or 3D-render look.',
+  'The product is the hero: large (about a third of the frame height or more), sharp, label facing the camera and fully visible, never covered by hands or props.',
+  'Realistic photography, social-ad quality: natural lighting, true-to-life colors and materials, no illustration or 3D-render look.',
 ].join(' ')
 
 export interface BuildScenePromptInput {
@@ -67,9 +71,12 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
     brief ? `Scene: ${brief}` : '',
     `Format intent: ${pattern.sceneIntent}`,
     `Layout the overlay will use (for spacing only, never draw it): ${pattern.layout.en}`,
+    `Placement and empty space (the text overlay covers it; this wins over any placement above): ${copySpaceHint(angle.format, SCENE_SPACE_RATIO)}.`,
     pattern.needsPerson ? 'Include a real person naturally interacting with the product; natural skin, hands and proportions.' : '',
     visualStyleLine(dna),
-    input.anchor ? 'Match the lighting, color grading and photographic style of the attached style reference so the pack looks like one campaign; do not copy its subject.' : '',
+    input.anchor
+      ? 'Match the lighting, color grading and photographic style of the attached style reference so the pack looks like one campaign; do not copy its subject, background or camera angle — this ad needs its own setting.'
+      : '',
     SCENE_COMPOSITION_RULES,
     SCENE_STRICT_NO_TEXT,
   ]

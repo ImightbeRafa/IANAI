@@ -14,6 +14,7 @@ import type { AdAngle, AdCopy, AdLanguage, BrandDna, CopyCheckResult, ModelGatew
 import { checkAdCopy, repairAdCopy } from './check-copy.js'
 import { complianceGuidance, getRequiredDisclaimer } from './compliance.js'
 import {
+  ADPACK_COPY_MODEL,
   buildCopyContext,
   defaultSceneFallback,
   factsAllowlistBlock,
@@ -33,6 +34,40 @@ export { buildOfferLine }
 /** Deterministic offer line for an offer + DNA (confirmed price/bundle/shipping only). */
 export function offerLineFor(dna: BrandDna, offer: OfferInput, language: AdLanguage): string | undefined {
   return buildOfferLine(mergeFacts(dna, offer), language)
+}
+
+/**
+ * Craft rules added after the live benchmark (judge flagged repetition between
+ * headline/subline/chips/caption, generic label-headlines and abstract chips).
+ */
+export const COPY_CRAFT_RULES: Record<AdLanguage, string> = {
+  es: `OFICIO (lo que separa un anuncio que vende de uno genérico):
+- Titular = la situación, dolor, deseo o dato duro del comprador, dicho como lo diría él. Nunca una etiqueta de catálogo ("Sérum de noche", "Paso a paso", "Calidad premium") ni el nombre del producto solo.
+- Cada pieza aporta algo NUEVO: el subtítulo no repite el titular ni los chips; los chips no repiten el subtítulo; el caption no copia los chips literalmente ni repite la línea de oferta.
+- Chips = resultado o dato concreto (ingrediente con su %, cantidad, tiempo, paso real), ≤ 4 palabras. Nada de adjetivos sueltos ("Calidad", "Natural", "Lo mejor").
+- Subtítulo = la razón para creer (el porqué funciona o el diferenciador), no una lista de ingredientes repetida en todos los anuncios.
+- Caption: abre con el gancho en otras palabras, responde la objeción principal con un hecho confirmado, cierra con el CTA. Frases cortas.`,
+  en: `CRAFT (what separates an ad that sells from a generic one):
+- Headline = the buyer's situation, pain, desire or hard fact, said the way they would say it. Never a catalog label ("Night serum", "Step by step", "Premium quality") or the bare product name.
+- Every piece adds something NEW: the subline does not repeat the headline or chips; chips do not repeat the subline; the caption does not copy the chips verbatim or repeat the offer line.
+- Chips = a concrete outcome or data point (ingredient with its %, quantity, time, real step), ≤ 4 words. No lone adjectives ("Quality", "Natural", "The best").
+- Subline = the reason to believe (why it works or the differentiator), not the same ingredient list in every ad.
+- Caption: open with the hook in other words, answer the main objection with a confirmed fact, close with the CTA. Short sentences.`,
+}
+
+/** Headlines/sublines already used in the pack, so parallel ads don't converge on one line. */
+function packDiversityBlock(others: AdCopy[] | undefined, language: AdLanguage): string {
+  const used = (others ?? [])
+    .flatMap((c) => [c.headline, c.subline ?? ''])
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 16)
+  if (!used.length) return ''
+  const head =
+    language === 'es'
+      ? 'YA USADO EN ESTE PACK (no repitas estas frases ni su idea central):'
+      : 'ALREADY USED IN THIS PACK (do not repeat these lines or their core idea):'
+  return [head, ...used.map((u) => `- ${u}`)].join('\n')
 }
 
 export interface CopyPrompt {
@@ -84,12 +119,12 @@ function outputContract(ctx: CopyContext): string {
 }
 
 /** Build the single copy prompt. Exported for tests and for prompt inspection. */
-export function buildCopyPrompt(input: { dna: BrandDna; offer: OfferInput; angle: AdAngle; language: AdLanguage }): CopyPrompt {
+export function buildCopyPrompt(input: { dna: BrandDna; offer: OfferInput; angle: AdAngle; language: AdLanguage; otherCopies?: AdCopy[] }): CopyPrompt {
   const ctx = buildCopyContext(input.dna, input.offer, input.angle, input.language)
-  return buildCopyPromptFromContext(ctx)
+  return buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies })
 }
 
-function buildCopyPromptFromContext(ctx: CopyContext): CopyPrompt {
+function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[] }): CopyPrompt {
   const { dna, angle, language } = ctx
   const es = language === 'es'
   const compliance = complianceGuidance(dna.category, language)
@@ -98,6 +133,7 @@ function buildCopyPromptFromContext(ctx: CopyContext): CopyPrompt {
     registerInstruction(dna.register, language),
     `${es ? 'REGLAS DE ANUNCIO ESTÁTICO' : 'STATIC AD RULES'}:\n${UNIVERSAL_AD_RULES[language].map((r) => `- ${r}`).join('\n')}`,
     `${es ? 'CUMPLIMIENTO (categoría' : 'COMPLIANCE (category'} ${dna.category}):\n${compliance.map((r) => `- ${r}`).join('\n')}`,
+    COPY_CRAFT_RULES[language],
     outputContract(ctx),
   ].join('\n\n')
 
@@ -108,7 +144,13 @@ function buildCopyPromptFromContext(ctx: CopyContext): CopyPrompt {
     dna.oneLiner ? `${es ? 'Qué es' : 'What it is'}: ${redactUnconfirmed(dna.oneLiner, ctx)}` : '',
     dna.voice ? `${es ? 'Voz de marca' : 'Brand voice'}: ${redactUnconfirmed(dna.voice, ctx)}` : '',
     dna.audience?.length ? `${es ? 'Audiencia' : 'Audience'}: ${redactList(dna.audience, ctx).join(' | ')}` : '',
-    dna.customerPhrases?.length ? `${es ? 'Frases reales de clientes (material de gancho)' : 'Real customer phrases (hook material)'}: ${redactList(dna.customerPhrases, ctx).join(' | ')}` : '',
+    dna.customerPhrases?.length
+      ? es
+        ? `Frases reales de clientes (voz del cliente, NO hechos del producto): ${redactList(dna.customerPhrases, ctx).join(' | ')}
+  Úsalas para inspirar el gancho o cítalas entre comillas como opinión de un cliente ("…", dice una clienta). Nunca las conviertas en promesas o chips del producto.`
+        : `Real customer phrases (customer voice, NOT product facts): ${redactList(dna.customerPhrases, ctx).join(' | ')}
+  Use them to inspire the hook or quote them in quotation marks as a customer's words ("…", says a customer). Never turn them into product promises or chips.`
+      : '',
   ].filter(Boolean)
 
   const forbidden = (dna.forbiddenPhrases ?? []).filter((p) => p.trim())
@@ -123,6 +165,7 @@ function buildCopyPromptFromContext(ctx: CopyContext): CopyPrompt {
     archetypeBlock(angle.archetype, language),
     formatGuidance(angle.format, language),
     factsAllowlistBlock(ctx),
+    packDiversityBlock(ctx.otherCopies, language),
     dna.gaps?.length
       ? es
         ? `Datos NO disponibles (no los menciones ni inventes): ${dna.gaps.join(', ')}`
@@ -162,11 +205,11 @@ export interface GeneratedAdCopy {
 
 export async function generateAdCopy(input: GenerateAdCopyInput): Promise<GeneratedAdCopy> {
   const ctx = buildCopyContext(input.dna, input.offer, input.angle, input.language)
-  const prompt = buildCopyPromptFromContext(ctx)
+  const prompt = buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies })
   const res = await input.gateway.json<RawModelCopy>({
     system: prompt.system,
     user: prompt.user,
-    model: input.model,
+    model: input.model ?? ADPACK_COPY_MODEL,
     temperature: input.temperature ?? 0.7,
     maxTokens: 1200,
   })

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { checkScene } from '../../api/lib/adpack/check-scene'
 import { createModelGateway, extractJson, withCostLedger } from '../../api/lib/adpack/gateway'
 import { imageSize } from '../../api/lib/adpack/image-size'
+import { copySpaceHint } from '../../api/lib/adpack/render/frame'
 import { planAngles } from '../../api/lib/adpack/plan-angles'
 import { buildScenePrompt, generateScene, SCENE_STRICT_NO_TEXT } from '../../api/lib/adpack/scene'
 import { createMemoryPackStore } from '../../api/lib/adpack/store-memory'
@@ -26,6 +27,7 @@ describe('buildScenePrompt', () => {
         expect(prompt.toLowerCase()).not.toContain(headline.toLowerCase())
         expect(prompt).not.toContain('Escribinos ya')
         expect(prompt).toMatch(/upper third/)
+        expect(prompt).toContain(copySpaceHint(angle.format, '4:5'))
       }
     }
   })

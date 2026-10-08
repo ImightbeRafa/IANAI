@@ -7,6 +7,14 @@ import { buildOfferLine, confirmedFacts, extractNumericClaims, mergeFacts, numbe
 import { COPY_LIMITS } from './patterns.js'
 import { cleanString, escapeRegExp, normalizeText } from './util.js'
 
+/**
+ * Default text model for ad copy + repair. Live benchmark (2026-10): the gateway
+ * default (grok-4.5) spent ~3.2k reasoning tokens and ~50 s per ad (~$0.035/ad),
+ * which alone breaks the ≤3 min / ≤$0.60 pack gates; the fast reasoning model
+ * takes ~9 s and ~$0.001 per ad with the same deterministic checks behind it.
+ */
+export const ADPACK_COPY_MODEL = 'grok-4-1-fast-reasoning'
+
 export interface CopyContext {
   dna: BrandDna
   offer: OfferInput

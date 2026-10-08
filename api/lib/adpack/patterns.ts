@@ -83,10 +83,10 @@ export interface FormatPattern {
 export const FORMAT_PATTERNS: Record<AdFormat, FormatPattern> = {
   offer_graphic: {
     layout: {
-      es: 'Producto héroe centrado + titular grande arriba + 3 chips de beneficios tangibles + línea de precio/oferta destacada + CTA en botón.',
-      en: 'Centered hero product + big headline on top + 3 tangible benefit chips + highlighted price/offer line + CTA button.',
+      es: 'Producto héroe a la derecha + titular grande arriba + 3 chips de beneficios tangibles a la izquierda + línea de precio/oferta destacada + CTA en botón.',
+      en: 'Hero product on the right + big headline on top + 3 tangible benefit chips on the left + highlighted price/offer line + CTA button.',
     },
-    sceneIntent: 'Hero product shot, centered, clean uncluttered background in brand colors, generous empty space at top and bottom for overlay.',
+    sceneIntent: 'Hero product shot, product standing in the right half of the frame, clean uncluttered background in brand colors, calm empty space on the left and at the top for the overlay.',
     archetypes: ['venta_directa', 'desvalidar_alternativas', 'variedad_productos'],
     hooks: ['price_value', 'desire', 'pain', 'urgency_scarcity', 'objection', 'social_proof'],
     bullets: [2, 3],
@@ -106,7 +106,7 @@ export const FORMAT_PATTERNS: Record<AdFormat, FormatPattern> = {
       es: '3–4 pasos numerados en columna o fila, cada uno con micro-texto de ≤4 palabras; producto visible; titular "en 3 pasos".',
       en: '3–4 numbered steps in a column or row, each with ≤4-word micro text; product visible; "in 3 steps" headline.',
     },
-    sceneIntent: 'Product with the elements of its use or ordering process laid out in a clean sequence, flat-lay or tabletop, space for numbered overlays.',
+    sceneIntent: 'Product in the right part of the frame with the elements of its use laid out next to it on a tabletop; the left two thirds stay calm and low-detail for numbered step cards.',
     archetypes: ['paso_a_paso', 'mostrar_servicio'],
     hooks: ['routine', 'objection', 'curiosity', 'desire'],
     bullets: [3, 4],

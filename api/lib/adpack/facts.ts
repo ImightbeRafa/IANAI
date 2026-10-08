@@ -121,8 +121,19 @@ export function numbersInFacts(facts: DnaFact[]): Set<string> {
 export const OFFER_LINE_MAX_CHARS = 70
 
 /**
+ * Budget for the on-image offer badge. Live benchmark (2026-10): 3-part lines like
+ * "₡12.900 · 2 por ₡22.000 · Envíos a todo Costa Rica por Correos" rendered as a
+ * two-line slab over the product; long logistics belong in the caption.
+ */
+export const OFFER_BADGE_TARGET_CHARS = 40
+
+const FREE_SHIPPING_RE = /\b(?:gratis|gratuit[oa]s?|free)\b/
+
+/**
  * Exact offer/price line from confirmed facts only, e.g. "₡9.900 · Antes ₡12.900 · Envío gratis GAM".
  * Returns undefined when there is no confirmed price and no confirmed bundle.
+ * Parts are dropped, least persuasive first, until the line fits the badge budget:
+ * plain shipping → compare-at → free shipping → bundle. The price always stays.
  */
 export function buildOfferLine(facts: DnaFact[], language: AdLanguage): string | undefined {
   const price = getConfirmed(facts, 'price')?.value.trim()
@@ -130,19 +141,20 @@ export function buildOfferLine(facts: DnaFact[], language: AdLanguage): string |
   if (!price && !bundle) return undefined
   const compare = getConfirmed(facts, 'compare_at_price')?.value.trim()
   const shipping = getConfirmed(facts, 'shipping')?.value.trim()
-  // Priority order: the first parts survive when the line is too long.
-  const parts: string[] = []
-  if (price) parts.push(price)
-  if (bundle && normalizeText(bundle) !== normalizeText(price ?? '')) parts.push(bundle)
-  if (shipping) parts.push(shipping)
-  if (compare && price) parts.splice(1, 0, `${language === 'es' ? 'Antes' : 'Was'} ${compare}`)
-  const priority = [price, bundle, shipping].filter(Boolean) as string[]
-  let line = parts.join(' · ')
-  while (line.length > OFFER_LINE_MAX_CHARS && parts.length > 1) {
-    // Drop compare-at first, then the lowest-priority part.
-    const compareIdx = parts.findIndex((p) => !priority.includes(p))
-    parts.splice(compareIdx >= 0 ? compareIdx : parts.length - 1, 1)
-    line = parts.join(' · ')
+  const freeShipping = Boolean(shipping && FREE_SHIPPING_RE.test(normalizeText(shipping)))
+  const KEEP = 99
+  const parts: Array<{ text: string; drop: number }> = []
+  if (price) parts.push({ text: price, drop: KEEP })
+  if (compare && price) parts.push({ text: `${language === 'es' ? 'Antes' : 'Was'} ${compare}`, drop: 2 })
+  if (bundle && normalizeText(bundle) !== normalizeText(price ?? '')) parts.push({ text: bundle, drop: price ? 4 : KEEP })
+  // Short free shipping sells; long logistics text does not fit a badge.
+  if (shipping) parts.push({ text: shipping, drop: freeShipping && shipping.length <= 24 ? 3 : 1 })
+  const join = () => parts.map((p) => p.text).join(' · ')
+  while (join().length > OFFER_BADGE_TARGET_CHARS && parts.length > 1) {
+    const victim = parts.reduce((min, p) => (p.drop < min.drop ? p : min))
+    if (victim.drop >= KEEP) break
+    parts.splice(parts.indexOf(victim), 1)
   }
-  return line
+  const line = join()
+  return line.length > OFFER_LINE_MAX_CHARS ? parts[0].text.slice(0, OFFER_LINE_MAX_CHARS) : line
 }
