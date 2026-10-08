@@ -13,7 +13,7 @@ export function goodSerumCopy(overrides: Partial<AdCopy> = {}): AdCopy {
     headline: '¿Poros que se notan en fotos?',
     subline: 'Niacinamida 5% y aloe vera, sin sensación pegajosa',
     bullets: ['Niacinamida 5%', 'Se absorbe rápido', '2 gotas de noche'],
-    offerLine: '₡12.900 · 2 por ₡22.000 · Envíos a todo Costa Rica por Correos',
+    offerLine: '₡12.900 · 2 por ₡22.000',
     cta: 'Pedí el tuyo',
     caption:
       'Poros que se notan en cada foto. Este sérum combina niacinamida 5% y aloe vera: 2 gotas en la noche sobre piel limpia. Envíos a todo Costa Rica por Correos y pagás con SINPE Móvil o tarjeta. Escribinos y pedí el tuyo.',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SCENE_NO_TEXT_CLAUSE, sceneBriefRequestsText } from '../../api/lib/adpack/copy-shared'
-import { buildCopyPrompt, generateAdCopy, generatePackCopy, offerLineFor } from '../../api/lib/adpack/copy'
+import { buildCopyPrompt, buildOfferLine, generateAdCopy, generatePackCopy, offerLineFor } from '../../api/lib/adpack/copy'
 import { confirmedFacts, mergeFacts, unconfirmedFacts } from '../../api/lib/adpack/facts'
 import { planAngles } from '../../api/lib/adpack/plan-angles'
 import { BENCHMARK_OFFERS } from '../fixtures/adpack/benchmark-offers'
@@ -79,18 +79,25 @@ describe('offer line', () => {
       else expect(a!.length).toBeLessThanOrEqual(70)
       for (const u of unconfirmedFacts(facts)) if (a) expect(a).not.toContain(u.value)
     }
-    expect(offerLineFor(serum.dna, serum.offer, 'es')).toBe('₡12.900 · 2 por ₡22.000 · Envíos a todo Costa Rica por Correos')
+    expect(offerLineFor(serum.dna, serum.offer, 'es')).toBe('₡12.900 · 2 por ₡22.000')
     const mat = caseById('health-yoga-mat')
-    expect(offerLineFor(mat.dna, mat.offer, 'es')).toBe('₡18.900 · Antes ₡22.900 · Envío por mensajería en la GAM')
+    expect(offerLineFor(mat.dna, mat.offer, 'es')).toBe('₡18.900 · Antes ₡22.900')
     const books = caseById('kids-books')
     expect(offerLineFor(books.dna, books.offer, 'es')).toBe('₡19.500')
     expect(offerLineFor(caseById('services-moving').dna, caseById('services-moving').offer, 'es')).toBeUndefined()
   })
 
+  it('fits the badge budget: drops plain shipping first, keeps short free shipping', () => {
+    const fact = (key: 'price' | 'shipping' | 'compare_at_price' | 'bundle', value: string) => ({ key, value, source: 'offer_form' as const, confirmed: true })
+    expect(buildOfferLine([fact('price', '₡9.900'), fact('shipping', 'Envío gratis GAM')], 'es')).toBe('₡9.900 · Envío gratis GAM')
+    expect(buildOfferLine([fact('price', '₡9.900'), fact('compare_at_price', '₡12.900'), fact('shipping', 'Envío gratis en la GAM desde 3 unidades')], 'es')).toBe('₡9.900 · Antes ₡12.900')
+    expect(buildOfferLine([fact('price', '₡9.900'), fact('shipping', 'Envíos a todo Costa Rica por Correos')], 'es')).toBe('₡9.900')
+  })
+
   it('ignores any offer line the model writes', async () => {
     const gw = fakeGateway(goodHandler)
     const res = await generateAdCopy({ gateway: gw, dna: serum.dna, offer: serum.offer, angle: serumAngles[0], language: 'es' })
-    expect(res.copy.offerLine).toBe('₡12.900 · 2 por ₡22.000 · Envíos a todo Costa Rica por Correos')
+    expect(res.copy.offerLine).toBe('₡12.900 · 2 por ₡22.000')
   })
 })
 

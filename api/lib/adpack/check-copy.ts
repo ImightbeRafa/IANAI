@@ -9,6 +9,7 @@
 import type { AdAngle, AdCopy, AdLanguage, BrandDna, CopyCheckIssue, CopyCheckResult, FactKey, ModelGateway, OfferInput } from './types.js'
 import { checkCompliance } from './compliance.js'
 import {
+  ADPACK_COPY_MODEL,
   buildCopyContext,
   defaultSceneFallback,
   factsAllowlistBlock,
@@ -294,7 +295,7 @@ export async function repairAdCopy(input: RepairAdCopyInput): Promise<RepairAdCo
     .join('\n\n')
 
   try {
-    const res = await gateway.json<RawModelCopy>({ system, user, model: input.model, temperature: 0.3, maxTokens: 900 })
+    const res = await gateway.json<RawModelCopy>({ system, user, model: input.model ?? ADPACK_COPY_MODEL, temperature: 0.3, maxTokens: 900 })
     const patch = (res.data ?? {}) as Record<string, unknown>
     const merged: RawModelCopy = { ...copy }
     for (const f of failing) if (patch[f] !== undefined) (merged as Record<string, unknown>)[f] = patch[f]
