@@ -8,6 +8,8 @@ import { CREDIT_WEIGHTS } from '../../api/lib/credits/catalog'
 import { createAdPackService, type AdPackChargeInput, type AdPackService, type AdPackUsageEntry } from '../../api/lib/adpack/service'
 import { createMemoryPackStore, type MemoryPackStore } from '../../api/lib/adpack/store-memory'
 import type { IngestBrandDnaInput } from '../../api/lib/adpack/dna/ingest'
+import type { AdPackLibrary } from '../../api/lib/adpack/library'
+import type { SavedBrandDb } from '../../api/lib/adpack/saved-brand'
 import { createMemoryMcpApprovalStore, type McpApprovalStore } from '../../api/lib/mcp/approval'
 import { handleMcpJsonRpc } from '../../api/lib/mcp/protocol'
 import type { McpDbClient } from '../../api/lib/mcp/user-tools'
@@ -32,7 +34,7 @@ export interface DoorEnv {
   service: AdPackService
 }
 
-export function createDoorEnv(options: { credits?: number; ownedIds?: string[] } = {}): DoorEnv {
+export function createDoorEnv(options: { credits?: number; ownedIds?: string[]; savedBrandDb?: SavedBrandDb; library?: AdPackLibrary } = {}): DoorEnv {
   const store = createMemoryPackStore()
   const gateway = runnerGateway()
   const renderer = fakeRenderer()
@@ -68,6 +70,8 @@ export function createDoorEnv(options: { credits?: number; ownedIds?: string[] }
       ingestCalls.push(input)
       return { dna: structuredClone(serum.dna), costUsd: 0.004, timingsMs: { website: 5, total: 6 } }
     },
+    ...(options.savedBrandDb ? { savedBrandDb: options.savedBrandDb } : {}),
+    ...(options.library ? { library: options.library } : {}),
   })
   return { store, gateway, renderer, storage, charges, logs, ingestCalls, credits, service }
 }

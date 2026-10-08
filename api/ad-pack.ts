@@ -39,6 +39,7 @@ export function setAdPackBackgroundScheduler(fn: AdPackBackgroundScheduler | nul
 
 const ACTIONS: ReadonlySet<AdPackAction> = new Set([
   'dna_ingest',
+  'dna_from_brand',
   'dna_confirm',
   'angles',
   'quote',
@@ -64,17 +65,31 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
           language: body.language as never,
         }),
       }
+    case 'dna_from_brand':
+      return {
+        result: await service.dnaFromBrand({
+          userId,
+          source: 'web',
+          brandId: body.brandId,
+          offerId: body.offerId,
+          brandKitId: body.brandKitId,
+          refresh: body.refresh,
+        }),
+      }
     case 'dna_confirm':
       return { result: await service.confirmDna({ userId, dna: body.dna, edits: body.edits }) }
     case 'angles':
-      return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size }) }
+      return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId }) }
     case 'quote':
-      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer }) }
+      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId }) }
     case 'start': {
       const started = await service.startPack({
         userId,
         dna: body.dna,
         offer: body.offer,
+        brandId: body.brandId,
+        offerId: body.offerId,
+        brief: body.brief,
         size: body.size,
         angleIds: body.angleIds,
         ratios: body.ratios,

@@ -80,21 +80,64 @@ export interface AdPackConfirmDnaRequest {
   edits: AdPackFactEdit[]
 }
 
-export interface AdPackAnglesRequest {
-  dna: BrandDna
-  offer: OfferInput
+/** Saved-brand alternative to `dna` + `offer` (angles / quote / start). */
+export interface AdPackSavedBrandRef {
+  brandId?: string
+  offerId?: string
+  brandKitId?: string
+}
+
+export interface AdPackAnglesRequest extends AdPackSavedBrandRef {
+  dna?: BrandDna
+  offer?: OfferInput
   size?: number
 }
 
-export interface AdPackQuoteRequest {
+export interface AdPackQuoteRequest extends AdPackSavedBrandRef {
   size?: number
   dna?: BrandDna
   offer?: OfferInput
 }
 
-export interface AdPackStartRequest {
+/**
+ * Build DNA + offer from what the owner already saved (business, brand kit, offer
+ * form, product photos, stored URL analysis). No URLs/uploads needed, no credits.
+ */
+export interface AdPackFromBrandRequest {
+  /** businesses.id (brand folder). */
+  brandId: string
+  /** products.id; omitted → the brand's most recent offer. */
+  offerId?: string
+  /** Linked brand kit; omitted → the brand's primary kit. */
+  brandKitId?: string
+  /** Re-read the stored website live (model call). Default false. */
+  refresh?: boolean
+}
+
+export interface AdPackFromBrandResponse {
   dna: BrandDna
   offer: OfferInput
+  gaps: FactKey[]
+  notes: string[]
+  brandId: string
+  offerId?: string
+  brandKitId?: string
+  websiteUrl?: string
+  /** Quote for the default pack size. */
+  quote: AdPackQuote
+}
+
+/**
+ * Either `dna` + `offer` (from dna_ingest / dna_confirm) or `brandId` (+ `offerId`,
+ * `brandKitId`): the server builds DNA + offer from the saved brand.
+ */
+export interface AdPackStartRequest {
+  dna?: BrandDna
+  offer?: OfferInput
+  brandId?: string
+  offerId?: string
+  /** Owner's campaign context ("Black Friday, focus on bundles"), ≤ 500 chars. Direction only, never facts. */
+  brief?: string
   size?: number
   /** Angle-board selection (ids from `angles` with the same `size`). */
   angleIds?: string[]
@@ -126,6 +169,7 @@ export interface AdPackCancelRequest {
 
 export type AdPackAction =
   | 'dna_ingest'
+  | 'dna_from_brand'
   | 'dna_confirm'
   | 'angles'
   | 'quote'
@@ -185,6 +229,8 @@ export interface AdPackItemView {
   renders: RenderedAd[]
   attempts: number
   charged: boolean
+  /** product_images ids of renders saved to the offer library (kind 'generated'). */
+  libraryImageIds?: string[]
   error?: string
 }
 
@@ -211,6 +257,11 @@ export interface AdPackStatusResponse {
   moreWork: boolean
   /** True when another worker currently holds a lease on some item. */
   leaseActive: boolean
+  /** Brand folder (businesses.id) and offer (products.id) the pack belongs to, when linked. */
+  businessId?: string
+  offerId?: string
+  /** Web-app link to the brand folder where the finished ads are saved (when linked to a brand). */
+  deepLink?: string
   createdAt: string
   updatedAt: string
 }

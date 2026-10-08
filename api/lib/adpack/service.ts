@@ -16,7 +16,12 @@ import { usageTimingMetadata } from '../usage-timings.js'
 import { confirmFacts, type FactEdit } from './dna/confirm.js'
 import { ingestBrandDna, type IngestBrandDnaInput, type IngestBrandDnaResult } from './dna/ingest.js'
 import type { UploadItem } from './dna/uploads.js'
+import { ingestWebsite } from './dna/website.js'
+import { BRIEF_MAX_CHARS, sanitizeBrief } from './copy-shared.js'
 import { createModelGateway } from './gateway.js'
+import { createSupabaseAdPackLibrary, type AdPackLibrary } from './library.js'
+import { buildDnaFromSavedBrand, SavedBrandError, type SavedBrandDb, type SavedBrandResult } from './saved-brand.js'
+import { createSupabaseSavedBrandDb } from './saved-brand-supabase.js'
 import type {
   AdPackAnglesResponse,
   AdPackCancelResponse,
@@ -24,6 +29,7 @@ import type {
   AdPackCopyPatch,
   AdPackEditTextResponse,
   AdPackErrorCode,
+  AdPackFromBrandResponse,
   AdPackIngestDnaRequest,
   AdPackIngestDnaResponse,
   AdPackItemView,
@@ -48,7 +54,8 @@ import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
-import type { AspectRatio, BrandDna, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
+import type { AdLanguage, AspectRatio, BrandDna, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
+import type { DnaPart } from './dna/part.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
 /** Background advance budget (waitUntil / MCP scheduler). */
@@ -60,6 +67,8 @@ export const ADPACK_MAX_UPLOADS = 12
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const RATIOS: ReadonlySet<AspectRatio> = new Set(['1:1', '4:5', '9:16'])
 const TERMINAL_PACK: ReadonlySet<PackStatus> = new Set(['done', 'partial', 'failed', 'cancelled'])
+/** Packs whose finished ads are saved to the offer library. */
+const COMPLETE_PACK: ReadonlySet<PackStatus> = new Set(['done', 'partial'])
 const UPLOAD_KINDS = new Set(['product_photo', 'logo', 'reference_ad', 'review_screenshot', 'document'])
 const FACT_EDIT_OPS = new Set(['confirm', 'edit', 'add', 'remove'])
 
@@ -141,6 +150,14 @@ export interface AdPackDeps {
   concurrency?: number
   /** Verify the user owns the business / brand kit they attach. Omitted → no linked ids allowed. */
   verifyLinks?: (input: { userId: string; businessId?: string; brandKitId?: string }) => Promise<boolean>
+  /** Owner-scoped reads of saved brands/offers (dna_from_brand, start by brandId). Omitted → brandId path unavailable. */
+  savedBrandDb?: SavedBrandDb
+  /** Live website re-read for `refresh: true` (model + network). */
+  refreshWebsite?: (url: string, language: AdLanguage) => Promise<DnaPart>
+  /** Saves finished renders to the offer library (product_images kind 'generated'). Omitted → no persistence. */
+  library?: AdPackLibrary
+  /** Web-app origin for deep links (default https://advanceai.studio). */
+  appOrigin?: string
 }
 
 /** Lazily create on first use so a missing env var fails the call that needs it, not module load. */
@@ -157,11 +174,16 @@ function lazy<T extends object>(make: () => T): T {
 }
 
 export function createDefaultAdPackDeps(): AdPackDeps {
+  const gateway = lazy(() => createModelGateway())
   return {
     store: lazy(() => createSupabasePackStore()),
-    gateway: lazy(() => createModelGateway()),
+    gateway,
     renderer: createDefaultRenderer(),
     storage: lazy(() => createSupabaseAdPackStorage()),
+    savedBrandDb: lazy(() => createSupabaseSavedBrandDb()),
+    library: lazy(() => createSupabaseAdPackLibrary()),
+    refreshWebsite: (url, language) => ingestWebsite({ url, gateway, language }),
+    appOrigin: process.env.APP_ORIGIN || process.env.VITE_APP_ORIGIN || undefined,
     // Same path as every other grok-imagine image: image → image_standard, idempotent by generationId.
     async charge({ userId, generationId }) {
       const result = await incrementUsage(userId, 'image', { generationId, imageModel: ADPACK_IMAGE_MODEL })
@@ -310,6 +332,22 @@ function parseOptionalUuid(raw: unknown, label: string): string | undefined {
   return id
 }
 
+/** Owner's campaign brief: optional plain text, sanitized, ≤ 500 chars. Never facts. */
+export function parseBrief(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined
+  if (typeof raw !== 'string') throw bad('brief must be a string')
+  if (raw.length > BRIEF_MAX_CHARS * 4) throw bad(`brief is too long (max ${BRIEF_MAX_CHARS} characters)`)
+  return sanitizeBrief(raw)
+}
+
+const DEFAULT_APP_ORIGIN = 'https://advanceai.studio'
+
+/** Web-app link to the brand folder of a pack (same shape as bulk `deepLinkForPack`, no session). */
+export function deepLinkForAdPack(appOrigin: string | undefined, brandId: string, packId: string): string {
+  const origin = (appOrigin || DEFAULT_APP_ORIGIN).replace(/\/$/, '')
+  return `${origin}/chat?brand=${encodeURIComponent(brandId)}&adpack=${encodeURIComponent(packId)}`
+}
+
 function parseUploads(raw: unknown): UploadItem[] | undefined {
   if (raw === undefined) return undefined
   if (!Array.isArray(raw)) throw bad('uploads must be an array')
@@ -391,11 +429,18 @@ export function toItemView(item: PackItem): AdPackItemView {
     renders: item.renders ?? [],
     attempts: item.attempts,
     charged: Boolean(item.chargedAt),
+    ...(libraryIdsFor(item).length ? { libraryImageIds: libraryIdsFor(item) } : {}),
     ...(item.error ? { error: item.error } : {}),
   }
 }
 
-function toStatusView(pack: Pack, items: PackItem[], nowMs: number): AdPackStatusResponse {
+/** Library rows of the item's CURRENT renders (an edit re-render produces new URLs). */
+function libraryIdsFor(item: PackItem): string[] {
+  const saved = new Map((item.libraryImages ?? []).map((l) => [l.imageUrl, l.productImageId]))
+  return (item.renders ?? []).map((r) => saved.get(r.imageUrl)).filter((id): id is string => Boolean(id))
+}
+
+function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string): AdPackStatusResponse {
   const progress: PackProgress = summarizePack(pack, items)
   const perAd = quotePack(1).perAd
   // Charges for the current attempt of each ad (a regenerate clears `chargedAt` until it is re-charged).
@@ -413,6 +458,8 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number): AdPackStatu
     items: items.map(toItemView),
     moreWork: !TERMINAL_PACK.has(pack.status) && progress.pending > 0,
     leaseActive,
+    ...(pack.businessId ? { businessId: pack.businessId, deepLink: deepLinkForAdPack(appOrigin, pack.businessId, pack.id) } : {}),
+    ...(pack.offer?.productId ? { offerId: pack.offer.productId } : {}),
     createdAt: pack.createdAt,
     updatedAt: pack.updatedAt,
   }
@@ -430,15 +477,29 @@ function parseAngleIds(value: unknown): string[] | undefined {
   return value.length ? [...new Set(value as string[])] : undefined
 }
 
+/** Saved-brand alternative to dna + offer (raw, validated by the service). */
+export interface SavedBrandRefInput {
+  brandId?: unknown
+  offerId?: unknown
+  brandKitId?: unknown
+}
+
 export interface AdPackService {
   ingestDna(input: { userId: string; source?: AdPackSource } & AdPackIngestDnaRequest): Promise<AdPackIngestDnaResponse>
+  /** DNA + offer from the owner's saved brand / kit / offer (no URLs, no credits). */
+  dnaFromBrand(input: { userId: string; source?: AdPackSource; refresh?: unknown } & SavedBrandRefInput): Promise<AdPackFromBrandResponse>
   confirmDna(input: { userId: string; dna: unknown; edits: unknown }): Promise<AdPackConfirmDnaResponse>
-  planAngles(input: { userId: string; dna: unknown; offer: unknown; size?: unknown }): Promise<AdPackAnglesResponse>
-  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown }): Promise<AdPackQuote>
+  planAngles(input: { userId: string; dna?: unknown; offer?: unknown; size?: unknown } & SavedBrandRefInput): Promise<AdPackAnglesResponse>
+  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown } & SavedBrandRefInput): Promise<AdPackQuote>
   startPack(input: {
     userId: string
-    dna: unknown
-    offer: unknown
+    /** dna + offer, OR brandId (+ offerId / brandKitId): the server builds them from the saved brand. */
+    dna?: unknown
+    offer?: unknown
+    brandId?: unknown
+    offerId?: unknown
+    /** Owner's campaign context for prompts (≤ 500 chars, sanitized). Never facts. */
+    brief?: unknown
     size?: unknown
     /** Angle-board selection: ids from planAngles with the same size. */
     angleIds?: unknown
@@ -449,9 +510,12 @@ export interface AdPackService {
     /** Fixed id for idempotent create (MCP: the approval id). */
     packId?: string
   }): Promise<AdPackStartResponse>
-  getStatus(input: { userId: string; packId: unknown }): Promise<AdPackStatusResponse>
-  /** getStatus, but first runs a short inline advance when work remains and no worker holds a lease. */
-  pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number }): Promise<AdPackStatusResponse>
+  getStatus(input: { userId: string; packId: unknown; appOrigin?: string }): Promise<AdPackStatusResponse>
+  /**
+   * getStatus, but first runs a short inline advance when work remains and no worker holds a lease,
+   * and saves finished renders to the offer library once the pack completes (idempotent).
+   */
+  pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number; appOrigin?: string }): Promise<AdPackStatusResponse>
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
   editText(input: { userId: string; packId: unknown; itemId: unknown; copy: unknown }): Promise<AdPackEditTextResponse>
   regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown }): Promise<AdPackRegenerateResponse>
@@ -513,10 +577,101 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     return result ?? { charged: true }
   }
 
+  /**
+   * Save finished renders of a completed pack (done / partial) to the offer library.
+   * Idempotent per render URL (item.libraryImages + the library's own existence check).
+   * Never throws: a library failure must not break status / advance. Returns true when
+   * something new was recorded.
+   */
+  const persistLibrary = async (userId: string, packId: string): Promise<boolean> => {
+    if (!deps.library) return false
+    const loaded = await deps.store.getPack(packId, userId).catch(() => null)
+    if (!loaded) return false
+    const { pack, items } = loaded
+    const productId = pack.offer?.productId
+    if (!productId || !COMPLETE_PACK.has(pack.status)) return false
+    let changed = false
+    for (const item of items) {
+      if (item.status !== 'done' || !item.renders?.length) continue
+      const have = new Set((item.libraryImages ?? []).map((l) => l.imageUrl))
+      const missing = item.renders.filter((r) => !have.has(r.imageUrl))
+      if (!missing.length) continue
+      try {
+        const saved = await deps.library.saveRenders({
+          userId,
+          productId,
+          packId,
+          itemIndex: item.index,
+          headline: item.copy?.headline,
+          renders: missing.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl })),
+        })
+        const fresh = saved.filter((s) => !have.has(s.imageUrl))
+        if (!fresh.length) continue
+        await deps.store.updateItem(item.id, { libraryImages: [...(item.libraryImages ?? []), ...fresh] })
+        changed = true
+      } catch (err) {
+        console.error('[adpack] library save failed', item.id, err instanceof Error ? err.message : err)
+      }
+    }
+    return changed
+  }
+
+  const fromBrand = async (userId: string | undefined, ref: SavedBrandRefInput & { refresh?: unknown }, source: AdPackSource): Promise<SavedBrandResult> => {
+    if (!userId) throw bad('userId is required')
+    const brandId = parseOptionalUuid(ref.brandId, 'brandId')
+    if (!brandId) throw bad('brandId is required')
+    const offerId = parseOptionalUuid(ref.offerId, 'offerId')
+    const brandKitId = parseOptionalUuid(ref.brandKitId, 'brandKitId')
+    if (!deps.savedBrandDb) throw new AdPackError('UNAVAILABLE', 'Saved brands are not available in this runtime')
+    const t0 = now()
+    try {
+      const res = await buildDnaFromSavedBrand({
+        db: deps.savedBrandDb,
+        userId,
+        brandId,
+        offerId,
+        brandKitId,
+        refresh: ref.refresh === true,
+        refreshWebsite: deps.refreshWebsite,
+      })
+      if (res.costUsd > 0) {
+        await log({
+          userId,
+          feature: 'brand_extraction',
+          model: 'adpack-dna',
+          costUsd: res.costUsd,
+          source,
+          durationMs: now() - t0,
+          metadata: { feature: 'adpack_dna_from_brand', refresh: true },
+        })
+      }
+      return res
+    } catch (err) {
+      if (err instanceof SavedBrandError) throw new AdPackError(err.code, err.message)
+      throw err
+    }
+  }
+
+  const hasValue = (v: unknown) => v !== undefined && v !== null && v !== ''
+
+  /** dna + offer from the request, or built from the saved brand when only brandId is given. */
+  const resolveDnaOffer = async (
+    userId: string | undefined,
+    input: { dna?: unknown; offer?: unknown } & SavedBrandRefInput,
+    source: AdPackSource,
+  ): Promise<{ dna: BrandDna; offer: OfferInput; saved?: SavedBrandResult }> => {
+    if (input.dna === undefined && input.offer === undefined && hasValue(input.brandId)) {
+      const saved = await fromBrand(userId, input, source)
+      return { dna: saved.dna, offer: saved.offer, saved }
+    }
+    if (input.dna === undefined && input.offer === undefined) throw bad('Provide brandId (+ offerId) or dna + offer')
+    return { dna: parseDna(input.dna), offer: parseOffer(input.offer) }
+  }
+
   const advance: AdPackService['advance'] = async (input) => {
     const packId = parsePackId(input.packId)
     const { pack } = await load(input.userId, packId)
-    return advancePack({
+    const progress = await advancePack({
       store: deps.store,
       gateway: deps.gateway,
       renderer: deps.renderer,
@@ -527,12 +682,14 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       budgetMs: input.budgetMs ?? ADPACK_BACKGROUND_BUDGET_MS,
       concurrency: deps.concurrency,
     })
+    if (COMPLETE_PACK.has(progress.status)) await persistLibrary(input.userId, packId)
+    return progress
   }
 
   const getStatus: AdPackService['getStatus'] = async (input) => {
     const packId = parsePackId(input.packId)
     const { pack, items } = await load(input.userId, packId)
-    return toStatusView(pack, items, now())
+    return toStatusView(pack, items, now(), input.appOrigin ?? deps.appOrigin)
   }
 
   const quoteFor = (size: number): AdPackQuote => {
@@ -567,36 +724,53 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       return { dna: result.dna, costUsd: result.costUsd, timingsMs: result.timingsMs }
     },
 
+    async dnaFromBrand(input) {
+      const saved = await fromBrand(input.userId, input, input.source ?? 'web')
+      const planned = planAngles({ dna: saved.dna, offer: saved.offer, size: DEFAULT_PACK_SIZE, language: saved.dna.language })
+      return {
+        dna: saved.dna,
+        offer: saved.offer,
+        gaps: saved.gaps,
+        notes: saved.notes,
+        brandId: saved.brandId,
+        ...(saved.offerId ? { offerId: saved.offerId } : {}),
+        ...(saved.brandKitId ? { brandKitId: saved.brandKitId } : {}),
+        ...(saved.websiteUrl ? { websiteUrl: saved.websiteUrl } : {}),
+        quote: quoteFor(planned.length),
+      }
+    },
+
     async confirmDna(input) {
       const dna = parseDna(input.dna)
       return { dna: confirmFacts(dna, parseFactEdits(input.edits)) }
     },
 
     async planAngles(input) {
-      const dna = parseDna(input.dna)
-      const offer = parseOffer(input.offer)
+      const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
       const angles = planAngles({ dna, offer, size: parseSize(input.size), language: dna.language })
       return { size: angles.length, angles }
     },
 
     async quote(input) {
       const size = parseSize(input.size)
-      if (input.dna !== undefined && input.offer !== undefined) {
-        const dna = parseDna(input.dna)
-        const offer = parseOffer(input.offer)
+      if ((input.dna !== undefined && input.offer !== undefined) || (input.dna === undefined && input.offer === undefined && hasValue(input.brandId))) {
+        const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
         return quoteFor(planAngles({ dna, offer, size, language: dna.language }).length)
       }
       return quoteFor(size)
     },
 
     async startPack(input) {
-      const dna = parseDna(input.dna)
-      const offer = parseOffer(input.offer)
+      const fromSaved = input.dna === undefined && input.offer === undefined && hasValue(input.brandId)
+      // dna path: validate the payload first (cheap, no I/O), as before.
+      let dna = fromSaved ? undefined : parseDna(input.dna)
+      let offer = fromSaved ? undefined : parseOffer(input.offer)
       const size = parseSize(input.size)
       const ratios = parseRatios(input.ratios)
-      const businessId = parseOptionalUuid(input.businessId, 'businessId')
-      const brandKitId = parseOptionalUuid(input.brandKitId, 'brandKitId')
-      if (businessId || brandKitId) {
+      const brief = parseBrief(input.brief)
+      let businessId = parseOptionalUuid(input.businessId ?? (fromSaved ? undefined : input.brandId), 'businessId')
+      let brandKitId = parseOptionalUuid(input.brandKitId, 'brandKitId')
+      if (!fromSaved && (businessId || brandKitId)) {
         const owned = deps.verifyLinks ? await deps.verifyLinks({ userId: input.userId, businessId, brandKitId }) : false
         if (!owned) throw new AdPackError('NOT_FOUND', 'Brand or brand kit not found')
       }
@@ -607,8 +781,18 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
         }
       }
+      if (fromSaved) {
+        // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
+        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId }, input.source)
+        if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
+        dna = saved.dna
+        offer = saved.offer
+        businessId = saved.brandId
+        brandKitId = saved.brandKitId
+      }
+      if (!dna || !offer) throw bad('Provide brandId (+ offerId) or dna + offer')
       const angleIds = parseAngleIds(input.angleIds)
-      const planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, ids: { packId } })
+      const planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, brief, ids: { packId } })
       if (!planned.items.length) throw bad(angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
       await requireCredits(input.userId, planned.pack.size)
       try {
@@ -625,15 +809,22 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     getStatus,
 
     async pollStatus(input) {
-      const status = await getStatus(input)
-      if (!status.moreWork || status.leaseActive) return status
-      try {
-        await advance({ userId: input.userId, packId: status.packId, budgetMs: input.inlineBudgetMs ?? ADPACK_INLINE_BUDGET_MS })
-      } catch (err) {
-        if (isAdPackError(err)) throw err
-        console.error('[adpack] inline advance failed', err instanceof Error ? err.message : err)
+      let status = await getStatus(input)
+      if (status.moreWork && !status.leaseActive) {
+        try {
+          await advance({ userId: input.userId, packId: status.packId, budgetMs: input.inlineBudgetMs ?? ADPACK_INLINE_BUDGET_MS })
+        } catch (err) {
+          if (isAdPackError(err)) throw err
+          console.error('[adpack] inline advance failed', err instanceof Error ? err.message : err)
+        }
+        status = await getStatus(input)
       }
-      return getStatus(input)
+      // A dropped background task may have finished the pack without saving: retry here (idempotent).
+      const unsaved = status.items.some((i) => i.status === 'done' && i.renders.length && (i.libraryImageIds?.length ?? 0) < i.renders.length)
+      if (COMPLETE_PACK.has(status.status) && status.offerId && unsaved && (await persistLibrary(input.userId, status.packId))) {
+        status = await getStatus(input)
+      }
+      return status
     },
 
     advance,
@@ -643,7 +834,14 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const itemId = parseItemId(input.itemId)
       const copyPatch = parseCopyPatch(input.copy)
       const res = await editItemText({ store: deps.store, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, copyPatch })
-      if (res.ok) return { item: toItemView(res.item) }
+      if (res.ok) {
+        // The edited version replaces the renders: save it to the offer library too.
+        if (await persistLibrary(input.userId, packId)) {
+          const fresh = (await deps.store.getPack(packId, input.userId))?.items.find((i) => i.id === itemId)
+          if (fresh) return { item: toItemView(fresh) }
+        }
+        return { item: toItemView(res.item) }
+      }
       if (res.error === 'pack_not_found') throw new AdPackError('NOT_FOUND', 'Pack not found')
       if (res.error === 'item_not_found') throw new AdPackError('NOT_FOUND', 'Ad not found')
       if (res.error === 'item_not_rendered') throw new AdPackError('NOT_READY', 'This ad is not rendered yet')

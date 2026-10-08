@@ -24,6 +24,8 @@ export function packToRow(pack: Pack): Row {
     source: pack.source,
     dna: pack.dna,
     offer: pack.offer,
+    // Column from migration 083; only sent when set so packs without a brief insert on 082 alone.
+    ...(pack.brief ? { brief: pack.brief } : {}),
     created_at: pack.createdAt,
     updated_at: pack.updatedAt,
   }
@@ -42,6 +44,7 @@ export function rowToPack(r: Row): Pack {
     source: (r.source as Pack['source']) ?? 'web',
     dna: r.dna as Pack['dna'],
     offer: r.offer as Pack['offer'],
+    ...(typeof r.brief === 'string' && r.brief ? { brief: r.brief } : {}),
     createdAt: iso(r.created_at) ?? '',
     updatedAt: iso(r.updated_at) ?? '',
   }
@@ -57,6 +60,7 @@ const PACK_PATCH_COLUMNS: Partial<Record<keyof Pack, string>> = {
   source: 'source',
   dna: 'dna',
   offer: 'offer',
+  brief: 'brief',
 }
 
 const ITEM_PATCH_COLUMNS: Partial<Record<keyof PackItem, string>> = {
@@ -75,12 +79,15 @@ const ITEM_PATCH_COLUMNS: Partial<Record<keyof PackItem, string>> = {
   timings: 'timings',
   sceneAttempts: 'scene_attempts',
   chargedAt: 'charged_at',
+  libraryImages: 'library_images',
 }
 
 export function itemToRow(item: PackItem, userId: string): Row {
   const row: Row = { id: item.id, pack_id: item.packId, user_id: userId, item_index: item.index, updated_at: item.updatedAt }
   for (const [k, col] of Object.entries(ITEM_PATCH_COLUMNS)) {
     const v = (item as unknown as Row)[k]
+    // library_images (migration 083) has a DB default; never sent on insert so 082 alone still works.
+    if (col === 'library_images') continue
     if (col === 'renders') row[col] = v ?? []
     else if (col === 'cost_usd') row[col] = v ?? 0
     else row[col!] = v ?? null
@@ -111,6 +118,7 @@ export function rowToItem(r: Row): PackItem {
     timings: opt(r.timings),
     sceneAttempts: r.scene_attempts === null || r.scene_attempts === undefined ? undefined : Number(r.scene_attempts),
     chargedAt: iso(r.charged_at),
+    libraryImages: Array.isArray(r.library_images) && r.library_images.length ? (r.library_images as PackItem['libraryImages']) : undefined,
   }
   for (const [k, v] of Object.entries(extra)) if (v !== undefined) (item as unknown as Row)[k] = v
   return item

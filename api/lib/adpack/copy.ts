@@ -15,6 +15,7 @@ import { checkAdCopy, repairAdCopy } from './check-copy.js'
 import { complianceGuidance, getRequiredDisclaimer } from './compliance.js'
 import {
   ADPACK_COPY_MODEL,
+  briefBlock,
   buildCopyContext,
   defaultSceneFallback,
   factsAllowlistBlock,
@@ -121,12 +122,12 @@ function outputContract(ctx: CopyContext): string {
 }
 
 /** Build the single copy prompt. Exported for tests and for prompt inspection. */
-export function buildCopyPrompt(input: { dna: BrandDna; offer: OfferInput; angle: AdAngle; language: AdLanguage; otherCopies?: AdCopy[] }): CopyPrompt {
+export function buildCopyPrompt(input: { dna: BrandDna; offer: OfferInput; angle: AdAngle; language: AdLanguage; otherCopies?: AdCopy[]; brief?: string }): CopyPrompt {
   const ctx = buildCopyContext(input.dna, input.offer, input.angle, input.language)
-  return buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies })
+  return buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies, brief: input.brief })
 }
 
-function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[] }): CopyPrompt {
+function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[]; brief?: string }): CopyPrompt {
   const { dna, angle, language } = ctx
   const es = language === 'es'
   const compliance = complianceGuidance(dna.category, language)
@@ -160,6 +161,8 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[] 
   ].filter(Boolean)
 
   const forbidden = (dna.forbiddenPhrases ?? []).filter((p) => p.trim())
+  // Brand phrases (kit must-use): wording only; a phrase with a number no confirmed fact backs is dropped.
+  const mustUse = redactList(dna.mustUsePhrases, ctx, 8).filter((p) => extractNumericClaims(p).every((c) => confirmedNums.has(c.value)))
   const user = [
     brandLines.join('\n'),
     [
@@ -178,6 +181,12 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[] 
         : `Data NOT available (do not mention or invent): ${dna.gaps.join(', ')}`
       : '',
     forbidden.length ? `${es ? 'FRASES PROHIBIDAS (nunca usar)' : 'FORBIDDEN PHRASES (never use)'}: ${forbidden.join(' | ')}` : '',
+    mustUse.length
+      ? es
+        ? `Frases de marca (usá una solo si encaja natural; son estilo, no hechos): ${mustUse.join(' | ')}`
+        : `Brand phrases (use one only if it fits naturally; style, not facts): ${mustUse.join(' | ')}`
+      : '',
+    briefBlock(ctx.brief, ctx.confirmed, language),
     disclaimer
       ? es
         ? `Incluye este disclaimer literal en subline o caption: "${disclaimer}"`
@@ -199,6 +208,8 @@ export interface GenerateAdCopyInput {
   temperature?: number
   /** Other copies already in the pack (duplicate detection in the returned check). */
   otherCopies?: AdCopy[]
+  /** Owner's campaign brief: creative direction only (numbers no confirmed fact backs are stripped). */
+  brief?: string
 }
 
 export interface GeneratedAdCopy {
@@ -211,7 +222,7 @@ export interface GeneratedAdCopy {
 
 export async function generateAdCopy(input: GenerateAdCopyInput): Promise<GeneratedAdCopy> {
   const ctx = buildCopyContext(input.dna, input.offer, input.angle, input.language)
-  const prompt = buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies })
+  const prompt = buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies, brief: input.brief })
   const res = await input.gateway.json<RawModelCopy>({
     system: prompt.system,
     user: prompt.user,
@@ -245,6 +256,7 @@ export interface GeneratePackCopyInput {
   concurrency?: number
   /** One targeted repair for ads that fail the deterministic check (default true). */
   repair?: boolean
+  brief?: string
 }
 
 export type PackCopyItem =
@@ -265,7 +277,7 @@ export async function generatePackCopy(input: GeneratePackCopyInput): Promise<Pa
 
   // Phase 1 — parallel generation.
   const gen = await mapWithConcurrency(angles, concurrency, (angle) =>
-    generateAdCopy({ gateway, dna, offer, angle, language, model: input.model })
+    generateAdCopy({ gateway, dna, offer, angle, language, model: input.model, brief: input.brief })
   )
   const items: PackCopyItem[] = angles.map((angle, i) => {
     const r = gen[i]

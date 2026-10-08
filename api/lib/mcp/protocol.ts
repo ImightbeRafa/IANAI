@@ -169,7 +169,22 @@ function toolInputSchema(name: string): Record<string, unknown> {
   }
   const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10).' }
   const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
+  const adpackSavedBrand = {
+    brandId: { type: 'string', description: 'Brand id from list_brands. Use INSTEAD of dna + offer: the server builds them from the saved brand, kit and offer.' },
+    offerId: { type: 'string', description: 'Offer id from list_offers / get_brand_context (optional; default = the brand\'s most recent offer).' },
+    brandKitId: { type: 'string', description: 'Optional linked brand kit id (default = primary kit).' },
+  }
   switch (name) {
+    case 'adpack_from_brand':
+      return {
+        type: 'object',
+        properties: {
+          ...adpackSavedBrand,
+          refresh: { type: 'boolean', description: 'Re-read the stored website live (slower). Default false: use saved data only.' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
     case 'adpack_dna_ingest':
       return {
         type: 'object',
@@ -232,33 +247,37 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'adpack_angles':
       return {
         type: 'object',
-        properties: { dna: adpackDna, offer: adpackOffer, size: adpackSize },
-        required: ['dna', 'offer'],
+        properties: { ...adpackSavedBrand, dna: adpackDna, offer: adpackOffer, size: adpackSize },
         additionalProperties: false,
       }
     case 'adpack_quote':
       return {
         type: 'object',
-        properties: { size: adpackSize, dna: adpackDna, offer: adpackOffer },
+        properties: { ...adpackSavedBrand, size: adpackSize, dna: adpackDna, offer: adpackOffer },
         additionalProperties: false,
       }
     case 'adpack_start':
       return {
         type: 'object',
         properties: {
+          ...adpackSavedBrand,
+          brief: {
+            type: 'string',
+            maxLength: 500,
+            description: 'Optional campaign context from the user, e.g. "Black Friday, focus on bundles". Steers theme/emphasis only; never used as a fact, price or promise.',
+          },
           dna: adpackDna,
           offer: adpackOffer,
           size: adpackSize,
           angleIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of angle ids from adpack_angles (same size).' },
           ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] } },
-          businessId: { type: 'string' },
-          brandKitId: { type: 'string' },
+          businessId: { type: 'string', description: 'dna/offer path only: brand folder to link the pack to.' },
           approvalRequestId: {
             type: 'string',
             description: 'After in-chat confirm_execute approve. Do not invent. Retry with the exact same arguments.',
           },
         },
-        required: ['dna', 'offer'],
+        // Either brandId (+ offerId) or dna + offer; the service validates which one was sent.
         additionalProperties: false,
       }
     case 'adpack_status':

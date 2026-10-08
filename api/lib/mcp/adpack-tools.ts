@@ -13,6 +13,7 @@ import {
   ADPACK_BACKGROUND_BUDGET_MS,
   ADPACK_INLINE_BUDGET_MS,
   AdPackError,
+  deepLinkForAdPack,
   isAdPackError,
   type AdPackService,
 } from '../adpack/service.js'
@@ -57,10 +58,25 @@ function compactItem(item: AdPackItemView) {
     status: item.status,
     format: item.format,
     headline: item.headline ?? null,
+    caption: item.copy?.caption ?? null,
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl })),
     charged: item.charged,
+    savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.error ? { error: item.error } : {}),
   }
+}
+
+/** Finished ads ready to share without the web UI: PNG per ratio + caption text. */
+function shareableResults(status: AdPackStatusResponse) {
+  return status.items
+    .filter((i) => i.status === 'done' && i.renders.length)
+    .map((i) => ({
+      index: i.index,
+      headline: i.headline ?? null,
+      caption: i.copy?.caption ?? '',
+      images: Object.fromEntries(i.renders.map((r) => [r.ratio, r.imageUrl])) as Record<string, string>,
+      savedToLibrary: (i.libraryImageIds?.length ?? 0) >= i.renders.length,
+    }))
 }
 
 function statusPayload(status: AdPackStatusResponse, language: 'es' | 'en' = 'es') {
@@ -70,6 +86,7 @@ function statusPayload(status: AdPackStatusResponse, language: 'es' | 'en' = 'es
     : status.status === 'cancelled'
       ? 'Pack cancelado. / Pack cancelled.'
       : `Pack listo: ${done}/${total} anuncios${failed ? ` (${failed} fallaron)` : ''}. / Pack ready: ${done}/${total} ads${failed ? ` (${failed} failed)` : ''}.`
+  const finished = !status.moreWork && (status.status === 'done' || status.status === 'partial')
   return {
     packId: status.packId,
     status: status.status,
@@ -79,8 +96,17 @@ function statusPayload(status: AdPackStatusResponse, language: 'es' | 'en' = 'es
     moreWork: status.moreWork,
     items: status.items.map(compactItem),
     statusMessage,
+    ...(status.deepLink ? { deepLink: status.deepLink } : {}),
     ...(status.moreWork
       ? { retryAfterMs: 4_000, nextTool: 'adpack_status', instructionsForGrok: language === 'en' ? 'Poll adpack_status with this packId until moreWork=false, then show each ad image.' : 'Llamá adpack_status con este packId hasta moreWork=false y luego mostrá cada imagen.' }
+      : {}),
+    ...(finished
+      ? {
+        results: shareableResults(status),
+        instructionsForGrok: language === 'en'
+          ? `Share each result: show the PNG (images["4:5"] for feed, images["9:16"] for stories, images["1:1"] square) and paste its caption as the post text. ${status.deepLink ? `All ads are also saved in the brand folder: ${status.deepLink}` : ''}`.trim()
+          : `Compartí cada resultado: mostrá el PNG (images["4:5"] para feed, images["9:16"] para historias, images["1:1"] cuadrado) y pegá su caption como texto del post. ${status.deepLink ? `Todos los anuncios quedaron guardados en la carpeta de la marca: ${status.deepLink}` : ''}`.trim(),
+      }
       : {}),
   }
 }
@@ -149,11 +175,16 @@ async function finalize(options: {
 
 function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
-  for (const key of ['size', 'ratios', 'businessId', 'brandKitId'] as const) {
+  for (const key of ['size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds'] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
   return bound
 }
+
+const linkedBrandId = (args: Args): string | undefined =>
+  (typeof args.businessId === 'string' && args.businessId) || (typeof args.brandId === 'string' && args.brandId) || undefined
+
+const usesSavedBrand = (args: Args) => args.dna === undefined && args.offer === undefined && typeof args.brandId === 'string' && args.brandId !== ''
 
 export async function dispatchAdPackTool(options: {
   name: AdPackMcpToolName
@@ -183,17 +214,41 @@ export async function dispatchAdPackTool(options: {
           nextStep: 'Show dna.facts and dna.gaps to the user; confirm or fix facts with adpack_dna_confirm (only confirmed facts become claims).',
         }
       }
+      case 'adpack_from_brand': {
+        const res = await service.dnaFromBrand({
+          userId,
+          source: 'mcp',
+          brandId: args.brandId,
+          offerId: args.offerId,
+          brandKitId: args.brandKitId,
+          refresh: args.refresh,
+        })
+        return {
+          ...res,
+          nextTool: 'adpack_start',
+          nextStep: res.gaps.length
+            ? `Tell the user which facts are missing (${res.gaps.join(', ')}) — ads will simply not mention them. Then call adpack_start with { brandId: "${res.brandId}"${res.offerId ? `, offerId: "${res.offerId}"` : ''}, size, brief? } (no need to pass dna/offer).`
+            : `Ready. Call adpack_start with { brandId: "${res.brandId}"${res.offerId ? `, offerId: "${res.offerId}"` : ''}, size, brief? } (no need to pass dna/offer).`,
+        }
+      }
       case 'adpack_dna_confirm':
         return { ...(await service.confirmDna({ userId, dna: args.dna, edits: args.edits })) }
       case 'adpack_angles':
-        return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size })) }
+        return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })) }
       case 'adpack_quote':
-        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer })) }
+        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })) }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input = startBoundInput(args)
         // Validate + quote before asking for approval (same parser as the web door).
-        const quote = await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer })
+        // Saved-brand path: build DNA + offer from the owner's saved data (owner-scoped → NOT_FOUND otherwise).
+        const preview = usesSavedBrand(args)
+          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })
+          : null
+        const quote = preview
+          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer })
+          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer })
+        const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
         const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,
@@ -202,11 +257,17 @@ export async function dispatchAdPackTool(options: {
           input,
           approvalRequestId,
           quotedCreditCost: quote.credits,
-          summaryEs: `Pack de ${quote.size} anuncios estáticos (${quote.perAd} créditos por anuncio)`,
-          summaryEn: `Pack of ${quote.size} static ads (${quote.perAd} credits per ad)`,
+          summaryEs: `Pack de ${quote.size} anuncios estáticos${target} (${quote.perAd} créditos por anuncio)`,
+          summaryEn: `Pack of ${quote.size} static ads${target} (${quote.perAd} credits per ad)`,
           appOrigin: options.appOrigin,
         })
-        if ('prompt' in gate) return { ...gate.prompt, quote }
+        if ('prompt' in gate) {
+          return {
+            ...gate.prompt,
+            quote,
+            ...(preview ? { brandName: preview.dna.brandName, offerName: preview.offer.name, gaps: preview.gaps, notes: preview.notes } : {}),
+          }
+        }
         if ('replay' in gate) {
           const packId = String(gate.replay.packId || '')
           if (packId) scheduleAdvance(service, userId, packId)
@@ -216,6 +277,9 @@ export async function dispatchAdPackTool(options: {
           userId,
           dna: args.dna,
           offer: args.offer,
+          brandId: args.brandId,
+          offerId: args.offerId,
+          brief: args.brief,
           size: args.size,
           angleIds: args.angleIds,
           ratios: args.ratios,
@@ -235,14 +299,16 @@ export async function dispatchAdPackTool(options: {
           // Credits are charged per finished ad while the pack runs.
           chargedCredits: 0,
           nextTool: 'adpack_status',
-          message: 'Pack started. Poll adpack_status with packId until moreWork=false; credits are charged per finished ad.',
+          estimatedSeconds: Math.max(60, Math.round(started.quote.size * 12)),
+          ...(linkedBrandId(args) ? { deepLink: deepLinkForAdPack(options.appOrigin, linkedBrandId(args) as string, started.packId) } : {}),
+          message: 'Pack started (~2 min per 10 ads). Poll adpack_status with packId until moreWork=false; credits are charged per finished ad. When done, share each image URL + caption and the brand-folder deepLink.',
         }, 'adpack_start')
         await finalize({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', input, approvalRequestId, result })
         scheduleAdvance(service, userId, started.packId)
         return result
       }
       case 'adpack_status': {
-        const status = await service.pollStatus({ userId, packId: args.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS })
+        const status = await service.pollStatus({ userId, packId: args.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, appOrigin: options.appOrigin })
         if (status.moreWork) scheduleAdvance(service, userId, status.packId)
         return statusPayload(status, args.language === 'en' ? 'en' : 'es')
       }

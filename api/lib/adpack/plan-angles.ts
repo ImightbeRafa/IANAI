@@ -19,6 +19,7 @@ import type {
   OfferInput,
 } from './types.js'
 import { isFormatAllowed } from './compliance.js'
+import { briefForPrompt } from './copy-shared.js'
 import { confirmedKeys, extractNumericClaims, getConfirmed, mergeFacts, numbersInFacts } from './facts.js'
 import { ALL_ARCHETYPES, ALL_FORMATS, ALL_HOOKS, FORMAT_PATTERNS, getCategoryPattern, preferenceRank } from './patterns.js'
 import { cleanString, mulberry32, normalizeText, stableHash } from './util.js'
@@ -415,6 +416,8 @@ export interface RefineAnglesInput {
   offer: OfferInput
   language?: AdLanguage
   model?: string
+  /** Owner's campaign brief: theme/emphasis only; numbers no confirmed fact backs are stripped. */
+  brief?: string
 }
 
 export interface RefineAnglesResult {
@@ -437,12 +440,15 @@ export async function refineAnglesWithLlm(input: RefineAnglesInput): Promise<Ref
   const allowedNums = numbersInFacts(facts.filter((f) => f.confirmed))
   const system =
     language === 'es'
-      ? 'Sos estratega de anuncios de venta directa (método IAN). Reescribí SOLO el texto de "message" (un único mensaje de venta, ≤ 22 palabras, concreto y tangible) y "target" (el dolor/deseo/objeción en palabras del cliente, ≤ 12 palabras). No cambies ids ni agregues cifras, precios, plazos o promesas nuevas. Responde SOLO JSON: {"angles":[{"id":"...","message":"...","target":"..."}]}'
-      : 'You are a direct-response ad strategist (IAN method). Rewrite ONLY "message" (one single selling message, ≤ 22 words, concrete and tangible) and "target" (the pain/desire/objection in customer words, ≤ 12 words). Do not change ids or add new figures, prices, timings or promises. Reply with JSON only: {"angles":[{"id":"...","message":"...","target":"..."}]}'
+      ? 'Sos estratega de anuncios de venta directa (método IAN). Reescribí SOLO el texto de "message" (un único mensaje de venta, ≤ 22 palabras, concreto y tangible) y "target" (el dolor/deseo/objeción en palabras del cliente, ≤ 12 palabras). No cambies ids ni agregues cifras, precios, plazos o promesas nuevas. "campaignContext" (si existe) es solo dirección creativa del dueño (tema, temporada, énfasis), nunca un dato ni una promesa. Responde SOLO JSON: {"angles":[{"id":"...","message":"...","target":"..."}]}'
+      : 'You are a direct-response ad strategist (IAN method). Rewrite ONLY "message" (one single selling message, ≤ 22 words, concrete and tangible) and "target" (the pain/desire/objection in customer words, ≤ 12 words). Do not change ids or add new figures, prices, timings or promises. "campaignContext" (when present) is creative direction from the owner only (theme, season, emphasis), never a fact or a promise. Reply with JSON only: {"angles":[{"id":"...","message":"...","target":"..."}]}'
+  const campaignContext = briefForPrompt(input.brief, facts.filter((f) => f.confirmed))
   const user = JSON.stringify({
     brand: dna.brandName,
     offer: offer.name,
     voice: dna.voice ?? '',
+    // Creative direction only (theme / season / emphasis) — never a fact, number or promise.
+    ...(campaignContext ? { campaignContext } : {}),
     angles: angles.map((a) => ({ id: a.id, archetype: a.archetype, hookType: a.hookType, format: a.format, message: a.message, target: a.target })),
   })
   try {

@@ -80,6 +80,8 @@ export interface PlanPackInput {
   /** Fixed ids (tests / idempotent create). Item ids default to deterministic UUIDs from packId. */
   ids?: { packId?: string; itemIds?: string[] }
   seed?: string | number
+  /** Owner's campaign brief (already sanitized). Copy-prompt context only, never facts. */
+  brief?: string
 }
 
 export function itemGenerationId(packId: string, index: number, attempt = 0): string {
@@ -105,6 +107,7 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] 
     ratios,
     quotedCredits: quotePack(angles.length).credits,
     source: input.source,
+    ...(input.brief ? { brief: input.brief } : {}),
     createdAt: ts,
     updatedAt: ts,
   }
@@ -378,7 +381,7 @@ async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   let lastError = ''
   for (let attempt = 0; attempt < 2 && !gen; attempt++) {
     try {
-      gen = await generateAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item) })
+      gen = await generateAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief })
     } catch (error) {
       lastError = errorMessage(error)
     }

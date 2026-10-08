@@ -32,6 +32,7 @@ Inputs are only what a normal user can give: **website URL, Instagram URL, produ
 
 | Operation | Web | MCP tool |
 |---|---|---|
+| DNA + offer from a SAVED brand (business, kit, offer form, product photos, stored site analysis) | `dna_from_brand` | `adpack_from_brand` |
 | Ingest DNA from URL/IG/uploads | `POST /api/ad-pack {action:'dna_ingest'}` | `adpack_dna_ingest` |
 | Confirm/edit facts | `dna_confirm` | `adpack_dna_confirm` |
 | Plan angles | `angles` | `adpack_angles` |
@@ -76,4 +77,8 @@ Out of scope now: Meta account connection, video generation, auto-publishing.
 | 6 Studio UI | Done behind `VITE_ADPACK_STUDIO=true`; dev harness `/dev/adpack-studio` |
 | 7 Live benchmark | Partial (2026-10-08, `ad-pack-benchmark-2026-10.md`): 3 categories pass time/cost/scene gates (107–127 s, $0.32–0.44, 29/30 scenes); copy judge 67% < 80%; 4th/5th category and final 30-offer copy run blocked by xAI 403 (credits) |
 
-Before enabling in prod: apply 082, finish the 30-offer copy run + 5-category packs with the final code until the copy gate passes, copy `api/lib/adpack/render/fonts/` in the CF Dockerfile.
+### Saved brands (Grok happy path, 2026-10-08)
+
+`list_brands` → `adpack_from_brand {brandId, offerId?}` (optional, review gaps) → `adpack_start {brandId, offerId, size, brief?}` → user confirms in chat → `adpack_status` until done → share `results[]` (PNG per ratio + caption) and `deepLink` (brand folder). `start` accepts `brandId`/`offerId` instead of `dna`/`offer` (built server-side by `api/lib/adpack/saved-brand.ts`; owner-scoped, other users' ids → NOT_FOUND). Owner-typed business/offer fields are confirmed facts; stored site analysis stays unconfirmed; a price is used only when the offer holds a concrete amount. `brief` (≤ 500 chars, sanitized, unbacked numbers stripped) is campaign context in copy/angle prompts, never a fact. On completion every render is saved as `product_images` (kind `generated`, linked to the offer), idempotent per render URL (`ad_pack_items.library_images`).
+
+Before enabling in prod: apply 082 + 083 (`083_ad_pack_brief_library.sql`), finish the 30-offer copy run + 5-category packs with the final code until the copy gate passes, copy `api/lib/adpack/render/fonts/` in the CF Dockerfile.

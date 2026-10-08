@@ -467,12 +467,12 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
         throw new AdPackApiError(402, { error: 'Not enough AI credits for this pack', code: 'INSUFFICIENT_CREDITS', creditsRequired: quote.credits, remaining: credits })
       }
       const at = now()
-      const price = body.dna.facts.find((f) => f.key === 'price' && f.confirmed)?.value
+      const price = body.dna?.facts.find((f) => f.key === 'price' && f.confirmed)?.value
       const pack: SimPack = {
         id: uuid(),
         ratios: body.ratios?.length ? body.ratios : ['1:1', '4:5', '9:16'],
         size,
-        brandName: body.dna.brandName,
+        brandName: body.dna?.brandName ?? 'Marca',
         confirmedPrice: price,
         createdAt: new Date(at).toISOString(),
         items: angles.map((angle, index) => ({

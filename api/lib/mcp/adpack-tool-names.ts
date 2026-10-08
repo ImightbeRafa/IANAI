@@ -3,6 +3,7 @@
  * without loading the render stack (satori/resvg/sharp) at cold start.
  */
 export const ADPACK_MCP_TOOLS = [
+  'adpack_from_brand',
   'adpack_dna_ingest',
   'adpack_dna_confirm',
   'adpack_angles',

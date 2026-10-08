@@ -99,6 +99,8 @@ export interface BrandDna {
   /** Customer phrases (reviews, comments, captions) — best hook material. */
   customerPhrases?: string[]
   forbiddenPhrases?: string[]
+  /** Brand phrases the owner wants used when they fit (brand kit). Wording, never facts. */
+  mustUsePhrases?: string[]
   facts: DnaFact[]
   visual: DnaVisual
   /** Missing facts that would materially improve ads, e.g. ["price", "delivery_time"]. */
@@ -295,6 +297,14 @@ export interface PackItem {
   sceneAttempts?: number
   /** Set when credits were charged for `generationId`. */
   chargedAt?: string
+  /** Renders saved to the offer library (`product_images`, kind 'generated'). One entry per saved render URL. */
+  libraryImages?: LibraryImage[]
+}
+
+export interface LibraryImage {
+  ratio: AspectRatio
+  imageUrl: string
+  productImageId: string
 }
 
 export interface PackItemTimings {
@@ -319,6 +329,11 @@ export interface Pack {
   quotedCredits: number
   /** Origin door, for parity analytics. */
   source: 'web' | 'mcp'
+  /**
+   * Owner's campaign brief ("Black Friday, focus on bundles"), sanitized, ≤ 500 chars.
+   * Creative direction for angle/copy prompts only — never a fact or claim.
+   */
+  brief?: string
   createdAt: string
   updatedAt: string
 }

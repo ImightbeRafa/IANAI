@@ -79,7 +79,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'list_brands',
     group: 'brand_workspace',
     risk: 'read',
-    description: 'List brands owned by the signed-in user (or team-visible).',
+    description:
+      'List brands owned by the signed-in user (or team-visible). To make a batch of ads for one of them: adpack_start {brandId, offerId (defaultOfferId), size, brief?} (optionally adpack_from_brand first to review gaps).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -389,12 +390,24 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
 
   // Ad Pack engine (same service as POST /api/ad-pack) — 10 sell-ready static ads
   {
+    name: 'adpack_from_brand',
+    group: 'guide_studio',
+    risk: 'guide',
+    description:
+      'Ad Pack for an EXISTING brand (happy path): list_brands → adpack_from_brand {brandId, offerId?} (optional, to review gaps) → adpack_start {brandId, offerId, size, brief?} → the user confirms in chat (confirm_execute) → poll adpack_status until moreWork=false → share the image links, captions and the brand-folder deepLink. ' +
+      'This tool builds the Brand DNA + offer from what the owner already saved (brand, brand kit voice/colors/logo/forbidden phrases, offer form, real product photos, stored site analysis) — no URLs or uploads needed, no credits. ' +
+      'Returns {dna, offer, gaps, notes, quote}. Only facts the owner typed are confirmed and only confirmed facts are used for prices/claims (a price appears only if the offer has a concrete price); tell the user the gaps, ads will simply not mention them.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
     name: 'adpack_dna_ingest',
     group: 'guide_studio',
     risk: 'guide',
     description:
-      'Ad Pack step 1: build the Brand DNA (facts, voice, audience, visual style, gaps) from a website URL, Instagram profile, https uploads, an offer form and/or user facts. No Advance credits. ' +
-      'Show dna.facts and dna.gaps to the user, then confirm with adpack_dna_confirm.',
+      'Ad Pack for a NEW brand not saved in AdvanceAI: build the Brand DNA (facts, voice, audience, visual style, gaps) from a website URL, Instagram profile, https uploads, an offer form and/or user facts. No Advance credits. ' +
+      'For a brand that already exists use adpack_from_brand / adpack_start {brandId} instead. Show dna.facts and dna.gaps to the user, then confirm with adpack_dna_confirm.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -414,7 +427,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'guide_studio',
     risk: 'guide',
     description:
-      'Ad Pack step 3: plan distinct ad angles (IAN archetype × buyer pain/desire/objection × format) for dna + offer. Deterministic, no credits.',
+      'Ad Pack (optional): plan distinct ad angles (IAN archetype × buyer pain/desire/objection × format) for dna + offer, or for a saved brand via {brandId, offerId}. Deterministic, no credits. Pass chosen ids as angleIds to adpack_start.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -433,7 +446,10 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Ad Pack step 4: start a pack of static ads (credits per finished ad). Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
+      'Ad Pack: start a pack of sell-ready static ads (credits per finished ad). For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
+      'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
+      'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
+      'Guarantees: only confirmed facts are used for prices/claims; images keep the real product photo; text on the image is rendered exactly (never drawn by the image model). Takes ~2 min per 10 ads. ' +
       'Returns packId; poll adpack_status until moreWork=false.',
     enabled: true,
     requiresApproval: true,
@@ -444,7 +460,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'read',
     description:
-      'Ad Pack: progress of a pack by packId — per-ad status, headline and render URLs (1:1 / 4:5 / 9:16). Polling also resumes work, so keep polling until moreWork=false.',
+      'Ad Pack: progress of a pack by packId — per-ad status, headline, caption and direct PNG URLs (1:1 / 4:5 / 9:16). Polling also resumes work, so keep polling (about every 4 s; ~2 min per 10 ads) until moreWork=false. ' +
+      'When done it returns results[] (images per ratio + caption text to paste) and deepLink to the brand folder where every ad is saved with the offer; share those with the user.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,

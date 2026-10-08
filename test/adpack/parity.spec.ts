@@ -343,14 +343,15 @@ describe('MCP adpack_* tools', () => {
     const listed = await handleMcpJsonRpc({ body: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, user: { id: USER_A }, db: mcpDb })
     const tools = (listed.result as { tools: Array<{ name: string; inputSchema: { required?: string[] } }> }).tools
     const names = tools.map((t) => t.name)
-    for (const name of ['adpack_dna_ingest', 'adpack_dna_confirm', 'adpack_angles', 'adpack_quote', 'adpack_start', 'adpack_status', 'adpack_edit_text', 'adpack_regenerate']) {
+    for (const name of ['adpack_from_brand', 'adpack_dna_ingest', 'adpack_dna_confirm', 'adpack_angles', 'adpack_quote', 'adpack_start', 'adpack_status', 'adpack_edit_text', 'adpack_regenerate']) {
       expect(names).toContain(name)
     }
     expect(names).toContain('execute_campaign_pack')
     expect(names).toContain('confirm_execute')
-    expect(tools.find((t) => t.name === 'adpack_start')?.inputSchema.required).toEqual(['dna', 'offer'])
+    // adpack_start takes either brandId (+ offerId) or dna + offer: neither pair is schema-required.
+    expect(tools.find((t) => t.name === 'adpack_start')?.inputSchema.required).toBeUndefined()
     expect(tools.find((t) => t.name === 'adpack_status')?.inputSchema.required).toEqual(['packId'])
-    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(8)
+    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(9)
   })
 
   it('adpack_start requires in-chat approval; after confirm it returns packId and is idempotent', async () => {
