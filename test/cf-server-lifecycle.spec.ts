@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import http from 'node:http'
@@ -6,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { startAdapter } from './helpers/cf-server'
 
-const API_DIR = resolve(new URL('./fixtures/cf-api', import.meta.url).pathname)
+const API_DIR = resolve(fileURLToPath(new URL('./fixtures/cf-api', import.meta.url)))
 
 describe('cf server lifecycle', () => {
   it('drains background work on SIGTERM before exiting', async () => {
@@ -46,7 +47,7 @@ describe('cf server lifecycle', () => {
   it('gives 404 instead of crashing when STATIC_DIR is missing', async () => {
     const adapter = await startAdapter({
       apiDir: API_DIR,
-      staticDir: resolve(new URL('./fixtures/cf-static-missing', import.meta.url).pathname),
+      staticDir: resolve(fileURLToPath(new URL('./fixtures/cf-static-missing', import.meta.url))),
     })
     const res = await fetch(`${adapter.baseUrl}/chat/abc`)
     expect(res.status).toBe(404)

@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -7,7 +8,7 @@ import { cronsEnabled } from '../api/lib/crons-enabled'
 import { parseJsonc, scanProcessEnvNames } from '../scripts/parity/lib.mjs'
 import { VERCEL_ENV_NAMES } from '../scripts/parity/vercel-env-names.mjs'
 
-const ROOT = resolve(new URL('..', import.meta.url).pathname)
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 function makeFakeContainer(impl?: (req: Request) => Promise<Response>) {
   return vi.fn(
@@ -158,6 +159,30 @@ describe('handleFetch', () => {
     expect(fakeContainer).toHaveBeenCalledTimes(1)
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff')
     expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'")
+  })
+
+  it('routes /api/ad-pack (any method, with query) to the container, never ASSETS', async () => {
+    const fakeContainer = makeFakeContainer()
+    const assetsFetch = vi.fn()
+    const env: WorkerEnv = { ASSETS: { fetch: assetsFetch }, APP_ENV: 'production' }
+    for (const method of ['OPTIONS', 'GET', 'POST']) {
+      const res = await handleFetch(
+        new Request('http://worker.test/api/ad-pack?packId=abc', {
+          method,
+          body: method === 'POST' ? '{"action":"start"}' : undefined,
+        }),
+        env,
+        fakeContainer
+      )
+      expect(res.status).toBe(200)
+    }
+    expect(fakeContainer).toHaveBeenCalledTimes(3)
+    expect(assetsFetch).toHaveBeenCalledTimes(0)
+    const forwarded = fakeContainer.mock.calls[2][0] as Request
+    expect(new URL(forwarded.url).pathname).toBe('/api/ad-pack')
+    expect(new URL(forwarded.url).search).toBe('?packId=abc')
+    expect(forwarded.method).toBe('POST')
+    expect(await forwarded.text()).toBe('{"action":"start"}')
   })
 
   it('preserves a header the container already set', async () => {
@@ -375,6 +400,16 @@ describe('wrangler.jsonc', () => {
   it('every top-level cron is a key of CRON_PATHS', () => {
     for (const cron of wrangler.triggers.crons) {
       expect(Object.keys(CRON_PATHS)).toContain(cron)
+    }
+  })
+
+  it('every vercel.json cron (schedule + path) is covered by a top-level wrangler cron via CRON_PATHS', () => {
+    const vercel = JSON.parse(readFileSync(resolve(ROOT, 'vercel.json'), 'utf8')) as {
+      crons?: Array<{ path: string; schedule: string }>
+    }
+    for (const { path, schedule } of vercel.crons ?? []) {
+      expect(wrangler.triggers.crons).toContain(schedule)
+      expect(CRON_PATHS[schedule]).toContain(path)
     }
   })
 })

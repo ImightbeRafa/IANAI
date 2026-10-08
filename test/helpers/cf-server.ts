@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { resolve } from 'node:path'
 
@@ -8,7 +9,7 @@ export interface AdapterHandle {
   stop(): Promise<{ code: number | null; signal: NodeJS.Signals | null }>
 }
 
-const REPO_ROOT = resolve(new URL('../..', import.meta.url).pathname)
+const REPO_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 
 export async function startAdapter(opts: {
   apiDir: string

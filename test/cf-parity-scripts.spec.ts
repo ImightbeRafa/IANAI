@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -6,7 +7,7 @@ import { diffEnv, buildVercelNameTable } from '../scripts/parity/env-diff.mjs'
 import { buildRouteTable } from '../scripts/parity/route-table.mjs'
 import { VERCEL_ENV_NAMES } from '../scripts/parity/vercel-env-names.mjs'
 
-const ROOT = resolve(new URL('..', import.meta.url).pathname)
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 describe('route-table', () => {
   const rows = buildRouteTable(ROOT)

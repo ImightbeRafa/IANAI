@@ -1,10 +1,11 @@
+import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { startAdapter } from './helpers/cf-server'
 
-const ROOT = resolve(new URL('..', import.meta.url).pathname)
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const DIST_API = resolve(ROOT, 'dist-api')
 
 beforeAll(() => {
@@ -19,6 +20,36 @@ describe('build-api.mjs', () => {
     expect(existsSync(resolve(DIST_API, 'lib/auth.js'))).toBe(true)
     expect(existsSync(resolve(DIST_API, 'data/image-presets.js'))).toBe(true)
   })
+
+  it('compiles the Ad Pack route and engine, with fonts + OFL next to the render module', () => {
+    expect(existsSync(resolve(DIST_API, 'ad-pack.js'))).toBe(true)
+    expect(existsSync(resolve(DIST_API, 'lib/adpack/service.js'))).toBe(true)
+    expect(existsSync(resolve(DIST_API, 'lib/adpack/render/index.js'))).toBe(true)
+    // Every font fonts.ts references via new URL('./fonts/<file>', import.meta.url)
+    // must exist relative to the compiled fonts.js.
+    const fontsSrc = readFileSync(resolve(ROOT, 'api/lib/adpack/render/fonts.ts'), 'utf8')
+    const referenced = [...fontsSrc.matchAll(/new URL\('\.\/fonts\/([^']+\.ttf)'/g)].map((m) => m[1])
+    expect(referenced.length).toBe(9)
+    for (const file of referenced) {
+      expect(existsSync(resolve(DIST_API, 'lib/adpack/render/fonts', file))).toBe(true)
+    }
+    for (const ofl of ['poppins-OFL.txt', 'firasans-OFL.txt', 'anton-OFL.txt', 'archivoblack-OFL.txt', 'dmserifdisplay-OFL.txt']) {
+      expect(existsSync(resolve(DIST_API, 'lib/adpack/render/fonts', ofl))).toBe(true)
+    }
+    const manifest = JSON.parse(readFileSync(resolve(DIST_API, '_route-deadlines.json'), 'utf8'))
+    expect(manifest['/api/ad-pack']).toBe(120)
+  })
+
+  it('the compiled Ad Pack renderer renders a real PNG from dist-api (no ADPACK_FONTS_DIR)', () => {
+    const env = { ...process.env }
+    delete env.ADPACK_FONTS_DIR
+    const out = execFileSync(process.execPath, ['scripts/adpack-render-smoke.mjs', DIST_API], {
+      cwd: ROOT,
+      env,
+      encoding: 'utf8',
+    })
+    expect(out).toMatch(/adpack render ok: 1080x1080/)
+  }, 60_000)
 
   it('does not emit api/types', () => {
     expect(existsSync(resolve(DIST_API, 'types'))).toBe(false)

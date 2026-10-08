@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { randomBytes, createHash } from 'node:crypto'
 import http from 'node:http'
 import { resolve } from 'node:path'
@@ -5,8 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startAdapter, type AdapterHandle } from './helpers/cf-server'
 import { CF_CONTENT_SECURITY_POLICY } from '../cf/http-rules.mjs'
 
-const API_DIR = resolve(new URL('./fixtures/cf-api', import.meta.url).pathname)
-const STATIC_DIR = resolve(new URL('./fixtures/cf-static', import.meta.url).pathname)
+const API_DIR = resolve(fileURLToPath(new URL('./fixtures/cf-api', import.meta.url)))
+const STATIC_DIR = resolve(fileURLToPath(new URL('./fixtures/cf-static', import.meta.url)))
 
 let adapter: AdapterHandle
 
@@ -793,7 +794,7 @@ describe('cf server adapter', () => {
   describe('trailing-slash normalization before the deadline-manifest lookup', () => {
     it('/api/slow-no-module-deadline/ (trailing slash) gets the manifest-configured deadline, not the 300s default', async () => {
       const manifestAdapter = await startAdapter({
-        apiDir: resolve(new URL('./fixtures/cf-api-deadline-manifest', import.meta.url).pathname),
+        apiDir: resolve(fileURLToPath(new URL('./fixtures/cf-api-deadline-manifest', import.meta.url))),
         staticDir: STATIC_DIR,
       })
       try {
@@ -811,7 +812,7 @@ describe('cf server adapter', () => {
 
     it('the same route without a trailing slash still gets the manifest deadline (sanity check)', async () => {
       const manifestAdapter = await startAdapter({
-        apiDir: resolve(new URL('./fixtures/cf-api-deadline-manifest', import.meta.url).pathname),
+        apiDir: resolve(fileURLToPath(new URL('./fixtures/cf-api-deadline-manifest', import.meta.url))),
         staticDir: STATIC_DIR,
       })
       try {

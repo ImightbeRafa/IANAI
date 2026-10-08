@@ -41,6 +41,10 @@ export const CONTAINER_ENV_KEYS = Object.freeze([
   'GUIONES_DRAFT_MODEL_EFFICIENT',
   'GUIONES_SKIP_ANGLES_MAX_COUNT',
   'SHUTDOWN_DRAIN_MS',
+  // Optional override for the Ad Pack renderer's font folder. Unset in
+  // normal deploys: scripts/build-api.mjs copies the fonts next to the
+  // compiled render module (dist-api/lib/adpack/render/fonts/).
+  'ADPACK_FONTS_DIR',
 ])
 
 export function getContainerEnvVars(source) {

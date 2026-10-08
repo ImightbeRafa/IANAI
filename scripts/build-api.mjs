@@ -5,7 +5,7 @@
 // natively, and the 1:1 file layout keeps the existing `.js`-suffixed relative
 // imports valid at runtime.
 import { build } from 'esbuild'
-import { rm, readdir, readFile, writeFile } from 'node:fs/promises'
+import { cp, rm, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { walkApiHandlers } from './parity/lib.mjs'
@@ -61,6 +61,27 @@ async function writeRouteDeadlineManifest(outDir) {
   return Object.keys(manifest).length
 }
 
+// Non-TS runtime assets that api/ code loads from disk relative to its own
+// compiled module (`new URL('./fonts/x.ttf', import.meta.url)`). esbuild only
+// emits .js, so these are copied 1:1 into the same relative spot under
+// dist-api/ — e.g. api/lib/adpack/render/fonts/** -> dist-api/lib/adpack/
+// render/fonts/** (TTFs plus their OFL license files). Every file under each
+// listed directory is copied; a missing directory fails the build loudly
+// rather than shipping a renderer that can't find its fonts.
+const API_ASSET_DIRS = Object.freeze(['lib/adpack/render/fonts'])
+
+async function copyApiAssets(apiDir, outDir) {
+  let count = 0
+  for (const rel of API_ASSET_DIRS) {
+    const src = join(apiDir, rel)
+    const info = await stat(src).catch(() => null)
+    if (!info?.isDirectory()) throw new Error(`asset dir missing: api/${rel}`)
+    await cp(src, join(outDir, rel), { recursive: true })
+    count += (await readdir(src, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).length
+  }
+  return count
+}
+
 async function main() {
   const { outdir } = parseArgs(process.argv.slice(2))
   const apiDir = join(ROOT, 'api')
@@ -83,8 +104,11 @@ async function main() {
   })
 
   const routeCount = await writeRouteDeadlineManifest(outDir)
+  const assetCount = await copyApiAssets(apiDir, outDir)
 
-  console.log(`[build-api] ${entryPoints.length} files -> ${outdir} (${routeCount} route deadlines)`)
+  console.log(
+    `[build-api] ${entryPoints.length} files -> ${outdir} (${routeCount} route deadlines, ${assetCount} assets from ${API_ASSET_DIRS.map((d) => 'api/' + d).join(', ')})`,
+  )
 }
 
 main().catch((err) => {
