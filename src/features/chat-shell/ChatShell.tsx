@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Menu, PanelRight } from 'lucide-react'
 import type { BrandKit, ChatSession, ProductType } from '../../types'
@@ -37,6 +37,9 @@ import { useChatShellRollout } from './ChatShellRolloutContext'
 import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
 import ChatShellBulkDialog from './ChatShellBulkDialog'
+import type { AdPackStudioPrefill, AdPackUploadFn } from './ChatShellAdPackStudio'
+import { readFileAsDataUrl } from './chatShellComposerAttachments'
+import { uploadSetupBrandAsset } from './chatShellSetupUploads'
 import { clampComposerBulkCount, packFailureCopy } from './chatShellBulk'
 import { invalidateUsageLimitsCache } from '../../hooks/useUsageLimits'
 import { formatCreditsBalance } from './chatShellCreditQuote'
@@ -59,6 +62,11 @@ interface ChatShellProps {
   onOpenTour?: () => void
   tourRevealNav?: boolean
 }
+
+// Ad Pack studio replaces the legacy Pack dialog only when the flag is on
+// (default off in prod until the adpack DB migration is applied).
+const ADPACK_STUDIO_ENABLED = import.meta.env.VITE_ADPACK_STUDIO === 'true'
+const ChatShellAdPackStudio = ADPACK_STUDIO_ENABLED ? lazy(() => import('./ChatShellAdPackStudio')) : null
 
 export default function ChatShell({
   theme,
@@ -562,6 +570,51 @@ export default function ChatShell({
     || thread.offerProductId
     || workspace.activeSession?.product_id
   )
+  const adPackOfferId = thread.activeProduct?.id || thread.offers[0]?.product_id || workspace.activeSession?.product_id || undefined
+  const adPackKit = brandKits.find((kit) => kit.id === workspace.activeSession?.brand_kit_id)
+    || brandKits.find((kit) => kit.business_id === workspace.activeBrand?.id && kit.is_primary_for_business)
+  const adPackPrefill = useMemo<AdPackStudioPrefill>(() => ({
+    brandName: workspace.activeBrand?.name,
+    offerName: thread.activeProduct?.name,
+    websiteUrl: brandSetup.facts.sourceUrl || undefined,
+    logoUrl: adPackKit?.logo_url || brandSetup.facts.logo_url || undefined,
+    productImageUrls: thread.offerImages
+      .filter((img) => img.kind === 'product' && (!adPackOfferId || img.product_id === adPackOfferId))
+      .map((img) => img.image_url)
+      .slice(0, 6),
+    price: thread.activeProduct?.price_range || undefined,
+    businessId: workspace.activeBrand?.id,
+    brandKitId: adPackKit?.id,
+    productId: adPackOfferId,
+  }), [
+    workspace.activeBrand?.name,
+    workspace.activeBrand?.id,
+    thread.activeProduct?.name,
+    thread.activeProduct?.price_range,
+    thread.offerImages,
+    brandSetup.facts.sourceUrl,
+    brandSetup.facts.logo_url,
+    adPackKit?.logo_url,
+    adPackKit?.id,
+    adPackOfferId,
+  ])
+  const adPackChargedRef = useRef(0)
+  const adPackUpload = useCallback<AdPackUploadFn>(async (file, kind) => {
+    const sessionId = workspace.activeSession?.id
+    if (kind === 'product_photo' && sessionId && adPackOfferId) {
+      // Same path as chat product uploads: storage + product_images row on the offer.
+      const image = await uploadShellOfferImage({
+        userId,
+        sessionId,
+        productId: adPackOfferId,
+        dataUrl: await readFileAsDataUrl(file),
+        filename: file.name,
+        kind: 'product',
+      })
+      return image.image_url
+    }
+    return uploadSetupBrandAsset(file, kind === 'logo' ? 'logo' : 'reference')
+  }, [workspace.activeSession?.id, adPackOfferId, userId])
   const glassBlock = resolveGlassVerbBlock({
     kitReady: kitListo,
     hasOfferName,
@@ -1024,7 +1077,28 @@ export default function ChatShell({
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
 
-      {workspace.activeBrand ? (
+      {ChatShellAdPackStudio && workspace.activeBrand ? (
+        <Suspense fallback={null}>
+          <ChatShellAdPackStudio
+            key={workspace.activeBrand.id}
+            open={bulkOpen}
+            language={language}
+            prefill={adPackPrefill}
+            uploadFile={adPackUpload}
+            creditsRemaining={thread.creditsRemaining}
+            creditsEnabled={thread.creditsEnabled}
+            onClose={() => setBulkOpen(false)}
+            onPackStarted={() => invalidateUsageLimitsCache()}
+            onPackStatus={(status) => {
+              // Credits are charged per finished ad: refresh the balance when that count moves.
+              if (status.chargedCredits !== adPackChargedRef.current) {
+                adPackChargedRef.current = status.chargedCredits
+                invalidateUsageLimitsCache()
+              }
+            }}
+          />
+        </Suspense>
+      ) : workspace.activeBrand ? (
         <ChatShellBulkDialog
           open={bulkOpen && hasSessionOffer}
           language={language}

@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_ANON_KEY?: string
   /** Injected at build from process.env.VERCEL_ENV (preview | production | …). */
   readonly VITE_VERCEL_ENV?: string
+  /** 'true' opens the Ad Pack studio instead of the legacy Pack dialog (needs the adpack DB migration). */
+  readonly VITE_ADPACK_STUDIO?: string
 }
 
 interface ImportMeta {

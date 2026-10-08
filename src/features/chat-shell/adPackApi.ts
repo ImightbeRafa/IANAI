@@ -89,3 +89,28 @@ export function adPackRegenerate(body: AdPackRegenerateRequest): Promise<AdPackR
 export function adPackCancel(body: AdPackCancelRequest): Promise<AdPackCancelResponse> {
   return call('cancel', body)
 }
+
+/** Injectable client surface (the studio takes one; the DEV harness passes a mock). */
+export interface AdPackClient {
+  ingestDna: typeof adPackIngestDna
+  confirm: typeof adPackConfirm
+  angles: typeof adPackAngles
+  quote: typeof adPackQuote
+  start: typeof adPackStart
+  status: typeof adPackStatus
+  editText: typeof adPackEditText
+  regenerate: typeof adPackRegenerate
+  cancel: typeof adPackCancel
+}
+
+export const adPackClient: AdPackClient = {
+  ingestDna: adPackIngestDna,
+  confirm: adPackConfirm,
+  angles: adPackAngles,
+  quote: adPackQuote,
+  start: adPackStart,
+  status: adPackStatus,
+  editText: adPackEditText,
+  regenerate: adPackRegenerate,
+  cancel: adPackCancel,
+}
