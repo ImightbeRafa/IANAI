@@ -59,10 +59,12 @@ create index if not exists ad_pack_items_pending_idx
 alter table public.ad_packs enable row level security;
 alter table public.ad_pack_items enable row level security;
 
+drop policy if exists "Users can view own ad packs" on public.ad_packs;
 create policy "Users can view own ad packs"
   on public.ad_packs for select to authenticated
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can view own ad pack items" on public.ad_pack_items;
 create policy "Users can view own ad pack items"
   on public.ad_pack_items for select to authenticated
   using (auth.uid() = user_id);
