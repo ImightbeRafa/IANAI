@@ -41,7 +41,8 @@ describe('ChatShellScriptCard post preview', () => {
     fireEvent.click(screen.getByRole('button', { name: /crear post/i }))
     const editor = await screen.findByLabelText('Vista previa editable del post')
     expect((editor as HTMLTextAreaElement).value).toBe('Headline optimizado\nCTA optimizado')
-    expect(screen.getAllByRole('img')).toHaveLength(2)
+    // Reference thumbnails are filled by an effect after the preview opens (a tick after the editor).
+    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
 
     fireEvent.change(editor, { target: { value: 'Headline aprobado\nCTA por mensaje' } })
     fireEvent.click(screen.getByRole('button', { name: /continuar al tipo de post/i }))
