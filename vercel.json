@@ -24,6 +24,9 @@
     "api/mcp.ts": {
       "maxDuration": 180
     },
+    "api/ad-pack.ts": {
+      "maxDuration": 120
+    },
     "api/bulk-angles.ts": {
       "maxDuration": 60
     },

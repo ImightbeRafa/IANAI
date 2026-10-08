@@ -65,11 +65,13 @@ import {
   type McpBrandKitStore,
 } from './brand-kit-tools.js'
 import { auditMcpToolCall } from './tool-audit.js'
+import { dispatchAdPackTool, isAdPackMcpTool } from './adpack-tools.js'
+import { getDefaultAdPackService, type AdPackService } from '../adpack/service.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.9.5',
+  version: '0.10.0',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -149,7 +151,156 @@ function toolInputSchema(name: string): Record<string, unknown> {
     isDefault: { type: 'boolean' },
     setAsPrimary: { type: 'boolean' },
   }
+  const adpackDna = {
+    type: 'object',
+    description: 'BrandDna object exactly as returned by adpack_dna_ingest / adpack_dna_confirm (version 1).',
+  }
+  const adpackOffer = {
+    type: 'object',
+    description: 'Offer: { name, facts: [{ key, value, source, confirmed }], productImageUrls: [https URLs, first = hero], productId? }',
+    properties: {
+      name: { type: 'string' },
+      productId: { type: 'string' },
+      facts: { type: 'array', items: { type: 'object' } },
+      productImageUrls: { type: 'array', items: { type: 'string' } },
+      productCutoutUrl: { type: 'string' },
+    },
+    required: ['name'],
+  }
+  const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10).' }
+  const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
   switch (name) {
+    case 'adpack_dna_ingest':
+      return {
+        type: 'object',
+        properties: {
+          websiteUrl: { type: 'string' },
+          instagramUrl: { type: 'string', description: 'Instagram profile URL or @handle' },
+          uploads: {
+            type: 'array',
+            maxItems: 12,
+            items: {
+              type: 'object',
+              properties: {
+                kind: { type: 'string', enum: ['product_photo', 'logo', 'reference_ad', 'review_screenshot', 'document'] },
+                url: { type: 'string', description: 'https URL (no base64 from chat)' },
+                text: { type: 'string' },
+                name: { type: 'string' },
+              },
+              required: ['kind'],
+            },
+          },
+          offerForm: {
+            type: 'object',
+            description: '{ name?, brandName?, facts?: { price: "9900 CRC", ... }, productImageUrls? }',
+          },
+          userFacts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { key: { type: 'string' }, value: { type: 'string' }, evidence: { type: 'string' } },
+              required: ['key', 'value'],
+            },
+          },
+          language: { type: 'string', enum: ['es', 'en'] },
+        },
+        additionalProperties: false,
+      }
+    case 'adpack_dna_confirm':
+      return {
+        type: 'object',
+        properties: {
+          dna: adpackDna,
+          edits: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                op: { type: 'string', enum: ['confirm', 'edit', 'add', 'remove'] },
+                key: { type: 'string' },
+                value: { type: 'string' },
+                previousValue: { type: 'string' },
+                evidence: { type: 'string' },
+              },
+              required: ['op', 'key'],
+            },
+          },
+        },
+        required: ['dna', 'edits'],
+        additionalProperties: false,
+      }
+    case 'adpack_angles':
+      return {
+        type: 'object',
+        properties: { dna: adpackDna, offer: adpackOffer, size: adpackSize },
+        required: ['dna', 'offer'],
+        additionalProperties: false,
+      }
+    case 'adpack_quote':
+      return {
+        type: 'object',
+        properties: { size: adpackSize, dna: adpackDna, offer: adpackOffer },
+        additionalProperties: false,
+      }
+    case 'adpack_start':
+      return {
+        type: 'object',
+        properties: {
+          dna: adpackDna,
+          offer: adpackOffer,
+          size: adpackSize,
+          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] } },
+          businessId: { type: 'string' },
+          brandKitId: { type: 'string' },
+          approvalRequestId: {
+            type: 'string',
+            description: 'After in-chat confirm_execute approve. Do not invent. Retry with the exact same arguments.',
+          },
+        },
+        required: ['dna', 'offer'],
+        additionalProperties: false,
+      }
+    case 'adpack_status':
+      return {
+        type: 'object',
+        properties: { packId: adpackPackId, language: { type: 'string', enum: ['es', 'en'] } },
+        required: ['packId'],
+        additionalProperties: false,
+      }
+    case 'adpack_edit_text':
+      return {
+        type: 'object',
+        properties: {
+          packId: adpackPackId,
+          itemId: { type: 'string' },
+          copy: {
+            type: 'object',
+            properties: {
+              headline: { type: 'string' },
+              subline: { type: 'string' },
+              bullets: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+              offerLine: { type: 'string' },
+              cta: { type: 'string' },
+              caption: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+        },
+        required: ['packId', 'itemId', 'copy'],
+        additionalProperties: false,
+      }
+    case 'adpack_regenerate':
+      return {
+        type: 'object',
+        properties: {
+          packId: adpackPackId,
+          itemId: { type: 'string' },
+          mode: { type: 'string', enum: ['copy', 'scene'], description: 'copy = new copy + image; scene = keep text, new image (default)' },
+          approvalRequestId: { type: 'string', description: 'After in-chat confirm_execute approve. Do not invent.' },
+        },
+        required: ['packId', 'itemId'],
+        additionalProperties: false,
+      }
     case 'get_brand_context':
       return {
         type: 'object',
@@ -674,6 +825,8 @@ export async function handleMcpJsonRpc(options: {
   adminStore?: McpAdminStore | null
   deleteStore?: McpDeleteStore | null
   brandKitStore?: McpBrandKitStore | null
+  /** Ad Pack service (defaults to the shared Supabase-backed service). */
+  adPackService?: AdPackService | null
   isAdmin?: boolean
   appOrigin?: string
 }): Promise<McpJsonRpcResponse> {
@@ -728,6 +881,7 @@ export async function handleMcpJsonRpc(options: {
           adminStore: options.adminStore,
           deleteStore: options.deleteStore,
           brandKitStore: options.brandKitStore,
+          adPackService: options.adPackService,
           isAdmin,
           appOrigin: options.appOrigin,
         })
@@ -787,6 +941,7 @@ async function dispatchEnabledTool(options: {
   adminStore?: McpAdminStore | null
   deleteStore?: McpDeleteStore | null
   brandKitStore?: McpBrandKitStore | null
+  adPackService?: AdPackService | null
   isAdmin?: boolean
   appOrigin?: string
 }): Promise<unknown> {
@@ -797,6 +952,17 @@ async function dispatchEnabledTool(options: {
       name: options.name,
       args: options.args,
       store: options.adminStore,
+    })
+  }
+
+  if (isAdPackMcpTool(options.name)) {
+    return dispatchAdPackTool({
+      name: options.name,
+      args: options.args,
+      user: options.user,
+      service: options.adPackService ?? getDefaultAdPackService(),
+      approvalStore: options.approvalStore,
+      appOrigin: options.appOrigin,
     })
   }
 
