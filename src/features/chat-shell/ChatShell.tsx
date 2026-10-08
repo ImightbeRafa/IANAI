@@ -38,6 +38,7 @@ import { useClassicSessionLibrary } from './useClassicSessionLibrary'
 import ChatShellMcpIntakeDialog from './ChatShellMcpIntakeDialog'
 import ChatShellBulkDialog from './ChatShellBulkDialog'
 import type { AdPackStudioPrefill, AdPackUploadFn } from './ChatShellAdPackStudio'
+import { useAdPackDeepLink } from './chatShellAdPackDeepLink'
 import { readFileAsDataUrl } from './chatShellComposerAttachments'
 import { uploadSetupBrandAsset } from './chatShellSetupUploads'
 import { clampComposerBulkCount, packFailureCopy } from './chatShellBulk'
@@ -63,10 +64,12 @@ interface ChatShellProps {
   tourRevealNav?: boolean
 }
 
-// Ad Pack studio replaces the legacy Pack dialog only when the flag is on
-// (default off in prod until the adpack DB migration is applied).
+// Ad Pack studio replaces the legacy Pack dialog (composer / slash entry points) only when
+// the flag is on (default off in prod until the adpack DB migration is applied). A
+// `?adpack=<packId>` deep link (from Grok / status.deepLink) always opens the studio on
+// Resultados, flag or not; the chunk is only fetched when one of the two is rendered.
 const ADPACK_STUDIO_ENABLED = import.meta.env.VITE_ADPACK_STUDIO === 'true'
-const ChatShellAdPackStudio = ADPACK_STUDIO_ENABLED ? lazy(() => import('./ChatShellAdPackStudio')) : null
+const ChatShellAdPackStudio = lazy(() => import('./ChatShellAdPackStudio'))
 
 export default function ChatShell({
   theme,
@@ -111,6 +114,8 @@ export default function ChatShell({
   })
   const [mcpIntakeBusy, setMcpIntakeBusy] = useState(false)
   const workspace = useChatShellWorkspace(userId)
+  // Wait for the brand (or for brands to finish loading: a foreign brand never loads → NOT_FOUND).
+  const adPackDeepLink = useAdPackDeepLink(Boolean(workspace.activeBrand) || !workspace.loadingBusinesses)
   const patchActiveSession = workspace.patchActiveSession
 
   const onSessionPatched = useCallback((session: ChatSession) => {
@@ -1077,7 +1082,30 @@ export default function ChatShell({
         onQuickEnhance={(mode) => void quickEnhanceImage(mode)}
       />
 
-      {ChatShellAdPackStudio && workspace.activeBrand ? (
+      {adPackDeepLink.packId ? (
+        <Suspense fallback={null}>
+          <ChatShellAdPackStudio
+            key={`adpack-link-${adPackDeepLink.packId}`}
+            open
+            initialPackId={adPackDeepLink.packId}
+            allowNewPack={ADPACK_STUDIO_ENABLED}
+            language={language}
+            prefill={adPackPrefill}
+            uploadFile={adPackUpload}
+            creditsRemaining={thread.creditsRemaining}
+            creditsEnabled={thread.creditsEnabled}
+            onClose={adPackDeepLink.close}
+            onPackStatus={(status) => {
+              if (status.chargedCredits !== adPackChargedRef.current) {
+                adPackChargedRef.current = status.chargedCredits
+                invalidateUsageLimitsCache()
+              }
+            }}
+          />
+        </Suspense>
+      ) : null}
+
+      {ADPACK_STUDIO_ENABLED && workspace.activeBrand ? (
         <Suspense fallback={null}>
           <ChatShellAdPackStudio
             key={workspace.activeBrand.id}

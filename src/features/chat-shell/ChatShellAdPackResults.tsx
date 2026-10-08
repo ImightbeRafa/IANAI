@@ -74,6 +74,7 @@ export default function ChatShellAdPackResults({
 }: AdPackResultsProps) {
   const [status, setStatus] = useState<AdPackStatusResponse | null>(null)
   const [pollError, setPollError] = useState<string | null>(null)
+  const [notFound, setNotFound] = useState(false)
   const [pollNonce, setPollNonce] = useState(0)
   const [cancelAsk, setCancelAsk] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -97,12 +98,15 @@ export default function ChatShellAdPackResults({
         if (cancelled) return
         errors = 0
         setPollError(null)
+        setNotFound(false)
         applyStatus(next)
         if (!shouldKeepPolling(next)) return
       } catch (err) {
         if (cancelled) return
         if (err instanceof AdPackApiError && err.code === 'NOT_FOUND') {
-          setPollError(err.message)
+          // Bad / foreign pack id (e.g. a deep link from another account): stop polling, say so plainly.
+          setNotFound(true)
+          setPollError(null)
           return
         }
         errors += 1
@@ -128,6 +132,8 @@ export default function ChatShellAdPackResults({
   }, [])
 
   const items = status?.items ?? []
+  // Deep-linked packs (no start response in this session): derive the per-ad price from the quote.
+  const perAdCredits = perAd || (status?.size ? Math.round(status.quotedCredits / status.size) : 0)
   const packRatios = status?.ratios?.length ? status.ratios : ratios
   const doneItems = items.filter((i) => i.status === 'done')
   const total = status?.progress.total ?? 0
@@ -171,6 +177,15 @@ export default function ChatShellAdPackResults({
     onAnnounce(ok ? t.copied : t.copyFailed)
   }
 
+  if (notFound && !status) {
+    return (
+      <section className="chat-shell__adpack-results" aria-labelledby="adpack-results-heading">
+        <h3 id="adpack-results-heading" className="chat-shell__adpack-h">{t.resultsHeading}</h3>
+        <p className="chat-shell__adpack-error" role="alert">{t.packNotFound}</p>
+      </section>
+    )
+  }
+
   return (
     <section className="chat-shell__adpack-results" aria-labelledby="adpack-results-heading">
       <div className="chat-shell__adpack-packbar">
@@ -181,6 +196,7 @@ export default function ChatShellAdPackResults({
           </h3>
           <p className="chat-shell__adpack-progress-text" aria-live="polite">
             {status ? progressLine(status.progress, language) : t.starting}
+            {notFound ? <span className="chat-shell__adpack-warn"> · {t.packNotFound}</span> : null}
             {pollError ? <span className="chat-shell__adpack-warn"> · {pollError}</span> : null}
           </p>
         </div>
@@ -244,7 +260,7 @@ export default function ChatShellAdPackResults({
               language={language}
               labels={t}
               brandName={brandName}
-              perAd={perAd}
+              perAd={perAdCredits}
               cancelled={status?.status === 'cancelled'}
               onUpdate={updateItem}
               onOpenImage={onOpenImage}

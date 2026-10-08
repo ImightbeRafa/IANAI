@@ -64,6 +64,10 @@ export interface ChatShellAdPackStudioProps {
   onClose: () => void
   onPackStarted?: (packId: string) => void
   onPackStatus?: (status: AdPackStatusResponse) => void
+  /** Open directly on Resultados for an existing pack (`?adpack=<packId>` deep link). */
+  initialPackId?: string | null
+  /** Show "Nuevo pack" on Resultados (false when the studio entry points are flagged off). */
+  allowNewPack?: boolean
 }
 
 type Step = 1 | 2 | 3
@@ -117,6 +121,8 @@ export default function ChatShellAdPackStudio({
   onClose,
   onPackStarted,
   onPackStatus,
+  initialPackId = null,
+  allowNewPack = true,
 }: ChatShellAdPackStudioProps) {
   const t = adPackT(language)
   const titleId = useId()
@@ -125,7 +131,7 @@ export default function ChatShellAdPackStudio({
   const restoreFocusRef = useRef<HTMLElement | null>(null)
   const dnaRef = useRef<HTMLElement>(null)
 
-  const [step, setStep] = useState<Step>(1)
+  const [step, setStep] = useState<Step>(initialPackId ? 3 : 1)
   // Step 1
   const [websiteUrl, setWebsiteUrl] = useState(prefill?.websiteUrl ?? '')
   const [instagramUrl, setInstagramUrl] = useState(prefill?.instagramUrl ?? '')
@@ -148,7 +154,7 @@ export default function ChatShellAdPackStudio({
   const [planning, setPlanning] = useState(false)
   const [starting, setStarting] = useState(false)
   // Step 3
-  const [packId, setPackId] = useState<string | null>(null)
+  const [packId, setPackId] = useState<string | null>(initialPackId)
   const [packRatios, setPackRatios] = useState<AspectRatio[]>([...ADPACK_RATIOS])
   const [perAd, setPerAd] = useState(0)
   // Shared
@@ -161,6 +167,14 @@ export default function ChatShellAdPackStudio({
   useEffect(() => () => {
     for (const u of uploadsRef.current) if (u.objectUrl) URL.revokeObjectURL(u.objectUrl)
   }, [])
+
+  // A new deep link while mounted jumps to that pack's results.
+  useEffect(() => {
+    if (!initialPackId) return
+    setPackId(initialPackId)
+    setStep(3)
+    setError(null)
+  }, [initialPackId])
 
   // Prefill arrives async in ChatShell (brand / offer load): fill only untouched fields.
   useEffect(() => {
@@ -697,7 +711,7 @@ export default function ChatShellAdPackStudio({
               packId={packId}
               language={language}
               labels={t}
-              brandName={confirmedDna?.brandName ?? dna?.brandName ?? ''}
+              brandName={confirmedDna?.brandName ?? dna?.brandName ?? prefill?.brandName ?? ''}
               ratios={packRatios}
               perAd={perAd}
               onOpenImage={setLightbox}
@@ -719,7 +733,7 @@ export default function ChatShellAdPackStudio({
           {step === 1 && dna ? (
             <span className="chat-shell__adpack-muted chat-shell__adpack-footer-meta">{t.confirmedCount(confirmedN, rows.length + gapDrafts.length)}</span>
           ) : null}
-          {step === 3 ? (
+          {step === 3 && allowNewPack ? (
             <button type="button" className="chat-shell__adpack-btn" onClick={resetAll}>{t.newPack}</button>
           ) : null}
           <button type="button" className="chat-shell__adpack-btn" onClick={onClose}>{t.close}</button>
