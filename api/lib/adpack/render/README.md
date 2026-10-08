@@ -57,9 +57,10 @@ a 60 px margin. `copySpaceHint(format, ratio)` tells the scene prompt where to l
 - Fonts are read from disk with literal `new URL('./fonts/<file>.ttf', import.meta.url)` paths so
   Vercel's file tracing bundles them. If a function ever misses them, add
   `"includeFiles": "api/lib/adpack/render/fonts/**"` to that function in `vercel.json`.
-- **Cloudflare container**: `scripts/build-api.mjs` compiles `api/` → `dist-api/`, which does not copy
-  non-TS assets. The Dockerfile (or build script) must copy `api/lib/adpack/render/fonts/` to
-  `dist-api/lib/adpack/render/fonts/`, or set `ADPACK_FONTS_DIR` to wherever the `.ttf` files live.
+- **Cloudflare container**: `scripts/build-api.mjs` compiles `api/` → `dist-api/` and copies
+  `api/lib/adpack/render/fonts/**` to `dist-api/lib/adpack/render/fonts/`, so no `ADPACK_FONTS_DIR`
+  is needed. The Dockerfile renders one ad from `dist-api` at build time
+  (`scripts/adpack-render-smoke.mjs`) and fails the image if fonts or native bindings are missing.
 - Native deps: `sharp` and `@resvg/resvg-js` (prebuilt `win32-x64-msvc`, `linux-x64-gnu` for Vercel
   and `node:22-slim`, `linux-x64-musl` for Alpine). `satori` ships HarfBuzz as WASM (`harfbuzzjs/hb.wasm`);
   keep `node_modules/harfbuzzjs` intact when pruning.

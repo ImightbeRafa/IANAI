@@ -24,7 +24,11 @@ does and does not do.
    - `node scripts/parity/upload-limits.mjs --base-url http://127.0.0.1:8080 --image advance-ai:local`
      — unauthenticated JSON bodies at each handler's size limit (expect 401)
      and limit+1 (expect 413).
-   Both scripts refuse non-local base URLs unless `--allow-remote` is passed,
+   - `bash scripts/parity/container-smoke.sh http://127.0.0.1:8080` — SPA index,
+     hashed asset + MIME, SPA fallback, `/api/ad-pack` OPTIONS/401, `/api/chat`
+     401, unknown route 404, oauth-protected-resource rewrites, cron guard,
+     body-size 413s. Read-only; also the post-cutover smoke against prod.
+   The two `.mjs` scripts refuse non-local base URLs unless `--allow-remote` is passed,
    and print the image digest they ran against (`IMAGE_DIGEST` env, or
    `docker image inspect` via `--image`, or `(unknown)`).
 4. Phase 2 QA against a real Preview deployment (behind Cloudflare Access,

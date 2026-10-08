@@ -6,6 +6,7 @@ Every `/api/*` route, derived from the current `api/**/*.ts` source and `vercel.
 
 | Route | Methods | Auth (detected) | Body parser | Max duration (Vercel) | waitUntil |
 |---|---|---|---|---|---|
+| `/api/ad-pack` | OPTIONS, POST | user JWT (401 without) | default (4.5mb) | 120 | yes |
 | `/api/admin-billing` | GET, OPTIONS | admin JWT (401 unauth, 403 non-admin) | default (4.5mb) | default | no |
 | `/api/admin-image-performance` | GET, OPTIONS | admin JWT (401 unauth, 403 non-admin) | default (4.5mb) | 60 | no |
 | `/api/admin-referrals` | GET, OPTIONS | admin JWT (401 unauth, 403 non-admin) | default (4.5mb) | default | no |

@@ -115,6 +115,7 @@ human in a browser once Preview is behind Access.
 
 | Route | Methods | Auth (detected) | Body parser | Vercel maxDuration | waitUntil | Expected (Vercel prod) | CF result | Tag |
 |---|---|---|---|---|---|---|---|---|
+| `/api/ad-pack` | OPTIONS, POST | user JWT (401 without) | default (4.5mb) | 120 | yes | 401 unauth; 200 JSON for a signed-in user; non-matching method -> 405 | PENDING | [needs browser session behind Access] |
 | `/api/admin-billing` | GET, OPTIONS | admin JWT (401 unauth, 403 non-admin) | default (4.5mb) | default | no | 401 unauth; 403 non-admin; 200 JSON for an admin user; non-matching method -> 405 | PENDING | [needs browser session behind Access] |
 | `/api/admin-image-performance` | GET, OPTIONS | admin JWT (401 unauth, 403 non-admin) | default (4.5mb) | 60 | no | 401 unauth; 403 non-admin; 200 JSON for an admin user; non-matching method -> 405 | PENDING | [needs browser session behind Access] |
 | `/api/admin-referrals` | GET, OPTIONS | admin JWT (401 unauth, 403 non-admin) | default (4.5mb) | default | no | 401 unauth; 403 non-admin; 200 JSON for an admin user; non-matching method -> 405 | PENDING | [needs browser session behind Access] |
