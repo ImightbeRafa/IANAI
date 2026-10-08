@@ -3,6 +3,7 @@
  */
 
 import { sectionsFromStoredContent } from '../guiones/script-sections-parse.js'
+import { legacyActionToCredit, quoteCredits } from '../credits/catalog.js'
 import {
   clampBulkCount,
   orchestrateAngles,
@@ -757,7 +758,7 @@ export async function mcpExecuteBulkPosts(options: {
           statusMessage: buildExecuteStatusMessage(toolName, item.error ? 'failed' : 'completed'),
         })),
         deepLink: deepLinkForPack(options.appOrigin, brandId, result.sessionId, result.packId),
-        note: `Charged ${quoteLegacyActionCredits('image', imageModel)} credits per succeeded image (plus any expanded product refs).`,
+        note: `Charged ${quoteImageCredits(imageModel)} credits per succeeded image (plus any expanded product refs).`,
       }, toolName)
       await finalizeIfSucceeded({
         approvalStore: options.approvalStore,
@@ -1193,3 +1194,9 @@ export async function mcpExecuteCampaignPack(options: {
 }
 
 export type { StyleDna } from '../bulk/types.js'
+
+/** Mirrors auth.quoteLegacyActionCredits without importing the auth module. */
+function quoteImageCredits(imageModel?: string | null): number {
+  const mapped = legacyActionToCredit({ action: 'image', imageModel })
+  return quoteCredits(mapped.creditAction, mapped.units)
+}

@@ -13,6 +13,7 @@ import {
   quoteLegacyActionCredits,
 } from '../auth.js'
 import { isCreditsV1Enabled } from '../credits/catalog.js'
+import { logApiUsage, estimateTokens } from '../usage-logger.js'
 import { usageTimingMetadata } from '../usage-timings.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { scriptsToSectionsDto } from '../guiones/script-output.js'
