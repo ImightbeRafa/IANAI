@@ -15,18 +15,22 @@
     "typecheck:worker": "tsc -p tsconfig.cf-worker.json",
     "parity:routes": "node scripts/parity/route-table.mjs --out docs/operations/cloudflare-route-table.md",
     "parity:checklist": "node scripts/parity/route-table.mjs --inline docs/operations/cloudflare-parity-checklist.md",
-    "parity:env": "node scripts/parity/env-diff.mjs"
+    "parity:env": "node scripts/parity/env-diff.mjs",
+    "typecheck:adpack": "tsc -p tsconfig.adpack.json"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
+    "@resvg/resvg-js": "2.6.2",
     "@supabase/supabase-js": "^2.45.0",
     "@vercel/functions": "^2.2.13",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.441.0",
+    "opentype.js": "1.3.4",
     "pdf-parse": "^1.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
+    "satori": "0.33.5",
     "sharp": "^0.35.3"
   },
   "overrides": {
@@ -41,6 +45,7 @@
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.4",
+    "@types/opentype.js": "1.3.9",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/sharp": "^0.31.1",

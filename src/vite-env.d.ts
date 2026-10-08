@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_APP_ENV?: string
   /** Comma-separated exact-match hostnames treated as Preview (e.g. a Cloudflare preview Worker hostname). */
   readonly VITE_PREVIEW_HOSTS?: string
+  /** 'true' opens the Ad Pack studio instead of the legacy Pack dialog (needs the adpack DB migration). */
+  readonly VITE_ADPACK_STUDIO?: string
 }
 
 interface ImportMeta {

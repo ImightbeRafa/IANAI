@@ -72,6 +72,8 @@ export function executeWorkKind(toolName: string):
   | 'bulk_posts'
   | 'carousel'
   | 'campaign'
+  | 'ad_pack'
+  | 'ad_regenerate'
   | 'generic' {
   switch (toolName) {
     case 'execute_script_generate':
@@ -90,6 +92,10 @@ export function executeWorkKind(toolName: string):
       return 'carousel'
     case 'execute_campaign_pack':
       return 'campaign'
+    case 'adpack_start':
+      return 'ad_pack'
+    case 'adpack_regenerate':
+      return 'ad_regenerate'
     default:
       return 'generic'
   }
@@ -118,7 +124,11 @@ export function buildExecuteStatusMessage(
                   ? 'un carrusel'
                   : kind === 'campaign'
                     ? 'un pack de campaña'
-                    : 'tu solicitud'
+                    : kind === 'ad_pack'
+                      ? 'un pack de anuncios'
+                      : kind === 'ad_regenerate'
+                        ? 'un anuncio nuevo'
+                        : 'tu solicitud'
   const nounEn =
     kind === 'script'
       ? 'a script'
@@ -136,7 +146,11 @@ export function buildExecuteStatusMessage(
                   ? 'a carousel'
                   : kind === 'campaign'
                     ? 'a campaign pack'
-                    : 'your request'
+                    : kind === 'ad_pack'
+                      ? 'an ad pack'
+                      : kind === 'ad_regenerate'
+                        ? 'a regenerated ad'
+                        : 'your request'
 
   if (status === 'running' || status === 'queued') {
     return `Advance está generando ${nounEs}… / Advance is generating ${nounEn}…`

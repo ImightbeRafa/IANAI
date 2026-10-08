@@ -28,6 +28,9 @@ const AdminTickets = lazy(() => import('./pages/AdminTickets'))
 const RespuestasDashboard = lazy(() => import('./pages/RespuestasDashboard'))
 const RespuestasWorkspace = lazy(() => import('./pages/RespuestasWorkspace'))
 const ChatShellPage = lazy(() => import('./pages/ChatShellPage'))
+// DEV-only QA harness (mock Ad Pack API). `import.meta.env.DEV` is a build-time
+// constant, so prod builds drop this branch and never emit the chunk.
+const DevAdPackStudioPage = import.meta.env.DEV ? lazy(() => import('./pages/DevAdPackStudioPage')) : null
 
 function LazyFallback() {
   const onChat =
@@ -195,6 +198,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            {DevAdPackStudioPage ? <Route path="/dev/adpack-studio" element={<DevAdPackStudioPage />} /> : null}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <AppFeedback />

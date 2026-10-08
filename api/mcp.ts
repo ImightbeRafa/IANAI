@@ -66,6 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       tools: 'POST JSON-RPC initialize | tools/list | tools/call',
       executeJobs:
         'execute_script_generate / execute_image_generate / execute_image_edit / execute_image_enhance / execute_carousel_generate / execute_bulk_scripts / execute_bulk_posts / execute_campaign_pack return jobId + statusMessage; poll get_execute_result',
+      adPack:
+        'adpack_dna_ingest → adpack_dna_confirm → adpack_angles → adpack_start (confirm_execute) returns packId; poll adpack_status (also resumes work) · adpack_edit_text · adpack_regenerate',
     })
     return
   }

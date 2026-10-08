@@ -31,6 +31,10 @@ function humanToolLabel(toolName: string): string {
       return 'Posts en lote'
     case 'execute_campaign_pack':
       return 'Campaign pack'
+    case 'adpack_start':
+      return 'Pack de anuncios'
+    case 'adpack_regenerate':
+      return 'Regenerar anuncio'
     case 'archive_brand':
       return 'Archivar marca'
     case 'delete_offer':

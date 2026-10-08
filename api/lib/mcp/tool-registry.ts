@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.9.5'
+export const MCP_REGISTRY_VERSION = '0.10.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -382,6 +382,89 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Generate a carousel from scriptId or scriptContent via Advance (Gemini Pro, max 5 slides, 24 credits/slide; one in-chat approval). ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+
+  // Ad Pack engine (same service as POST /api/ad-pack) — 10 sell-ready static ads
+  {
+    name: 'adpack_dna_ingest',
+    group: 'guide_studio',
+    risk: 'guide',
+    description:
+      'Ad Pack step 1: build the Brand DNA (facts, voice, audience, visual style, gaps) from a website URL, Instagram profile, https uploads, an offer form and/or user facts. No Advance credits. ' +
+      'Show dna.facts and dna.gaps to the user, then confirm with adpack_dna_confirm.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_dna_confirm',
+    group: 'guide_studio',
+    risk: 'sync_write',
+    description:
+      'Ad Pack step 2: apply the user\'s confirmations / edits / additions / removals to the DNA facts. Only confirmed facts may become claims (price, guarantee, delivery). Returns the updated dna. No credits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_angles',
+    group: 'guide_studio',
+    risk: 'guide',
+    description:
+      'Ad Pack step 3: plan distinct ad angles (IAN archetype × buyer pain/desire/objection × format) for dna + offer. Deterministic, no credits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_quote',
+    group: 'guide_studio',
+    risk: 'read',
+    description: 'Ad Pack: credit quote for a pack (size, or dna + offer for the planned size). No credits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_start',
+    group: 'execute_studio',
+    risk: 'execute',
+    description:
+      'Ad Pack step 4: start a pack of static ads (credits per finished ad). Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
+      'Returns packId; poll adpack_status until moreWork=false.',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+  {
+    name: 'adpack_status',
+    group: 'execute_studio',
+    risk: 'read',
+    description:
+      'Ad Pack: progress of a pack by packId — per-ad status, headline and render URLs (1:1 / 4:5 / 9:16). Polling also resumes work, so keep polling until moreWork=false.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_edit_text',
+    group: 'execute_studio',
+    risk: 'sync_write',
+    description:
+      'Ad Pack: edit the on-image text or caption of one finished ad (headline, subline, bullets, offerLine, cta, caption) and re-render it instantly. Free; rejected when it breaks facts or length rules.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'adpack_regenerate',
+    group: 'execute_studio',
+    risk: 'execute',
+    description:
+      'Ad Pack: regenerate one ad (mode scene = new image, copy = new text + image). Costs one ad of credits: in-chat confirmation via confirm_execute, then retry with approvalRequestId and poll adpack_status.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,

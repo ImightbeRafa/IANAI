@@ -143,6 +143,10 @@ function humanToolSummaryEs(toolName: string): string {
       return 'Generar posts en lote (bulk)'
     case 'execute_campaign_pack':
       return 'Campaign pack (ángulos + guiones + posts)'
+    case 'adpack_start':
+      return 'Pack de anuncios estáticos (texto + imagen por anuncio)'
+    case 'adpack_regenerate':
+      return 'Regenerar un anuncio del pack'
     case 'archive_brand':
       return 'Archivar una marca'
     case 'delete_offer':
@@ -174,6 +178,10 @@ function humanToolSummaryEn(toolName: string): string {
       return 'Bulk-generate posts'
     case 'execute_campaign_pack':
       return 'Campaign pack (angles + scripts + posts)'
+    case 'adpack_start':
+      return 'Static ad pack (copy + image per ad)'
+    case 'adpack_regenerate':
+      return 'Regenerate one ad in the pack'
     case 'archive_brand':
       return 'Archive a brand'
     case 'delete_offer':

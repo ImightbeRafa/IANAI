@@ -1,0 +1,4 @@
+:root { --brand: #2f6b4f; }
+body { font-family: "Nunito", sans-serif; color: #333333; background: #fffaf2; }
+h1, h2 { font-family: 'Playfair Display', serif; color: #2f6b4f; }
+.btn { background: #e8a33d; }

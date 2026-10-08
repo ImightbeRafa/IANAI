@@ -22,11 +22,11 @@ export type StyleDna = {
   notes: string
 }
 
-function bulkApiUrl(name: 'bulk-angles' | 'bulk-scripts' | 'bulk-posts' | 'bulk-campaign'): string {
+export function bulkApiUrl(name: 'bulk-angles' | 'bulk-scripts' | 'bulk-posts' | 'bulk-campaign' | 'ad-pack'): string {
   return import.meta.env.PROD ? `/api/${name}` : `http://localhost:3000/api/${name}`
 }
 
-async function authHeaders(): Promise<HeadersInit> {
+export async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session?.access_token) throw new Error('Not authenticated')
   return {

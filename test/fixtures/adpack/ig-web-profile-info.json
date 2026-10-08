@@ -1,0 +1,23 @@
+{
+  "data": {
+    "user": {
+      "username": "lumabotanica.cr",
+      "full_name": "Luma Botánica",
+      "biography": "🌿 Jabones artesanales para piel sensible\n🚚 Envíos a todo Costa Rica 24-48h\n💳 SINPE Móvil y tarjeta\n📍 Heredia",
+      "external_url": "https://lumabotanica.example/",
+      "bio_links": [{ "title": "", "url": "https://lumabotanica.example/" }],
+      "category_name": "Health/beauty",
+      "is_business_account": true,
+      "edge_followed_by": { "count": 12345 },
+      "edge_owner_to_timeline_media": {
+        "count": 245,
+        "edges": [
+          { "node": { "display_url": "https://scontent.cdninstagram.com/v/t51/post1.jpg", "is_video": false, "edge_media_to_caption": { "edges": [{ "node": { "text": "Kit Piel Sensible a ₡12.900 🌿 3 jabones de avena. Pedí el tuyo por DM" } }] } } },
+          { "node": { "display_url": "https://scontent.cdninstagram.com/v/t51/post2.jpg", "is_video": false, "edge_media_to_caption": { "edges": [{ "node": { "text": "\"Desde que lo uso ya no me pica la piel\" — gracias por tu reseña 💚" } }] } } },
+          { "node": { "display_url": "https://scontent.cdninstagram.com/v/t51/post3.jpg", "is_video": true, "edge_media_to_caption": { "edges": [] } } }
+        ]
+      }
+    }
+  },
+  "status": "ok"
+}
