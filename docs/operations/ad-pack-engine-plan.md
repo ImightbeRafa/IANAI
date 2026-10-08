@@ -62,3 +62,18 @@ Inputs are only what a normal user can give: **website URL, Instagram URL, produ
 | 7 | Live benchmark run + report | All gates above |
 
 Out of scope now: Meta account connection, video generation, auto-publishing.
+
+## Status (2026-10-08)
+
+| Phase | State |
+|---|---|
+| 0 Contract + benchmark set | Done (`types.ts`, 30 fictional offers) |
+| 1 Copy engine | Done; live judge gate **not yet met** (33% ≥7 at baseline; tuned rules unmeasured — xAI credits ran out) |
+| 2 Render engine | Done (7 formats × 3 ratios, exact text, contrast/safe-zone tests) |
+| 3 Brand DNA | Done (website + IG best-effort + uploads). IG blocks server fetches → UI asks for screenshots |
+| 4 Scene/check/runner/store | Done; migration `082_ad_packs.sql` **not applied** |
+| 5 Web + MCP doors | Done (`/api/ad-pack`, `adpack_*` tools, parity tests, registry 0.10.0) |
+| 6 Studio UI | Done behind `VITE_ADPACK_STUDIO=true`; dev harness `/dev/adpack-studio` |
+| 7 Live benchmark | Partial (1 full pack: 10/10, 311 s, $0.72 baseline) — re-run `npx tsx scripts/adpack-bench.ts --env-file .env` after xAI top-up |
+
+Before enabling in prod: apply 082, re-run benchmark until gates pass, copy `api/lib/adpack/render/fonts/` in the CF Dockerfile.
