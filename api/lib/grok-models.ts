@@ -13,15 +13,27 @@ export const GROK_IMAGE_INPUT_COST_USD = 0.01
 /** Premium social default: max resolution + highest API quality (xAI: low|medium only). */
 export const GROK_IMAGE_DEFAULT_RESOLUTION = '2k' as const
 export const GROK_IMAGE_DEFAULT_QUALITY = 'medium' as const
+/** Opt-in output sizes (draft = 1k). Default stays 2k. */
+export type GrokImageResolution = '1k' | '2k'
+export type GrokImageQuality = 'low' | 'medium'
+/**
+ * Draft (1k) output estimate. xAI publishes a single per-image list price; we
+ * assume 1k bills at half of 2k until a separate list price is confirmed.
+ * Only used when a caller opts into `resolution: '1k'` (Ad Pack drafts).
+ */
+export const GROK_IMAGE_1K_COST_USD = 0.02
 
 /** Official xAI Imagine 2.0 estimate: $0.04/output + $0.01/input (reference) image. */
 export function estimateGrokImageCostUsd(options: {
   outputImages?: number
   referenceCount?: number
+  /** Default '2k' (list price). '1k' uses the draft estimate. */
+  resolution?: GrokImageResolution
 }): number {
   const outputs = Math.max(1, options.outputImages ?? 1)
   const refs = Math.max(0, options.referenceCount ?? 0)
-  return GROK_IMAGE_COST_USD * outputs + GROK_IMAGE_INPUT_COST_USD * refs
+  const perOutput = options.resolution === '1k' ? GROK_IMAGE_1K_COST_USD : GROK_IMAGE_COST_USD
+  return perOutput * outputs + GROK_IMAGE_INPUT_COST_USD * refs
 }
 
 /** Flagship — scripts, assistant, edits. */
