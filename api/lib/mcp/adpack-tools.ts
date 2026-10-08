@@ -27,23 +27,9 @@ import {
 import { issueMcpChatApproval } from './approval-prompt.js'
 import { scheduleMcpExecuteWork, withStatusMessage } from './execute-job.js'
 import type { McpAuthUser } from './user-tools.js'
+import { isAdPackMcpTool, type AdPackMcpToolName } from './adpack-tool-names.js'
 
-export const ADPACK_MCP_TOOLS = [
-  'adpack_dna_ingest',
-  'adpack_dna_confirm',
-  'adpack_angles',
-  'adpack_quote',
-  'adpack_start',
-  'adpack_status',
-  'adpack_edit_text',
-  'adpack_regenerate',
-] as const
-
-export type AdPackMcpToolName = typeof ADPACK_MCP_TOOLS[number]
-
-export function isAdPackMcpTool(name: string): name is AdPackMcpToolName {
-  return (ADPACK_MCP_TOOLS as readonly string[]).includes(name)
-}
+export { ADPACK_MCP_TOOLS, isAdPackMcpTool, type AdPackMcpToolName } from './adpack-tool-names.js'
 
 type Args = Record<string, unknown>
 

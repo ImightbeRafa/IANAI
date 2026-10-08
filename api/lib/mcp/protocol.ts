@@ -65,8 +65,8 @@ import {
   type McpBrandKitStore,
 } from './brand-kit-tools.js'
 import { auditMcpToolCall } from './tool-audit.js'
-import { dispatchAdPackTool, isAdPackMcpTool } from './adpack-tools.js'
-import { getDefaultAdPackService, type AdPackService } from '../adpack/service.js'
+import { isAdPackMcpTool } from './adpack-tool-names.js'
+import type { AdPackService } from '../adpack/service.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
@@ -956,11 +956,14 @@ async function dispatchEnabledTool(options: {
   }
 
   if (isAdPackMcpTool(options.name)) {
+    // Lazy: the ad-pack stack pulls in satori/resvg/sharp; keep other tools' cold start lean.
+    const { dispatchAdPackTool } = await import('./adpack-tools.js')
+    const service = options.adPackService ?? (await import('../adpack/service.js')).getDefaultAdPackService()
     return dispatchAdPackTool({
       name: options.name,
       args: options.args,
       user: options.user,
-      service: options.adPackService ?? getDefaultAdPackService(),
+      service,
       approvalStore: options.approvalStore,
       appOrigin: options.appOrigin,
     })

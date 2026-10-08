@@ -47,6 +47,7 @@ import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
 import { createSupabasePackStore } from './store-supabase.js'
+import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { AspectRatio, BrandDna, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
@@ -138,6 +139,8 @@ export interface AdPackDeps {
   ingest?: (input: IngestBrandDnaInput) => Promise<IngestBrandDnaResult>
   /** Advance concurrency (default 4). */
   concurrency?: number
+  /** Verify the user owns the business / brand kit they attach. Omitted → no linked ids allowed. */
+  verifyLinks?: (input: { userId: string; businessId?: string; brandKitId?: string }) => Promise<boolean>
 }
 
 /** Lazily create on first use so a missing env var fails the call that needs it, not module load. */
@@ -168,6 +171,19 @@ export function createDefaultAdPackDeps(): AdPackDeps {
     async checkCredits({ userId, ads }) {
       const r = await checkUsageLimit(userId, 'image', { imageModel: ADPACK_IMAGE_MODEL, units: Math.max(1, ads) })
       return { allowed: r.allowed, remaining: r.remaining, creditsRequired: r.creditsRequired }
+    },
+    async verifyLinks({ userId, businessId, brandKitId }) {
+      const db = getSupabaseAdmin()
+      if (!db) return false
+      if (businessId) {
+        const { data, error } = await db.from('businesses').select('id').eq('id', businessId).eq('owner_id', userId).maybeSingle()
+        if (error || !data) return false
+      }
+      if (brandKitId) {
+        const { data, error } = await db.from('brand_kits').select('id').eq('id', brandKitId).eq('user_id', userId).maybeSingle()
+        if (error || !data) return false
+      }
+      return true
     },
     async logUsage(entry) {
       await logApiUsage({
@@ -570,6 +586,10 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const ratios = parseRatios(input.ratios)
       const businessId = parseOptionalUuid(input.businessId, 'businessId')
       const brandKitId = parseOptionalUuid(input.brandKitId, 'brandKitId')
+      if (businessId || brandKitId) {
+        const owned = deps.verifyLinks ? await deps.verifyLinks({ userId: input.userId, businessId, brandKitId }) : false
+        if (!owned) throw new AdPackError('NOT_FOUND', 'Brand or brand kit not found')
+      }
       const packId = input.packId ? parsePackId(input.packId) : randomUUID()
       if (input.packId) {
         const existing = await deps.store.getPack(packId, input.userId)

@@ -32,7 +32,7 @@ export interface DoorEnv {
   service: AdPackService
 }
 
-export function createDoorEnv(options: { credits?: number } = {}): DoorEnv {
+export function createDoorEnv(options: { credits?: number; ownedIds?: string[] } = {}): DoorEnv {
   const store = createMemoryPackStore()
   const gateway = runnerGateway()
   const renderer = fakeRenderer()
@@ -59,6 +59,10 @@ export function createDoorEnv(options: { credits?: number } = {}): DoorEnv {
     },
     async logUsage(entry) {
       logs.push(entry)
+    },
+    async verifyLinks({ businessId, brandKitId }) {
+      const owned = options.ownedIds ?? []
+      return [businessId, brandKitId].every((id) => !id || owned.includes(id))
     },
     async ingest(input) {
       ingestCalls.push(input)
