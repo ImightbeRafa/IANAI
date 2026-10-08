@@ -9,6 +9,7 @@ import {
   regenerateItem,
   type AdvancePackInput,
 } from '../../api/lib/adpack/pack-runner'
+import { SCENE_SETTINGS } from '../../api/lib/adpack/scene'
 import { createMemoryPackStore, type MemoryPackStore } from '../../api/lib/adpack/store-memory'
 import type { OfferInput } from '../../api/lib/adpack/types'
 import { caseById } from './helpers'
@@ -101,9 +102,28 @@ describe('advancePack', () => {
     expect(t.charge.total()).toBe(8)
   })
 
-  it('settles the style anchor (index 0) before any other scene and passes it as a style ref', async () => {
+  it('by default uses no style anchor and rotates the setting between same-format ads', async () => {
     const t = await setup({ gateway: { delayMs: 5 } })
     await t.advance({ concurrency: 4 })
+    const calls = t.gateway.sceneCalls
+    expect(calls).toHaveLength(10)
+    for (const c of calls) expect(c.styleRefs ?? []).toEqual([])
+    const { items } = await t.state()
+    const byFormat = new Map<string, string[]>()
+    for (const it of items) {
+      const call = calls.find((c) => c.prompt.includes(propFor(it.index)))!
+      const setting = call.prompt.split('\n').find((l) => l.startsWith('Setting for this ad:'))!
+      byFormat.set(it.angle.format, [...(byFormat.get(it.angle.format) ?? []), setting])
+    }
+    for (const [format, settings] of byFormat) {
+      const distinct = Math.min(settings.length, SCENE_SETTINGS[format as keyof typeof SCENE_SETTINGS].length)
+      expect(new Set(settings).size).toBe(distinct)
+    }
+  })
+
+  it('settles the style anchor (index 0) before any other scene and passes it as a style ref (opt-in)', async () => {
+    const t = await setup({ gateway: { delayMs: 5 } })
+    await t.advance({ concurrency: 4, styleAnchor: true })
     const calls = t.gateway.sceneCalls
     expect(calls[0].prompt).toContain(propFor(0))
     expect(calls[0].styleRefs).toEqual([])

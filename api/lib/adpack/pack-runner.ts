@@ -200,6 +200,14 @@ export interface AdvancePackInput {
   maxSceneRetries?: number
   /** Optional text model override for copy. */
   copyModel?: string
+  /**
+   * Pass item 0's scene as a style reference to every other scene (and wait for it).
+   * Default false: the live benchmark showed the anchor cloned its background into the
+   * whole pack (monotony; a garden anchor put a kitchen cleaner in 10 gardens), cost
+   * +$0.01 per scene and serialized the first scene. Cohesion now comes from the brand
+   * palette + per-format setting rotation in the scene prompt.
+   */
+  styleAnchor?: boolean
 }
 
 type StepOutcome = 'finished' | 'deferred' | 'budget'
@@ -395,7 +403,7 @@ async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem> {
 }
 
 async function waitForAnchor(ctx: RunCtx, item: PackItem): Promise<{ anchorUrl?: string } | 'defer'> {
-  if (item.index === ANCHOR_INDEX) return {}
+  if (!ctx.input.styleAnchor || item.index === ANCHOR_INDEX) return {}
   const anchorOf = () => [...ctx.known.values()].find((i) => i.index === ANCHOR_INDEX)
   let anchor = anchorOf()
   if (!anchor || !ANCHOR_SETTLED.has(anchor.status)) {
@@ -418,8 +426,11 @@ const RETRY_HINT_PRODUCT =
 const RETRY_HINT_TEXT =
   'IMPORTANT: the previous attempt contained stray text. The image must contain zero added text, letters, numbers, signs or logos.'
 
+const RETRY_HINT_BORDERS =
+  'IMPORTANT: the previous attempt had blank bars or borders. Fill the entire frame edge to edge with one continuous photograph.'
+
 function needsRegeneration(check: SceneCheckResult): boolean {
-  return check.productMatches === false || check.strayText === true
+  return check.productMatches === false || check.strayText === true || check.borders === true
 }
 
 function toDataUrl(bytes: Uint8Array, mimeType: string): string {
@@ -433,6 +444,8 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
   if (!copy) return save(ctx, item, { status: 'planned' })
   const maxAttempts = 1 + Math.max(0, ctx.input.maxSceneRetries ?? MAX_SCENE_RETRIES)
   const productRef = offer.productImageUrls?.[0]
+  // Nth ad of this format in the pack → Nth setting variant (no two same-format ads share a backdrop).
+  const variation = [...ctx.known.values()].filter((i) => i.angle.format === item.angle.format && i.index < item.index).length
   const t0 = Date.now()
   let checkMs = 0
   let cost = 0
@@ -452,6 +465,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
         dna,
         offer,
         anchor: anchorUrl ? { imageUrl: anchorUrl } : null,
+        variation,
         draft: ctx.input.draft ?? true,
         promptSuffix: hint,
       })
@@ -472,7 +486,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
     checkMs += Date.now() - c0
     candidates.push({ scene, check })
     if (!needsRegeneration(check)) break
-    hint = check.productMatches === false ? RETRY_HINT_PRODUCT : RETRY_HINT_TEXT
+    hint = check.productMatches === false ? RETRY_HINT_PRODUCT : check.strayText === true ? RETRY_HINT_TEXT : RETRY_HINT_BORDERS
   }
 
   const costUsd = (item.costUsd ?? 0) + cost
@@ -486,6 +500,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
     ok: best.check.ok,
     productMatches: best.check.productMatches,
     strayText: best.check.strayText,
+    ...(best.check.borders != null ? { borders: best.check.borders } : {}),
     score: best.check.score,
     ...(best.check.notes ? { notes: best.check.notes } : {}),
   }

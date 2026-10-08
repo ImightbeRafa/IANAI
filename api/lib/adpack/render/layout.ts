@@ -187,6 +187,9 @@ export interface PillOpts {
   size: number
   min: number
   lines?: number
+  /** Try this many lines first (down to preferMin) before using `lines`. */
+  prefer?: number
+  preferMin?: number
   padX?: number
   padY?: number
   radius?: number
@@ -220,6 +223,7 @@ export function pill(role: TextRole, str: string, o: PillOpts): Pill {
     size: o.size,
     min: o.min,
     lines: o.lines ?? 1,
+    ...(o.prefer ? { prefer: o.prefer, preferMin: o.preferMin } : {}),
     lh,
     color: o.textColor ?? readableOn(o.fill),
     fill: o.fill,

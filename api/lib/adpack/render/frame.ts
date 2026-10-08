@@ -68,13 +68,12 @@ export function copySpaceHint(format: AdFormat, ratio: AspectRatio): string {
   const tall = ratio === '9:16'
   switch (format) {
     case 'offer_graphic':
-      return 'clean, uncluttered background; keep the top third and the left half free of objects; product (if shown) on the right side'
+      return 'clean, uncluttered background; keep the top third and the left half free of objects; product entirely in the right half, label fully visible'
     case 'before_after':
-      return tall
-        ? 'split composition: "before" state in the top half, "after" state in the bottom half; keep the top 20% simple'
-        : 'split composition: "before" state on the left half, "after" state on the right half; keep the top 20% simple'
+      // Left/right at every ratio: one scene is cover-fit to all ratios and the template always splits vertically.
+      return 'split composition: "before" state on the left half, "after" state on the right half, divided at the vertical center line; keep the top 20% simple'
     case 'how_to_steps':
-      return 'keep the left 65% calm and low-detail (cards go there); subject on the right; keep the top 25% simple'
+      return 'keep the left 60% calm and low-detail (cards go there); product entirely in the right third, label fully visible; keep the top 25% simple'
     case 'variant_card':
       return 'subject centered in the upper half; lower half simple, plain backdrop (a color card covers it)'
     case 'ugc_person':
@@ -82,8 +81,7 @@ export function copySpaceHint(format: AdFormat, ratio: AspectRatio): string {
     case 'handheld_overlay':
       return 'product held in a hand, lifestyle setting; keep the top 30% calm (sky, wall, blurred background)'
     case 'explainer':
-      return tall
-        ? 'product centered in the upper-middle area on a plain backdrop; generous empty space around it'
-        : 'product centered on a plain backdrop with generous empty space on both sides; keep the top 25% simple'
+      // Callout cards sit in a bottom band above the button at every ratio.
+      return 'product centered in the middle of the frame, slightly above center; keep the top 25% simple and the lower third calm and low-detail (callout cards go there)'
   }
 }

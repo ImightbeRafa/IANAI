@@ -176,17 +176,28 @@ function factKeysFor(a: IanArchetype, h: HookType, f: AdFormat, ctx: Ctx): FactK
   return out
 }
 
-/** Primary confirmed fact value that anchors the message. */
-function focusValue(a: IanArchetype, h: HookType, ctx: Ctx): string | undefined {
-  const order: FactKey[] = [...HOOK_KEYS[h], ...ARCHETYPE_KEYS[a]].filter(
+/**
+ * Primary confirmed fact value that anchors the message. Rotates across the pack:
+ * the least-used candidate wins (ties keep hook/archetype order), so ten angles do
+ * not all lean on the same fact (live benchmark: one ingredient line in 8/10 ads).
+ */
+function focusValue(a: IanArchetype, h: HookType, f: AdFormat, ctx: Ctx, used: Map<string, number>): string | undefined {
+  const order: FactKey[] = [...HOOK_KEYS[h], ...ARCHETYPE_KEYS[a], ...FORMAT_KEYS[f], ...FOCUS_FALLBACK_KEYS].filter(
     (k) => !['price', 'compare_at_price', 'shipping', 'payment_methods'].includes(k)
   )
+  const values: string[] = []
   for (const k of order) {
     const v = getConfirmed(ctx.facts, k)?.value
-    if (v && v.length <= 80) return v
+    if (v && v.length <= 80 && !values.includes(v)) values.push(v)
   }
-  return undefined
+  if (!values.length) return undefined
+  // Only the first few candidates are relevant to this hook/archetype; rotate among them.
+  const pool = values.slice(0, 3)
+  return pool.reduce((best, v) => ((used.get(v) ?? 0) < (used.get(best) ?? 0) ? v : best), pool[0])
 }
+
+/** Generic facts that can anchor any angle once the hook-specific ones are used up. */
+const FOCUS_FALLBACK_KEYS: FactKey[] = ['differentiator', 'how_it_works', 'ingredients_materials', 'usage_steps', 'quantity_per_pack', 'variants']
 
 const HOOK_FRAMES: Record<AdLanguage, Record<HookType, (t: string) => string>> = {
   es: {
@@ -319,6 +330,7 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
   const countH = new Map<HookType, number>()
   const countF = new Map<AdFormat, number>()
   const targetUse = new Map<string, number>()
+  const focusUse = new Map<string, number>()
   const angles: AdAngle[] = []
 
   const pick = (pool: Candidate[]): Candidate | undefined => {
@@ -348,7 +360,8 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     countH.set(c.hookType, (countH.get(c.hookType) ?? 0) + 1)
     countF.set(c.format, (countF.get(c.format) ?? 0) + 1)
 
-    const focus = focusValue(c.archetype, c.hookType, ctx)
+    const focus = focusValue(c.archetype, c.hookType, c.format, ctx, focusUse)
+    if (focus) focusUse.set(focus, (focusUse.get(focus) ?? 0) + 1)
     const archetypeText = ARCHETYPE_FRAMES[language][c.archetype](offerName, focus)
     // Candidate targets: least-used first, then pool order.
     // Primary pool wins; secondary pools only once primary targets are well used.

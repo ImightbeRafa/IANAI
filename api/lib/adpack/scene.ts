@@ -11,7 +11,7 @@ import { getFormatPattern } from './patterns.js'
 import { imageSize } from './image-size.js'
 import { copySpaceHint } from './render/frame.js'
 import { escapeRegExp } from './util.js'
-import type { AdAngle, AdCopy, AspectRatio, BrandDna, ModelGateway, OfferInput } from './types.js'
+import type { AdAngle, AdCopy, AdFormat, AspectRatio, BrandDna, BusinessCategory, ModelGateway, OfferInput } from './types.js'
 
 /** Ratio every scene is generated at (tallest; cover-fit to the others). */
 export const SCENE_RATIO: AspectRatio = '9:16'
@@ -22,19 +22,82 @@ export const SCENE_STRICT_NO_TEXT =
   'STRICT: no text, letters, numbers, logos, watermarks, signage, captions, price tags or UI anywhere in the image. Packaging text must remain exactly as in the product photo only; never add, invent or rewrite any lettering.'
 
 export const SCENE_COMPOSITION_RULES = [
+  'One full-bleed photograph filling the whole frame edge to edge: no borders, frames, white or blank bars, letterboxing or collage panels.',
   'Composition: the image is center-cropped to 1:1, 4:5 and 9:16, so the top and bottom 20% may be cut; keep the product and any face inside the middle band (roughly 25%–80% of the height) with margins, nothing important near the edges.',
   'Keep the upper third clean, calm negative space for a headline overlay; leave a quiet band at the bottom for a button.',
   'The product is the hero: large (about a third of the frame height or more), sharp, label facing the camera and fully visible, never covered by hands or props.',
   'Realistic photography, social-ad quality: natural lighting, true-to-life colors and materials, no illustration or 3D-render look.',
 ].join(' ')
 
+/** Plain-language category for the image model (the enum `home_garden` made it paint gardens). */
+const CATEGORY_LABEL: Record<BusinessCategory, string> = {
+  beauty: 'beauty and skincare',
+  health_wellness: 'health and wellness',
+  food_beverage: 'food and beverage',
+  fashion_apparel: 'fashion and apparel',
+  home_garden: 'home and household',
+  tech_electronics: 'consumer electronics',
+  fitness_sports: 'fitness and sports',
+  pets: 'pet products',
+  kids_baby: 'kids and baby products',
+  services_local: 'local services',
+  education: 'education',
+  finance: 'financial services',
+  other: 'retail',
+}
+
+/**
+ * Background/setting variations per format, picked by the item's index so a pack
+ * does not repeat one look (live benchmark: a shared style anchor made 8/10 scenes the
+ * same backdrop, and a garden anchor put a kitchen cleaner in a garden in every ad).
+ * Product, brand palette and photographic quality stay constant; the setting rotates.
+ */
+export const SCENE_SETTINGS: Record<AdFormat, string[]> = {
+  offer_graphic: [
+    'Seamless studio backdrop in one solid color taken from the brand palette, soft directional light, crisp natural shadow.',
+    'Bright, airy light-neutral backdrop (off-white or warm beige) with a single brand-color accent prop, soft daylight.',
+    'On a real surface where this product is normally used or kept, daylight, background softly blurred and uncluttered.',
+    'Bold color-blocked backdrop (two flat tones from the brand palette meeting behind the product), hard light, graphic shadow.',
+  ],
+  before_after: [
+    'The real place where this product is used. Left half: the everyday problem it solves (or the ordinary alternative), with no bottle, box or packaging of any kind in that half. Right half: the same place and framing, problem solved, with this product clearly visible.',
+  ],
+  how_to_steps: [
+    'The real place where this product is used, daylight, the few items needed to use it laid out next to the product.',
+    'Top-down flat lay on a light, clean surface: the product plus the few items needed to use it, arranged on the right side.',
+  ],
+  variant_card: [
+    'Solid or soft-gradient backdrop in the color of the featured variant, with one or two props that express its flavor, color or profile.',
+    'Light backdrop with a colored platform matching the featured variant, props that express its flavor, color or profile.',
+  ],
+  ugc_person: [
+    'An everyday location where this product is really used (home, kitchen, bathroom, desk, gym or street as fits the product), casual phone-camera look.',
+    'Bright room by a window, natural daylight, relaxed candid moment, casual phone-camera look.',
+  ],
+  handheld_overlay: [
+    'A hand holding the product in the real place where it is used, natural daylight, background softly blurred.',
+    'A hand holding the product against a simple bright background (wall, sky or window light), crisp and clean.',
+  ],
+  explainer: [
+    'Clean light backdrop; the product with its real ingredients, materials or parts arranged neatly around it.',
+    'Soft colored backdrop from the brand palette; the product with its real ingredients, materials or parts arranged around it.',
+  ],
+}
+
+export function sceneSetting(format: AdFormat, variation = 0): string {
+  const list = SCENE_SETTINGS[format]
+  return list[Math.abs(Math.floor(variation)) % list.length]
+}
+
 export interface BuildScenePromptInput {
   copy: AdCopy
   angle: AdAngle
   dna: BrandDna
   offer: OfferInput
-  /** Style anchor (first scene of the pack) is attached as a reference image. */
+  /** Optional style anchor attached as a reference image (off by default in the pack runner). */
   anchor?: { imageUrl: string } | null
+  /** Rotates the background/setting per item (pack index). */
+  variation?: number
 }
 
 /** Remove any on-image copy strings that leaked into the scene brief. */
@@ -63,19 +126,21 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
   const pattern = getFormatPattern(angle.format)
   const hasProductRef = (offer.productImageUrls ?? []).length > 0
   const brief = stripCopyText(copy.sceneBrief ?? '', copy)
+  const what = dna.oneLiner ? `${offer.name} (${dna.oneLiner})` : offer.name
   const lines = [
-    `Text-free advertising photo for a ${dna.category.replace(/_/g, ' ')} brand.`,
+    `Text-free advertising photo for a ${CATEGORY_LABEL[dna.category] ?? 'retail'} brand. The product is: ${what}.`,
     hasProductRef
       ? 'Use the attached product photo as the exact product: identical shape, colors, materials and label.'
-      : `Product to show: ${offer.name} (show the object only, do not write its name).`,
+      : 'Show the product object only; do not write its name.',
     brief ? `Scene: ${brief}` : '',
     `Format intent: ${pattern.sceneIntent}`,
+    `Setting for this ad: ${sceneSetting(angle.format, input.variation)}`,
     `Layout the overlay will use (for spacing only, never draw it): ${pattern.layout.en}`,
     `Placement and empty space (the text overlay covers it; this wins over any placement above): ${copySpaceHint(angle.format, SCENE_SPACE_RATIO)}.`,
     pattern.needsPerson ? 'Include a real person naturally interacting with the product; natural skin, hands and proportions.' : '',
     visualStyleLine(dna),
     input.anchor
-      ? 'Match the lighting, color grading and photographic style of the attached style reference so the pack looks like one campaign; do not copy its subject, background or camera angle — this ad needs its own setting.'
+      ? 'Match only the color grading of the attached style reference so the pack looks like one campaign; do not copy its subject, background, setting or camera angle — this ad needs its own setting.'
       : '',
     SCENE_COMPOSITION_RULES,
     SCENE_STRICT_NO_TEXT,

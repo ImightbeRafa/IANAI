@@ -24,6 +24,17 @@ export function wordCount(text: string | undefined): number {
   return text ? words(text).length : 0
 }
 
+const CONNECTORS = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'y', 'e', 'o', 'a', 'al', 'en', 'con', 'por', 'para', 'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with', 'by'])
+
+/**
+ * Words that carry meaning on a chip/button: articles and connectors ("y", "de", "en"…)
+ * are not counted, so a confirmed fact copied verbatim ("Niacinamida 5% y aloe vera")
+ * fits a 4-word chip. Callers pair it with a character cap.
+ */
+export function contentWordCount(text: string | undefined): number {
+  return text ? words(text).filter((w) => !CONNECTORS.has(normalizeText(w).replace(/[^\p{L}\p{N}]/gu, ''))).length : 0
+}
+
 const STOPWORDS = new Set([
   'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'y', 'o', 'a', 'en', 'con', 'por', 'para',
   'que', 'tu', 'su', 'tus', 'sus', 'es', 'al', 'lo', 'se', 'te', 'mi', 'sin', 'mas', 'muy', 'ya',

@@ -4,7 +4,7 @@
  */
 import type { AdAngle, AdCopy, AdLanguage, BrandDna, DnaFact, FactKey, OfferInput } from './types.js'
 import { buildOfferLine, confirmedFacts, extractNumericClaims, mergeFacts, numbersInFacts, unconfirmedFacts } from './facts.js'
-import { COPY_LIMITS } from './patterns.js'
+import { COPY_LIMITS, FORMAT_PATTERNS } from './patterns.js'
 import { cleanString, escapeRegExp, normalizeText } from './util.js'
 
 /**
@@ -97,9 +97,23 @@ function sentences(text: string): string[] {
     .filter(Boolean)
 }
 
-/** Keep visual-only sentences, cap length, append the no-text clause. */
+/**
+ * Keep visual-only clauses, cap length, append the no-text clause. Works per clause
+ * (comma/semicolon), not per sentence: the live benchmark showed most briefs ended in
+ * "…, empty space for text" and the whole sentence was dropped, so 70% of scenes fell
+ * back to the generic format intent and lost the setting the copy model described.
+ */
 export function sanitizeSceneBrief(brief: string, fallback: string): string {
-  const kept = sentences(cleanString(brief)).filter((s) => !TEXT_REQUEST_RE.test(normalizeText(s)))
+  const kept = sentences(cleanString(brief))
+    .map((s) =>
+      s
+        .split(/\s*[,;]\s*/)
+        .filter((c) => c && !TEXT_REQUEST_RE.test(normalizeText(c)))
+        .join(', ')
+        .replace(/[\s,]+$/, '')
+    )
+    .filter((s) => s.replace(/[.!?\s]/g, '').length > 0)
+    .map((s) => (/[.!?]$/.test(s) ? s : `${s}.`))
   let body = kept.join(' ').trim()
   if (!body) body = fallback
   const max = COPY_LIMITS.sceneBriefMaxChars - SCENE_NO_TEXT_CLAUSE.length - 1
@@ -142,6 +156,12 @@ export interface RawModelCopy {
   usedFactKeys?: unknown
 }
 
+/** "1. Limpiá", "Paso 2: Aplicá", "3) Listo" → bare step text (the template numbers steps). */
+export function stripStepNumber(text: string): string {
+  const out = text.replace(/^\s*(?:(?:paso|step)\s*)?\d{1,2}\s*[.):\-–—](?!\d)\s*/i, '').replace(/^\s*(?:paso|step)\s*\d{1,2}\s+/i, '').trim()
+  return out || text
+}
+
 export function defaultSceneFallback(ctx: CopyContext, sceneIntent: string): string {
   return `${sceneIntent} Product: ${ctx.offer.name}.`
 }
@@ -153,8 +173,11 @@ export function defaultSceneFallback(ctx: CopyContext, sceneIntent: string): str
  */
 export function normalizeModelCopy(raw: RawModelCopy | null | undefined, ctx: CopyContext, sceneFallback: string): AdCopy {
   const r = raw ?? {}
+  // Step formats draw their own numbered badges: "1. Limpiá" would render as "① 1. Limpiá".
+  const isSteps = Boolean(FORMAT_PATTERNS[ctx.angle.format]?.bulletsAreSteps)
   const bullets = (Array.isArray(r.bullets) ? r.bullets : [])
     .map((b) => cleanString(b))
+    .map((b) => (isSteps ? stripStepNumber(b) : b))
     .filter(Boolean)
     .slice(0, COPY_LIMITS.maxBullets)
   const scriptRaw = (r.script && typeof r.script === 'object' ? r.script : {}) as Record<string, unknown>

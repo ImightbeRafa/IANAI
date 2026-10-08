@@ -164,6 +164,16 @@ export const REGISTER_MARKERS: Record<SpanishRegister, RegExp> = {
   usted: /(?<!\p{L})(usted|escríbanos|escribanos|envíenos|pida)(?!\p{L})/iu,
 }
 
+/**
+ * Unambiguous wrong-register markers for the deterministic copy check (REGISTER_MARKERS
+ * minus forms that are also valid 1st/3rd person: "pedí" = I ordered, "pide"/"pida" = he/she asks).
+ */
+export const REGISTER_DRIFT_MARKERS: Record<SpanishRegister, RegExp> = {
+  voseo: /(?<!\p{L})(tenés|querés|escribinos|mandanos|mirá|elegí|sabés|podés|vos)(?!\p{L})/iu,
+  tuteo: /(?<!\p{L})(tienes|quieres|escríbenos|envíanos|tú|puedes|sabes)(?!\p{L})/iu,
+  usted: /(?<!\p{L})(usted|escríbanos|envíenos)(?!\p{L})/iu,
+}
+
 export function archetypeBlock(archetype: IanArchetype, language: AdLanguage): string {
   const spec = IAN_ARCHETYPES[archetype]
   const head = language === 'es' ? 'ESTRUCTURA' : 'STRUCTURE'

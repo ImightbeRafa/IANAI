@@ -1,83 +1,110 @@
 # Ad Pack engine — live benchmark (2026-10-07/08)
 
-Script: `npx tsx scripts/adpack-bench.ts --env-file <.env> [--steps A,B,C,D] [--offers …] [--copy-offers …]`
+Script: `npx tsx scripts/adpack-bench.ts --env-file <.env> [--steps A,B,C,D|R] [--offers …] [--copy-offers …]
+[--judge-model m] [--judge-calibrate m --calibrate-per-offer n] [--from <out dir>]`
 (real `createModelGateway` + `withCostLedger`, `createMemoryPackStore`, `createDefaultRenderer`, local
-file storage, no database). Generated images stay local under `%TEMP%\adpack-bench\` and are not committed.
+file storage, no database). Step `R` re-renders saved scenes with the current templates at $0. Generated
+images stay local under `%TEMP%\adpack-bench\` and are not committed.
 
-> **Status: INCOMPLETE — blocked by the xAI account.** After $1.94 of benchmark spend (cap $8), every
-> Grok call (text and image) started returning `403 permission-denied: … used all available credits or
-> reached its monthly spending limit`. Copy, scenes and the judge all run on Grok, so the full 30-offer
-> copy run, the 5 full packs and the post-tuning re-runs could not be executed. The numbers below are the
-> **baseline** plus the one tuned ad that completed before the 403s. Re-run with credits:
-> `npx tsx scripts/adpack-bench.ts --env-file .env` (≈ $3–4 for all steps).
+> **Status: gates partly met, run cut short again by xAI.** Second session (2026-10-08): $4.52 of benchmark
+> spend (cap $6), then every Grok call returned `403 permission-denied … used all available credits or reached
+> its monthly spending limit` (copy and scenes). The full-30-offer copy re-run with the final code and the 4th/5th
+> pack categories did not complete. Numbers below are what was measured; nothing is projected.
 
-## Gates
+## Gates — before → after
 
-| Gate | Target | Baseline (prod defaults) | After tuning |
-|---|---|---|---|
-| Facts guaranteed by checker | 100% (0 unconfirmed claims shipped) | **Pass** — 0/89 shipped ads with a fact/number issue; 11 caught, 10 repaired, 1 blocked | Not re-run (checker unchanged) |
-| Copy rubric ≥ 7 | on ≥ 80% of ads | **Fail** — 0% (6 judged, grok-4.5 copy, mean 6.4); 33% (21 judged, fast copy model, mean 6.5) | Not measured (403) |
-| Scene vision pass after ≤ 2 retries | ≥ 90% | **Pass** — 10/10 first try (but the checker passed 2 scenes with a blank label, see below) | 1/1 (stricter label rule) |
-| Wall time per pack | ≤ 3 min | **Fail** — 311 s (copy ≈ 49–124 s per ad on grok-4.5) | Projected ≈ 1.5 min (copy 19 s on the tuned item) |
-| Model cost per pack | ≤ $0.60 | **Fail** — $0.717 (copy $0.324, scenes $0.390, vision $0.003) | Projected ≈ $0.33 (tuned item: $0.032) |
+| Gate | Target | Baseline (session 1, prod defaults) | Session-1 tuning, measured now (r2) | Final code (r3 / pilot) | Verdict |
+|---|---|---|---|---|---|
+| Copy rubric ≥ 7 | ≥ 80% of judged ads | 0% (6, grok-4.5 copy) · 33% (21, fast copy) | **50%** (45/90, grok-4.5 judge, 30 offers, mean 6.90) · 33% (30/90) with the fast judge | **67%** (20/30, fast judge, 10 offers, mean 7.15) — same 10 offers at r2: 33% fast / 53% grok-4.5. Final code partial (403): 7/9 fast | **Fail** |
+| Facts: 0 shipped ads with unconfirmed fact / number mismatch | 0 | 0 shipped (11 caught) | 0 shipped of 299 (42 caught, 42 repaired, 1 blocked) | 0 shipped of 100 (11 caught, 11 repaired); packs: 0 | **Pass** (checker unchanged) |
+| Scene vision pass after ≤ 2 retries | ≥ 90% | 10/10 (but blank labels passed) | 30/30 (but missed letterboxing and wrong settings) | **29/30** (96.7%); first try 23/30; stricter check (blank label, borders) | **Pass** |
+| Wall time, pack of 10 | ≤ 3 min | 311 s | 116–128 s (3 packs) | **107–127 s** (3 packs) | **Pass** (3 categories) |
+| Model cost, pack of 10 | ≤ $0.60 | $0.717 | $0.408–0.449 | **$0.317–0.440** | **Pass** (3 categories) |
+| Visual variety / badge / readability | not one look; short badge | 6/10 same dark-green studio; 2-line badge | 8/10 same backdrop; anchor garden cloned into a cleaner's whole pack; letterboxed scenes | settings rotate per format (studio color, light neutral, real place of use, color-block…); badge 1 line; step/explainer cards and badge kept off the label | **Improved**, see weaknesses |
 
-Baseline = `beauty-serum` pack of 10 with the engine as committed in `05f555b` (copy on the gateway default
-`grok-4.5`). "Projected" is per-item measured cost/time × 10 under concurrency 4, not a measured pack.
+Packs measured: `beauty-serum`, `food-coffee`, `home-cleaner` (beauty, food, home). `pets-bed` got 4/10 before the
+403, `fitness-bands` 0/10 — the ≥ 4-category goal is not met.
 
-## Copy benchmark (Step B)
+Judge calibration (r2, same 90 ads): grok-4-1-fast-reasoning mean 6.45 vs grok-4.5 6.90, ≥7 on 30 vs 45,
+pass/fail agreement 66%. The fast judge is **stricter**, never more lenient, so it was used for later runs
+(grok-4.5 judging cost $0.0126/ad = $1.13 for 90 ads).
 
-| Run | Ads generated | Pass `checkAdCopy` first try → after 1 repair | Shipped (no blocking issue) | Fact issues caught / repaired / blocked / shipped | Judge mean, ≥7 | Cost |
+## Copy (Step B)
+
+| Run | Ads | Pass check 1st try → after repair | Shipped | Initial issues | Judge (≥7) | Cost |
 |---|---|---|---|---|---|---|
-| grok-4.5 copy, 2 offers | 20 | 17 → 19 | 20 | 0 / 0 / 0 / 0 | 6.4, 0/6 | $0.70 |
-| grok-4-1-fast-reasoning copy, 11 offers (9 completed) | 90 (20 lost to 403) | 30 → 68 | 89 | 11 / 10 / 1 / **0** | 6.5, 7/21 | $0.39 |
+| r2: session-1 tuning, 30 offers | 300 | 98 → 256 | 299 | too_long 167, duplicate 65, number_mismatch 38, unconfirmed 4 | 4.5: 50% · fast: 33% | copy $0.43 ($0.0014/ad) + judges $1.14 |
+| r3 pilot: final rules minus last 2 tweaks, 10 offers | 100 | 25 → 80 | 100 | duplicate 33, too_long 30, register 29 (new check), number 9, unconfirmed 2 | fast: 67% | copy $0.16 + judge $0.02 |
 
-Initial issues by code (fast model, 90 ads): `too_long` 48 (bullets 37, cta 29 fields), `duplicate_message` 27,
-`number_mismatch` 8, `unconfirmed_fact` 3. After repair: `duplicate_message` 20, `too_long` 2, `number_mismatch` 1
-(blocked, not shipped). Judge criteria means (fast run): register 9.2, cold CTA 8.4, brevity 7.8, single message
-6.7, tangible benefit 6.4, hook 5.5, faithful to facts 4.7, **no repetition 3.5**.
+Judge criteria (fast judge, same 10 offers, r2 → r3): faithful to facts 8.2 → 9.0, brevity 6.2 → 7.7, CTA 7.4 → 8.3,
+single message 4.9 → 6.1, hook 6.2 → 6.0, **no repetition 3.5 → 4.1**, tangible 7.5 → 7.8, register 7.8 → 8.0.
+Top remaining judge reasons: caption restating chips/subline, hook "doesn't filter with price or proof in 3 s",
+mixing two ideas (variants + logistics) in one ad.
 
-## Cost breakdown by stage (all runs, $1.94 total)
+## Packs (Step C, final code = r3)
 
-| Stage | Cost |
-|---|---|
-| A — 5 product packshots (Grok Imagine compose, 1k) | $0.10 |
-| B — copy + repair + judge (grok-4.5 run) | $0.70 |
-| B — copy + repair + judge (fast copy, grok-4.5 judge) | $0.39 |
-| C — baseline pack (copy $0.32, scenes $0.39, vision $0.003) + aborted 2nd pack | $0.72 + ≈ $0.10 |
-| C — tuned pack (1 item before 403) | $0.04 |
+| Pack | Done | Wall | Cost | Copy | Scenes | Vision | Retries | Avg per ad: copy / scene / check / render |
+|---|---|---|---|---|---|---|---|---|
+| home-cleaner | 9/10 (1 before_after product mismatch ×3) | 127 s | $0.440 | $0.014 | $0.420 | $0.005 | 4 | 15.9 / 22.2 / 2.2 / 1.0 s |
+| beauty-serum | 10/10 | 112 s | $0.439 | $0.013 | $0.420 | $0.005 | 4 (borders) | 13.8 / 18.9 / 2.2 / 1.2 s |
+| food-coffee | 10/10 | 107 s | $0.317 | $0.013 | $0.300 | $0.004 | 0 | 13.4 / 13.7 / 1.7 / 2.1 s |
 
-Per ad at baseline: copy ≈ $0.032 (grok-4.5 spends ~3.2k reasoning tokens), scene $0.03–0.04
-($0.02 draft + $0.01 per reference image), vision ≈ $0.0003.
+Scenes are ~95% of pack cost ($0.03 each: $0.02 draft + $0.01 product ref; the style-anchor ref is gone).
+Every retry costs another $0.03, so cost per pack = $0.31 + $0.03 × retries.
 
-## Observed failure modes (looked at every render)
+## Cost by stage (session 2, $4.52 total; session 1 was $1.94)
 
-1. **Copy was the whole cost and time problem**: grok-4.5 took 49–124 s and ~$0.032 per ad. Same prompt on
-   `grok-4-1-fast-reasoning`: ~9–19 s and ~$0.001.
-2. **Text over the product**: `offer_graphic` / `how_to_steps` scenes put the bottle dead-center, so chips,
-   step cards and the offer slab covered the label. The scene prompt never used `copySpaceHint`, and the
-   9:16 → 1:1/4:5 center crop was not mentioned.
-3. **Offer badge as a two-line slab**: "₡12.900 · 2 por ₡22.000 · Envíos a todo Costa Rica por Correos" on every ad.
-4. **Blank labels passed the vision check**: 2/10 scenes lost the "ALBA" label and still scored 1.0.
-5. **Monotony**: 6/10 ads were the same dark-green studio bottle (the style anchor was copied as a set).
-6. **Copy repetition**: the same subline ("Niacinamida 5% y aloe vera" / "2 gotas de noche") in most ads; caption
-   re-listing chips; customer phrases ("se absorbe rapidísimo…") turned into product claims (judge: unfaithful).
-7. Fast model overshoots chip/CTA word limits (fixed by the single repair, +1 cheap call).
-8. `before_after` at 9:16: the template splits top/bottom while the scene is left/right (scene follows 4:5).
+| Run | Stage | Cost |
+|---|---|---|
+| r2-copy-tuned | B copy + repair (300 ads) / judges (90 × grok-4.5 + 90 × fast) | $0.43 / $1.14 |
+| r2-packs1 | C 3 packs (session-1 code + 9:16 before/after fix) | $1.27 |
+| r3-copy-pilot | B 10 offers + fast judge | $0.18 |
+| r3-packs | C 3 packs (final scene/template code) | $1.20 |
+| r4 (403) | B 30 ads + C 4 ads before the cut-off | $0.31 |
 
-## Changes made
+## What I saw in the renders and what changed
 
-- `copy-shared.ts` `ADPACK_COPY_MODEL = 'grok-4-1-fast-reasoning'` as the default for copy + repair (gateway default unchanged).
-- `copy.ts`: `COPY_CRAFT_RULES` (headline = buyer situation, every field adds new info, concrete chips, subline =
-  reason to believe); customer phrases marked as customer voice (quote, never a claim); "already used in this pack" list.
-- `facts.ts`: offer badge budget 40 chars — drops plain shipping, then compare-at, then free shipping; price never dropped.
-- `scene.ts` / `patterns.ts`: per-format `copySpaceHint` placement (4:5), crop-safe middle band, product ≥ ⅓ of
-  the frame with label visible, anchor = grade only (not subject/background); `offer_graphic`/`how_to_steps` product on the right.
-- `check-scene.ts`: blank/missing/rewritten label ⇒ `productMatches: false` (stricter, never looser).
-- `score-copy.ts`: judge gets the real customer quotes so quoting them is not scored as invention.
-- Deterministic fact/compliance checks: unchanged.
+1. **Anchor cloned the pack** (r2: 8/10 identical backdrops; the cleaner's first scene was a garden — category
+   label "home garden" — and all 10 ads were in a garden, two letterboxed). → Style anchor **off by default**
+   (`styleAnchor` opt-in), per-format **setting rotation** (`SCENE_SETTINGS`, Nth ad of a format gets the Nth
+   setting), plain category label ("home and household") + offer name and one-liner in the prompt, setting-neutral
+   `sceneIntent`s. Saves $0.01/scene and the anchor wait.
+2. **70% of scene briefs were the generic fallback**: the sanitizer dropped any sentence mentioning "text"
+   ("…, empty space for text"). → Clause-level sanitizing; copy prompt asks for 1–2 concrete visual sentences.
+3. **Letterboxing/blank bars** passed the vision check → new `borders` flag in `checkScene` (regenerates).
+4. **Text over the label**: 9:16 step cards were full width; explainer chips sat mid-frame; offer badge was 80% wide.
+   → Cards 60–62% wide, explainer grid bottom-anchored, badge in the left column and one line preferred;
+   scene hints put the product in the right third / above the card band.
+5. **before_after 9:16**: template now splits left/right at every ratio (scene is one left/right image).
+6. **"① 1. Limpiá"** double numbering → step bullets are stripped of leading numbers.
+7. **Copy**: craft rules rewritten (one idea per ad around 1–2 focus facts; pains/desires/quotes describe the buyer,
+   never product results; "What it is" is context; caption adds what the image doesn't say; vary headline
+   structure, "No compres…" once). Deterministic, non-blocking checks that trigger the single repair: register drift
+   (voseo in a tuteo/usted brand, quotes exempt), same two-word opener as another headline, caption restating a
+   chip/subline verbatim. Chip/CTA length = content words (articles/connectors not counted) **plus** a 26-char cap,
+   so verbatim confirmed facts ("Niacinamida 5% y aloe vera") stop triggering repairs. Customer quotes with numbers
+   no fact backs are kept out of the prompt. CTA example follows the brand register. Planner rotates the focus fact.
+8. Judge: told that the spoken `script` is a separate deliverable (criteria text already scoped repetition to
+   headline/subline/chips/caption). Rubric otherwise unchanged; fact/compliance checks unchanged.
 
-## Local output
+## Remaining weaknesses
 
-- Baseline contact sheet: `%TEMP%\adpack-bench\baseline-packs\contact-beauty-serum.png`
-- Tuned run (1/10 before 403): `%TEMP%\adpack-bench\tune1\contact-beauty-serum.png`
-- Product photos: `%TEMP%\adpack-bench\products\*.png`; copy runs: `copy-before\copy-bench.json`; spend ledger: `spend.json`
+- **Copy gate not met.** Best measured 67% ≥ 7 (fast judge, 10 offers). The last two copy changes (register-correct
+  CTA example, caption-repeats-chip check) are measured only on 9 ads. Caption repetition and "hook doesn't filter"
+  remain the main judge complaints; ~75% of ads still need the one repair call (adds ~10 s per ad).
+- Scene retries are frequent (8 of 30 in r3, mostly `borders`); a retry costs $0.03. Not yet known whether the
+  borders flag has false positives on split before/after images.
+- before_after is the weakest format (1 failure ×3 attempts, product appears in the "before" half).
+- Headlines still sometimes are product name + price ("Sérum Niacinamida ₡12.900") and the same chip
+  ("Envíos por Correos") appears in many ads of a pack.
+- Explainer scenes generated before the bottom-grid change still put the product low; needs a fresh run to verify.
+- Only 3 categories measured end-to-end; services/education/finance packs never ran with images.
+
+## Local output (absolute paths)
+
+- Final contact sheets (final templates, re-rendered from r3/r4 scenes, $0):
+  `C:\Users\Ryan\AppData\Local\Temp\adpack-bench\final-sheets\contact-beauty-serum.png`,
+  `…\final-sheets\contact-food-coffee.png`, `…\final-sheets\contact-home-cleaner.png`, `…\final-sheets\contact-pets-bed.png` (4/10)
+- As generated: `C:\Users\Ryan\AppData\Local\Temp\adpack-bench\r3-packs\contact-*.png`; before: `…\r2-packs1\contact-*.png`,
+  `…\baseline-packs\contact-beauty-serum.png`
+- Copy runs: `…\r2-copy-tuned\copy-bench.json`, `…\r3-copy-pilot\copy-bench.json`; spend ledger `…\adpack-bench\spend.json`

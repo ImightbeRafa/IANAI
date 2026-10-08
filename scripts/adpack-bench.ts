@@ -52,6 +52,11 @@ const PACK_OFFERS = (arg('offers') ?? 'beauty-serum,food-coffee,pets-bed,home-cl
 const COPY_OFFERS = arg('copy-offers') ?? 'all'
 const COPY_ANGLES = Number(arg('copy-angles') ?? 10)
 const JUDGE_PER_OFFER = Number(arg('judge') ?? 3)
+/** Judge model (default: gateway default, grok-4.5). `--judge-calibrate <model>` also scores the same ads with a 2nd model. */
+const JUDGE_MODEL = arg('judge-model')
+const JUDGE_CALIBRATE = arg('judge-calibrate')
+/** Calibrate only the first N judged ads per offer (cost control). */
+const CALIBRATE_PER_OFFER = Number(arg('calibrate-per-offer') ?? 99)
 const PACK_CONCURRENCY = Number(arg('concurrency') ?? 4)
 const PACK_SIZE = Number(arg('size') ?? 10)
 
@@ -130,10 +135,10 @@ function capGuard(inner: ModelGateway): ModelGateway {
 
 let baseGateway: ModelGateway
 /** A fresh ledger per scope (pack / copy offer); all entries also go to the run ledger. */
-function scopedGateway(): LedgeredGateway {
+function scopedGateway(stageOverride?: string): LedgeredGateway {
   return withCostLedger(capGuard(baseGateway), (e) => {
     runSpend += e.costUsd
-    runLedger.push({ ...e, stage })
+    runLedger.push({ ...e, stage: stageOverride ?? stage })
     persistSpend()
   })
 }
@@ -204,7 +209,8 @@ interface CopyAdRecord {
   repaired: boolean
   shipped: boolean
   copy?: AdCopy
-  judge?: { score: number; reasons: string[]; criteria: Record<string, number> }
+  judge?: { score: number; reasons: string[]; criteria: Record<string, number>; model?: string }
+  judgeAlt?: { score: number; reasons: string[]; criteria: Record<string, number>; model?: string }
 }
 
 const FACT_CODES = new Set<CopyCheckIssue['code']>(['unconfirmed_fact', 'number_mismatch'])
@@ -255,12 +261,18 @@ async function copyBenchOffer(c: BenchmarkCase): Promise<{ records: CopyAdRecord
     const idx = shippedIdx[Math.floor((k * shippedIdx.length) / JUDGE_PER_OFFER)]
     if (!pick.includes(idx)) pick.push(idx)
   }
+  const jgw = scopedGateway('B_judge')
   await mapWithConcurrency(pick, 3, async (i) => {
     const r = records[i]
-    const j = await scoreAdCopy({ gateway: gw, copy: r.copy!, angle: angles[i], dna, language, offer })
-    r.judge = { score: j.score, reasons: j.reasons, criteria: j.criteria as Record<string, number> }
+    const calibrate = JUDGE_CALIBRATE && pick.indexOf(i) < CALIBRATE_PER_OFFER
+    const j = await scoreAdCopy({ gateway: jgw, copy: r.copy!, angle: angles[i], dna, language, offer, model: JUDGE_MODEL })
+    r.judge = { score: j.score, reasons: j.reasons, criteria: j.criteria as Record<string, number>, model: j.model }
+    if (calibrate) {
+      const k = await scoreAdCopy({ gateway: jgw, copy: r.copy!, angle: angles[i], dna, language, offer, model: JUDGE_CALIBRATE })
+      r.judgeAlt = { score: k.score, reasons: k.reasons, criteria: k.criteria as Record<string, number>, model: k.model }
+    }
   })
-  return { records, costUsd: gw.totalCostUsd() }
+  return { records, costUsd: gw.totalCostUsd() + jgw.totalCostUsd() }
 }
 
 function pct(n: number, d: number): string {
@@ -325,7 +337,27 @@ async function stepCopy(): Promise<unknown> {
     judgeHistogram: hist,
     judgeCriteriaMean: Object.fromEntries(Object.entries(criteria).map(([k, v]) => [k, Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(2))])),
     topJudgeReasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 15),
+    judgeCalibration: (() => {
+      const pairs = judged.filter((r) => r.judgeAlt).map((r) => [r.judge!.score, r.judgeAlt!.score] as const)
+      if (!pairs.length) return null
+      const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
+      const a = pairs.map((p) => p[0])
+      const b = pairs.map((p) => p[1])
+      const agree = pairs.filter(([x, y]) => (x >= 7) === (y >= 7)).length
+      return {
+        model: judged.find((r) => r.judgeAlt)?.judgeAlt?.model,
+        n: pairs.length,
+        primaryMean: Number(mean(a).toFixed(2)),
+        altMean: Number(mean(b).toFixed(2)),
+        meanAbsDiff: Number(mean(pairs.map(([x, y]) => Math.abs(x - y))).toFixed(2)),
+        gte7Primary: a.filter((x) => x >= 7).length,
+        gte7Alt: b.filter((x) => x >= 7).length,
+        passFailAgreement: pct(agree, pairs.length),
+      }
+    })(),
     costUsd: Number(runLedger.filter((e) => e.stage === 'B_copy').reduce((s, e) => s + e.costUsd, 0).toFixed(4)),
+    judgeCostUsd: Number(runLedger.filter((e) => e.stage === 'B_judge').reduce((s, e) => s + e.costUsd, 0).toFixed(4)),
+    copyCostPerAd: Number((runLedger.filter((e) => e.stage === 'B_copy').reduce((s, e) => s + e.costUsd, 0) / Math.max(1, records.length)).toFixed(5)),
     wallMs: Date.now() - t0,
   }
   await writeFile(join(OUT, 'copy-bench.json'), JSON.stringify({ summary, records }, null, 2))
@@ -491,11 +523,55 @@ async function contactSheet(m: PackMetrics): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Step R — re-render saved packs with the current templates ($0, no model calls)
+// ---------------------------------------------------------------------------
+
+async function rerenderPacks(fromDir: string): Promise<PackMetrics[]> {
+  const renderer = createDefaultRenderer()
+  const out: PackMetrics[] = []
+  for (const offerId of PACK_OFFERS) {
+    const src = join(fromDir, 'packs', offerId)
+    if (!existsSync(join(src, 'pack.json'))) continue
+    const c = BENCHMARK_OFFERS.find((x) => x.id === offerId)!
+    const saved = JSON.parse(await readFile(join(src, 'pack.json'), 'utf8')) as { metrics: PackMetrics; items: PackMetrics['items'] }
+    const dir = join(OUT, 'packs', offerId)
+    await mkdir(dir, { recursive: true })
+    const items: PackMetrics['items'] = []
+    for (const it of saved.items) {
+      const prefix = String(it.index).padStart(2, '0')
+      const sceneFile = ['jpg', 'png'].map((e) => join(src, `${prefix}-scene.${e}`)).find((f) => existsSync(f))
+      if (!sceneFile || !it.copy || it.status !== 'done') {
+        items.push({ ...it, renders: [] })
+        continue
+      }
+      const scene = await readFile(sceneFile)
+      const renders: string[] = []
+      for (const ratio of ['1:1', '4:5', '9:16'] as const) {
+        const r = await renderer.render({ format: it.angle.format, ratio, sceneImage: new Uint8Array(scene), copy: it.copy, visual: c.dna.visual ?? {}, language: c.dna.language })
+        const file = join(dir, `${prefix}-render-${ratio.replace(':', 'x')}.png`)
+        await writeFile(file, r.png)
+        renders.push(pathToFileURL(file).href)
+      }
+      items.push({ ...it, renders })
+    }
+    const m: PackMetrics = { ...saved.metrics, dir, items }
+    console.log(`[R] re-rendered ${offerId} from ${src}`)
+    out.push(m)
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
   await mkdir(OUT, { recursive: true })
+  if (STEPS.has('R')) {
+    // `--steps R --from <bench out dir> --offers a,b`: templates only, no keys needed.
+    for (const m of await rerenderPacks(resolve(arg('from') ?? ''))) console.log(`[R] contact sheet ${await contactSheet(m)}`)
+    return
+  }
   const keys = loadKeys()
   baseGateway = createModelGateway({ env: keys })
   console.log(`[bench] out=${OUT} steps=${[...STEPS].join(',')} cap=$${CAP_USD} prior spend=$${priorSpend.toFixed(3)}`)
