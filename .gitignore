@@ -35,3 +35,6 @@ supabase/config.toml
 
 # Verification run artifacts (keep the README)
 .cursor/skills/verify-advance/evidence/runs/
+
+# Local agent worktrees
+.claude/worktrees/
