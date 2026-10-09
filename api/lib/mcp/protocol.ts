@@ -352,7 +352,11 @@ function toolInputSchema(name: string): Record<string, unknown> {
       enum: ['exact', 'generated'],
       description: 'exact (default when a product photo exists; forced when the offer locks the product appearance) = the real product photo pixels are cut out and composited into a generated scene, with a fidelity score; generated = the image model redraws the product from the reference. Same price either way.',
     },
-    relight: { type: 'boolean', description: 'exact mode: optional light-harmonization pass (one extra image-edit call per ad, included in the quote), kept only if the product still matches (fidelity).' },
+    relight: {
+      type: 'string',
+      enum: ['auto', 'ai'],
+      description: 'exact mode relighting, always included and free (never changes the quote): "auto" (default) = deterministic photographic harmonization of the real product into the scene (light direction, shading, white balance + shared grade, light wrap, contact/cast shadows, reflection on glossy surfaces, grain) without redrawing product pixels; "ai" = the same plus an image-edit relight pass kept only if the product still matches (fidelity). Older boolean values are still accepted (true = "ai").',
+    },
     allowedProps: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Kit objects that may appear besides the product (ambient props like table/plants/fabric are always allowed). Defaults to the offer ad_profile.' },
     immutableAttributes: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Product appearance facts that must never change, used in prompts and checks. Defaults to the offer ad_profile.' },
   }

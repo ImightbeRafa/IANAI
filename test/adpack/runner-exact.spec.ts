@@ -130,7 +130,7 @@ describe('exact product mode — pack runner (A1/A3/A4/H3)', () => {
     await t.advance()
     const { items } = await t.state()
     expect(items[0].status).toBe('failed')
-    expect(items[0].error).toMatch(/^fidelity_failed: ssim/)
+    expect(items[0].error).toMatch(/^fidelity_failed: (detail ssim|silhouette IoU|hue shift|chroma ratio|ΔE)/)
     expect(items[0].renders).toEqual([])
     expect(items[0].fidelity?.passed).toBe(false)
     expect(t.charge.total()).toBe(0)
@@ -223,9 +223,14 @@ describe('pack options + persistence', () => {
     expect(resolveRenderOptions({}, noPhoto).productFidelity).toBe('generated')
     expect(() => resolveRenderOptions({ productFidelity: 'exact' }, noPhoto)).toThrow(/needs a real product photo/)
     expect(() => resolveRenderOptions({ productFidelity: 'pixel' }, withPhoto)).toThrow(/exact or generated/)
-    expect(resolveRenderOptions({ relight: true, allowedProps: ['caja', ' caja '], immutableAttributes: ['ala blanca'] }, withPhoto)).toEqual({ productFidelity: 'exact', relight: true, allowedProps: ['caja'], immutableAttributes: ['ala blanca'] })
+    // relight: 'auto' (default, deterministic) is not stored; 'ai' (or legacy true) is. Free either way.
+    expect(resolveRenderOptions({ relight: 'ai', allowedProps: ['caja', ' caja '], immutableAttributes: ['ala blanca'] }, withPhoto)).toEqual({ productFidelity: 'exact', relight: 'ai', allowedProps: ['caja'], immutableAttributes: ['ala blanca'] })
+    expect(resolveRenderOptions({ relight: true }, withPhoto).relight).toBe('ai')
+    expect(resolveRenderOptions({ relight: 'auto' }, withPhoto).relight).toBeUndefined()
+    expect(resolveRenderOptions({ relight: false }, withPhoto).relight).toBeUndefined()
+    expect(() => resolveRenderOptions({ relight: 'max' }, withPhoto)).toThrow(/"auto" or "ai"/)
     // Relight is ignored in generated mode.
-    expect(resolveRenderOptions({ relight: true, productFidelity: 'generated' }, withPhoto).relight).toBeUndefined()
+    expect(resolveRenderOptions({ relight: 'ai', productFidelity: 'generated' }, withPhoto).relight).toBeUndefined()
   })
 
   it('service.startPack stores the options; status reports productFidelity', async () => {
@@ -248,11 +253,11 @@ describe('pack options + persistence', () => {
   })
 
   it('no migration needed: render options ride in the offer jsonb, fidelity in scene_check', () => {
-    const { pack } = planPack({ dna: serum.dna, offer: { ...serum.offer, productImageUrls: [HERO] }, size: 1, userId: USER, source: 'web', ids: { packId: PACK_ID }, render: { productFidelity: 'exact', relight: true } })
+    const { pack } = planPack({ dna: serum.dna, offer: { ...serum.offer, productImageUrls: [HERO] }, size: 1, userId: USER, source: 'web', ids: { packId: PACK_ID }, render: { productFidelity: 'exact', relight: 'ai' } })
     const row = packToRow(pack)
-    expect((row.offer as Record<string, unknown>).packRender).toEqual({ productFidelity: 'exact', relight: true })
+    expect((row.offer as Record<string, unknown>).packRender).toEqual({ productFidelity: 'exact', relight: 'ai' })
     const back = rowToPack(row)
-    expect(back.render).toEqual({ productFidelity: 'exact', relight: true })
+    expect(back.render).toEqual({ productFidelity: 'exact', relight: 'ai' })
     expect(back.offer).toEqual(pack.offer)
     const fidelity = { score: 0.99, ssim: 0.999, deltaE: 1.2, passed: true, method: 'composite' as const }
     const item = rowToItem({ id: 'i', pack_id: PACK_ID, item_index: 0, status: 'done', angle: {}, renders: [], attempts: 0, generation_id: 'g', updated_at: new Date().toISOString(), scene_check: { ok: true, productMatches: null, strayText: null, score: 0.8, fidelity } })
@@ -276,7 +281,8 @@ describe('exact single image (execute_image_generate / bulk / campaign pack)', (
     expect(res.ok).toBe(true)
     if (!res.ok) return
     expect([res.width, res.height]).toEqual([1080, 1350])
-    expect(res.fidelity).toMatchObject({ passed: true, method: 'composite' })
+    expect(res.fidelity).toMatchObject({ passed: true, method: 'harmonized' })
+    expect(res.fidelity.silhouetteIoU).toBeGreaterThanOrEqual(0.98)
     expect(gw.sceneCalls[0]).toMatchObject({ refs: [], ratio: '4:5' })
   })
 

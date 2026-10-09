@@ -47,6 +47,7 @@ import {
   editItemText,
   MAX_VARIATIONS,
   packAdCount,
+  packRelightMode,
   planPack,
   quotePack,
   regenerateItem,
@@ -69,7 +70,7 @@ import { createSupabaseAdPackStorage } from './storage.js'
 import { buildStatusExtras } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
-import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto } from './types.js'
+import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto, RelightMode } from './types.js'
 import { hasUsableProductPhoto, isProductPhotoRole } from './fidelity/photos.js'
 import type { ImageLoader } from './fidelity/pipeline.js'
 import type { DnaPart } from './dna/part.js'
@@ -409,7 +410,7 @@ export function parseStringList(raw: unknown, label: string): string[] | undefin
 export function resolveRenderOptions(raw: { productFidelity?: unknown; relight?: unknown; allowedProps?: unknown; immutableAttributes?: unknown }, offer: OfferInput): PackRenderOptions {
   const mode = raw.productFidelity
   if (mode !== undefined && mode !== null && mode !== 'exact' && mode !== 'generated') throw bad('productFidelity must be exact or generated')
-  if (raw.relight !== undefined && raw.relight !== null && typeof raw.relight !== 'boolean') throw bad('relight must be a boolean')
+  const relight = parseRelight(raw.relight)
   const hasPhoto = hasUsableProductPhoto(offer)
   const locked = offer.lockProductAppearance === true || offer.productLock?.lockProductAppearance === true
   if ((mode === 'exact' || locked) && !hasPhoto) {
@@ -423,10 +424,22 @@ export function resolveRenderOptions(raw: { productFidelity?: unknown; relight?:
   const immutableAttributes = parseStringList(raw.immutableAttributes, 'immutableAttributes') ?? offer.immutableAttributes ?? (lock?.immutableAttributes.length ? lock.immutableAttributes : undefined)
   return {
     productFidelity,
-    ...(raw.relight === true && productFidelity === 'exact' ? { relight: true } : {}),
+    ...(relight === 'ai' && productFidelity === 'exact' ? { relight: 'ai' as const } : {}),
     ...(allowedProps?.length ? { allowedProps } : {}),
     ...(immutableAttributes?.length ? { immutableAttributes } : {}),
   }
+}
+
+/**
+ * relight (exact mode; always included and free): 'auto' (default) = deterministic photographic
+ * harmonization, 'ai' = + an image-edit pass kept only when fidelity holds. Booleans from older
+ * callers: true → 'ai', false → 'auto'. Never changes the price.
+ */
+export function parseRelight(raw: unknown): RelightMode | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (raw === 'auto' || raw === false) return 'auto'
+  if (raw === 'ai' || raw === true) return 'ai'
+  throw bad('relight must be "auto" or "ai"')
 }
 
 /** Ads per angle (1–3). Out of range is an error, never clamped (approval = what runs). */
@@ -583,9 +596,9 @@ export function applyDnaOverrides(dna: BrandDna, input: DnaOverridesInput): Bran
   return out
 }
 
-/** Plan summary for a count of ads (credits = per-ad × count; relight adds its model call per ad). */
-export function adPackPlanSummary(items: number, opts: { relight?: boolean } = {}): AdPackPlanSummary {
-  const q = quotePack(items, opts)
+/** Plan summary for a count of ads (credits = per-ad × count; relighting is included, free). */
+export function adPackPlanSummary(items: number): AdPackPlanSummary {
+  const q = quotePack(items)
   return { items, unitCost: q.perAd, total: q.credits, currency: 'credits' }
 }
 
@@ -642,14 +655,19 @@ export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrase
   }
 }
 
-/** Public fidelity (A4): score, passed, method, ssim/ΔE and the heatmap link when present. */
+/** Public fidelity (A4): score, passed, method, detail SSIM / silhouette IoU / hue shift / ΔE and the heatmap link. */
 export function fidelityView(f: NonNullable<PackItem['fidelity']>): NonNullable<AdPackItemView['fidelity']> {
+  const num = (v: number | null | undefined) => v !== null && v !== undefined
   return {
     score: f.score,
     passed: f.passed,
     method: f.method,
-    ...(f.ssim !== null && f.ssim !== undefined ? { ssim: f.ssim } : {}),
-    ...(f.deltaE !== null && f.deltaE !== undefined ? { deltaE: f.deltaE } : {}),
+    ...(num(f.ssim) ? { ssim: f.ssim as number } : {}),
+    ...(num(f.deltaE) ? { deltaE: f.deltaE as number } : {}),
+    ...(num(f.ssimDetail) ? { ssimDetail: f.ssimDetail as number } : {}),
+    ...(num(f.silhouetteIoU) ? { silhouetteIoU: f.silhouetteIoU as number } : {}),
+    ...(num(f.hueShift) ? { hueShift: f.hueShift as number } : {}),
+    ...(num(f.chromaRatio) ? { chromaRatio: f.chromaRatio as number } : {}),
     ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}),
   }
 }
@@ -662,7 +680,7 @@ function libraryIdsFor(item: PackItem): string[] {
 
 function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string, language?: AdLanguage): AdPackStatusResponse {
   const progress: PackProgress = summarizePack(pack, items)
-  const perAd = quotePack(1, { relight: pack.render?.relight }).perAd
+  const perAd = quotePack(1).perAd
   // Charges for the current attempt of each ad (a regenerate clears `chargedAt` until it is re-charged).
   const chargedCredits = items.filter((i) => i.chargedAt).length * perAd
   const leaseActive = items.some((i) => i.leaseUntil && Date.parse(i.leaseUntil) > nowMs && i.status !== 'done' && i.status !== 'failed')
@@ -683,7 +701,7 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     size: pack.size,
     ratios: pack.ratios,
     productFidelity: pack.render?.productFidelity ?? 'generated',
-    ...(pack.render?.relight ? { relight: true } : {}),
+    ...(pack.render?.productFidelity === 'exact' ? { relight: packRelightMode(pack) } : {}),
     source: pack.source,
     quotedCredits: pack.quotedCredits,
     chargedCredits,
@@ -812,7 +830,7 @@ export interface AdPackService {
   planAngles(input: { userId: string; dna?: unknown; offer?: unknown; size?: unknown; brief?: unknown } & SavedBrandRefInput): Promise<AdPackAnglesResponse>
   /**
    * Quote for exactly the ads start would run: same resolver (guide angles + angleIds, or the
-   * planner's `size`), × variations, + relight's model call per ad in exact mode.
+   * planner's `size`), × variations. Relighting (exact mode) is included and free.
    */
   quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; brief?: unknown; productFidelity?: unknown; relight?: unknown } & SelectionInput & SavedBrandRefInput): Promise<AdPackQuote>
   startPack(input: {
@@ -851,7 +869,7 @@ export interface AdPackService {
     expectedAds?: number
     /** 'exact' (default with a product photo) = real product pixels; 'generated' = model-drawn product. */
     productFidelity?: unknown
-    /** Optional relight pass in exact mode (kept only when fidelity holds; one extra model call per ad, quoted). */
+    /** Exact mode relight: 'auto' (default, deterministic) or 'ai' (+ guarded model pass). Free either way. */
     relight?: unknown
     /** Kit objects allowed in scenes besides the product. */
     allowedProps?: unknown
@@ -1048,14 +1066,13 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     return toStatusView(pack, items, now(), input.appOrigin ?? deps.appOrigin, language)
   }
 
-  const quoteFor = (size: number, opts: { relight?: boolean; variations?: number; angleIds?: string[] } = {}): AdPackQuote => {
-    const q = quotePack(size, { relight: opts.relight })
+  const quoteFor = (size: number, opts: { variations?: number; angleIds?: string[] } = {}): AdPackQuote => {
+    const q = quotePack(size)
     const variations = opts.variations ?? 1
     return {
       size,
       credits: q.credits,
       perAd: q.perAd,
-      ...(opts.relight ? { relight: true as const } : {}),
       ...(opts.angleIds ? { angleIds: opts.angleIds } : {}),
       ...(variations > 1 ? { variations, angles: Math.round(size / variations) } : {}),
     }
@@ -1131,15 +1148,15 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         const angles = resolveAngles(dna, offer, size, { angleIds: sel.angleIds, angles: guideAngles }, brief)
         const ads = packAdCount(angles.length, sel.variations)
         if (ads > MAX_PACK_SIZE) throw bad(`angles × variations = ${ads} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
-        // Same render resolution as start: relight only counts when the pack really runs exact.
-        const render = resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
-        return quoteFor(ads, { relight: render.relight, variations: sel.variations, angleIds: angles.map((a) => a.id) })
+        // Same render resolution as start (validates productFidelity / relight; relight is free).
+        resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
+        return quoteFor(ads, { variations: sel.variations, angleIds: angles.map((a) => a.id) })
       }
       if (sel.angleIds || sel.guideAngles.length) throw bad('angleIds / angles need dna + offer or brandId to resolve')
-      if (input.relight !== undefined && input.relight !== null && typeof input.relight !== 'boolean') throw bad('relight must be a boolean')
+      parseRelight(input.relight)
       const ads = packAdCount(size, sel.variations)
       if (ads > MAX_PACK_SIZE) throw bad(`angles × variations = ${ads} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
-      return quoteFor(ads, { relight: input.relight === true && input.productFidelity !== 'generated', variations: sel.variations })
+      return quoteFor(ads, { variations: sel.variations })
     },
 
     async startPack(input) {
@@ -1160,7 +1177,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       if (input.packId) {
         const existing = await deps.store.getPack(packId, input.userId)
         if (existing) {
-          return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size, { relight: existing.pack.render?.relight }), existing: true }
+          return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
         }
       }
       let savedStyleDnas: StyleDna[] | undefined
@@ -1225,8 +1242,8 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       if (!planned.items.length) throw bad(sel.angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
       if (planned.items.length > MAX_PACK_SIZE) throw bad(`angles × variations = ${planned.items.length} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
       // F1: never run (or silently shrink) a plan the user did not approve. The plan is recomputed
-      // here with the quote's resolver (ads × variations, + relight's model call per ad).
-      const current = adPackPlanSummary(planned.items.length, { relight: render.relight })
+      // here with the quote's resolver (ads × variations; relighting is included and free).
+      const current = adPackPlanSummary(planned.items.length)
       const approvedCount = input.expectedAds !== undefined ? Number(input.expectedAds) : undefined
       if ((approved && (approved.items !== current.items || approved.total !== current.total)) || (approvedCount !== undefined && approvedCount !== current.items)) {
         const was = approved ?? { items: approvedCount as number, total: (approvedCount as number) * current.unitCost }
@@ -1237,19 +1254,19 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           approvedAds: was.items,
         })
       }
-      await requireCredits(input.userId, planned.pack.size * (render.relight ? 2 : 1))
+      await requireCredits(input.userId, planned.pack.size)
       try {
         await deps.store.createPack(planned.pack, planned.items)
       } catch (err) {
         // Concurrent retry with the same fixed id won the insert: return that pack.
         const existing = input.packId ? await deps.store.getPack(packId, input.userId).catch(() => null) : null
         if (!existing) throw err
-        return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size, { relight: existing.pack.render?.relight }), existing: true }
+        return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
       }
       return {
         packId,
         status: planned.pack.status,
-        quote: quoteFor(planned.pack.size, { relight: render.relight, variations: sel.variations, angleIds: [...new Set(planned.items.map((i) => i.angle.id))] }),
+        quote: quoteFor(planned.pack.size, { variations: sel.variations, angleIds: [...new Set(planned.items.map((i) => i.angle.id))] }),
         existing: false,
         creativeFreedom: planned.creativeFreedom,
         variations: sel.variations,
@@ -1337,13 +1354,13 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const { pack, items } = await load(input.userId, packId)
       if (pack.status === 'cancelled') throw new AdPackError('NOT_READY', 'Pack was cancelled')
       if (!items.some((i) => i.id === itemId)) throw new AdPackError('NOT_FOUND', 'Ad not found')
-      await requireCredits(input.userId, pack.render?.relight ? 2 : 1)
+      await requireCredits(input.userId, 1)
       const res = await regenerateItem({ store: deps.store, packId, itemId, userId: input.userId, mode })
       if (!res.ok) {
         if (res.error === 'item_busy') throw new AdPackError('BUSY', 'This ad is still being generated')
         throw new AdPackError('NOT_FOUND', res.error === 'pack_not_found' ? 'Pack not found' : 'Ad not found')
       }
-      return { item: toItemView(res.item), quote: quoteFor(1, { relight: pack.render?.relight }) }
+      return { item: toItemView(res.item), quote: quoteFor(1) }
     },
 
     async cancel(input) {

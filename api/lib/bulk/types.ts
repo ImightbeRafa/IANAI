@@ -115,8 +115,8 @@ export type BulkPostItem = {
   generationId: string
   approach: string
   error?: string
-  /** Product fidelity of the image (exact mode: real product pixels, masked SSIM / ΔE). */
-  fidelity?: { score: number; passed: boolean; method: 'composite' | 'relit' | 'generated'; ssim?: number; deltaE?: number }
+  /** Product fidelity of the image (exact mode: real product pixels, detail SSIM / silhouette IoU / hue shift). */
+  fidelity?: { score: number; passed: boolean; method: 'composite' | 'harmonized' | 'relit' | 'generated'; ssim?: number; deltaE?: number; silhouetteIoU?: number; hueShift?: number }
 }
 
 export type ExpandedProductRef = {

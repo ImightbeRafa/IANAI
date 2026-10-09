@@ -77,7 +77,8 @@ describe('runBulkPosts product fidelity', () => {
     expect(res.succeeded).toBe(1)
     expect(runGrokPostFirstGen).not.toHaveBeenCalled()
     expect(plateGw.sceneCalls[0].refs).toEqual([])
-    expect(res.items[0].fidelity).toMatchObject({ passed: true, method: 'composite' })
+    // The relight stage is included (deterministic harmonization), and the product still passes.
+    expect(res.items[0].fidelity).toMatchObject({ passed: true, method: 'harmonized' })
     expect(saved[0].metadata).toMatchObject({ productFidelity: 'exact', grokMode: 'exact_composite' })
     const meta = await sharp(Buffer.from(saved[0].imageDataUrl.split(',')[1], 'base64')).metadata()
     expect([meta.width, meta.height]).toEqual([1080, 1350])

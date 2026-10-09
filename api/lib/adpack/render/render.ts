@@ -4,8 +4,10 @@
  *   scene / plate (sharp cover-fit)
  *   + under layer (scrims, panels, cards, frames, dividers; SVG → resvg)
  *     → contrast is measured here per text box, scrims are strengthened until ≥ 4.5:1
- *   + real product cut-out(s) (fidelity/composite.ts: contact + cast shadow, capped harmonization)
- *   + optional relight hook (exact mode; kept only when fidelity holds)
+ *   + real product cut-out(s) (fidelity/composite.ts). Exact mode includes the deterministic relight
+ *     stage (fidelity/harmonize.ts): plate light model + shared grade, directional shading, white
+ *     balance, light wrap, contact/cast shadows, reflection on glossy plates, grain/defocus match
+ *   + optional AI relight hook (relight 'ai'; kept only when fidelity holds)
  *   + logo (background removed, variant picked for the background under its slot)
  *   = base
  *   + over layer (pills/icons as SVG + text via satori → resvg)
@@ -27,7 +29,8 @@ import { blend, contrastFromLuminance, contrastRatio, ensureReadableFill, INK, l
 import { composeFamily, FAMILY_SPECS, type LayoutFamily } from './families.js'
 import { ensureBrandFonts, type FontResolution } from './font-resolver.js'
 import { cssFamily, familyFonts, resolveFonts, satoriFonts, type ResolvedFonts } from './fonts.js'
-import { compositeProducts, layoutProductGroup, type PlacedProduct } from '../fidelity/composite.js'
+import { compositeProducts, layoutProductGroup, unionBox, type PlacedProduct } from '../fidelity/composite.js'
+import { estimateLight, gradeFor, gradeImage, lightSummary, type LightModel } from '../fidelity/harmonize.js'
 import { avoidRegions, blockingNodes, overlayBoxes } from './avoid.js'
 import { ALL_RATIOS, inside, makeFrame, overlaps, union, type Frame } from './frame.js'
 import { decodeLayer, loadImageBytes, prepareScene, regionStats, resizeLayer, trimTransparent, type PreparedLayer } from './image.js'
@@ -583,7 +586,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   // 1) Layout: family placement variants × progressive type scale, product box kept clear.
   const planned = planLayout({ ...input, product: productDims, parts: partDims, logo: logoDims, exact, avoidBox, fonts: assets.fonts.fonts })
   const { layout, scale, frame, fonts, palette, family, placement } = planned
-  const scene = await prepareScene(assets.scene, frame.W, frame.H)
+  let scene = await prepareScene(assets.scene, frame.W, frame.H)
   warnings.push(...layout.warnings)
   const texts = textNodes(layout)
 
@@ -594,6 +597,14 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   const composited = productBoxes.length > 0
   const guarded = composited ? productBoxes : avoidBox ? [avoidBox] : []
   const productBoxRespected = productOverlap(layout, guarded, composited) === 0
+  // Exact mode relight stage, part 1: light model of the clean plate around the product slot and
+  // the shared grade on the plate itself (before panels / scrims, so brand colors stay exact).
+  const harmonize = exact && input.harmonize !== false && productBoxes.length > 0
+  let lightModel: LightModel | null = null
+  if (harmonize) {
+    lightModel = await estimateLight(scene, unionBox(productBoxes), { light: input.light, surface: input.surface })
+    scene = await gradeImage(scene, gradeFor(lightModel))
+  }
   warnings.push(...placed.warnings)
   if (!productBoxRespected) warnings.push('copy overlaps the product box in every placement of this family (least-overlapping placement used)')
 
@@ -644,14 +655,15 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     under = await composeUnder()
   }
 
-  // 4) Real product cut-out(s): shadows + capped harmonization (exact) — product pixels stay intact.
+  // 4) Real product cut-out(s): exact mode = relight stage (light only) — product pixels never redrawn.
   let base: Buffer = under
   let placements: PlacedProduct[] = []
   let relit = false
   if (assets.product && productBoxes.length) {
     const layers = [assets.product, ...(exact ? assets.parts : [])].slice(0, productBoxes.length)
     const products = layers.map((p, i) => ({ cutout: p.png, box: productBoxes[i], role: (i ? 'part' : 'hero') as 'hero' | 'part' }))
-    const comp = await compositeProducts({ base, products, light: input.light, harmonize: exact, shadow: true, lightWrap: exact })
+    // Part 2: shading, white balance, the same grade, light wrap, shadows, reflection, grain.
+    const comp = await compositeProducts({ base, products, light: input.light, surface: input.surface, harmonize, shadow: true, lightWrap: harmonize, ...(lightModel ? { lightModel, gradeBase: false } : {}) })
     base = comp.png
     placements = comp.placements
     if (exact && input.relight) {
@@ -790,6 +802,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     layoutReport,
     basePng: input.debug?.returnBase ? base : undefined,
     ...(placements.length ? { productPlacements: placements } : {}),
+    ...(harmonize && lightModel ? { harmonized: true, light: lightSummary(lightModel) } : {}),
     ...(relit ? { relit } : {}),
   }
 }

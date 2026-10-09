@@ -446,7 +446,7 @@ describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, app
         expect(f.url).toMatch(new RegExp(`^${STORAGE_PUBLIC}.*\\.png$`))
         expect(f.jpgUrl).toMatch(new RegExp(`^${STORAGE_PUBLIC}.*\\.jpg$`))
         expect(`${f.url} ${f.jpgUrl}`).not.toMatch(/token=|X-Amz-|\/sign\//)
-        expect(f.fidelity).toMatchObject({ passed: true, method: expect.stringMatching(/composite|relit/) })
+        expect(f.fidelity).toMatchObject({ passed: true, method: expect.stringMatching(/harmonized|composite|relit/) })
         const png = await sharp(Buffer.from(w.blobs.get(f.url)!)).metadata()
         expect([png.format, png.width, png.height]).toEqual(['png', f.width, f.height])
         const jpg = await sharp(Buffer.from(w.blobs.get(f.jpgUrl)!)).metadata()

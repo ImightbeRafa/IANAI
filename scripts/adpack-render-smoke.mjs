@@ -18,8 +18,10 @@ import { pathToFileURL } from 'node:url'
 const distApi = resolve(process.argv[2] || 'dist-api')
 const renderDir = join(distApi, 'lib/adpack/render')
 
-const fontFile = join(renderDir, 'fonts/Poppins-Bold.ttf')
-if (!existsSync(fontFile)) throw new Error(`font missing in compiled output: ${fontFile}`)
+for (const f of ['Poppins-Bold.ttf', 'SpaceGrotesk-Regular.ttf', 'SpaceGrotesk-Bold.ttf', 'spacegrotesk-OFL.txt']) {
+  const fontFile = join(renderDir, 'fonts', f)
+  if (!existsSync(fontFile)) throw new Error(`font missing in compiled output: ${fontFile}`)
+}
 
 const { Resvg } = await import('@resvg/resvg-js')
 const sharp = (await import('sharp')).default
@@ -43,7 +45,8 @@ const { png, layoutReport } = await renderAd({
     offerLine: '₡9.900 · Envío gratis',
     cta: '¡Pedí la tuya!',
   },
-  visual: { primaryColor: '#0F5132', accentColor: '#F4B400', headingFont: 'Montserrat', bodyFont: 'Montserrat' },
+  // Space Grotesk is a bundled system font: it must resolve exactly with no network.
+  visual: { primaryColor: '#0F5132', accentColor: '#F4B400', headingFont: 'Space Grotesk', bodyFont: 'Space Grotesk' },
   language: 'es',
 })
 
@@ -52,6 +55,8 @@ if (!Buffer.isBuffer(png) || !png.subarray(0, 8).equals(PNG_SIG)) throw new Erro
 const meta = await sharp(png).metadata()
 if (meta.width !== 1080 || meta.height !== 1080) throw new Error(`unexpected size ${meta.width}x${meta.height}`)
 if (!layoutReport?.elements?.length) throw new Error('layoutReport has no text elements')
+const headline = layoutReport.elements.find((e) => e.role === 'headline')
+if (headline?.fontFamily !== 'Space Grotesk') throw new Error(`headline font is ${headline?.fontFamily}, expected bundled Space Grotesk`)
 
 console.log(
   `adpack render ok: ${meta.width}x${meta.height} ${png.length}B, ${layoutReport.elements.length} text elements, fits=${layoutReport.fits}, ${Date.now() - t0}ms (sharp vips ${sharp.versions.vips})`,

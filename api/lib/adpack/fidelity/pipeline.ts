@@ -5,21 +5,22 @@
  * - `prepareProductCutouts`: hero (sharpest usable photo, C3) + real parts → cut-outs, cached
  *   by content hash in storage; never synthesizes a missing part.
  * - `generateExactProductImage`: one text-free image at any supported ratio
- *   (plate → props check → composite → optional relight → fidelity), used by MCP
- *   execute_image_generate, bulk posts and the campaign pack image step.
+ *   (plate → props check → composite + deterministic relight stage → optional AI relight →
+ *   fidelity), used by MCP execute_image_generate, bulk posts and the campaign pack image step.
  */
 import sharp from 'sharp'
 import { isSupportedImageRatio, RATIO_OUTPUT_SIZE, ratioValue, reframeToRatio } from '../../image-ratios.js'
 import { loadImageBytes } from '../render/image.js'
-import type { AdFormat, AdLanguage, AspectRatio, BrandDna, FidelityResult, LightDirection, ModelGateway, OfferInput, ProductPhoto, StoredCutout } from '../types.js'
+import type { AdFormat, AdLanguage, AspectRatio, BrandDna, FidelityResult, LightDirection, ModelGateway, OfferInput, ProductPhoto, RelightMode, StoredCutout } from '../types.js'
 import { analyzeAssetQuality, pickProductImage, type AssetQuality, type PoolImage } from './asset-quality.js'
 import type { BlobCache } from './cache.js'
 import { compositeProducts, fitBox } from './composite.js'
-import { checkPlate, generatePlate, plateLight, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion } from './plate.js'
+import { checkPlate, generatePlate, plateLight, plateSurface, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion } from './plate.js'
 import { relightComposite } from './relight.js'
-import { scoreFidelity, toFidelityResult, type FidelityScore } from './score.js'
+import { fidelityFailReason, scoreFidelity, toFidelityResult, type FidelityScore } from './score.js'
 import { segmentProduct, sha256Hex, type CutoutMethod } from './segment.js'
 import { resolveProductPhotos } from './photos.js'
+import { upscaleProductPhoto, upscaleTarget, type UpscaleResult } from './upscale.js'
 
 export type ImageLoader = (url: string) => Promise<Uint8Array>
 
@@ -32,6 +33,8 @@ export interface LoadedCutout {
   bytes: Uint8Array
   width: number
   height: number
+  /** Present when the source photo was upscaled (without redrawing) before the cut-out. */
+  upscale?: Pick<UpscaleResult, 'from' | 'to' | 'ssim' | 'silhouetteIoU'>
 }
 
 export interface CutoutContext {
@@ -59,8 +62,12 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
   map.set(key, value)
 }
 
-/** One photo → cut-out (storage cache by sha256 of the source bytes). */
-export async function cutoutForPhoto(photo: ProductPhoto, ctx: CutoutContext): Promise<LoadedCutout | { error: string }> {
+/**
+ * One photo → cut-out (storage cache by sha256 of the source bytes). With `upscale` (the photo is
+ * low resolution per asset-quality), the photo is first upscaled without redrawing (upscale.ts)
+ * and the cut-out is made from that; its cache key gets an `-sr<w>x<h>` suffix.
+ */
+export async function cutoutForPhoto(photo: ProductPhoto, ctx: CutoutContext, opts: { upscale?: boolean } = {}): Promise<LoadedCutout | { error: string }> {
   let bytes: Uint8Array
   try {
     bytes = await sourceBytes(photo.url, ctx)
@@ -68,6 +75,33 @@ export async function cutoutForPhoto(photo: ProductPhoto, ctx: CutoutContext): P
     return { error: `photo_unreadable: ${error instanceof Error ? error.message : String(error)}` }
   }
   const hash = sha256Hex(bytes)
+  if (opts.upscale) {
+    try {
+      // Deterministic target → the upscaled cut-out's cache key is known before any work.
+      const meta = await sharp(bytes).rotate().metadata()
+      const target = upscaleTarget(meta.width ?? 0, meta.height ?? 0)
+      if (target) {
+        const key = `${hash}-sr${target.width}x${target.height}`
+        const from = { width: meta.width ?? 0, height: meta.height ?? 0 }
+        const hit = cutoutMemo.has(key) || (ctx.cache ? await ctx.cache.get(key).catch(() => null) : null)
+        if (hit) {
+          const res = await cutoutFromBytes(photo, bytes, key, ctx)
+          return 'error' in res ? res : { ...res, upscale: { from, to: { width: target.width, height: target.height } } }
+        }
+        const up = await upscaleProductPhoto(bytes)
+        if (up.upscaled) {
+          const res = await cutoutFromBytes(photo, new Uint8Array(up.bytes), key, ctx)
+          return 'error' in res ? res : { ...res, upscale: { from: up.from, to: up.to, ssim: up.ssim, silhouetteIoU: up.silhouetteIoU } }
+        }
+      }
+    } catch {
+      // Upscale is best-effort: the original photo is still a valid source.
+    }
+  }
+  return cutoutFromBytes(photo, bytes, hash, ctx)
+}
+
+async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: string, ctx: CutoutContext): Promise<LoadedCutout | { error: string }> {
   const local = cutoutMemo.get(hash)
   if (local && ctx.cache) {
     // Still make sure the storage copy exists (URL for the item) — cheap when it does.
@@ -143,11 +177,12 @@ export async function prepareProductCutouts(input: { photos: ProductPhoto[]; for
     if (!pick) break
     tried.push(pick.url)
     const photo = input.photos.find((p) => p.url === pick.url) as ProductPhoto
-    const res = await cutoutForPhoto(photo, ctx)
+    // C4: a low-resolution hero is upscaled (never redrawn) before the cut-out.
+    const res = await cutoutForPhoto(photo, ctx, { upscale: Boolean(pick.quality?.lowResolution) })
     if ('error' in res) errors.push(res.error)
     else {
       hero = res
-      heroQuality = pick.quality
+      heroQuality = pick.quality && res.upscale ? { ...pick.quality, upscaled: true, from: res.upscale.from, to: res.upscale.to } : pick.quality
     }
   }
   if (!hero) return { ok: false, error: errors[0]?.startsWith('cutout_failed') ? errors.join(' | ').slice(0, 480) : `cutout_failed: ${errors.join(' | ')}`.slice(0, 480), warnings }
@@ -182,7 +217,11 @@ export interface ExactImageInput {
   allowedProps?: string[]
   /** Product appearance facts that never change (plate prompt, plate check, relight). */
   immutableAttributes?: string[]
-  relight?: boolean
+  /**
+   * Relight (free): 'auto' (default) = deterministic harmonization only; 'ai' = + the guarded
+   * image-edit pass. `true` = 'ai' (older callers); `false` = 'auto'.
+   */
+  relight?: RelightMode | boolean
   cache?: BlobCache | null
   load?: ImageLoader
   variation?: number
@@ -241,6 +280,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   warnings.push(...cutouts.warnings)
   const region = singleImageRegion(input.ratio)
   const light: LightDirection = plateLight(input.variation ?? 0)
+  const surface = plateSurface('offer_graphic', input.variation ?? 0)
   const dna = minimalDna(input)
   const offer: OfferInput = { name: input.offerName, facts: [], productImageUrls: [] }
   const size = outputSize(input.ratio)
@@ -253,7 +293,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   for (let a = 0; a < attempts && !plateBytes; a++) {
     let plate
     try {
-      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, variation: input.variation, allowedProps: input.allowedProps, immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
+      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, surface, variation: input.variation, allowedProps: input.allowedProps, immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
     } catch (error) {
       warnings.push(`plate attempt ${a + 1} failed: ${error instanceof Error ? error.message : String(error)}`)
       continue
@@ -278,10 +318,11 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   }
   const area = { x: region.x0 * size.width, y: region.y0 * size.height, w: (region.x1 - region.x0) * size.width, h: (region.y1 - region.y0) * size.height }
   const box = fitBox({ width: cutouts.hero.width, height: cutouts.hero.height }, area, 'bottom')
-  const comp = await compositeProducts({ base: plateBytes, products: [{ cutout: Buffer.from(cutouts.hero.bytes), box, role: 'hero' }], light })
+  // The relight stage is included: light model, shading, white balance + grade, wrap, shadows, grain.
+  const comp = await compositeProducts({ base: plateBytes, products: [{ cutout: Buffer.from(cutouts.hero.bytes), box, role: 'hero' }], light, surface })
   let png = comp.png
-  let method: FidelityResult['method'] = 'composite'
-  if (input.relight) {
+  let method: FidelityResult['method'] = comp.harmonized ? 'harmonized' : 'composite'
+  if (input.relight === 'ai' || input.relight === true) {
     const rl = await relightComposite({ gateway: input.gateway, composite: png, placements: comp.placements, ratio: input.ratio, immutableAttributes: input.immutableAttributes })
     costUsd += rl.costUsd
     if (rl.relit) {
@@ -289,8 +330,9 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
       method = 'relit'
     } else if (rl.reason) warnings.push(rl.reason)
   }
-  const score = await scoreFidelity({ image: png, box: comp.placements[0].box, reference: comp.placements[0].placed, method, diff: true })
-  if (!score.passed) return { ok: false, error: `fidelity_failed: ssim ${score.ssim} / ΔE ${score.deltaE}`, costUsd, warnings }
+  const p0 = comp.placements[0]
+  const score = await scoreFidelity({ image: png, box: p0.box, reference: p0.placed, ...(p0.background ? { background: p0.background } : {}), method, diff: true })
+  if (!score.passed) return { ok: false, error: `fidelity_failed: ${fidelityFailReason(score)}`, costUsd, warnings }
   return {
     ok: true,
     png,
@@ -332,14 +374,18 @@ export function exactResultDataUrl(res: Extract<ExactImageResult, { ok: true }>)
   return `data:image/png;base64,${res.png.toString('base64')}`
 }
 
-/** productFidelity / relight / allowedProps args of the image tools (only present keys, for approval binding). */
-export function parseImageFidelityArgs(args: Record<string, unknown>): { productFidelity?: 'exact' | 'generated'; relight?: boolean; allowedProps?: string[] } {
-  const out: { productFidelity?: 'exact' | 'generated'; relight?: boolean; allowedProps?: string[] } = {}
+/**
+ * productFidelity / relight / allowedProps args of the image tools (only present keys, for approval
+ * binding). relight: 'auto' (default, omitted) | 'ai' (true accepted) — free either way.
+ */
+export function parseImageFidelityArgs(args: Record<string, unknown>): { productFidelity?: 'exact' | 'generated'; relight?: 'ai'; allowedProps?: string[] } {
+  const out: { productFidelity?: 'exact' | 'generated'; relight?: 'ai'; allowedProps?: string[] } = {}
   if (args.productFidelity !== undefined) {
     if (args.productFidelity !== 'exact' && args.productFidelity !== 'generated') throw new Error('productFidelity must be "exact" or "generated"')
     out.productFidelity = args.productFidelity
   }
-  if (args.relight === true) out.relight = true
+  if (args.relight !== undefined && args.relight !== null && args.relight !== true && args.relight !== false && args.relight !== 'ai' && args.relight !== 'auto') throw new Error('relight must be "auto" or "ai"')
+  if (args.relight === true || args.relight === 'ai') out.relight = 'ai'
   if (Array.isArray(args.allowedProps)) {
     const props = args.allowedProps.filter((p): p is string => typeof p === 'string').map((p) => p.trim().slice(0, 60)).filter(Boolean).slice(0, 12)
     if (props.length) out.allowedProps = props

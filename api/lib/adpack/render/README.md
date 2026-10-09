@@ -82,9 +82,11 @@ fixtures + fake fetch. Glyph coverage (₡, accents, ¿¡, ñ) is reported per r
 drawn with Fira Sans per glyph. Without the brand face, the closest bundled family is used
 (e.g. any "Grotesk" → Fira Sans, never the rounded default).
 
-Vendoring an OFL family into the bundle (e.g. Space Grotesk, so it works offline):
-`node scripts/adpack-vendor-fonts.mjs "Space Grotesk"` writes the static TTFs + OFL.txt into
-`fonts/`; any extra TTF there is registered under its own family name.
+Vendoring an OFL family into the bundle (so it works offline):
+`node scripts/adpack-vendor-fonts.mjs "Family Name"` downloads it from the google/fonts GitHub
+repo (static TTFs, or the variable font instanced locally to 400/700 with fontTools) + OFL.txt
+into `fonts/`; any extra TTF there is registered under its own family name. Space Grotesk was
+vendored this way and is listed in the `fonts.ts` manifest (a bundled system font).
 
 ### Bundled (OFL, in `fonts/`)
 
@@ -95,6 +97,7 @@ Vendoring an OFL family into the bundle (e.g. Space Grotesk, so it works offline
 | Archivo Black | 400 | heavy display brands |
 | Anton | 400 | condensed display brands (Bebas, Oswald, Impact…) |
 | DM Serif Display | 400 | serif brands (Playfair, Lora, Georgia…) — headings only; body falls back to Fira Sans |
+| Space Grotesk | 400 / 700 | brands whose kit names Space Grotesk (exact match, no fetch; has its own ₡) |
 
 `resolveFonts(visual)` maps brand font names to these families (default Poppins). Licenses:
 `fonts/*-OFL.txt`. Source: github.com/google/fonts (static TTFs).
