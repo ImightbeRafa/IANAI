@@ -472,7 +472,7 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
       const price = body.dna?.facts.find((f) => f.key === 'price' && f.confirmed)?.value
       const pack: SimPack = {
         id: uuid(),
-        ratios: body.ratios?.length ? body.ratios : ['1:1', '4:5', '9:16'],
+        ratios: body.ratios?.length ? body.ratios : ['4:5', '9:16'],
         size,
         brandName: body.dna?.brandName ?? 'Marca',
         confirmedPrice: price,
@@ -513,7 +513,10 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
           throw new AdPackApiError(422, {
             error: 'The edited text breaks the facts or length rules',
             code: 'COPY_REJECTED',
-            issues: [{ code: 'unconfirmed_fact', field: body.copy.headline && text === body.copy.headline ? 'headline' : 'subline', detail: `Price "${m[0]}" is not a confirmed fact` }],
+            issues: [(() => {
+              const field = body.copy.headline && text === body.copy.headline ? 'headline' : 'subline'
+              return { code: 'unconfirmed_fact' as const, rule: 'unconfirmed_fact' as const, field, baseField: field, token: m[0], detail: `Price "${m[0]}" is not a confirmed fact` }
+            })()],
           })
         }
       }
@@ -521,7 +524,7 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
         throw new AdPackApiError(422, {
           error: 'The edited text breaks the facts or length rules',
           code: 'COPY_REJECTED',
-          issues: [{ code: 'too_long', field: 'headline', detail: 'Headline has more than 8 words' }],
+          issues: [{ code: 'too_long', rule: 'too_long', field: 'headline', baseField: 'headline', limit: 8, actual: body.copy.headline.split(/\s+/).length, detail: 'Headline has more than 8 words' }],
         })
       }
       item.copy = { ...item.copy, ...body.copy, bullets: body.copy.bullets ?? item.copy.bullets }

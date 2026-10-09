@@ -6,6 +6,8 @@
  * - EXECUTE: Advance APIs run generation — credits + approval
  */
 
+import { CREATE_ADS_DECISION_TABLE } from './create-ads.js'
+
 export type McpToolRisk = 'read' | 'guide' | 'sync_write' | 'execute' | 'delete' | 'admin'
 
 export type McpToolGroupId =
@@ -313,7 +315,18 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'workspace_save_url_context',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Save a source URL onto an owned brand as pending_analysis (no credits; analyzed by worker).',
+    description:
+      'Save a source URL onto an owned brand and analyze it now (no credits, no cron needed): waits up to ~25 s and returns status ready (analysis) | failed, ' +
+      'or status processing + jobId — then poll workspace_url_context_status { intakeId } (or get_execute_result { jobId }) every ~10 s; each poll continues the work. Brand data is filled only where empty.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'workspace_url_context_status',
+    group: 'library_sessions',
+    risk: 'read',
+    description: 'Status of a URL saved with workspace_save_url_context (intakeId = its id/jobId). A pending or stuck analysis is resumed inline on this call. No credits.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -362,7 +375,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     risk: 'execute',
     description:
       'Approve or deny a pending Advance EXECUTE after the user confirms in THIS chat. ' +
-      'Pass approvalRequestId from the previous approval_required response. Prefer this over any optionalAdvancePage URL. ' +
+      'Pass approvalRequestId from the previous approval_required response (the approval block shows items, unitCost, total, expiresAt). No web link is needed. ' +
       'After status=approved, immediately retry the same EXECUTE tool with that approvalRequestId.',
     enabled: true,
     requiresApproval: false,
@@ -374,7 +387,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     risk: 'read',
     description:
       'Poll any async EXECUTE job by jobId (same as approvalRequestId). Returns running|completed|failed plus a bilingual statusMessage. ' +
-      'Keep polling after an EXECUTE tool returns status=running so the artifact reaches chat without MCP client timeout.',
+      'Keep polling after an EXECUTE tool returns status=running so the artifact reaches chat without MCP client timeout. ' +
+      'A failed result with code PLAN_CHANGED means nothing ran (approved vs planned differ): ask for a fresh approval. Also resolves workspace_save_url_context jobIds.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -395,7 +409,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate an image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'Prefer create_ads for ads (exact text, feed+story). Generate one free-form image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
       'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
@@ -417,7 +431,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute). productImageIds = product photo pool (first = hero). ' +
+      'Prefer create_ads mode pack for static ads. Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute; runs exactly count/angleIds or answers PLAN_CHANGED). productImageIds = product photo pool (first = hero). ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
@@ -428,7 +442,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total. ' +
+      'Prefer create_ads mode pack for static ads. Launch pack: angles → scripts → posts with one in-chat approval (confirm_execute) and a quoted total (runs exactly that count or answers PLAN_CHANGED). ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
@@ -439,7 +453,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Edit an image via Advance (Grok Imagine; 18 credits). Defaults to the offer’s latest generated image when no source is supplied. Confirm in chat with userPrompt + confirm_execute. ' +
+      'Prefer create_ads mode edit. Edit an image via Advance (Grok Imagine; 18 credits). Defaults to the offer’s latest generated image when no source is supplied. Confirm in chat with userPrompt + confirm_execute. ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
@@ -461,8 +475,24 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate a carousel from scriptId or scriptContent via Advance (Gemini Pro, max 5 slides, 24 credits/slide; one in-chat approval). ' +
+      'Prefer create_ads mode carousel. Generate a carousel from scriptId or scriptContent via Advance (Gemini Pro, max 5 slides, 24 credits/slide; one in-chat approval). ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
+    enabled: true,
+    requiresApproval: true,
+    consumesAdvanceCredits: true,
+  },
+
+  // One entry point for ads (G1) — routes to adpack / carousel / image edit
+  {
+    name: 'create_ads',
+    group: 'execute_studio',
+    risk: 'execute',
+    description:
+      'START HERE to make ads for a saved brand: create_ads { brandId, offerId?, mode: pack|single|carousel|edit, count?, ratios?, brief? }. ' +
+      'Routes to the right implementation with the same in-chat approval (approval { items, unitCost, total, expiresAt }) → confirm_execute → retry create_ads with the same arguments + approvalRequestId. ' +
+      'pack/single then poll adpack_status with the packId; carousel/edit poll get_execute_result with the jobId. ' +
+      'pack/single also accept the adpack_start options: productImageIds / productImageIdsByAd (photo pool, first = hero), saveToOffer + offerPatch / saveToBrandKit + brandKitPatch (persist chat corrections first), locale / register / forbiddenPhrases / forbiddenClaims, angleIds. ' +
+      CREATE_ADS_DECISION_TABLE,
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
@@ -529,7 +559,9 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Ad Pack: start a pack of sell-ready static ads (credits per finished ad). For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
+      'Ad Pack (create_ads mode pack routes here): start a pack of sell-ready static ads (credits per finished ad). For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
+      'Default ratios 4:5 (feed) + 9:16 (story); 1:1 on request or later free via adpack_resize. locale (e.g. "es-CR") makes the register a hard rule (voseo for CR); forbiddenPhrases/forbiddenClaims are verified on image text, caption and script. ' +
+      'The approval shows the exact plan {items, unitCost, total}; on retry the plan is recomputed and, if count or credits differ, the tool answers status=plan_changed (code PLAN_CHANGED, approved vs planned) and runs nothing — ask the user again. ' +
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
       'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd = {"1": [id]} per ad. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
@@ -547,7 +579,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
       'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
-      'When finished it returns deliverable {ads[{index, format, headline, caption, links{1:1,4:5,9:16}}], captionsText, deepLink}: present it as a numbered list of links + captions, offer captionsText to copy all captions, and share the deepLink (brand folder where every ad is saved). ' +
+      'When finished it returns deliverable {ads[{index, format, headline, caption, links{4:5,9:16,…}, files[{ratio, url, width, height, format:"png", placement}], forbiddenHits[]}], captionsText, deepLink}: present it as a numbered list of full-res files + captions (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. ' +
       'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,
     requiresApproval: false,
@@ -558,7 +590,9 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'sync_write',
     description:
-      'Ad Pack: edit the on-image text or caption of one finished ad (headline, subline, bullets, offerLine, cta, caption) and re-render it instantly. Free; rejected when it breaks facts or length rules.',
+      'Ad Pack: edit the on-image text or caption of one finished ad (headline, subline, bullets, offerLine, cta, caption) and re-render it instantly. Free. ' +
+      'A rejection returns status=rejected with issues[{field (e.g. "bullets[2]"), rule (too_long, number_mismatch, unconfirmed_fact, forbidden_phrase, locale_register…), limit, actual, token, detail}] — show them and propose a fixed text. ' +
+      'Step labels (01/02/03), confirmed prices and stated exclusions ("Papel no incluido") are allowed.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -572,6 +606,18 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
+  },
+
+  {
+    name: 'adpack_resize',
+    group: 'execute_studio',
+    risk: 'sync_write',
+    description:
+      'Ad Pack: FREE — render a finished ad into more ratios (e.g. add 1:1 or 9:16) from its stored scene and text. Renderer only: no model calls, no credits, no approval. ' +
+      'Returns the ad with every render {ratio, imageUrl, width, height, format}; new renders are saved to the offer library.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
   },
 
   // Archive & deletes

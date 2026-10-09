@@ -5,6 +5,10 @@
  * - adpack_start / adpack_regenerate spend credits: in-chat approval
  *   (approval_required → confirm_execute → retry with approvalRequestId).
  *   The approval id doubles as the packId, so retries are idempotent.
+ * - F1: the approval stores the exact plan (items × unitCost = total, as quotedCreditCost).
+ *   Before running, the plan is recomputed; any difference in count or credits answers
+ *   PLAN_CHANGED { approved, planned } and the approval is retired — never a silent downgrade.
+ * - adpack_resize (free): re-render a finished ad into more ratios, renderer only.
  * - Background work goes through the MCP execute scheduler (waitUntil in
  *   api/mcp.ts); adpack_status also advances inline when no worker holds a
  *   lease, so a dropped background task never stalls the pack.
@@ -13,16 +17,19 @@ import {
   ADPACK_BACKGROUND_BUDGET_MS,
   ADPACK_INLINE_BUDGET_MS,
   AdPackError,
+  adPackPlanSummary,
   deepLinkForAdPack,
   isAdPackError,
   type AdPackService,
 } from '../adpack/service.js'
-import type { AdPackItemView, AdPackStatusResponse } from '../adpack/http-types.js'
+import type { AdPackItemView, AdPackPlanSummary, AdPackStatusResponse } from '../adpack/http-types.js'
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
+  denyMcpApprovalRequest,
   replayMcpApprovalResult,
   storeMcpApprovalResult,
+  type McpApprovalRecord,
   type McpApprovalStore,
 } from './approval.js'
 import { issueMcpChatApproval } from './approval-prompt.js'
@@ -66,12 +73,54 @@ function compactItem(item: AdPackItemView) {
     status: item.status,
     format: item.format,
     headline: item.headline ?? null,
-    renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl })),
+    // Stable public storage URLs (never signed / expiring) with explicit size + format (G4).
+    renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, width: r.width, height: r.height, format: 'png' as const })),
     charged: item.charged,
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
+    ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
     ...(item.error ? { error: item.error.slice(0, 160) } : {}),
   }
 }
+
+/** Approved plan from the approval row: total = quotedCreditCost, items = total / unitCost. */
+export function approvedPlanFromRecord(record: Pick<McpApprovalRecord, 'quotedCreditCost'>, unitCost: number): AdPackPlanSummary | null {
+  const total = record.quotedCreditCost
+  if (typeof total !== 'number' || !Number.isFinite(total) || unitCost <= 0) return null
+  return { items: Math.round(total / unitCost), unitCost, total, currency: 'credits' }
+}
+
+/**
+ * F1: the plan that would run now differs from what the user approved. Nothing ran; the old
+ * approval is retired (denied) so it can never run the other plan; the agent must ask again.
+ */
+async function planChanged(options: {
+  approvalStore: McpApprovalStore
+  user: McpAuthUser
+  toolName: string
+  approvalRequestId: string
+  approved: AdPackPlanSummary
+  planned: AdPackPlanSummary
+  language?: 'es' | 'en'
+}): Promise<Record<string, unknown>> {
+  await denyMcpApprovalRequest(options.approvalStore, { approvalRequestId: options.approvalRequestId, userId: options.user.id }).catch(() => undefined)
+  const { approved, planned } = options
+  const es = options.language !== 'en'
+  return {
+    status: 'plan_changed',
+    code: 'PLAN_CHANGED',
+    toolName: options.toolName,
+    approvalRequestId: options.approvalRequestId,
+    approved,
+    planned,
+    chargedCredits: 0,
+    message: es
+      ? `No se ejecutó nada: se aprobaron ${approved.items} por ${approved.total} créditos y el plan actual es ${planned.items} por ${planned.total} créditos. Hace falta una aprobación nueva.`
+      : `Nothing ran: ${approved.items} for ${approved.total} credits was approved but the plan is now ${planned.items} for ${planned.total} credits. A fresh approval is needed.`,
+    nextStep: `Tell the user the plan changed (approved vs planned), then call ${options.toolName} again WITHOUT approvalRequestId to get a fresh approval.`,
+  }
+}
+
+const samePlan = (a: AdPackPlanSummary, b: AdPackPlanSummary) => a.items === b.items && a.total === b.total
 
 /** Same `summary` / `etaSeconds` / `failures` / `deliverable` as the web `status` (built once in the service). */
 function statusPayload(status: AdPackStatusResponse) {
@@ -81,6 +130,12 @@ function statusPayload(status: AdPackStatusResponse) {
     ? es
       ? ' Para los que fallaron, explicá el motivo y ofrecé reintentar con la llamada exacta de failures[].retry.call (cuesta 1 anuncio de créditos, requiere confirmación).'
       : ' For failed ads, explain the reason and offer to retry with the exact failures[].retry.call (costs one ad of credits, needs confirmation).'
+    : ''
+  const forbidden = (status.deliverable?.ads ?? []).filter((a) => a.forbiddenHits.length)
+  const forbiddenHint = forbidden.length
+    ? es
+      ? ` Atención: ${forbidden.length} anuncio(s) contienen frases prohibidas de la marca (forbiddenHits); no los publiques sin corregirlos con adpack_edit_text.`
+      : ` Warning: ${forbidden.length} ad(s) contain forbidden brand phrases (forbiddenHits); do not publish them before fixing with adpack_edit_text.`
     : ''
   return {
     packId: status.packId,
@@ -108,8 +163,8 @@ function statusPayload(status: AdPackStatusResponse) {
       : finished
         ? {
           instructionsForGrok: es
-            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + links (4:5 feed, 9:16 historias, 1:1 cuadrado) + su caption. Ofrecé deliverable.captionsText para copiar todo junto.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}`
-            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + links (4:5 feed, 9:16 stories, 1:1 square) + its caption. Offer deliverable.captionsText to copy all captions at once.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}`,
+            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + sus files (url full-res por ratio: 4:5 feed, 9:16 historia; 1:1 si se pidió) + su caption. Ofrecé deliverable.captionsText para copiar todo junto. Otro formato (p. ej. 1:1) sale gratis con adpack_resize.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}${forbiddenHint}`
+            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + its files (full-res url per ratio: 4:5 feed, 9:16 story; 1:1 if requested) + its caption. Offer deliverable.captionsText to copy all captions at once. Another ratio (e.g. 1:1) is free with adpack_resize.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}${forbiddenHint}`,
         }
         : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }
@@ -121,11 +176,13 @@ async function approvedOrPrompt(options: {
   toolName: 'adpack_start' | 'adpack_regenerate'
   input: Record<string, unknown>
   approvalRequestId: string
-  quotedCreditCost: number
+  /** The exact plan: items × unitCost = total (stored as quotedCreditCost). */
+  plan: AdPackPlanSummary
   summaryEs: string
   summaryEn: string
   appOrigin?: string
-}): Promise<{ prompt: Record<string, unknown> } | { replay: Record<string, unknown> } | { approved: true }> {
+  language?: 'es' | 'en'
+}): Promise<{ prompt: Record<string, unknown> } | { replay: Record<string, unknown> } | { approved: AdPackPlanSummary | null }> {
   if (!options.approvalRequestId) {
     return {
       prompt: await issueMcpChatApproval({
@@ -133,10 +190,13 @@ async function approvedOrPrompt(options: {
         userId: options.user.id,
         toolName: options.toolName,
         input: options.input,
-        quotedCreditCost: options.quotedCreditCost,
+        quotedCreditCost: options.plan.total,
+        items: options.plan.items,
+        unitCost: options.plan.unitCost,
         appOrigin: options.appOrigin,
         summaryEs: options.summaryEs,
         summaryEn: options.summaryEn,
+        language: options.language,
       }),
     }
   }
@@ -156,7 +216,7 @@ async function approvedOrPrompt(options: {
     input: options.input,
   })
   if (!ready.ok) throw new Error(ready.reason)
-  return { approved: true }
+  return { approved: approvedPlanFromRecord(ready.record, options.plan.unitCost) }
 }
 
 async function finalize(options: {
@@ -182,6 +242,7 @@ function startBoundInput(args: Args): Record<string, unknown> {
   for (const key of [
     'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
     'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
+    'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
   ] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
@@ -345,7 +406,7 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_angles':
         return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })) }
       case 'adpack_quote':
-        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })) }
+        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, angleIds: args.angleIds })) }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input = startBoundInput(args)
@@ -357,20 +418,24 @@ export async function dispatchAdPackTool(options: {
         const preview = usesSavedBrand(args)
           ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
           : null
+        // The quote resolves the exact angles start will run (angleIds included): what the user approves is what runs.
         const quote = preview
-          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer })
-          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer })
+          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, angleIds: args.angleIds })
+          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, angleIds: args.angleIds })
+        const plan = adPackPlanSummary(quote.size)
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
+        const ratios = Array.isArray(args.ratios) && args.ratios.length ? (args.ratios as string[]).join(' + ') : '4:5 + 9:16'
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,
           user,
           toolName: 'adpack_start',
           input,
           approvalRequestId,
-          quotedCreditCost: quote.credits,
-          summaryEs: `Pack de ${quote.size} anuncios estáticos${target} (${quote.perAd} créditos por anuncio)`,
-          summaryEn: `Pack of ${quote.size} static ads${target} (${quote.perAd} credits per ad)`,
+          plan,
+          summaryEs: `${quote.size} ${quote.size === 1 ? 'anuncio estático' : 'anuncios estáticos'}${target} · formatos ${ratios}`,
+          summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${target} · ratios ${ratios}`,
           appOrigin: options.appOrigin,
+          language: args.language === 'en' ? 'en' : undefined,
         })
         if ('prompt' in gate) {
           return {
@@ -386,23 +451,39 @@ export async function dispatchAdPackTool(options: {
           if (packId) scheduleAdvance(service, userId, packId)
           return gate.replay
         }
-        const started = await service.startPack({
-          userId,
-          dna: args.dna,
-          offer: args.offer,
-          brandId: args.brandId,
-          offerId: args.offerId,
-          brief: args.brief,
-          size: args.size,
-          angleIds: args.angleIds,
-          ratios: args.ratios,
-          businessId: args.businessId,
-          brandKitId: args.brandKitId,
-          productImageIds: args.productImageIds,
-          productImageIdsByAd: args.productImageIdsByAd,
-          source: 'mcp',
-          packId: approvalRequestId,
-        })
+        if (gate.approved && !samePlan(gate.approved, plan)) {
+          return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: plan })
+        }
+        let started: Awaited<ReturnType<AdPackService['startPack']>>
+        try {
+          started = await service.startPack({
+            userId,
+            dna: args.dna,
+            offer: args.offer,
+            brandId: args.brandId,
+            offerId: args.offerId,
+            brief: args.brief,
+            size: args.size,
+            angleIds: args.angleIds,
+            ratios: args.ratios,
+            businessId: args.businessId,
+            brandKitId: args.brandKitId,
+            productImageIds: args.productImageIds,
+            productImageIdsByAd: args.productImageIdsByAd,
+            locale: args.locale,
+            register: args.register,
+            forbiddenPhrases: args.forbiddenPhrases,
+            forbiddenClaims: args.forbiddenClaims,
+            source: 'mcp',
+            packId: approvalRequestId,
+            ...(gate.approved ? { approved: { items: gate.approved.items, total: gate.approved.total } } : {}),
+          })
+        } catch (err) {
+          if (isAdPackError(err) && err.code === 'PLAN_CHANGED' && gate.approved) {
+            return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: (err.details?.planned as AdPackPlanSummary) ?? plan })
+          }
+          throw err
+        }
         const result = withStatusMessage({
           status: 'completed',
           jobId: approvalRequestId,
@@ -429,8 +510,35 @@ export async function dispatchAdPackTool(options: {
         return statusPayload(status)
       }
       case 'adpack_edit_text': {
-        const res = await service.editText({ userId, packId: args.packId, itemId: args.itemId, copy: args.copy })
-        return { item: compactItem(res.item), copy: res.item.copy ?? null, chargedCredits: 0 }
+        try {
+          const res = await service.editText({ userId, packId: args.packId, itemId: args.itemId, copy: args.copy })
+          return { status: 'edited', item: compactItem(res.item), copy: res.item.copy ?? null, chargedCredits: 0 }
+        } catch (err) {
+          // E1: a rejection is an answer, not a crash — say exactly which field broke which rule.
+          if (isAdPackError(err) && err.code === 'COPY_REJECTED') {
+            return {
+              status: 'rejected',
+              code: 'COPY_REJECTED',
+              message: err.message,
+              issues: (err.details?.issues as unknown[]) ?? [],
+              chargedCredits: 0,
+              nextStep: 'Show each issue (field, rule, limit vs actual or the offending token) and propose a corrected text; nothing was changed.',
+            }
+          }
+          throw err
+        }
+      }
+      case 'adpack_resize': {
+        const res = await service.resize({ userId, packId: args.packId, itemId: args.itemId, ratios: args.ratios })
+        return {
+          status: 'resized',
+          item: compactItem(res.item),
+          added: res.added,
+          chargedCredits: 0,
+          message: res.added.length
+            ? `Rendered ${res.added.join(', ')} from the same scene and text (free, no model calls).`
+            : 'The ad already has these ratios; nothing to render.',
+        }
       }
       case 'adpack_regenerate': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
@@ -438,7 +546,7 @@ export async function dispatchAdPackTool(options: {
         if (typeof args.packId !== 'string' || typeof args.itemId !== 'string') throw new AdPackError('BAD_INPUT', 'packId and itemId are required')
         // Ownership check before issuing an approval.
         await service.getStatus({ userId, packId: args.packId })
-        const quote = await service.quote({ userId, size: 1 })
+        const plan = adPackPlanSummary(1)
         const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,
@@ -446,13 +554,16 @@ export async function dispatchAdPackTool(options: {
           toolName: 'adpack_regenerate',
           input,
           approvalRequestId,
-          quotedCreditCost: quote.credits,
+          plan,
           summaryEs: 'Regenerar un anuncio del pack',
           summaryEn: 'Regenerate one ad in the pack',
           appOrigin: options.appOrigin,
         })
         if ('prompt' in gate) return gate.prompt
         if ('replay' in gate) return gate.replay
+        if (gate.approved && !samePlan(gate.approved, plan)) {
+          return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_regenerate', approvalRequestId, approved: gate.approved, planned: plan })
+        }
         const regen = await service.regenerate({ userId, packId: args.packId, itemId: args.itemId, mode: input.mode })
         const result = withStatusMessage({
           status: 'completed',

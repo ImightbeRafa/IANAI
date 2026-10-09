@@ -347,6 +347,34 @@ export function createMcpUrlIntakeStore(): McpUrlIntakeStore | null {
       }
       return { id: data.id as string }
     },
+    // G3: owner-scoped status + inline analysis (no cron needed).
+    async getUrlIntake({ id, userId }) {
+      const { data, error } = await db
+        .from('mcp_url_intakes')
+        .select('id, business_id, source_url, status, error_message, analysis_result, warnings, applied_brand_kit_id, attempt_count')
+        .eq('id', id)
+        .eq('user_id', userId)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return null
+      const row = data as Record<string, unknown>
+      return {
+        id: String(row.id),
+        businessId: String(row.business_id),
+        sourceUrl: String(row.source_url),
+        status: row.status as 'pending_analysis' | 'processing' | 'ready' | 'failed',
+        errorMessage: (row.error_message as string | null) ?? null,
+        analysis: (row.analysis_result as Record<string, unknown> | null) ?? null,
+        warnings: Array.isArray(row.warnings) ? row.warnings : [],
+        appliedBrandKitId: (row.applied_brand_kit_id as string | null) ?? null,
+        attemptCount: Number(row.attempt_count) || 0,
+      }
+    },
+    async runUrlIntakeInline({ id, userId }) {
+      // Lazy: site analysis (model + fetch) only loads when an intake actually runs.
+      const { runMcpUrlIntakeInline } = await import('./url-analysis-worker.js')
+      return runMcpUrlIntakeInline({ id, userId })
+    },
   }
 }
 

@@ -103,6 +103,8 @@ describe('buildStatusExtras', () => {
         headline: `Titular ${i + 1}`,
         caption: `Caption del anuncio ${i + 1}`,
         links: { '1:1': `https://cdn.example/${i}-1:1.png`, '4:5': `https://cdn.example/${i}-4:5.png`, '9:16': `https://cdn.example/${i}-9:16.png` },
+        files: (['1:1', '4:5', '9:16'] as const).map((ratio) => ({ ratio, url: `https://cdn.example/${i}-${ratio}.png`, width: 1, height: 1, format: 'png', placement: ({ '1:1': 'square', '4:5': 'feed', '9:16': 'story' } as const)[ratio] })),
+        forbiddenHits: [],
       })),
       captionsText: '1. Anuncio 1 — Titular 1\nCaption del anuncio 1\n\n2. Anuncio 2 — Titular 2\nCaption del anuncio 2',
       deepLink: 'https://advanceai.studio/chat?brand=b&adpack=p',

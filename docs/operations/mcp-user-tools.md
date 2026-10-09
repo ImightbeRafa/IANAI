@@ -6,7 +6,7 @@ Primary client: **Grok Custom Connector** → `https://advanceai.studio/api/mcp`
 | Topic | Decision |
 |---|---|
 | Modes | GUIDE = free (Grok’s own usage); EXECUTE = Advance credits |
-| Approval | **In-chat** via `confirm_execute` (show `userPrompt`, user says sí/no). Optional fallback `/mcp/approve/:id`. **TTL = 1 hour**; single-use; input-bound; result replay after consume |
+| Approval | **In-chat** via `confirm_execute` (show `userPrompt`, user says sí/no). Neutral, structured payload `approval {items, unitCost, total, currency, expiresAt, summary}` — no persona, no web link (web fallback `/mcp/approve/:id` only when a caller passes `includeWebFallback`). **TTL = 1 hour**; single-use; input-bound; result replay after consume. **Plan guard (F1):** the approved plan is re-checked before running; any change in count or credits → `PLAN_CHANGED {approved, planned}`, nothing runs, approval retired |
 | Intake | HTTPS URL + up to **5** PDF/image files → Chat upload dialog via `?intake=files\|asset` |
 | External Grok images | Not imported; session `generated_outside` only |
 | Advance images | Auto-saved to session/library at max API quality (`2k`/`medium`) |
@@ -56,7 +56,7 @@ Web parity: `POST /api/ad-pack` (`angles`, `quote`, `dna_from_brand`, `start`) a
 
 **GUIDE (no Advance credits):** `guide_script`, `guide_image` (clarify board for product/scene refs — do not quote EXECUTE until confirmed), `guide_brand_pack`, `guide_bulk_angles`
 
-**Workspace sync (no credits):** `workspace_save_url_context`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`, `workspace_save_artifact` (`kind=product|context` + https URL for product-shot ingest)
+**Workspace sync (no credits):** `workspace_save_url_context` (analyzes inline ≤ ~25 s, no cron needed; else `jobId` → `workspace_url_context_status` / `get_execute_result`), `workspace_url_context_status`, `workspace_ingest_file`, `workspace_note_generated_outside`, `workspace_import_asset`, `workspace_save_artifact` (`kind=product|context` + https URL for product-shot ingest)
 
 **EXECUTE (credits + in-chat approval):** `confirm_execute`, `get_execute_result`, `execute_script_generate`, `execute_image_generate`, `execute_bulk_scripts`, `execute_bulk_posts`, `execute_campaign_pack`, edit/enhance/carousel — first call returns `status: approval_required` with `userPrompt` (Grok shows this in chat; do **not** lead with a raw URL). After the user says yes, call `confirm_execute` then retry with `approvalRequestId`. **Script/image/bulk/carousel EXECUTE** return `status: running` + `jobId` immediately (background `waitUntil`); poll `get_execute_result` until `completed` (script text / `imageUrl` / slides). **Campaign packs** also schedule chunks off-request: poll is cheap (seconds) with `script N/total` / `image N/total` + partial scripts/posts; generate runs in `waitUntil` + CAS. Stale leases reclaim up to 3 times then terminal-fail. Image/post/pack/carousel **require confirmed product refs** (`productImageId` / `referenceImageIds`) unless `referenceMode:"none"`. Grok `aspectRatio` is fail-closed (no silent `4:5`→`3:4`; opt-in `aspectRatioFallback`). Bulk scripts return full `content`. Carousel returns per-slide `headline`/`body`/`copy` + `imageUrl`; preview binds billed slide count. Same `approvalRequestId` and stable per-artifact generation UUIDs prevent double charge. `chargedCredits` is always a number. **MCP caps:** bulk `count` ≤ 10; carousel `slideCount` ≤ 5. Host `maxDuration` for `/api/mcp` is **180s**. Registry **0.9.4**.
 
@@ -87,6 +87,43 @@ Every `tools/call` is audited via `auditMcpToolCall` (`source=mcp`, lane from to
 Registry / server version: **0.9.0**.
 
 ChatShell shares the same libs via `POST /api/bulk-angles`, `/api/bulk-scripts`, `/api/bulk-posts`, `/api/bulk-campaign`.
+
+## Ads: one entry point, exact plans, verified copy (2026-10 premium fixes)
+
+Source: owner test 2026-10-08 (`advance-mcp-limitaciones-premium`), items F1, F2, E1–E3, G1, G3, G4, H6.
+
+### Decision table (also in the tool descriptions)
+| Need | Tool | Product fidelity | Ratios | Style | Credits |
+|---|---|---|---|---|---|
+| N static ads (`create_ads mode:"pack"`) | `adpack_start` | Real product photo as scene reference + product check with retries (not pixel-exact; see A1) | **4:5 + 9:16 default**, 1:1 on request or free `adpack_resize` | Brand kit colors/fonts/logo/voice; text rendered exactly | 6 / finished ad |
+| 1 static ad (`mode:"single"`) | `adpack_start {size:1}` | same | same | same | 6 |
+| Carousel (`mode:"carousel"`) | `execute_carousel_generate` | product refs | one of 1:1/4:5/9:16/3:4 | `designDirection` = brief | 24 / slide |
+| Edit an image (`mode:"edit"`) | `execute_image_edit` | edits the given image | one ratio | — | 18 |
+| Free-form image | `execute_image_generate` | product lock via refs | 1:1/9:16/16:9 (4:5 needs `aspectRatioFallback`) | `guidePrompt` | 6 / 24 by model |
+| Angle-board posts / scripts | `execute_bulk_posts`, `execute_campaign_pack`, `execute_bulk_scripts` | product refs | `aspectRatio` | `styleDnaId` | per item |
+
+`create_ads {brandId, offerId?, mode, count?, ratios?, brief?, angleIds?, locale?, register?, forbiddenPhrases?, forbiddenClaims?, productImageIds?, productImageIdsByAd?, saveToOffer?+offerPatch?, saveToBrandKit?+brandKitPatch?, includeDna?, scriptId?/scriptContent?, editPrompt?, productImageId?/imageUrl?, approvalRequestId?}` only routes (`api/lib/mcp/create-ads.ts`): the approval is issued under the routed tool and the create_ads retry maps to identical arguments, so idempotency and credits are the routed tool's. Responses add `via:"create_ads"`, `mode`, `routedTo`. Old tools keep working; overlapping ones say "Prefer create_ads".
+
+### F1 — approved quantity and cost are what runs
+- Root cause of "2 approved for 12, got 1 for 6": the approval quoted `size` ignoring `angleIds`, and start filtered a re-plan of only `size` angles by ids taken from a bigger board (ids are index-based; `a05` does not exist in a 2-angle plan) → silent shrink.
+- Now `resolvePackAngles` (plan-angles.ts) is the single resolver behind quote, approval and start: no `angleIds` → exactly `size` angles (the planner fills with diversified angles when hook×format pairs run out; impossible → `BAD_INPUT reason:infeasible` at quote time); `angleIds` → resolved against the full board (prefix-stable), unknown ids → `BAD_INPUT reason:unknown_angle_ids` before any approval.
+- The approval stores the plan total (`quotedCreditCost`; items = total / unitCost). On retry the plan is recomputed; mismatch → `{status:"plan_changed", code:"PLAN_CHANGED", approved, planned}`; the approval is denied so it can never run the other plan. Web `start` accepts `approved {items,total}` → 409 `PLAN_CHANGED`.
+- Bulk scripts/posts/campaign: `count` defaults to the number of selected `angleIds`; selected ids are never swapped for others; a smaller board → stored failed result `code:"PLAN_CHANGED"` (nothing generated, nothing charged).
+
+### E1–E3 — copy rules
+- **E1** `adpack_edit_text` rejection = `{status:"rejected", code:"COPY_REJECTED", issues:[{field:"bullets[2]", baseField, rule:"too_long", limit, actual, token?, detail}]}` (web 422 body has the same `issues`). Owner edits get chips up to 6 content words / 34 chars; step labels `01/02/03` (and a leading number equal to the chip position) are structure, not facts; an owner offer line passes when every part is a confirmed fact or a stated exclusion ("Kit ₡14.900 · Papel no incluido"); exclusions stated in the facts never count as claims.
+- **E2** `forbiddenPhrases` (kit) + `forbiddenClaims` (request) are checked on image text, caption, script and scene brief; generation repairs once, else the ad fails (not charged, reason "frase prohibida"). Status items and `deliverable.ads[]` carry `forbiddenHits [{phrase, field}]` (verified empty for shipped ads).
+- **E3** `locale` (e.g. `es-CR`, normalized; CR/AR/UY/… default to voseo) makes the register a hard rule: other-register forms (`tienes`, `pídelo`, sentence-initial `Descubre`, `usted`…) are `locale_register` issues — blocking, repaired once; the prompt states "REGLA DURA". Without a locale, register drift stays a soft note.
+
+### G4 + H6 — downloads and formats
+- Default ratios for adpack / create_ads: `["4:5","9:16"]` (feed + story). `deliverable.ads[].files[] = {ratio, url, width, height, format:"png", placement:"feed"|"story"|"square"}`; URLs are public storage URLs (never signed/expiring). Running rows carry `renders[] {ratio, imageUrl, width, height, format}`.
+- `adpack_resize {packId, itemId, ratios}` (web `action:"resize"`): FREE — re-renders the stored scene + copy into new ratios (renderer only: no model, no credits, no approval); new renders go to the offer library.
+
+### G3 — URL context without the cron
+`workspace_save_url_context` inserts the intake and runs the analysis inline (`MCP_URL_INLINE_BUDGET_MS` = 25 s). Done → `ready` (analysis) / `failed`. Over budget → `processing` + `jobId` (work kept alive with `waitUntil`); `workspace_url_context_status {intakeId}` or `get_execute_result {jobId}` resolve it and re-run a pending / stale-lease intake inline (owner-scoped CAS claim by id, same lease guards as the cron). `wait:false` keeps the old queue-only behaviour. Cron config is unchanged.
+
+### Migration needs (not applied here)
+- None required. Optional later: `brand_kits.locale` + `brand_kits.forbidden_claims` to persist E2/E3 per brand (today they are per request / per pack via `pack.dna`).
 
 ## Operator step (required for Grok OAuth)
 In **Supabase Dashboard → Authentication → OAuth Server** (AIIAN `lstzfxsdmggkoaxfawny`):
@@ -125,7 +162,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 3. Deletes / archive / admin tools (deferred)
 
 ## GUIDE URL analysis worker
-- Save via `workspace_save_url_context` → `mcp_url_intakes.status=pending_analysis`
+- Save via `workspace_save_url_context` → `mcp_url_intakes.status=pending_analysis`, then analyzed inline (G3 above); the cron below is optional catch-up
 - Cron `* * * * *` → `GET/POST /api/mcp-guide-analysis` (Bearer `CRON_SECRET`)
 - Worker claims one row, runs shared site analyzer, fill-only merges into `businesses` + `brand_kits`
 - `get_brand_context` returns richer kit + `latestGuideIntake`

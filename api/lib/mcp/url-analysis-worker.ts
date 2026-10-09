@@ -1,6 +1,12 @@
 /**
  * MCP GUIDE URL analysis worker — claim → analyze → fill-only merge → ready|failed.
  * No Advance credits. Service-role only.
+ *
+ * Two drivers share `processClaimedMcpUrlIntake`:
+ * - cron (`processNextMcpUrlIntake`, api/mcp-guide-analysis.ts): claims the oldest pending row.
+ * - inline (`runMcpUrlIntakeInline`, G3): claims ONE row by id for its owner, so
+ *   workspace_save_url_context / workspace_url_context_status work with no cron at all
+ *   (poll-driven resume, same lease guards).
  */
 
 import { getSupabaseAdmin } from '../supabase-admin.js'
@@ -49,7 +55,72 @@ export async function processNextMcpUrlIntake(signal?: AbortSignal): Promise<Url
   if (claimError) throw claimError
   const row = (Array.isArray(claimed) ? claimed[0] : claimed) as ClaimedUrlIntake | null
   if (!row?.id) return { processed: false, reason: 'empty' }
+  return processClaimedMcpUrlIntake(db, row, signal, 'cron')
+}
 
+type WorkerDb = NonNullable<ReturnType<typeof getSupabaseAdmin>>
+
+export type InlineUrlIntakeResult =
+  | { processed: false; reason: 'db_unavailable' | 'not_found' | 'already_final' | 'in_progress' | 'lease_lost' }
+  | Extract<UrlAnalysisWorkerResult, { processed: true }>
+
+/**
+ * Claim one intake by id for its owner (no cron, no RPC): pending, or processing with a stale
+ * lease. Compare-and-set on (status, claimed_at) so two pollers never both claim it.
+ */
+export async function claimMcpUrlIntakeById(
+  db: WorkerDb,
+  input: { id: string; userId: string; nowMs?: number; staleAfterSeconds?: number }
+): Promise<ClaimedUrlIntake | { skipped: Exclude<InlineUrlIntakeResult, { processed: true }>['reason'] }> {
+  const nowMs = input.nowMs ?? Date.now()
+  const staleMs = Math.max(60, input.staleAfterSeconds ?? MCP_URL_ANALYSIS_STALE_SECONDS) * 1000
+  const { data: current, error } = await db
+    .from('mcp_url_intakes')
+    .select('id, user_id, business_id, source_url, status, attempt_count, claimed_at')
+    .eq('id', input.id)
+    .eq('user_id', input.userId)
+    .maybeSingle()
+  if (error) throw error
+  if (!current) return { skipped: 'not_found' }
+  const row = current as ClaimedUrlIntake & { claimed_at: string | null }
+  if (row.status === 'ready' || row.status === 'failed') return { skipped: 'already_final' }
+  if (row.status === 'processing' && row.claimed_at && nowMs - Date.parse(row.claimed_at) < staleMs) return { skipped: 'in_progress' }
+  const claimedAt = new Date(nowMs).toISOString()
+  let update = db
+    .from('mcp_url_intakes')
+    .update({
+      status: 'processing',
+      claimed_at: claimedAt,
+      last_attempt_at: claimedAt,
+      attempt_count: (Number(row.attempt_count) || 0) + 1,
+      updated_at: claimedAt,
+    })
+    .eq('id', row.id)
+    .eq('user_id', input.userId)
+    .eq('status', row.status)
+  update = row.claimed_at ? update.eq('claimed_at', row.claimed_at) : update.is('claimed_at', null)
+  const { data: claimed, error: claimError } = await update.select('id, user_id, business_id, source_url, status, attempt_count, claimed_at')
+  if (claimError) throw claimError
+  const won = Array.isArray(claimed) ? claimed[0] : claimed
+  if (!won) return { skipped: 'lease_lost' }
+  return won as ClaimedUrlIntake
+}
+
+/** G3: analyze one intake now (owner-scoped), same pipeline and lease guards as the cron. */
+export async function runMcpUrlIntakeInline(input: { id: string; userId: string; signal?: AbortSignal }): Promise<InlineUrlIntakeResult> {
+  const db = getSupabaseAdmin()
+  if (!db) return { processed: false, reason: 'db_unavailable' }
+  const claim = await claimMcpUrlIntakeById(db, { id: input.id, userId: input.userId })
+  if ('skipped' in claim) return { processed: false, reason: claim.skipped }
+  return processClaimedMcpUrlIntake(db, claim, input.signal, 'mcp')
+}
+
+export async function processClaimedMcpUrlIntake(
+  db: WorkerDb,
+  row: ClaimedUrlIntake,
+  signal: AbortSignal | undefined,
+  usageSource: 'cron' | 'mcp'
+): Promise<Extract<UrlAnalysisWorkerResult, { processed: true }>> {
   try {
     assertPublicHttpUrl(row.source_url)
     const { data: business, error: bizError } = await db
@@ -221,10 +292,10 @@ export async function processNextMcpUrlIntake(signal?: AbortSignal): Promise<Url
       outputTokens: usage.output,
       thinkingTokens: usage.thinking,
       success: true,
-      source: 'cron',
+      source: usageSource,
       metadata: {
         action: 'mcp_guide_url_analysis',
-        source: 'cron',
+        source: usageSource,
         intakeId: row.id,
         businessId: row.business_id,
         host: new URL(row.source_url).hostname,
@@ -264,10 +335,10 @@ export async function processNextMcpUrlIntake(signal?: AbortSignal): Promise<Url
         model: SITE_ANALYSIS_MODEL,
         success: false,
         errorMessage: message,
-        source: 'cron',
+        source: usageSource,
         metadata: {
           action: 'mcp_guide_url_analysis',
-          source: 'cron',
+          source: usageSource,
           intakeId: row.id,
           businessId: row.business_id,
           attempt: attempts,

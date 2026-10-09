@@ -75,7 +75,7 @@ export async function scoreAdCopy(input: ScoreAdCopyInput): Promise<ScoreAdCopyR
       : 'You are a strict judge of static direct-response ads under the IAN METHOD (total certainty, zero greetings, filtering hook, tangible development, cold CTA, one message).',
     es ? 'Puntúa cada criterio de 0 a 10:' : 'Score each criterion from 0 to 10:',
     criteria,
-    registerInstruction(dna.register, language),
+    registerInstruction(dna.register, language, dna.locale),
     es
       ? 'customerQuotes son frases reales de clientes: citarlas como voz del cliente es fiel a los hechos; convertirlas en promesa del producto no lo es. offerLine la pone el sistema desde hechos confirmados.'
       : 'customerQuotes are real customer words: quoting them as customer voice is faithful; turning them into product promises is not. offerLine is set by the system from confirmed facts.',

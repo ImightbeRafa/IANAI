@@ -90,6 +90,11 @@ export interface BrandDna {
   language: AdLanguage
   /** Spanish register for copy: voseo (CR/AR), tuteo, usted. */
   register: 'voseo' | 'tuteo' | 'usted'
+  /**
+   * BCP-47 locale, e.g. "es-CR". When set, `register` is a HARD rule (E3): copy in another
+   * register is blocking (repaired once, else the ad fails) — not just a tone note.
+   */
+  locale?: string
   oneLiner?: string
   voice?: string
   audience?: string[]
@@ -99,6 +104,8 @@ export interface BrandDna {
   /** Customer phrases (reviews, comments, captions) — best hook material. */
   customerPhrases?: string[]
   forbiddenPhrases?: string[]
+  /** Claims the brand must never make (e.g. "armado en minutos"); checked like forbiddenPhrases. */
+  forbiddenClaims?: string[]
   /** Brand phrases the owner wants used when they fit (brand kit). Wording, never facts. */
   mustUsePhrases?: string[]
   facts: DnaFact[]
@@ -224,8 +231,17 @@ export interface CopyCheckIssue {
     | 'duplicate_message'
     | 'placeholder'
     | 'register'
+    /** Wrong register while `dna.locale` makes the register a hard rule (blocking). */
+    | 'locale_register'
   field: keyof AdCopy | 'script'
   detail: string
+  /** Exact location, e.g. "bullets[2]" or "script.hook" (defaults to `field`). */
+  path?: string
+  /** Length rules: the limit and the actual value (chars or words, see detail). */
+  limit?: number
+  actual?: number
+  /** The offending token (number, phrase, verb form). */
+  token?: string
 }
 
 export interface CopyCheckResult {

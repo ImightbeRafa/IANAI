@@ -334,17 +334,25 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
   const focusUse = new Map<string, number>()
   const angles: AdAngle[] = []
 
-  const pick = (pool: Candidate[]): Candidate | undefined => {
+  const usedTriples = new Set<string>()
+  /**
+   * `fill` = every distinct (hookType, format) pair is used up (narrow category / few facts):
+   * reuse a pair with a different archetype so the plan still has exactly `size` angles
+   * (F1: never plan fewer ads than were quoted and approved).
+   */
+  const pick = (pool: Candidate[], fill = false): Candidate | undefined => {
     let best: Candidate | undefined
     let bestScore = Infinity
     for (const c of pool) {
-      if (usedPairs.has(`${c.hookType}|${c.format}`)) continue
+      if (!fill && usedPairs.has(`${c.hookType}|${c.format}`)) continue
+      if (usedTriples.has(`${c.archetype}|${c.hookType}|${c.format}`)) continue
       const score =
         c.base +
         1.6 * (countA.get(c.archetype) ?? 0) +
         1.2 * (countF.get(c.format) ?? 0) +
         1.0 * (countH.get(c.hookType) ?? 0) +
-        (angles.length === 0 && c.archetype !== 'venta_directa' ? 2 : 0)
+        (angles.length === 0 && c.archetype !== 'venta_directa' ? 2 : 0) +
+        (fill && usedPairs.has(`${c.hookType}|${c.format}`) ? 4 : 0)
       if (score < bestScore) {
         bestScore = score
         best = c
@@ -354,9 +362,10 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
   }
 
   while (angles.length < size) {
-    const c = pick(strict) ?? pick(relaxed)
+    const c = pick(strict) ?? pick(relaxed) ?? pick(relaxed, true)
     if (!c) break
     usedPairs.add(`${c.hookType}|${c.format}`)
+    usedTriples.add(`${c.archetype}|${c.hookType}|${c.format}`)
     countA.set(c.archetype, (countA.get(c.archetype) ?? 0) + 1)
     countH.set(c.hookType, (countH.get(c.hookType) ?? 0) + 1)
     countF.set(c.format, (countF.get(c.format) ?? 0) + 1)
@@ -388,6 +397,9 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     if (usedMessages.has(normalizeText(message))) {
       message = `${message.replace(/\.$/, '')} — ${FORMAT_LABEL[language][c.format]}.`
     }
+    for (let n = 2; usedMessages.has(normalizeText(message)); n++) {
+      message = `${message.replace(/(?: · v\d+)?\.$/, '')} · v${n}.`
+    }
     usedMessages.add(normalizeText(message))
     targetUse.set(target, (targetUse.get(target) ?? 0) + 1)
 
@@ -403,6 +415,58 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     })
   }
   return angles
+}
+
+// ---------------------------------------------------------------------------
+// Exact pack plan (quote == approval == execution)
+// ---------------------------------------------------------------------------
+
+export type AnglePlanErrorReason = 'unknown_angle_ids' | 'infeasible'
+
+export class AnglePlanError extends Error {
+  readonly reason: AnglePlanErrorReason
+  readonly details: Record<string, unknown>
+  constructor(reason: AnglePlanErrorReason, message: string, details: Record<string, unknown>) {
+    super(message)
+    this.name = 'AnglePlanError'
+    this.reason = reason
+    this.details = details
+  }
+}
+
+/**
+ * The exact angles a pack will run — the single function behind quote, approval and start,
+ * so the approved count can never silently shrink (F1).
+ *
+ * - No `angleIds`: exactly `size` angles (planAngles fills); fewer → AnglePlanError('infeasible').
+ * - `angleIds`: resolved against the full MAX_PACK_SIZE board. The planner is greedy and
+ *   prefix-stable for one dna/offer/seed, so ids from a board of ANY size resolve to the same
+ *   angles (before: the ids were filtered against a re-plan of `size`, so ids beyond that size
+ *   were dropped silently — 2 approved ads became 1). Unknown ids → AnglePlanError('unknown_angle_ids').
+ */
+export function resolvePackAngles(input: PlanAnglesInput & { angleIds?: string[] }): AdAngle[] {
+  const ids = input.angleIds?.length ? [...new Set(input.angleIds)] : null
+  if (!ids) {
+    const size = Math.max(1, Math.min(MAX_PACK_SIZE, Math.floor(input.size ?? DEFAULT_PACK_SIZE) || DEFAULT_PACK_SIZE))
+    const angles = planAngles({ ...input, size })
+    if (angles.length < size) {
+      throw new AnglePlanError('infeasible', `Only ${angles.length} distinct angles can be planned for this offer (asked for ${size}); lower size or add facts`, {
+        requested: size,
+        feasible: angles.length,
+      })
+    }
+    return angles
+  }
+  const board = planAngles({ ...input, size: MAX_PACK_SIZE })
+  const known = new Set(board.map((a) => a.id))
+  const unknown = ids.filter((id) => !known.has(id))
+  if (unknown.length) {
+    throw new AnglePlanError('unknown_angle_ids', `Unknown angle ids for this offer: ${unknown.slice(0, 5).join(', ')} — use ids from adpack_angles for this brand/offer`, {
+      unknownAngleIds: unknown,
+    })
+  }
+  const keep = new Set(ids)
+  return board.filter((a) => keep.has(a.id))
 }
 
 // ---------------------------------------------------------------------------

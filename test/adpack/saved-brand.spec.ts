@@ -353,7 +353,7 @@ describe('saved-brand doors (web + MCP parity)', () => {
     expect(wS).toMatchObject({ status: 'done', size: 10, businessId: BIZ_A, brandKitId: KIT_A })
     expect(wS.offer.productId).toBe(PROD_A)
     expect(wS.offer.productImageUrls[0]).toBe('https://cdn.example/serum.jpg')
-    expect(wS.items.every((i) => i.status === 'done' && i.renders === 3)).toBe(true)
+    expect(wS.items.every((i) => i.status === 'done' && i.renders === 2)).toBe(true)
 
     // Product lock: every scene used the real product photo as reference 0.
     expect(web.gateway.sceneCalls.length).toBeGreaterThanOrEqual(10)
@@ -375,12 +375,12 @@ describe('saved-brand doors (web + MCP parity)', () => {
     // ---- results usable without the web UI
     expect(wStatus).toMatchObject({ status: 'done', moreWork: false, businessId: BIZ_A, offerId: PROD_A })
     expect(wStatus.deepLink).toBe(`https://advanceai.studio/chat?brand=${BIZ_A}&adpack=${wPackId}`)
-    expect(wStatus.items.every((i) => i.libraryImageIds?.length === 3)).toBe(true)
+    expect(wStatus.items.every((i) => i.libraryImageIds?.length === 2)).toBe(true)
     expect(mStatus.deepLink).toBe(`https://advanceai.studio/chat?brand=${BIZ_A}&adpack=${mPackId}`)
     const deliverable = mStatus.deliverable as { ads: Array<{ caption: string; links: Record<string, string> }>; captionsText: string; deepLink: string }
     expect(deliverable.ads).toHaveLength(10)
     for (const r of deliverable.ads) {
-      expect(Object.keys(r.links).sort()).toEqual(['1:1', '4:5', '9:16'])
+      expect(Object.keys(r.links).sort()).toEqual(['4:5', '9:16'])
       expect(Object.values(r.links).every((u) => u.startsWith('https://'))).toBe(true)
       expect(r.caption.length).toBeGreaterThan(20)
     }
@@ -394,11 +394,11 @@ describe('saved-brand doors (web + MCP parity)', () => {
     expect(wStatus.summary).toBe(mStatus.summary)
     expect(String(mStatus.instructionsForGrok)).toContain(String(mStatus.deepLink))
 
-    // product_images rows: 10 ads × 3 ratios, kind generated, linked to the offer, per door.
+    // product_images rows: 10 ads × 2 ratios (feed + story default), kind generated, linked to the offer, per door.
     for (const env of [web, mcp]) {
-      expect(env.library.rows).toHaveLength(30)
+      expect(env.library.rows).toHaveLength(20)
       expect(env.library.rows.every((r) => r.kind === 'generated' && r.productId === PROD_A && r.userId === USER_A)).toBe(true)
-      expect(new Set(env.library.rows.map((r) => r.imageUrl)).size).toBe(30)
+      expect(new Set(env.library.rows.map((r) => r.imageUrl)).size).toBe(20)
     }
     expect(web.charges).toHaveLength(10)
     expect(mcp.charges).toHaveLength(10)
@@ -411,31 +411,31 @@ describe('saved-brand doors (web + MCP parity)', () => {
     const packId = (start.body as { packId: string }).packId
     const done = await pollWebUntilDone(packId)
     expect(done.status).toBe('done')
-    expect(env.library.rows).toHaveLength(9)
+    expect(env.library.rows).toHaveLength(6)
     const calls = env.library.calls
 
     // More polls / advances never duplicate rows nor call the library again.
     await pollWebUntilDone(packId)
     await callWeb(handler, USER_A, { action: 'status', packId })
     await env.service.advance({ userId: USER_A, packId })
-    expect(env.library.rows).toHaveLength(9)
+    expect(env.library.rows).toHaveLength(6)
     expect(env.library.calls).toBe(calls)
 
     // A lost write (marker missing) is repaired without duplicating rows.
     const item0 = [...env.store.items.values()].find((i) => i.packId === packId && i.index === 0)!
     await env.store.updateItem(item0.id, { libraryImages: undefined })
     const repaired = (await callWeb(handler, USER_A, { action: 'status', packId })).body as AdPackStatusResponse
-    expect(env.library.rows).toHaveLength(9)
-    expect(repaired.items[0].libraryImageIds).toHaveLength(3)
+    expect(env.library.rows).toHaveLength(6)
+    expect(repaired.items[0].libraryImageIds).toHaveLength(2)
 
     // Free text edit re-renders: the new version is saved once (3 new rows), old rows kept.
     const edit = await callWeb(handler, USER_A, { action: 'edit_text', packId, itemId: item0.id, copy: { headline: 'Tu rutina de noche' } })
     expect(edit.statusCode).toBe(200)
     const edited = (edit.body as { item: { libraryImageIds: string[] } }).item
-    expect(env.library.rows).toHaveLength(12)
-    expect(edited.libraryImageIds).toHaveLength(3)
+    expect(env.library.rows).toHaveLength(8)
+    expect(edited.libraryImageIds).toHaveLength(2)
     await callWeb(handler, USER_A, { action: 'status', packId })
-    expect(env.library.rows).toHaveLength(12)
+    expect(env.library.rows).toHaveLength(8)
   })
 
   it('keeps the dna/offer path working and never saves into an offer the user does not own', async () => {

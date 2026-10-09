@@ -183,7 +183,7 @@ describe('ChatShellAdPackStudio', () => {
     expect(generate).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Generar · 9 anuncios · 54 créditos' }))
-    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ size: 10, ratios: ['1:1', '4:5', '9:16'] }))
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ size: 10, ratios: ['4:5', '9:16'] }))
     expect((api.start as ReturnType<typeof vi.fn>).mock.calls[0][0].angleIds).toHaveLength(9)
     expect(onPackStarted).toHaveBeenCalledWith('p1')
     expect(await screen.findByText('1/1 listos')).toBeTruthy()

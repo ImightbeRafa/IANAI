@@ -20,7 +20,7 @@ import { deterministicGenerationUuid, generationUuidFromApproval } from '../cred
 import { checkAdCopy, repairAdCopy } from './check-copy.js'
 import { checkScene, type CheckSceneOutput } from './check-scene.js'
 import { generateAdCopy } from './copy.js'
-import { planAngles } from './plan-angles.js'
+import { resolvePackAngles } from './plan-angles.js'
 import { generateScene, type GeneratedScene } from './scene.js'
 import { errorMessage } from './util.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
@@ -41,7 +41,8 @@ import type {
   SceneCheckResult,
 } from './types.js'
 
-export const DEFAULT_RATIOS: AspectRatio[] = ['1:1', '4:5', '9:16']
+/** Feed (4:5) + story (9:16) by default (H6); '1:1' stays available on request or via a free resize. */
+export const DEFAULT_RATIOS: AspectRatio[] = ['4:5', '9:16']
 export const ANCHOR_INDEX = 0
 export const MAX_SCENE_RETRIES = 2
 
@@ -53,6 +54,7 @@ export const BLOCKING_COPY_CODES: ReadonlySet<CopyCheckIssue['code']> = new Set(
   'forbidden_phrase',
   'placeholder',
   'empty_field',
+  'locale_register',
 ])
 /** User text edits are also rejected when they break length limits. */
 export const EDIT_BLOCKING_COPY_CODES: ReadonlySet<CopyCheckIssue['code']> = new Set([...BLOCKING_COPY_CODES, 'too_long'])
@@ -70,7 +72,7 @@ export interface PlanPackInput {
   dna: BrandDna
   offer: OfferInput
   size?: number
-  /** Keep only these planned angle ids (angle-board selection). Ids are deterministic for the same dna/offer/size/seed. */
+  /** Keep only these planned angle ids (angle-board selection). Ids are deterministic and prefix-stable for the same dna/offer/seed. */
   angleIds?: string[]
   ratios?: AspectRatio[]
   userId: string
@@ -90,9 +92,8 @@ export function itemGenerationId(packId: string, index: number, attempt = 0): st
 
 export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] } {
   const packId = input.ids?.packId ?? randomUUID()
-  const planned = planAngles({ dna: input.dna, offer: input.offer, size: input.size, language: input.dna.language, seed: input.seed })
-  const keep = input.angleIds?.length ? new Set(input.angleIds) : null
-  const angles = keep ? planned.filter((a) => keep.has(a.id)) : planned
+  // Same resolver as the quote/approval: exactly `size` angles, or exactly the selected ids (throws otherwise).
+  const angles = resolvePackAngles({ dna: input.dna, offer: input.offer, size: input.size, language: input.dna.language, seed: input.seed, angleIds: input.angleIds })
   const ratios = input.ratios?.length ? [...new Set(input.ratios)] : [...DEFAULT_RATIOS]
   const ts = nowIso()
   const pack: Pack = {
@@ -400,7 +401,7 @@ async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const timings = { ...item.timings, copyMs: Date.now() - t0 }
   const blocking = blockingIssues(check, BLOCKING_COPY_CODES)
   if (blocking.length) {
-    return fail(ctx, item, `copy_check_failed: ${blocking.map((i) => `${i.code}(${i.field})`).join(', ')}`, { copy, copyCheck: check, costUsd, timings })
+    return fail(ctx, item, `copy_check_failed: ${blocking.map((i) => `${i.code}(${i.path ?? i.field})`).join(', ')}`, { copy, copyCheck: check, costUsd, timings })
   }
   return save(ctx, item, { status: 'copy_ready', copy, copyCheck: check, costUsd, timings, error: undefined })
 }
@@ -551,10 +552,12 @@ async function renderAllRatios(args: {
   item: PackItem
   copy: AdCopy
   sceneImage: Uint8Array | string
+  /** Defaults to the pack's ratios. */
+  ratios?: AspectRatio[]
 }): Promise<RenderedAd[]> {
   const { renderer, storage, pack, item, copy, sceneImage } = args
   const out: RenderedAd[] = []
-  for (const ratio of pack.ratios) {
+  for (const ratio of args.ratios ?? pack.ratios) {
     const r = await renderer.render({
       format: item.angle.format,
       ratio,
@@ -658,15 +661,60 @@ export async function editItemText(input: EditItemTextInput): Promise<EditItemTe
     angle: item.angle,
     language: pack.dna.language,
     otherCopies: items.filter((i) => i.id !== item.id && i.copy && i.status !== 'failed').map((i) => i.copy as AdCopy),
+    userEdit: true,
   })
   const blocking = blockingIssues(check, EDIT_BLOCKING_COPY_CODES)
   if (blocking.length) return { ok: false, error: 'copy_rejected', issues: blocking }
 
   const t0 = Date.now()
-  const renders = await renderAllRatios({ renderer: input.renderer, storage: input.storage, pack, item, copy, sceneImage: item.scene.imageUrl })
+  // Keep every ratio the ad has (pack ratios + any added by a free resize).
+  const ratios = [...new Set([...pack.ratios, ...(item.renders ?? []).map((r) => r.ratio)])]
+  const renders = await renderAllRatios({ renderer: input.renderer, storage: input.storage, pack, item, copy, sceneImage: item.scene.imageUrl, ratios })
   const next: Partial<PackItem> = { copy, copyCheck: check, renders, timings: { ...item.timings, renderMs: Date.now() - t0 } }
   await input.store.updateItem(item.id, next)
   return { ok: true, item: { ...item, ...next, updatedAt: nowIso() } }
+}
+
+// ---------------------------------------------------------------------------
+// Resize (free): same scene + same copy, new ratios — renderer only
+// ---------------------------------------------------------------------------
+
+
+export interface ResizeItemInput {
+  store: PackStore
+  renderer: Renderer
+  storage: AdPackStorage
+  packId: string
+  itemId: string
+  userId: string
+  ratios: AspectRatio[]
+}
+
+export type ResizeItemResult =
+  | { ok: true; item: PackItem; added: AspectRatio[] }
+  | { ok: false; error: 'pack_not_found' | 'item_not_found' | 'item_not_rendered' }
+
+/**
+ * Render an already-finished ad into more ratios from its stored scene + copy. No model calls,
+ * no credits (H6). Ratios the ad already has are kept as they are; the item's renders become
+ * the union (existing ratios first).
+ */
+export async function resizeItem(input: ResizeItemInput): Promise<ResizeItemResult> {
+  const loaded = await input.store.getPack(input.packId, input.userId)
+  if (!loaded) return { ok: false, error: 'pack_not_found' }
+  const { pack, items } = loaded
+  const item = items.find((i) => i.id === input.itemId)
+  if (!item) return { ok: false, error: 'item_not_found' }
+  if (!item.copy || !item.scene || (item.status !== 'rendered' && item.status !== 'done')) return { ok: false, error: 'item_not_rendered' }
+  const have = new Set((item.renders ?? []).map((r) => r.ratio))
+  const missing = [...new Set(input.ratios)].filter((r) => !have.has(r))
+  if (!missing.length) return { ok: true, item, added: [] }
+  const t0 = Date.now()
+  const fresh = await renderAllRatios({ renderer: input.renderer, storage: input.storage, pack, item, copy: item.copy, sceneImage: item.scene.imageUrl, ratios: missing })
+  const renders = [...(item.renders ?? []), ...fresh]
+  const next: Partial<PackItem> = { renders, timings: { ...item.timings, renderMs: Date.now() - t0 } }
+  await input.store.updateItem(item.id, next)
+  return { ok: true, item: { ...item, ...next, updatedAt: nowIso() }, added: missing }
 }
 
 export interface RegenerateItemInput {

@@ -19,7 +19,7 @@ import {
   type RawModelCopy,
 } from './copy-shared.js'
 import { extractNumericClaims, numbersInFacts } from './facts.js'
-import { IAN_CORE_RULES, REGISTER_DRIFT_MARKERS, registerInstruction } from './ian-rules.js'
+import { HARD_REGISTER_MARKERS, IAN_CORE_RULES, isHardRegister, REGISTER_DRIFT_MARKERS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, headlineMaxWords } from './patterns.js'
 import { contentWordCount, normalizeText, textSimilarity, wordCount } from './util.js'
 
@@ -30,26 +30,94 @@ export interface CheckAdCopyOptions {
   language: AdLanguage
   /** Other copies in the same pack, for near-duplicate detection. */
   otherCopies?: AdCopy[]
+  /**
+   * The owner typed this copy (adpack_edit_text / web edit_text): chips get a little more room
+   * (EDIT_BULLET_LIMITS) and a hand-written offer line is accepted when every part of it is a
+   * confirmed fact or a stated exclusion.
+   */
+  userEdit?: boolean
 }
+
+/** Chip limits for owner edits ("Kit ₡14.900 · Papel no incluido" is a legit chip). */
+export const EDIT_BULLET_LIMITS = { words: 6, chars: 34 } as const
 
 type Field = CopyCheckIssue['field']
 
 interface TextField {
   field: Field
+  /** "bullets[2]", "script.hook", … */
+  path: string
   text: string
 }
 
+interface IssueExtra {
+  path?: string
+  limit?: number
+  actual?: number
+  token?: string
+}
+
+type Push = (code: CopyCheckIssue['code'], field: Field, detail: string, extra?: IssueExtra) => void
+
 function textFields(copy: AdCopy): TextField[] {
-  const out: TextField[] = [{ field: 'headline', text: copy.headline ?? '' }]
-  if (copy.subline) out.push({ field: 'subline', text: copy.subline })
-  for (const b of copy.bullets ?? []) out.push({ field: 'bullets', text: b })
-  if (copy.offerLine) out.push({ field: 'offerLine', text: copy.offerLine })
-  out.push({ field: 'cta', text: copy.cta ?? '' })
-  out.push({ field: 'caption', text: copy.caption ?? '' })
+  const out: TextField[] = [{ field: 'headline', path: 'headline', text: copy.headline ?? '' }]
+  if (copy.subline) out.push({ field: 'subline', path: 'subline', text: copy.subline })
+  ;(copy.bullets ?? []).forEach((b, i) => out.push({ field: 'bullets', path: `bullets[${i}]`, text: b }))
+  if (copy.offerLine) out.push({ field: 'offerLine', path: 'offerLine', text: copy.offerLine })
+  out.push({ field: 'cta', path: 'cta', text: copy.cta ?? '' })
+  out.push({ field: 'caption', path: 'caption', text: copy.caption ?? '' })
   if (copy.script) {
-    out.push({ field: 'script', text: copy.script.hook ?? '' })
-    out.push({ field: 'script', text: copy.script.development ?? '' })
-    out.push({ field: 'script', text: copy.script.cta ?? '' })
+    out.push({ field: 'script', path: 'script.hook', text: copy.script.hook ?? '' })
+    out.push({ field: 'script', path: 'script.development', text: copy.script.development ?? '' })
+    out.push({ field: 'script', path: 'script.cta', text: copy.script.cta ?? '' })
+  }
+  return out
+}
+
+/** Stating a limitation ("Papel no incluido") is not a promise. */
+const EXCLUSION_RE = /\b(?:no incluid[oa]s?|no incluye|no viene(?:n)? incluid[oa]s?|no trae|sin incluir|se vende por separado|not included|does not include|doesn't include|sold separately|excluded?)\b/
+
+export function isExclusionStatement(text: string): boolean {
+  return EXCLUSION_RE.test(normalizeText(text))
+}
+
+/** Segments of a chip / line split on the usual separators ("Kit ₡14.900 · Papel no incluido"). */
+function segments(text: string): string[] {
+  return text.split(/\s*[·•|;]\s*|\s+[-–—]\s+/).map((t) => t.trim()).filter(Boolean)
+}
+
+export interface ForbiddenHit {
+  /** The brand's phrase / claim as written in the kit. */
+  phrase: string
+  kind: 'phrase' | 'claim'
+  /** Exact location: "headline", "bullets[1]", "caption", "script.hook", "sceneBrief"… */
+  field: string
+  baseField: Field
+}
+
+function forbiddenList(dna: BrandDna): string[] {
+  return [...(dna.forbiddenPhrases ?? []), ...(dna.forbiddenClaims ?? [])].map((p) => p.trim()).filter(Boolean)
+}
+
+/**
+ * Brand forbidden phrases + forbidden claims found in the ad: on-image text (headline, subline,
+ * chips, offer line, CTA), caption, script and scene brief. Accent/case-insensitive. Pure.
+ */
+export function findForbiddenHits(copy: AdCopy | undefined, dna: Pick<BrandDna, 'forbiddenPhrases' | 'forbiddenClaims'>): ForbiddenHit[] {
+  if (!copy) return []
+  const lists: Array<[ForbiddenHit['kind'], string[]]> = [['phrase', dna.forbiddenPhrases ?? []], ['claim', dna.forbiddenClaims ?? []]]
+  const where = [...textFields(copy), { field: 'sceneBrief' as Field, path: 'sceneBrief', text: copy.sceneBrief ?? '' }]
+  const out: ForbiddenHit[] = []
+  for (const [kind, list] of lists) {
+    for (const phrase of list) {
+      const p = normalizeText(phrase)
+      if (!p) continue
+      for (const { field, path, text } of where) {
+        if (normalizeText(text).includes(p) && !out.some((h) => h.field === path && normalizeText(h.phrase) === p)) {
+          out.push({ phrase, kind, field: path, baseField: field })
+        }
+      }
+    }
   }
   return out
 }
@@ -85,21 +153,31 @@ const GUARANTEE_RE = /\b(?:garantia|garantizad[oa]s?|guarantee[ds]?|warranty|dev
 export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyCheckResult {
   const ctx = buildCopyContext(options.dna, options.offer, options.angle, options.language)
   const issues: CopyCheckIssue[] = []
-  const push = (code: CopyCheckIssue['code'], field: Field, detail: string) => {
-    if (!issues.some((i) => i.code === code && i.field === field && i.detail === detail)) issues.push({ code, field, detail })
+  const push: Push = (code, field, detail, extra = {}) => {
+    const path = extra.path ?? field
+    if (issues.some((i) => i.code === code && (i.path ?? i.field) === path && i.detail === detail)) return
+    issues.push({
+      code,
+      field,
+      detail,
+      ...(path !== field ? { path } : {}),
+      ...(extra.limit !== undefined ? { limit: extra.limit } : {}),
+      ...(extra.actual !== undefined ? { actual: extra.actual } : {}),
+      ...(extra.token !== undefined ? { token: extra.token } : {}),
+    })
   }
 
-  checkEmptyAndLength(copy, options.angle, push)
+  checkEmptyAndLength(copy, options.angle, push, options.userEdit === true)
   const fields = textFields(copy)
 
   // Greetings + placeholders
-  for (const { field, text } of fields) {
+  for (const { field, path, text } of fields) {
     const n = normalizeText(text)
-    if (GREETING_START_RE.test(n) || GREETING_ANY_RE.test(n)) push('greeting', field, `Greeting in "${text.slice(0, 60)}"`)
+    if (GREETING_START_RE.test(n) || GREETING_ANY_RE.test(n)) push('greeting', field, `Greeting in "${text.slice(0, 60)}"`, { path })
     for (const re of PLACEHOLDER_RES) {
       const m = text.match(re)
       if (m) {
-        push('placeholder', field, `Placeholder "${m[0]}"`)
+        push('placeholder', field, `Placeholder "${m[0]}"`, { path, token: m[0] })
         break
       }
     }
@@ -112,30 +190,31 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
     }
   }
 
-  checkFacts(copy, ctx, fields, push)
+  checkFacts(copy, ctx, fields, push, options)
 
-  // Spanish register drift (e.g. voseo "Escribinos" in an usted brand). Customer quotes in
-  // quotation marks are the customer's own words and are not checked.
+  // Spanish register. With a locale (es-CR + voseo…) the register is a HARD rule: any form of
+  // another register is blocking ('locale_register', repaired once, else the ad fails). Without
+  // a locale it stays a soft drift note ('register'). Customer quotes in quotation marks are the
+  // customer's own words and are not checked.
   if (options.language === 'es') {
     const own = options.dna.register ?? 'tuteo'
-    for (const { field, text } of fields) {
+    const hard = isHardRegister(options.dna)
+    for (const { field, path, text } of fields) {
       if (field === 'offerLine') continue
       const unquoted = text.replace(/["“”«»][^"“”«»]*["“”«»]/g, ' ')
       for (const other of Object.keys(REGISTER_DRIFT_MARKERS) as Array<keyof typeof REGISTER_DRIFT_MARKERS>) {
         if (other === own) continue
-        const m = unquoted.match(REGISTER_DRIFT_MARKERS[other])
-        if (m) push('register', field, `"${m[0]}" is ${other}; this brand writes in ${own}`)
+        const m = unquoted.match(hard ? HARD_REGISTER_MARKERS[other] : REGISTER_DRIFT_MARKERS[other])
+        if (!m) continue
+        if (hard) push('locale_register', field, `"${m[0]}" is ${other}; locale ${options.dna.locale} requires ${own}`, { path, token: m[0] })
+        else push('register', field, `"${m[0]}" is ${other}; this brand writes in ${own}`, { path, token: m[0] })
       }
     }
   }
 
-  // Forbidden phrases (brand list)
-  for (const phrase of options.dna.forbiddenPhrases ?? []) {
-    const p = normalizeText(phrase)
-    if (!p) continue
-    for (const { field, text } of [...fields, { field: 'sceneBrief' as Field, text: copy.sceneBrief ?? '' }]) {
-      if (normalizeText(text).includes(p)) push('forbidden_phrase', field, `Forbidden phrase "${phrase}"`)
-    }
+  // Forbidden phrases + forbidden claims (brand lists) on every on-image field, caption, script and scene brief.
+  for (const hit of findForbiddenHits(copy, options.dna)) {
+    push('forbidden_phrase', hit.baseField, `Forbidden ${hit.kind} "${hit.phrase}"`, { path: hit.field, token: hit.phrase })
   }
   if (copy.sceneBrief && sceneBriefRequestsText(copy.sceneBrief)) {
     push('forbidden_phrase', 'sceneBrief', 'Scene brief asks for on-image text/letters/logos')
@@ -190,82 +269,116 @@ export function sameOpener(a: string, b: string): boolean {
   return wa[0] === wb[0] && wa[1] === wb[1]
 }
 
-function checkEmptyAndLength(
-  copy: AdCopy,
-  angle: AdAngle,
-  push: (code: CopyCheckIssue['code'], field: Field, detail: string) => void
-): void {
+function checkEmptyAndLength(copy: AdCopy, angle: AdAngle, push: Push, userEdit: boolean): void {
   const L = COPY_LIMITS
+  const bulletWords = userEdit ? EDIT_BULLET_LIMITS.words : L.bulletWords
+  const bulletChars = userEdit ? EDIT_BULLET_LIMITS.chars : L.bulletChars
   if (!copy.headline?.trim()) push('empty_field', 'headline', 'Headline is empty')
   if (!copy.cta?.trim()) push('empty_field', 'cta', 'CTA is empty')
   if (!copy.caption?.trim()) push('empty_field', 'caption', 'Caption is empty')
-  else if (copy.caption.trim().length < L.captionMinChars) push('empty_field', 'caption', `Caption shorter than ${L.captionMinChars} chars`)
+  else if (copy.caption.trim().length < L.captionMinChars) {
+    push('empty_field', 'caption', `Caption shorter than ${L.captionMinChars} chars`, { limit: L.captionMinChars, actual: copy.caption.trim().length })
+  }
   if (!copy.sceneBrief?.trim()) push('empty_field', 'sceneBrief', 'Scene brief is empty')
 
   const hMax = headlineMaxWords(angle.format)
-  if (wordCount(copy.headline) > hMax) push('too_long', 'headline', `Headline has ${wordCount(copy.headline)} words (max ${hMax})`)
-  if ((copy.headline ?? '').length > L.headlineChars) push('too_long', 'headline', `Headline has ${copy.headline.length} chars (max ${L.headlineChars})`)
-  if (wordCount(copy.subline) > L.sublineWords) push('too_long', 'subline', `Subline has ${wordCount(copy.subline)} words (max ${L.sublineWords})`)
-  if ((copy.bullets ?? []).length > L.maxBullets) push('too_long', 'bullets', `${copy.bullets.length} bullets (max ${L.maxBullets})`)
-  for (const b of copy.bullets ?? []) {
-    if (!b.trim()) push('empty_field', 'bullets', 'Empty bullet')
-    else if (contentWordCount(b) > L.bulletWords) push('too_long', 'bullets', `Bullet "${b}" has ${contentWordCount(b)} words (max ${L.bulletWords})`)
-    else if (b.length > L.bulletChars) push('too_long', 'bullets', `Bullet "${b}" has ${b.length} chars (max ${L.bulletChars})`)
+  const hWords = wordCount(copy.headline)
+  if (hWords > hMax) push('too_long', 'headline', `Headline has ${hWords} words (max ${hMax})`, { limit: hMax, actual: hWords })
+  if ((copy.headline ?? '').length > L.headlineChars) {
+    push('too_long', 'headline', `Headline has ${copy.headline.length} chars (max ${L.headlineChars})`, { limit: L.headlineChars, actual: copy.headline.length })
   }
+  const sWords = wordCount(copy.subline)
+  if (sWords > L.sublineWords) push('too_long', 'subline', `Subline has ${sWords} words (max ${L.sublineWords})`, { limit: L.sublineWords, actual: sWords })
+  if ((copy.bullets ?? []).length > L.maxBullets) {
+    push('too_long', 'bullets', `${copy.bullets.length} bullets (max ${L.maxBullets})`, { limit: L.maxBullets, actual: copy.bullets.length })
+  }
+  ;(copy.bullets ?? []).forEach((b, i) => {
+    const path = `bullets[${i}]`
+    if (!b.trim()) {
+      push('empty_field', 'bullets', 'Empty bullet', { path })
+      return
+    }
+    // Separator glyphs ("·") are not words.
+    const w = contentWordCount(b.replace(/(^|\s)[·•|]+(?=\s|$)/g, ' '))
+    if (w > bulletWords) push('too_long', 'bullets', `Bullet "${b}" has ${w} words (max ${bulletWords})`, { path, limit: bulletWords, actual: w })
+    else if (b.length > bulletChars) push('too_long', 'bullets', `Bullet "${b}" has ${b.length} chars (max ${bulletChars})`, { path, limit: bulletChars, actual: b.length })
+  })
   const minBullets = FORMAT_PATTERNS[angle.format].bulletsAreSteps ? 2 : 0
-  if ((copy.bullets ?? []).length < minBullets) push('empty_field', 'bullets', `Format ${angle.format} needs at least ${minBullets} steps`)
-  if (contentWordCount(copy.cta) > L.ctaWords) push('too_long', 'cta', `CTA has ${contentWordCount(copy.cta)} words (max ${L.ctaWords})`)
-  else if ((copy.cta ?? '').length > L.ctaChars) push('too_long', 'cta', `CTA has ${copy.cta.length} chars (max ${L.ctaChars})`)
-  if ((copy.caption ?? '').length > L.captionMaxChars) push('too_long', 'caption', `Caption has ${copy.caption.length} chars (max ${L.captionMaxChars})`)
-  if ((copy.offerLine ?? '').length > L.offerLineChars) push('too_long', 'offerLine', `Offer line has ${copy.offerLine!.length} chars (max ${L.offerLineChars})`)
-  if ((copy.sceneBrief ?? '').length > L.sceneBriefMaxChars) push('too_long', 'sceneBrief', `Scene brief has ${copy.sceneBrief.length} chars (max ${L.sceneBriefMaxChars})`)
+  if ((copy.bullets ?? []).length < minBullets) {
+    push('empty_field', 'bullets', `Format ${angle.format} needs at least ${minBullets} steps`, { limit: minBullets, actual: (copy.bullets ?? []).length })
+  }
+  const ctaWords = contentWordCount(copy.cta)
+  if (ctaWords > L.ctaWords) push('too_long', 'cta', `CTA has ${ctaWords} words (max ${L.ctaWords})`, { limit: L.ctaWords, actual: ctaWords })
+  else if ((copy.cta ?? '').length > L.ctaChars) push('too_long', 'cta', `CTA has ${copy.cta.length} chars (max ${L.ctaChars})`, { limit: L.ctaChars, actual: copy.cta.length })
+  if ((copy.caption ?? '').length > L.captionMaxChars) {
+    push('too_long', 'caption', `Caption has ${copy.caption.length} chars (max ${L.captionMaxChars})`, { limit: L.captionMaxChars, actual: copy.caption.length })
+  }
+  if ((copy.offerLine ?? '').length > L.offerLineChars) {
+    push('too_long', 'offerLine', `Offer line has ${copy.offerLine!.length} chars (max ${L.offerLineChars})`, { limit: L.offerLineChars, actual: copy.offerLine!.length })
+  }
+  if ((copy.sceneBrief ?? '').length > L.sceneBriefMaxChars) {
+    push('too_long', 'sceneBrief', `Scene brief has ${copy.sceneBrief.length} chars (max ${L.sceneBriefMaxChars})`, { limit: L.sceneBriefMaxChars, actual: copy.sceneBrief.length })
+  }
   if (copy.script) {
     if (!copy.script.hook?.trim() || !copy.script.development?.trim() || !copy.script.cta?.trim()) push('empty_field', 'script', 'Script part is empty')
-    if (wordCount(copy.script.hook) > L.scriptHookWords) push('too_long', 'script', `Script hook over ${L.scriptHookWords} words`)
-    if (wordCount(copy.script.development) > L.scriptDevelopmentWords) push('too_long', 'script', `Script development over ${L.scriptDevelopmentWords} words`)
-    if (wordCount(copy.script.cta) > L.scriptCtaWords) push('too_long', 'script', `Script CTA over ${L.scriptCtaWords} words`)
+    const parts: Array<['hook' | 'development' | 'cta', number]> = [['hook', L.scriptHookWords], ['development', L.scriptDevelopmentWords], ['cta', L.scriptCtaWords]]
+    for (const [part, max] of parts) {
+      const n = wordCount(copy.script[part])
+      if (n > max) push('too_long', 'script', `Script ${part === 'cta' ? 'CTA' : part} over ${max} words`, { path: `script.${part}`, limit: max, actual: n })
+    }
   }
 }
 
-function checkFacts(
-  copy: AdCopy,
-  ctx: CopyContext,
-  fields: TextField[],
-  push: (code: CopyCheckIssue['code'], field: Field, detail: string) => void
-): void {
+function checkFacts(copy: AdCopy, ctx: CopyContext, fields: TextField[], push: Push, options: CheckAdCopyOptions): void {
   const confirmedNums = numbersInFacts(ctx.confirmed)
   const unconfirmedNums = numbersInFacts(ctx.unconfirmed)
   const confirmedText = ctx.confirmed.map((f) => normalizeText(f.value)).join(' | ')
+  const allFactText = [...ctx.confirmed, ...ctx.unconfirmed].map((f) => normalizeText(f.value)).join(' | ')
   const confirmedKeys = new Set<FactKey>(ctx.confirmed.map((f) => f.key))
+  /** An exclusion the facts state ("Papel no incluido") is allowed anywhere: it limits, never promises. */
+  const statedExclusion = (segment: string) => isExclusionStatement(segment) && allFactText.includes(normalizeText(segment).replace(/[.!]+$/, ''))
 
-  for (const { field, text } of fields) {
+  for (const { field, path, text } of fields) {
     if (field === 'offerLine') continue
-    const masked = maskStructural(text)
+    const bulletIndex = field === 'bullets' ? Number(path.slice(8, -1)) : -1
+    const masked = maskStructural(text, bulletIndex, FORMAT_PATTERNS[options.angle.format].bulletsAreSteps)
     for (const claim of extractNumericClaims(masked)) {
       if (confirmedNums.has(claim.value)) continue
-      if (unconfirmedNums.has(claim.value)) push('unconfirmed_fact', field, `"${claim.raw.trim()}" comes from an unconfirmed fact`)
-      else push('number_mismatch', field, `"${claim.raw.trim()}" does not match any confirmed fact`)
+      const token = claim.raw.trim()
+      if (unconfirmedNums.has(claim.value)) push('unconfirmed_fact', field, `"${token}" comes from an unconfirmed fact`, { path, token })
+      else push('number_mismatch', field, `"${token}" does not match any confirmed fact`, { path, token })
     }
-    const n = normalizeText(text)
-    if (FREE_RE.test(n) && !FREE_FACT_RE.test(confirmedText)) push('unconfirmed_fact', field, '"Free/gratis" claim without a confirmed fact')
-    if (GUARANTEE_RE.test(n) && !confirmedKeys.has('guarantee') && !confirmedKeys.has('returns')) {
-      push('unconfirmed_fact', field, 'Guarantee claim without a confirmed guarantee/returns fact')
+    // Claims are judged without the stated exclusions ("Garantía no incluida" is not a guarantee claim).
+    const claimText = segments(text).filter((seg) => !statedExclusion(seg)).join(' · ')
+    const n = normalizeText(claimText)
+    const free = n.match(FREE_RE)
+    if (free && !FREE_FACT_RE.test(confirmedText)) push('unconfirmed_fact', field, '"Free/gratis" claim without a confirmed fact', { path, token: free[0] })
+    const guarantee = n.match(GUARANTEE_RE)
+    if (guarantee && !confirmedKeys.has('guarantee') && !confirmedKeys.has('returns')) {
+      push('unconfirmed_fact', field, 'Guarantee claim without a confirmed guarantee/returns fact', { path, token: guarantee[0] })
     }
     for (const f of ctx.unconfirmed) {
       const v = normalizeText(f.value)
-      if (v.length >= 4 && n.includes(v)) push('unconfirmed_fact', field, `Uses unconfirmed ${f.key}: "${f.value}"`)
+      if (v.length >= 4 && n.includes(v) && !isExclusionStatement(f.value)) push('unconfirmed_fact', field, `Uses unconfirmed ${f.key}: "${f.value}"`, { path, token: f.value })
     }
   }
 
   checkNotIncluded(ctx, fields, push)
-  if (ctx.offer.strictClaims) checkTraceableClaims(ctx, fields, push)
+  if (ctx.offer.strictClaims) checkTraceableClaims(ctx, fields, push, statedExclusion)
 
-  // Offer line must be exactly the deterministic one.
-  if ((copy.offerLine ?? '') !== (ctx.offerLine ?? '')) {
-    push('number_mismatch', 'offerLine', ctx.offerLine ? `Offer line must be "${ctx.offerLine}"` : 'No confirmed price/bundle: offer line must be empty')
+  // Offer line: the deterministic one, or (owner edit) a line whose every part is a confirmed fact / stated exclusion.
+  const line = copy.offerLine ?? ''
+  if (line !== (ctx.offerLine ?? '')) {
+    const problem = options.userEdit && line ? offerLineProblem(line, confirmedNums, confirmedText, statedExclusion) : line || '(empty)'
+    if (problem) {
+      const detail = options.userEdit && line
+        ? `Offer line part "${problem}" is not a confirmed fact`
+        : ctx.offerLine ? `Offer line must be "${ctx.offerLine}"` : 'No confirmed price/bundle: offer line must be empty'
+      push('number_mismatch', 'offerLine', detail, { token: problem })
+    }
   }
   for (const k of copy.usedFactKeys ?? []) {
-    if (!confirmedKeys.has(k)) push('unconfirmed_fact', 'usedFactKeys', `Fact key "${k}" is not confirmed`)
+    if (!confirmedKeys.has(k)) push('unconfirmed_fact', 'usedFactKeys', `Fact key "${k}" is not confirmed`, { token: k })
   }
 }
 
@@ -285,20 +398,16 @@ export function claimSentences(text: string): string[] {
 }
 
 /** "Papel no incluido" on the offer → copy may never say paper is included. */
-function checkNotIncluded(
-  ctx: CopyContext,
-  fields: TextField[],
-  push: (code: CopyCheckIssue['code'], field: Field, detail: string) => void
-): void {
+function checkNotIncluded(ctx: CopyContext, fields: TextField[], push: Push): void {
   const items = (ctx.offer.notIncluded ?? []).map((i) => ({ raw: i, n: normalizeText(i) })).filter((i) => i.n.length >= 3)
   if (!items.length) return
-  for (const { field, text } of fields) {
+  for (const { field, path, text } of fields) {
     for (const sentence of claimSentences(text)) {
       const n = normalizeText(sentence)
       for (const item of items) {
         if (!new RegExp(`\\b${item.n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(n)) continue
         if (INCLUSION_RE.test(n) && !NEGATION_NEAR_RE.test(n)) {
-          push('unconfirmed_fact', field, `not_included: "${sentence.slice(0, 80)}" says ${item.raw} is included, but the offer says it is not`)
+          push('unconfirmed_fact', field, `not_included: "${sentence.slice(0, 80)}" says ${item.raw} is included, but the offer says it is not`, { path, token: item.raw })
         }
       }
     }
@@ -339,29 +448,50 @@ function tracingValues(ctx: CopyContext): string[] {
  * case-insensitive) a confirmed fact or verified claim — "gratis con dos kits" fails
  * when the fact is "Envío gratis desde 2 kits".
  */
-function checkTraceableClaims(
-  ctx: CopyContext,
-  fields: TextField[],
-  push: (code: CopyCheckIssue['code'], field: Field, detail: string) => void
-): void {
+function checkTraceableClaims(ctx: CopyContext, fields: TextField[], push: Push, statedExclusion: (s: string) => boolean): void {
   const values = tracingValues(ctx)
-  for (const { field, text } of fields) {
+  for (const { field, path, text } of fields) {
     if (field === 'offerLine' || field === 'cta') continue
     for (const sentence of claimSentences(text)) {
+      // A stated exclusion ("Papel no incluido") limits, never promises.
+      if (statedExclusion(sentence)) continue
       const n = normalizeText(sentence)
       if (!CLAIM_MARKER_RE.test(n)) continue
       if (values.some((v) => n.includes(v))) continue
-      push('unconfirmed_fact', field, `untraceable_claim: "${sentence.slice(0, 90)}" is not one of the confirmed facts or verified claims (copy them exactly)`)
+      push('unconfirmed_fact', field, `untraceable_claim: "${sentence.slice(0, 90)}" is not one of the confirmed facts or verified claims (copy them exactly)`, { path, token: sentence.slice(0, 90) })
     }
   }
 }
 
-/** Neutralize structural counts ("3 pasos", "Paso 2", "1. ") so they are not read as claims. */
-function maskStructural(text: string): string {
-  return text
+/** First part of an owner-written offer line that no confirmed fact backs, or null when every part is backed. */
+function offerLineProblem(line: string, confirmedNums: Set<string>, confirmedText: string, statedExclusion: (s: string) => boolean): string | null {
+  for (const seg of segments(line)) {
+    if (statedExclusion(seg)) continue
+    const nums = extractNumericClaims(seg)
+    if (nums.some((c) => !confirmedNums.has(c.value))) return seg
+    // Labels around a confirmed number ("Kit ₡14.900", "Antes ₡19.900") are fine; a part with no number must be a confirmed fact.
+    if (!nums.length && !confirmedText.includes(normalizeText(seg))) return seg
+  }
+  return null
+}
+
+/**
+ * Neutralize structural numbers so they are not read as claims: counts ("3 pasos"), labels
+ * ("Paso 2", "1. "), zero-padded step indices ("01", "02/03") and, in a chip, a leading number
+ * equal to its position ("1 Doblá el papel" as the first chip) or any leading index in a steps format.
+ */
+function maskStructural(text: string, bulletIndex = -1, stepsFormat = false): string {
+  let out = text
     .replace(/(^|\s)(paso|step|opci[oó]n|option|#)\s*\d+\b/gi, '$1$2 N')
     .replace(/\b\d+(\s+)(pasos|steps|razones|reasons|motivos|formas|ways|opciones|options|tips|claves|keys|preguntas|questions)\b/gi, 'N$1$2')
     .replace(/^\s*\d+[.)-]\s/, 'N. ')
+    // "01" · "02/03": nobody writes a price or a quantity zero-padded.
+    .replace(/(^|[^\d.,₡¢$€£%])0[1-9](?![\d.,%])/g, '$1N')
+  if (bulletIndex >= 0) {
+    const lead = out.match(/^\s*(\d{1,2})(?=\s*[.):·\-–/]?\s*\p{L})/u)
+    if (lead && (stepsFormat || Number(lead[1]) === bulletIndex + 1)) out = out.replace(lead[1], 'N')
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -405,14 +535,14 @@ export async function repairAdCopy(input: RepairAdCopyInput): Promise<RepairAdCo
   const L = COPY_LIMITS
   const system = [
     IAN_CORE_RULES[language],
-    registerInstruction(dna.register, language),
+    registerInstruction(dna.register, language, dna.locale),
     language === 'es'
       ? `Corrige SOLO los campos indicados de este anuncio. No toques los demás. Límites: headline ≤ ${headlineMaxWords(angle.format)} palabras; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} de ≤ ${L.bulletWords} palabras y ≤ ${L.bulletChars} caracteres; cta ≤ ${L.ctaWords} palabras y ≤ ${L.ctaChars} caracteres; nada se repite entre titular, subtítulo, chips y caption; mantené el trato de la marca; caption ${L.captionMinChars}–${L.captionMaxChars} caracteres; sceneBrief solo visual, sin pedir texto/letras/logos. Responde SOLO JSON con los campos corregidos.`
       : `Fix ONLY the listed fields of this ad. Do not touch the rest. Limits: headline ≤ ${headlineMaxWords(angle.format)} words; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} of ≤ ${L.bulletWords} words and ≤ ${L.bulletChars} chars; cta ≤ ${L.ctaWords} words and ≤ ${L.ctaChars} chars; nothing repeats across headline, subline, chips and caption; caption ${L.captionMinChars}–${L.captionMaxChars} chars; sceneBrief visual only, never ask for text/letters/logos. Reply with JSON only containing the fixed fields.`,
   ].join('\n\n')
   const user = [
     factsAllowlistBlock(ctx),
-    (dna.forbiddenPhrases ?? []).length ? `${language === 'es' ? 'Frases prohibidas' : 'Forbidden phrases'}: ${dna.forbiddenPhrases!.join(' | ')}` : '',
+    forbiddenList(dna).length ? `${language === 'es' ? 'Frases y claims prohibidos' : 'Forbidden phrases and claims'}: ${forbiddenList(dna).join(' | ')}` : '',
     `${language === 'es' ? 'Mensaje del anuncio' : 'Ad message'}: ${angle.message}`,
     `${language === 'es' ? 'Campos a corregir' : 'Fields to fix'}: ${failing.join(', ')}`,
     `${language === 'es' ? 'Problemas' : 'Issues'}:\n${issues.map((i) => `- [${i.field}] ${i.code}: ${i.detail}`).join('\n')}`,
