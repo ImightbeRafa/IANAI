@@ -215,7 +215,7 @@ describe('server info (version visible in a tool response)', () => {
   it('reports the MCP version, build commit when known, and the feature list', () => {
     const info = buildServerInfo({ commit: 'abc1234' })
     expect(info.version).toBe(MCP_VERSION)
-    expect(info.version).toBe('0.17.0')
+    expect(info.version).toBe('0.18.0')
     expect(info.commit).toBe('abc1234')
     expect(info.features).toEqual(expect.arrayContaining(['generated_web_flow', 'exact_with_text_logo_qa', 'auto_retry_keep_better', 'provider_retry_backoff']))
     expect(MCP_SERVER_INFO.name).toBeTruthy()

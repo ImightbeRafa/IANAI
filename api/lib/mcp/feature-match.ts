@@ -340,3 +340,15 @@ export function compareLocatedRegion(ref: Gray, gen: Gray, refKps: Keypoint[], t
   if (cells === 0) return null
   return { cells, preserved: kept / cells, bbox: { x0: bx0, y0: by0, x1: bx1, y1: by1 } }
 }
+
+/** Where the whole reference frame lands in the generated image, as fractions (0–1). Used to find the brand logo. */
+export function projectReferenceBox(ref: Gray, gen: Gray, t: Similarity): { x0: number; y0: number; x1: number; y1: number } {
+  const xs: number[] = []
+  const ys: number[] = []
+  for (const [x, y] of [[0, 0], [ref.w, 0], [0, ref.h], [ref.w, ref.h]] as Array<[number, number]>) {
+    xs.push(applyX(t, x, y))
+    ys.push(applyY(t, x, y))
+  }
+  const c = (v: number) => Math.max(0, Math.min(1, v))
+  return { x0: c(Math.min(...xs) / gen.w), y0: c(Math.min(...ys) / gen.h), x1: c(Math.max(...xs) / gen.w), y1: c(Math.max(...ys) / gen.h) }
+}

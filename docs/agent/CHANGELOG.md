@@ -1,3 +1,11 @@
+## 2026-10-09 — MCP 0.18.0: safe zones enforced in code, accessory ref slots, caption, palette fidelity fallback, build commit file
+
+**Area:** api (mcp, web-post-image), scripts, docs — no migration, no new env/secret/binding/route/cron
+**Files:** `api/lib/mcp/{safe-zone-fix,image-postcheck,web-image,execute-tools,copy-layout,feature-match,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (optional `mcp.refBudget`; web request unchanged), `scripts/build-api.mjs`, `.gitignore`, tests, fixtures `test/fixtures/round5/`
+
+- `enforceSafeZones` (default on): logo/CTA/text inside the 8 % (9:16: 14 %/20 %) bands are fixed by a uniform scale-in with edge-matched padding on the same pixel size; clipped top logo replaced by the real one. Free, one model call, one charge.
+- Up to 5 refs for box/controller photos (selected or listed in `allowedProps`); plane lock "no agregues ni quites alas, aletas, flaps ni piezas"; ctaButtons false positive fixed (table edge); echoed `layoutCap`/`autoRetry`/`enforceSafeZones`/`allowedProps`/`productFidelity`; `caption`; palette fidelity fallback; `.build-commit` for `get_server_info.commit`.
+
 ## 2026-10-09 — MCP 0.17.0: exact = same ad layers, allowedProps honoured, one CTA, 8 % margins, better-of-two retry, capacity backoff, get_server_info
 
 **Area:** api (mcp, web-post-image, adpack render/fidelity), docs — no migration, no new env/secret/binding/route/cron

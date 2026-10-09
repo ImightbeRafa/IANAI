@@ -20,6 +20,7 @@ import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import type { AspectRatio } from '../adpack/types.js'
 import { generateExactWebStyleAd } from './exact-flow.js'
+import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fidelity/photos.js'
 import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary } from './web-image.js'
 import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
@@ -170,6 +171,25 @@ async function resolveOwnedReferenceUrls(options: {
 }
 
 /**
+ * Owned refs whose role is a real accessory (box / contents / part) are lifted out of the product refs — except when that
+ * would leave no product photo at all (then they stay as they were). The explicit SKU photo is never lifted.
+ */
+export function splitAccessoryRefs(images: McpOwnedImage[], productImageId?: string): { rest: McpOwnedImage[]; accessories: Array<{ id: string; imageUrl: string; label: string }> } {
+  const skuId = productImageId?.trim() || ''
+  const accessories: Array<{ id: string; imageUrl: string; label: string }> = []
+  const rest: McpOwnedImage[] = []
+  for (const image of images) {
+    const role = image.id === skuId ? undefined : (roleFromImageRow({ tags: image.tags, is_primary: image.isPrimary }) ?? roleFromLabel(image.label))
+    if (image.kind !== 'context' && image.kind !== 'generated' && (role === 'box' || role === 'contents' || role === 'part')) {
+      accessories.push({ id: image.id, imageUrl: image.imageUrl, label: [stripRolePrefix(image.label), image.role].filter(Boolean).join(' ').trim() || role })
+    } else rest.push(image)
+  }
+  const hasProduct = rest.some((i) => i.kind !== 'context' && i.kind !== 'generated')
+  if (!hasProduct) return { rest: images, accessories: [] }
+  return { rest, accessories }
+}
+
+/**
  * Split owned refs into product vs support URLs for Grok first-gen.
  * When `productImageId` is set, that SKU URL is always `productUrls[0]`
  * (edits API base) even if a kind=generated/unknown ref appears first.
@@ -283,6 +303,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   lockProductAppearance?: boolean
   autoRetry?: boolean
   layoutCap?: boolean
+  enforceSafeZones?: boolean
 } {
   const out: ReturnType<typeof parseWebPostArgs> = {}
   const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
@@ -304,8 +325,10 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
     if (attrs.length) out.immutableAttributes = attrs
   }
   if (args.lockProductAppearance === true) out.lockProductAppearance = true
-  if (args.autoRetry === true) out.autoRetry = true
-  if (args.layoutCap === false) out.layoutCap = false
+  // Always echoed (boundInput / executeArguments) so the caller sees the value that is actually applied, defaults included.
+  out.autoRetry = args.autoRetry === true
+  out.layoutCap = args.layoutCap !== false
+  out.enforceSafeZones = args.enforceSafeZones !== false
   return out
 }
 
@@ -647,6 +670,9 @@ export async function mcpExecuteImageGenerate(options: {
     sessionId: sessionIdArg,
     ...fidelityArgs,
     ...webArgs,
+    // Effective values echoed in boundInput / executeArguments (the defaults the job will actually use).
+    productFidelity: fidelityArgs.productFidelity ?? ('generated' as const),
+    allowedProps: fidelityArgs.allowedProps ?? [],
   }
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
@@ -810,6 +836,7 @@ async function runImageGenerateBody(options: {
   lockProductAppearance?: boolean
   autoRetry?: boolean
   layoutCap?: boolean
+  enforceSafeZones?: boolean
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -840,10 +867,16 @@ async function runImageGenerateBody(options: {
     offerId: options.offerId,
     imageIds: options.referenceImageIds,
   })
+  // Selected refs that are real accessory photos (box / controller / contents) are attached as accessories, not as a second
+  // "product": they keep their own slot and the prompt copies them faithfully instead of treating them as the SKU.
+  const accessoryRefs = splitAccessoryRefs(ownedRefs, options.productImageId)
   const { productUrls, supportUrls } = partitionOwnedImageRefs({
-    images: ownedRefs,
+    images: accessoryRefs.rest,
     productImageId: options.productImageId,
   })
+  const selectedAccessories = accessoryRefs.accessories
+  // exact mode composites real pixels of every selected photo, so it keeps the unsplit product list.
+  const exactProductUrls = partitionOwnedImageRefs({ images: ownedRefs, productImageId: options.productImageId }).productUrls
 
   const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0)
   let fidelity: Record<string, unknown> | null = null
@@ -857,7 +890,7 @@ async function runImageGenerateBody(options: {
     const exactAd = await generateExactWebStyleAd({
       exact: {
         gateway: createModelGateway(),
-        photos: photosFromUrls(productUrls),
+        photos: photosFromUrls(exactProductUrls),
         ratio: appliedAspectRatio,
         brandName: options.ctxPreview.brand.name,
         offerName,
@@ -919,10 +952,15 @@ async function runImageGenerateBody(options: {
       offerId: options.offerId,
       kind: 'product',
     }).catch(() => [])
-    const accessories = pickAccessoryPhotos(allProductAssets, {
-      excludeIds: options.referenceImageIds,
-      lockText: [...(lock.immutableAttributes || []), options.scene || ''].join(' '),
-    })
+    // Accessory photos (box / controller / contents): the ones the caller selected explicitly, plus the offer's photos that
+    // match an `allowedProps` entry. Never attached when not allowed (default = no props), so they win reference slots
+    // (budget up to 5 on the MCP path: hero + 2nd product photo + accessories + logo).
+    const accessories = [...selectedAccessories, ...pickAccessoryPhotos(allProductAssets, {
+      excludeIds: [...options.referenceImageIds, ...selectedAccessories.map((a) => a.id)],
+      lockText: (lock.allowedProps || []).join(' '),
+      onlyMatching: true,
+      max: Math.max(0, 2 - selectedAccessories.length),
+    })].slice(0, 2).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
     const web = await generateWebStyleImage({
       apiKey: xaiKey(),
       ctx: options.ctxPreview,
@@ -942,6 +980,7 @@ async function runImageGenerateBody(options: {
       accessories,
       autoRetry: options.autoRetry,
       layoutCap: options.layoutCap,
+      enforceSafeZones: options.enforceSafeZones,
     })
     generated = web.generated
     promptUsed = web.prompt

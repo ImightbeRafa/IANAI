@@ -121,6 +121,8 @@ export type WebPostMcpRules = {
   ctaText?: string
   /** Cap the layout to: headline, one price line, one facts line, one CTA, logo. */
   layoutCap?: boolean
+  /** Reference slots sent to Grok (the web route is fixed at 3; xAI /images/edits accepts up to 5). MCP only. */
+  refBudget?: number
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -177,15 +179,15 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
     const allowed = (rules.allowedProps || []).map((a) => a.trim()).filter(Boolean).slice(0, 8)
     const accessories = (rules.accessoryLabels || []).map((a) => a.trim()).filter(Boolean).slice(0, 3)
     lines.push(es
-      ? 'PRODUCTO BLOQUEADO (reforzado): NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues, cables, hélices, proporciones ni colores. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
-      : 'PRODUCT LOCK (reinforced): do NOT alter shape, parts, wheels, landing gear, tail, folds, wires, propellers, proportions or colours. It is the SAME physical object as the photo; only the environment and light change.')
+      ? 'PRODUCTO BLOQUEADO (reforzado): NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues, cables, hélices, proporciones ni colores. No agregues ni quites alas, aletas, flaps ni piezas: el mismo número de partes que la foto. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
+      : 'PRODUCT LOCK (reinforced): do NOT alter shape, parts, wheels, landing gear, tail, folds, wires, propellers, proportions or colours. Do not add or remove wings, fins, flaps or parts: the same number of parts as the photo. It is the SAME physical object as the photo; only the environment and light change.')
     lines.push(es
       ? `PROPS: PROHIBIDO añadir objetos que no estén en las fotos de referencia adjuntas ni nombrados en la escena: ninguna caja, empaque, control/gamepad, cable, herramienta, repuesto, hoja con dibujo, logo, accesorio ni texto impreso inventado. Solo el producto${accessories.length ? ', los accesorios de las fotos adjuntas' : ''} y la superficie/ambiente.${allowed.length ? ` Únicos extras permitidos: ${allowed.join('; ')}.` : ' No hay extras permitidos.'}`
       : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: no box, packaging, controller/gamepad, cable, tool, spare part, drawn sheet, logo, accessory or invented printed text. Only the product${accessories.length ? ', the accessories in the attached photos' : ''} and the surface/ambience.${allowed.length ? ` Only extras allowed: ${allowed.join('; ')}.` : ' No extras allowed.'}`)
     if (accessories.length) {
       lines.push(es
-        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente (misma impresión y forma); no son el producto principal y no los inventes distintos.`
-        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully (same print and shape); they are not the main product and must not be reinvented.`)
+        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente (misma impresión, forma, botones y tamaño relativo al producto; una caja plana sigue plana, un control pequeño sigue pequeño); no son el producto principal y no los inventes distintos.`
+        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully (same print, shape, buttons and size relative to the product; a flat box stays flat, a small controller stays small); they are not the main product and must not be reinvented.`)
     }
   }
   lines.push(es
@@ -257,6 +259,8 @@ export function selectWebPostReferenceUrls(input: {
   productUrls: string[]
   logoDataUrl?: string | null
   supportUrls?: string[]
+  /** Reference slots (default 3 = the web route; the MCP path may raise it up to 5 for real accessory photos). */
+  max?: number
 }): string[] {
   return selectGrokReferenceBudget(
     [
@@ -264,7 +268,7 @@ export function selectWebPostReferenceUrls(input: {
       ...(input.logoDataUrl ? [{ url: input.logoDataUrl, role: 'style' as const }] : []),
       ...(input.supportUrls || []).map((url) => ({ url, role: 'scene' as const })),
     ],
-    3
+    input.max ?? 3
   ).map((row) => row.url)
 }
 
@@ -418,6 +422,8 @@ export type WebPostGrokImageResult = {
   providerRetries: number
   /** Every reference actually sent (product, accessories, kit, logo, scene), as data URLs. */
   allReferenceDataUrls: string[]
+  /** The brand logo as a data URL when one was loaded (used by the MCP safe-zone fix to restore a clipped logo). */
+  logoDataUrl: string | null
   /** The request exactly as POSTed (images omitted → lengths only) — for parity evidence. */
   request: Record<string, unknown>
   prompt: string
@@ -518,7 +524,7 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
     }
   }
 
-  const referenceUrls = selectWebPostReferenceUrls({ productUrls: productData, logoDataUrl, supportUrls: supportData })
+  const referenceUrls = selectWebPostReferenceUrls({ productUrls: productData, logoDataUrl, supportUrls: supportData, ...(options.mcp?.refBudget ? { max: Math.min(5, Math.max(3, options.mcp.refBudget)) } : {}) })
   const kindOf = (dataUrl: string): WebPostGrokImageResult['referencesUsed'][number] => {
     if (confirmedLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'product'
     if (accessoryLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'accessory'
@@ -610,5 +616,6 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
     prompt: prepared.prompt,
     providerRetries: providerTrace.retries.length,
     allReferenceDataUrls: referenceUrls,
+    logoDataUrl,
   }
 }

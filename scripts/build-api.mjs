@@ -99,6 +99,12 @@ async function main() {
       commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
     } catch { commit = '' }
   }
+  // Docker builds have no .git (dockerignored): the deploy step writes the SHA to a git-ignored `.build-commit` file that COPY . . brings in.
+  if (!commit) {
+    try {
+      commit = (await readFile(join(ROOT, '.build-commit'), 'utf8')).trim().slice(0, 40)
+    } catch { commit = '' }
+  }
   await build({
     entryPoints,
     define: { __ADVANCE_BUILD_COMMIT__: JSON.stringify(commit) },

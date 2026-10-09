@@ -37,6 +37,18 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.18.0 — deterministic safe zones, accessory slots, caption, palette fidelity fallback
+
+Registry / server version **0.18.0**. **No migration**, no new env/secret/binding/route/cron. Proofs: `test/round5-mcp.spec.ts` (Round 5 raw image fixtures), `test/mcp-web-image-flow.spec.ts` (round 5 block), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- **Margins are enforced in code, not asked of the model** (`api/lib/mcp/safe-zone-fix.ts`, input `enforceSafeZones`, default true). When the QA finds a logo / CTA / text inside the top/bottom Instagram margins (4:5: 8 %, 9:16: 14 % / 20 %) the kept image is scaled uniformly into a canvas of the **same pixel size** with edge-matched padding (per-column edge colours with the logo-plate / button columns replaced by the surrounding background, blurred, picture feathered in) — no outpaint, no model call, no extra charge, product and text are never cropped or distorted. A logo clipped by the top edge is replaced by the **real kit logo** (cover with the local background, composite whole). It is re-checked with the same QA (up to 4 shrink steps). Result: `safeZoneFix {applied, scale, padTop, padBottom, logoRestored, before[], after[]}`, `qaBeforeFix`, and `qa` re-measured on the delivered image. `autoRetry` no longer spends a second generation on safe-zone defects when enforcement is on (only missing text / extra CTA / orphan separators). `enforceSafeZones:false` = report only.
+- **Accessory reference slots** (MCP only; the web route keeps its 3): reference images you select whose role is box / contents / part (tag, role or label) and the offer photos matching an `allowedProps` entry get their own slot, up to **5 references** (hero + 2nd product photo + box + controller + logo; xAI `/images/edits` accepts 5). Unlisted accessories are never attached (default = no props). Prompt: "no agregues ni quites alas, aletas, flaps ni piezas", and accessories keep their relative size / buttons ("una caja plana sigue plana").
+- **`ctaButtons`**: blocks touching the left/right border (scene surfaces such as the table edge — the real cause of the Round 5 false positive), blocks entirely in the top 18 % and the located brand logo are no longer counted as buttons.
+- **Echoed args**: `boundInput` / `executeArguments` now carry the effective `layoutCap`, `autoRetry`, `enforceSafeZones`, `allowedProps` (`[]` by default), `productFidelity` (`generated`) and `scene`.
+- **`caption`**: ready-to-paste, deterministic (no model): headline, facts, the `copyOverflow` lines (punctuated), `👉 CTA` last.
+- **Fidelity fallback**: when the feature match cannot locate the product (dark / low-texture, different camera angle) the check compares the product's distinctive part colours (yellow battery, red wire …) with the picture: all present → `ok` with `details.method:"palette"`, `confident:false`; a missing one → `fidelity_warning` naming the colour. It proves a part vanished, not that the shape is intact; "unverified" remains only when the reference has no distinctive colours.
+- **`get_server_info.commit`**: `scripts/build-api.mjs` reads `BUILD_COMMIT`, then git, then a git-ignored `.build-commit` file. The Docker build has no `.git`, so the deploy step must run `git rev-parse HEAD > .build-commit` in the worktree before `wrangler deploy` (the file rides in with `COPY . .`). No Dockerfile / wrangler.jsonc change.
+
 ### 0.17.0 — exact with text/logo/QA, `allowedProps` honoured, one CTA, 8 % margins, better-of-two retry, capacity backoff, `get_server_info`
 
 Registry / server version **0.17.0**. **No migration**, no new env/secret/binding/route/cron (build commit for `get_server_info` comes from `BUILD_COMMIT` / `git` at `build:api`; `unknown` otherwise). Proofs: `test/round4-mcp.spec.ts`, `test/mcp-web-image-flow.spec.ts` (round 4 block), `test/mcp-image-postcheck.spec.ts` (Round-3 real images), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -209,7 +221,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.17.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.18.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

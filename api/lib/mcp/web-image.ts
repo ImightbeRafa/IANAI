@@ -9,9 +9,10 @@ import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fide
 import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
 import type { ProductCreativeRow } from '../product-creative-rules.js'
 import { runWebPostGrokImage, type WebPostGrokImageResult } from '../web-post-image.js'
-import { capCopyBlocks } from './copy-layout.js'
+import { buildCaption, capCopyBlocks } from './copy-layout.js'
 import { checkExtraObjects, type ExtraObjectsFinding } from './extra-objects.js'
-import { checkGeneratedProductFidelity, runMcpImageQa, tidyCopySeparators, type FidelityCheckResult, type FidelityWarning, type McpImageQa } from './image-postcheck.js'
+import { checkGeneratedProductFidelity, locateLogoBox, qaSeverity, runMcpImageQa, tidyCopySeparators, type FidelityCheckResult, type FidelityWarning, type McpImageQa } from './image-postcheck.js'
+import { enforceSafeZones, type SafeZoneFix } from './safe-zone-fix.js'
 import type { McpBrandContext } from './user-tools.js'
 
 export type OfferLock = {
@@ -49,7 +50,7 @@ const ACCESSORY_PRIORITY: Record<string, number> = { box: 0, contents: 1, part: 
  */
 export function pickAccessoryPhotos(
   assets: Array<{ id: string; imageUrl: string; label?: string | null; role?: string | null; tags?: string[]; isPrimary?: boolean; kind?: string }>,
-  options: { excludeIds: string[]; lockText?: string; max?: number }
+  options: { excludeIds: string[]; lockText?: string; max?: number; /** Only photos whose role/label/tags match a word of lockText (e.g. the offer's allowedProps). */ onlyMatching?: boolean }
 ): Array<{ id: string; imageUrl: string; role: 'box' | 'contents' | 'part'; label: string }> {
   const lockWords = new Set((options.lockText || '').toLowerCase().split(/[^a-záéíóúñ0-9]+/).filter((w) => w.length >= 4))
   const rows: Array<{ id: string; imageUrl: string; role: 'box' | 'contents' | 'part'; label: string; score: number }> = []
@@ -60,6 +61,7 @@ export function pickAccessoryPhotos(
     const label = [stripRolePrefix(a.label), a.role].filter(Boolean).join(' ').trim() || role
     const text = `${label} ${(a.tags || []).join(' ')}`.toLowerCase()
     const hit = [...lockWords].some((w) => text.includes(w)) ? 0 : 1
+    if (options.onlyMatching && hit) continue
     rows.push({ id: a.id, imageUrl: a.imageUrl, role: role as 'box' | 'contents' | 'part', label, score: hit * 10 + ACCESSORY_PRIORITY[role] })
   }
   return rows.sort((x, y) => x.score - y.score).slice(0, options.max ?? 2).map(({ score: _s, ...r }) => r)
@@ -109,6 +111,12 @@ export type WebStyleImageInput = {
   /** Default true: condense a long copy to headline + 1 price line + 1 facts line + 1 CTA; the rest comes back as `copyOverflow` for the caption. */
   layoutCap?: boolean
   /**
+   * Default true: if the QA finds the logo / CTA / text inside the Instagram UI margins, FIX it in code (scale the picture
+   * into a safe canvas of the same pixel size with edge-matched padding, re-stamp the real logo if it was clipped).
+   * Free, local, no model call, no extra charge. false = report only (legacy behaviour).
+   */
+  enforceSafeZones?: boolean
+  /**
    * Default true: MCP-only prompt rules (binding scene, strict lock / no invented props, safe zones, separator hygiene).
    * false = the legacy web prompt (scene as factual context) — used by the web⇄MCP parity test to prove the shared
    * builder is byte-identical to the web route.
@@ -146,6 +154,12 @@ export type WebStyleImageOutput = {
   copyOverflow: string[]
   /** Transient provider failures retried inside the job (not an error, not charged). */
   providerRetries: number
+  /** Deterministic safe-zone fix applied to the kept image (absent when the image already passed or enforcement is off). */
+  safeZoneFix?: SafeZoneFix
+  /** The QA verdict of the image as Grok drew it, before the deterministic fix (only when a fix was applied). */
+  qaBeforeFix?: { safeZones: McpImageQa['safeZones']; severity: number; issues: string[] }
+  /** Ready-to-paste caption (es-CR, short): headline / price / facts + the lines moved off the image + the CTA. Deterministic. */
+  caption: string
 }
 
 function cleanCopy(value: string | undefined): string {
@@ -251,6 +265,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     ...(ctaText ? { ctaText } : {}),
     layoutCap: input.layoutCap !== false,
     accessoryLabels: accessories.map((a) => a.label),
+    // xAI /images/edits takes up to 5 references: hero + 2nd product photo + the real box / controller + logo.
+    ...(accessories.length ? { refBudget: 5 } : {}),
     ...(retryHint ? { retryHint } : {}),
   })
   const reframe = async (grokImage: string, grokRatio: string) => {
@@ -261,7 +277,13 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     }
     return { imageDataUrl: grokImage, aspectRatio: grokRatio }
   }
-  const qaFor = (imageDataUrl: string) => runMcpImageQa({
+  const qaFor = async (imageDataUrl: string, logoDataUrl?: string | null) => {
+    let logoBox: Awaited<ReturnType<typeof locateLogoBox>> = null
+    if (logoDataUrl?.startsWith('data:') && imageDataUrl.startsWith('data:')) {
+      logoBox = await locateLogoBox(Buffer.from(logoDataUrl.slice(logoDataUrl.indexOf(',') + 1), 'base64'), Buffer.from(imageDataUrl.slice(imageDataUrl.indexOf(',') + 1), 'base64'))
+    }
+    return runMcpImageQa({
+    logoBox,
     generatedDataUrl: imageDataUrl,
     requestedRatio: ratioPlan.requested,
     copyRequested: Boolean(copy),
@@ -269,14 +291,19 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     logoExpected: Boolean(kit),
     copy,
     copyChanges: tidied.changes,
-  })
+    })
+  }
+  const enforce = input.enforceSafeZones !== false
+  // With enforcement on, safe-zone defects are fixed in code, so only the other defects justify a second (paid) generation.
+  const effSeverity = (q: McpImageQa) => (enforce ? qaSeverity({ ...q, safeZoneIssues: [] }) : q.severity)
+  const retryWorthy = (q: McpImageQa) => effSeverity(q) > 0
 
   let grok = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules() } : {}) })
   let framed = await reframe(grok.imageDataUrl, grok.aspectRatio)
-  let qa = await qaFor(framed.imageDataUrl)
+  let qa = await qaFor(framed.imageDataUrl, grok.logoDataUrl)
   const autoRetry: WebStyleImageOutput['autoRetry'] = { requested: input.autoRetry === true, attempted: false }
   let totalCost = grok.estimatedCostUsd
-  if (input.autoRetry === true && qa.severity > 0) {
+  if (input.autoRetry === true && retryWorthy(qa)) {
     // One corrective regeneration inside the same job: no second approval, no second charge (the caller charges once).
     autoRetry.attempted = true
     autoRetry.reason = retryHintFor(qa, language)
@@ -285,11 +312,11 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       const second = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules(autoRetry.reason) } : {}) })
       totalCost += second.estimatedCostUsd
       const secondFramed = await reframe(second.imageDataUrl, second.aspectRatio)
-      const secondQa = await qaFor(secondFramed.imageDataUrl)
+      const secondQa = await qaFor(secondFramed.imageDataUrl, second.logoDataUrl)
       autoRetry.firstSeverity = qa.severity
       autoRetry.retrySeverity = secondQa.severity
       // Keep the BETTER image by QA result (lower weighted defect score); a tie keeps the first (no change for the same price).
-      if (secondQa.severity < qa.severity) {
+      if (effSeverity(secondQa) < effSeverity(qa)) {
         grok = second
         framed = secondFramed
         qa = secondQa
@@ -304,19 +331,46 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       autoRetry.reason = `${autoRetry.reason}; retry failed: ${err instanceof Error ? err.message.slice(0, 160) : 'error'}`
     }
   }
-  const { imageDataUrl, aspectRatio } = framed
+  const { aspectRatio } = framed
+  let imageDataUrl = framed.imageDataUrl
+  const preFixImageDataUrl = imageDataUrl
+
+  // Deterministic safe-zone fix (free, local, same pixel size): the logo / CTA / text end up inside the margins every time.
+  let safeZoneFix: SafeZoneFix | undefined
+  let qaBeforeFix: WebStyleImageOutput['qaBeforeFix']
+  if (enforce && qa.safeZoneIssues.length && imageDataUrl.startsWith('data:')) {
+    try {
+      const logoBytes = grok.logoDataUrl?.startsWith('data:') ? Buffer.from(grok.logoDataUrl.slice(grok.logoDataUrl.indexOf(',') + 1), 'base64') : null
+      const fixed = await enforceSafeZones({
+        bytes: Buffer.from(imageDataUrl.slice(imageDataUrl.indexOf(',') + 1), 'base64'),
+        ratio: ratioPlan.requested,
+        logo: logoBytes,
+        issues: qa.safeZoneIssues,
+      })
+      if (fixed.fix.applied) {
+        const fixedUrl = `data:image/jpeg;base64,${fixed.bytes.toString('base64')}`
+        const fixedQa = await qaFor(fixedUrl, grok.logoDataUrl)
+        qaBeforeFix = { safeZones: qa.safeZones, severity: qa.severity, issues: qa.warnings.slice(0, 6) }
+        safeZoneFix = fixed.fix
+        imageDataUrl = fixedUrl
+        qa = fixedQa
+      }
+    } catch (err) {
+      safeZoneFix = { applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: qa.safeZoneIssues, after: qa.safeZoneIssues, note: `safe-zone fix unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
+    }
+  }
 
   // Free local fidelity post-check — warning only, on the image we keep.
   const fidelityCheck = grok.lockApplied
-    ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: imageDataUrl })
+    ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: preFixImageDataUrl })
     : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
   // Free local props check (colour novelty vs every reference sent): warning only.
   let propsCheck: ExtraObjectsFinding | undefined
   try {
-    const imgBytes = Buffer.from(imageDataUrl.slice(imageDataUrl.indexOf(',') + 1), 'base64')
+    const imgBytes = Buffer.from(preFixImageDataUrl.slice(preFixImageDataUrl.indexOf(',') + 1), 'base64')
     const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map((u) => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'))
     const box = fidelityCheck.status === 'ok' || fidelityCheck.status === 'unverified' ? fidelityCheck.details.productBox : fidelityCheck.status === 'warning' ? fidelityCheck.warning.details.productBox : undefined
-    if (imageDataUrl.startsWith('data:') && refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: box ?? null, allowedCount: (input.lock?.allowedProps || []).length })
+    if (preFixImageDataUrl.startsWith('data:') && refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: box ?? null, allowedCount: (input.lock?.allowedProps || []).length })
   } catch { /* heuristic only */ }
   return {
     generated: {
@@ -351,11 +405,14 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     copyNormalised: tidied.changes,
     copyOverflow: capped?.overflow ?? [],
     providerRetries: grok.providerRetries,
+    ...(safeZoneFix ? { safeZoneFix } : {}),
+    ...(qaBeforeFix ? { qaBeforeFix } : {}),
+    caption: buildCaption({ onImage: copy, overflow: capped?.overflow ?? [], cta: ctaText, language }),
   }
 }
 
 /** Compact, result-safe summary of the post-check (no image bytes). */
-export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries'>>): Record<string, unknown> {
+export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption'>>): Record<string, unknown> {
   return {
     ...(out.fidelity_warning ? { fidelity_warning: out.fidelity_warning } : {}),
     fidelityCheck: out.fidelityCheck.status === 'skipped'
@@ -374,5 +431,8 @@ export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' 
     ...(out.copyNormalised.length ? { copyNormalised: out.copyNormalised } : {}),
     ...(out.copyOverflow?.length ? { copyOverflow: out.copyOverflow } : {}),
     ...(out.providerRetries ? { providerRetries: out.providerRetries } : {}),
+    ...(out.safeZoneFix ? { safeZoneFix: out.safeZoneFix } : {}),
+    ...(out.qaBeforeFix ? { qaBeforeFix: out.qaBeforeFix } : {}),
+    ...(out.caption ? { caption: out.caption } : {}),
   }
 }

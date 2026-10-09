@@ -204,7 +204,7 @@ describe('MCP defaults and inputs', () => {
 
   it('parseWebPostArgs validates copy/density/style/cta/lock', () => {
     expect(parseWebPostArgs({ copy: ' Hola ', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', ' b '], lockProductAppearance: true }))
-      .toEqual({ copy: 'Hola', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', 'b'], lockProductAppearance: true })
+      .toEqual({ copy: 'Hola', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', 'b'], lockProductAppearance: true, autoRetry: false, layoutCap: true, enforceSafeZones: true })
     expect(() => parseWebPostArgs({ textDensity: 'huge' })).toThrow()
     expect(() => parseWebPostArgs({ postStyle: 'x' })).toThrow()
   })

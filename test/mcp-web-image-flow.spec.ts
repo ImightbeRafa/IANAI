@@ -105,7 +105,8 @@ describe('execute_image_generate = web flow by default', () => {
     expect(xai).toHaveLength(1)
     expect(xai[0].url).toContain('/images/edits')
     expect(xai[0].body.aspect_ratio).toBe('3:4')
-    expect(xai[0].body.images).toHaveLength(3) // 3-ref budget: 2 product photos (+kit ref trimmed) … logo kept as style ref
+    // p2 is a real accessory photo (label "part"): it gets its own slot (MCP budget 5): hero + accessory + kit ref + logo
+    expect(xai[0].body.images).toHaveLength(4)
     const prompt = String(xai[0].body.prompt)
     expect(prompt).toContain('Papel arriba. Motores abajo.')
     expect(prompt).toContain('₡14.900')
@@ -188,7 +189,7 @@ describe('round 3: safe zones, QA auto-retry (single charge), scene, props, acce
   it('qa.safeZones flags a CTA that touches the bottom edge (no retry unless asked): status fail, credits unchanged', async () => {
     sequence([await ad(6)])
     vi.mocked(incrementUsage).mockClear()
-    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM' })
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', enforceSafeZones: false })
     expect(xai).toHaveLength(1)
     const qa = status.qa as { safeZones: string; status: string; safeZoneIssues: Array<{ edge: string }> }
     expect(qa.safeZones).toBe('violation')
@@ -202,7 +203,7 @@ describe('round 3: safe zones, QA auto-retry (single charge), scene, props, acce
   it('autoRetry:true regenerates ONCE with a corrective hint, keeps the better image and charges once', async () => {
     sequence([await ad(6), await ad(190)])
     vi.mocked(incrementUsage).mockClear()
-    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true, enforceSafeZones: false })
     expect(xai).toHaveLength(2)
     expect(String(xai[0].body.prompt)).not.toContain('CORRECCIÓN')
     expect(String(xai[1].body.prompt)).toMatch(/CORRECCIÓN.*CTA/s)
@@ -216,14 +217,14 @@ describe('round 3: safe zones, QA auto-retry (single charge), scene, props, acce
 
   it('autoRetry keeps the first image when the retry is no better, and never retries a second time', async () => {
     sequence([await ad(6), await ad(6), await ad(190)])
-    const { status } = await runJob({ copy: 'Hola', autoRetry: true })
+    const { status } = await runJob({ copy: 'Hola', autoRetry: true, enforceSafeZones: false })
     expect(xai).toHaveLength(2)
     expect((status.autoRetry as { kept: string }).kept).toBe('first')
   })
 
   it('a clean first image never triggers the retry', async () => {
     sequence([await ad(190)])
-    const { status } = await runJob({ copy: 'Hola', autoRetry: true })
+    const { status } = await runJob({ copy: 'Hola', autoRetry: true, enforceSafeZones: false })
     expect(xai).toHaveLength(1)
     expect((status.autoRetry as { attempted: boolean }).attempted).toBe(false)
   })
@@ -318,7 +319,7 @@ describe('round 4: allowedProps, one CTA, layout cap, better-of-two retry, capac
     // first: CTA touching the bottom edge AND headline in the top band; retry: only a milder defect
     sequence([await ad(6, 40), await ad(190, 40)])
     vi.mocked(incrementUsage).mockClear()
-    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true, enforceSafeZones: false })
     const ar = status.autoRetry as { kept: string; firstSeverity: number; retrySeverity: number; keptReason: string }
     expect(ar.kept).toBe('retry')
     expect(ar.retrySeverity).toBeLessThan(ar.firstSeverity)
@@ -329,7 +330,7 @@ describe('round 4: allowedProps, one CTA, layout cap, better-of-two retry, capac
 
   it('autoRetry keeps the first when the retry is WORSE (never delivers the worse image)', async () => {
     sequence([await ad(190, 40), await ad(6, 40)]) // first only has the headline in the band; retry adds a CTA touching the edge
-    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true, enforceSafeZones: false })
     const ar = status.autoRetry as { kept: string; firstSeverity: number; retrySeverity: number }
     expect(ar.kept).toBe('first')
     expect(ar.retrySeverity).toBeGreaterThan(ar.firstSeverity)
@@ -360,5 +361,72 @@ describe('round 4: allowedProps, one CTA, layout cap, better-of-two retry, capac
     expect(xai).toHaveLength(4) // 1 + 3 retries, then the job fails
     expect(down.status.status).toBe('failed')
     expect(vi.mocked(incrementUsage)).not.toHaveBeenCalled()
+  })
+})
+
+describe('round 5: deterministic safe zones, echoed args, caption, accessory refs', () => {
+  async function ad(buttonBottomGap: number, headlineY = 250): Promise<Buffer> {
+    const noise = Buffer.alloc(800 * 1000 * 3)
+    for (let i = 0; i < noise.length; i++) noise[i] = 90 + ((i * 2654435761) >>> 28) * 3
+    const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect x="250" y="${1000 - buttonBottomGap - 90}" width="300" height="90" rx="14" fill="#2ec4b6"/><text x="400" y="${1000 - buttonBottomGap - 32}" font-size="38" font-family="sans-serif" text-anchor="middle" fill="#0b1a2a">Escribinos por DM</text><text x="60" y="${headlineY}" font-size="64" font-family="sans-serif" fill="#ffffff">Un regalo que armas</text></svg>`)
+    return sharp(noise, { raw: { width: 800, height: 1000, channels: 3 } }).blur(14).composite([{ input: label }]).jpeg({ quality: 90 }).toBuffer()
+  }
+  function sequence(images: Buffer[]) {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      xai.push({ url, body: JSON.parse(init.body) })
+      const img = images[Math.min(n++, images.length - 1)]
+      return new Response(JSON.stringify({ data: [{ b64_json: img.toString('base64') }] }), { status: 200 })
+    }))
+  }
+
+  it('a CTA touching the bottom edge + a headline in the top band are FIXED in code: qa.safeZones ok, same pixel size, single call, single charge', async () => {
+    sequence([await ad(6, 40)])
+    vi.mocked(incrementUsage).mockClear()
+    const { status, saved } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    expect(xai).toHaveLength(1) // the safe-zone defect is fixed locally: no second paid generation even with autoRetry
+    const qa = status.qa as { safeZones: string; status: string }
+    expect(qa.safeZones).toBe('ok')
+    const fix = status.safeZoneFix as { applied: boolean; scale: number; before: unknown[]; after: unknown[] }
+    expect(fix.applied).toBe(true)
+    expect(fix.before.length).toBeGreaterThan(0)
+    expect(fix.after).toHaveLength(0)
+    expect(fix.scale).toBeLessThan(1)
+    expect((status.qaBeforeFix as { safeZones: string }).safeZones).toBe('violation')
+    expect((status.autoRetry as { attempted: boolean }).attempted).toBe(false)
+    expect(status.chargedCredits).toBe(6)
+    expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
+    const meta = await sharp(Buffer.from(String(saved[0].imageDataUrl).split(',')[1], 'base64')).metadata()
+    expect(meta.width! / meta.height!).toBeCloseTo(4 / 5, 2) // ratio stays exact
+  })
+
+  it('enforceSafeZones:false is report-only (legacy): violation stays, no fix', async () => {
+    sequence([await ad(6)])
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', enforceSafeZones: false })
+    expect((status.qa as { safeZones: string }).safeZones).toBe('violation')
+    expect(status.safeZoneFix).toBeUndefined()
+  })
+
+  it('boundInput / executeArguments echo every effective arg, defaults included (layoutCap, autoRetry, enforceSafeZones, allowedProps, productFidelity, scene)', async () => {
+    const { db, artifactStore } = await setup()
+    const approvalStore = createMemoryMcpApprovalStore()
+    const r = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', scene: 'Gimnasio', referenceImageIds: ['p1'], productImageId: 'p1' } })
+    const rec = await approvalStore.findById(String(r.approvalRequestId))
+    expect(rec?.inputJson).toMatchObject({ layoutCap: true, autoRetry: false, enforceSafeZones: true, allowedProps: [], productFidelity: 'generated', scene: 'Gimnasio' })
+    const r2 = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', layoutCap: false, autoRetry: true, enforceSafeZones: false, allowedProps: ['caja'], referenceImageIds: ['p1'], productImageId: 'p1' } })
+    const rec2 = await approvalStore.findById(String(r2.approvalRequestId))
+    expect(rec2?.inputJson).toMatchObject({ layoutCap: false, autoRetry: true, enforceSafeZones: false, allowedProps: ['caja'] })
+    expect(JSON.stringify(r2)).toMatch(/layoutCap/)
+  })
+
+  it('returns a ready-to-paste caption built from the overflow + facts + the CTA (deterministic)', async () => {
+    sequence([await ad(190)])
+    const { status } = await runJob({ copy: 'El plan de sábado: doblá, armá y volá\n₡14.900, 2 kits ₡29.800\nEnvío gratis llevando 2 kits o más\nPapel y 3 pilas AA no incluidos\nDesde 8 años con supervisión de un adulto\nEscribinos por DM' })
+    const caption = String(status.caption)
+    expect(caption).toContain('El plan de sábado: doblá, armá y volá')
+    expect(caption).toContain('Papel y 3 pilas AA no incluidos.')
+    expect(caption).toContain('Desde 8 años con supervisión de un adulto.')
+    expect(caption.trim().endsWith('👉 Escribinos por DM')).toBe(true)
+    expect(status.copyOverflow).toEqual(['Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto'])
   })
 })

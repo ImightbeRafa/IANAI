@@ -32,3 +32,27 @@ export function capCopyBlocks(copy: string, maxBlocks = 4): CappedCopy {
   const overflow = lines.filter((_, i) => !keep.includes(i))
   return { onImage: keep.map((i) => lines[i]).join('\n'), overflow, cta, capped: overflow.length > 0 }
 }
+
+const END_PUNCT_RE = /[.!?…:]$/
+
+/**
+ * Ready-to-paste caption (deterministic, no model call): the on-image headline / price / facts, then every line the
+ * layout cap moved off the image (not-included, age, shipping detail …), then the CTA. Short, one idea per line,
+ * es-CR voseo when the copy already uses it (nothing is reworded, only joined and punctuated).
+ */
+export function buildCaption(input: { onImage: string; overflow: string[]; cta?: string; language?: 'es' | 'en' }): string {
+  const lines = input.onImage.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const cta = input.cta?.trim()
+  const body = lines.filter((l) => l !== cta)
+  const head = body[0]
+  const rest = body.slice(1)
+  const tidy = (l: string) => (END_PUNCT_RE.test(l) ? l : `${l}.`)
+  const blocks: string[] = []
+  if (head) blocks.push(END_PUNCT_RE.test(head) ? head : head)
+  const facts = [...rest, ...input.overflow.map((l) => l.trim()).filter(Boolean)]
+  const seen = new Set<string>()
+  const uniq = facts.filter((l) => { const k = l.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true })
+  if (uniq.length) blocks.push(uniq.map(tidy).join('\n'))
+  if (cta) blocks.push(`👉 ${cta}`)
+  return blocks.join('\n\n').slice(0, 1200)
+}

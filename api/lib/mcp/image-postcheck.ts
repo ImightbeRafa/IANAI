@@ -16,7 +16,7 @@
 import sharp from 'sharp'
 import { components, deltaE3, erode, labImage } from '../adpack/fidelity/pixels.js'
 import { floodBackground } from '../adpack/fidelity/segment.js'
-import { GEN_WIDTH as FEATURE_GEN_WIDTH, compareLocatedRegion, locateProduct } from './feature-match.js'
+import { GEN_WIDTH as FEATURE_GEN_WIDTH, compareLocatedRegion, locateProduct, projectReferenceBox } from './feature-match.js'
 import { safeZoneMargins } from './safe-zones.js'
 
 export { safeZoneMargins }
@@ -44,7 +44,7 @@ export type FidelityWarning = {
   /** 0 (different product) – 1 (same product). */
   score: number
   details: {
-    method: 'features' | 'colour'
+    method: 'features' | 'colour' | 'palette'
     referenceIndex: number
     /** true = the product was located by feature match, so the structural comparison is trusted. */
     confident: boolean
@@ -54,6 +54,8 @@ export type FidelityWarning = {
     cells?: number
     scale?: number
     colourDeltaE?: number
+    /** Fallback (angle differs / dark product): distinctive colour parts of the product found in the image. */
+    parts?: { clusters: number; presence: number; missing: string[] }
     /** Located product box as fractions of the generated image (feature match only). */
     productBox?: { x0: number; y0: number; x1: number; y1: number }
   }
@@ -305,6 +307,65 @@ async function compareOne(tpl: RefTemplate, generated: Buffer, referenceIndex: n
   }
 }
 
+
+/**
+ * Fallback when the product cannot be located by feature match (dark / low-texture product, or a different camera angle):
+ * view-invariant PART PRESENCE. The reference product's distinctive (chromatic) colour clusters — e.g. a yellow battery strip,
+ * a red wire, a green cap — must all still exist in the generated image, and the dark/neutral palette must not have vanished.
+ * It can prove a part disappeared (warning) but cannot prove the shape is intact, so it never claims more than that.
+ */
+export type PaletteFallback = { informative: boolean; clusters: number; missing: string[]; presence: number }
+
+function hueName(a: number, b: number): string {
+  const ang = (Math.atan2(b, a) * 180) / Math.PI
+  const names: Array<[number, string]> = [[0, 'red/pink'], [40, 'orange/brown'], [85, 'yellow'], [135, 'green'], [185, 'teal/cyan'], [235, 'blue'], [290, 'violet'], [340, 'red/pink']]
+  const a360 = (ang + 360) % 360
+  let best = names[0][1]
+  let bd = 999
+  for (const [h, n] of names) { const d = Math.min(Math.abs(a360 - h), 360 - Math.abs(a360 - h)); if (d < bd) { bd = d; best = n } }
+  return best
+}
+
+async function paletteFallback(tpl: RefTemplate, generated: Buffer): Promise<PaletteFallback> {
+  const lab = labImage(tpl.rgb, 3, tpl.w * tpl.h)
+  // Distinctive colours = chromatic pixels (chroma ≥ 28) grouped in 45° hue sectors; a sector counts from 0.3 % of the product.
+  const sectors = new Map<number, { c: number; L: number; a: number; b: number }>()
+  let total = 0
+  for (let i = 0; i < tpl.w * tpl.h; i++) {
+    if (!tpl.mask[i]) continue
+    total++
+    const a = lab[i * 3 + 1]
+    const b = lab[i * 3 + 2]
+    if (Math.hypot(a, b) < 28) continue
+    const key = Math.floor(((Math.atan2(b, a) * 180) / Math.PI + 360) % 360 / 45)
+    const e = sectors.get(key) || { c: 0, L: 0, a: 0, b: 0 }
+    e.c++; e.L += lab[i * 3]; e.a += a; e.b += b
+    sectors.set(key, e)
+  }
+  const chromatic = [...sectors.values()]
+    .filter((e) => e.c / Math.max(1, total) >= 0.003 && e.c >= 5)
+    .sort((x, y) => y.c - x.c)
+    .slice(0, 5)
+    .map((e) => ({ share: e.c / total, L: e.L / e.c, a: e.a / e.c, b: e.b / e.c }))
+  if (!chromatic.length) return { informative: false, clusters: 0, missing: [], presence: 1 }
+  const gen = await sharp(generated).rotate().flatten({ background: '#ffffff' }).resize({ width: 320 }).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  const n = gen.info.width * gen.info.height
+  const glab = labImage(gen.data, 3, n)
+  const missing: string[] = []
+  let present = 0
+  for (const c of chromatic) {
+    let hits = 0
+    for (let i = 0; i < n; i++) {
+      const d = Math.hypot((glab[i * 3] - c.L) * 0.5, glab[i * 3 + 1] - c.a, glab[i * 3 + 2] - c.b)
+      if (d <= 15) hits++
+    }
+    // a visible part of that colour: at least ~0.03 % of the picture (≈ 40 px at 320 px wide)
+    if (hits / n >= 0.0003) present++
+    else missing.push(hueName(c.a, c.b))
+  }
+  return { informative: true, clusters: chromatic.length, missing, presence: Math.round((present / chromatic.length) * 100) / 100 }
+}
+
 /** Minimum RANSAC inliers to trust the feature location (below this the product is "not located"). */
 export const MIN_LOCATED_INLIERS = 15
 /** Warn when less than this share of the product's textured regions still matches the reference. */
@@ -355,6 +416,17 @@ export async function checkGeneratedProductFidelity(input: {
         }
       }
     }
+    let fallback: PaletteFallback | null = null
+    if (!best) {
+      for (let i = 0; i < refs.length && !fallback?.informative; i++) {
+        const bytes = dataUrlBytes(refs[i])
+        if (!bytes) continue
+        try {
+          const tpl = await buildTemplate(bytes)
+          if (typeof tpl !== 'string') fallback = await paletteFallback(tpl, generated)
+        } catch { /* fallback is best-effort */ }
+      }
+    }
     const colourDeltaE = colour?.details.colourDeltaE
     const colourBad = typeof colourDeltaE === 'number' && colourDeltaE > POSTCHECK_THRESHOLD.colourDeltaE
     const reasons: string[] = []
@@ -362,19 +434,25 @@ export async function checkGeneratedProductFidelity(input: {
       reasons.push(`the product's shapes, parts or printed details differ from the reference photo (only ${Math.round(best.preserved * 100)}% of its textured regions match at the located position, < ${Math.round(PRESERVED_MIN * 100)}%): it may have been redrawn`)
     }
     if (colourBad) reasons.push(`product colour differs from the reference (ΔE ${colourDeltaE} > ${POSTCHECK_THRESHOLD.colourDeltaE})`)
+    if (fallback?.informative && fallback.missing.length) {
+      reasons.push(`distinctive parts of the product are missing from the image (${fallback.missing.join(', ')} not found; the shape could not be located, so only part colours were compared)`)
+    }
     const details: FidelityWarning['details'] = {
-      method: best ? 'features' : 'colour',
+      method: best ? 'features' : fallback?.informative ? 'palette' : 'colour',
       referenceIndex: best ? best.index : (colour?.details.referenceIndex ?? 0),
       confident: Boolean(best),
       ...(best ? { inliers: best.inliers, preserved: Math.round(best.preserved * 100) / 100, cells: best.cells, scale: Math.round(best.scale * 100) / 100, productBox: { x0: Math.max(0, best.bbox.x0 / FEATURE_GEN_WIDTH), y0: Math.max(0, best.bbox.y0 / best.genH), x1: Math.min(1, best.bbox.x1 / FEATURE_GEN_WIDTH), y1: Math.min(1, best.bbox.y1 / best.genH) } } : {}),
       ...(typeof colourDeltaE === 'number' ? { colourDeltaE } : {}),
+      ...(fallback?.informative ? { parts: { clusters: fallback.clusters, presence: fallback.presence, missing: fallback.missing } } : {}),
     }
     const colourScore = colour ? Math.max(0, 1 - (colour.details.colourDeltaE) / (POSTCHECK_THRESHOLD.colourDeltaE * 2)) : 1
-    const score = Math.round((best ? Math.min(best.preserved, colourScore) : colourScore) * 100) / 100
+    const score = Math.round((best ? Math.min(best.preserved, colourScore) : fallback?.informative ? Math.min(colourScore, fallback.presence) : colourScore) * 100) / 100
     if (reasons.length) {
       return { status: 'warning', score, warning: { code: 'fidelity_warning', reason: reasons.join('; '), score, details } }
     }
     if (best) return { status: 'ok', score, details }
+    // Fallback verdict: every distinctive part colour is still there (the angle differs, so the shape itself is not compared).
+    if (fallback?.informative) return { status: 'ok', score, details }
     if (colour) {
       return { status: 'unverified', reason: 'product not located by feature match (dark, low-texture or heavily changed): only colour was compared, shape/details not verified — check it by eye', details }
     }
@@ -549,7 +627,7 @@ export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<Safe
  * rounded-rectangle (aspect 2.2–9, 14–65 % of the width, 2.5–12 % of the height) and mostly filled (text leaves holes).
  * Heuristic: a CTA drawn as plain text is not detectable; a textured scene rarely forms such a block.
  */
-export async function countCtaButtons(bytes: Buffer): Promise<number> {
+export async function countCtaButtons(bytes: Buffer, opts: { logoBox?: { x0: number; y0: number; x1: number; y1: number } | null } = {}): Promise<number> {
   const { data, info } = await sharp(bytes).rotate().removeAlpha().resize({ width: 200 }).blur(0.8).raw().toBuffer({ resolveWithObject: true })
   const w = info.width
   const h = info.height
@@ -577,11 +655,37 @@ export async function countCtaButtons(bytes: Buffer): Promise<number> {
       if (comp.area / (bw * bh) < 0.55) continue
       const dup = boxes.some((b) => Math.abs(b.x0 - comp.x0) < 8 && Math.abs(b.y0 - comp.y0) < 8)
       if (dup) continue
+      // The brand logo plate is a rounded rectangle too: it is never a CTA (a plate that sits wholly in the top 18 % band,
+      // or overlaps the located logo, is skipped).
+      if (comp.y1 / h < 0.18) continue
+      // A button never touches the left/right border (the safe-zone side margin is 5 %): a block that does is scene surface
+      // (the round-5 table edge was counted as a second button).
+      if (comp.x0 <= 1 || comp.x1 >= w - 2) continue
+      const lb = opts.logoBox
+      if (lb) {
+        const ix = Math.max(0, Math.min(comp.x1 / w, lb.x1) - Math.max(comp.x0 / w, lb.x0))
+        const iy = Math.max(0, Math.min(comp.y1 / h, lb.y1) - Math.max(comp.y0 / h, lb.y0))
+        if (ix * iy > 0.4 * ((comp.x1 - comp.x0 + 1) / w) * ((comp.y1 - comp.y0 + 1) / h)) continue
+      }
       boxes.push({ x0: comp.x0, y0: comp.y0, x1: comp.x1, y1: comp.y1 })
       buttons++
     }
   }
   return buttons
+}
+
+/** Best-effort: where the brand logo sits in the generated image (feature match), as fractions; null when not found. */
+export async function locateLogoBox(logo: Buffer, generated: Buffer): Promise<{ x0: number; y0: number; x1: number; y1: number } | null> {
+  try {
+    const found = await locateProduct(logo, generated)
+    if (!found.located || found.located.inliers < 12) return null
+    const box = projectReferenceBox(found.ref, found.gen, found.located.transform)
+    const bw = box.x1 - box.x0
+    const bh = box.y1 - box.y0
+    return bw > 0.04 && bw < 0.7 && bh > 0.01 && bh < 0.4 ? box : null
+  } catch {
+    return null
+  }
 }
 
 /** Weighted defect score (0 = clean). Used to keep the BETTER image after the single auto-retry. */
@@ -604,6 +708,8 @@ export async function runMcpImageQa(input: {
   copy?: string
   /** Separator fixes already applied to the copy (reported, not flagged). */
   copyChanges?: string[]
+  /** Where the brand logo sits (fractions of the image) when known: excluded from the button count. */
+  logoBox?: { x0: number; y0: number; x1: number; y1: number } | null
 }): Promise<McpImageQa> {
   const warnings: string[] = []
   let ratioOk = true
@@ -638,7 +744,7 @@ export async function runMcpImageQa(input: {
       safeZones = 'not_checked'
     }
     try {
-      ctaButtons = await countCtaButtons(bytes)
+      ctaButtons = await countCtaButtons(bytes, { logoBox: input.logoBox })
     } catch { /* heuristic only */ }
   }
   const separatorLines = input.copy ? findSeparatorLines(input.copy) : []
