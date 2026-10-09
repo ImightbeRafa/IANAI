@@ -36,7 +36,7 @@ const PACK_RATIOS = new Set(['1:1', '4:5', '9:16', '16:9'])
 export const PACK_PASSTHROUGH = [
   'brief', 'angleIds', 'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId', 'brandKitId', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
   'productImageIds', 'productImageIdsByAd', 'photoPerAd', 'heroRequired', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
-  'includeDna', 'language',
+  'includeDna', 'language', 'useStyleDna',
   'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
   'mustAppear', 'previewId',
 ] as const

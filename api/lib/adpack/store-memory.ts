@@ -57,6 +57,15 @@ export function createMemoryPackStore(options: { now?: () => number } = {}): Mem
       return free.map(clone)
     },
 
+    async listOpenPacks({ limit, createdAfterIso }) {
+      const after = Date.parse(createdAfterIso)
+      return [...packs.values()]
+        .filter((p) => (p.status === 'planned' || p.status === 'running') && Date.parse(p.createdAt) >= after)
+        .sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt))
+        .slice(0, Math.max(0, limit))
+        .map((p) => ({ packId: p.id, userId: p.userId }))
+    },
+
     async updateItem(itemId, patch) {
       const item = items.get(itemId)
       if (!item) throw new Error(`item_not_found:${itemId}`)

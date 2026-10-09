@@ -63,7 +63,7 @@ export function asBox2d(v: unknown): [number, number, number, number] | undefine
 }
 
 const cleanAttrs = (list: string[] | undefined) =>
-  [...new Set((list ?? []).map((a) => String(a ?? '').replace(/[\r\n"`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 8)
+  [...new Set((list ?? []).map((a) => String(a ?? '').replace(/[\r\n"`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)).filter(Boolean))].slice(0, 12)
 
 export function buildSceneCheckPrompt(
   hasRef: boolean,

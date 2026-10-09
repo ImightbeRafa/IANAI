@@ -19,22 +19,18 @@ vi.mock('../../api/lib/auth', async (importOriginal) => {
 import handler, { setAdPackBackgroundScheduler } from '../../api/ad-pack'
 import { setDefaultAdPackService } from '../../api/lib/adpack/service'
 import type { AdPackStatusResponse } from '../../api/lib/adpack/http-types'
-import { setMcpExecuteScheduler } from '../../api/lib/mcp/execute-job'
+import { drainBackground, queueBackgroundWork, restoreBackgroundWork } from './background-queue'
 import { routeCreateAds } from '../../api/lib/mcp/create-ads'
 import { PER_AD, USER_A, callMcp, callWeb, createDoorEnv, createMemoryMcpApprovalStore, mcpStartApproved, serum } from './door-harness'
 import { BIZ_A, PROD_A, fakeLibrary, fakeSavedBrandDb } from './saved-brand-fakes'
 
 beforeEach(() => {
-  setAdPackBackgroundScheduler(() => {})
-  setMcpExecuteScheduler(() => {})
+  queueBackgroundWork(setAdPackBackgroundScheduler)
 })
 
 afterEach(() => {
-  setAdPackBackgroundScheduler(null)
+  restoreBackgroundWork()
   setDefaultAdPackService(null)
-  setMcpExecuteScheduler((work) => {
-    void work().catch(() => {})
-  })
 })
 
 function env() {
@@ -47,8 +43,9 @@ function env() {
 async function finishedPack(e: ReturnType<typeof env>, extra: Record<string, unknown> = {}) {
   const { started } = await mcpStartApproved(e, USER_A, { dna: serum.dna, offer: serum.offer, size: 2, ...extra })
   const packId = String(started.payload.packId)
-  let status = await callMcp(e, USER_A, 'adpack_status', { packId })
-  for (let i = 0; i < 5 && status.payload.moreWork; i++) status = await callMcp(e, USER_A, 'adpack_status', { packId })
+  // The pack runs in background slices (no polling needed); status is a cheap read.
+  await drainBackground()
+  const status = await callMcp(e, USER_A, 'adpack_status', { packId })
   return { packId, status }
 }
 
@@ -144,8 +141,12 @@ describe('E2: forbidden phrases verified per ad', () => {
     const failures = status.payload.failures as Array<{ reason: string }>
     expect(failures).toHaveLength(2)
     expect(failures[0].reason).toBe('el texto usaba una frase prohibida de la marca')
-    // generate + two free repair rounds per ad (P0 #2b), then no scene / no charge.
-    expect(e.gateway.jsonCalls.length).toBe(6)
+    // generate + two free repair rounds per ad (P0 #2b), × (1 + 2 automatic item retries, #16):
+    // 2 ads × 3 attempts × 3 calls; then no scene / no charge.
+    expect(e.gateway.jsonCalls.length).toBe(18)
+    expect(failures[0]).toMatchObject({ attempts: 3, attemptLog: [{ attempt: 1, mode: 'copy' }, { attempt: 2, mode: 'copy' }] })
+    // The retry tells the writer why the last version was rejected.
+    expect(e.gateway.jsonCalls.some((c) => /REINTENTO 1/.test(c.user))).toBe(true)
     expect(e.gateway.sceneCalls).toHaveLength(0)
     expect(e.charges).toHaveLength(0)
   })
@@ -223,7 +224,10 @@ describe('G1: create_ads routes to the existing tools with the same approval', (
     const approvalRequestId = String(prompt.payload.approvalRequestId)
     await callMcp(e, USER_A, 'confirm_execute', { approvalRequestId, action: 'approve' })
     const started = await callMcp(e, USER_A, 'create_ads', { ...args, approvalRequestId })
-    expect(started.payload).toMatchObject({ status: 'completed', packId: approvalRequestId, via: 'create_ads', quote: { size: 2 } })
+    expect(started.payload).toMatchObject({ status: 'running', packStatus: 'planned', moreWork: true, packId: approvalRequestId, via: 'create_ads', quote: { size: 2 } })
+    expect(started.payload.etaSeconds).toEqual(expect.any(Number))
+    expect(started.payload.pollAfterSeconds).toEqual(expect.any(Number))
+    expect(String(started.payload.statusMessage)).not.toMatch(/terminó|finished/)
     const pack = e.store.packs.get(approvalRequestId)!
     expect(pack.size).toBe(2)
     expect(pack.ratios).toEqual(['4:5', '9:16'])

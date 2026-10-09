@@ -8,6 +8,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { processNextMcpUrlIntake } from './lib/mcp/url-analysis-worker.js'
 import { getDeadlineSignal } from './lib/request-deadline.js'
 import { cronsEnabled } from './lib/crons-enabled.js'
+import { runAdPackCronSweep } from './lib/adpack/cron-sweep.js'
 
 export const maxDuration = 60
 
@@ -57,12 +58,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
+  let result: Awaited<ReturnType<typeof processNextMcpUrlIntake>> | null = null
+  let failure: string | null = null
   try {
-    const result = await processNextMcpUrlIntake(getDeadlineSignal(req))
-    res.status(200).json({ ok: true, ...result })
+    result = await processNextMcpUrlIntake(getDeadlineSignal(req))
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Worker failed'
-    console.error('mcp-guide-analysis', message)
-    res.status(500).json({ ok: false, error: message })
+    failure = err instanceof Error ? err.message : 'Worker failed'
+    console.error('mcp-guide-analysis', failure)
   }
+  // #14c: the same minute tick resumes stale Ad Packs (bounded, background work, never throws).
+  const sweep = await runAdPackCronSweep()
+  const resumed = 'resumed' in sweep && sweep.resumed.length ? { adpackResumed: sweep.resumed } : {}
+  if (failure !== null) {
+    res.status(500).json({ ok: false, error: failure, ...resumed })
+    return
+  }
+  res.status(200).json({ ok: true, ...result, ...resumed })
 }

@@ -29,6 +29,7 @@ import type {
   PackItemStatus,
   PackStatus,
   RenderedAd,
+  FontsUsed,
 } from './types.js'
 import type { AdPackDeliverable, AdPackFailureView } from './status-summary.js'
 
@@ -169,7 +170,11 @@ export interface AdPackFromBrandResponse {
   brandKitId?: string
   websiteUrl?: string
   /** Style DNAs on the brand kit (pass one as styleDnaId to adpack_start). */
-  styleDnas?: Array<{ id: string; name: string; kind: string; references: number; analyzed: boolean }>
+  styleDnas?: Array<{ id: string; name: string; kind: string; references: number; analyzed: boolean; active?: boolean }>
+  /** #12: Style DNAs whose notes / references shape this brand's packs ([] = none; useStyleDna:false → []). */
+  activeStyleDnaIds?: string[]
+  /** #19: saved values that had to be shortened for the ads ({field, from, to}); nothing is cut silently. */
+  truncated?: Array<{ field: string; from: number; to: number }>
   /** Quote for the default pack size. */
   quote: AdPackQuote
 }
@@ -366,6 +371,26 @@ export interface AdPackAnglesResponse {
   angles: AdAngle[]
 }
 
+/** #15: what one ad of the pack will be — computed deterministically BEFORE approval (quote / approval). */
+export interface AdPackPlannedAd {
+  /** 1-based ad number (as in adpack_status). */
+  index: number
+  angleId: string
+  category?: AngleCategory
+  hookType: HookType
+  format: AdAngle['format']
+  layoutFamily?: LayoutFamily
+  variation?: number
+  /** Short "why this angle". */
+  rationale?: string
+  /**
+   * Planned product photo (exact mode: the real photo composited; a blurry one is swapped at run time).
+   * source: per_ad = the owner's pick, hero = the guaranteed hero (P1 #8), pool = best photo for the format.
+   */
+  photo?: { productImageId?: string; role?: string; label?: string; url: string; source: 'per_ad' | 'hero' | 'pool' }
+  ratios: AspectRatio[]
+}
+
 export interface AdPackQuote {
   /** Ads in the pack (angles × variations). */
   size: number
@@ -379,6 +404,10 @@ export interface AdPackQuote {
   variations?: number
   /** Distinct angles (size / variations), when variations > 1. */
   angles?: number
+  /** #15: the per-ad plan (with brand/offer or dna + offer and `withPlan`). */
+  plan?: AdPackPlannedAd[]
+  /** #15: stable hash of `plan` (bound into the approval; start with a different plan → PLAN_CHANGED). */
+  planHash?: string
 }
 
 export interface AdPackStartResponse {
@@ -389,14 +418,18 @@ export interface AdPackStartResponse {
   existing: boolean
   creativeFreedom?: CreativeFreedom
   variations?: number
-  /** What the planner decided per ad (angle, hook, format, layout family, why). */
-  angles?: Array<{ index: number; angleId: string; category?: AngleCategory; hookType: HookType; format: AdAngle['format']; layoutFamily?: LayoutFamily; variation?: number; rationale?: string }>
+  /** What the planner decided per ad (angle, hook, format, layout family, why, planned photo, ratios). */
+  angles?: AdPackPlannedAd[]
+  /** #15: hash of `angles` (same as the approved quote's planHash). */
+  planHash?: string
   styleProfile?: StyleRenderProfile
   notes?: string[]
   /** Copy reused from this preview (approved copy = delivered copy). */
   previewId?: string
   /** Ads whose copy came from the preview (1-based). */
   previewAds?: number[]
+  /** Estimated seconds until the pack finishes (default step timings × pending steps ÷ workers). */
+  etaSeconds?: number
 }
 
 export interface AdPackItemView {
@@ -420,6 +453,11 @@ export interface AdPackItemView {
   sceneUrl?: string
   renders: RenderedAd[]
   attempts: number
+  /** #9: fonts actually drawn (first render; every ratio uses the same faces). */
+  fontsUsed?: FontsUsed
+  /** #16: automatic retries used inside the approval (0–2) and why each earlier attempt failed. */
+  autoRetries?: number
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
   charged: boolean
   /** product_images ids of renders saved to the offer library (kind 'generated'). */
   libraryImageIds?: string[]
@@ -429,6 +467,8 @@ export interface AdPackItemView {
   fidelity?: AdPackFidelityView
   /** Ratios not delivered while others were (P0 #3); regenerate one with adpack_regenerate { ratio } (free). */
   rejectedRatios?: AdPackRejectedRatioView[]
+  /** A free ratio regeneration of this ad running in the background. */
+  regenerating?: { ratio: AspectRatio; startedAt: string }
   /** The real product photo this ad used (P1 #8). */
   photo?: AdPhotoRef
   /** Real part photos composited next to it. */
@@ -494,6 +534,12 @@ export interface AdPackStatusResponse {
   summary: string
   /** Estimated seconds left (from this pack's per-step timings), only while moreWork. */
   etaSeconds?: number
+  /** Suggested wait before the next status read (only while moreWork); work continues in the background meanwhile. */
+  retryAfterSeconds?: number
+  /** Free ratio regenerations still running in the background (adpack_regenerate {ratio}). */
+  regenerating?: Array<{ itemId: string; index: number; ratio: AspectRatio; startedAt: string }>
+  /** True when this read started a background advance (nobody held a lease). */
+  backgroundKicked?: boolean
   /** Failed ads: plain-language reason + the exact adpack_regenerate call to retry. */
   failures?: AdPackFailureView[]
   /** Once finished (done / partial): links per ratio + captions per ad, numbered captionsText, deepLink. */
@@ -509,13 +555,21 @@ export interface AdPackEditTextResponse {
 export interface AdPackRegenerateResponse {
   item: AdPackItemView
   quote: AdPackQuote
-  /** Ratio-only regeneration (P0 #3): free, synchronous; the other ratios are untouched. */
+  /**
+   * Ratio-only regeneration (P0 #3): free; the other ratios are untouched. Through the doors it runs
+   * in the background (status 'running'; adpack_status lists it under `regenerating` until it lands).
+   */
   ratio?: {
     ratio: AspectRatio
     delivered: boolean
-    method: 'recomposite' | 'replate'
+    status?: 'running' | 'done'
+    method?: 'recomposite' | 'replate'
     rejected?: AdPackRejectedRatioView
   }
+  /** 'running' when the work was scheduled in the background. */
+  status?: 'running'
+  /** Check adpack_status after this many seconds. */
+  pollAfterSeconds?: number
 }
 
 /** A ratio of an ad not delivered because the real product did not survive it (P0 #3). */

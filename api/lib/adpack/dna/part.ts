@@ -77,6 +77,55 @@ export function cleanText(value: unknown, max = 400): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, max)
 }
 
+const AUDIENCE_STOPWORDS = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'a', 'y', 'e', 'o', 'con', 'para', 'en', 'que', 'un', 'una', 'anos', 'ano', 'the', 'of', 'to', 'and', 'with', 'for', 'in', 'years', 'year', 'old', 'aged'])
+
+/** Normalized token set of an audience line ("Mujeres de 25 a 40" → {mujeres, 25-40}). */
+export function audienceTokens(line: string): Set<string> {
+  const s = line
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/(\d{1,3})\s*(?:-|–|—|a|to|hasta)\s*(\d{1,3})/g, '$1-$2')
+    .replace(/(\d{1,3})\s*\+/g, '$1+')
+    .replace(/[^a-z0-9+\-\s]/g, ' ')
+  return new Set(s.split(/\s+/).filter((t) => t && !AUDIENCE_STOPWORDS.has(t)))
+}
+
+/**
+ * #22: audience lines merged from several sources (brand profile, offer, kit, business, site)
+ * often say the same thing ("Mujeres 25–40" vs "Mujeres de 25 a 40 con piel mixta"). Near-duplicates
+ * (same first word + age range, one stem set inside the other, or Jaccard ≥ 0.5) collapse into the most specific line; the
+ * first-source order is kept and the list is capped (default 3).
+ */
+export function dedupeAudiences(values: Array<string | null | undefined>, cap = 3): string[] {
+  const kept: Array<{ line: string; stems: Set<string>; specific: number; core: string }> = []
+  for (const raw of values) {
+    const line = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : ''
+    if (!line) continue
+    const tokens = [...audienceTokens(line)]
+    if (!tokens.length) continue
+    // Crude stems ("buscan" ~ "buscando", "padre" ~ "padres") and a demographic core (first word + age range).
+    const stems = new Set(tokens.map((t) => (/^\d/.test(t) ? t : t.slice(0, 5))))
+    const specific = tokens.filter((t) => !GENERIC_AUDIENCE.has(t)).length
+    const age = tokens.find((t) => /^\d{1,3}(?:-\d{1,3}|\+)$/.test(t))
+    const core = age ? `${tokens[0].slice(0, 5)}|${age}` : ''
+    const entry = { line, stems, specific, core }
+    const dup = kept.findIndex((k) => {
+      if (core && k.core === core) return true
+      let inter = 0
+      for (const t of stems) if (k.stems.has(t)) inter++
+      const union = stems.size + k.stems.size - inter
+      return inter === stems.size || inter === k.stems.size || (union > 0 && inter / union >= 0.5)
+    })
+    if (dup < 0) kept.push(entry)
+    else if (specific > kept[dup].specific) kept[dup] = entry
+  }
+  return kept.slice(0, Math.max(1, cap)).map((k) => k.line)
+}
+
+/** Words that say nothing about who buys ("todo el país", "personas"). */
+const GENERIC_AUDIENCE = new Set(['todo', 'pais', 'nacional', 'nationwide', 'country', 'personas', 'people', 'gente', 'local', 'internacional', 'international', 'publico', 'general'])
+
 export function uniqStrings(values: Array<string | null | undefined>, limit = 50): string[] {
   const seen = new Set<string>()
   const out: string[] = []

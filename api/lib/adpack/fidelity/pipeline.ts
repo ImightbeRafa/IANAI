@@ -419,7 +419,7 @@ export function parseImageFidelityArgs(args: Record<string, unknown>): { product
   if (args.relight !== undefined && args.relight !== null && args.relight !== true && args.relight !== false && args.relight !== 'ai' && args.relight !== 'auto') throw new Error('relight must be "auto" or "ai"')
   if (args.relight === true || args.relight === 'ai') out.relight = 'ai'
   if (Array.isArray(args.allowedProps)) {
-    const props = args.allowedProps.filter((p): p is string => typeof p === 'string').map((p) => p.trim().slice(0, 60)).filter(Boolean).slice(0, 12)
+    const props = args.allowedProps.filter((p): p is string => typeof p === 'string').map((p) => p.trim().slice(0, 160)).filter(Boolean).slice(0, 12)
     if (props.length) out.allowedProps = props
   }
   return out

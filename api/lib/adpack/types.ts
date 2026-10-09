@@ -407,6 +407,17 @@ export interface AdAngle {
    * headlines to avoid and the alternative hook type the next attempt must use (P1 #10).
    */
   retry?: { attempt: number; avoidHeadlines: string[]; hookType?: HookType }
+  /**
+   * #16: automatic retries inside the same approval (pack runner): count used so far and why each
+   * earlier attempt failed. Rides on the angle jsonb (no migration). Distinct from `retry`
+   * (the copy-rejection hint the copy writer reads).
+   */
+  autoRetry?: AdAutoRetry
+}
+
+export interface AdAutoRetry {
+  count: number
+  history: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +556,8 @@ export interface SceneCheckResult {
   fidelity?: FidelityResult
   /** Persisted copy of PackItem.rejectedRatios (scene_check jsonb; no extra column). */
   rejectedRatios?: RejectedRatio[]
+  /** A free ratio regeneration running in the background (adpack_regenerate {ratio}); scene_check jsonb. */
+  regenerating?: { ratio: AspectRatio; startedAt: string }
 }
 
 export interface RenderedAd {
@@ -559,6 +572,17 @@ export interface RenderedAd {
   fidelity?: FidelityResult
   /** Set when this ratio was re-plated alone (adpack_regenerate {ratio}): its own background plate. */
   plateUrl?: string
+  /** #9: fonts actually drawn in this render (stored in the renders jsonb, no migration). */
+  fontsUsed?: FontsUsed
+}
+
+/** #9: the families a render actually drew, and every fallback taken (brand font missing, glyphs). */
+export interface FontsUsed {
+  /** e.g. "Space Grotesk 700". */
+  heading: string
+  /** e.g. "Inter 400/700". */
+  body: string
+  fallbacks: Array<{ role: 'heading' | 'body'; requested?: string; family: string; reason: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +689,11 @@ export interface PackStore {
    * cross-pack angle diversity (P1 #10). Cancelled packs are ignored.
    */
   recentAngleIds?(userId: string, productId: string, packs: number): Promise<string[]>
+  /**
+   * Cron sweep (service role, all users): packs still planned/running created after `createdAfterIso`,
+   * least recently updated first. Optional: stores without it are never swept.
+   */
+  listOpenPacks?(opts: { limit: number; createdAfterIso: string }): Promise<Array<{ packId: string; userId: string }>>
 }
 
 /** Model-call abstraction so tests and the benchmark can inject fakes / record cost. */

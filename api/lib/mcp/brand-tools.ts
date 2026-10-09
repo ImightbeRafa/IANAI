@@ -10,6 +10,9 @@ import { mcpCreateBrandKit, type McpBrandKitStore } from './brand-kit-tools.js'
 import type { RehostFn } from './asset-rehost.js'
 import type { McpOfferStore } from './offer-tools.js'
 import { normalizeBrandName, type McpAuthUser, type McpDbClient } from './user-tools.js'
+import { resolveMcpBrandKit } from './brand-kit-tools.js'
+import { readBrandProfile, type BrandProfile } from '../brand-profile.js'
+import type { IgnoredPlaceholder } from '../placeholder-guard.js'
 
 type Row = Record<string, unknown>
 
@@ -114,4 +117,120 @@ export async function mcpCreateBrand(options: {
     'create_ads { brandId, offerId, count, ratios: ["4:5","9:16"] }',
   ]
   return out
+}
+
+// ---------------------------------------------------------------------------
+// #22 update_brand / set_default_offer
+// ---------------------------------------------------------------------------
+
+/** Text field for update_brand: null/"" clears; a placeholder ("country", "N/A"…) is never stored (reported). */
+function updText(args: Row, key: string, max: number, ignored: IgnoredPlaceholder[]): string | null | undefined {
+  const raw = args[key]
+  if (raw === undefined) return undefined
+  if (raw === null) return null
+  if (typeof raw !== 'string') throw new BrandInputError(`${key} must be a string`)
+  const v = raw.replace(/\s+/g, ' ').trim()
+  if (!v) return null
+  if (v.length > max) throw new BrandInputError(`${key} is ${v.length} characters; the maximum is ${max} (nothing was saved)`)
+  if (isPlaceholderValue(v)) {
+    ignored.push({ field: key, value: v })
+    return undefined
+  }
+  return v
+}
+
+/** Edit the brand record (same fields as create_brand / the web brand form). Free sync write. */
+export async function mcpUpdateBrand(options: { db: McpDbClient; store: McpOfferStore; user: McpAuthUser; args: Row }): Promise<Row> {
+  const { args, user } = options
+  if (!options.store.updateBusiness) throw new Error('Brand store not configured')
+  const brandId = asString(args.brandId)
+  if (!brandId) throw new BrandInputError('brandId is required (list_brands)')
+  const brand = await options.db.getBusinessForUser(user.id, brandId)
+  if (!brand) throw Object.assign(new Error('Brand not found'), { code: 'NOT_FOUND' })
+  const ignored: IgnoredPlaceholder[] = []
+  const patch: Row = {}
+  if (args.name !== undefined) {
+    const name = asString(args.name)
+    if (!name) throw new BrandInputError('name cannot be empty')
+    if (name.length > 120) throw new BrandInputError(`name is ${name.length} characters; the maximum is 120 (nothing was saved)`)
+    if (isPlaceholderValue(name)) throw new BrandInputError('name looks like a placeholder: send the real brand name')
+    patch.name = name
+  }
+  const location = updText(args, 'location', 200, ignored)
+  if (location !== undefined) patch.location = location
+  const shippingMethod = updText(args, 'shippingMethod', 200, ignored)
+  if (shippingMethod !== undefined) patch.shipping_method = shippingMethod
+  const icp = updText(args, 'icpDescription', 1000, ignored)
+  if (icp !== undefined) patch.icp_description = icp
+  if (args.doesShipping !== undefined) {
+    if (typeof args.doesShipping !== 'boolean') throw new BrandInputError('doesShipping must be a boolean')
+    patch.does_shipping = args.doesShipping
+  }
+  if (args.salesChannels !== undefined) {
+    if (!Array.isArray(args.salesChannels) || args.salesChannels.some((c) => !(SALES_CHANNELS as readonly string[]).includes(String(c)))) {
+      throw new BrandInputError(`salesChannels must be an array of ${SALES_CHANNELS.join(', ')}`)
+    }
+    patch.sales_channels = [...new Set(args.salesChannels as string[])]
+  }
+  const out: Row = { brandId, creditsNote: 'Free sync write — no Advance credits.' }
+  if (ignored.length) {
+    out.ignoredPlaceholders = ignored
+    out.placeholderNote = 'Placeholder values were not stored (they would leak into ads, e.g. "Hecho para country"). Send the real value, or null to clear the field.'
+  }
+  if (!Object.keys(patch).length) return { ...out, status: 'unchanged', message: 'Nothing to update (send name, location, salesChannels, doesShipping, shippingMethod or icpDescription).' }
+  if (typeof patch.name === 'string' && normalizeBrandName(patch.name) !== normalizeBrandName(brand.name)) {
+    const clash = (await options.db.listBusinessesForUser(user.id, { includeArchived: false })).find((b) => b.id !== brandId && normalizeBrandName(b.name) === normalizeBrandName(patch.name as string))
+    if (clash) out.warnings = [`Another brand is also named "${clash.name}" (${clash.id}); select brands by brandId.`]
+  }
+  const saved = await options.store.updateBusiness({ userId: user.id, brandId, patch })
+  if (!saved) throw Object.assign(new Error('Brand not found'), { code: 'NOT_FOUND' })
+  return {
+    ...out,
+    status: 'updated',
+    updated: Object.keys(patch),
+    brand: {
+      brandId,
+      name: saved.name ?? brand.name,
+      location: saved.location ?? null,
+      salesChannels: saved.sales_channels ?? null,
+      doesShipping: saved.does_shipping ?? null,
+      shippingMethod: saved.shipping_method ?? null,
+      icpDescription: saved.icp_description ?? null,
+    },
+  }
+}
+
+/**
+ * Pick the offer tools use when offerId is omitted (adpack_start / create_ads / adpack_from_brand).
+ * Stored on the brand's primary kit profile (brand_kits.brand_profile.defaultOfferId; 085, no new migration).
+ */
+export async function mcpSetDefaultOffer(options: { db: McpDbClient; kitStore: McpBrandKitStore; user: McpAuthUser; args: Row }): Promise<Row> {
+  const { args, user } = options
+  const brandId = asString(args.brandId)
+  const offerId = asString(args.offerId)
+  if (!brandId) throw new BrandInputError('brandId is required (list_brands)')
+  if (!offerId) throw new BrandInputError('offerId is required (list_offers)')
+  const brand = await options.db.getBusinessForUser(user.id, brandId)
+  if (!brand) throw Object.assign(new Error('Brand not found'), { code: 'NOT_FOUND' })
+  const offers = await options.db.listOffersForBrand(user.id, brandId)
+  const offer = offers.find((o) => o.id === offerId)
+  if (!offer) throw Object.assign(new Error('Offer not found for this brand (list_offers)'), { code: 'NOT_FOUND' })
+  const resolved = await resolveMcpBrandKit({ store: options.kitStore, userId: user.id, brandId })
+  const kitId = resolved.brandKit?.id
+  if (!kitId) throw Object.assign(new Error('This brand has no primary brand kit: create_brand_kit first (the default offer is stored on it)'), { code: 'NOT_READY' })
+  if (!(options.kitStore.hasBrandProfile ? await options.kitStore.hasBrandProfile() : false)) {
+    throw Object.assign(new Error('Migration 085 is not applied: the default offer cannot be saved yet'), { code: 'UNAVAILABLE' })
+  }
+  const kit = await options.kitStore.getKit({ userId: user.id, kitId })
+  const profile: BrandProfile = { ...(readBrandProfile(kit?.brand_profile) ?? {}), defaultOfferId: offerId, updatedAt: new Date().toISOString() }
+  await options.kitStore.updateKit({ userId: user.id, kitId, patch: { brand_profile: profile, updated_at: new Date().toISOString() } })
+  return {
+    status: 'updated',
+    brandId,
+    defaultOfferId: offerId,
+    offerName: offer.name,
+    brandKitId: kitId,
+    message: `"${offer.name}" is now the default offer: tools that omit offerId (create_ads, adpack_start, adpack_from_brand) use it.`,
+    creditsNote: 'Free sync write — no Advance credits.',
+  }
 }

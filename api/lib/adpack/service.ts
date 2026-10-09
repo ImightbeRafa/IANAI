@@ -35,6 +35,7 @@ import type {
   AdPackIngestDnaResponse,
   AdPackItemView,
   AdPackPlanSummary,
+  AdPackPlannedAd,
   AdPackPreviewResponse,
   AdPackQuote,
   AdPackRegenerateResponse,
@@ -51,8 +52,10 @@ import {
   packRelightMode,
   planPack,
   quotePack,
+  ratioRegenBlocker,
   regenerateItem,
   regenerateRatio,
+  withoutRegenMarker,
   resizeItem,
   summarizePack,
   type PackProgress,
@@ -69,7 +72,8 @@ import type { StyleDna } from '../bulk/types.js'
 import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
-import { buildStatusExtras, photoViews } from './status-summary.js'
+import { buildStatusExtras, estimateRemainingSeconds, photoViews } from './status-summary.js'
+import { ADPACK_SLICE_BUDGET_MS, kickPackAdvance, sweepStalePacks, type BackgroundSchedule, type SweepResult } from './background.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { writeAdCopy } from './copy-stage.js'
 import { offerForItem } from './pack-runner.js'
@@ -86,10 +90,10 @@ import type { ImageLoader } from './fidelity/pipeline.js'
 import type { DnaPart } from './dna/part.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
-/** Background advance budget (waitUntil / MCP scheduler). */
-export const ADPACK_BACKGROUND_BUDGET_MS = 50_000
-/** Inline advance budget when a status poll finds no active worker. */
-export const ADPACK_INLINE_BUDGET_MS = 8_000
+/** Background advance budget per slice (waitUntil / MCP scheduler; slices self-continue). */
+export const ADPACK_BACKGROUND_BUDGET_MS = ADPACK_SLICE_BUDGET_MS
+/** @deprecated status no longer advances inline (#14); kept for callers that still import it. */
+export const ADPACK_INLINE_BUDGET_MS = 0
 export const ADPACK_MAX_UPLOADS = 12
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -404,7 +408,8 @@ export function parseProductPhotos(raw: unknown, label: string): ProductPhoto[] 
     if (!isObj(p) || typeof p.url !== 'string' || !isAllowedImageUrl(p.url)) throw bad(`${label}[${i}].url must be an https or data:image URL`)
     if (!isProductPhotoRole(p.role)) throw bad(`${label}[${i}].role must be one of hero, part, contents, box, in_use, detail`)
     const photo: ProductPhoto = { url: p.url, role: p.role }
-    const lbl = str(p.label, 80)
+    const lbl = typeof p.label === 'string' ? p.label.replace(/\s+/g, ' ').trim() : ''
+    if (lbl.length > 160) throw bad(`${label}[${i}].label is ${lbl.length} characters; the maximum is 160`)
     if (lbl) photo.label = lbl
     const id = str(p.id, 64)
     if (id) photo.id = id
@@ -412,11 +417,15 @@ export function parseProductPhotos(raw: unknown, label: string): ProductPhoto[] 
   })
 }
 
-/** Short owner strings (props, immutable attributes): ≤ 12 items × 60 chars. */
+/** Short owner strings (props, immutable attributes): ≤ 12 items × 160 chars; longer → BAD_INPUT (#19, never cut). */
 export function parseStringList(raw: unknown, label: string): string[] | undefined {
   if (raw === undefined || raw === null) return undefined
   if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) throw bad(`${label} must be an array of strings`)
-  const out = [...new Set((raw as string[]).map((v) => v.replace(/[\r\n`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 12)
+  if (raw.length > 12) throw bad(`${label} has ${raw.length} items; the maximum is 12`)
+  const cleaned = (raw as string[]).map((v) => v.replace(/[\r\n`]/g, ' ').replace(/\s+/g, ' ').trim())
+  const long = cleaned.findIndex((v) => v.length > 160)
+  if (long >= 0) throw bad(`${label}[${long}] is ${cleaned[long].length} characters; the maximum is 160`)
+  const out = [...new Set(cleaned.filter(Boolean))]
   return out.length ? out : undefined
 }
 
@@ -667,12 +676,15 @@ export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrase
     ...(item.copy ? { headline: item.copy.headline, copy: item.copy } : {}),
     ...(item.scene ? { sceneUrl: item.scene.imageUrl } : {}),
     renders: item.renders ?? [],
+    ...(item.renders?.[0]?.fontsUsed ? { fontsUsed: item.renders[0].fontsUsed } : {}),
     attempts: item.attempts,
+    ...(item.angle.autoRetry?.count ? { autoRetries: item.angle.autoRetry.count, attemptLog: item.angle.autoRetry.history } : {}),
     charged: Boolean(item.chargedAt),
     ...(libraryIdsFor(item).length ? { libraryImageIds: libraryIdsFor(item) } : {}),
     ...(dna && item.copy ? { forbiddenHits: findForbiddenHits(item.copy, dna).map((h) => ({ phrase: h.phrase, field: h.field })) } : {}),
     ...(item.fidelity ? { fidelity: fidelityView(item.fidelity) } : {}),
     ...(item.rejectedRatios?.length ? { rejectedRatios: item.rejectedRatios.map((r) => ({ ratio: r.ratio, reason: r.reason, fidelity: fidelityView(r.fidelity) })) } : {}),
+    ...(item.sceneCheck?.regenerating ? { regenerating: item.sceneCheck.regenerating } : {}),
     ...photoViews(item),
     ...(item.error ? { error: item.error } : {}),
   }
@@ -703,6 +715,12 @@ function libraryIdsFor(item: PackItem): string[] {
   return (item.renders ?? []).map((r) => saved.get(r.imageUrl)).filter((id): id is string => Boolean(id))
 }
 
+/** Poll cadence hint: a quarter of the ETA, 10–30 s (work never depends on the poll). */
+export function retryAfterSecondsFor(etaSeconds: number | undefined): number {
+  if (etaSeconds === undefined || !Number.isFinite(etaSeconds)) return 20
+  return Math.max(10, Math.min(30, Math.round(etaSeconds / 4)))
+}
+
 function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string, language?: AdLanguage): AdPackStatusResponse {
   const progress: PackProgress = summarizePack(pack, items)
   const perAd = quotePack(1).perAd
@@ -710,6 +728,11 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
   const chargedCredits = items.filter((i) => i.chargedAt).length * perAd
   const leaseActive = items.some((i) => i.leaseUntil && Date.parse(i.leaseUntil) > nowMs && i.status !== 'done' && i.status !== 'failed')
   const moreWork = !TERMINAL_PACK.has(pack.status) && progress.pending > 0
+  // Free ratio regenerations running in the background (fresh markers only; a dropped one expires).
+  const regenerating = items.flatMap((i) => {
+    const m = i.sceneCheck?.regenerating
+    return m && nowMs - Date.parse(m.startedAt) < RATIO_REGEN_STALE_MS ? [{ itemId: i.id, index: i.index + 1, ratio: m.ratio, startedAt: m.startedAt }] : []
+  })
   const deepLink = pack.businessId ? deepLinkForAdPack(appOrigin, pack.businessId, pack.id) : undefined
   const extras = buildStatusExtras({
     packId: pack.id,
@@ -737,6 +760,8 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     ...(pack.businessId && deepLink ? { businessId: pack.businessId, deepLink } : {}),
     ...(pack.offer?.productId ? { offerId: pack.offer.productId } : {}),
     ...extras,
+    ...(regenerating.length ? { regenerating } : {}),
+    ...(moreWork ? { retryAfterSeconds: retryAfterSecondsFor(extras.etaSeconds) } : regenerating.length ? { retryAfterSeconds: RATIO_REGEN_POLL_SECONDS } : {}),
     createdAt: pack.createdAt,
     updatedAt: pack.updatedAt,
   }
@@ -745,6 +770,56 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
+
+/**
+ * #15: per-ad plan view (quote / approval / start). Photo = the per-ad pick, else the format's
+ * preferred role from the pool (quality is measured at run time, so a blurry pick may be swapped).
+ */
+export function plannedAdsView(items: PackItem[], offer: OfferInput, exact: boolean, ratios: AspectRatio[], requested?: OfferInput): AdPackPlannedAd[] {
+  return items.map((i) => {
+    const perAd = offer.productImageUrlsByAd?.[String(i.index)]?.filter(Boolean) ?? []
+    let photo: AdPackPlannedAd['photo']
+    if (perAd.length) {
+      const known = (offer.productPhotos ?? []).find((p) => p.url === perAd[0])
+      // P1 #8: a pick the owner did not make is the guaranteed hero (ensureHeroUsage at plan time).
+      const ownerPick = !requested || Boolean(requested.productImageUrlsByAd?.[String(i.index)]?.length)
+      photo = { url: perAd[0], role: 'hero', ...(known?.id ? { productImageId: known.id } : {}), ...(known?.label ? { label: known.label } : {}), source: ownerPick ? 'per_ad' : 'hero' }
+    } else {
+      const pool = resolveProductPhotos(offer).map((p) => ({ url: p.url, role: p.role, ...(p.id ? { id: p.id } : {}), ...(p.label ? { label: p.label } : {}) }))
+      const pick = exact ? pickProductImage(pool, { format: i.angle.format }) : pool[0] ?? null
+      if (pick) photo = { url: pick.url, ...(pick.role ? { role: pick.role } : {}), ...(pick.id ? { productImageId: pick.id } : {}), ...(pick.label ? { label: pick.label } : {}), source: 'pool' }
+    }
+    return {
+      index: i.index + 1,
+      angleId: i.angle.id,
+      ...(i.angle.category ? { category: i.angle.category } : {}),
+      hookType: i.angle.hookType,
+      format: i.angle.format,
+      ...(i.angle.layoutFamily ? { layoutFamily: i.angle.layoutFamily } : {}),
+      ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}),
+      ...(i.angle.rationale ? { rationale: i.angle.rationale } : {}),
+      ...(photo ? { photo } : {}),
+      ratios,
+    }
+  })
+}
+
+/** A background ratio regeneration older than this is considered dropped (the ad can be retried). */
+export const RATIO_REGEN_STALE_MS = 5 * 60 * 1000
+/** Poll hint after scheduling a ratio regeneration (one plate + render ~ 30 s). */
+export const RATIO_REGEN_POLL_SECONDS = 30
+
+/** Fixed pack id for quote-time planning (plan views never expose item ids). */
+const PLAN_QUOTE_PACK_ID = '00000000-0000-4000-8000-000000000000'
+
+/**
+ * #15: stable hash of the per-ad plan (angle, format after handheld substitution, layout family,
+ * variation, planned photo incl. the guaranteed hero, ratios). Bound into the approval: a different
+ * plan behind the same price is PLAN_CHANGED, never silently run.
+ */
+export function planHashOf(plan: AdPackPlannedAd[]): string {
+  return sha(plan.map((p) => ({ i: p.index, a: p.angleId, f: p.format, l: p.layoutFamily ?? null, v: p.variation ?? null, p: p.photo?.url ?? null, r: p.ratios }))).slice(0, 24)
+}
 
 function adPackPlanSummaryFrom(approved: { items: number; total: number }): AdPackPlanSummary {
   return { items: approved.items, unitCost: approved.items ? Math.round(approved.total / approved.items) : 0, total: approved.total, currency: 'credits' }
@@ -825,6 +900,15 @@ export interface SavedBrandRefInput {
   productImageIdsByAd?: unknown
   /** Alias of productImageIdsByAd (P1 #8): { "<ad number>": [productImageId…] }. */
   photoPerAd?: unknown
+  /** #12: false → no Style DNA influence (notes, references, layout profile). */
+  useStyleDna?: unknown
+}
+
+/** #12: `useStyleDna` is true / false / omitted; anything else is BAD_INPUT. */
+export function parseUseStyleDna(raw: unknown): boolean | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'boolean') throw bad('useStyleDna must be true or false')
+  return raw
 }
 
 const IMAGE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -859,7 +943,7 @@ export interface AdPackService {
    * Quote for exactly the ads start would run: same resolver (guide angles + angleIds, or the
    * planner's `size`), × variations. Relighting (exact mode) is included and free.
    */
-  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; brief?: unknown; productFidelity?: unknown; relight?: unknown } & SelectionInput & SavedBrandRefInput): Promise<AdPackQuote>
+  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; brief?: unknown; productFidelity?: unknown; relight?: unknown; ratios?: unknown; withPlan?: boolean } & SelectionInput & SavedBrandRefInput & Partial<Omit<StartLikeInput, 'userId' | 'source'>> & { source?: AdPackSource }): Promise<AdPackQuote>
   startPack(input: {
     userId: string
     /** dna + offer, OR brandId (+ offerId / brandKitId): the server builds them from the saved brand. */
@@ -882,6 +966,8 @@ export interface AdPackService {
     layoutFamily?: unknown
     /** Brand kit Style DNA id (list_style_dnas): layout family, density and weight follow its winners. */
     styleDnaId?: unknown
+    /** #12: false → no Style DNA influence at all (conflicts with styleDnaId). */
+    useStyleDna?: unknown
     ratios?: unknown
     businessId?: unknown
     brandKitId?: unknown
@@ -910,6 +996,8 @@ export interface AdPackService {
     mustAppear?: unknown
     /** Deliver the copy of this preview (must match the args; else PLAN_CHANGED). */
     previewId?: unknown
+    /** #15: planHash of the approved quote: a different per-ad plan now → PLAN_CHANGED, nothing is created. */
+    approvedPlanHash?: unknown
   } & DnaOverridesInput): Promise<AdPackStartResponse>
   /**
    * FREE copy dry run (P0 #2d): planning + copy + checks with the same arguments as start — model
@@ -921,21 +1009,29 @@ export interface AdPackService {
   getPreview(input: { userId: string; previewId: unknown }): Promise<StoredPreview | null>
   getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
-   * getStatus, but first runs a short inline advance when work remains and no worker holds a lease,
-   * and saves finished renders to the offer library once the pack completes (idempotent).
+   * getStatus as a cheap read (#14): never advances inline. With `schedule`, it kicks a background
+   * advance loop when work remains and no worker holds a lease, and schedules the (idempotent)
+   * offer-library save of a completed pack; it returns immediately either way.
    */
-  pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
+  pollStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown; schedule?: BackgroundSchedule }): Promise<AdPackStatusResponse>
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
+  /** Kick the self-continuing background loop for a pack (no-op when this process already runs one). */
+  kickAdvance(input: { userId: string; packId: string; schedule: BackgroundSchedule }): boolean
+  /** Cron: resume up to `limit` running packs nobody is advancing (no lease, no recent update). */
+  sweepStale(input: { schedule: BackgroundSchedule; limit?: number }): Promise<SweepResult>
   editText(input: { userId: string; packId: unknown; itemId: unknown; copy: unknown }): Promise<AdPackEditTextResponse>
-  /** mode copy | scene (paid, async); `ratio` = regenerate just that ratio of a delivered ad (free, synchronous, P0 #3). */
-  regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown; ratio?: unknown }): Promise<AdPackRegenerateResponse>
+  /**
+   * mode copy | scene (paid, async); `ratio` = regenerate just that ratio of a delivered ad (free, P0 #3).
+   * With `schedule` the ratio work runs in the background (answer `running`, status shows `regenerating`).
+   */
+  regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown; ratio?: unknown; schedule?: BackgroundSchedule }): Promise<AdPackRegenerateResponse>
   /** Free: re-render a finished ad into more ratios from its stored scene + copy (no model calls, no credits). */
   resize(input: { userId: string; packId: unknown; itemId: unknown; ratios: unknown }): Promise<AdPackResizeResponse>
   cancel(input: { userId: string; packId: unknown }): Promise<AdPackCancelResponse>
 }
 
 /** Start-shaped input shared by start and the free preview. */
-export type StartLikeInput = Omit<Parameters<AdPackService['startPack']>[0], 'packId' | 'approved' | 'expectedAds' | 'previewId'> & { previewId?: unknown }
+export type StartLikeInput = Omit<Parameters<AdPackService['startPack']>[0], 'packId' | 'approved' | 'expectedAds' | 'previewId' | 'approvedPlanHash'> & { previewId?: unknown }
 
 export function createAdPackService(deps: AdPackDeps): AdPackService {
   const now = deps.now ?? (() => Date.now())
@@ -1040,6 +1136,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     const productImageIds = parseProductImageIds(ref.productImageIds)
     if (ref.productImageIdsByAd !== undefined && ref.photoPerAd !== undefined && JSON.stringify(ref.productImageIdsByAd) !== JSON.stringify(ref.photoPerAd)) throw bad('photoPerAd is an alias of productImageIdsByAd: send only one')
     const productImageIdsByAd = parseProductImageIdsByAd(ref.productImageIdsByAd ?? ref.photoPerAd)
+    const useStyleDna = parseUseStyleDna(ref.useStyleDna)
     if (!deps.savedBrandDb) throw new AdPackError('UNAVAILABLE', 'Saved brands are not available in this runtime')
     const t0 = now()
     try {
@@ -1053,6 +1150,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         refreshWebsite: deps.refreshWebsite,
         productImageIds,
         productImageIdsByAd,
+        ...(useStyleDna !== undefined ? { useStyleDna } : {}),
       })
       if (res.costUsd > 0) {
         await log({
@@ -1159,7 +1257,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     let savedStyleDnas: StyleDna[] | undefined
     if (fromSaved) {
       // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
-      const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd, photoPerAd: input.photoPerAd }, input.source)
+      const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd, photoPerAd: input.photoPerAd, useStyleDna: input.useStyleDna }, input.source)
       if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
       savedStyleDnas = saved.styleDnas ?? []
       dna = saved.dna
@@ -1176,6 +1274,14 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     if (input.heroRequired !== undefined && input.heroRequired !== null && typeof input.heroRequired !== 'boolean') throw bad('heroRequired must be a boolean')
     const heroRequired = typeof input.heroRequired === 'boolean' ? input.heroRequired : undefined
     const styleDnaId = parseStyleDnaId(input.styleDnaId)
+    const useStyleDna = parseUseStyleDna(input.useStyleDna)
+    if (useStyleDna === false && styleDnaId) throw bad('styleDnaId conflicts with useStyleDna:false (drop one of them)')
+    if (useStyleDna === false && dna.visual?.styleProfile) {
+      // #12 dna path: an agent-supplied Style DNA profile is ignored too.
+      const { styleProfile: _sp, ...visual } = dna.visual
+      void _sp
+      dna = { ...dna, visual }
+    }
     let styleNote: string | undefined
     if (styleDnaId) {
       if (!savedStyleDnas) throw bad('styleDnaId needs brandId (the style DNA lives on the brand kit)')
@@ -1303,7 +1409,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         ...(saved.offerId ? { offerId: saved.offerId } : {}),
         ...(saved.brandKitId ? { brandKitId: saved.brandKitId } : {}),
         ...(saved.websiteUrl ? { websiteUrl: saved.websiteUrl } : {}),
-        ...(saved.styleDnas?.length ? { styleDnas: saved.styleDnas.map((d) => ({ id: d.id, name: d.name, kind: d.kind, references: d.referenceUrls.length, analyzed: Boolean(d.analysis) })) } : {}),
+        ...(saved.styleDnas?.length ? { styleDnas: saved.styleDnas.map((d) => ({ id: d.id, name: d.name, kind: d.kind, references: d.referenceUrls.length, analyzed: Boolean(d.analysis), active: (saved.activeStyleDnaIds ?? []).includes(d.id) })) } : {}),
+        activeStyleDnaIds: saved.activeStyleDnaIds ?? [],
+        ...(saved.truncated?.length ? { truncated: saved.truncated } : {}),
         quote: quoteFor(planned.length),
       }
     },
@@ -1322,7 +1430,18 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     async quote(input) {
       const size = parseSize(input.size)
       const sel = parseSelection(input)
-      if ((input.dna !== undefined && input.offer !== undefined) || (input.dna === undefined && input.offer === undefined && hasValue(input.brandId))) {
+      const resolvable = (input.dna !== undefined && input.offer !== undefined) || (input.dna === undefined && input.offer === undefined && hasValue(input.brandId))
+      if (resolvable && input.withPlan) {
+        // #15 + P0 #2d: ONE plan — the same prepareRun start and the free preview use (saved brand,
+        // Style DNA / useStyleDna, mustAppear, hero guarantee, per-ad photos, handheld substitution,
+        // cross-pack diversity), so the plan[] the user approves is the plan that runs.
+        if (!input.userId) throw bad('userId is required')
+        const run = await prepareRun({ ...(input as StartLikeInput), userId: input.userId, source: (input as { source?: AdPackSource }).source ?? 'web' }, PLAN_QUOTE_PACK_ID)
+        const ads = run.planned.items.length
+        const plan = plannedAdsView(run.planned.items, run.planned.pack.offer, run.render.productFidelity === 'exact', run.ratios, run.offer)
+        return { ...quoteFor(ads, { variations: run.sel.variations, angleIds: [...new Set(run.planned.items.map((i) => i.angle.id))] }), plan, planHash: planHashOf(plan) }
+      }
+      if (resolvable) {
         const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
         const brief = parseBrief(input.brief)
         const guideAngles = guideAnglesFor(sel.guideAngles, dna, offer, brief)
@@ -1356,8 +1475,11 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         }
       }
       const run = await prepareRun(input, packId)
-      const { planned, dna, sel, styleNote } = run
+      const { planned, dna, sel, styleNote, render, ratios } = run
       const approved = parseApproved(input.approved)
+      // #15: the per-ad plan the user saw (quote / approval / preview) — same view, same hash.
+      const planView = plannedAdsView(planned.items, planned.pack.offer, render.productFidelity === 'exact', ratios, run.offer)
+      const planHash = planHashOf(planView)
       // F1: never run (or silently shrink) a plan the user did not approve. The plan is recomputed
       // here with the quote's resolver (ads × variations; relighting is included and free).
       const current = adPackPlanSummary(planned.items.length)
@@ -1369,6 +1491,16 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           planned: current,
           plannedAds: current.items,
           approvedAds: was.items,
+        })
+      }
+      const approvedPlanHash = typeof input.approvedPlanHash === 'string' && input.approvedPlanHash ? input.approvedPlanHash : undefined
+      if (approvedPlanHash && approvedPlanHash !== planHash) {
+        // Same count and price, but a different per-ad plan (angle, layout, photo, format or ratios).
+        throw new AdPackError('PLAN_CHANGED', 'The per-ad plan changed since it was approved (angle, layout, photo, format or ratios). Nothing ran; ask for a fresh approval.', {
+          reason: 'plan_changed',
+          planned: current,
+          plan: planView,
+          planHash,
         })
       }
       // P0 #2d: the copy the user previewed is the copy that ships (same args, same facts, same angles).
@@ -1390,10 +1522,12 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         existing: false,
         creativeFreedom: planned.creativeFreedom,
         variations: sel.variations,
-        angles: planned.items.map((i) => ({ index: i.index + 1, angleId: i.angle.id, category: i.angle.category, hookType: i.angle.hookType, format: i.angle.format, layoutFamily: i.angle.layoutFamily, ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}), rationale: i.angle.rationale })),
+        angles: planView,
+        planHash,
         ...(dna.visual?.styleProfile ? { styleProfile: dna.visual.styleProfile } : {}),
         ...(styleNote ? { notes: [styleNote] } : {}),
         ...(reused ? { previewId: reused.previewId, previewAds } : {}),
+        etaSeconds: estimateRemainingSeconds(planned.items),
       }
     },
 
@@ -1450,9 +1584,10 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         const packOffer = planned.pack.offer
         return previewAdView(item, base, offerForItem(packOffer, item.index), Boolean(packOffer.productImageUrlsByAd?.[String(item.index)]?.length))
       })
+      const plan = plannedAdsView(planned.items, planned.pack.offer, run.render.productFidelity === 'exact', run.ratios, run.offer)
       return {
         previewId,
-        quote: quoteFor(planned.items.length, { variations: run.sel.variations, angleIds: [...new Set(planned.items.map((i) => i.angle.id))] }),
+        quote: { ...quoteFor(planned.items.length, { variations: run.sel.variations, angleIds: [...new Set(planned.items.map((i) => i.angle.id))] }), plan, planHash: planHashOf(plan) },
         ads: views,
         costUsd,
         chargedCredits: 0 as const,
@@ -1472,25 +1607,38 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     getStatus,
 
     async pollStatus(input) {
+      // #14: a cheap read. Never advances inline (a model step can run far past any inline budget and
+      // time the host out); at most it kicks a background loop when nobody holds a lease.
       let status = await getStatus(input)
-      if (status.moreWork && !status.leaseActive) {
-        try {
-          await advance({ userId: input.userId, packId: status.packId, budgetMs: input.inlineBudgetMs ?? ADPACK_INLINE_BUDGET_MS })
-        } catch (err) {
-          if (isAdPackError(err)) throw err
-          console.error('[adpack] inline advance failed', err instanceof Error ? err.message : err)
-        }
-        status = await getStatus(input)
-      }
-      // A dropped background task may have finished the pack without saving: retry here (idempotent).
       const unsaved = status.items.some((i) => i.status === 'done' && i.renders.length && (i.libraryImageIds?.length ?? 0) < i.renders.length)
-      if (COMPLETE_PACK.has(status.status) && status.offerId && unsaved && (await persistLibrary(input.userId, status.packId))) {
-        status = await getStatus(input)
+      const needsLibrary = COMPLETE_PACK.has(status.status) && Boolean(status.offerId) && unsaved
+      if (input.schedule) {
+        let kicked = false
+        if (status.moreWork && !status.leaseActive) {
+          kicked = kickPackAdvance({ service: { advance }, userId: input.userId, packId: status.packId, schedule: input.schedule, now })
+        }
+        // A dropped background task may have finished the pack without saving: retry off-request (idempotent).
+        if (needsLibrary) {
+          const packId = status.packId
+          input.schedule(async () => {
+            await persistLibrary(input.userId, packId)
+          })
+        }
+        return kicked ? { ...status, backgroundKicked: true } : status
       }
+      if (needsLibrary && (await persistLibrary(input.userId, status.packId))) status = await getStatus(input)
       return status
     },
 
     advance,
+
+    kickAdvance(input) {
+      return kickPackAdvance({ service: { advance }, userId: input.userId, packId: input.packId, schedule: input.schedule, now })
+    },
+
+    async sweepStale(input) {
+      return sweepStalePacks({ store: deps.store, service: { advance }, schedule: input.schedule, limit: input.limit, now })
+    },
 
     async editText(input) {
       const packId = parsePackId(input.packId)
@@ -1548,26 +1696,68 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       if (pack.status === 'cancelled') throw new AdPackError('NOT_READY', 'Pack was cancelled')
       if (!items.some((i) => i.id === itemId)) throw new AdPackError('NOT_FOUND', 'Ad not found')
       if (input.ratio !== undefined && input.ratio !== null) {
-        // P0 #3: one ratio of a delivered ad — free (the ad was charged once), synchronous.
+        // P0 #3: one ratio of a delivered ad — free (the ad was charged once).
         const [ratio] = parseRatios([input.ratio])
         if (input.mode !== undefined && input.mode !== 'scene') throw bad('ratio regenerates the image of one ratio only (mode scene); omit mode or use scene')
-        const res = await regenerateRatio({ store: deps.store, gateway: deps.gateway, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, ratio, ...(deps.loadImage ? { loadImage: deps.loadImage } : {}) })
-        if (!res.ok) {
-          if (res.error === 'item_busy') throw new AdPackError('BUSY', 'This ad is still being generated')
-          if (res.error === 'pack_not_found' || res.error === 'item_not_found') throw new AdPackError('NOT_FOUND', res.error === 'pack_not_found' ? 'Pack not found' : 'Ad not found')
-          if (res.error === 'ratio_not_in_pack') throw bad(`ratio ${ratio} is not part of this ad (use adpack_resize to add a new ratio)`)
-          if (res.error === 'not_exact') throw new AdPackError('NOT_READY', 'Ratio-only regeneration needs an exact-mode ad (real product composite); regenerate the whole ad with mode scene')
-          if (res.error === 'cutout_missing') throw new AdPackError('NOT_READY', 'The stored product cut-out of this ad is missing; regenerate the whole ad with mode scene')
-          throw new AdPackError('NOT_READY', 'This ad has no delivered ratio yet; regenerate the whole ad with mode scene')
+        const ratioError = (error: Exclude<Awaited<ReturnType<typeof regenerateRatio>>, { ok: true }>['error']): AdPackError => {
+          if (error === 'item_busy') return new AdPackError('BUSY', 'This ad is still being generated')
+          if (error === 'pack_not_found' || error === 'item_not_found') return new AdPackError('NOT_FOUND', error === 'pack_not_found' ? 'Pack not found' : 'Ad not found')
+          if (error === 'ratio_not_in_pack') return bad(`ratio ${ratio} is not part of this ad (use adpack_resize to add a new ratio)`)
+          if (error === 'not_exact') return new AdPackError('NOT_READY', 'Ratio-only regeneration needs an exact-mode ad (real product composite); regenerate the whole ad with mode scene')
+          if (error === 'cutout_missing') return new AdPackError('NOT_READY', 'The stored product cut-out of this ad is missing; regenerate the whole ad with mode scene')
+          return new AdPackError('NOT_READY', 'This ad has no delivered ratio yet; regenerate the whole ad with mode scene')
         }
-        if (res.costUsd > 0) {
-          await log({ userId: input.userId, feature: 'image', model: ADPACK_IMAGE_MODEL, costUsd: res.costUsd, source: pack.source, durationMs: 0, metadata: { feature: 'adpack_regenerate_ratio', packId, itemIndex: res.item.index, ratio } })
+        const item = items.find((i) => i.id === itemId) as PackItem
+        const marker = item.sceneCheck?.regenerating
+        if (marker && now() - Date.parse(marker.startedAt) < RATIO_REGEN_STALE_MS) {
+          throw new AdPackError('BUSY', `Ratio ${marker.ratio} of this ad is already being regenerated; check adpack_status in ~${RATIO_REGEN_POLL_SECONDS} s`)
         }
-        if (res.delivered) await persistLibrary(input.userId, packId)
+        const blocked = ratioRegenBlocker(pack, item, ratio)
+        if (blocked) throw ratioError(blocked)
+        const runRatio = async () => {
+          const res = await regenerateRatio({ store: deps.store, gateway: deps.gateway, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, ratio, ...(deps.loadImage ? { loadImage: deps.loadImage } : {}) })
+          if (res.ok) {
+            if (res.costUsd > 0) {
+              await log({ userId: input.userId, feature: 'image', model: ADPACK_IMAGE_MODEL, costUsd: res.costUsd, source: pack.source, durationMs: 0, metadata: { feature: 'adpack_regenerate_ratio', packId, itemIndex: res.item.index, ratio } })
+            }
+            if (res.delivered) await persistLibrary(input.userId, packId)
+          }
+          return res
+        }
+        if (input.schedule) {
+          // #14: a ratio re-plate is a model call (~30 s): never inside the request (MCP -32001). Mark the
+          // ad, run it in the background and answer `running`; adpack_status shows it until it lands.
+          const startedAt = new Date(now()).toISOString()
+          const sceneCheck = { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), regenerating: { ratio, startedAt } }
+          await deps.store.updateItem(item.id, { sceneCheck })
+          input.schedule(async () => {
+            const clear = async () => {
+              const fresh = (await deps.store.getPack(packId, input.userId).catch(() => null))?.items.find((i) => i.id === itemId)
+              if (fresh?.sceneCheck?.regenerating) await deps.store.updateItem(itemId, { sceneCheck: withoutRegenMarker(fresh.sceneCheck) }).catch(() => undefined)
+            }
+            try {
+              const res = await runRatio()
+              if (!res.ok) await clear()
+            } catch (err) {
+              console.error('[adpack] ratio regeneration failed', packId, itemId, ratio, err instanceof Error ? err.message : err)
+              await clear()
+            }
+          })
+          return {
+            item: toItemView({ ...item, sceneCheck }, pack.dna),
+            quote: quoteFor(0),
+            ratio: { ratio, delivered: false, status: 'running' as const },
+            status: 'running' as const,
+            pollAfterSeconds: RATIO_REGEN_POLL_SECONDS,
+          }
+        }
+        // No scheduler (tests / scripts): synchronous.
+        const res = await runRatio()
+        if (!res.ok) throw ratioError(res.error)
         return {
           item: toItemView(res.item, pack.dna),
           quote: quoteFor(0),
-          ratio: { ratio, delivered: res.delivered, method: res.method, ...(res.rejected ? { rejected: { ratio: res.rejected.ratio, reason: res.rejected.reason, fidelity: fidelityView(res.rejected.fidelity) } } : {}) },
+          ratio: { ratio, delivered: res.delivered, method: res.method, status: 'done' as const, ...(res.rejected ? { rejected: { ratio: res.rejected.ratio, reason: res.rejected.reason, fidelity: fidelityView(res.rejected.fidelity) } } : {}) },
         }
       }
       await requireCredits(input.userId, 1)
@@ -1622,7 +1812,7 @@ const sha = (v: unknown) => createHash('sha256').update(canonicalJson(v)).digest
 export const PREVIEW_ARG_KEYS = [
   'brandId', 'offerId', 'brandKitId', 'dna', 'offer', 'size', 'angleIds', 'angles', 'variations', 'creativeFreedom', 'layoutFamily',
   'styleDnaId', 'brief', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims', 'productImageIds', 'productImageIdsByAd', 'mustAppear',
-  'heroRequired', 'productFidelity',
+  'heroRequired', 'productFidelity', 'useStyleDna',
 ] as const
 
 export function previewArgsHash(input: Record<string, unknown>): string {

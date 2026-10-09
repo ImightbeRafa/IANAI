@@ -33,9 +33,25 @@ Enabled tools now:
 
 **Brand kits (sync write, no credits):** `create_brand_kit`, `update_brand_kit` (every kit field — see 0.11 below), `set_primary_brand_kit`, `link_brand_kit` (PatchHouse / explicit `business_id`; no cross-brand moves). `delete_brand_kit` requires typed name + in-chat `confirm_execute`.
 
-**Brands (sync write, no credits, 0.13):** `create_brand` (+ primary kit), `import_image` / `import_images` (Drive/Dropbox/https → Advance storage, roles, quality, logo cleanup).
+**Brands (sync write, no credits, 0.13–0.14):** `create_brand` (+ primary kit), `update_brand`, `set_default_offer`, `import_image` / `import_images` (Drive/Dropbox/https → Advance storage, roles, quality, logo cleanup), `detach_style_dna` / `delete_style_dna`.
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
+
+### 0.14.0 — real-test fixes (packs without polling, plan before paying, Style DNA control)
+
+Registry / server version **0.14.0**. **No migration** (085 columns only). Proofs: `test/adpack/background.spec.ts`, `test/adpack/approval-plan.spec.ts`, `test/mcp-tools-v014.spec.ts` (+ updated door / journey tests).
+
+- **#13** `create_ads` / `adpack_start` answer `status: "running"` + `packId`, `etaSeconds`, `pollAfterSeconds` once work begins; never "completed" (or "Advance terminó …") until the pack is terminal. Replays and `get_execute_result` report the live state.
+- **#14** Root cause of "only advances while polling" + `-32001`: a 50 s background slice ended and nothing resumed the pack until the next poll, and that poll advanced **inline** (a model step overran the 8 s budget). Now `kickPackAdvance` schedules self-continuing, bounded (30 slices), lease-safe slices through the existing scheduler (`waitUntil`, process-wide in the CF container via `server.mjs`); `adpack_status` / web `status` are cheap reads that at most kick a loop when nobody holds a lease (`retryAfterSeconds`, `etaSeconds`, `backgroundKicked`); the existing minute cron (`/api/mcp-guide-analysis`, `ENABLE_CRONS`) also sweeps stale unleased packs (≤ 3 per tick). Charges stay idempotent per item.
+- **#15** `adpack_preview`, `adpack_quote` / the approval and the run share ONE planner (`prepareRun`): `plan[]` per ad (angle, rationale, layoutFamily, planned photo incl. the guaranteed hero — `photo.source` per_ad | hero | pool —, format after handheld substitution, ratios) + `planHash`. The approval is bound to the arguments (incl. `previewId`) and `planHash`; Ad Pack approvals last 24 h (`ADPACK_APPROVAL_TTL_HOURS`); identical arguments + price + plan reuse the open approval (`reused`, `approvalStatus`); an approved call whose plan changed answers `plan_changed` (`reason: "plan_changed"`) and runs nothing.
+- **#16** Failed ads retry automatically up to 2× inside the approval, after the copy stage's 2 free repair rounds (copy: new copy with another hook and the checker's reason; fully rejected scene/fidelity/render: re-plate with another setting + light). A single failing ratio never uses an item retry: AI relight → deterministic fallback → one re-plate at that ratio → `rejectedRatios` (ad delivered with ≥ 1 ratio). `attempts` / `attemptLog` reported; credits only for delivered ads.
+- **Ratio regenerate** `adpack_regenerate { packId, itemId, ratio }` (free) runs in the background: `status: "running"` + `pollAfterSeconds`; `adpack_status` lists `regenerating[]` until the new file lands (`BUSY` on a second request meanwhile). Proof: `test/adpack/merge-coherence.spec.ts`.
+- **#9** Inter (OFL) bundled; `fontsUsed { heading, body, fallbacks[] }` per item / deliverable ad.
+- **#12** `useStyleDna: false` (create_ads / adpack_start / adpack_from_brand / quote); kit `styleDnaIds: []` = none (no implicit `dna_1` notes); new `detach_style_dna` (free) and `delete_style_dna` (typed name + approval); kit views echo `styleDnaIds` / `activeStyleDnaIds`.
+- **#18** `create_upload_url.role` = import_image enum (+ `variant`, `label`, `tags`, `setPrimary`; `sizeBytes` optional/0); `finalize_upload` returns the quality report, tags, primary, clean label; `tag_product_image { label }`.
+- **#19** Labels / props 160, summaries 200, technicalSpecs 2000; over-limit input = clear `BAD_INPUT`, shortened derived values = `truncated[{field, from, to}]`; stored filenames shortened in the middle.
+- **#20** `list_assets` returns `role`, `partName`, `tags`, `isPrimary`, `quality`, `sourceUrl`, `label` (+ `kitAssets`).
+- **#22** `update_brand` (placeholder guard), `set_default_offer` (primary kit `brand_profile.defaultOfferId`, used when `offerId` is omitted; `list_brands` honors it); DNA audiences de-duplicated (max 3).
 
 ### 0.13.0 — a brand entirely via MCP (Content agent journey)
 
@@ -163,7 +179,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.13.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.14.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

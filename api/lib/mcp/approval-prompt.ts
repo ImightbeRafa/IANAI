@@ -10,6 +10,7 @@
  */
 
 import {
+  findReusableMcpApproval,
   issueMcpApprovalRequest,
   type McpApprovalStore,
 } from './approval.js'
@@ -59,13 +60,57 @@ export async function issueMcpChatApproval(options: {
   items?: number
   unitCost?: number
   includeWebFallback?: boolean
+  /** Approval lifetime (default MCP_APPROVAL_TTL_MS = 1 h; Ad Pack: 24 h). */
+  ttlMs?: number
+  /** #15: reuse an open approval with the same tool + arguments + price instead of a new round. */
+  reuseIdentical?: boolean
 }): Promise<Record<string, unknown>> {
+  if (options.reuseIdentical) {
+    const open = await findReusableMcpApproval(options.approvalStore, {
+      userId: options.userId,
+      toolName: options.toolName,
+      input: options.input,
+      quotedCreditCost: options.quotedCreditCost,
+    })
+    if (open) {
+      const payload = buildMcpApprovalRequiredPayload({
+        approvalRequestId: open.id,
+        expiresAtMs: open.expiresAtMs,
+        deepLink: `${(options.appOrigin || 'https://advanceai.studio').replace(/\/$/, '')}/mcp/approve/${encodeURIComponent(open.id)}`,
+        toolName: options.toolName,
+        quotedCreditCost: options.quotedCreditCost,
+        creditUnit: options.creditUnit,
+        boundInput: options.input && typeof options.input === 'object' ? options.input as Record<string, unknown> : undefined,
+        language: options.language,
+        summaryEs: options.summaryEs,
+        summaryEn: options.summaryEn,
+        extra: options.extra,
+        items: options.items,
+        unitCost: options.unitCost,
+        includeWebFallback: options.includeWebFallback,
+      })
+      const approved = open.status === 'approved'
+      return {
+        ...payload,
+        reused: true,
+        approvalStatus: open.status,
+        ...(approved
+          ? {
+              nextTool: options.toolName,
+              instructionsForGrok: `Same request as an approval the user already gave (still valid until ${new Date(open.expiresAtMs).toISOString()}): do NOT ask again — call ${options.toolName} with the same arguments plus approvalRequestId "${open.id}".`,
+              message: 'Already approved with these exact arguments: retry the tool with approvalRequestId (no new approval round).',
+            }
+          : {}),
+      }
+    }
+  }
   const req = await issueMcpApprovalRequest(options.approvalStore, {
     userId: options.userId,
     toolName: options.toolName,
     input: options.input,
     quotedCreditCost: options.quotedCreditCost,
     appOrigin: options.appOrigin,
+    ...(options.ttlMs ? { ttlMs: options.ttlMs } : {}),
   })
   return buildMcpApprovalRequiredPayload({
     approvalRequestId: req.approvalRequestId,

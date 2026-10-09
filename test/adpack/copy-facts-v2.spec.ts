@@ -258,9 +258,11 @@ describe('repair before failing (P0 #2b) with detailed issues (P0 #2c)', () => {
     await env.service.advance({ userId: USER_A, packId: started.packId })
     const status = await env.service.getStatus({ userId: USER_A, packId: started.packId })
     expect(status.status).toBe('failed')
-    expect(env.gateway.jsonCalls).toHaveLength(3) // generate + 2 free repair rounds
+    // (generate + 2 free repair rounds) × (1 + 2 automatic item retries, #16): repair rounds run first.
+    expect(env.gateway.jsonCalls).toHaveLength(9)
     expect(env.charges).toHaveLength(0)
     const failure = status.failures![0]
+    expect(failure).toMatchObject({ attempts: 3, attemptLog: [{ attempt: 1, mode: 'copy' }, { attempt: 2, mode: 'copy' }] })
     expect(failure.reason).toMatch(/datos confirmados/)
     expect(failure.issues![0]).toMatchObject({ field: 'caption', rule: 'unconfirmed_fact', sentence: 'Envío gratis desde 3 kits.', nearestFactKey: 'shipping' })
     expect(failure.issues![0].offendingTokens).toContain('3 kit')
@@ -416,7 +418,9 @@ describe('free copy preview reused by start (P0 #2d)', () => {
     expect(other.isError).toBe(true)
     const started = await call('create_ads', { ...base, previewId, approvalRequestId })
     expect(started.isError).toBe(false)
-    expect(started.payload).toMatchObject({ status: 'completed', previewId, previewAds: [1] })
+    // #13: work has begun, nothing is finished yet — running + packId + eta + plan.
+    expect(started.payload).toMatchObject({ status: 'running', previewId, previewAds: [1], packId: approvalRequestId, etaSeconds: expect.any(Number), pollAfterSeconds: expect.any(Number) })
+    expect(started.payload.plan).toEqual(prompt.payload.plan)
   })
 
   it('MCP: the previewed copy going stale after the approval answers plan_changed and runs nothing', async () => {

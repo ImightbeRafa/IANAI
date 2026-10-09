@@ -6,7 +6,7 @@
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
 import { findForbiddenHits } from './check-copy.js'
-import type { AdLanguage, AdPhotoRef, AngleCategory, AspectRatio, BrandDna, CopyCheckIssue, FactKey, FidelityMethod, FidelityResult, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AdPhotoRef, AngleCategory, AspectRatio, BrandDna, CopyCheckIssue, FactKey, FidelityMethod, FidelityResult, FontsUsed, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** The real photo(s) an ad used (P1 #8): exact = its cut-outs' sources, generated = the locked scene photo. */
 export function photoViews(item: Pick<PackItem, 'scene'>): { photo?: AdPhotoRef; parts?: AdPhotoRef[] } {
@@ -94,6 +94,10 @@ export interface AdPackFailureView {
   reason: string
   /** Paid (one ad of credits, needs in-chat approval) retry of just this ad. */
   retry: AdPackRetryCall
+  /** #16: attempts made inside the approval (1 + automatic retries) before reporting the failure. */
+  attempts: number
+  /** Why each automatic retry was needed (earlier attempts), oldest first. */
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
   /** Measured product fidelity when the ad failed on it (fidelity_failed). */
   fidelity?: AdPackFidelitySummary
   /** Copy failures: every blocking issue with field, sentence, offending tokens and the nearest fact. */
@@ -162,6 +166,12 @@ export interface AdPackDeliverableAd {
   files: AdPackDeliverableFile[]
   /** Brand forbidden phrases/claims found in the copy (verified empty for a shipped ad). */
   forbiddenHits: Array<{ phrase: string; field: string }>
+  /** #16: attempts it took inside the approval (1 = first try; credits are charged once). */
+  attempts: number
+  /** Why each automatic retry was needed (earlier attempts), oldest first. */
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
+  /** #9: fonts actually drawn (heading, body, fallbacks). */
+  fontsUsed?: FontsUsed
   /** Product fidelity (A4), worst ratio of the ad. */
   fidelity?: AdPackFidelitySummary
   /** The real product photo this ad used (P1 #8) and the part photos next to it. */
@@ -295,6 +305,8 @@ export function buildStatusExtras(input: {
       index: i.index + 1,
       reason: failureReason(i.error, language),
       retry: retryCall(input.packId, i),
+      attempts: 1 + (i.angle.autoRetry?.count ?? 0),
+      ...(i.angle.autoRetry?.history.length ? { attemptLog: i.angle.autoRetry.history } : {}),
       ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
       ...(failureIssues(i).length ? { issues: failureIssues(i) } : {}),
     }))
@@ -338,6 +350,9 @@ export function buildStatusExtras(input: {
           ...(r.fidelity ? { fidelity: fidelitySummary(r.fidelity) } : {}),
         })),
         forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
+        attempts: 1 + (i.angle.autoRetry?.count ?? 0),
+        ...(i.angle.autoRetry?.history.length ? { attemptLog: i.angle.autoRetry.history } : {}),
+        ...(i.renders[0]?.fontsUsed ? { fontsUsed: i.renders[0].fontsUsed } : {}),
         ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
         ...photoViews(i),
         ...(i.rejectedRatios?.length ? { rejectedRatios: rejectedRatioSummaries(input.packId, i) } : {}),

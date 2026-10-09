@@ -164,8 +164,40 @@ describe('advancePack', () => {
     const [item] = (await t.state()).items
     expect(item.status).toBe('failed')
     expect(item.error).toMatch(/scene_product_mismatch/)
-    expect(t.gateway.sceneCalls).toHaveLength(3)
+    // 3 scene attempts per run × (1 + 2 automatic retries inside the approval, #16).
+    expect(t.gateway.sceneCalls).toHaveLength(9)
+    expect(item.angle.autoRetry).toMatchObject({ count: 2, history: [{ attempt: 1, mode: 'scene' }, { attempt: 2, mode: 'scene' }] })
     expect(t.charge.total()).toBe(0)
+  })
+
+  it('#16: a failed ad is retried automatically inside the approval, delivered and charged once', async () => {
+    let checks = 0
+    const t = await setup({
+      size: 1,
+      offer: { productImageUrls: [PRODUCT_REF] },
+      // The first run's 3 scene checks reject the product; the automatic retry passes.
+      gateway: { vision: () => (++checks <= 3 ? { productMatches: false, strayText: false, score: 0.2 } : { productMatches: true, strayText: false, score: 0.9 }) },
+    })
+    const progress = await t.advance()
+    expect(progress.status).toBe('done')
+    const [item] = (await t.state()).items
+    expect(item.status).toBe('done')
+    expect(item.angle.autoRetry).toMatchObject({ count: 1, history: [{ attempt: 1, mode: 'scene', error: expect.stringMatching(/^scene_product_mismatch/) }] })
+    expect(t.charge.total()).toBe(1)
+    expect(t.charge.counts.get(item.generationId)).toBe(1)
+  })
+
+  it('#16: maxAutoRetries 0 reports the first failure (no retry)', async () => {
+    const t = await setup({
+      size: 1,
+      offer: { productImageUrls: [PRODUCT_REF] },
+      gateway: { vision: () => ({ productMatches: false, strayText: false, score: 0.2 }) },
+    })
+    await t.advance({ maxAutoRetries: 0 })
+    const [item] = (await t.state()).items
+    expect(item.status).toBe('failed')
+    expect(item.angle.autoRetry).toBeUndefined()
+    expect(t.gateway.sceneCalls).toHaveLength(3)
   })
 
   it('charges each item exactly once across repeated and concurrent advance calls', async () => {

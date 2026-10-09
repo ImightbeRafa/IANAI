@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { setMcpExecuteScheduler } from '../api/lib/mcp/execute-job'
+import { drainBackground, queueBackgroundWork, restoreBackgroundWork } from './adpack/background-queue'
 import { buildMcpApprovalRequiredPayload } from '../api/lib/mcp/approval-prompt'
 import { MCP_TOOL_REGISTRY } from '../api/lib/mcp/tool-registry'
 import { PER_AD, USER_A, callMcp, createDoorEnv, createMemoryMcpApprovalStore, mcpStartApproved, serum } from './adpack/door-harness'
@@ -82,10 +82,8 @@ describe('approval prompts are neutral and structured (static scan + builder)', 
 })
 
 describe('approval prompts through the MCP entry (adpack_start, adpack_regenerate; create_ads: mcp-journey-content-agent.spec.ts)', () => {
-  beforeAll(() => setMcpExecuteScheduler(() => {}))
-  afterAll(() => setMcpExecuteScheduler((work) => {
-    void work().catch(() => {})
-  }))
+  beforeAll(() => queueBackgroundWork())
+  afterAll(() => restoreBackgroundWork())
 
   it('pack approvals are neutral, structured and exact', async () => {
     const e = { ...createDoorEnv(), approvalStore: createMemoryMcpApprovalStore() }
@@ -96,8 +94,8 @@ describe('approval prompts through the MCP entry (adpack_start, adpack_regenerat
 
     const { started } = await mcpStartApproved(e, USER_A, { dna: serum.dna, offer: serum.offer, size: 1 })
     const packId = String(started.payload.packId)
-    let status = await callMcp(e, USER_A, 'adpack_status', { packId })
-    for (let i = 0; i < 5 && status.payload.moreWork; i++) status = await callMcp(e, USER_A, 'adpack_status', { packId })
+    await drainBackground()
+    const status = await callMcp(e, USER_A, 'adpack_status', { packId })
     const itemId = String((status.payload.deliverable as { ads: Array<{ itemId: string }> }).ads[0].itemId)
     const regen = await callMcp(e, USER_A, 'adpack_regenerate', { packId, itemId })
     expect(regen.payload.status).toBe('approval_required')

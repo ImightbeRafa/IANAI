@@ -7,7 +7,7 @@
  * pick them up. `ADPACK_FONTS_DIR` overrides the folder (e.g. a Cloudflare
  * container that copies the fonts somewhere else).
  *
- * Space Grotesk (OFL) is part of the manifest: a bundled system font, never fetched.
+ * Space Grotesk and Inter (OFL) are part of the manifest: bundled system fonts, never fetched.
  * Extra OFL TTF/OTF files dropped into the same folder (see README) are registered too, under the family name stored in the
  * font itself. Brand fonts fetched at runtime (Google Fonts / kit uploads, see
  * `font-resolver.ts`) are added with `registerFont`.
@@ -24,7 +24,7 @@ import type { DnaVisual } from '../types.js'
 /** Any registered family name (bundled, vendored or fetched at runtime). */
 export type FamilyName = string
 
-export type BundledFamily = 'Poppins' | 'Fira Sans' | 'Archivo Black' | 'Anton' | 'DM Serif Display' | 'Space Grotesk'
+export type BundledFamily = 'Poppins' | 'Fira Sans' | 'Archivo Black' | 'Anton' | 'DM Serif Display' | 'Space Grotesk' | 'Inter'
 
 interface FontFile {
   family: BundledFamily
@@ -46,9 +46,12 @@ const FONT_FILES: FontFile[] = [
   // Space Grotesk (OFL, google/fonts; static 400/700 instanced by scripts/adpack-vendor-fonts.mjs): bundled system font.
   { family: 'Space Grotesk', weight: 400, file: 'SpaceGrotesk-Regular.ttf', url: new URL('./fonts/SpaceGrotesk-Regular.ttf', import.meta.url) },
   { family: 'Space Grotesk', weight: 700, file: 'SpaceGrotesk-Bold.ttf', url: new URL('./fonts/SpaceGrotesk-Bold.ttf', import.meta.url) },
+  // Inter (OFL, google/fonts Inter[opsz,wght]; static 400/700 instanced by scripts/adpack-vendor-fonts.mjs "Inter"): bundled.
+  { family: 'Inter', weight: 400, file: 'Inter-Regular.ttf', url: new URL('./fonts/Inter-Regular.ttf', import.meta.url) },
+  { family: 'Inter', weight: 700, file: 'Inter-Bold.ttf', url: new URL('./fonts/Inter-Bold.ttf', import.meta.url) },
 ]
 
-export const BUNDLED_FAMILIES: BundledFamily[] = ['Poppins', 'Fira Sans', 'Archivo Black', 'Anton', 'DM Serif Display', 'Space Grotesk']
+export const BUNDLED_FAMILIES: BundledFamily[] = ['Poppins', 'Fira Sans', 'Archivo Black', 'Anton', 'DM Serif Display', 'Space Grotesk', 'Inter']
 
 /** Fira Sans covers ₡ and other glyphs missing from the display faces; it is always the fallback. */
 export const FALLBACK_FAMILY: BundledFamily = 'Fira Sans'
@@ -327,6 +330,7 @@ export function matchFamily(name: string | undefined, role: 'heading' | 'body'):
   if (s.includes('poppins')) return 'Poppins'
   if (s.includes('fira')) return 'Fira Sans'
   if (s.includes('space grotesk')) return 'Space Grotesk'
+  if (/^inter\b/.test(s) && !s.startsWith('interstate')) return 'Inter'
   if (s.includes('dm serif')) return role === 'heading' ? 'DM Serif Display' : 'Fira Sans'
   if (includesAny(s, SERIF) && !s.includes('sans')) return role === 'heading' ? 'DM Serif Display' : 'Fira Sans'
   if (includesAny(s, CONDENSED)) return role === 'heading' ? 'Anton' : 'Fira Sans'
@@ -343,6 +347,7 @@ const HEADING_WEIGHT: Record<BundledFamily, number> = {
   Anton: 400,
   'DM Serif Display': 400,
   'Space Grotesk': 700,
+  Inter: 700,
 }
 
 /** Heaviest useful heading weight of a registered family (prefers 700–800). */

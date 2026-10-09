@@ -2,18 +2,16 @@
  * Ad Pack — web door. POST JSON `{ action, ...fields }` (Bearer Supabase token).
  *
  * Thin wrapper over `api/lib/adpack/service.ts`; the MCP `adpack_*` tools call
- * the same service. `start` / `status` schedule a background advance with
- * `waitUntil` after responding, and `status` also runs a short inline advance
- * when no worker holds a lease (poll-driven resume: dropped background work is
- * never lost).
+ * the same service. `start` / `regenerate` kick a self-continuing background
+ * advance (waitUntil slices) after responding; `status` is a cheap read that at
+ * most kicks that loop when no worker holds a lease. The minute cron also
+ * resumes stale packs (api/mcp-guide-analysis.ts), so dropped work is never lost.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { waitUntil } from '@vercel/functions'
 import { requireAuth } from './lib/auth.js'
 import type { AdPackAction } from './lib/adpack/http-types.js'
 import {
-  ADPACK_BACKGROUND_BUDGET_MS,
-  ADPACK_INLINE_BUDGET_MS,
   adPackErrorResponse,
   AdPackError,
   getDefaultAdPackService,
@@ -81,6 +79,9 @@ function startArgs(body: Record<string, unknown>) {
     allowedProps: body.allowedProps,
     immutableAttributes: body.immutableAttributes,
     mustAppear: body.mustAppear,
+    useStyleDna: body.useStyleDna,
+    photoPerAd: body.photoPerAd,
+    heroRequired: body.heroRequired,
   }
 }
 
@@ -110,6 +111,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
           productImageIds: body.productImageIds,
           productImageIdsByAd: body.productImageIdsByAd,
           refresh: body.refresh,
+          useStyleDna: body.useStyleDna,
         }),
       }
     case 'dna_confirm':
@@ -117,25 +119,29 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
     case 'angles':
       return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd }) }
     case 'quote':
-      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd, angleIds: body.angleIds, productFidelity: body.productFidelity, relight: body.relight }) }
+      // #15: same prepareRun as start / preview → plan[] + planHash (send it back as start {approvedPlanHash}).
+      return { result: await service.quote({ userId, ...startArgs(body), source: 'web', withPlan: true }) }
     case 'start': {
       const started = await service.startPack({
         userId,
         ...startArgs(body),
         approved: body.approved,
         previewId: body.previewId,
+        approvedPlanHash: body.approvedPlanHash,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }
     }
     case 'status': {
-      const status = await service.pollStatus({ userId, packId: body.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, language: body.language })
-      return { result: status, backgroundPackId: status.moreWork ? status.packId : undefined }
+      // #14: cheap read — at most kicks the background loop (no inline advance).
+      const status = await service.pollStatus({ userId, packId: body.packId, language: body.language, schedule: (work) => scheduleBackground(work) })
+      return { result: status }
     }
     case 'edit_text':
       return { result: await service.editText({ userId, packId: body.packId, itemId: body.itemId, copy: body.copy }) }
     case 'regenerate': {
-      const regen = await service.regenerate({ userId, packId: body.packId, itemId: body.itemId, mode: body.mode })
+      // Ratio-only (free) work is scheduled in the background too: the request never waits on a re-plate.
+      const regen = await service.regenerate({ userId, packId: body.packId, itemId: body.itemId, mode: body.mode, ratio: body.ratio, schedule: (work) => scheduleBackground(work) })
       return { result: regen, backgroundPackId: String(body.packId) }
     }
     case 'resize':
@@ -186,6 +192,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const packId = outcome.backgroundPackId
   if (packId) {
-    scheduleBackground(() => service.advance({ userId: user.id, packId, budgetMs: ADPACK_BACKGROUND_BUDGET_MS }))
+    // Self-continuing slices: the pack finishes without anyone polling.
+    service.kickAdvance({ userId: user.id, packId, schedule: (work) => scheduleBackground(work) })
   }
 }

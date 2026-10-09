@@ -346,6 +346,10 @@ export interface AdvancePackInput {
   cutoutCache?: BlobCache | null
   /** Fetch product photos / cut-outs (default: data URL or https fetch). Tests inject fakes. */
   loadImage?: ImageLoader
+  /** #16: automatic retries per failed ad (default MAX_AUTO_RETRIES = 2; 0 disables). */
+  maxAutoRetries?: number
+  /** Exact mode: re-plate a rejected ratio once at that ratio before listing it (default true; false = list it directly). */
+  ratioReplate?: boolean
 }
 
 type StepOutcome = 'finished' | 'deferred' | 'budget'
@@ -466,8 +470,70 @@ async function release(ctx: RunCtx, item: PackItem): Promise<void> {
   ctx.known.set(item.id, { ...item, leaseUntil: undefined })
 }
 
+/** #16: automatic retries per ad inside the same approval before it is reported failed. */
+export const MAX_AUTO_RETRIES = 2
+
+/**
+ * Which failures are retried automatically, and how: copy failures write new copy (different
+ * hook/wording, the checker's issues fed back); scene / fidelity / render failures keep the copy
+ * and re-plate with another setting + light. A failed cut-out (same photo, same cut-out) and
+ * charge problems are not retried.
+ */
+export function autoRetryMode(error: string): 'copy' | 'scene' | null {
+  if (/^copy_(check_)?failed/.test(error)) return 'copy'
+  if (/^(fidelity_failed|scene_props_failed|scene_failed|scene_product_mismatch|scene_upload_failed|render_failed)/.test(error)) return 'scene'
+  return null
+}
+
 async function fail(ctx: RunCtx, item: PackItem, error: string, patch: Partial<PackItem> = {}): Promise<PackItem> {
+  const mode = autoRetryMode(error)
+  // The copy stage may hand back the angle it last wrote for (round-2 hook swap): keep it.
+  const angle = patch.angle ?? item.angle
+  const used = angle.autoRetry?.count ?? 0
+  const max = Math.max(0, ctx.input.maxAutoRetries ?? MAX_AUTO_RETRIES)
+  if (mode && used < max && !item.chargedAt) {
+    // Same approval, same credits: nothing is charged for a failed attempt (only delivered ads are).
+    // Order: the copy stage's free repair rounds already ran; this is the item-level retry (#16).
+    const autoRetry = { count: used + 1, history: [...(angle.autoRetry?.history ?? []), { attempt: used + 1, mode, error: error.slice(0, 240) }] }
+    const keepCopy = mode === 'scene' && Boolean(patch.copy ?? item.copy)
+    // A copy retry is a new angle variant: avoid the rejected headline(s) and use another hook (P1 #10).
+    const rejectedHeadline = (patch.copy ?? item.copy)?.headline ?? ''
+    const copyHint = mode === 'copy'
+      ? {
+          retry: {
+            attempt: (angle.retry?.attempt ?? 0) + 1,
+            avoidHeadlines: [...new Set([...(angle.retry?.avoidHeadlines ?? []), rejectedHeadline].filter(Boolean))].slice(-4),
+            hookType: alternateHook(angle, ctx.pack.dna, ctx.pack.offer, (angle.retry?.attempt ?? 0) + 1),
+          },
+        }
+      : {}
+    console.warn('[adpack] auto-retry', item.id, `${autoRetry.count}/${max}`, mode, error.slice(0, 160))
+    return save(ctx, item, {
+      ...(patch.costUsd !== undefined ? { costUsd: patch.costUsd } : {}),
+      ...(patch.timings ? { timings: patch.timings } : {}),
+      angle: { ...angle, ...copyHint, autoRetry },
+      status: keepCopy ? 'copy_ready' : 'planned',
+      copy: keepCopy ? (patch.copy ?? item.copy) : undefined,
+      copyCheck: keepCopy ? (patch.copyCheck ?? item.copyCheck) : undefined,
+      scene: undefined,
+      sceneCheck: undefined,
+      renders: [],
+      fidelity: undefined,
+      rejectedRatios: undefined,
+      sceneAttempts: undefined,
+      error: undefined,
+    })
+  }
   return save(ctx, item, { ...patch, status: 'failed', error: error.slice(0, 500), leaseUntil: undefined })
+}
+
+/** Copy-prompt hint for an automatic copy retry: what the checker rejected, and "write it differently". */
+export function copyRetryHint(retry: PackItem['angle']['autoRetry'], language: 'es' | 'en'): string | undefined {
+  const last = retry?.history.filter((h) => h.mode === 'copy').at(-1)
+  if (!retry || !last) return undefined
+  return language === 'es'
+    ? `REINTENTO ${retry.count}: la versión anterior fue rechazada (${last.error.slice(0, 180)}). Escribí un gancho y un titular distintos; cada dato concreto (precio, envío, contenido, edad, cantidades) copialo tal cual de los datos confirmados o no lo menciones; nada de urgencia ni frases prohibidas.`
+    : `RETRY ${retry.count}: the previous version was rejected (${last.error.slice(0, 180)}). Write a different hook and headline; copy every concrete fact (price, shipping, contents, age, quantities) verbatim from the confirmed facts or leave it out; no urgency, no forbidden phrases.`
 }
 
 async function runItem(ctx: RunCtx, leased: PackItem, onAnchorSettled: () => void): Promise<StepOutcome> {
@@ -577,8 +643,11 @@ async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem | 'defer'
   if (shared === 'defer') return 'defer'
   if (shared) return save(ctx, item, { status: 'copy_ready', copy: shared.copy, copyCheck: shared.copyCheck, timings: { ...item.timings, copyMs: 0 }, error: undefined })
   const t0 = Date.now()
-  // Generation + up to 2 free repair rounds fed with the checker's detailed issues (P0 #2b).
-  const res = await writeAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief })
+  // Copy stage (P0 #2b): generation + up to 2 free repair rounds fed with the checker's detailed
+  // issues. Still blocking afterwards → fail() schedules an automatic item retry (#16, ≤ 2) whose
+  // prompt says why the last version was rejected and asks for another hook.
+  const retryHint = copyRetryHint(item.angle.autoRetry, language)
+  const res = await writeAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief, ...(retryHint ? { retryHint, temperature: 0.9 } : {}) })
   const costUsd = (item.costUsd ?? 0) + res.costUsd
   const timings = { ...item.timings, copyMs: Date.now() - t0 }
   if (!res.copy || !res.check) return fail(ctx, item, res.error ?? 'copy_failed', { costUsd, timings })
@@ -686,7 +755,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
   const maxAttempts = 1 + Math.max(0, ctx.input.maxSceneRetries ?? MAX_SCENE_RETRIES)
   const productRef = offer.productImageUrls?.[0]
   // Nth ad of this format in the pack → Nth setting variant (no two same-format ads share a backdrop).
-  const variation = [...ctx.known.values()].filter((i) => i.angle.format === item.angle.format && i.index < item.index).length
+  const variation = [...ctx.known.values()].filter((i) => i.angle.format === item.angle.format && i.index < item.index).length + (item.angle.autoRetry?.count ?? 0)
   const t0 = Date.now()
   let checkMs = 0
   let cost = 0
@@ -882,8 +951,10 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const keptParts = overhead ? [] : cut.parts.filter((p) => !p.stored.flatLay)
   if (keptParts.length < cut.parts.length) cut.warnings.push(`${cut.parts.length - keptParts.length} part photo(s) skipped: ${overhead ? 'a flat lay already shows the kit' : 'top-down part photos are not placed in a perspective scene'}`)
   const cutouts: LoadedCutout[] = [cut.hero, ...keptParts]
-  const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length
-  const light: LightDirection = overhead ? 'top' : plateLight(item.index)
+  // #16: an automatic re-plate uses another setting and light (a fresh seed, not the same plate again).
+  const retries = item.angle.autoRetry?.count ?? 0
+  const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length + retries
+  const light: LightDirection = overhead ? 'top' : plateLight(item.index + retries)
   const surface = overhead ? 'matte' : plateSurface(format, variation)
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
@@ -1169,7 +1240,7 @@ async function renderAllRatios(args: {
       contentType: 'image/png',
     })
     const jpgUrl = await uploadJpgTwin(storage, pack, item, ratio, r.png)
-    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(fidelity ? { fidelity } : {}) })
+    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(fidelity ? { fidelity } : {}), ...(r.fontsUsed ? { fontsUsed: r.fontsUsed } : {}) })
     outputs.set(ratio, r)
   }
   if (!exact) {
@@ -1265,14 +1336,42 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
       if (!worst) return fail(ctx, item, 'fidelity_failed: product placement missing in render', { renders: [], timings })
       return fail(ctx, item, `fidelity_failed: ${worst.reason} (${rejectedRatios.map((r) => r.ratio).join(', ')})`, { fidelity: worst.fidelity, sceneCheck, renders: [], rejectedRatios, timings })
     }
+    // Fidelity order per ratio: AI relight → deterministic relight fallback (renderAllRatios) →
+    // one re-plate AT that ratio (here, free, no item retry used) → listed in rejectedRatios.
+    let renders = rendered.renders
+    let rejectedNow = rejectedRatios
+    let replateCost = 0
+    if (exactMode && exact && renders.length && rejectedNow.length && ctx.input.ratioReplate !== false && Date.now() < ctx.deadline) {
+      const still: RejectedRatio[] = []
+      for (const rj of rejectedNow) {
+        try {
+          const rp = await replateOneRatio({ gateway: ctx.input.gateway, renderer: ctx.input.renderer, storage: ctx.input.storage, pack: ctx.pack, item, copy: item.copy, exact, ratio: rj.ratio, maxPlateRetries: 0 })
+          replateCost += rp.costUsd
+          const got = rp.res?.renders[0]
+          if (got) {
+            renders = [...renders, { ...got, ...(rp.plateUrl ? { plateUrl: rp.plateUrl } : {}) }].sort((x, y) => ctx.pack.ratios.indexOf(x.ratio) - ctx.pack.ratios.indexOf(y.ratio))
+            continue
+          }
+          still.push(rp.res?.rejected[0] ?? rj)
+        } catch {
+          still.push(rj)
+        }
+      }
+      rejectedNow = still
+    }
+    const finalFidelity = rejectedNow.length === rejectedRatios.length ? fidelity : (worstFidelity(renders) ?? fidelity)
+    const finalCheck = finalFidelity
+      ? { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity: finalFidelity, ...(rejectedNow.length ? { rejectedRatios: rejectedNow } : { rejectedRatios: undefined }) }
+      : sceneCheck
     // Partial delivery: the passing ratios ship (charged once as one ad); rejected ones are listed
-    // and can be regenerated alone (adpack_regenerate { ratio }).
+    // and can be regenerated alone (adpack_regenerate { ratio }, free).
     return save(ctx, item, {
       status: 'rendered',
-      renders: rendered.renders,
-      ...(fidelity ? { fidelity, sceneCheck } : {}),
-      rejectedRatios: rejectedRatios.length ? rejectedRatios : undefined,
-      timings,
+      renders,
+      ...(finalFidelity ? { fidelity: finalFidelity, sceneCheck: finalCheck } : {}),
+      rejectedRatios: rejectedNow.length ? rejectedNow : undefined,
+      ...(replateCost ? { costUsd: (item.costUsd ?? 0) + replateCost } : {}),
+      timings: { ...timings, renderMs: Date.now() - t0 },
       error: undefined,
     })
   }
@@ -1581,19 +1680,96 @@ export type RegenerateRatioResult =
  * that ratio alone (one model call + props check), composited and fidelity-checked. The other
  * ratios are never touched. A ratio that still fails stays in `rejectedRatios` (not delivered).
  */
+/**
+ * A new background plate generated AT one ratio, then that ratio re-composited on it (exact mode).
+ * Shared by the free ratio regeneration and the runner's per-ratio retry (before a ratio is listed
+ * as rejected). Never touches the other ratios.
+ */
+async function replateOneRatio(args: {
+  gateway: ModelGateway
+  renderer: Renderer
+  storage: AdPackStorage
+  pack: Pack
+  item: PackItem
+  copy: AdCopy
+  exact: ExactRenderInputs
+  ratio: AspectRatio
+  maxPlateRetries: number
+}): Promise<{ res: RenderAllRatiosResult | null; plateUrl?: string; costUsd: number }> {
+  const { pack, item, copy, exact, ratio } = args
+  let costUsd = 0
+  let res: RenderAllRatiosResult | null = null
+  let plateUrl: string | undefined
+  const hero = await sharp(Buffer.from(exact.cutouts[0])).metadata()
+  const placement = plateRegionFor({ pack, format: item.angle.format, copy, product: { width: hero.width ?? 1, height: hero.height ?? 1 }, layoutFamily: item.angle.layoutFamily, ratios: [ratio], plateRatio: ratio })
+  const offer = offerForItem(pack.offer, item.index)
+  const view = item.scene?.view === 'overhead' ? ('overhead' as const) : undefined
+  const refs: PropsReference[] = (item.scene?.cutouts ?? []).slice(0, 3).map((c) => ({ image: c.sourceUrl, role: c.role, ...(c.label ? { label: c.label } : {}) }))
+  const allowedProps = pack.render?.allowedProps ?? offer.allowedProps
+  const immutableAttributes = pack.render?.immutableAttributes ?? offer.immutableAttributes
+  let hint: string | undefined
+  for (let a = 0; a <= Math.max(0, args.maxPlateRetries); a++) {
+    let plate
+    try {
+      plate = await generatePlate({
+        gateway: args.gateway,
+        format: item.angle.format,
+        dna: pack.dna,
+        offer,
+        placement,
+        light: exact.light ?? 'left',
+        surface: exact.surface ?? 'matte',
+        variation: item.attempts + a + 1,
+        allowedProps,
+        immutableAttributes,
+        sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy),
+        draft: true,
+        ratio,
+        promptSuffix: hint,
+        ...(view ? { view } : {}),
+      })
+    } catch {
+      continue
+    }
+    costUsd += plate.costUsd
+    let check: PlateCheckResult | null = null
+    try {
+      check = await checkPlate({ gateway: args.gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: pack.dna.language, immutableAttributes, ...(view ? { view } : {}) })
+      costUsd += check.costUsd
+    } catch {
+      check = null
+    }
+    if (check && !check.ok) {
+      hint = check.extraObjects.length ? PLATE_RETRY_HINT_PROPS : PLATE_RETRY_HINT_PLACEMENT
+      continue
+    }
+    const contentType = plate.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+    plateUrl = (await args.storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: 'plate', bytes: plate.bytes, contentType })).url
+    res = await renderAllRatios({ renderer: args.renderer, storage: args.storage, pack, item, copy, ratios: [ratio], exact, relightAuto: true, sceneImage: plate.bytes })
+    if (res.renders.length) break
+  }
+  return { res, ...(plateUrl ? { plateUrl } : {}), costUsd }
+}
+
+/** Cheap pre-checks of a ratio regeneration (no image I/O): the reason it cannot run, or null. */
+export function ratioRegenBlocker(pack: Pack, item: PackItem, ratio: AspectRatio): 'item_busy' | 'item_not_rendered' | 'not_exact' | 'ratio_not_in_pack' | null {
+  if (item.leaseUntil && Date.parse(item.leaseUntil) > Date.now() && !TERMINAL.has(item.status)) return 'item_busy'
+  if (!item.copy || !item.scene || (item.status !== 'rendered' && item.status !== 'done') || !item.renders.length) return 'item_not_rendered'
+  if (packMode(pack) !== 'exact' || item.scene.kind !== 'plate') return 'not_exact'
+  if (!pack.ratios.includes(ratio) && !(item.rejectedRatios ?? []).some((r) => r.ratio === ratio) && !item.renders.some((r) => r.ratio === ratio)) return 'ratio_not_in_pack'
+  return null
+}
+
 export async function regenerateRatio(input: RegenerateRatioInput): Promise<RegenerateRatioResult> {
   const loaded = await input.store.getPack(input.packId, input.userId)
   if (!loaded) return { ok: false, error: 'pack_not_found' }
   const { pack, items } = loaded
   const item = items.find((i) => i.id === input.itemId)
   if (!item) return { ok: false, error: 'item_not_found' }
-  if (item.leaseUntil && Date.parse(item.leaseUntil) > Date.now() && !TERMINAL.has(item.status)) return { ok: false, error: 'item_busy' }
-  if (!item.copy || !item.scene || (item.status !== 'rendered' && item.status !== 'done') || !item.renders.length) return { ok: false, error: 'item_not_rendered' }
-  if (packMode(pack) !== 'exact' || item.scene.kind !== 'plate') return { ok: false, error: 'not_exact' }
   const ratio = input.ratio
-  if (!pack.ratios.includes(ratio) && !(item.rejectedRatios ?? []).some((r) => r.ratio === ratio) && !item.renders.some((r) => r.ratio === ratio)) {
-    return { ok: false, error: 'ratio_not_in_pack' }
-  }
+  const blocked = ratioRegenBlocker(pack, item, ratio)
+  if (blocked) return { ok: false, error: blocked }
+  if (!item.copy || !item.scene) return { ok: false, error: 'item_not_rendered' }
   let exact: ExactRenderInputs
   try {
     exact = await exactInputsFromScene(item, input.loadImage ?? defaultImageLoader)
@@ -1611,54 +1787,10 @@ export async function regenerateRatio(input: RegenerateRatioInput): Promise<Rege
   // 2) A new plate for this ratio alone.
   if (!res.renders.length) {
     method = 'replate'
-    const hero = await sharp(Buffer.from(exact.cutouts[0])).metadata()
-    const placement = plateRegionFor({ pack, format: item.angle.format, copy, product: { width: hero.width ?? 1, height: hero.height ?? 1 }, layoutFamily: item.angle.layoutFamily, ratios: [ratio], plateRatio: ratio })
-    const offer = offerForItem(pack.offer, item.index)
-    const view = item.scene.view === 'overhead' ? ('overhead' as const) : undefined
-    const refs: PropsReference[] = (item.scene.cutouts ?? []).slice(0, 3).map((c) => ({ image: c.sourceUrl, role: c.role, ...(c.label ? { label: c.label } : {}) }))
-    const allowedProps = pack.render?.allowedProps ?? offer.allowedProps
-    const immutableAttributes = pack.render?.immutableAttributes ?? offer.immutableAttributes
-    let hint: string | undefined
-    for (let a = 0; a <= Math.max(0, input.maxPlateRetries ?? 1); a++) {
-      let plate
-      try {
-        plate = await generatePlate({
-          gateway: input.gateway,
-          format: item.angle.format,
-          dna: pack.dna,
-          offer,
-          placement,
-          light: exact.light ?? 'left',
-          surface: exact.surface ?? 'matte',
-          variation: item.attempts + a + 1,
-          allowedProps,
-          immutableAttributes,
-          sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy),
-          draft: true,
-          ratio,
-          promptSuffix: hint,
-          ...(view ? { view } : {}),
-        })
-      } catch {
-        continue
-      }
-      costUsd += plate.costUsd
-      let check: PlateCheckResult | null = null
-      try {
-        check = await checkPlate({ gateway: input.gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: pack.dna.language, immutableAttributes, ...(view ? { view } : {}) })
-        costUsd += check.costUsd
-      } catch {
-        check = null
-      }
-      if (check && !check.ok) {
-        hint = check.extraObjects.length ? PLATE_RETRY_HINT_PROPS : PLATE_RETRY_HINT_PLACEMENT
-        continue
-      }
-      const contentType = plate.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png'
-      plateUrl = (await input.storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: 'plate', bytes: plate.bytes, contentType })).url
-      res = await renderAllRatios({ ...base, sceneImage: plate.bytes })
-      if (res.renders.length) break
-    }
+    const rp = await replateOneRatio({ gateway: input.gateway, renderer: input.renderer, storage: input.storage, pack, item, copy, exact, ratio, maxPlateRetries: input.maxPlateRetries ?? 1 })
+    costUsd += rp.costUsd
+    plateUrl = rp.plateUrl
+    if (rp.res) res = rp.res
   }
   const delivered = res.renders[0]
   const renders = delivered
@@ -1673,10 +1805,18 @@ export async function regenerateRatio(input: RegenerateRatioInput): Promise<Rege
     costUsd: (item.costUsd ?? 0) + costUsd,
     timings: { ...item.timings, renderMs: Date.now() - t0 },
     ...(fidelity ? { fidelity } : {}),
-    sceneCheck: { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), ...(fidelity ? { fidelity } : {}), rejectedRatios: list.length ? list : undefined },
+    // The background marker (adpack_regenerate {ratio}) is cleared with the result.
+    sceneCheck: { ...withoutRegenMarker(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), ...(fidelity ? { fidelity } : {}), rejectedRatios: list.length ? list : undefined },
   }
   await input.store.updateItem(item.id, next)
   const fresh = { ...item, ...next, updatedAt: nowIso() }
   for (const [k, v] of Object.entries(next)) if (v === undefined) delete (fresh as unknown as Record<string, unknown>)[k]
   return { ok: true, item: fresh, ratio, delivered: Boolean(delivered), method, ...(delivered ? {} : failedNow ? { rejected: failedNow } : {}), costUsd }
+}
+
+/** scene_check without the background ratio-regeneration marker. */
+export function withoutRegenMarker<T extends { regenerating?: unknown }>(check: T): Omit<T, 'regenerating'> {
+  const { regenerating: _r, ...rest } = check
+  void _r
+  return rest
 }

@@ -4,7 +4,7 @@
  * The runner never imports the renderer, storage or credits directly so tests
  * and the benchmark inject fakes, and the web / MCP doors inject real ones.
  */
-import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LayoutFamily, LightDirection, PlateSurface } from './types.js'
+import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LayoutFamily, LightDirection, PlateSurface, FontsUsed } from './types.js'
 
 /** Placement of a real-product cut-out in a render (canvas px). */
 export interface RenderProductPlacement {
@@ -65,6 +65,8 @@ export interface RenderOutput {
   /** Layout family + placement variant actually used. */
   layoutFamily?: LayoutFamily
   placement?: string
+  /** #9: fonts actually drawn (+ fallbacks). */
+  fontsUsed?: FontsUsed
 }
 
 /** Deterministic text layer (Satori → resvg). Real impl: `./render` (see render-adapter.ts). */

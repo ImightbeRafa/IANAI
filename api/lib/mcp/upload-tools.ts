@@ -11,8 +11,13 @@
 import { randomUUID } from 'node:crypto'
 import { MIGRATION_085 } from '../db-missing-column.js'
 import { readBrandProfile, type BrandLogoVariant, type BrandLogoVariantKind } from '../brand-profile.js'
+import { labelWithRole } from '../adpack/fidelity/photos.js'
 import { resolveBrandKitForBusiness } from '../brand-kit-resolve.js'
 import { safeFilename, uploadPath } from './asset-rehost.js'
+import { LABEL_MAX, PART_NAME_MAX } from './text-limits.js'
+import { PRODUCT_PHOTO_ROLES, isProductPhotoRole, roleFromLabel } from '../adpack/fidelity/photos.js'
+import { PRODUCT_IMAGE_TAGS, type ProductImageTag } from '../product-image-order.js'
+import type { ProductPhotoRole } from '../adpack/types.js'
 import type { McpBrandKitStore } from './brand-kit-tools.js'
 import type { McpOfferStore } from './offer-tools.js'
 import type { McpAuthUser, McpDbClient } from './user-tools.js'
@@ -34,7 +39,6 @@ export const UPLOAD_LIMITS: Record<UploadKind, { types: string[]; maxBytes: numb
   document: { types: ['application/pdf'], maxBytes: 20 * 1024 * 1024 },
 }
 
-const ROLE_MAX = 60
 const asString = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
 
 class UploadInputError extends Error {
@@ -63,12 +67,42 @@ export async function mcpCreateUploadUrl(options: {
   const contentType = normalizeType(asString(args.contentType))
   const limits = UPLOAD_LIMITS[kind]
   if (!limits.types.includes(contentType)) throw new UploadInputError(`contentType for ${kind} must be one of ${limits.types.join(', ')}`)
-  if (args.sizeBytes !== undefined) {
-    if (typeof args.sizeBytes !== 'number' || !Number.isFinite(args.sizeBytes) || args.sizeBytes <= 0) throw new UploadInputError('sizeBytes must be a positive number')
+  // #18: sizeBytes is optional; 0 / absent = unknown (the real size is checked at finalize_upload).
+  if (args.sizeBytes !== undefined && args.sizeBytes !== null) {
+    if (typeof args.sizeBytes !== 'number' || !Number.isFinite(args.sizeBytes) || args.sizeBytes < 0) throw new UploadInputError('sizeBytes is optional; when sent it must be the file size in bytes (0 or omit it if unknown)')
     if (args.sizeBytes > limits.maxBytes) throw new UploadInputError(`File too large: max ${Math.round(limits.maxBytes / 1024 / 1024)} MB for ${kind}`)
   }
-  const role = asString(args.role)
-  if (role.length > ROLE_MAX) throw new UploadInputError(`role must be at most ${ROLE_MAX} characters`)
+  // #18: role uses the same enum as import_image (product_photo: hero|part|box|contents|in_use|detail;
+  // logo: a variant). A legacy free part name ("control") is still accepted and kept as the label.
+  const rawRole = asString(args.role)
+  let role: string | undefined
+  let legacyLabel: string | undefined
+  if (rawRole) {
+    if (kind === 'product_photo') {
+      if (isProductPhotoRole(rawRole)) role = rawRole
+      else {
+        if (rawRole.length > PART_NAME_MAX) throw new UploadInputError(`role "${rawRole.slice(0, 40)}…" is not a role (${PRODUCT_PHOTO_ROLES.join(', ')}); send the part name as label (max ${PART_NAME_MAX} characters)`)
+        legacyLabel = rawRole
+      }
+    } else if (kind === 'logo') {
+      if (!(LOGO_VARIANTS as readonly string[]).includes(rawRole)) throw new UploadInputError(`role for a logo is its variant: ${LOGO_VARIANTS.join(', ')}`)
+      role = rawRole
+    } else throw new UploadInputError('role applies to product_photo (hero|part|box|contents|in_use|detail) and logo (variant) only')
+  }
+  const variant = asString(args.variant)
+  if (variant) {
+    if (kind !== 'logo' || !(LOGO_VARIANTS as readonly string[]).includes(variant)) throw new UploadInputError(`variant applies to logo only: ${LOGO_VARIANTS.join(', ')}`)
+    role = variant
+  }
+  const label = asString(args.label).replace(/\s+/g, ' ') || legacyLabel || ''
+  if (label.length > LABEL_MAX) throw new UploadInputError(`label is ${label.length} characters; the maximum is ${LABEL_MAX} (shorten it)`)
+  let tags: ProductImageTag[] | undefined
+  if (args.tags !== undefined && args.tags !== null) {
+    if (kind !== 'product_photo') throw new UploadInputError('tags apply to product_photo only')
+    if (!Array.isArray(args.tags) || args.tags.some((t) => !(PRODUCT_IMAGE_TAGS as readonly string[]).includes(String(t)))) throw new UploadInputError(`tags must be an array of: ${PRODUCT_IMAGE_TAGS.join(', ')}`)
+    tags = [...new Set(args.tags as ProductImageTag[])]
+  }
+  if (args.setPrimary !== undefined && typeof args.setPrimary !== 'boolean') throw new UploadInputError('setPrimary must be a boolean')
 
   const brand = await options.db.getBusinessForUser(user.id, brandId)
   if (!brand) throw new Error('Brand not found')
@@ -90,9 +124,14 @@ export async function mcpCreateUploadUrl(options: {
       kind,
       path,
       filename: safeFilename(filename),
+      originalFilename: filename,
       contentType,
       ...(offerId ? { offerId } : {}),
       ...(role ? { role } : {}),
+      ...(label ? { label } : {}),
+      ...(tags?.length ? { tags } : {}),
+      ...(args.setPrimary !== undefined ? { setPrimary: args.setPrimary } : {}),
+      ...(legacyLabel ? { role: legacyLabel, legacyRole: legacyLabel } : {}),
       expiresAt: new Date(Date.now() + SIGNED_UPLOAD_TTL_SECONDS * 1000).toISOString(),
       source: 'mcp',
     },
@@ -229,28 +268,55 @@ export async function mcpFinalizeUpload(options: {
   const role = typeof meta.role === 'string' ? meta.role : undefined
   const warnings: string[] = []
   let saved: Row
+  let quality: Row | null = null
   if (kind === 'product_photo') {
     const caps = await store.capabilities()
     const offerId = String(meta.offerId || '')
-    const row = await store.insertProductImage({
-      userId: user.id,
+    // #18: never "MCP upload — <file>": the given label, else a clean name from the file.
+    const label = (typeof meta.label === 'string' && meta.label) || cleanLabelFromFilename(String(meta.originalFilename || meta.filename || '')) || 'product photo'
+    const photoRole: ProductPhotoRole | undefined = role && isProductPhotoRole(role) ? role : roleFromLabel(typeof meta.legacyRole === 'string' ? meta.legacyRole : undefined)
+    const tags: ProductImageTag[] = [...new Set([...(photoRole ? [ROLE_TAG_OF[photoRole]] : []), ...((Array.isArray(meta.tags) ? meta.tags : []) as ProductImageTag[])])]
+    const setPrimary = photoRole === 'hero' && meta.setPrimary !== false
+    quality = await uploadQuality(store, path)
+    if (!quality) warnings.push('quality report unavailable for this upload (the photo is saved; import_image analyzes it too)')
+    else if (Array.isArray(quality.warnings)) warnings.push(...(quality.warnings as string[]))
+    const row: Row = {
+      product_id: offerId,
+      user_id: user.id,
+      image_url: url,
+      label: caps.imageMeta || !photoRole ? label : labelWithRole(photoRole, label),
+      kind: 'product',
+    }
+    if (caps.imageMeta) {
+      if (tags.length) row.tags = tags
+      // Free part name ("control tipo gamepad") like import_image; legacy free roles stay as before.
+      const partName = typeof meta.legacyRole === 'string' ? meta.legacyRole : typeof meta.label === 'string' ? meta.label : ''
+      if (partName) row.role = partName
+      if (quality) row.quality = quality
+      if (setPrimary) {
+        await store.clearPrimaryImages({ userId: user.id, offerId })
+        row.is_primary = true
+      }
+    } else if (photoRole || tags.length) warnings.push(`role/tags stored in the label only (migration ${MIGRATION_085} pending)`)
+    const inserted = await store.insertProductImage({ userId: user.id, offerId, row })
+    saved = {
+      target: 'product_images',
+      productImageId: inserted.id,
       offerId,
-      row: {
-        product_id: offerId,
-        user_id: user.id,
-        image_url: url,
-        label: `MCP upload — ${String(meta.filename || 'product photo')}`.slice(0, 200),
-        kind: 'product',
-        ...(caps.imageMeta && role ? { role } : {}),
-      },
-    })
-    if (role && !caps.imageMeta) warnings.push(`role was not saved (migration ${MIGRATION_085} pending)`)
-    saved = { target: 'product_images', productImageId: row.id, offerId }
+      label,
+      role: photoRole ?? null,
+      tags: caps.imageMeta ? tags : [],
+      isPrimary: Boolean(caps.imageMeta && setPrimary),
+      ...(quality ? { width: quality.width, height: quality.height, quality } : { quality: null }),
+      ...(quality && (quality.lowResolution || quality.blurry)
+        ? { qualityNote: 'Low-quality photo: it is saved, but the sharpest photo of the offer is preferred for ads. Upload a sharper / larger original if you have one.' }
+        : {}),
+    }
   } else {
     if (!options.brandKitStore) throw new Error('Brand kit store not configured')
     const kitSaved = await saveKitAsset({ store, kitStore: options.brandKitStore, userId: user.id, brandId: record.brandId, kind, url, role, filename: String(meta.filename || 'document.pdf') })
     warnings.push(...kitSaved.warnings)
-    saved = { target: 'brand_kit', brandKitId: kitSaved.brandKitId, assetKind: kind }
+    saved = { target: 'brand_kit', brandKitId: kitSaved.brandKitId, assetKind: kind, ...(role ? { role } : {}), ...(kind === 'logo' ? { logoUrlSet: kitSaved.logoUrlSet } : {}) }
   }
 
   const out: Row = {
@@ -260,11 +326,36 @@ export async function mcpFinalizeUpload(options: {
     url,
     sizeBytes: stat.size,
     contentType: actualType,
-    ...saved,
     ...(role ? { role } : {}),
+    ...saved,
     ...(warnings.length ? { warnings } : {}),
     creditsNote: 'Free — no Advance credits.',
   }
   await store.updateUploadRecord({ userId: user.id, uploadId, metadata: { ...meta, status: 'finalized', result: out } })
   return out
+}
+
+const ROLE_TAG_OF: Record<ProductPhotoRole, ProductImageTag> = { hero: 'hero', part: 'part', box: 'caja', contents: 'contenido-kit', in_use: 'en-uso', detail: 'detalle' }
+
+/** "IMG_2041 avión-armado (final).JPG" → "avión armado final"; camera names ("IMG_2041") drop out. */
+export function cleanLabelFromFilename(filename: string): string {
+  const stem = filename.replace(/\.[a-z0-9]{2,5}$/i, '')
+  const words = stem
+    .replace(/[_\-.()[\]{}]+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !/^(img|dsc|dscn|pxl|photo|image|whatsapp|wa\d+|\d{3,})$/i.test(w) && !/^\d{6,}$/.test(w))
+  return words.join(' ').trim().slice(0, LABEL_MAX)
+}
+
+/** #18: the same quality report as import_image, from the uploaded bytes (best-effort). */
+async function uploadQuality(store: McpOfferStore, path: string): Promise<Row | null> {
+  if (!store.downloadObject) return null
+  try {
+    const bytes = await store.downloadObject({ path })
+    if (!bytes?.length) return null
+    const { analyzeAssetQuality } = await import('../adpack/fidelity/asset-quality.js')
+    return { ...(await analyzeAssetQuality(bytes, 'es')) }
+  } catch {
+    return null
+  }
 }

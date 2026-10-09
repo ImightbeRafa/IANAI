@@ -14,16 +14,16 @@
  *   lease, so a dropped background task never stalls the pack.
  */
 import {
-  ADPACK_BACKGROUND_BUDGET_MS,
-  ADPACK_INLINE_BUDGET_MS,
   AdPackError,
   adPackPlanSummary,
   deepLinkForAdPack,
+  retryAfterSecondsFor,
   isAdPackError,
   type AdPackService,
 } from '../adpack/service.js'
 import type { AdPackItemView, AdPackPlanSummary, AdPackStatusResponse } from '../adpack/http-types.js'
 import {
+  adPackApprovalTtlMs,
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
   denyMcpApprovalRequest,
@@ -56,14 +56,22 @@ function rethrow(err: unknown): never {
   throw err
 }
 
+/**
+ * #14: kick the self-continuing background loop (slice after slice, no poll needed). A second kick
+ * while this process already runs the pack's loop is a no-op; leases keep other workers apart.
+ */
 function scheduleAdvance(service: AdPackService, userId: string, packId: string): void {
-  scheduleMcpExecuteWork(async () => {
-    await service.advance({ userId, packId, budgetMs: ADPACK_BACKGROUND_BUDGET_MS })
-  })
+  service.kickAdvance({ userId, packId, schedule: scheduleMcpExecuteWork })
 }
 
-/** Poll cadence suggested to the host while a pack runs (background work continues between polls). */
+/** Default poll cadence suggested to the host while a pack runs (background work continues between polls). */
 export const ADPACK_POLL_AFTER_MS = 20_000
+
+/** #13: the pack is still working unless it reached a terminal state. */
+const TERMINAL_PACK_STATUSES = new Set(['done', 'partial', 'failed', 'cancelled'])
+export function jobStatusForPack(packStatus: string): 'running' | 'completed' {
+  return TERMINAL_PACK_STATUSES.has(packStatus) ? 'completed' : 'running'
+}
 
 /** Compact per-ad row (no copy blocks / DNA): captions live once, in `deliverable`. */
 function compactItem(item: AdPackItemView) {
@@ -82,11 +90,15 @@ function compactItem(item: AdPackItemView) {
     // Stable public storage URLs (never signed / expiring) with explicit size + format (G4).
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}), width: r.width, height: r.height, format: 'png' as const })),
     charged: item.charged,
+    ...(item.autoRetries ? { autoRetries: item.autoRetries } : {}),
+    ...(item.fontsUsed ? { fontsUsed: item.fontsUsed } : {}),
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
     ...(item.fidelity ? { fidelity: item.fidelity } : {}),
     // P0 #3: ratios not delivered (product changed) — regenerate one free with adpack_regenerate { ratio }.
     ...(item.rejectedRatios?.length ? { rejectedRatios: item.rejectedRatios } : {}),
+    // A free ratio regeneration of this ad still running in the background.
+    ...(item.regenerating ? { regenerating: item.regenerating } : {}),
     // P1 #8: the real photo this ad used (+ parts).
     ...(item.photo ? { photo: item.photo } : {}),
     ...(item.parts?.length ? { parts: item.parts } : {}),
@@ -143,14 +155,21 @@ function statusPayload(status: AdPackStatusResponse) {
   const finished = Boolean(status.deliverable)
   const failedHint = status.failures?.length
     ? es
-      ? ' Para los que fallaron, explicá el motivo y ofrecé reintentar con la llamada exacta de failures[].retry.call (cuesta 1 anuncio de créditos, requiere confirmación).'
-      : ' For failed ads, explain the reason and offer to retry with the exact failures[].retry.call (costs one ad of credits, needs confirmation).'
+      ? ' Para los que fallaron: Advance ya los reintentó solo dentro de esta aprobación (failures[].attempts, sin cobrar). Explicá el motivo y ofrecé reintentar con la llamada exacta de failures[].retry.call (cuesta 1 anuncio de créditos, requiere confirmación).'
+      : ' For failed ads: Advance already retried them inside this approval (failures[].attempts, not charged). Explain the reason and offer to retry with the exact failures[].retry.call (costs one ad of credits, needs confirmation).'
     : ''
   const forbidden = (status.deliverable?.ads ?? []).filter((a) => a.forbiddenHits.length)
   const forbiddenHint = forbidden.length
     ? es
       ? ` Atención: ${forbidden.length} anuncio(s) contienen frases prohibidas de la marca (forbiddenHits); no los publiques sin corregirlos con adpack_edit_text.`
       : ` Warning: ${forbidden.length} ad(s) contain forbidden brand phrases (forbiddenHits); do not publish them before fixing with adpack_edit_text.`
+    : ''
+  // Free ratio regenerations still running (the pack itself may be finished): one more status read later.
+  const regen = status.regenerating?.length ? status.regenerating : null
+  const regenHint = regen
+    ? es
+      ? ` Se está regenerando gratis ${regen.map((r) => `el ${r.ratio} del anuncio ${r.index}`).join(', ')}: volvé a llamar adpack_status en ~${status.retryAfterSeconds ?? 30} s para el archivo nuevo.`
+      : ` Still regenerating (free) ${regen.map((r) => `${r.ratio} of ad ${r.index}`).join(', ')}: call adpack_status again in ~${status.retryAfterSeconds ?? 30} s for the new file.`
     : ''
   return {
     packId: status.packId,
@@ -162,6 +181,9 @@ function statusPayload(status: AdPackStatusResponse) {
     chargedCredits: status.chargedCredits,
     moreWork: status.moreWork,
     ...(status.etaSeconds !== undefined ? { etaSeconds: status.etaSeconds } : {}),
+    ...(status.retryAfterSeconds !== undefined ? { retryAfterSeconds: status.retryAfterSeconds } : {}),
+    ...(status.backgroundKicked ? { backgroundKicked: true } : {}),
+    ...(status.regenerating?.length ? { regenerating: status.regenerating } : {}),
     // While running: per-ad rows (finished ads already have links). Once finished: the deliverable replaces them.
     ...(finished ? {} : { items: status.items.map(compactItem) }),
     ...(status.failures?.length ? { failures: status.failures } : {}),
@@ -170,12 +192,20 @@ function statusPayload(status: AdPackStatusResponse) {
     statusMessage: status.summary,
     ...(status.moreWork
       ? {
-        retryAfterMs: ADPACK_POLL_AFTER_MS,
+        retryAfterMs: (status.retryAfterSeconds ?? ADPACK_POLL_AFTER_MS / 1000) * 1000,
         nextTool: 'adpack_status',
         instructionsForGrok: es
-          ? `Decile al usuario el resumen ("${status.summary}"). Volvé a llamar adpack_status con este packId en ~20-30 s (no más seguido); el trabajo sigue en segundo plano. Pará cuando moreWork=false.${failedHint}`
-          : `Tell the user the summary ("${status.summary}"). Call adpack_status again with this packId in ~20-30 s (not more often); work continues in the background. Stop when moreWork=false.${failedHint}`,
+          ? `Decile al usuario el resumen ("${status.summary}"). El pack avanza solo en segundo plano (no hace falta consultar para que avance). Si querés novedades, volvé a llamar adpack_status con este packId en ~${status.retryAfterSeconds ?? 20} s (no más seguido). Pará cuando moreWork=false.${failedHint}`
+          : `Tell the user the summary ("${status.summary}"). The pack advances on its own in the background (polling is not needed for progress). For an update, call adpack_status again with this packId in ~${status.retryAfterSeconds ?? 20} s (not more often). Stop when moreWork=false.${failedHint}`,
       }
+      : finished && regen
+        ? {
+          retryAfterMs: (status.retryAfterSeconds ?? 30) * 1000,
+          nextTool: 'adpack_status',
+          instructionsForGrok: es
+            ? `Pack terminado: presentá deliverable.ads (files + caption por anuncio).${regenHint}${failedHint}${forbiddenHint}`
+            : `Pack finished: present deliverable.ads (files + caption per ad).${regenHint}${failedHint}${forbiddenHint}`,
+        }
       : finished
         ? {
           instructionsForGrok: es
@@ -184,6 +214,24 @@ function statusPayload(status: AdPackStatusResponse) {
         }
         : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }
+}
+
+/** A replayed start/regenerate answer with the pack's CURRENT state (running until terminal). */
+function withLivePackStatus(stored: Record<string, unknown>, status: AdPackStatusResponse | null, toolName: string): Record<string, unknown> {
+  if (!status) return stored
+  const job = jobStatusForPack(status.status)
+  return withStatusMessage({
+    ...stored,
+    status: job,
+    packStatus: status.status,
+    moreWork: status.moreWork,
+    chargedCredits: status.chargedCredits,
+    ...(status.etaSeconds !== undefined ? { etaSeconds: status.etaSeconds } : {}),
+    ...(status.retryAfterSeconds !== undefined ? { pollAfterSeconds: status.retryAfterSeconds, retryAfterMs: status.retryAfterSeconds * 1000 } : {}),
+    summary: status.summary,
+    statusMessage: undefined,
+    ...(status.deliverable ? { deliverable: status.deliverable } : {}),
+  }, toolName)
 }
 
 async function approvedOrPrompt(options: {
@@ -198,6 +246,8 @@ async function approvedOrPrompt(options: {
   summaryEn: string
   appOrigin?: string
   language?: 'es' | 'en'
+  /** Extra fields on the approval payload (e.g. the per-ad plan). */
+  extra?: Record<string, unknown>
 }): Promise<{ prompt: Record<string, unknown> } | { replay: Record<string, unknown> } | { approved: AdPackPlanSummary | null }> {
   if (!options.approvalRequestId) {
     return {
@@ -213,6 +263,10 @@ async function approvedOrPrompt(options: {
         summaryEs: options.summaryEs,
         summaryEn: options.summaryEn,
         language: options.language,
+        // #15: 24 h (configurable) and an identical re-quote reuses the open approval.
+        ttlMs: adPackApprovalTtlMs(),
+        reuseIdentical: true,
+        ...(options.extra ? { extra: options.extra } : {}),
       }),
     }
   }
@@ -222,7 +276,8 @@ async function approvedOrPrompt(options: {
     toolName: options.toolName,
     input: options.input,
   })
-  if (replay.ok && replay.result && typeof replay.result === 'object' && (replay.result as { status?: unknown }).status === 'completed') {
+  const replayedStatus = replay.ok && replay.result && typeof replay.result === 'object' ? (replay.result as { status?: unknown }).status : undefined
+  if (replay.ok && (replayedStatus === 'completed' || replayedStatus === 'running')) {
     return { replay: { ...(replay.result as Record<string, unknown>), replayed: true } }
   }
   const ready = await assertMcpApprovalReady(options.approvalStore, {
@@ -253,11 +308,47 @@ async function finalize(options: {
   if (!consumed.ok) throw new Error(consumed.reason)
 }
 
+/** Start-shaped arguments shared by adpack_start, the approval quote and adpack_preview (one plan). */
+function startLikeArgs(args: Args) {
+  return {
+    dna: args.dna,
+    offer: args.offer,
+    brandId: args.brandId,
+    offerId: args.offerId,
+    brief: args.brief,
+    size: args.size,
+    angleIds: args.angleIds,
+    angles: args.angles,
+    variations: args.variations,
+    creativeFreedom: args.creativeFreedom,
+    layoutFamily: args.layoutFamily,
+    styleDnaId: args.styleDnaId,
+    useStyleDna: args.useStyleDna,
+    ratios: args.ratios,
+    businessId: args.businessId,
+    brandKitId: args.brandKitId,
+    productImageIds: args.productImageIds,
+    productImageIdsByAd: args.productImageIdsByAd,
+    photoPerAd: args.photoPerAd,
+    heroRequired: args.heroRequired,
+    locale: args.locale,
+    register: args.register,
+    forbiddenPhrases: args.forbiddenPhrases,
+    forbiddenClaims: args.forbiddenClaims,
+    productFidelity: args.productFidelity,
+    relight: args.relight,
+    allowedProps: args.allowedProps,
+    immutableAttributes: args.immutableAttributes,
+    mustAppear: args.mustAppear,
+    previewId: args.previewId,
+  }
+}
+
 function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
   for (const key of [
     'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
-    'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId',
+    'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId', 'useStyleDna',
     'productImageIds', 'productImageIdsByAd', 'photoPerAd', 'heroRequired', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
     'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
     'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
@@ -405,6 +496,7 @@ export async function dispatchAdPackTool(options: {
           productImageIdsByAd: args.productImageIdsByAd,
           photoPerAd: args.photoPerAd,
           refresh: args.refresh,
+          useStyleDna: args.useStyleDna,
         })
         // G2: the server resolves the profile by id; the full DNA (~3 KB) is only echoed on request.
         const { dna, ...rest } = full
@@ -425,7 +517,7 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_dna_confirm':
         return { ...(await service.confirmDna({ userId, dna: args.dna, edits: args.edits })) }
       case 'adpack_angles': {
-        const res = await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brief: args.brief, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
+        const res = await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brief: args.brief, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, useStyleDna: args.useStyleDna })
         return {
           ...res,
           nextStep: 'Each angle has id (stable catalog id <category>-<hookType>-<format>), category, hookType, format and rationale. Pass the ids you want as adpack_start {angleIds}; ids from guide_bulk_angles (adpackAngleId) and legacy aNN-… ids work too.',
@@ -433,24 +525,7 @@ export async function dispatchAdPackTool(options: {
       }
       case 'adpack_quote':
         return {
-          ...(await service.quote({
-            userId,
-            size: args.size,
-            dna: args.dna,
-            offer: args.offer,
-            brief: args.brief,
-            brandId: args.brandId,
-            offerId: args.offerId,
-            brandKitId: args.brandKitId,
-            productImageIds: args.productImageIds,
-            productImageIdsByAd: args.productImageIdsByAd,
-            photoPerAd: args.photoPerAd,
-            angleIds: args.angleIds,
-            angles: args.angles,
-            variations: args.variations,
-            productFidelity: args.productFidelity,
-            relight: args.relight,
-          })),
+          ...(await service.quote({ userId, ...startLikeArgs(args), source: 'mcp', withPlan: true })),
         }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
@@ -464,16 +539,25 @@ export async function dispatchAdPackTool(options: {
         // B2: corrections are written once, on the first call (the approved retry repeats the same arguments).
         const saved = approvalRequestId ? undefined : await persist()
         const preview = usesSavedBrand(args)
-          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
+          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, photoPerAd: args.photoPerAd, useStyleDna: args.useStyleDna })
           : null
         // The quote resolves the exact angles start will run (angleIds included): what the user approves is what runs.
         // Relighting (exact mode, 'auto' or 'ai') is included and free: it never changes the price.
-        // Same parser + resolver as start: guide angles + angleIds (catalog / planner / legacy ids) × variations.
-        const render = { productFidelity: args.productFidelity, relight: args.relight }
-        const selection = { angleIds: args.angleIds, angles: args.angles, variations: args.variations, brief: args.brief }
-        const quote = preview
-          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, ...selection, ...render })
-          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, ...selection, ...render })
+        // #15: ONE plan — the quote runs the same prepareRun as start / adpack_preview (saved brand, Style
+        // DNA, hero guarantee, per-ad photos, handheld substitution, ratios) and returns plan[] + planHash.
+        const quote = await service.quote({ userId, ...startLikeArgs(args), source: 'mcp', withPlan: true })
+        // The approval is bound to the arguments (previewId included) AND the per-ad plan (planHash).
+        let approvedPlanHash: string | undefined
+        if (approvalRequestId) {
+          // The approved call binds to the plan stored on the approval (so the hash check is about the args);
+          // a different plan now is reported as PLAN_CHANGED below, never a bare input mismatch.
+          const record = await options.approvalStore.findById(approvalRequestId).catch(() => null)
+          const stored = record?.inputJson && typeof record.inputJson === 'object' ? (record.inputJson as Record<string, unknown>).planHash : undefined
+          approvedPlanHash = typeof stored === 'string' ? stored : undefined
+          if (approvedPlanHash) input.planHash = approvedPlanHash
+        } else if (quote.planHash) {
+          input.planHash = quote.planHash
+        }
         const plan = adPackPlanSummary(quote.size)
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
         const vary = quote.variations && quote.variations > 1 ? { es: ` (${quote.angles} ángulos × ${quote.variations} variaciones)`, en: ` (${quote.angles} angles × ${quote.variations} variations)` } : { es: '', en: '' }
@@ -489,11 +573,15 @@ export async function dispatchAdPackTool(options: {
           summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${vary.en}${target} · ratios ${ratios}`,
           appOrigin: options.appOrigin,
           language: args.language === 'en' ? 'en' : undefined,
+          ...(quote.plan?.length ? { extra: { plan: quote.plan } } : {}),
         })
         if ('prompt' in gate) {
           return {
             ...gate.prompt,
             quote,
+            ...(quote.plan?.length
+              ? { planNote: 'plan[] = what each ad will be (angle, why, layout family, planned photo, format, ratios). Show it with the cost; the approved run follows it. The photo is the planned pick; a blurry/unusable photo is swapped for the next best one at run time.' }
+              : {}),
             ...(preview ? { brandName: preview.dna.brandName, offerName: preview.offer.name, gaps: preview.gaps, notes: preview.notes } : {}),
             ...(saved ? { saved } : {}),
             ...(args.includeDna === true && preview ? { dna: preview.dna } : {}),
@@ -501,49 +589,27 @@ export async function dispatchAdPackTool(options: {
         }
         if ('replay' in gate) {
           const packId = String(gate.replay.packId || '')
-          if (packId) scheduleAdvance(service, userId, packId)
-          return gate.replay
+          if (!packId) return gate.replay
+          scheduleAdvance(service, userId, packId)
+          return withLivePackStatus(gate.replay, await service.getStatus({ userId, packId, appOrigin: options.appOrigin }).catch(() => null), 'adpack_start')
         }
         if (gate.approved && !samePlan(gate.approved, plan)) {
           return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: plan })
+        }
+        if (gate.approved && approvedPlanHash && quote.planHash && approvedPlanHash !== quote.planHash) {
+          // Same price, different per-ad plan (angle / layout / photo / format / ratios): fresh approval.
+          return { ...(await planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: plan, reason: 'plan_changed' })), ...(quote.plan ? { plan: quote.plan } : {}) }
         }
         let started: Awaited<ReturnType<AdPackService['startPack']>>
         try {
           started = await service.startPack({
             userId,
-            dna: args.dna,
-            offer: args.offer,
-            brandId: args.brandId,
-            offerId: args.offerId,
-            brief: args.brief,
-            size: args.size,
-            angleIds: args.angleIds,
-            angles: args.angles,
-            variations: args.variations,
-            creativeFreedom: args.creativeFreedom,
-            layoutFamily: args.layoutFamily,
-            styleDnaId: args.styleDnaId,
-            ratios: args.ratios,
-            businessId: args.businessId,
-            brandKitId: args.brandKitId,
-            productImageIds: args.productImageIds,
-            productImageIdsByAd: args.productImageIdsByAd,
-            photoPerAd: args.photoPerAd,
-            heroRequired: args.heroRequired,
-            locale: args.locale,
-            register: args.register,
-            forbiddenPhrases: args.forbiddenPhrases,
-            forbiddenClaims: args.forbiddenClaims,
-            productFidelity: args.productFidelity,
-            relight: args.relight,
-            allowedProps: args.allowedProps,
-            immutableAttributes: args.immutableAttributes,
-            mustAppear: args.mustAppear,
-            previewId: args.previewId,
+            ...startLikeArgs(args),
             source: 'mcp',
             packId: approvalRequestId,
             // F1: the service recomputes the plan and refuses (PLAN_CHANGED, nothing created) on any difference.
             ...(gate.approved ? { approved: { items: gate.approved.items, total: gate.approved.total } } : {}),
+            ...(approvedPlanHash ? { approvedPlanHash } : {}),
             expectedAds: quote.size,
           })
         } catch (err) {
@@ -553,12 +619,18 @@ export async function dispatchAdPackTool(options: {
           }
           throw err
         }
+        const etaSeconds = started.etaSeconds ?? Math.max(60, Math.round(started.quote.size * 12))
+        const pollAfterSeconds = retryAfterSecondsFor(etaSeconds)
+        // #13: work has begun, nothing is finished — never "completed" until the pack is terminal.
         const result = withStatusMessage({
-          status: 'completed',
+          status: jobStatusForPack(started.status),
           jobId: approvalRequestId,
           approvalRequestId,
           packId: started.packId,
           packStatus: started.status,
+          moreWork: jobStatusForPack(started.status) === 'running',
+          etaSeconds,
+          pollAfterSeconds,
           quote: started.quote,
           quotedCreditCost: started.quote.credits,
           ...(started.creativeFreedom ? { creativeFreedom: started.creativeFreedom } : {}),
@@ -569,18 +641,18 @@ export async function dispatchAdPackTool(options: {
           // Credits are charged per finished ad while the pack runs.
           chargedCredits: 0,
           nextTool: 'adpack_status',
-          estimatedSeconds: Math.max(60, Math.round(started.quote.size * 12)),
+          estimatedSeconds: etaSeconds,
           ...(linkedBrandId(args) ? { deepLink: deepLinkForAdPack(options.appOrigin, linkedBrandId(args) as string, started.packId) } : {}),
-          retryAfterMs: ADPACK_POLL_AFTER_MS,
-          message: 'Pack started (~2 min per 10 ads). Tell the user it is running, then poll adpack_status with this packId every ~20-30 s until moreWork=false; credits are charged per finished ad. When done, present deliverable.ads (links + captions), captionsText and the brand-folder deepLink.',
+          retryAfterMs: pollAfterSeconds * 1000,
+          message: `Pack running in the background (~${etaSeconds} s). Tell the user it is RUNNING (not finished). It advances without polling; check adpack_status with this packId in ~${pollAfterSeconds} s (not more often) until moreWork=false. Credits are charged per finished ad only. When done, present deliverable.ads (links + captions), captionsText and the brand-folder deepLink.`,
         }, 'adpack_start')
         await finalize({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', input, approvalRequestId, result })
         scheduleAdvance(service, userId, started.packId)
         return result
       }
       case 'adpack_status': {
-        const status = await service.pollStatus({ userId, packId: args.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, appOrigin: options.appOrigin, language: args.language })
-        if (status.moreWork) scheduleAdvance(service, userId, status.packId)
+        // #14: cheap read; at most kicks a background loop when nobody holds a lease.
+        const status = await service.pollStatus({ userId, packId: args.packId, appOrigin: options.appOrigin, language: args.language, schedule: scheduleMcpExecuteWork })
         return statusPayload(status)
       }
       case 'adpack_edit_text': {
@@ -606,36 +678,7 @@ export async function dispatchAdPackTool(options: {
         // FREE dry run (P0 #2d): same arguments as create_ads / adpack_start; model text only, no images, no credits.
         const saved = await persist()
         const size = args.size !== undefined ? args.size : args.count
-        const res = await service.previewPack({
-          userId,
-          dna: args.dna,
-          offer: args.offer,
-          brandId: args.brandId,
-          offerId: args.offerId,
-          brief: args.brief,
-          size,
-          angleIds: args.angleIds,
-          angles: args.angles,
-          variations: args.variations,
-          creativeFreedom: args.creativeFreedom,
-          layoutFamily: args.layoutFamily,
-          styleDnaId: args.styleDnaId,
-          ratios: args.ratios,
-          businessId: args.businessId,
-          brandKitId: args.brandKitId,
-          productImageIds: args.productImageIds,
-          productImageIdsByAd: args.productImageIdsByAd,
-          locale: args.locale,
-          register: args.register,
-          forbiddenPhrases: args.forbiddenPhrases,
-          forbiddenClaims: args.forbiddenClaims,
-          productFidelity: args.productFidelity,
-          relight: args.relight,
-          allowedProps: args.allowedProps,
-          immutableAttributes: args.immutableAttributes,
-          mustAppear: args.mustAppear,
-          source: 'mcp',
-        })
+        const res = await service.previewPack({ userId, ...startLikeArgs(args), size, source: 'mcp' })
         const es = args.language !== 'en'
         const failing = res.ads.filter((a) => !a.check.ok).map((a) => a.index)
         return {
@@ -669,8 +712,24 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_regenerate': {
         if (args.ratio !== undefined && args.ratio !== null) {
           // P0 #3: one ratio of a delivered ad — free (charged once with the ad), no approval needed.
-          const res = await service.regenerate({ userId, packId: args.packId, itemId: args.itemId, mode: args.mode, ratio: args.ratio })
+          // #14: the re-plate (~30 s) runs in the background — never inside the MCP request (-32001).
+          const res = await service.regenerate({ userId, packId: args.packId, itemId: args.itemId, mode: args.mode, ratio: args.ratio, schedule: scheduleMcpExecuteWork })
           const r = res.ratio
+          if (res.status === 'running') {
+            const pollAfterSeconds = res.pollAfterSeconds ?? 30
+            return {
+              status: 'running',
+              packId: args.packId,
+              item: compactItem(res.item),
+              ratio: r?.ratio,
+              chargedCredits: 0,
+              etaSeconds: pollAfterSeconds,
+              pollAfterSeconds,
+              retryAfterMs: pollAfterSeconds * 1000,
+              nextTool: 'adpack_status',
+              message: `Regenerating ${r?.ratio ?? 'the ratio'} in the background (free; the other ratios are unchanged). Tell the user it is RUNNING; check adpack_status with this packId in ~${pollAfterSeconds} s: the item leaves \`regenerating\` with the new file, or lists the ratio under rejectedRatios if the product still did not stay identical.`,
+            }
+          }
           return {
             status: r?.delivered ? 'regenerated' : 'rejected',
             packId: args.packId,
@@ -703,13 +762,16 @@ export async function dispatchAdPackTool(options: {
           appOrigin: options.appOrigin,
         })
         if ('prompt' in gate) return gate.prompt
-        if ('replay' in gate) return gate.replay
+        if ('replay' in gate) {
+          scheduleAdvance(service, userId, args.packId)
+          return withLivePackStatus(gate.replay, await service.getStatus({ userId, packId: args.packId, appOrigin: options.appOrigin }).catch(() => null), 'adpack_regenerate')
+        }
         if (gate.approved && !samePlan(gate.approved, plan)) {
           return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_regenerate', approvalRequestId, approved: gate.approved, planned: plan })
         }
         const regen = await service.regenerate({ userId, packId: args.packId, itemId: args.itemId, mode: input.mode })
         const result = withStatusMessage({
-          status: 'completed',
+          status: 'running',
           jobId: approvalRequestId,
           approvalRequestId,
           packId: args.packId,

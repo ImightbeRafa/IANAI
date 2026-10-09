@@ -8,6 +8,7 @@
  * caller keeps the original URL and gets a warning — existing link flows keep working.
  */
 import { randomUUID } from 'node:crypto'
+import { middleTruncate } from './text-limits.js'
 import { assertPublicHttpUrl } from '../url-safety.js'
 import { defaultRemoteFetch, downloadRemoteImage, resolveDownloadUrl } from './remote-image.js'
 
@@ -49,7 +50,8 @@ export function directDownloadUrl(url: string): string {
 export function safeFilename(name: string, fallback = 'file'): string {
   const base = (name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/-\./g, '.').replace(/^[-.]+|[-.]+$/g, '')
-  const trimmed = base.length > 60 ? base.slice(base.length - 60).replace(/^[-.]+/, '') : base
+  // #19: long names keep their start AND the meaningful tail/extension (shortened in the middle).
+  const trimmed = middleTruncate(base, 80)
   return trimmed || fallback
 }
 

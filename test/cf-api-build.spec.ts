@@ -43,11 +43,11 @@ describe('build-api.mjs', () => {
     // must exist relative to the compiled fonts.js.
     const fontsSrc = readFileSync(resolve(ROOT, 'api/lib/adpack/render/fonts.ts'), 'utf8')
     const referenced = [...fontsSrc.matchAll(/new URL\('\.\/fonts\/([^']+\.ttf)'/g)].map((m) => m[1])
-    expect(referenced.length).toBe(11)
+    expect(referenced.length).toBe(13) // + Inter 400/700 (0.14)
     for (const file of referenced) {
       expect(existsSync(resolve(DIST_API, 'lib/adpack/render/fonts', file))).toBe(true)
     }
-    for (const ofl of ['poppins-OFL.txt', 'firasans-OFL.txt', 'anton-OFL.txt', 'archivoblack-OFL.txt', 'dmserifdisplay-OFL.txt', 'spacegrotesk-OFL.txt']) {
+    for (const ofl of ['poppins-OFL.txt', 'firasans-OFL.txt', 'anton-OFL.txt', 'archivoblack-OFL.txt', 'dmserifdisplay-OFL.txt', 'spacegrotesk-OFL.txt', 'inter-OFL.txt']) {
       expect(existsSync(resolve(DIST_API, 'lib/adpack/render/fonts', ofl))).toBe(true)
     }
     const manifest = JSON.parse(readFileSync(resolve(DIST_API, '_route-deadlines.json'), 'utf8'))

@@ -23,7 +23,7 @@ import { setDefaultAdPackService } from '../../api/lib/adpack/service'
 import type { AdPackStatusResponse } from '../../api/lib/adpack/http-types'
 import { planAngles, refineAnglesWithLlm } from '../../api/lib/adpack/plan-angles'
 import type { DnaFact, ModelGateway, PackItem } from '../../api/lib/adpack/types'
-import { setMcpExecuteScheduler } from '../../api/lib/mcp/execute-job'
+import { drainBackground, queueBackgroundWork, restoreBackgroundWork } from './background-queue'
 import { getMcpTool, listEnabledMcpTools } from '../../api/lib/mcp/tool-registry'
 import {
   USER_A,
@@ -49,17 +49,12 @@ import {
 } from './saved-brand-fakes'
 
 beforeEach(() => {
-  // Background work is captured and dropped: progress comes from polls only.
-  setAdPackBackgroundScheduler(() => {})
-  setMcpExecuteScheduler(() => {})
+  queueBackgroundWork(setAdPackBackgroundScheduler)
 })
 
 afterEach(() => {
-  setAdPackBackgroundScheduler(null)
+  restoreBackgroundWork()
   setDefaultAdPackService(null)
-  setMcpExecuteScheduler((work) => {
-    void work().catch(() => {})
-  })
 })
 
 function savedEnv() {
@@ -120,7 +115,10 @@ describe('buildDnaFromSavedBrand: saved brand → BrandDna + offer', () => {
     })
     expect(dna.visual.styleNotes).toContain('luz natural')
     expect(dna.oneLiner).toBe('Sérum facial de niacinamida y aloe hecho en Heredia')
-    expect(dna.audience).toEqual(expect.arrayContaining(['Mujeres de 25 a 40 con piel mixta', 'Mujeres 25–40']))
+    // #22: near-duplicate audiences from several sources collapse into the most specific line (max 3).
+    expect(dna.audience).toContain('Mujeres de 25 a 40 con piel mixta')
+    expect(dna.audience).not.toContain('Mujeres 25–40')
+    expect(dna.audience!.length).toBeLessThanOrEqual(3)
     expect(dna.pains).toEqual(expect.arrayContaining(['poros abiertos que se notan en fotos', 'brillo en la zona T a media tarde']))
     expect(dna.objections).toEqual(['ya probé sérums y no noté nada'])
 
@@ -252,6 +250,7 @@ describe('campaign brief', () => {
 async function pollWebUntilDone(packId: string, userId = USER_A): Promise<AdPackStatusResponse> {
   let last: AdPackStatusResponse | null = null
   for (let i = 0; i < 6; i++) {
+    await drainBackground()
     const res = await callWeb(handler, userId, { action: 'status', packId })
     last = res.body as AdPackStatusResponse
     if (!last.moreWork) break
@@ -262,6 +261,7 @@ async function pollWebUntilDone(packId: string, userId = USER_A): Promise<AdPack
 async function pollMcpUntilDone(env: ReturnType<typeof savedEnv>, packId: string) {
   let last: Record<string, unknown> = {}
   for (let i = 0; i < 6; i++) {
+    await drainBackground()
     last = (await callMcp(env, USER_A, 'adpack_status', { packId })).payload
     if (!last.moreWork) break
   }
@@ -432,6 +432,9 @@ describe('saved-brand doors (web + MCP parity)', () => {
     // A lost write (marker missing) is repaired without duplicating rows.
     const item0 = [...env.store.items.values()].find((i) => i.packId === packId && i.index === 0)!
     await env.store.updateItem(item0.id, { libraryImages: undefined })
+    // The status read schedules the (idempotent) repair off-request.
+    await callWeb(handler, USER_A, { action: 'status', packId })
+    await drainBackground()
     const repaired = (await callWeb(handler, USER_A, { action: 'status', packId })).body as AdPackStatusResponse
     expect(env.library.rows).toHaveLength(6)
     expect(repaired.items[0].libraryImageIds).toHaveLength(2)
@@ -490,7 +493,8 @@ describe('MCP registry: adpack_from_brand + happy path descriptions', () => {
     expect(getMcpTool('adpack_status')!.description).toContain('deepLink')
     // Poll cadence, stop condition, deliverable presentation, no invented ids, price gap.
     const status = getMcpTool('adpack_status')!.description
-    expect(status).toContain('~20-30 s')
+    expect(status).toContain('retryAfterSeconds')
+    expect(status).toContain('without polling')
     expect(status).toContain('STOP as soon as moreWork=false')
     expect(status).toContain('captionsText')
     expect(status).toContain('failures[]')

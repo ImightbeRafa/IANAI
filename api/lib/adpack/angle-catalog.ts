@@ -298,7 +298,8 @@ const FORMAT_WHY: Record<AdLanguage, Record<AdFormat, string>> = {
 export function angleRationale(category: AngleCategory, format: AdFormat, language: AdLanguage, focus?: string): string {
   const spec = ANGLE_CATEGORIES[category]
   const base = `${spec.label[language]}: ${spec.why[language]}; ${FORMAT_WHY[language][format]}`
-  const withFocus = focus ? `${base}${language === 'es' ? '; se apoya en' : '; built on'} "${focus.slice(0, 60)}"` : base
+  const shown = focus && focus.length > 200 ? `${focus.slice(0, 199).trimEnd()}…` : focus
+  const withFocus = shown ? `${base}${language === 'es' ? '; se apoya en' : '; built on'} "${shown}"` : base
   return withFocus.slice(0, 220)
 }
 

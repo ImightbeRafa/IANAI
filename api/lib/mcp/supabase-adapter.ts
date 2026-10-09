@@ -972,6 +972,12 @@ export function createMcpOfferStore(): McpOfferStore | null {
       return db.storage.from(UPLOAD_BUCKET).getPublicUrl(path).data.publicUrl
     },
 
+    async downloadObject({ path }) {
+      const { data, error } = await db.storage.from(UPLOAD_BUCKET).download(path)
+      if (error || !data) return null
+      return new Uint8Array(await data.arrayBuffer())
+    },
+
     async uploadBytes({ path, bytes, contentType }) {
       const { error } = await db.storage.from(UPLOAD_BUCKET).upload(path, bytes, { contentType, upsert: false })
       if (error) throw error
@@ -1015,6 +1021,23 @@ export function createMcpOfferStore(): McpOfferStore | null {
         .single()
       if (error) throw error
       return asRow(data)
+    },
+
+    async updateBusiness({ userId, brandId, patch }) {
+      // #22: same columns as the web brand form; owner-scoped (another user's brand → null).
+      const allowed: Record<string, unknown> = {}
+      for (const key of ['name', 'sales_channels', 'location', 'does_shipping', 'shipping_method', 'icp_description']) {
+        if (patch[key] !== undefined) allowed[key] = patch[key]
+      }
+      const { data, error } = await db
+        .from('businesses')
+        .update(allowed)
+        .eq('id', brandId)
+        .eq('owner_id', userId)
+        .select('id, name, location, sales_channels, does_shipping, shipping_method, icp_description')
+        .maybeSingle()
+      if (error) throw error
+      return data ? asRow(data) : null
     },
 
     async updateUploadRecord({ userId, uploadId, metadata }) {

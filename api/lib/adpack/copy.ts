@@ -289,6 +289,8 @@ export interface GenerateAdCopyInput {
   otherCopies?: AdCopy[]
   /** Owner's campaign brief: creative direction only (numbers no confirmed fact backs are stripped). */
   brief?: string
+  /** #16: automatic retry: why the previous version was rejected + "write it differently". */
+  retryHint?: string
 }
 
 export interface GeneratedAdCopy {
@@ -304,7 +306,7 @@ export async function generateAdCopy(input: GenerateAdCopyInput): Promise<Genera
   const prompt = buildCopyPromptFromContext({ ...ctx, otherCopies: input.otherCopies, brief: input.brief })
   const res = await input.gateway.json<RawModelCopy>({
     system: prompt.system,
-    user: prompt.user,
+    user: input.retryHint ? `${prompt.user}\n\n${input.retryHint}` : prompt.user,
     model: input.model ?? ADPACK_COPY_MODEL,
     // A retry after a rejection explores further (seed/variation per retry, P1 #10).
     temperature: input.temperature ?? (input.angle.retry ? 0.9 : 0.7),

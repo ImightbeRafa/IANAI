@@ -27,6 +27,7 @@ import { MIGRATION_085 } from '../db-missing-column.js'
 import { parseStyleDnas, upsertStyleDnaList } from '../bulk/style-dna.js'
 import type { StyleDna } from '../bulk/types.js'
 import { safeFilename, uploadPath } from './asset-rehost.js'
+import { LABEL_MAX } from './text-limits.js'
 import { downloadRemoteImage, RemoteImageError, type RemoteFetch } from './remote-image.js'
 import { LOGO_VARIANTS, UPLOAD_LIMITS, saveKitAsset } from './upload-tools.js'
 import type { McpBrandKitStore } from './brand-kit-tools.js'
@@ -53,7 +54,6 @@ export const ROLE_TAG: Record<ProductPhotoRole, ProductImageTag> = {
 }
 
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/svg+xml': 'svg' }
-const LABEL_MAX = 80
 const asString = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
 
 class ImportInputError extends Error {
@@ -115,8 +115,8 @@ export async function mcpImportImage(deps: ImportDeps & { args: Row }): Promise<
     if (!(LOGO_VARIANTS as readonly string[]).includes(String(args.variant))) throw new ImportInputError(`variant must be one of ${LOGO_VARIANTS.join(', ')}`)
     variant = String(args.variant)
   }
-  const rawLabel = asString(args.label)
-  if (rawLabel.length > LABEL_MAX) throw new ImportInputError(`label must be at most ${LABEL_MAX} characters`)
+  const rawLabel = asString(args.label).replace(/\s+/g, ' ')
+  if (rawLabel.length > LABEL_MAX) throw new ImportInputError(`label is ${rawLabel.length} characters; the maximum is ${LABEL_MAX} (nothing was imported — shorten it)`)
   const label = rawLabel && !isPlaceholderValue(rawLabel) ? rawLabel : ''
   if (args.setPrimary !== undefined && typeof args.setPrimary !== 'boolean') throw new ImportInputError('setPrimary must be a boolean')
 
@@ -171,7 +171,7 @@ export async function mcpImportImage(deps: ImportDeps & { args: Row }): Promise<
       row.source_url = url
       if (quality) row.quality = quality
       if (isProduct && role) row.tags = [ROLE_TAG[role]]
-      if (isProduct && label) row.role = label.slice(0, 60)
+      if (isProduct && label) row.role = label
     }
     if (setPrimary && caps.imageMeta) await store.clearPrimaryImages({ userId: user.id, offerId })
     if (setPrimary && caps.imageMeta) row.is_primary = true

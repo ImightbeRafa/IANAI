@@ -69,7 +69,18 @@ for (const family of families) {
   }
   // 2) Otherwise the variable font, instanced locally.
   if (!wrote) {
-    const vf = await get(`${RAW}/${slug}/${encodeURIComponent(`${pascal}[wght]`)}.ttf`)
+    // Variable font: "[wght]" or multi-axis files like Inter's "[opsz,wght]" (other axes are
+    // pinned to their default with `axis=drop`, satori needs fully static instances).
+    let vf = null
+    let axes = []
+    for (const tag of ['wght', 'opsz,wght', 'wdth,wght', 'opsz,wdth,wght']) {
+      vf = await tryGet(`${RAW}/${slug}/${encodeURIComponent(`${pascal}[${tag}]`)}.ttf`)
+      if (vf) {
+        axes = tag.split(',').filter((a) => a !== 'wght')
+        break
+      }
+    }
+    if (!vf) throw new Error(`${family}: no static TTFs and no variable font found in google/fonts ofl/${slug}`)
     const tmp = await mkdtemp(join(tmpdir(), 'adpack-font-'))
     try {
       const src = join(tmp, `${pascal}-VF.ttf`)
@@ -77,7 +88,7 @@ for (const family of families) {
       const py = python()
       for (const w of WEIGHTS) {
         const file = join(FONTS_DIR, `${pascal}-${NAMES[w]}.ttf`)
-        execFileSync(py, ['-m', 'fontTools.varLib.instancer', src, `wght=${w}`, '--static', '--update-name-table', '-q', '-o', file], { stdio: 'inherit' })
+        execFileSync(py, ['-m', 'fontTools.varLib.instancer', src, `wght=${w}`, ...axes.map((a) => `${a}=drop`), '--static', '--update-name-table', '-q', '-o', file], { stdio: 'inherit' })
         console.log(`${family} ${w} → ${file} (instanced from the variable font)`)
       }
     } finally {

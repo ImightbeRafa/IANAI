@@ -1,3 +1,27 @@
+## 2026-10-09 — Ad Pack v3 + MCP 0.14 merged: one plan, composed retries, background ratio regenerate
+
+**Area:** api (adpack, mcp), docs — no migration
+**Files:** `api/lib/adpack/{service,pack-runner,copy-stage,status-summary,types,http-types}.ts`, `api/ad-pack.ts`, `api/lib/mcp/{adpack-tools,create-ads,protocol}.ts`, `api/lib/brand-profile.ts`, `test/adpack/merge-coherence.spec.ts`
+
+- **One plan:** `adpack_preview`, `adpack_quote` / the `adpack_start` approval (`plan[]` + `planHash`) and `startPack` all run the same `prepareRun` (saved brand, Style DNA / `useStyleDna`, `mustAppear`, hero guarantee, per-ad photos / `photoPerAd`, handheld substitution, ratios, cross-pack diversity). `plan[].photo.source` = `per_ad` | `hero` (guaranteed hero) | `pool`.
+- **Approval binding:** the approval input = the arguments (incl. `previewId`) + `planHash`. An identical re-quote reuses the open approval only when the plan is identical; an approved call whose plan changed answers `plan_changed` (`reason: "plan_changed"`) and creates nothing (the service also checks `approvedPlanHash`; the web door may send it from its quote).
+- **Retries:** copy = generate → up to 2 free repair rounds → (still blocking) automatic item retry (≤ 2, new hook + rejected headline avoided + the checker's reason in the prompt). Fidelity = AI relight → deterministic fallback → one re-plate AT the failing ratio (no item retry used) → `rejectedRatios` (ad delivered with ≥ 1 ratio, charged once); only a fully rejected ad uses an item retry (re-plate with another setting/light). `angle.retry` (copy hint) and `angle.autoRetry` (`{count, history}`, surfaced as `attempts` / `attemptLog`) are separate fields.
+- **Background:** `adpack_regenerate { ratio }` (web `regenerate` + `ratio`) is scheduled in the background and answers `running` + `pollAfterSeconds`; `adpack_status` lists `regenerating[]` (marker in `scene_check`, expires after 5 min) and stays a cheap read. Registry / server 0.14.0.
+
+## 2026-10-09 — MCP 0.14.0: Ad Packs run without polling, plan before paying, Style DNA control
+
+**Area:** adpack, mcp, cron (code only; no migration, no wrangler change)
+**Files:** `api/lib/adpack/background.ts`, `api/lib/adpack/cron-sweep.ts`, `api/lib/adpack/service.ts`, `api/lib/adpack/pack-runner.ts`, `api/lib/mcp/adpack-tools.ts`, `api/lib/mcp/approval*.ts`, `api/lib/mcp/brand-*.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/text-limits.ts`, `api/mcp-guide-analysis.ts`, `api/lib/adpack/render/fonts/Inter-*.ttf`
+
+Real-test report items #9, #12–#16, #18–#20, #22: create_ads/adpack_start answer `running`
+(never `completed` early); self-continuing lease-safe background slices + cheap status
+(`retryAfterSeconds`) + minute-cron sweep of stale packs; per-ad plan in the quote, 24 h
+approvals, identical re-quote reuse; automatic retries (≤ 2) inside the approval; Inter bundled
+and `fontsUsed` reported; `useStyleDna:false`, `styleDnaIds: []` = none, `detach_style_dna` /
+`delete_style_dna`; upload role enum + quality report + labels; no silent truncation; richer
+`list_assets`; `update_brand`, `set_default_offer`, audience de-duplication. Docs:
+`docs/operations/content-agent-runbook.md`, `docs/operations/mcp-user-tools.md`.
+
 ## 2026-10-09 — Ad Pack v3 real-test fixes A: logos, per-ratio fidelity, cut-out recall, flat lays, no fake hands, hero usage, sharpness scale
 
 **Area:** api (adpack, mcp)
@@ -6,7 +30,7 @@
 Fixes from the 2026-10-08 prototype real test (P0 #1/#3/#4, P1 #6/#7/#8, P3 #17). No migration (state rides in existing jsonb: `scene_check.rejectedRatios`, `scene.cutouts[].{recall,flatLay,productImageId}`, `scene.view`, `brand_profile.logoVariants`).
 
 - **Logo (P0 #1):** self-contained logos (opaque > 85% of the trimmed bbox, or kit variant `badge`) are never recolored — as-is when their outer edge reads (≥ 3:1), else on a light / dark chip; monochrome white only for transparent line / wordmark logos. Kit `logoVariants` (primary / light / dark / badge) reach the renderer (`dna.visual.logoVariants`) and the one that reads is placed (`layoutReport.logoSource`). Background removal is an edge-connected flood from the border only (interior pixels bit-identical), reports `removedPct` + a review warning, and refuses (keeps the original) when > 60% of the logo's own bbox would go. `import_image kind=logo variant=badge` sets the kit logo unless a primary variant exists; otherwise `logoUrlNote` says why.
-- **Per-ratio fidelity (P0 #3):** passing ratios ship, failing ones are listed as `rejectedRatios[{ratio, reason, fidelity(+full-res diff)}]` (item done if ≥ 1 ratio passed, charged once; no charge if none). An AI relight that broke a ratio is retried with 'auto' (`fidelity.relightFallback`). `adpack_regenerate { packId, itemId, ratio }` is FREE and synchronous: re-composite, else a new plate for that ratio only. Low-texture windows use a luminance-adaptive flatness test instead of SSIM; silhouette IoU runs at the placement's native resolution with an antialiased-rim band; diff heatmaps at placement resolution (≥ 512 px).
+- **Per-ratio fidelity (P0 #3):** passing ratios ship, failing ones are listed as `rejectedRatios[{ratio, reason, fidelity(+full-res diff)}]` (item done if ≥ 1 ratio passed, charged once; no charge if none). An AI relight that broke a ratio is retried with 'auto' (`fidelity.relightFallback`). `adpack_regenerate { packId, itemId, ratio }` is FREE: re-composite, else a new plate for that ratio only (runs in the background since the 0.14 merge — see above). Low-texture windows use a luminance-adaptive flatness test instead of SSIM; silhouette IoU runs at the placement's native resolution with an antialiased-rim band; diff heatmaps at placement resolution (≥ 512 px).
 - **Cut-out recall (P0 #4):** independent foreground estimate (robust quadratic background model, shadow-like blobs ignored) → `recall` (components, area, color coverage). Flat lays get missed near-white pieces back; recall < 95% → model segmentation → `cutout_incomplete` (never delivered). Owner cut-outs (alpha PNG, role contents/part) are used as-is.
 - **Flat lay (P1 #6):** role `contents` or ≥ 3 separated objects → overhead plate prompt (top-down, no horizon), light 'top', drop shadow + AO under every piece, no cast shadow / reflection; perspective parts are not mixed in.
 - **Hand-held + grounding (P1 #7):** exact mode never plans `handheld_overlay` / `ugc_person` without a real `in_use` photo (planner excludes, explicit selections are substituted with the same category / hook — counts and quote unchanged). Plate prompt states the surface line; the renderer snaps the product base onto a detected table edge when it would stand against the wall; stronger contact shadow / AO.

@@ -29,7 +29,7 @@ import { mapSiteAnalysis } from './dna/website.js'
 import { hasRolePrefix, roleFromImageRow, roleFromLabel, stripRolePrefix } from './fidelity/photos.js'
 import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKey, OfferInput } from './types.js'
 import { isPlaceholderValue, stripPlaceholderParts } from '../placeholder-guard.js'
-import { audienceLines, readBrandProfile, type BrandProfile } from '../brand-profile.js'
+import { activeStyleDnaIds, audienceLines, readBrandProfile, type BrandProfile } from '../brand-profile.js'
 import { orderProductImages } from '../product-image-order.js'
 import { contactCtaText, languageFromLocale, offerProfileFacts, readOfferAdProfile, type OfferProfileFacts } from './offer-profile.js'
 
@@ -82,6 +82,10 @@ export interface SavedBrandResult {
   costUsd: number
   /** Style DNAs saved on the resolved brand kit (`style_dnas`), for adpack_start {styleDnaId}. */
   styleDnas?: StyleDna[]
+  /** #12: Style DNA ids whose notes / references shaped this DNA ([] = none). */
+  activeStyleDnaIds?: string[]
+  /** #19: saved values shortened while building the DNA. */
+  truncated?: Array<{ field: string; from: number; to: number }>
 }
 
 export interface BuildDnaFromSavedBrandInput {
@@ -99,6 +103,8 @@ export interface BuildDnaFromSavedBrandInput {
   productImageIds?: string[]
   /** C3: per-ad photos (ad index → product_images ids). */
   productImageIdsByAd?: Record<string, string[]>
+  /** #12: false → no Style DNA influence at all (notes, references, profile). */
+  useStyleDna?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +177,8 @@ export function productFacts(
   business: Row | null,
   language: AdLanguage,
   profileFacts?: OfferProfileFacts | null,
+  /** #19: fact values shortened while building the DNA ({field, from, to}). */
+  truncated?: Array<{ field: string; from: number; to: number }>,
 ): { facts: DnaFact[]; notes: string[] } {
   const facts: DnaFact[] = [...(profileFacts?.facts ?? [])]
   const notes: string[] = []
@@ -245,8 +253,13 @@ export function productFacts(
     ['offer_details', 'offer'],
   ]
   for (const [slug, field] of custom) {
-    const v = s(product, field, 240)
-    if (v) add(`custom:${slug}`, v, `products.${field}`)
+    // #19: technical specs keep up to 2000 characters; anything longer is shortened visibly and reported.
+    const max = slug === 'technical_specs' ? 2_000 : 500
+    const full = s(product, field, 20_000)
+    if (!full) continue
+    const v = full.length > max ? `${full.slice(0, max - 1).trimEnd()}…` : full
+    if (full.length > max) truncated?.push({ field: `products.${field}`, from: full.length, to: max })
+    facts.push(makeFact(`custom:${slug}`, v, 'offer_form', `saved products.${field}`, true))
   }
   if (bool(product, 'ind_customizable') === true) {
     const v = s(product, 'ind_customization_description', 200)
@@ -273,6 +286,7 @@ function savedPart(input: {
   fetchedAt: string
   brandProfile?: BrandProfile | null
   profileFacts?: OfferProfileFacts | null
+  useStyleDna?: boolean
 }): DnaPart {
   const { business, kit, product, language, brandProfile } = input
   const tone = strings(kit?.tone_keywords, 40, 6)
@@ -282,7 +296,10 @@ function savedPart(input: {
     tone.length ? tone.join(', ') : '',
     doList.length ? `${language === 'es' ? 'Hacer' : 'Do'}: ${doList.join('; ')}` : '',
   ].filter(Boolean).join(' · ')
-  const styleDnas = parseStyleDnas(kit?.style_dnas)
+  // #12: only the brand's active Style DNAs (selection / useStyleDna:false) — never an implicit leak.
+  const allDnas = parseStyleDnas(kit?.style_dnas)
+  const activeIds = activeStyleDnaIds(allDnas.map((d) => d.id), brandProfile, input.useStyleDna)
+  const styleDnas = allDnas.filter((d) => activeIds.includes(d.id))
   const visual: DnaVisual = {}
   const color = (key: string) => {
     const v = s(kit, key, 20)
@@ -369,9 +386,11 @@ export interface MapSavedBrandInput {
   productImageIds?: string[]
   /** C3: per-ad photos (1-based ad number → product_images ids). */
   productImageIdsByAd?: Record<string, string[]>
+  /** #12: false → no Style DNA influence. */
+  useStyleDna?: boolean
 }
 
-export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer: OfferInput; gaps: FactKey[]; notes: string[] } {
+export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer: OfferInput; gaps: FactKey[]; notes: string[]; truncated?: Array<{ field: string; from: number; to: number }> } {
   const { business, kit, product } = input
   const brandName = s(business, 'name', 120) || s(kit, 'name', 120)
   const notes: string[] = [...(input.extraNotes || [])]
@@ -386,7 +405,9 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
     || (probe.trim() ? detectLanguage(probe) : 'es')
   const profileFacts = adProfile ? offerProfileFacts(adProfile, language) : null
 
-  const { facts, notes: factNotes } = product ? productFacts(product, business, language, profileFacts) : productFacts({}, business, language)
+  const truncated: Array<{ field: string; from: number; to: number }> = []
+  const { facts, notes: factNotes } = product ? productFacts(product, business, language, profileFacts, truncated) : productFacts({}, business, language)
+  for (const t of truncated) notes.push(`truncated: ${t.field} is ${t.from} characters; the ads use the first ${t.to}`)
   notes.push(...factNotes.filter((n) => product || !n.startsWith('price')))
 
   // Product photos: real product refs first (primary → hero tag → sharpest → newest; then legacy refs), never generated; context → style refs.
@@ -413,7 +434,7 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   const contextUrls = httpsOnly(usable.filter((r) => r.kind === 'context').map(urlOf))
   if (!productUrls.length) notes.push('missing:product_photo — no real product photo saved on this offer; scenes will not be product-locked (upload one in the offer for best results)')
 
-  const part = savedPart({ business, kit, product, language, fetchedAt: input.fetchedAt, brandProfile, profileFacts })
+  const part = savedPart({ business, kit, product, language, fetchedAt: input.fetchedAt, brandProfile, profileFacts, useStyleDna: input.useStyleDna })
   if (contextUrls.length) part.referenceImageUrls = uniqStrings([...(part.referenceImageUrls || []), ...contextUrls], 16)
 
   const offerName = s(product, 'name', 200) || brandName
@@ -471,8 +492,8 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   const tagged = productUrls.map((url) => {
     const row = rowOf.get(url)
     const fromTags = row ? roleFromImageRow(row) : undefined
-    const freeRole = s(row ?? null, 'role', 80)
-    const rawLabel = s(row ?? null, 'label', 80)
+    const freeRole = s(row ?? null, 'role', 160)
+    const rawLabel = s(row ?? null, 'label', 160)
     // import_image before 085 stores the role as an explicit "[part] …" label prefix.
     const label = stripRolePrefix(freeRole || rawLabel)
     const role = fromTags ?? roleFromLabel(freeRole) ?? roleFromLabel(rawLabel)
@@ -485,7 +506,7 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
       return { url: t.url, role, ...(t.label ? { label: t.label } : {}), ...(t.id ? { id: t.id } : {}), ...(t.primary ? { primary: true } : {}) }
     })
   }
-  return { dna, offer, gaps: dna.gaps, notes }
+  return { dna, offer, gaps: dna.gaps, notes, ...(truncated.length ? { truncated } : {}) }
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +530,11 @@ export async function buildDnaFromSavedBrand(input: BuildDnaFromSavedBrandInput)
   if (!kit) notes.push(`brand_kit: ${resolved.resolution} — using brand and offer data only (no colors/logo/voice from a kit)`)
   else if (resolved.resolution === 'inactive') notes.push('brand_kit: the selected kit is inactive; using it anyway')
 
-  const product = await db.getProduct(userId, brandId, input.offerId)
+  // #22: no offerId → the brand's default offer (set_default_offer on the kit profile), else the newest.
+  const defaultOfferId = !input.offerId ? readBrandProfile(kit?.brand_profile)?.defaultOfferId : undefined
+  let product = defaultOfferId ? await db.getProduct(userId, brandId, defaultOfferId) : null
+  if (defaultOfferId && !product) notes.push('offer: the default offer no longer exists — using the most recent offer (set_default_offer to pick another)')
+  if (!product) product = await db.getProduct(userId, brandId, input.offerId)
   if (input.offerId && !product) throw new SavedBrandError('NOT_FOUND', 'Offer not found for this brand')
   if (!product) notes.push('offer: this brand has no saved offer/product — the pack will sell the brand itself (add an offer for product-locked images)')
   const images = product ? await db.listProductImages(userId, String(product.id)) : []
@@ -551,9 +576,13 @@ export async function buildDnaFromSavedBrand(input: BuildDnaFromSavedBrandInput)
     business, kit, product, images, website, fetchedAt, extraNotes: notes,
     productImageIds: input.productImageIds,
     productImageIdsByAd: input.productImageIdsByAd,
+    useStyleDna: input.useStyleDna,
   })
+  const kitDnas = parseStyleDnas(kit?.style_dnas)
+  const activeIds = activeStyleDnaIds(kitDnas.map((d) => d.id), readBrandProfile(kit?.brand_profile), input.useStyleDna)
   return {
     ...mapped,
+    activeStyleDnaIds: activeIds,
     brandId,
     ...(product?.id ? { offerId: String(product.id) } : {}),
     ...(kit?.id ? { brandKitId: String(kit.id) } : {}),

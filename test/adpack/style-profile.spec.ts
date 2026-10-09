@@ -109,6 +109,7 @@ describe('adpack_start {styleDnaId}', () => {
     await expect(env.service.startPack({ userId: USER_A, source: 'web', brandId: BIZ_A, size: 2, styleDnaId: 'nope' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
     await expect(env.service.startPack({ userId: USER_A, source: 'web', dna: serum.dna, offer: serum.offer, size: 2, styleDnaId: 'dna_1' })).rejects.toMatchObject({ code: 'BAD_INPUT' })
     const from = await env.service.dnaFromBrand({ userId: USER_A, brandId: BIZ_A })
-    expect(from.styleDnas).toEqual([{ id: 'dna_1', name: 'Feed', kind: 'ads', references: 1, analyzed: false }])
+    expect(from.styleDnas).toEqual([{ id: 'dna_1', name: 'Feed', kind: 'ads', references: 1, analyzed: false, active: true }])
+    expect(from.activeStyleDnaIds).toEqual(['dna_1'])
   })
 })

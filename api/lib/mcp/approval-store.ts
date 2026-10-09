@@ -55,6 +55,22 @@ export function createMcpApprovalStore(): McpApprovalStore | null {
       if (error) throw error
       return data ? rowToRecord(data as Record<string, unknown>) : null
     },
+    async findOpenByInput({ userId, toolName, inputHash, nowMs }) {
+      const { data, error } = await db
+        .from('mcp_approval_tokens')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('tool_name', toolName)
+        .eq('input_hash', inputHash)
+        .in('status', ['pending', 'approved'])
+        .is('result_json', null)
+        .gte('expires_at', new Date(nowMs).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1)
+      if (error) throw error
+      const row = Array.isArray(data) ? data[0] : null
+      return row ? rowToRecord(row as Record<string, unknown>) : null
+    },
     async findByHash(tokenHash) {
       const { data, error } = await db
         .from('mcp_approval_tokens')

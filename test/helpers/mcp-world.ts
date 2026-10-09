@@ -115,6 +115,15 @@ export function createMcpWorld(options: { caps?: Partial<McpStoreCapabilities>; 
       objects.set(path, { size: bytes.length, contentType, bytes })
       return `${STORAGE_PUBLIC}${path}`
     },
+    async downloadObject({ path }) {
+      return objects.get(path)?.bytes ?? null
+    },
+    async updateBusiness({ userId, brandId, patch }) {
+      const row = db.businesses.find((b) => b.id === brandId && b.owner_id === userId)
+      if (!row) return null
+      Object.assign(row, patch)
+      return { ...row }
+    },
     async insertBusiness({ userId, row }) {
       const full = { ...row, id: nextId('brand'), owner_id: userId, created_at: new Date().toISOString() }
       db.businesses.push(full)

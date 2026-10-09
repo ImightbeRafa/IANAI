@@ -7,7 +7,8 @@
  *       (field, sentence, offending tokens, nearest fact). Round 2 regenerates with another hook
  *       type when the hook itself was rejected (comparison without a verified fact, headline),
  *       otherwise it is a from-scratch rewrite of the failing sentences.
- *     → blocking issues left → the ad fails with those issues (never charged).
+ *     → blocking issues left → the ad fails with those issues (never charged); the pack runner then
+ *       retries the item automatically (#16, ≤ 2, new hook + retryHint) before reporting it failed.
  *
  * Repair rounds only cost model tokens (logged on the item), never credits.
  */
@@ -86,6 +87,9 @@ export interface WriteAdCopyInput {
   brief?: string
   /** Max free repair rounds (default MAX_COPY_REPAIR_ROUNDS). */
   maxRepairRounds?: number
+  /** #16: automatic item retry — why the previous attempt was rejected (appended to the prompt). */
+  retryHint?: string
+  temperature?: number
 }
 
 export interface WriteAdCopyResult {
@@ -114,7 +118,7 @@ export async function writeAdCopy(input: WriteAdCopyInput): Promise<WriteAdCopyR
   let lastError = ''
   for (let attempt = 0; attempt < 2 && !gen; attempt++) {
     try {
-      gen = await generateAdCopy({ gateway, dna, offer, angle, language, model: input.model, otherCopies: input.otherCopies, brief: input.brief })
+      gen = await generateAdCopy({ gateway, dna, offer, angle, language, model: input.model, otherCopies: input.otherCopies, brief: input.brief, ...(input.retryHint ? { retryHint: input.retryHint } : {}), ...(input.temperature !== undefined ? { temperature: input.temperature } : {}) })
     } catch (error) {
       lastError = errorMessage(error)
     }
