@@ -338,7 +338,7 @@ describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, app
     const logo = await rpc('import_image', { brandId, kind: 'logo', url: SHARE.logo })
     expect(logo.isError, JSON.stringify(logo.payload).slice(0, 1500)).toBe(false)
     expect(logo.payload).toMatchObject({ status: 'imported', kind: 'logo', provider: 'google_drive', sourceUrl: SHARE.logo, target: 'brand_kit', logoUrlSet: true })
-    expect(logo.payload.logo).toMatchObject({ backgroundRemoved: true, method: 'color_key', transparent: true })
+    expect(logo.payload.logo).toMatchObject({ backgroundRemoved: true, method: 'edge_flood', transparent: true })
     const kitRow = w.world.db.kits.find((k) => k.id === kitId)!
     expect(String(kitRow.logo_url)).toBe(logo.payload.logo.cleanedUrl)
     expect(String(kitRow.logo_url)).toMatch(new RegExp(`^${STORAGE_PUBLIC}${USER}/uploads/`))

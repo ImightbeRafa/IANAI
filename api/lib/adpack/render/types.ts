@@ -59,6 +59,11 @@ export interface RenderAdInput {
   /** Plate surface (glossy → reflection under the product). */
   surface?: PlateSurface
   /**
+   * Overhead (top-down) plate + flat-lay product (P1 #6): no perspective grounding, no cast shadow
+   * or reflection — a soft drop shadow directly under each component instead.
+   */
+  topDown?: boolean
+  /**
    * Exact mode relight stage (default true): deterministic harmonization of the product into the
    * plate (light model, shading, white balance + shared grade, light wrap, shadows, reflection,
    * grain). False = plain cut-out + ground shadows (QA comparisons only).
@@ -109,11 +114,25 @@ export interface LayoutReport {
   productAvoid?: Box | null
   /** True when some text / pill could not be kept off the product. */
   textOverProduct?: boolean
+  /**
+   * Exact mode grounding (P1 #7): the plate's surface back edge found above the product slot
+   * (canvas y, null when none), the product base y, and how far the product was moved down so its
+   * base rests on the surface instead of against the wall.
+   */
+  grounding?: { surfaceLineY: number | null; baseY: number; snappedPx: number }
+  /** 'overhead' when a flat lay was composited on a top-down plate (P1 #6). */
+  view?: 'overhead'
   /** Boxes of every text, pill, card and icon drawn over the scene. */
   overlays?: Box[]
   logo: Box | null
   /** Logo variant used for this background. */
   logoVariant?: 'onLight' | 'onDark' | 'badge'
+  /** Which kit logo was placed (primary / light / dark / badge variant). */
+  logoSource?: 'primary' | 'light' | 'dark' | 'badge'
+  /** True when the placed logo is self-contained (badge, own background): never recolored. */
+  logoSelfContained?: boolean
+  /** Contrast of the placed logo (its edge, or its chip) vs the region under it. */
+  logoContrast?: number
   /** Font-size scale applied to the whole template (1 = nominal). */
   scale: number
   /** Visual family and the placement variant that was used. */

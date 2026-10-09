@@ -138,7 +138,7 @@ export async function saveKitAsset(options: {
   filename?: string
   /** Original external link (kept on 085 logo variants). */
   sourceUrl?: string
-}): Promise<{ brandKitId: string; warnings: string[]; logoUrlSet: boolean }> {
+}): Promise<{ brandKitId: string; warnings: string[]; logoUrlSet: boolean; logoUrlNote?: string }> {
   const { kitStore, userId, brandId, kind, url, role } = options
   const warnings: string[] = []
   let kit: Row
@@ -152,11 +152,20 @@ export async function saveKitAsset(options: {
   const profile = readBrandProfile(kit.brand_profile) ?? {}
   const patch: Row = { updated_at: new Date().toISOString() }
   let logoUrlSet = false
+  let logoUrlNote: string | undefined
   if (kind === 'logo') {
     const variant = role && (LOGO_VARIANTS as readonly string[]).includes(role) ? role : 'primary'
-    if (!kit.logo_url || variant === 'primary') {
+    // A badge (self-contained logo) is the brand's main logo unless a 'primary' variant already
+    // exists (P0 #1: explicit, never a silent logoUrlSet:false).
+    const hasPrimaryVariant = (profile.logoVariants ?? []).some((v) => v.variant === 'primary')
+    if (!kit.logo_url || variant === 'primary' || (variant === 'badge' && !hasPrimaryVariant)) {
       patch.logo_url = url
       logoUrlSet = true
+    } else {
+      logoUrlNote =
+        variant === 'badge'
+          ? 'The kit already has a primary logo, so the badge is stored as a variant: ads use it automatically where the primary does not read (dark/light backgrounds). Import it with variant "primary" to make it the main logo.'
+          : `Stored as the "${variant}" variant (the kit's main logo is unchanged): ads pick it automatically when it reads better on the background.`
     }
     if (caps.brandProfile) {
       const entry: BrandLogoVariant = { url, variant: variant as BrandLogoVariantKind, ...(options.sourceUrl ? { sourceUrl: options.sourceUrl } : {}) }
@@ -174,7 +183,7 @@ export async function saveKitAsset(options: {
     } else warnings.push(`document stored in Advance storage but not listed on the kit (migration ${MIGRATION_085} pending)`)
   }
   if (Object.keys(patch).length > 1) await kitStore.updateKit({ userId, kitId, patch })
-  return { brandKitId: kitId, warnings, logoUrlSet }
+  return { brandKitId: kitId, warnings, logoUrlSet, ...(logoUrlNote ? { logoUrlNote } : {}) }
 }
 
 export async function mcpFinalizeUpload(options: {

@@ -13,11 +13,18 @@
  *
  * Quality checks: foreground 5–90% of the frame, one dominant component (kit-contents photos
  * may hold several), not touching all four borders.
+ *
+ * Recall (P0 #4): the flood / model masks are compared with an independent foreground estimate of
+ * the source (recall.ts: components, area, color coverage). Flat lays (role 'contents' or ≥ 3
+ * separated objects on a uniform background) keep every piece: near-white pieces the flood took
+ * for background are added back from the estimate. Recall < 95% → the model path is tried; still
+ * below → `cutout_incomplete` (never delivered). Owner cut-outs (alpha) are used as-is.
  */
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import type { ModelGateway, ProductPhotoRole, SegmentationItem } from '../types.js'
 import { borderBackground, bordersTouched, components, deltaE, dilate, erode, labImage } from './pixels.js'
+import { addMissedObjects, cutoutRecall, estimateForeground, isFlatLayEstimate, MIN_CUTOUT_RECALL, type CutoutRecall, type ForegroundEstimate } from './recall.js'
 
 export type CutoutMethod = 'alpha' | 'flood' | 'model'
 
@@ -33,14 +40,20 @@ export interface CutoutOk {
   sourceHash: string
   /** Strategies tried before this one and why they were rejected. */
   rejected: string[]
+  /** Recall vs the source photo's foreground (absent for owner cut-outs / unmeasurable photos). */
+  recall?: CutoutRecall
+  /** Top-down kit layout (role 'contents' or ≥ 3 separated objects): overhead plate, no perspective. */
+  flatLay?: boolean
 }
 
 export interface CutoutFailed {
   ok: false
-  reason: 'cutout_failed'
+  /** cutout_incomplete = a mask was found but it dropped pieces of the product (recall < 95%). */
+  reason: 'cutout_failed' | 'cutout_incomplete'
   detail: string
   sourceHash: string
   rejected: string[]
+  recall?: CutoutRecall
 }
 
 export type CutoutResult = CutoutOk | CutoutFailed
@@ -100,13 +113,14 @@ export function validateMask(mask: Uint8Array, w: number, h: number, opts: { all
   return null
 }
 
-/** Drop specks: keep components ≥ 1% of the largest (and only the largest unless multi). */
+/** Drop specks: keep components ≥ 0.5% of the largest when multi (small kit pieces), ≥ 15% otherwise. */
 function keepMain(mask: Uint8Array, w: number, h: number, allowMulti: boolean): Uint8Array {
   const { labels, list } = components(mask, w, h)
   if (!list.length) return mask
   const keep = new Set<number>()
+  const minMulti = Math.max(24, list[0].area * 0.005)
   for (const c of list) {
-    if (c === list[0] || (allowMulti ? c.area >= list[0].area * 0.02 : c.area >= list[0].area * 0.15)) keep.add(c.label)
+    if (c === list[0] || (allowMulti ? c.area >= minMulti : c.area >= list[0].area * 0.15)) keep.add(c.label)
   }
   const out = new Uint8Array(w * h)
   for (let i = 0; i < out.length; i++) out[i] = keep.has(labels[i]) ? 1 : 0
@@ -283,10 +297,30 @@ function labToRgbApprox(raw: Raw, bg: Uint8Array): [number, number, number] {
   return n ? [r / n, g / n, b / n] : [255, 255, 255]
 }
 
-async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions): Promise<CutoutOk | string> {
-  const work = await rawRgba(bytes, WORK_SIDE)
+/** Work-resolution view of a photo shared by the strategies (one decode, one Lab conversion). */
+interface WorkImage {
+  raw: Raw
+  lab: Float32Array
+  /** Border flood with the default options (null when the border is not uniform). */
+  flood: { bg: Uint8Array; bgLab: [number, number, number] } | null
+  /** Independent foreground estimate (recall reference); null when not measurable. */
+  est: ForegroundEstimate | null
+}
+
+async function workImage(bytes: Uint8Array): Promise<WorkImage> {
+  const raw = await rawRgba(bytes, WORK_SIDE)
+  const lab = labImage(raw.data, raw.channels, raw.w * raw.h)
+  const flood = floodBackground(lab, raw.w, raw.h)
+  const est = typeof flood === 'string' ? null : estimateForeground(lab, raw.w, raw.h, flood.bg)
+  return { raw, lab, flood: typeof flood === 'string' ? null : flood, est }
+}
+
+type Attempt = { cut: CutoutOk; mask: Uint8Array } | string
+
+async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions, wi?: WorkImage): Promise<Attempt> {
+  const work = wi?.raw ?? (await rawRgba(bytes, WORK_SIDE))
   const n = work.w * work.h
-  const lab = labImage(work.data, work.channels, n)
+  const lab = wi?.lab ?? labImage(work.data, work.channels, n)
   const flood = floodBackground(lab, work.w, work.h, opts)
   if (typeof flood === 'string') return flood
   let fg: Uint8Array = new Uint8Array(n)
@@ -296,6 +330,9 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions):
   fg = erode(dilate(fg, work.w, work.h, 2), work.w, work.h, 2)
   fg = fillSmallHoles(fg, work.w, work.h)
   fg = keepMain(fg, work.w, work.h, opts.allowMulti === true)
+  // Flat lays: near-white pieces on a light surface fall under the flood's tolerance — the
+  // stricter, model-relative estimate brings every missed piece back (P0 #4).
+  if (opts.allowMulti && wi?.est) fg = addMissedObjects(wi.est, fg)
   const why = validateMask(fg, work.w, work.h, { allowMulti: opts.allowMulti })
   if (why) return why
   let area = 0
@@ -305,7 +342,7 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions):
   const bgRgb = labToRgbApprox(work, bgMask)
   const full = await rawRgba(bytes, maxSide)
   const cut = await buildCutout(full, fg, work.w, work.h, bgRgb)
-  return { ok: true, ...cut, method: 'flood', coverage: area / n, sourceHash: '', rejected: [] }
+  return { cut: { ok: true, ...cut, method: 'flood', coverage: area / n, sourceHash: '', rejected: [] }, mask: fg }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,21 +389,21 @@ export async function masksToFrame(items: SegmentationItem[], w: number, h: numb
   return frame
 }
 
-async function tryModel(bytes: Uint8Array, maxSide: number, input: SegmentProductInput): Promise<CutoutOk | string> {
+async function tryModel(bytes: Uint8Array, maxSide: number, input: SegmentProductInput, multi?: boolean, wi?: WorkImage): Promise<Attempt> {
   const gw = input.gateway
   if (!gw?.segment || input.noModel) return 'model segmentation unavailable'
-  const work = await rawRgba(bytes, WORK_SIDE)
+  const work = wi?.raw ?? (await rawRgba(bytes, WORK_SIDE))
   const dataUrl = `data:image/png;base64,${(await sharp(work.data, { raw: { width: work.w, height: work.h, channels: work.channels as 4 } }).png().toBuffer()).toString('base64')}`
   let items: SegmentationItem[]
   try {
-    items = (await gw.segment({ image: dataUrl, prompt: buildSegmentationPrompt(input.label, input.role) })).items ?? []
+    items = (await gw.segment({ image: dataUrl, prompt: buildSegmentationPrompt(input.label, multi ? 'contents' : input.role) })).items ?? []
   } catch (error) {
     return `model segmentation failed: ${error instanceof Error ? error.message : String(error)}`
   }
   if (!items.length) return 'model returned no mask'
   let fg: Uint8Array = await masksToFrame(items, work.w, work.h)
   fg = erode(dilate(fg, work.w, work.h, 1), work.w, work.h, 1)
-  const allowMulti = input.role === 'contents'
+  const allowMulti = multi ?? input.role === 'contents'
   fg = keepMain(fg, work.w, work.h, allowMulti)
   const why = validateMask(fg, work.w, work.h, { allowMulti })
   if (why) return why
@@ -374,7 +411,7 @@ async function tryModel(bytes: Uint8Array, maxSide: number, input: SegmentProduc
   for (let i = 0; i < fg.length; i++) area += fg[i]
   const full = await rawRgba(bytes, maxSide)
   const cut = await buildCutout(full, fg, work.w, work.h, null)
-  return { ok: true, ...cut, method: 'model', coverage: area / fg.length, sourceHash: '', rejected: [] }
+  return { cut: { ok: true, ...cut, method: 'model', coverage: area / fg.length, sourceHash: '', rejected: [] }, mask: fg }
 }
 
 /** Segment one real product photo. Never throws for image content problems (returns cutout_failed). */
@@ -383,21 +420,52 @@ export async function segmentProduct(input: SegmentProductInput): Promise<Cutout
   const sourceHash = sha256Hex(bytes)
   const maxSide = input.maxSide ?? DEFAULT_MAX_SIDE
   const rejected: string[] = []
-  const allowMulti = input.role === 'contents'
-  const steps: Array<[CutoutMethod, () => Promise<CutoutOk | string>]> = [
-    ['alpha', () => tryAlpha(bytes, maxSide)],
-    ['flood', () => tryFlood(bytes, maxSide, { allowMulti })],
-    ['model', () => tryModel(bytes, maxSide, input)],
+  // (a) An owner-provided cut-out / per-part mask (transparent PNG) is used as-is.
+  try {
+    const alpha = await tryAlpha(bytes, maxSide)
+    if (typeof alpha !== 'string') return { ...alpha, sourceHash, rejected, ...(input.role === 'contents' ? { flatLay: true } : {}) }
+    rejected.push(`alpha: ${alpha}`)
+  } catch (error) {
+    rejected.push(`alpha: error: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  let wi: WorkImage | undefined
+  try {
+    wi = await workImage(bytes)
+  } catch {
+    wi = undefined
+  }
+  // Flat lay: kit contents laid out top-down (role or ≥ 3 separated objects on a clean surface).
+  const flatLay = input.role === 'contents' || isFlatLayEstimate(wi?.est ?? null)
+  const allowMulti = flatLay
+  // Single products only count objects around the product (a prop elsewhere is not the product).
+  const measure = (mask: Uint8Array): CutoutRecall | undefined => (wi?.est ? cutoutRecall(wi.est, mask, { scopeToMain: !allowMulti }) : undefined)
+  let incomplete: { recall: CutoutRecall; method: CutoutMethod } | null = null
+  const steps: Array<[CutoutMethod, () => Promise<Attempt>]> = [
+    ['flood', () => tryFlood(bytes, maxSide, { allowMulti }, wi)],
+    ['model', () => tryModel(bytes, maxSide, input, allowMulti, wi)],
   ]
   for (const [name, run] of steps) {
-    let res: CutoutOk | string
+    let res: Attempt
     try {
       res = await run()
     } catch (error) {
       res = `error: ${error instanceof Error ? error.message : String(error)}`
     }
-    if (typeof res !== 'string') return { ...res, sourceHash, rejected }
-    rejected.push(`${name}: ${res}`)
+    if (typeof res === 'string') {
+      rejected.push(`${name}: ${res}`)
+      continue
+    }
+    const recall = measure(res.mask)
+    if (recall && recall.recall < MIN_CUTOUT_RECALL) {
+      // Pieces of the product were dropped: try the next strategy (model), never deliver it.
+      rejected.push(`${name}: recall ${recall.recall} < ${MIN_CUTOUT_RECALL} (${recall.components.kept}/${recall.components.source} pieces, area ${recall.areaRecall}, color ${recall.colorCoverage})`)
+      if (!incomplete || recall.recall > incomplete.recall.recall) incomplete = { recall, method: name }
+      continue
+    }
+    return { ...res.cut, sourceHash, rejected, ...(recall ? { recall } : {}), ...(flatLay ? { flatLay: true } : {}) }
+  }
+  if (incomplete) {
+    return { ok: false, reason: 'cutout_incomplete', detail: rejected.join('; ').slice(0, 400), sourceHash, rejected, recall: incomplete.recall }
   }
   return { ok: false, reason: 'cutout_failed', detail: rejected.join('; ').slice(0, 400), sourceHash, rejected }
 }

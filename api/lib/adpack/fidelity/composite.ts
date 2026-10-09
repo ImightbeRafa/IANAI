@@ -46,6 +46,8 @@ export interface CompositeOptions {
   plate?: Buffer
   /** Apply the shared grade to the base too (default true; the renderer grades the plate itself, before panels). */
   gradeBase?: boolean
+  /** Overhead plate + flat lay (P1 #6): drop shadow under every piece, no cast shadow / reflection. */
+  topDown?: boolean
 }
 
 export interface CompositeResult {
@@ -168,7 +170,7 @@ export async function compositeProducts(opts: CompositeOptions): Promise<Composi
       H,
       layers.map((l) => ({ rgba: l.rgba, w: l.box.w, h: l.box.h, box: { x: l.box.x, y: l.box.y } })),
       model,
-      { shadow: opts.shadow !== false, reflection: harmonize },
+      { shadow: opts.shadow !== false, reflection: harmonize && !opts.topDown, topDown: opts.topDown === true },
     )
   }
 

@@ -49,6 +49,16 @@ const LOG_OFFSET = 32
 /** SSIM constants in the log-luminance domain (range ≈ ln(287/32) ≈ 2.19). */
 const C1 = (0.01 * 2.19) ** 2
 const C2 = (0.03 * 2.19) ** 2
+/**
+ * Low-texture tolerance (P0 #3): 8-bit noise levels a flat region may carry after relighting,
+ * expressed in the log-luminance band-pass domain as NOISE / (gray + LOG_OFFSET), clamped.
+ */
+const LOW_TEXTURE_NOISE = 9
+const LOW_TEXTURE_TOL: readonly [number, number] = [0.03, 0.25]
+/** Silhouette IoU: max side it is measured at (the placement's native resolution up to this). */
+export const IOU_MAX_SIDE = 1400
+/** Diff heatmaps are never smaller than this on the long side (a 142 px heatmap is unreadable). */
+export const DIFF_MIN_SIDE = 512
 /** Chroma (Lab) below which a pixel's hue is not meaningful; chroma ratio uses clearly colored pixels. */
 const MIN_CHROMA = 12
 const RATIO_CHROMA = 18
@@ -283,24 +293,68 @@ export async function scoreFidelity(input: ScoreFidelityInput): Promise<Fidelity
     cov /= Math.max(1, n - 1)
     return [((2 * ma * mb + C1) * (2 * cov + C2)) / ((ma * ma + mb * mb + C1) * (va + vb + C2)), va + C2]
   }
+  // Low-texture windows (P0 #3): where the cut-out itself has no detail beyond the noise level of
+  // its luminance (matte black plastic, flat paint), SSIM only measures grain — a relit / re-grained
+  // flat part looks "different" while nothing changed. There the similarity is a luminance-adaptive
+  // flatness test instead: the image window must stay flat within the noise tolerance of that
+  // luminance (a dark part tolerates more log-domain noise than a bright one). New structure
+  // (a printed logo, a removed button) breaks flatness → 0, and gains weight by its excess energy.
+  const lowTexture = (x0: number, y0: number): { tol: number; sdA: number; sdB: number } => {
+    let g = 0
+    let sa = 0
+    let sa2 = 0
+    let sb = 0
+    let sb2 = 0
+    let n = 0
+    for (let y = y0; y < y0 + WIN; y++) for (let x = x0; x < x0 + WIN; x++) {
+      const i = y * w + x
+      g += grs[i]
+      sa += ha[i]
+      sa2 += ha[i] * ha[i]
+      sb += hb[i]
+      sb2 += hb[i] * hb[i]
+      n++
+    }
+    const tol = Math.max(LOW_TEXTURE_TOL[0], Math.min(LOW_TEXTURE_TOL[1], LOW_TEXTURE_NOISE / (g / n + LOG_OFFSET)))
+    return { tol, sdA: Math.sqrt(Math.max(0, sa2 / n - (sa / n) ** 2)), sdB: Math.sqrt(Math.max(0, sb2 / n - (sb / n) ** 2)) }
+  }
   let ssimSum = 0
   let windows = 0
+  let lowWindows = 0
+  let allWindows = 0
   const detailMap = dEMap ? new Float32Array(N) : null
   for (let y = 0; y + WIN <= h; y += STRIDE) {
     for (let x = 0; x + WIN <= w; x += STRIDE) {
       if (!inside(x, y)) continue
       const r = ssimWindow(x, y, x + WIN, y + WIN, false)
       if (r === null) continue
-      const s = r[0]
-      ssimSum += s * r[1]
-      windows += r[1]
+      let s = r[0]
+      let wgt = r[1]
+      allWindows++
+      const lt = lowTexture(x, y)
+      if (lt.sdA <= lt.tol) {
+        lowWindows++
+        s = lt.sdB <= lt.tol ? 1 : Math.max(0, 1 - (lt.sdB - lt.tol) / (1.5 * lt.tol))
+        wgt += Math.max(0, lt.sdB * lt.sdB - lt.tol * lt.tol)
+      }
+      ssimSum += s * wgt
+      windows += wgt
       if (detailMap) for (let yy = y; yy < y + WIN; yy++) for (let xx = x; xx < x + WIN; xx++) detailMap[yy * w + xx] = Math.max(detailMap[yy * w + xx], 1 - s)
     }
   }
   const ssimDetail = windows ? ssimSum / windows : ssimWindow(0, 0, w, h, true)?.[0] ?? 0
 
-  // Silhouette IoU.
-  const iou = await silhouetteIoU({ img, ref, sil, inCanvas, w, h, background: input.background })
+  // Silhouette IoU at the placement's native resolution (P0 #3): a downscaled copy turns the
+  // antialiased edge into a band of mixed pixels that small / thin parts cannot afford.
+  const kI = Math.min(1, IOU_MAX_SIDE / Math.max(bw, bh))
+  const iw = Math.max(8, Math.round(bw * kI))
+  const ih = Math.max(8, Math.round(bh * kI))
+  const imgN = kI < 1 ? await sharp(crop.img, { raw: { width: bw, height: bh, channels: 3 } }).resize(iw, ih, { fit: 'fill', kernel: 'lanczos3' }).raw().toBuffer() : crop.img
+  const inCanvasN = kI < 1 ? new Uint8Array(await sharp(Buffer.from(crop.inCanvas.map((v) => v * 255)), { raw: { width: bw, height: bh, channels: 1 } }).resize(iw, ih, { fit: 'fill', kernel: 'nearest' }).raw().toBuffer()).map((v) => (v >= 128 ? 1 : 0)) : crop.inCanvas
+  const refN = await sharp(input.reference).resize(iw, ih, { fit: 'fill', kernel: 'lanczos3' }).ensureAlpha().raw().toBuffer()
+  const silN = new Uint8Array(iw * ih)
+  for (let i = 0; i < iw * ih; i++) silN[i] = inCanvasN[i] && refN[i * 4 + 3] >= 128 ? 1 : 0
+  const iou = await silhouetteIoU({ img: imgN, ref: refN, sil: silN, inCanvas: inCanvasN, w: iw, h: ih, background: input.background })
 
   const metrics = { ssimDetail, silhouetteIoU: iou.iou, hueShift, chromaRatio, deltaE }
   const result: FidelityScore = {
@@ -318,7 +372,12 @@ export async function scoreFidelity(input: ScoreFidelityInput): Promise<Fidelity
   }
   if (dEMap && detailMap) {
     const png = await heatmap(dEMap, detailMap, core, ref, w, h)
-    result.diffPng = k < 1 ? await sharp(png).resize(bw, bh, { fit: 'fill' }).png().toBuffer() : png
+    // Full placement resolution (never the metric's downscaled copy), and at least DIFF_MIN_SIDE on
+    // the long side so a small part's heatmap stays readable (nearest: no invented detail).
+    const up = Math.max(1, DIFF_MIN_SIDE / Math.max(bw, bh))
+    const dw = Math.round(bw * up)
+    const dh = Math.round(bh * up)
+    result.diffPng = dw !== w || dh !== h ? await sharp(png).resize(dw, dh, { fit: 'fill', kernel: up > 1 ? 'nearest' : 'lanczos3' }).png().toBuffer() : png
   }
   return result
 }
@@ -394,12 +453,18 @@ async function silhouetteIoU(a: { img: Buffer; ref: Buffer; sil: Uint8Array; inC
     Bg = blurred[1]
     Bb = blurred[2]
   }
+  // The antialiased rim (±1 px, wider on large placements) is neither in nor out: a soft / relit
+  // edge must not count as a shape change; a real reshape moves whole regions far beyond it.
+  const rim = Math.max(1, Math.round(minDim / 300))
+  const outer = dilate(sil, w, h, rim)
+  const innerCore = erode(sil, w, h, rim)
   let inter = 0
   let uni = 0
   let decRef = 0
   let refArea = 0
   for (let i = 0; i < N; i++) {
     if (!inCanvas[i]) continue
+    if (outer[i] && !innerCore[i]) continue
     if (sil[i]) refArea++
     // Undecidable: the product color is (up to light) the plate color.
     if (scaledDist(Pr[i], Pg[i], Pb[i], Br[i], Bg[i], Bb[i], 0.6, 1.6) < 20) continue

@@ -298,6 +298,13 @@ function savedPart(input: {
   if (s(kit, 'font_secondary', 60)) visual.bodyFont = s(kit, 'font_secondary', 60)
   const logo = s(kit, 'logo_url', 1000)
   if (/^https:\/\//i.test(logo)) visual.logoUrl = logo
+  // Kit logo variants (085 brand_profile): the renderer picks the one that reads on each ad (P0 #1).
+  const logoVariants = (brandProfile?.logoVariants ?? [])
+    .filter((v): v is typeof v & { variant: 'primary' | 'light' | 'dark' | 'badge' } => /^https:\/\//i.test(v.url) && ['primary', 'light', 'dark', 'badge'].includes(v.variant))
+    .map((v) => ({ url: v.url, variant: v.variant }))
+    .slice(0, 4)
+  if (logoVariants.length) visual.logoVariants = logoVariants
+  if (!visual.logoUrl && logoVariants.length) visual.logoUrl = (logoVariants.find((v) => v.variant === 'primary') ?? logoVariants[0]).url
   const styleNotes = [s(kit, 'visual_style_notes', 300), ...styleDnas.map((d) => cleanText(d.notes, 160))].filter(Boolean).join(' · ').slice(0, 400)
   if (styleNotes) visual.styleNotes = styleNotes
 
@@ -452,13 +459,13 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
     // import_image before 085 stores the role as an explicit "[part] …" label prefix.
     const label = stripRolePrefix(freeRole || rawLabel)
     const role = fromTags ?? roleFromLabel(freeRole) ?? roleFromLabel(rawLabel)
-    return { url, label, id: s(row ?? null, 'id', 64), role, explicit: fromTags !== undefined || hasRolePrefix(rawLabel) }
+    return { url, label, id: s(row ?? null, 'id', 64), role, primary: row?.is_primary === true, explicit: fromTags !== undefined || hasRolePrefix(rawLabel) }
   })
   if (tagged.some((t) => t.explicit || (t.role && t.role !== 'detail' && t.role !== 'hero'))) {
     let heroSet = tagged.some((t) => t.role === 'hero')
     offer.productPhotos = tagged.map((t) => {
       const role = t.role ?? (heroSet ? 'detail' : ((heroSet = true), 'hero'))
-      return { url: t.url, role, ...(t.label ? { label: t.label } : {}), ...(t.id ? { id: t.id } : {}) }
+      return { url: t.url, role, ...(t.label ? { label: t.label } : {}), ...(t.id ? { id: t.id } : {}), ...(t.primary ? { primary: true } : {}) }
     })
   }
   return { dna, offer, gaps: dna.gaps, notes }

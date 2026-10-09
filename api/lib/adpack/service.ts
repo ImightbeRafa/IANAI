@@ -326,6 +326,12 @@ export function parseDna(raw: unknown): BrandDna {
   const facts = parseFacts(raw.facts, 'dna.facts')
   const visual = isObj(raw.visual) ? raw.visual : {}
   if (typeof visual.logoUrl === 'string' && !isAllowedImageUrl(visual.logoUrl)) throw bad('dna.visual.logoUrl must be an https or data:image URL')
+  if (visual.logoVariants !== undefined) {
+    const list = visual.logoVariants
+    if (!Array.isArray(list) || list.length > 4 || list.some((v) => !isObj(v) || typeof v.url !== 'string' || !isAllowedImageUrl(v.url) || !['primary', 'light', 'dark', 'badge'].includes(String(v.variant)))) {
+      throw bad('dna.visual.logoVariants must be up to 4 { url (https), variant: primary | light | dark | badge }')
+    }
+  }
   const dna = { ...raw, facts, visual, gaps: Array.isArray(raw.gaps) ? raw.gaps : [], sources: Array.isArray(raw.sources) ? raw.sources : [] } as unknown as BrandDna
   if (raw.productImageUrls !== undefined) dna.productImageUrls = parseImageUrls(raw.productImageUrls, 'dna.productImageUrls')
   if (raw.referenceImageUrls !== undefined) dna.referenceImageUrls = parseImageUrls(raw.referenceImageUrls, 'dna.referenceImageUrls')

@@ -34,7 +34,7 @@ import { estimateLight, gradeFor, gradeImage, lightSummary, type LightModel } fr
 import { avoidRegions, blockingNodes, overlayBoxes } from './avoid.js'
 import { ALL_RATIOS, inside, makeFrame, overlaps, union, type Frame } from './frame.js'
 import { decodeLayer, loadImageBytes, prepareScene, regionStats, resizeLayer, trimTransparent, type PreparedLayer } from './image.js'
-import { pickLogoVariant, prepareLogo, type LogoVariantName, type LogoVariants } from './logo.js'
+import { chooseKitLogo, pickLogoVariant, prepareLogo, type KitLogo, type KitLogoKind, type LogoVariantName, type LogoVariants } from './logo.js'
 import { makePalette, type Ctx, type IconNode, type Node, type NormalizedCopy, type RectNode, type TemplateLayout, type TextNode, type Zone } from './layout.js'
 import { TEMPLATES } from './templates.js'
 import { normalizeText } from './text.js'
@@ -59,6 +59,8 @@ interface Assets {
   product: PreparedLayer | null
   parts: PreparedLayer[]
   logo: LogoVariants | null
+  /** Primary + kit logo variants (light / dark / badge), primary first. */
+  kitLogos: KitLogo[]
   /** Brand fonts (kit upload → bundled → disk cache → Google Fonts → GitHub), resolved once. */
   fonts: FontResolution
   warnings: string[]
@@ -86,14 +88,29 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
     }
   }
   let logo: LogoVariants | null = null
-  const logoSrc = input.logo ?? input.visual?.logoUrl
+  const kitLogos: KitLogo[] = []
+  const kitVariants = (input.visual?.logoVariants ?? []).filter((v) => v && typeof v.url === 'string' && ['primary', 'light', 'dark', 'badge'].includes(v.variant))
+  const primaryBadge = kitVariants.some((v) => v.variant === 'badge' && (v.url === input.visual?.logoUrl))
+  const logoSrc = input.logo ?? input.visual?.logoUrl ?? kitVariants.find((v) => v.variant === 'primary')?.url ?? kitVariants[0]?.url
   if (logoSrc) {
     try {
-      logo = await prepareLogo(await loadImageBytes(logoSrc))
+      // The kit's badge variant used as the main logo is self-contained by declaration.
+      logo = await prepareLogo(await loadImageBytes(logoSrc), { badge: primaryBadge })
+      kitLogos.push({ kind: 'primary', variants: logo })
     } catch {
       warnings.push('logo could not be loaded/decoded; skipped')
     }
   }
+  // Kit variants (light / dark / badge) — the renderer picks what reads on each ad region.
+  for (const v of kitVariants.slice(0, 4)) {
+    if (v.variant === 'primary' || v.url === logoSrc) continue
+    try {
+      kitLogos.push({ kind: v.variant, variants: await prepareLogo(await loadImageBytes(v.url), { badge: v.variant === 'badge' }) })
+    } catch {
+      warnings.push(`logo variant ${v.variant} could not be loaded; skipped`)
+    }
+  }
+  if (!logo && kitLogos.length) logo = kitLogos[0].variants
   // Decode the scene bytes once (re-used for every ratio).
   const scene = await loadImageBytes(input.sceneImage)
   let sceneSize: Assets['sceneSize'] = null
@@ -108,7 +125,7 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
     const r = fonts[role]
     if (r.note) warnings.push(`${role} font "${r.requested ?? ''}": ${r.note}; using ${r.family}`)
   }
-  return { scene, sceneSize, product, parts, logo, fonts, warnings }
+  return { scene, sceneSize, product, parts, logo, kitLogos, fonts, warnings }
 }
 
 type CornerBox = { x0: number; y0: number; x1: number; y1: number }
@@ -569,6 +586,60 @@ export function placeProductAndAvoidText(input: {
   return { productBoxes, textOverProduct, avoidRegion, warnings }
 }
 
+/**
+ * Surface back edge (where the tabletop / floor meets the wall) above a product slot: the row with
+ * the strongest, consistent horizontal edge between 30% of the slot height and a little below its
+ * base. Null when the plate shows no clear edge there (open floor, overhead, studio sweep).
+ */
+export async function findSurfaceLine(scene: Buffer, W: number, H: number, box: Box): Promise<number | null> {
+  const x0 = Math.max(0, Math.round(box.x + box.w * 0.1))
+  const x1 = Math.min(W - 1, Math.round(box.x + box.w * 0.9))
+  const y0 = Math.max(3, Math.round(box.y + box.h * 0.3))
+  const y1 = Math.min(H - 4, Math.round(box.y + box.h + 0.035 * H))
+  if (x1 - x0 < 8 || y1 - y0 < 8) return null
+  const { data } = await sharp(scene).removeAlpha().greyscale().raw().toBuffer({ resolveWithObject: true })
+  const cols = x1 - x0 + 1
+  let best = -1
+  let bestY = -1
+  const profile: number[] = []
+  for (let y = y0; y <= y1; y++) {
+    let sum = 0
+    for (let x = x0; x <= x1; x++) sum += Math.abs(data[(y + 2) * W + x] - data[(y - 2) * W + x])
+    const v = sum / cols
+    profile.push(v)
+    if (v > best) {
+      best = v
+      bestY = y
+    }
+  }
+  const sorted = [...profile].sort((a, b) => a - b)
+  const med = sorted[sorted.length >> 1] ?? 0
+  if (best < 10 || best < 4 * med + 2) return null
+  // Consistent across the slot width (a real horizon, not one object's edge).
+  let strong = 0
+  for (let x = x0; x <= x1; x++) if (Math.abs(data[(bestY + 2) * W + x] - data[(bestY - 2) * W + x]) >= 0.5 * best) strong++
+  return strong / cols >= 0.6 ? bestY : null
+}
+
+/**
+ * P1 #7: when the plate's surface back edge lies BELOW the product's base (the product would stand
+ * against the wall, floating), move the product group down so its base rests just below that
+ * line — only when it stays inside the safe area and no text / pill gets covered.
+ */
+async function groundOnSurface(scene: Buffer, frame: Frame, layout: TemplateLayout, boxes: Box[]): Promise<{ boxes: Box[]; report: NonNullable<LayoutReport['grounding']> }> {
+  const hero = boxes[0]
+  const baseY = Math.max(...boxes.map((b) => b.y + b.h))
+  const line = await findSurfaceLine(scene, frame.W, frame.H, hero)
+  const report = { surfaceLineY: line, baseY, snappedPx: 0 }
+  if (line === null || line <= baseY - 0.005 * frame.H) return { boxes, report }
+  const shift = Math.round(line - baseY + 0.02 * frame.H)
+  const moved = boxes.map((b) => ({ ...b, y: b.y + shift }))
+  const bottom = Math.max(...moved.map((b) => b.y + b.h))
+  if (bottom > frame.H - 0.02 * frame.H) return { boxes, report }
+  if (productOverlap(layout, moved, true) > productOverlap(layout, boxes, true)) return { boxes, report }
+  return { boxes: moved, report: { ...report, snappedPx: shift } }
+}
+
 async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<RenderAdResult> {
   const exact = input.productMode === 'exact' && Boolean(assets.product)
   const logoDims = assets.logo ? { width: assets.logo.onLight.width, height: assets.logo.onLight.height } : undefined
@@ -593,7 +664,17 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   // 2) Product boxes (real cut-out placement) or the scene product's bbox; groups still on it move
   //    to free zones, and in exact mode the product shrinks when nothing can move.
   const placed = placeProductAndAvoidText({ layout, frame, product: assets.product, parts: exact ? assets.parts : [], exact, avoidRegion: avoidBox })
-  const productBoxes = placed.productBoxes
+  let productBoxes = placed.productBoxes
+  // P1 #7: ground the product on the plate's surface line (never standing against the wall).
+  let grounding: LayoutReport['grounding']
+  if (exact && productBoxes.length && !input.topDown) {
+    const g = await groundOnSurface(scene, frame, layout, productBoxes)
+    grounding = g.report
+    if (g.boxes !== productBoxes) {
+      productBoxes = g.boxes
+      warnings.push(`product moved down ${g.report.snappedPx}px onto the surface line`)
+    }
+  }
   const composited = productBoxes.length > 0
   const guarded = composited ? productBoxes : avoidBox ? [avoidBox] : []
   const productBoxRespected = productOverlap(layout, guarded, composited) === 0
@@ -602,7 +683,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   const harmonize = exact && input.harmonize !== false && productBoxes.length > 0
   let lightModel: LightModel | null = null
   if (harmonize) {
-    lightModel = await estimateLight(scene, unionBox(productBoxes), { light: input.light, surface: input.surface })
+    lightModel = await estimateLight(scene, unionBox(productBoxes), { light: input.light ?? (input.topDown ? 'top' : undefined), surface: input.topDown ? 'matte' : input.surface })
     scene = await gradeImage(scene, gradeFor(lightModel))
   }
   warnings.push(...placed.warnings)
@@ -663,7 +744,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     const layers = [assets.product, ...(exact ? assets.parts : [])].slice(0, productBoxes.length)
     const products = layers.map((p, i) => ({ cutout: p.png, box: productBoxes[i], role: (i ? 'part' : 'hero') as 'hero' | 'part' }))
     // Part 2: shading, white balance, the same grade, light wrap, shadows, reflection, grain.
-    const comp = await compositeProducts({ base, products, light: input.light, surface: input.surface, harmonize, shadow: true, lightWrap: harmonize, ...(lightModel ? { lightModel, gradeBase: false } : {}) })
+    const comp = await compositeProducts({ base, products, light: input.light ?? (input.topDown ? 'top' : undefined), surface: input.surface, harmonize, shadow: true, lightWrap: harmonize, ...(input.topDown ? { topDown: true } : {}), ...(lightModel ? { lightModel, gradeBase: false } : {}) })
     base = comp.png
     placements = comp.placements
     if (exact && input.relight) {
@@ -682,25 +763,39 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   // 5) Logo (every family): background-free variant picked for what is under its slot — a
   //    family's solid panel / card / avatar when the logo sits on one, else the composite.
   let logoVariant: LogoVariantName | undefined
+  let logoSource: KitLogoKind | undefined
+  let logoSelfContained = false
+  let logoContrastValue: number | undefined
   if (assets.logo && logoBox) {
     const lb = logoBox
     const host = [...layout.nodes]
       .reverse()
       .find((n): n is RectNode => n.kind === 'rect' && n.layer === 'under' && !n.hole && (n.alpha ?? 1) >= 0.9 && inside(lb, n.box, 0))
     const bgL = host ? luminance(host.color) : (await regionStats(base, lb, frame.W, frame.H)).p50
-    const choice = pickLogoVariant(assets.logo, bgL, parseColor(input.visual?.primaryColor))
+    const brand = parseColor(input.visual?.primaryColor)
+    // Kit variants (light / dark / badge) first; self-contained badges are never recolored (P0 #1).
+    const choice = chooseKitLogo(assets.kitLogos, bgL, brand) ?? { ...pickLogoVariant(assets.logo, bgL, brand), kind: 'primary' as KitLogoKind }
     logoVariant = choice.variant
+    logoSource = choice.kind
+    logoSelfContained = Boolean(choice.selfContained)
+    logoContrastValue = choice.contrast
+    // A variant with another aspect ratio is fitted inside the slot (never stretched).
+    const s = Math.min(lb.w / choice.layer.width, lb.h / choice.layer.height)
+    const fw = Math.max(1, Math.round(choice.layer.width * s))
+    const fh = Math.max(1, Math.round(choice.layer.height * s))
+    const fx = lb.x + Math.round((lb.w - fw) / 2)
+    const fy = lb.y + Math.round((lb.h - fh) / 2)
     const logoLayers: OverlayOptions[] = []
     if (choice.variant === 'badge' && choice.chip) {
       const pad = 14
-      const chipBox = { x: lb.x - pad, y: lb.y - pad, w: lb.w + pad * 2, h: lb.h + pad * 2 }
+      const chipBox = { x: fx - pad, y: fy - pad, w: fw + pad * 2, h: fh + pad * 2 }
       const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" width="${frame.W}" height="${frame.H}" viewBox="0 0 ${frame.W} ${frame.H}">${SHADOW_DEFS}` +
         rectSvg({ kind: 'rect', layer: 'under', box: chipBox, color: choice.chip, radius: 16, alpha: 0.95, shadow: 'soft' }) +
         '</svg>'
       logoLayers.push({ input: rasterize(svg), left: 0, top: 0 })
     }
-    logoLayers.push({ input: await resizeLayer(choice.layer, lb.w, lb.h), left: lb.x, top: lb.y })
+    logoLayers.push({ input: await resizeLayer(choice.layer, fw, fh), left: fx, top: fy })
     base = await sharp(base).composite(logoLayers).png({ compressionLevel: 0 }).toBuffer()
   } else {
     logoBox = null
@@ -778,10 +873,14 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     product: productBox,
     productBoxes: placements.map((p) => ({ ...p.box })),
     productAvoid: placed.avoidRegion,
+    ...(grounding ? { grounding } : {}),
+    ...(input.topDown ? { view: 'overhead' as const } : {}),
     textOverProduct: !productBoxRespected,
     overlays: overlayBoxes(layout),
     logo: logoBox,
     ...(logoVariant ? { logoVariant } : {}),
+    ...(logoSource ? { logoSource, logoSelfContained } : {}),
+    ...(logoContrastValue !== undefined ? { logoContrast: logoContrastValue } : {}),
     scale,
     layoutFamily: family,
     placement,

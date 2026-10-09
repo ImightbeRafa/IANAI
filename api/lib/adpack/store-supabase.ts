@@ -133,6 +133,10 @@ export function rowToItem(r: Row): PackItem {
     libraryImages: Array.isArray(r.library_images) && r.library_images.length ? (r.library_images as PackItem['libraryImages']) : undefined,
     // Fidelity is persisted inside scene_check (no dedicated column yet).
     fidelity: (r.scene_check as { fidelity?: PackItem['fidelity'] } | null)?.fidelity ?? undefined,
+    // Ratios not delivered (P0 #3) also ride inside scene_check (no migration).
+    rejectedRatios: (r.scene_check as { rejectedRatios?: PackItem['rejectedRatios'] } | null)?.rejectedRatios?.length
+      ? (r.scene_check as { rejectedRatios: PackItem['rejectedRatios'] }).rejectedRatios
+      : undefined,
   }
   for (const [k, v] of Object.entries(extra)) if (v !== undefined) (item as unknown as Row)[k] = v
   return item
