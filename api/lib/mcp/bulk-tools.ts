@@ -9,6 +9,8 @@ import {
   orchestrateAngles,
   pickAngles,
 } from '../bulk/angle-orchestrator.js'
+import { angleCacheKey, cachedAngleBoard, type AngleBoardCacheStore } from '../bulk/angle-cache.js'
+import { boardToAdpackAngles } from '../adpack/guide-angles.js'
 import { countExpandNeeded } from '../bulk/expand-product-refs.js'
 import {
   quoteBulkPosts,
@@ -74,6 +76,12 @@ async function recentSummariesFor(userId: string, offerId: string): Promise<stri
   return rows.map((row) => `${row.title}: ${row.summary}`)
 }
 
+/** Optional shared store for the angle-board cache (memory-only when unset). */
+let angleBoardStore: AngleBoardCacheStore | null = null
+export function setAngleBoardCacheStore(store: AngleBoardCacheStore | null): void {
+  angleBoardStore = store
+}
+
 export async function mcpGuideBulkAngles(
   db: McpDbClient,
   user: McpAuthUser,
@@ -87,31 +95,43 @@ export async function mcpGuideBulkAngles(
   const count = clampBulkCount(args.count)
   const language = languageOf(args.language)
   const recent = await recentSummariesFor(user.id, offerId)
-  const board = await orchestrateAngles({
-    brandName: ctx.brand.name,
-    brandIcp: ctx.brand.icpDescription,
-    brandVoice: ctx.brandKit?.brandVoice,
-    audience: ctx.brandKit?.targetAudience,
-    offerName: offer.name,
-    offerType: offer.type,
-    offerDescription: ctx.brandKit?.tagline,
-    count,
-    language,
-    recentSummaries: recent,
+  // Cached 1 h per brand+offer+count+language; the model is budgeted (F4) and falls back to the
+  // deterministic catalog board, refining the cache in the background.
+  const board = await cachedAngleBoard({
+    key: angleCacheKey({ brandId, offerId, count, language }),
+    refresh: args.refresh === true,
+    store: angleBoardStore,
+    input: {
+      brandName: ctx.brand.name,
+      brandIcp: ctx.brand.icpDescription,
+      brandVoice: ctx.brandKit?.brandVoice,
+      audience: ctx.brandKit?.targetAudience,
+      offerName: offer.name,
+      offerType: offer.type,
+      offerDescription: ctx.brandKit?.tagline,
+      count,
+      language,
+      recentSummaries: recent,
+    },
   })
+  // Same angle system as the Ad Pack: every board item carries an adpack-compatible angle.
+  const adpack = boardToAdpackAngles(board.angles, language)
+  const angles = board.angles.map((a, i) => ({ ...a, adpackAngleId: adpack[i].id, adpackAngle: adpack[i] }))
   return {
     mode: 'GUIDE',
     consumesAdvanceCredits: false,
     brandId,
     offerId,
     ...board,
+    angles,
     quoteScripts: quoteBulkScripts(board.count),
     quoteCampaign: quoteCampaignPack({
       scriptCount: board.count,
       imageCount: board.count,
       imageModel: 'grok-imagine',
     }),
-    instruction: 'Present the angle board. Do not generate scripts until the user picks angles and calls execute_bulk_scripts (or execute_campaign_pack).',
+    adpackStart: `adpack_start { brandId: "${brandId}", offerId: "${offerId}", angles: [<picked angles[i].adpackAngle>] }  (or angleIds: [<angles[i].adpackAngleId>])`,
+    instruction: 'Present the angle board (full hooks in angles[i].hook). Do not generate until the user picks angles: scripts/posts → execute_bulk_scripts / execute_campaign_pack with angle ids; static ad pack → adpack_start with the picked angles[i].adpackAngle objects (or adpackAngleId values).' + (board.refining ? ' This board came from the fast deterministic planner because the model was slow; calling guide_bulk_angles again in ~30 s returns the refined board.' : ''),
   }
 }
 

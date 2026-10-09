@@ -5,7 +5,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { CREDIT_WEIGHTS } from '../../api/lib/credits/catalog'
-import { createAdPackService, type AdPackChargeInput, type AdPackService, type AdPackUsageEntry } from '../../api/lib/adpack/service'
+import { createAdPackService, type AdPackChargeInput, type AdPackDeps, type AdPackService, type AdPackUsageEntry } from '../../api/lib/adpack/service'
 import { createMemoryPackStore, type MemoryPackStore } from '../../api/lib/adpack/store-memory'
 import type { IngestBrandDnaInput } from '../../api/lib/adpack/dna/ingest'
 import type { AdPackLibrary } from '../../api/lib/adpack/library'
@@ -14,7 +14,7 @@ import { createMemoryMcpApprovalStore, type McpApprovalStore } from '../../api/l
 import { handleMcpJsonRpc } from '../../api/lib/mcp/protocol'
 import type { McpDbClient } from '../../api/lib/mcp/user-tools'
 import { caseById } from './helpers'
-import { fakeImageLoader, fakeRenderer, fakeStorage, runnerGateway, type RunnerGateway } from './runner-fakes'
+import { fakeImageLoader, fakeRenderer, fakeStorage, runnerGateway, type RunnerGateway, type RunnerGatewayOptions } from './runner-fakes'
 
 export const USER_A = '00000000-0000-4000-8000-00000000000a'
 export const USER_B = '00000000-0000-4000-8000-00000000000b'
@@ -34,9 +34,19 @@ export interface DoorEnv {
   service: AdPackService
 }
 
-export function createDoorEnv(options: { credits?: number; ownedIds?: string[]; savedBrandDb?: SavedBrandDb; library?: AdPackLibrary } = {}): DoorEnv {
+export function createDoorEnv(
+  options: {
+    credits?: number
+    ownedIds?: string[]
+    savedBrandDb?: SavedBrandDb
+    library?: AdPackLibrary
+    /** Vision verdicts (scene checks and the style-DNA analysis). */
+    vision?: RunnerGatewayOptions['vision']
+    saveStyleDnaAnalysis?: AdPackDeps['saveStyleDnaAnalysis']
+  } = {},
+): DoorEnv {
   const store = createMemoryPackStore()
-  const gateway = runnerGateway()
+  const gateway = runnerGateway(options.vision ? { vision: options.vision } : {})
   const renderer = fakeRenderer()
   const storage = fakeStorage()
   const charges: AdPackChargeInput[] = []
@@ -74,6 +84,7 @@ export function createDoorEnv(options: { credits?: number; ownedIds?: string[]; 
     ...(options.library ? { library: options.library } : {}),
     // Exact mode (default with a product photo) loads photos: synthetic, no network.
     loadImage: fakeImageLoader(),
+    ...(options.saveStyleDnaAnalysis ? { saveStyleDnaAnalysis: options.saveStyleDnaAnalysis } : {}),
   })
   return { store, gateway, renderer, storage, charges, logs, ingestCalls, credits, service }
 }

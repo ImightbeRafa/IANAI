@@ -29,6 +29,7 @@ import { deterministicGenerationUuid, generationUuidFromApproval } from '../cred
 import { checkAdCopy, repairAdCopy } from './check-copy.js'
 import { checkScene, type CheckSceneOutput } from './check-scene.js'
 import { generateAdCopy } from './copy.js'
+import { assignLayoutFamilies } from './layout-plan.js'
 import { resolvePackAngles } from './plan-angles.js'
 import { generateScene, stripCopyText, type GeneratedScene } from './scene.js'
 import { errorMessage } from './util.js'
@@ -42,8 +43,12 @@ import { RATIO_SIZE } from './render/frame.js'
 import { cachedLogo } from './render/logo.js'
 import type { AdPackStorage, ChargeFn, Renderer, RenderOutput } from './runner-types.js'
 import type {
+  AdAngle,
   AdCopy,
   AspectRatio,
+  CreativeFreedom,
+  LayoutFamily,
+  StyleRenderProfile,
   BrandDna,
   CopyCheckIssue,
   CopyCheckResult,
@@ -90,12 +95,28 @@ const nowIso = () => new Date().toISOString()
 // Plan + quote
 // ---------------------------------------------------------------------------
 
+export const MAX_VARIATIONS = 3
+
 export interface PlanPackInput {
   dna: BrandDna
   offer: OfferInput
   size?: number
-  /** Keep only these planned angle ids (angle-board selection). Ids are deterministic and prefix-stable for the same dna/offer/seed. */
+  /**
+   * Angle selection: planner ids from adpack_angles (prefix-stable, resolved against the full
+   * board) OR any catalog id (`<category>-<hook>-<format>`, e.g. guide_bulk_angles' adpackAngleId;
+   * legacy `aNN-…` ids parse too). An id that cannot be honored is an error (never silently dropped).
+   */
   angleIds?: string[]
+  /** Full angles from guide_bulk_angles (`adpackAngle`), validated by the caller. Kept in order, before angleIds. */
+  angles?: AdAngle[]
+  /** Ads per angle (1–3): same angle and copy, different scene / composition / layout family. */
+  variations?: number
+  /** high (default without a selection) = planner decides angle, hook, format, layout and scene; guided = keep the agent's picks. */
+  creativeFreedom?: CreativeFreedom
+  /** Force one layout family (agent / brand setting). Variations still differ. */
+  layoutFamily?: LayoutFamily
+  /** Style DNA render profile (families, copy density, preferred hook). */
+  styleProfile?: StyleRenderProfile
   ratios?: AspectRatio[]
   userId: string
   source: Pack['source']
@@ -117,10 +138,53 @@ export function itemGenerationId(packId: string, index: number, attempt = 0): st
   return generationUuidFromApproval(packId, attempt > 0 ? `adpack:${index}:r${attempt}` : `adpack:${index}`)
 }
 
-export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] } {
+export interface PlannedAngles {
+  angles: AdAngle[]
+  creativeFreedom: CreativeFreedom
+}
+
+/**
+ * Base angles of a pack (before variations) + the creative-freedom mode. One resolver
+ * (plan-angles `resolvePackAngles`) serves quote, approval and start: same inputs → same list,
+ * unusable ids throw AnglePlanError (BAD_INPUT `rejectedAngles` at the doors).
+ */
+export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' | 'size' | 'angleIds' | 'angles' | 'creativeFreedom' | 'seed' | 'brief' | 'styleProfile'>): PlannedAngles {
+  const selected = Boolean(input.angleIds?.length || input.angles?.length)
+  const creativeFreedom: CreativeFreedom = input.creativeFreedom ?? (selected ? 'guided' : 'high')
+  const angles = resolvePackAngles({
+    dna: input.dna,
+    offer: input.offer,
+    size: input.size,
+    language: input.dna.language,
+    seed: input.seed,
+    brief: input.brief,
+    preferHook: input.styleProfile?.hookType,
+    angleIds: input.angleIds,
+    angles: input.angles,
+  })
+  return { angles, creativeFreedom }
+}
+
+/** Ads a selection runs: base angles × variations (1–3). */
+export function packAdCount(baseAngles: number, variations = 1): number {
+  return baseAngles * Math.max(1, Math.min(MAX_VARIATIONS, Math.floor(variations) || 1))
+}
+
+export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[]; creativeFreedom: CreativeFreedom } {
   const packId = input.ids?.packId ?? randomUUID()
-  // Same resolver as the quote/approval: exactly `size` angles, or exactly the selected ids (throws otherwise).
-  const angles = resolvePackAngles({ dna: input.dna, offer: input.offer, size: input.size, language: input.dna.language, seed: input.seed, angleIds: input.angleIds })
+  // Same resolver as the quote/approval: exactly `size` angles, or exactly the selection (throws otherwise).
+  const { angles: baseAngles, creativeFreedom } = resolvePlannedAngles(input)
+  const variations = Math.max(1, Math.min(MAX_VARIATIONS, Math.floor(input.variations ?? 1) || 1))
+  const expanded: AdAngle[] = []
+  for (const a of baseAngles) for (let v = 0; v < variations; v++) expanded.push(variations > 1 ? { ...a, variation: v } : { ...a })
+  const families = assignLayoutFamilies({
+    slots: expanded.map((a) => ({ format: a.format, angleId: a.id })),
+    // Same inputs → same families through both doors (parity), whatever the packId.
+    seed: input.seed ?? `${input.dna.brandName}|${input.offer.name}|families`,
+    profile: input.styleProfile,
+    family: input.layoutFamily,
+  })
+  const angles = expanded.map((a, i) => ({ ...a, layoutFamily: families[i] }))
   const ratios = input.ratios?.length ? [...new Set(input.ratios)] : [...DEFAULT_RATIOS]
   const ts = nowIso()
   const pack: Pack = {
@@ -152,7 +216,7 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] 
     updatedAt: ts,
     costUsd: 0,
   }))
-  return { pack, items }
+  return { pack, items, creativeFreedom }
 }
 
 /**
@@ -277,6 +341,8 @@ interface RunCtx {
   logo: Promise<Uint8Array | null> | null
   anchorWait: Promise<void> | null
   advanced: Set<string>
+  /** Base items (variation 0) whose copy is being written in this call. */
+  copyWaits: Map<string, Promise<void>>
 }
 
 class DeferredSignal {
@@ -312,6 +378,7 @@ export async function advancePack(input: AdvancePackInput): Promise<PackProgress
     logo: null,
     anchorWait: null,
     advanced: new Set(),
+    copyWaits: new Map(),
   }
   const deferred = new Set<string>()
   let stoppedForBudget = false
@@ -390,9 +457,27 @@ async function runItem(ctx: RunCtx, leased: PackItem, onAnchorSettled: () => voi
       return 'budget'
     }
     switch (item.status) {
-      case 'planned':
-        item = await stepCopy(ctx, item)
+      case 'planned': {
+        let signal: DeferredSignal | null = null
+        if (!item.angle.variation && item.angle.variation !== undefined) {
+          signal = new DeferredSignal()
+          ctx.copyWaits.set(item.id, signal.promise)
+        }
+        try {
+          const next = await stepCopy(ctx, item)
+          if (next === 'defer') {
+            await release(ctx, item)
+            return 'deferred'
+          }
+          item = next
+        } finally {
+          if (signal) {
+            signal.resolve()
+            ctx.copyWaits.delete(item.id)
+          }
+        }
         break
+      }
       case 'copy_ready': {
         const gate = await waitForAnchor(ctx, item)
         if (gate === 'defer') {
@@ -426,10 +511,45 @@ function blockingIssues(check: CopyCheckResult, codes: ReadonlySet<CopyCheckIssu
   return check.issues.filter((i) => codes.has(i.code))
 }
 
-async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem> {
+/** Base item (variation 0) of a variation item, from this call's view. */
+function variationBase(ctx: RunCtx, item: PackItem): PackItem | undefined {
+  if (!item.angle.variation) return undefined
+  return [...ctx.known.values()].find((i) => i.angle.id === item.angle.id && !i.angle.variation && i.id !== item.id)
+}
+
+/**
+ * Variations share the angle's copy (only scene / composition / layout family change): reuse the
+ * base item's copy once it exists. Returns 'defer' while the base copy is still being written.
+ */
+async function variationCopy(ctx: RunCtx, item: PackItem): Promise<{ copy: AdCopy; copyCheck?: CopyCheckResult } | 'defer' | null> {
+  if (!item.angle.variation) return null
+  let base = variationBase(ctx, item)
+  const wait = base ? ctx.copyWaits.get(base.id) : undefined
+  if (wait) {
+    await wait
+    base = variationBase(ctx, item)
+  }
+  if (!base?.copy && base?.status !== 'failed') {
+    // Another caller may have written it: refresh the base from the store.
+    const fresh = await ctx.input.store.getPack(ctx.pack.id, ctx.input.userId)
+    const b = fresh?.items.find((i) => i.angle.id === item.angle.id && !i.angle.variation && i.id !== item.id)
+    if (b) {
+      ctx.known.set(b.id, b)
+      base = b
+    }
+  }
+  if (!base || base.status === 'failed') return null
+  if (base.copy && base.status !== 'planned') return { copy: base.copy, ...(base.copyCheck ? { copyCheck: base.copyCheck } : {}) }
+  return 'defer'
+}
+
+async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem | 'defer'> {
   const { gateway } = ctx.input
   const { dna, offer } = ctx.pack
   const language = dna.language
+  const shared = await variationCopy(ctx, item)
+  if (shared === 'defer') return 'defer'
+  if (shared) return save(ctx, item, { status: 'copy_ready', copy: shared.copy, copyCheck: shared.copyCheck, timings: { ...item.timings, copyMs: 0 }, error: undefined })
   const t0 = Date.now()
   let cost = 0
   let gen: Awaited<ReturnType<typeof generateAdCopy>> | null = null
@@ -670,9 +790,10 @@ const PLATE_SIZE = RATIO_SIZE['9:16']
  * Union of the product boxes of every pack ratio, mapped back into the 9:16 plate through the
  * renderer's centered cover crop → where the plate must leave an empty surface.
  */
-export function plateRegionFor(input: { pack: Pick<Pack, 'ratios' | 'dna'>; format: PackItem['angle']['format']; copy: AdCopy; product: { width: number; height: number } }): PlateRegion {
+export function plateRegionFor(input: { pack: Pick<Pack, 'ratios' | 'dna'>; format: PackItem['angle']['format']; copy: AdCopy; product: { width: number; height: number }; layoutFamily?: LayoutFamily }): PlateRegion {
   const boxes = planProductBoxes({
     format: input.format,
+    ...(input.layoutFamily ? { layoutFamily: input.layoutFamily } : {}),
     ratios: input.pack.ratios,
     copy: input.copy,
     visual: input.pack.dna.visual,
@@ -731,7 +852,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const cutouts: LoadedCutout[] = [cut.hero, ...cut.parts]
   const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length
   const light = plateLight(item.index)
-  const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height } })
+  const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
   const refs: PropsReference[] = photos
     .filter((p) => p.url === cut.hero.stored.sourceUrl || p.role === 'part' || p.role === 'box' || p.role === 'contents')
@@ -837,10 +958,22 @@ async function exactInputsFromScene(item: PackItem, load: ImageLoader, memory?: 
   return { cutouts, light: item.scene?.light }
 }
 
-function scenePlacementAvoid(check: SceneCheckResult | undefined): { x0: number; y0: number; x1: number; y1: number } | undefined {
+/**
+ * Generated mode: where the product sits in the scene (fractions x/y/w/h) — the scene's stored
+ * box when present, else the vision check's [y0, x0, y1, x1] (0–1000) bbox. Exact mode never uses
+ * it: there the composite's placement IS the product box.
+ */
+export function sceneProductBox(item: Pick<PackItem, 'scene' | 'sceneCheck'>): { x: number; y: number; w: number; h: number } | undefined {
+  if (item.scene?.productBox) return item.scene.productBox
+  return visionBoxToNormalized(item.sceneCheck)
+}
+
+function visionBoxToNormalized(check: SceneCheckResult | undefined): { x: number; y: number; w: number; h: number } | undefined {
   const b = check?.productBox
   if (!b) return undefined
-  return { y0: b[0] / 1000, x0: b[1] / 1000, y1: b[2] / 1000, x1: b[3] / 1000 }
+  const [y0, x0, y1, x1] = b.map((v) => v / 1000)
+  if (!(x1 > x0 && y1 > y0)) return undefined
+  return { x: x0, y: y0, w: Math.round((x1 - x0) * 1000) / 1000, h: Math.round((y1 - y0) * 1000) / 1000 }
 }
 
 /** Fidelity of one exact render: every placed cut-out is scored, the worst wins. */
@@ -882,6 +1015,8 @@ async function renderAllRatios(args: {
       copy,
       visual: pack.dna.visual ?? {},
       language: pack.dna.language,
+      // Every family supports both modes; resize keeps the item's family (fonts come from dna.visual).
+      ...(item.angle.layoutFamily ? { layoutFamily: item.angle.layoutFamily } : {}),
       ...(args.logo ? { logo: args.logo } : {}),
       ...(exact
         ? {
@@ -905,7 +1040,8 @@ async function renderAllRatios(args: {
           }
         : {
             productCutout: pack.offer.productCutoutUrl,
-            ...(scenePlacementAvoid(item.sceneCheck) ? { productAvoid: scenePlacementAvoid(item.sceneCheck) } : {}),
+            // One product-avoid input: the scene's own box, else the vision-check bbox.
+            ...(sceneProductBox(item) ? { productBox: sceneProductBox(item) } : {}),
           }),
     })
     const { url } = await storage.upload({

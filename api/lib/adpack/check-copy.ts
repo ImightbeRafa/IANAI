@@ -7,6 +7,7 @@
  * repairAdCopy: ONE LLM rewrite of only the failing fields, then re-check.
  */
 import type { AdAngle, AdCopy, AdLanguage, BrandDna, CopyCheckIssue, CopyCheckResult, FactKey, ModelGateway, OfferInput } from './types.js'
+import { clicheExamples, findCliches } from './cliches.js'
 import { checkCompliance } from './compliance.js'
 import {
   ADPACK_COPY_MODEL,
@@ -209,6 +210,15 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
         if (hard) push('locale_register', field, `"${m[0]}" is ${other}; locale ${options.dna.locale} requires ${own}`, { path, token: m[0] })
         else push('register', field, `"${m[0]}" is ${other}; this brand writes in ${own}`, { path, token: m[0] })
       }
+    }
+  }
+
+  // Generic clichés (deterministic blocklist): repairable, the one targeted rewrite replaces them.
+  for (const { field, path, text } of fields) {
+    if (field === 'offerLine') continue
+    const unquoted = text.replace(/["“”«»][^"“”«»]*["“”«»]/g, ' ')
+    for (const hit of findCliches(unquoted)) {
+      push('cliche', field, `Generic cliché "${hit.match}" (${hit.example}); say the specific benefit, situation or fact instead`, { path, token: hit.match })
     }
   }
 
@@ -537,8 +547,8 @@ export async function repairAdCopy(input: RepairAdCopyInput): Promise<RepairAdCo
     IAN_CORE_RULES[language],
     registerInstruction(dna.register, language, dna.locale),
     language === 'es'
-      ? `Corrige SOLO los campos indicados de este anuncio. No toques los demás. Límites: headline ≤ ${headlineMaxWords(angle.format)} palabras; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} de ≤ ${L.bulletWords} palabras y ≤ ${L.bulletChars} caracteres; cta ≤ ${L.ctaWords} palabras y ≤ ${L.ctaChars} caracteres; nada se repite entre titular, subtítulo, chips y caption; mantené el trato de la marca; caption ${L.captionMinChars}–${L.captionMaxChars} caracteres; sceneBrief solo visual, sin pedir texto/letras/logos. Responde SOLO JSON con los campos corregidos.`
-      : `Fix ONLY the listed fields of this ad. Do not touch the rest. Limits: headline ≤ ${headlineMaxWords(angle.format)} words; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} of ≤ ${L.bulletWords} words and ≤ ${L.bulletChars} chars; cta ≤ ${L.ctaWords} words and ≤ ${L.ctaChars} chars; nothing repeats across headline, subline, chips and caption; caption ${L.captionMinChars}–${L.captionMaxChars} chars; sceneBrief visual only, never ask for text/letters/logos. Reply with JSON only containing the fixed fields.`,
+      ? `Corrige SOLO los campos indicados de este anuncio. No toques los demás. Nada de frases hechas genéricas (${clicheExamples().slice(0, 8).join(' / ')}): decí la situación o el dato concreto. Límites: headline ≤ ${headlineMaxWords(angle.format)} palabras; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} de ≤ ${L.bulletWords} palabras y ≤ ${L.bulletChars} caracteres; cta ≤ ${L.ctaWords} palabras y ≤ ${L.ctaChars} caracteres; nada se repite entre titular, subtítulo, chips y caption; mantené el trato de la marca; caption ${L.captionMinChars}–${L.captionMaxChars} caracteres; sceneBrief solo visual, sin pedir texto/letras/logos. Responde SOLO JSON con los campos corregidos.`
+      : `Fix ONLY the listed fields of this ad. Do not touch the rest. No generic stock phrases (${clicheExamples().slice(15).join(' / ')}): state the concrete situation or fact. Limits: headline ≤ ${headlineMaxWords(angle.format)} words; subline ≤ ${L.sublineWords}; bullets ≤ ${L.maxBullets} of ≤ ${L.bulletWords} words and ≤ ${L.bulletChars} chars; cta ≤ ${L.ctaWords} words and ≤ ${L.ctaChars} chars; nothing repeats across headline, subline, chips and caption; caption ${L.captionMinChars}–${L.captionMaxChars} chars; sceneBrief visual only, never ask for text/letters/logos. Reply with JSON only containing the fixed fields.`,
   ].join('\n\n')
   const user = [
     factsAllowlistBlock(ctx),

@@ -19,6 +19,7 @@
  */
 import { resolveBrandKitForBusiness, type BrandKitRowLike } from '../brand-kit-resolve.js'
 import { parseStyleDnas } from '../bulk/style-dna.js'
+import type { StyleDna } from '../bulk/types.js'
 import { isReusableProductReference } from '../product-image-refs.js'
 import type { SiteAnalysisResult } from '../site-analysis.js'
 import { detectLanguage } from './dna/classify.js'
@@ -79,6 +80,8 @@ export interface SavedBrandResult {
   websiteUrl?: string
   /** Model cost (only with refresh). */
   costUsd: number
+  /** Style DNAs saved on the resolved brand kit (`style_dnas`), for adpack_start {styleDnaId}. */
+  styleDnas?: StyleDna[]
 }
 
 export interface BuildDnaFromSavedBrandInput {
@@ -530,5 +533,6 @@ export async function buildDnaFromSavedBrand(input: BuildDnaFromSavedBrandInput)
     ...(kit?.id ? { brandKitId: String(kit.id) } : {}),
     ...(websiteUrl ? { websiteUrl } : {}),
     costUsd,
+    styleDnas: parseStyleDnas(kit?.style_dnas),
   }
 }

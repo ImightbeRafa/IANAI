@@ -97,7 +97,7 @@ describe('planAngles', () => {
   it('writes messages in the requested language', () => {
     const c = BENCHMARK_OFFERS.find((x) => x.dna.language === 'en')!
     const angles = planAngles({ dna: c.dna, offer: c.offer })
-    expect(angles.every((a) => /For people|Defuse|Real proof|Versus|Clear value|A concrete|What few|How it fits|Made for/.test(a.message))).toBe(true)
+    expect(angles.every((a) => /^(From the concrete problem|The product in a real|To give as a gift|How it works|What you get|What comes in it|The confirmed technical|Versus the usual|For the campaign date|Verified proof)/.test(a.message))).toBe(true)
   })
 })
 

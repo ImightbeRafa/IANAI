@@ -103,8 +103,8 @@ CTA.`,
 
 describe('mcp 0.8 remaining tools', () => {
   it('enables the remaining extension tools on 0.8.x', () => {
-    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.(9|10|11)\./)
-    expect(MCP_SERVER_INFO.version).toMatch(/^0\.(9|10|11)\./)
+    expect(MCP_REGISTRY_VERSION).toMatch(/^0\.(9|10|11|12)\./)
+    expect(MCP_SERVER_INFO.version).toMatch(/^0\.(9|10|11|12)\./)
     for (const name of NEW_ENABLED) {
       const tool = getMcpTool(name)
       expect(tool?.enabled).toBe(true)

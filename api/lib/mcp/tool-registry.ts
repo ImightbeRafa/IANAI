@@ -29,7 +29,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.11.0'
+export const MCP_REGISTRY_VERSION = '0.12.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -286,7 +286,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'guide_bulk_angles',
     group: 'guide_studio',
     risk: 'guide',
-    description: 'Return a diverse buyer-niche angle board (not same-ad-different-words). Free GUIDE.',
+    description: 'Return a diverse buyer-niche angle board (not same-ad-different-words) with full hooks. Free GUIDE, cached 1 h per brand/offer/count/language (refresh: true for a new one). Every item carries adpackAngleId + adpackAngle (shared angle catalog: regalo, cómo funciona, valor/precio, qué incluye, uso real, detalle técnico, comparación, temporada, problema→solución, prueba social) that adpack_start accepts as {angles} or {angleIds}.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -540,7 +540,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'guide_studio',
     risk: 'guide',
     description:
-      'Ad Pack (optional): plan distinct ad angles (IAN archetype × buyer pain/desire/objection × format) for dna + offer, or for a saved brand via {brandId, offerId}. Deterministic, no credits. Pass chosen ids as angleIds to adpack_start.',
+      'Ad Pack (optional): plan distinct ad angles from the shared angle catalog (regalo, cómo funciona, valor/precio, qué incluye, uso real, detalle técnico, comparación, temporada, problema→solución, prueba social only with verified proof) × hook × format for dna + offer, or for a saved brand via {brandId, offerId}. Each angle has a stable id "<category>-<hookType>-<format>" and a short rationale. Deterministic, no credits. Pass chosen ids as angleIds to adpack_start (guide_bulk_angles adpackAngleId values work too).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -564,6 +564,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'The approval shows the exact plan {items, unitCost, total}; on retry the plan is recomputed and, if count or credits differ, the tool answers status=plan_changed (code PLAN_CHANGED, approved vs planned) and runs nothing — ask the user again. ' +
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
       'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd = {"1": [id]} per ad. ' +
+      'Creative control: creativeFreedom "high" (default when you give only brand/offer) lets Advance choose angle, hook, format, layout family and scene; pass angleIds (adpack_angles / guide_bulk_angles adpackAngleId) or angles (guide_bulk_angles adpackAngle objects) to steer. variations 1–3 = ads per angle (same copy, different scene/layout; credits = ads × variations). styleDnaId (list_style_dnas) makes the layouts follow the brand\'s winning ads; layoutFamily forces one look. The response lists per ad {angleId, category, hookType, format, layoutFamily, rationale}. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
       'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
       'Guarantees: only confirmed facts are used for prices/claims; text on the image is rendered exactly (never drawn by the image model). ' +
@@ -580,7 +581,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
       'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
-      'When finished it returns deliverable {ads[{index, format, headline, caption, links{4:5,9:16,…}, files[{ratio, url, width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
+      'When finished it returns deliverable {ads[{index, format, angleId, category, hookType, rationale, layoutFamily, variation?, headline, caption, links{4:5,9:16,…}, files[{ratio, url, width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions with the angle and why (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
       'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,
     requiresApproval: false,

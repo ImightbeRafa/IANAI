@@ -34,7 +34,7 @@ const PACK_RATIOS = new Set(['1:1', '4:5', '9:16', '16:9'])
 
 /** adpack_start arguments create_ads forwards unchanged in pack/single mode. */
 export const PACK_PASSTHROUGH = [
-  'brief', 'angleIds', 'brandKitId', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
+  'brief', 'angleIds', 'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId', 'brandKitId', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
   'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
   'includeDna', 'language',
   'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
@@ -116,7 +116,7 @@ export function routeCreateAds(args: Record<string, unknown>): CreateAdsRoute {
 /** Decision table shared by the tool descriptions (which tool for which job). */
 export const CREATE_ADS_DECISION_TABLE =
   'DECISION TABLE (prefer create_ads): ' +
-  'mode pack|single → Ad Pack: sell-ready static ads, text rendered exactly (never drawn by the model), real product photo as scene reference + product check with retries; ratios 4:5 + 9:16 by default (1:1 on request, or later free via adpack_resize); brand kit colors/fonts/logo/voice/forbidden phrases; 6 credits per finished ad. ' +
+  'mode pack|single → Ad Pack: sell-ready static ads, text rendered exactly (never drawn by the model), real product photo as scene reference + product check with retries; ratios 4:5 + 9:16 by default (1:1 on request, or later free via adpack_resize); brand kit colors/fonts/logo/voice/forbidden phrases; 7 layout families (layoutFamily / styleDnaId), creativeFreedom, variations 1-3 (credits = ads × variations), angleIds from adpack_angles or guide_bulk_angles; 6 credits per finished ad. ' +
   'mode carousel → execute_carousel_generate: 2-5 slides from a script, one ratio (1:1/4:5/9:16/3:4), designDirection = brief; 24 credits per slide. ' +
   'mode edit → execute_image_edit: change an existing image (productImageId or imageUrl), one ratio; 18 credits. ' +
   'Other tools (still available): execute_image_generate = one free-form image (no exact text; 4:5 needs aspectRatioFallback→3:4); execute_bulk_posts / execute_campaign_pack = angle-board posts/scripts with styleDnaId (Style DNA), 6 or 24 credits per image. ' +

@@ -2,7 +2,7 @@
  * Ad Pack engine — adapter from the runner's `Renderer` to `./render`.
  * Static import so Vercel's tracer and the Cloudflare esbuild step bundle it.
  */
-import { renderAd } from './render/index.js'
+import { renderAd, type FetchLike } from './render/index.js'
 import type { Renderer, RenderInput, RenderOutput } from './runner-types.js'
 
 function toBufferOrString(v: Uint8Array | string | undefined): Buffer | string | undefined {
@@ -28,13 +28,17 @@ export function createDefaultRenderer(): Renderer {
         ...(input.productMode ? { productMode: input.productMode } : {}),
         ...(input.productParts?.length ? { productParts: input.productParts.map((p) => toBufferOrString(p)!) } : {}),
         ...(input.light ? { light: input.light } : {}),
-        ...(input.productAvoid ? { productAvoid: input.productAvoid } : {}),
         ...(relight
           ? {
               relight: (composite, placements, ratio) =>
                 relight(u8(composite), placements.map((p) => ({ box: p.box, placed: u8(p.placed), role: p.role })), ratio),
             }
           : {}),
+        ...(input.layoutFamily ? { layoutFamily: input.layoutFamily } : {}),
+        // Generated mode only (exact mode avoids the composite's own placement).
+        ...(input.productBox ? { productBox: input.productBox } : {}),
+        // Brand fonts: bundled → disk cache → Google Fonts (ADPACK_FONT_FETCH=0 disables network).
+        fonts: { fetch: fontFetchEnabled() ? (globalThis.fetch as unknown as FetchLike) : null },
       })
       return {
         png: new Uint8Array(out.png),
@@ -43,7 +47,13 @@ export function createDefaultRenderer(): Renderer {
         ...(out.productPlacements?.length ? { productPlacements: out.productPlacements.map((p) => ({ box: p.box, placed: u8(p.placed), role: p.role })) } : {}),
         ...(out.relit ? { relit: true } : {}),
         ...(out.layoutReport.textOverProduct ? { textOverProduct: true } : {}),
+        layoutFamily: out.layoutReport.layoutFamily,
+        placement: out.layoutReport.placement,
       }
     },
   }
+}
+
+function fontFetchEnabled(): boolean {
+  return process.env.ADPACK_FONT_FETCH !== '0' && typeof globalThis.fetch === 'function'
 }

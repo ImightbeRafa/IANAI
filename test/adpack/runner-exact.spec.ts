@@ -189,7 +189,7 @@ describe('exact product mode — pack runner (A1/A3/A4/H3)', () => {
 })
 
 describe('generated mode keeps working, with the new props / bbox checks', () => {
-  it('legacy packs (no render options) stay generated: product ref on the scene, vision bbox → renderer productAvoid', async () => {
+  it('legacy packs (no render options) stay generated: product ref on the scene, vision bbox → renderer productBox (one avoid input)', async () => {
     const t = await setup({
       size: 1,
       render: { productFidelity: 'generated', allowedProps: ['caja'] },
@@ -200,7 +200,7 @@ describe('generated mode keeps working, with the new props / bbox checks', () =>
     expect(items[0].status).toBe('done')
     expect(t.gateway.sceneCalls[0].refs).toEqual([HERO])
     expect(t.renderer.calls[0].productMode).toBeUndefined()
-    expect(t.renderer.calls[0].productAvoid).toEqual({ y0: 0.4, x0: 0.5, y1: 0.8, x1: 0.9 })
+    expect(t.renderer.calls[0].productBox).toEqual({ x: 0.5, y: 0.4, w: 0.4, h: 0.4 })
     expect(items[0].fidelity).toMatchObject({ method: 'generated', passed: true, ssim: null, deltaE: null })
   })
 

@@ -73,6 +73,12 @@ function compactItem(item: AdPackItemView) {
     status: item.status,
     format: item.format,
     headline: item.headline ?? null,
+    angleId: item.angleId ?? null,
+    category: item.category ?? null,
+    hookType: item.hookType,
+    rationale: item.rationale ?? null,
+    layoutFamily: item.layoutFamily ?? null,
+    ...(item.variation !== undefined ? { variation: item.variation } : {}),
     // Stable public storage URLs (never signed / expiring) with explicit size + format (G4).
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, width: r.width, height: r.height, format: 'png' as const })),
     charged: item.charged,
@@ -165,8 +171,8 @@ function statusPayload(status: AdPackStatusResponse) {
       : finished
         ? {
           instructionsForGrok: es
-            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + sus files (url full-res por ratio: 4:5 feed, 9:16 historia; 1:1 si se pidió) + su caption. Ofrecé deliverable.captionsText para copiar todo junto. Otro formato (p. ej. 1:1) sale gratis con adpack_resize.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}${forbiddenHint}`
-            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + its files (full-res url per ratio: 4:5 feed, 9:16 story; 1:1 if requested) + its caption. Offer deliverable.captionsText to copy all captions at once. Another ratio (e.g. 1:1) is free with adpack_resize.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}${forbiddenHint}`,
+            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + ángulo (category, hookType) y por qué (rationale) + sus files (url full-res por ratio: 4:5 feed, 9:16 historia; 1:1 si se pidió) + su caption. Ofrecé deliverable.captionsText para copiar todo junto. Otro formato (p. ej. 1:1) sale gratis con adpack_resize.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}${forbiddenHint}`
+            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + angle (category, hookType) and why (rationale) + its files (full-res url per ratio: 4:5 feed, 9:16 story; 1:1 if requested) + its caption. Offer deliverable.captionsText to copy all captions at once. Another ratio (e.g. 1:1) is free with adpack_resize.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}${forbiddenHint}`,
         }
         : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }
@@ -243,6 +249,7 @@ function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
   for (const key of [
     'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
+    'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId',
     'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
     'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
     'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
@@ -406,10 +413,33 @@ export async function dispatchAdPackTool(options: {
       }
       case 'adpack_dna_confirm':
         return { ...(await service.confirmDna({ userId, dna: args.dna, edits: args.edits })) }
-      case 'adpack_angles':
-        return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })) }
+      case 'adpack_angles': {
+        const res = await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brief: args.brief, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
+        return {
+          ...res,
+          nextStep: 'Each angle has id (stable catalog id <category>-<hookType>-<format>), category, hookType, format and rationale. Pass the ids you want as adpack_start {angleIds}; ids from guide_bulk_angles (adpackAngleId) and legacy aNN-… ids work too.',
+        }
+      }
       case 'adpack_quote':
-        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, angleIds: args.angleIds, productFidelity: args.productFidelity, relight: args.relight })) }
+        return {
+          ...(await service.quote({
+            userId,
+            size: args.size,
+            dna: args.dna,
+            offer: args.offer,
+            brief: args.brief,
+            brandId: args.brandId,
+            offerId: args.offerId,
+            brandKitId: args.brandKitId,
+            productImageIds: args.productImageIds,
+            productImageIdsByAd: args.productImageIdsByAd,
+            angleIds: args.angleIds,
+            angles: args.angles,
+            variations: args.variations,
+            productFidelity: args.productFidelity,
+            relight: args.relight,
+          })),
+        }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input = startBoundInput(args)
@@ -423,12 +453,15 @@ export async function dispatchAdPackTool(options: {
           : null
         // The quote resolves the exact angles start will run (angleIds included): what the user approves is what runs.
         // Relight (exact mode) adds an image-edit call per ad, so it is part of the approved price.
+        // Same parser + resolver as start: guide angles + angleIds (catalog / planner / legacy ids) × variations.
         const render = { productFidelity: args.productFidelity, relight: args.relight }
+        const selection = { angleIds: args.angleIds, angles: args.angles, variations: args.variations, brief: args.brief }
         const quote = preview
-          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, angleIds: args.angleIds, ...render })
-          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, angleIds: args.angleIds, ...render })
+          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, ...selection, ...render })
+          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, ...selection, ...render })
         const plan = adPackPlanSummary(quote.size, { relight: quote.relight === true })
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
+        const vary = quote.variations && quote.variations > 1 ? { es: ` (${quote.angles} ángulos × ${quote.variations} variaciones)`, en: ` (${quote.angles} angles × ${quote.variations} variations)` } : { es: '', en: '' }
         const ratios = Array.isArray(args.ratios) && args.ratios.length ? (args.ratios as string[]).join(' + ') : '4:5 + 9:16'
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,
@@ -437,8 +470,8 @@ export async function dispatchAdPackTool(options: {
           input,
           approvalRequestId,
           plan,
-          summaryEs: `${quote.size} ${quote.size === 1 ? 'anuncio estático' : 'anuncios estáticos'}${target} · formatos ${ratios}`,
-          summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${target} · ratios ${ratios}`,
+          summaryEs: `${quote.size} ${quote.size === 1 ? 'anuncio estático' : 'anuncios estáticos'}${vary.es}${target} · formatos ${ratios}`,
+          summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${vary.en}${target} · ratios ${ratios}`,
           appOrigin: options.appOrigin,
           language: args.language === 'en' ? 'en' : undefined,
         })
@@ -470,6 +503,11 @@ export async function dispatchAdPackTool(options: {
             brief: args.brief,
             size: args.size,
             angleIds: args.angleIds,
+            angles: args.angles,
+            variations: args.variations,
+            creativeFreedom: args.creativeFreedom,
+            layoutFamily: args.layoutFamily,
+            styleDnaId: args.styleDnaId,
             ratios: args.ratios,
             businessId: args.businessId,
             brandKitId: args.brandKitId,
@@ -485,7 +523,9 @@ export async function dispatchAdPackTool(options: {
             immutableAttributes: args.immutableAttributes,
             source: 'mcp',
             packId: approvalRequestId,
+            // F1: the service recomputes the plan and refuses (PLAN_CHANGED, nothing created) on any difference.
             ...(gate.approved ? { approved: { items: gate.approved.items, total: gate.approved.total } } : {}),
+            expectedAds: quote.size,
           })
         } catch (err) {
           if (isAdPackError(err) && err.code === 'PLAN_CHANGED' && gate.approved) {
@@ -501,6 +541,10 @@ export async function dispatchAdPackTool(options: {
           packStatus: started.status,
           quote: started.quote,
           quotedCreditCost: started.quote.credits,
+          ...(started.creativeFreedom ? { creativeFreedom: started.creativeFreedom } : {}),
+          ...(started.angles ? { plan: started.angles } : {}),
+          ...(started.styleProfile ? { styleProfile: started.styleProfile } : {}),
+          ...(started.notes?.length ? { notes: started.notes } : {}),
           // Credits are charged per finished ad while the pack runs.
           chargedCredits: 0,
           nextTool: 'adpack_status',

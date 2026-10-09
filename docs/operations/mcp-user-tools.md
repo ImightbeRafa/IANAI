@@ -35,6 +35,14 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.12.0 — ad-pack premium merge (WS1 exact fidelity × WS3 creative system)
+
+Registry / server version **0.12.0**. No migration.
+
+- `adpack_start` / `adpack_quote` / `create_ads` (pack/single): `angleIds` (adpack_angles board ids, catalog ids `<category>-<hookType>-<format>` from guide_bulk_angles `adpackAngleId`, legacy `aNN-…`), `angles` (guide adpackAngle objects), `variations` 1–3, `creativeFreedom`, `layoutFamily` (7 families), `styleDnaId`. One resolver: quote = ads × variations (+ relight per ad); the approval stores it; start recomputes and answers `PLAN_CHANGED` on any difference; unusable ids → `BAD_INPUT` `rejectedAngles` before approval.
+- Every layout family runs in exact mode: the composite's placement of the real cut-out is the product box all families keep copy off (generated mode: the vision-check bbox). Brand fonts (kit font URL → bundled → disk cache → Google Fonts → GitHub; `ADPACK_FONT_FETCH=0` disables network) and WS1 logo variants on every family.
+- Status / deliverable per ad: WS4 fields (files[], forbiddenHits, failures) + WS1 fidelity + `angleId`, `category`, `hookType`, `rationale`, `layoutFamily`, `variation`. `adpack_resize` keeps the item's layout family and brand fonts.
+
 ### 0.11.0 — premium round (owner feedback 2026-10-08: B1–B5, C1–C3, A2 data model, H7, G2)
 
 Registry / server version **0.11.0**. Migration **`085_offer_profile_brand_profile_images.sql`** (additive, re-runnable; applied by the operator). Every tool works before 085 is applied and says what is pending.
@@ -141,7 +149,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.11.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.12.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

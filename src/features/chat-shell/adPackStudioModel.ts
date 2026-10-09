@@ -384,6 +384,7 @@ const ISSUE_LABELS: Record<CopyCheckIssue['code'], { es: string; en: string }> =
   placeholder: { es: 'Tiene un texto de relleno', en: 'Contains a placeholder' },
   register: { es: 'Mezcla el trato (vos/tú/usted)', en: 'Wrong form of address' },
   locale_register: { es: 'No usa el trato obligatorio del idioma (vos/tú/usted)', en: 'Breaks the required form of address for the locale' },
+  cliche: { es: 'Frase hecha genérica', en: 'Generic stock phrase' },
 }
 
 const FIELD_LABELS: Record<string, { es: string; en: string }> = {

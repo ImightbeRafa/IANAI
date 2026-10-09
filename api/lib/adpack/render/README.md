@@ -21,7 +21,38 @@ const all = await renderAdAllRatios({ ...sameInputWithoutRatio })   // decodes a
 ```
 
 `layoutReport` lists every text element actually drawn (exact string, lines, font, size, box,
-color, background treatment, WCAG contrast) plus `fits`, `scale`, product/logo boxes and warnings.
+color, background treatment, WCAG contrast) plus `fits`, `scale`, product/logo boxes, warnings,
+`layoutFamily`, `placement`, `productBox` / `productBoxRespected` and the font resolution.
+
+## Layout families (`families.ts`)
+
+Seven visual systems, each implementing all 7 formats × 3 ratios with the same exact strings and
+guarantees (safe zones, fit, ≥ 4.5:1 contrast, layoutReport). Pass `layoutFamily` (default
+`bold_pill`, the original templates).
+
+| Family | Look | Copy treatment |
+|---|---|---|
+| `bold_pill` | classic performance ad | white check pills, price badge, rounded CTA |
+| `editorial_minimal` | magazine | big heading-face type, accent rule, hairline list, price as type, text-link CTA |
+| `split_panel` | brand color block | solid primary panel (side, or bottom band), checks, full-width squared button |
+| `full_bleed_type` | poster | huge headline over a deep dark scrim, inline facts, outline CTA |
+| `badge_corner` | clean product shot | round price sticker, white spec strip, squared button |
+| `framed_card` | inset photo | brand-color frame with rounded window, white card with checks + button |
+| `ugc_native` | organic post | comment-reply bubble (logo avatar), caption box, stickers, link-sticker CTA |
+
+`FAMILY_SPECS[f].sceneHint(format)` tells the scene prompt where to keep the product (scene.ts
+uses it). The pack assigns families in `layout-plan.ts` (Style DNA families, or a rotation of ≤ 2
+per family per 10 ads; variations of one angle always differ).
+
+**One product-avoid path.** In exact mode (`productMode: 'exact'`) every family reserves its own
+product slot on every format; the composite's placement of the real cut-out (hero + parts) IS the
+product box — text, pills, cards and over-layer shapes stay off it (groups move to free zones,
+then the product shrinks on its surface), and `layoutReport.productBox` = that placement.
+In generated mode, **`productBox`** (fractions of the scene image, from the vision check bbox;
+`productAvoid` corner form is accepted as an alias) is mapped through the same cover-fit; the renderer tries the family's placements (left/right/top/bottom, mirror) and then the
+free regions around the box, and keeps text, cards, pills and panels off it (scrims/decor may
+overlap). When no placement can, it renders the least-overlapping one and sets
+`productBoxRespected: false` + a warning (e.g. a product filling the middle of a square).
 
 ## Pipeline
 
@@ -39,7 +70,23 @@ color, background treatment, WCAG contrast) plus `fits`, `scale`, product/logo b
 Safe areas: 9:16 keeps text out of the top 14% and bottom 20% (Meta Stories/Reels); feed ratios use
 a 60 px margin. `copySpaceHint(format, ratio)` tells the scene prompt where to leave empty space.
 
-## Fonts (OFL, bundled in `fonts/`)
+## Fonts
+
+The kit's heading/body fonts are used when available (`font-resolver.ts`, `ensureBrandFonts`):
+uploaded kit font (`visual.headingFontUrl` / `bodyFontUrl`, TTF/OTF) → registered (bundled,
+vendored, fetched earlier) → disk cache `<os tmp>/adpack-fonts` → Google Fonts by name (CSS2 API
+with a legacy UA that returns static TTFs, then google/fonts GitHub static TTFs). Timeouts 5 s per
+request / 9 s total, failures negative-cached 15 min, never throws. Network only when a `fetch` is
+passed: the production adapter passes global fetch (`ADPACK_FONT_FETCH=0` disables it); tests use
+fixtures + fake fetch. Glyph coverage (₡, accents, ¿¡, ñ) is reported per role; missing glyphs are
+drawn with Fira Sans per glyph. Without the brand face, the closest bundled family is used
+(e.g. any "Grotesk" → Fira Sans, never the rounded default).
+
+Vendoring an OFL family into the bundle (e.g. Space Grotesk, so it works offline):
+`node scripts/adpack-vendor-fonts.mjs "Space Grotesk"` writes the static TTFs + OFL.txt into
+`fonts/`; any extra TTF there is registered under its own family name.
+
+### Bundled (OFL, in `fonts/`)
 
 | Family | Weights | Used for |
 |---|---|---|
@@ -70,3 +117,6 @@ a 60 px margin. `copySpaceHint(format, ratio)` tells the scene prompt where to l
 
 `npx tsx scripts/adpack-render-samples.ts [outDir]` renders all formats × ratios (plus stress cases)
 with synthetic scenes into `<os tmp>/adpack-render-samples` (PNG + layout JSON).
+`npx tsx scripts/adpack-layouts-qa.ts [outDir] [--families a,b] [--formats x,y]` renders every
+family × format × ratio into `<os tmp>/adpack-layouts-qa` plus one contact sheet per family
+(`_sheet_<family>.png`).

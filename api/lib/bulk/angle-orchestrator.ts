@@ -1,3 +1,5 @@
+import { ALL_ANGLE_CATEGORIES, ANGLE_CATEGORIES, isAngleCategory } from '../adpack/angle-catalog.js'
+import { clicheExamples, hasCliche } from '../adpack/cliches.js'
 import { GROK_TEXT_MODEL_EFFICIENT } from '../grok-models.js'
 import { safeJsonParse } from '../guiones/utils.js'
 import {
@@ -14,6 +16,22 @@ export type AngleOrchestratorDeps = {
   fetchFn?: typeof fetch
   apiKey?: string | null
   model?: string
+  /**
+   * Max wait for the model (ms). Over budget → the deterministic catalog board is returned at
+   * once (source 'planner', refining: true) and the model board is handed to `onLateBoard`
+   * when it arrives (e.g. to fill the cache). Omitted → wait for the model.
+   */
+  budgetMs?: number
+  onLateBoard?: (board: AngleBoard) => void
+}
+
+/** Text fields keep their full content (sanity cap only, cut at a word boundary). */
+function fullText(value: string, max: number): string {
+  const s = value.replace(/\s+/g, ' ').trim()
+  if (s.length <= max) return s
+  const cut = s.slice(0, max)
+  const sp = cut.lastIndexOf(' ')
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).trim()
 }
 
 const FALLBACK_NICHES = [
@@ -56,19 +74,22 @@ export function normalizeAngle(raw: Partial<AngleBoardItem> | null | undefined, 
   const title = typeof raw?.title === 'string' && raw.title.trim()
     ? raw.title.trim()
     : `${fallback.niche} angle`
+  const hook = typeof raw?.hook === 'string' && raw.hook.trim() && !hasCliche(raw.hook) ? fullText(raw.hook, 1_000) : ''
+  const category = typeof raw?.category === 'string' && isAngleCategory(raw.category.trim()) ? raw.category.trim() : ''
   return {
     id: typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : `angle_${index + 1}`,
-    title: title.slice(0, 120),
-    niche: (typeof raw?.niche === 'string' && raw.niche.trim() ? raw.niche.trim() : fallback.niche).slice(0, 80),
-    whyItBuys: (typeof raw?.whyItBuys === 'string' && raw.whyItBuys.trim()
-      ? raw.whyItBuys.trim()
-      : fallback.why).slice(0, 280),
+    title: fullText(title, 300),
+    niche: fullText(typeof raw?.niche === 'string' && raw.niche.trim() ? raw.niche.trim() : fallback.niche, 200),
+    whyItBuys: fullText(typeof raw?.whyItBuys === 'string' && raw.whyItBuys.trim() ? raw.whyItBuys.trim() : fallback.why, 1_000),
+    // Short label only; the full hook line lives in `hook` (never truncated).
     hookStyle: (typeof raw?.hookStyle === 'string' && raw.hookStyle.trim()
       ? raw.hookStyle.trim()
       : fallback.hook).slice(0, 80),
     frameworkHint: (typeof raw?.frameworkHint === 'string' && raw.frameworkHint.trim()
       ? raw.frameworkHint.trim()
       : fallback.framework).slice(0, 80),
+    ...(hook ? { hook } : {}),
+    ...(category ? { category } : {}),
   }
 }
 
@@ -115,6 +136,35 @@ export function fallbackAngleBoard(input: BulkOrchestratorInput, count: number):
   })
 }
 
+/**
+ * Deterministic board from the shared angle catalog (no model): used when the model is over
+ * budget. One category per item (gift included), brand/offer/ICP words only, no invented claims.
+ */
+export function plannerAngleBoard(input: BulkOrchestratorInput, count: number): AngleBoardItem[] {
+  const language: BulkLanguage = input.language === 'en' ? 'en' : 'es'
+  const offer = (input.offerName || 'offer').trim()
+  const audience = (input.audience || input.brandIcp || '').replace(/\s+/g, ' ').trim()
+  const order = ['regalo', 'problema_solucion', 'uso_real', 'como_funciona', 'unboxing', 'detalle_tecnico', 'comparacion', 'valor_precio', 'temporada'] as const
+  return Array.from({ length: count }, (_, i) => {
+    const category = order[i % order.length]
+    const spec = ANGLE_CATEGORIES[category]
+    const target = audience ? fullText(audience, 120) : language === 'es' ? `quien busca ${offer}` : `people looking for ${offer}`
+    return normalizeAngle(
+      {
+        id: `angle_${i + 1}`,
+        title: `${spec.label[language]} — ${offer}`,
+        niche: target,
+        whyItBuys: spec.why[language],
+        hook: spec.frame[language](target).replace(/:$/, ''),
+        hookStyle: category,
+        category,
+        frameworkHint: spec.archetypes[0],
+      },
+      i,
+    )
+  })
+}
+
 export function buildOrchestratorSystemPrompt(language: BulkLanguage): string {
   const isEs = language === 'es'
   return isEs
@@ -125,6 +175,8 @@ export function buildOrchestratorSystemPrompt(language: BulkLanguage): string {
         'Ejemplos correctos: blanqueamiento → nightlife vs creators; arnés de postura → gym vs enfermeras vs oficina.',
         'Cada ángulo debe cambiar nicho, por qué compra, estilo de gancho y framework.',
         'No inventes claims médicos, precios ni resultados. Responde SOLO JSON {"angles":[...]}.',
+        `Cada ángulo trae "hook": la frase de gancho COMPLETA (sin recortar) y "category" del catálogo: ${ALL_ANGLE_CATEGORIES.join(', ')}. Incluí al menos un ángulo de regalo si el producto se puede regalar.`,
+        `Prohibidas las frases hechas: ${clicheExamples().slice(0, 10).join(' / ')}.`,
       ].join(' ')
     : [
         'You are a demand strategist, not a copywriter of variations.',
@@ -133,6 +185,8 @@ export function buildOrchestratorSystemPrompt(language: BulkLanguage): string {
         'Correct examples: teeth whitening → nightlife vs creators; posture harness → gym vs nurses vs office.',
         'Each angle must change niche, whyItBuys, hookStyle, and frameworkHint.',
         'Do not invent medical claims, prices, or outcomes. Return ONLY JSON {"angles":[...]}.',
+        `Each angle has "hook": the FULL hook line (never shortened) and "category" from the catalog: ${ALL_ANGLE_CATEGORIES.join(', ')}. Include at least one gift angle when the product can be given as a gift.`,
+        `No stock phrases: ${clicheExamples().slice(15).join(' / ')}.`,
       ].join(' ')
 }
 
@@ -156,7 +210,7 @@ export function buildOrchestratorUserPrompt(input: BulkOrchestratorInput, count:
     isEs
       ? 'Cada ángulo = un nicho distinto (no un tono distinto). title, niche, whyItBuys, hookStyle, frameworkHint.'
       : 'Each angle = a different niche (not a different tone). title, niche, whyItBuys, hookStyle, frameworkHint.',
-    'JSON: {"angles":[{"id":"angle_1","title":"...","niche":"...","whyItBuys":"...","hookStyle":"...","frameworkHint":"venta_directa|storytelling|educativo|..."}]}',
+    'JSON: {"angles":[{"id":"angle_1","title":"...","niche":"...","whyItBuys":"...","hook":"full hook line","hookStyle":"short_label","category":"regalo|como_funciona|...","frameworkHint":"venta_directa|storytelling|educativo|..."}]}',
   ].filter(Boolean).join('\n')
 }
 
@@ -219,20 +273,35 @@ export async function orchestrateAngles(
     return fill(fallbackAngleBoard(input, count), 'fallback')
   }
 
-  try {
-    const text = await callGrokAngles({
-      fetchFn,
-      apiKey,
-      model: deps.model || GROK_TEXT_MODEL_EFFICIENT,
-      system: buildOrchestratorSystemPrompt(language),
-      user: buildOrchestratorUserPrompt({ ...input, language, recentSummaries: recent }, count),
-    })
-    const parsed = parseAngleBoard(text, count)
-    if (!parsed.length) return fill(fallbackAngleBoard(input, count), 'fallback')
-    return fill(parsed, 'model')
-  } catch {
-    return fill(fallbackAngleBoard(input, count), 'fallback')
-  }
+  const modelBoard = (async (): Promise<AngleBoard> => {
+    try {
+      const text = await callGrokAngles({
+        fetchFn,
+        apiKey,
+        model: deps.model || GROK_TEXT_MODEL_EFFICIENT,
+        system: buildOrchestratorSystemPrompt(language),
+        user: buildOrchestratorUserPrompt({ ...input, language, recentSummaries: recent }, count),
+      })
+      const parsed = parseAngleBoard(text, count)
+      if (!parsed.length) return fill(fallbackAngleBoard(input, count), 'fallback')
+      return fill(parsed, 'model')
+    } catch {
+      return fill(fallbackAngleBoard(input, count), 'fallback')
+    }
+  })()
+  if (!deps.budgetMs || deps.budgetMs <= 0) return modelBoard
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const overBudget = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), deps.budgetMs)
+  })
+  const first = await Promise.race([modelBoard, overBudget])
+  if (timer) clearTimeout(timer)
+  if (first) return first
+  // Over budget: answer now with the catalog board; the model keeps going and refines the cache.
+  modelBoard.then((board) => {
+    if (board.source === 'model') deps.onLateBoard?.(board)
+  }).catch(() => undefined)
+  return { ...fill(plannerAngleBoard({ ...input, language }, count), 'planner'), refining: true }
 }
 
 export function pickAngles(

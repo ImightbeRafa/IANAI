@@ -2,11 +2,21 @@
  * Render-engine types (additive to ../types.ts; nothing there is changed).
  */
 import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LightDirection } from '../types.js'
+import type { LayoutFamily } from './families.js'
+import type { FontResolution, FontResolverOptions } from './font-resolver.js'
 
 /** Raw bytes, an http(s) URL (fetched with global fetch) or a data: URL. */
 export type ImageInput = Uint8Array | ArrayBuffer | string
 
 export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Box in fractions (0–1) of the scene image's width/height. */
+export interface NormalizedBox {
   x: number
   y: number
   w: number
@@ -25,6 +35,19 @@ export interface RenderAdInput {
   /** Logo bytes; overrides `visual.logoUrl` (avoids a fetch). */
   logo?: ImageInput
   language: AdLanguage
+  /** Visual system (see families.ts). Default 'bold_pill' (the original templates). */
+  layoutFamily?: LayoutFamily
+  /** Force a placement variant of the family first (e.g. 'right'); others are still tried if text would cover the product. */
+  placement?: string
+  /**
+   * Generated mode: where the product sits in the SCENE image (fractions of its width/height,
+   * before cover-fit), from the vision check. Text, chips, cards and panels are never placed over
+   * it: the renderer tries the family's placement variants (and free regions around it) until
+   * nothing collides. Exact mode ignores it — the composite's placement is the product box.
+   */
+  productBox?: NormalizedBox
+  /** Brand font loading (network fetch, disk cache). Omitted → bundled/registered fonts only. */
+  fonts?: FontResolverOptions
   /** QA/test only: also return the composited background (everything except the top text/UI layer). */
   debug?: { returnBase?: boolean }
   /** 'exact': the real cut-out is the product on every format (composited, harmonized, scored by the caller). */
@@ -33,7 +56,7 @@ export interface RenderAdInput {
   productParts?: ImageInput[]
   /** Plate light direction (shadow side). */
   light?: LightDirection
-  /** Generated mode: product bbox in the scene image, normalized 0–1; text is kept off it. */
+  /** @deprecated Corner form of `productBox` (normalized 0–1); folded into `productBox`. */
   productAvoid?: { x0: number; y0: number; x1: number; y1: number }
   /** Exact mode relight hook on the text-free composite; null keeps the deterministic composite. */
   relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part' }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
@@ -85,7 +108,18 @@ export interface LayoutReport {
   logoVariant?: 'onLight' | 'onDark' | 'badge'
   /** Font-size scale applied to the whole template (1 = nominal). */
   scale: number
-  fonts: { heading: string; body: string }
+  /** Visual family and the placement variant that was used. */
+  layoutFamily: LayoutFamily
+  placement: string
+  /**
+   * The product box every family keeps copy off (canvas px): exact mode = the composite's
+   * placement (hero + parts), generated mode = the scene bbox mapped through the cover crop;
+   * null when there is none.
+   */
+  productBox: Box | null
+  /** False only when copy could not be kept off the product box (textOverProduct; a warning says so). */
+  productBoxRespected: boolean
+  fonts: { heading: string; body: string; resolution?: { heading: FontResolution['heading']; body: FontResolution['body'] } }
   /** All text fits its box, nothing overflows the canvas/safe area. */
   fits: boolean
   warnings: string[]

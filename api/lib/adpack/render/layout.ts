@@ -2,7 +2,7 @@
  * Layout primitives shared by the format templates: a tiny scene graph (text,
  * shapes, icons, zones) plus helpers that size text blocks and pills.
  */
-import type { AdLanguage } from '../types.js'
+import type { AdFormat, AdLanguage } from '../types.js'
 import { contrastRatio, INK, readableOn, shade, WHITE, type Rgb } from './color.js'
 import type { FontRef, ResolvedFonts } from './fonts.js'
 import type { Frame } from './frame.js'
@@ -62,6 +62,12 @@ export interface RectNode {
   stroke?: { color: Rgb; width: number; alpha?: number }
   /** Set for pills/badges: the text (and icons) drawn on this fill, re-colored if the fill changes. */
   pill?: { role: TextRole; text: TextNode; icons: IconNode[] }
+  /** Fill/stroke follow the text color of this scene zone (rules, underlines, outline buttons). */
+  zone?: string
+  /** Decorative (accent bars, hairlines, frames): ignored by the product-box collision check. */
+  decor?: boolean
+  /** Frame: the rect is drawn with this rounded hole cut out (even-odd). */
+  hole?: { box: Box; radius: number }
 }
 
 export interface IconNode {
@@ -69,14 +75,25 @@ export interface IconNode {
   icon: 'check' | 'arrow_right' | 'arrow_down'
   box: Box
   color: Rgb
+  /** Color follows the text color of this scene zone. */
+  zone?: string
 }
 
 export type Node = TextNode | RectNode | IconNode
 
 export interface Zone {
   id: string
-  /** gradient-top/bottom: full-width band from the canvas edge; box: rounded panel behind the zone's text. */
-  style: 'gradient-top' | 'gradient-bottom' | 'box'
+  /**
+   * gradient-top/bottom: full-width band from the canvas edge; gradient-left/right: full-height
+   * band from the side edge; box: rounded panel behind the zone's text.
+   */
+  style: 'gradient-top' | 'gradient-bottom' | 'gradient-left' | 'gradient-right' | 'box'
+  /** Minimum scrim alpha (a family's look, e.g. the heavy type scrim). */
+  minAlpha?: number
+  /** Force the scrim tone: dark = black scrim + white text, light = white scrim + ink text. */
+  tone?: 'dark' | 'light'
+  /** Fade length as a fraction of the canvas height/width (default 0.16). */
+  fade?: number
 }
 
 export interface TemplateLayout {
@@ -106,6 +123,14 @@ export interface Ctx {
    * reserves a product box (formats that used to rely on the scene's product too).
    */
   exact?: boolean
+  /** Ad format being laid out (family composers adapt their content blocks to it). */
+  format?: AdFormat
+  /** Family placement variant (e.g. 'left' | 'right' | 'top' | 'bottom'). */
+  placement?: string
+  /** Areas (canvas px) text must never cover, e.g. the product in the scene. */
+  avoid?: Box[]
+  /** Set when `frame.safe` is a free region around the product (not the whole safe area). */
+  region?: { full: Box }
 }
 
 /** Fonts used for each role. */

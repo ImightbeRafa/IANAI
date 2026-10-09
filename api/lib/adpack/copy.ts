@@ -12,6 +12,8 @@
  */
 import type { AdAngle, AdCopy, AdLanguage, BrandDna, CopyCheckResult, ModelGateway, OfferInput } from './types.js'
 import { checkAdCopy, repairAdCopy } from './check-copy.js'
+import { ANGLE_CATEGORIES } from './angle-catalog.js'
+import { clicheExamples } from './cliches.js'
 import { complianceGuidance, getRequiredDisclaimer } from './compliance.js'
 import {
   ADPACK_COPY_MODEL,
@@ -48,14 +50,16 @@ export const COPY_CRAFT_RULES: Record<AdLanguage, string> = {
 - Dolores, deseos y frases de clientes describen al COMPRADOR, no son resultados del producto: no afirmes que el producto quita un dolor o logra un deseo ("no se estira", "sin dolor", "dura más", "menos azúcar", "para cocina y baño"…) salvo que lo diga un hecho confirmado. Lo que el producto ES y HACE sale solo de los hechos confirmados; "Qué es" es contexto, no una fuente de afirmaciones.
 - CERO repetición: cada dato aparece UNA sola vez entre titular, subtítulo, chips y caption. Subtítulo = la razón para creer (un dato distinto al del titular). Chips = datos concretos nuevos (ingrediente con %, cantidad, tiempo, paso real); nada de adjetivos sueltos ("Calidad", "Natural").
 - Caption (va debajo de la imagen; quien lo lee ya vio titular, chips y precio): NO repite titular, chips ni oferta. Aporta lo que la imagen no dice: responde la objeción principal o explica el cómo/por qué con un hecho confirmado y cierra con el CTA. 2–4 frases cortas.
-- Variá la estructura del titular dentro del pack (situación, pregunta, dato, cita); "No compres…" como mucho en un anuncio del pack.`,
+- Variá la estructura del titular dentro del pack (situación, pregunta, dato, cita); "No compres…" como mucho en un anuncio del pack.
+- PROHIBIDO usar frases hechas genéricas (se rechazan por código): ${clicheExamples().slice(0, 15).join(' · ')}.`,
   en: `CRAFT (what separates an ad that sells from a generic one):
 - ONE idea per ad: pick 1–2 focus facts (*) as the central proof and build everything around them. Do not walk through the facts list (shipping, payments, variants, ingredients) in one ad; the offer line already shows price/bundle.
 - Headline (read in 3 s) = the buyer's concrete situation or pain + something specific (the product type, a confirmed fact or a precise moment/place), said the way they would say it. Nothing generic ("Your ideal routine", "Quality you can feel"), never a catalog label or the bare product name.
 - Pains, desires and customer phrases describe the BUYER, they are not product results: never claim the product removes a pain or delivers a desire ("won't stretch", "pain-free", "lasts longer", "less sugar"…) unless a confirmed fact says so. What the product IS and DOES comes only from confirmed facts; "What it is" is context, not a source of claims.
 - ZERO repetition: each fact appears ONCE across headline, subline, chips and caption. Subline = the reason to believe (a different fact than the headline). Chips = new concrete data (ingredient with %, quantity, time, real step); no lone adjectives ("Quality", "Natural").
 - Caption (sits below the image; the reader already saw headline, chips and price): does NOT repeat the headline, chips or offer. It adds what the image does not say: answer the main objection or explain how/why with a confirmed fact, then the CTA. 2–4 short sentences.
-- Vary the headline structure across the pack (situation, question, data point, quote); "Don't buy…" at most once per pack.`,
+- Vary the headline structure across the pack (situation, question, data point, quote); "Don't buy…" at most once per pack.
+- NEVER use generic stock phrases (rejected by code): ${clicheExamples().slice(15).join(' · ')}.`,
 }
 
 /** Headlines/sublines already used in the pack, so parallel ads don't converge on one line. */
@@ -170,7 +174,13 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
       `- ${es ? 'Mensaje único' : 'Single message'}: ${redactUnconfirmed(angle.message, ctx)}`,
       `- ${es ? 'Apunta a' : 'Targets'}: ${redactUnconfirmed(angle.target, ctx)}`,
       `- ${es ? 'Tipo de gancho' : 'Hook type'}: ${angle.hookType}`,
+      ...(angle.category ? [`- ${es ? 'Categoría de ángulo' : 'Angle category'}: ${ANGLE_CATEGORIES[angle.category].label[language]}`] : []),
+      // A hook line from the angle board is direction for the headline, not text to copy verbatim.
+      ...(angle.hook
+        ? [`- ${es ? 'Gancho propuesto (inspiración; el titular respeta los límites y solo usa hechos confirmados)' : 'Proposed hook (inspiration; the headline keeps the limits and uses confirmed facts only)'}: ${redactUnconfirmed(angle.hook, ctx)}`]
+        : []),
     ].join('\n'),
+    densityBlock(dna.visual?.styleProfile?.copyDensity, language),
     archetypeBlock(angle.archetype, language),
     formatGuidance(angle.format, language),
     factsAllowlistBlock(ctx),
@@ -196,6 +206,20 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
     .filter(Boolean)
     .join('\n\n')
   return { system, user }
+}
+
+/** Copy density from the brand's Style DNA (winners): a floor for how much text the image carries. */
+function densityBlock(density: 'minimal' | 'standard' | 'rich' | undefined, language: AdLanguage): string {
+  if (!density || density === 'standard') return ''
+  const es = language === 'es'
+  if (density === 'minimal') {
+    return es
+      ? 'DENSIDAD (estilo de los anuncios ganadores de la marca): mínima — titular corto, sin subtítulo o uno muy breve, 0–2 chips.'
+      : "DENSITY (the brand's winning ads): minimal — short headline, no or a very short subline, 0–2 chips."
+  }
+  return es
+    ? 'DENSIDAD (estilo de los anuncios ganadores de la marca): rica — subtítulo con la razón para creer y 3–4 chips con datos concretos.'
+    : "DENSITY (the brand's winning ads): rich — a subline with the reason to believe and 3–4 chips with concrete data."
 }
 
 export interface GenerateAdCopyInput {

@@ -10,6 +10,43 @@
 
 export type AdLanguage = 'es' | 'en'
 
+/** Shared angle-catalog categories (see angle-catalog.ts). */
+export type AngleCategory =
+  | 'regalo'
+  | 'como_funciona'
+  | 'valor_precio'
+  | 'unboxing'
+  | 'uso_real'
+  | 'detalle_tecnico'
+  | 'comparacion'
+  | 'temporada'
+  | 'problema_solucion'
+  | 'prueba_social'
+
+/** Visual layout families (see render/families.ts). */
+export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native'
+
+/** How much the planner decides on its own: high = angle, hook, format, layout and scene; guided = the agent's picks are kept. */
+export type CreativeFreedom = 'high' | 'guided'
+
+/**
+ * Render choices derived from a brand's Style DNA (winner / reference ads), see style-profile.ts.
+ * A quality floor: matching layout family + copy density; references are never copied.
+ */
+export interface StyleRenderProfile {
+  styleDnaId?: string
+  /** Families to use, in preference order (the pack alternates between them). */
+  families: LayoutFamily[]
+  paletteEmphasis: 'primary' | 'accent' | 'neutral'
+  typeWeight: 'heavy' | 'regular'
+  ctaStyle: 'button' | 'text' | 'sticker'
+  copyDensity: 'minimal' | 'standard' | 'rich'
+  /** Hook type the winners lean on (planner preference, not a constraint). */
+  hookType?: HookType
+  /** Where the profile came from. */
+  source: 'analysis' | 'notes' | 'default'
+}
+
 /** Broad business category; drives angle spread, examples and compliance rules. */
 export type BusinessCategory =
   | 'beauty'
@@ -73,14 +110,19 @@ export interface DnaVisual {
   primaryColor?: string
   secondaryColor?: string
   accentColor?: string
-  /** Font family names; the renderer maps them to bundled fonts. */
+  /** Font family names (the kit's). The renderer loads them (bundled → cache → Google Fonts) or maps to the closest bundled family. */
   headingFont?: string
   bodyFont?: string
+  /** Uploaded custom font files (kit assets, TTF/OTF over https). Used before the Google lookup. */
+  headingFontUrl?: string
+  bodyFontUrl?: string
   logoUrl?: string
   /** e.g. "clean white studio, bright fruit splashes, bold sans headlines". */
   styleNotes?: string
   /** Formats the brand already uses (from Instagram analysis). */
   formatsSeen?: AdFormat[]
+  /** Render profile from the brand's Style DNA (set by adpack_start {styleDnaId}). */
+  styleProfile?: StyleRenderProfile
 }
 
 export interface BrandDna {
@@ -264,6 +306,20 @@ export interface AdAngle {
   target: string
   /** Fact keys the copy is allowed/expected to use. */
   factKeys: FactKey[]
+  /** Shared angle-catalog category (angle-catalog.ts). Id = `<category>-<hookType>-<format>`. */
+  category?: AngleCategory
+  /** Short ES/EN "why this angle" (shown in status / deliverable). */
+  rationale?: string
+  /** Full hook line suggested by the angle source (guide_bulk_angles / agent). Never truncated. */
+  hook?: string
+  /** Visual direction for the scene (English, visual only). */
+  sceneDirection?: string
+  /** Visual layout family for this ad (render/families.ts). */
+  layoutFamily?: LayoutFamily
+  /** 0-based variation of the same angle (variations: n): same copy, different scene/layout. */
+  variation?: number
+  /** Where the angle came from. */
+  source?: 'planner' | 'guide' | 'agent'
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +361,8 @@ export interface CopyCheckIssue {
     | 'register'
     /** Wrong register while `dna.locale` makes the register a hard rule (blocking). */
     | 'locale_register'
+    /** Generic hook/cliché from the deterministic blocklist (cliches.ts). Repairable, not blocking. */
+    | 'cliche'
   field: keyof AdCopy | 'script'
   detail: string
   /** Exact location, e.g. "bullets[2]" or "script.hook" (defaults to `field`). */
@@ -340,6 +398,11 @@ export interface SceneResult {
   light?: LightDirection
   /** Real-product cut-outs composited onto the plate (exact mode). First = hero. */
   cutouts?: StoredCutout[]
+  /**
+   * Where the product sits in this scene, fractions (0–1) of the scene's width/height. Filled by
+   * product detection (another step); the renderer never places copy over it.
+   */
+  productBox?: { x: number; y: number; w: number; h: number }
 }
 
 export interface SceneCheckResult {

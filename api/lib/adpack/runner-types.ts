@@ -4,7 +4,7 @@
  * The runner never imports the renderer, storage or credits directly so tests
  * and the benchmark inject fakes, and the web / MCP doors inject real ones.
  */
-import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LightDirection } from './types.js'
+import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LayoutFamily, LightDirection } from './types.js'
 
 /** Placement of a real-product cut-out in a render (canvas px). */
 export interface RenderProductPlacement {
@@ -30,12 +30,18 @@ export interface RenderInput {
   productParts?: Array<Uint8Array | string>
   /** Plate light direction (contact shadow side). */
   light?: LightDirection
-  /** Generated mode: product bbox in the scene, normalized 0–1 (text is laid out around it). */
-  productAvoid?: { x0: number; y0: number; x1: number; y1: number }
   /** Logo override (already background-removed bytes); falls back to visual.logoUrl. */
   logo?: Uint8Array | string
   /** Optional relight hook on the text-free composite (exact mode). Returns null to keep the composite. */
   relight?: (composite: Uint8Array, placements: RenderProductPlacement[], ratio: AspectRatio) => Promise<Uint8Array | null>
+  /** Visual layout family (default bold_pill). Every family supports exact and generated mode. */
+  layoutFamily?: LayoutFamily
+  /**
+   * Generated mode: where the scene's product sits (fractions 0–1 of the scene, from the vision
+   * check bbox). Exact mode ignores it: the composite's own placement is the product box.
+   * Copy is never drawn over the product box in either mode.
+   */
+  productBox?: { x: number; y: number; w: number; h: number }
 }
 
 export interface RenderOutput {
@@ -48,6 +54,9 @@ export interface RenderOutput {
   relit?: boolean
   /** True when some text could not be kept off the product box. */
   textOverProduct?: boolean
+  /** Layout family + placement variant actually used. */
+  layoutFamily?: LayoutFamily
+  placement?: string
 }
 
 /** Deterministic text layer (Satori → resvg). Real impl: `./render` (see render-adapter.ts). */
