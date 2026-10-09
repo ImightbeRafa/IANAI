@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resetFontResolverState, parseGoogleCss, type FetchLike } from '../../api/lib/adpack/render/font-resolver'
-import { resetRuntimeFonts } from '../../api/lib/adpack/render/fonts'
+import { measureText, missingGlyphs, resetRuntimeFonts } from '../../api/lib/adpack/render/fonts'
 import { ensureBrandFonts, hasAllGlyphs, renderAd, resolveFonts } from '../../api/lib/adpack/render/index'
 import { makeScene, SAMPLE_COPY } from './render-fixtures'
 
@@ -75,34 +75,34 @@ describe('ensureBrandFonts', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('Space Grotesk resolves to Space Grotesk via Google Fonts CSS2 (TTF UA), caches to disk, reports glyph fallback', async () => {
+  it('A brand family that is not bundled resolves via Google Fonts CSS2 (TTF UA), caches to disk, reports glyph fallback', async () => {
     const cacheDir = tmpCache()
-    const { fn, calls } = fakeFetch({ css: () => css('Space Grotesk'), files: { 'regular.ttf': REGULAR, 'bold.ttf': BOLD } })
-    const res = await ensureBrandFonts({ headingFont: "'Space Grotesk', sans-serif", bodyFont: 'Space Grotesk' }, { fetch: fn, cacheDir })
-    expect(res.heading).toMatchObject({ requested: 'Space Grotesk', family: 'Space Grotesk', source: 'google' })
-    expect(res.body.family).toBe('Space Grotesk')
-    expect(res.fonts.heading).toEqual({ family: 'Space Grotesk', weight: 700 })
-    expect(res.fonts.body).toMatchObject({ family: 'Space Grotesk', weight: 400, boldWeight: 700 })
-    expect(calls[0].url).toBe('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700')
+    const { fn, calls } = fakeFetch({ css: () => css('Brand Grotesk'), files: { 'regular.ttf': REGULAR, 'bold.ttf': BOLD } })
+    const res = await ensureBrandFonts({ headingFont: "'Brand Grotesk', sans-serif", bodyFont: 'Brand Grotesk' }, { fetch: fn, cacheDir })
+    expect(res.heading).toMatchObject({ requested: 'Brand Grotesk', family: 'Brand Grotesk', source: 'google' })
+    expect(res.body.family).toBe('Brand Grotesk')
+    expect(res.fonts.heading).toEqual({ family: 'Brand Grotesk', weight: 700 })
+    expect(res.fonts.body).toMatchObject({ family: 'Brand Grotesk', weight: 400, boldWeight: 700 })
+    expect(calls[0].url).toBe('https://fonts.googleapis.com/css2?family=Brand+Grotesk:wght@400;700')
     expect(calls[0].ua).toMatch(/Firefox\/27/)
     // The fixture face lacks ₡: it is reported and drawn per glyph with the fallback face.
     expect(res.heading.missingGlyphs).toContain('₡')
-    expect(hasAllGlyphs('¿¡Ñ ₡9.900 áéíóú', { family: 'Space Grotesk', weight: 700 })).toBe(true)
-    expect(existsSync(join(cacheDir, 'spacegrotesk-400.ttf'))).toBe(true)
-    expect(existsSync(join(cacheDir, 'spacegrotesk-700.ttf'))).toBe(true)
+    expect(hasAllGlyphs('¿¡Ñ ₡9.900 áéíóú', { family: 'Brand Grotesk', weight: 700 })).toBe(true)
+    expect(existsSync(join(cacheDir, 'brandgrotesk-400.ttf'))).toBe(true)
+    expect(existsSync(join(cacheDir, 'brandgrotesk-700.ttf'))).toBe(true)
 
     // A fresh process (registry reset) without network loads it from the disk cache.
     resetRuntimeFonts()
-    const again = await ensureBrandFonts({ headingFont: 'Space Grotesk' }, { fetch: null, cacheDir })
-    expect(again.heading).toMatchObject({ family: 'Space Grotesk', source: 'cache' })
+    const again = await ensureBrandFonts({ headingFont: 'Brand Grotesk' }, { fetch: null, cacheDir })
+    expect(again.heading).toMatchObject({ family: 'Brand Grotesk', source: 'cache' })
   })
 
   it('the renderer draws the headline in the fetched brand face', async () => {
-    const { fn } = fakeFetch({ css: () => css('Space Grotesk'), files: { 'regular.ttf': REGULAR, 'bold.ttf': BOLD } })
+    const { fn } = fakeFetch({ css: () => css('Brand Grotesk'), files: { 'regular.ttf': REGULAR, 'bold.ttf': BOLD } })
     const scene = await makeScene(600, 750, 'light')
-    const r = await renderAd({ format: 'handheld_overlay', ratio: '4:5', sceneImage: scene, copy: SAMPLE_COPY, visual: { headingFont: 'Space Grotesk', bodyFont: 'Inter' }, language: 'es', layoutFamily: 'editorial_minimal', fonts: { fetch: fn, cacheDir: tmpCache() } })
-    expect(r.layoutReport.elements.find((e) => e.role === 'headline')!.fontFamily).toBe('Space Grotesk')
-    expect(r.layoutReport.fonts.resolution?.heading).toMatchObject({ family: 'Space Grotesk', source: 'google' })
+    const r = await renderAd({ format: 'handheld_overlay', ratio: '4:5', sceneImage: scene, copy: SAMPLE_COPY, visual: { headingFont: 'Brand Grotesk', bodyFont: 'Inter' }, language: 'es', layoutFamily: 'editorial_minimal', fonts: { fetch: fn, cacheDir: tmpCache() } })
+    expect(r.layoutReport.elements.find((e) => e.role === 'headline')!.fontFamily).toBe('Brand Grotesk')
+    expect(r.layoutReport.fonts.resolution?.heading).toMatchObject({ family: 'Brand Grotesk', source: 'google' })
     expect(r.layoutReport.elements.find((e) => e.role === 'offer')!.text).toBe(SAMPLE_COPY.offerLine)
   })
 
@@ -113,11 +113,43 @@ describe('ensureBrandFonts', () => {
     expect(calls.some((c) => c.url === 'https://raw.githubusercontent.com/google/fonts/main/ofl/brandsans/static/BrandSans-Bold.ttf')).toBe(true)
   })
 
-  it('without fetch: closest bundled family (Space Grotesk → Fira Sans), never the rounded default', async () => {
-    const res = await ensureBrandFonts({ headingFont: 'Space Grotesk' }, { cacheDir: tmpCache() })
+  it('Space Grotesk is a bundled system font: exact match, no network, its own ₡ glyph', async () => {
+    const { fn, calls } = fakeFetch({ css: () => css('Space Grotesk'), files: { 'regular.ttf': REGULAR, 'bold.ttf': BOLD } })
+    const res = await ensureBrandFonts({ headingFont: "'Space Grotesk', sans-serif", bodyFont: 'Space Grotesk' }, { fetch: fn, cacheDir: tmpCache() })
+    expect(calls).toHaveLength(0)
+    expect(res.heading).toMatchObject({ requested: 'Space Grotesk', family: 'Space Grotesk', source: 'bundled' })
+    expect(res.fonts.heading).toEqual({ family: 'Space Grotesk', weight: 700 })
+    expect(res.fonts.body).toMatchObject({ family: 'Space Grotesk', weight: 400, boldWeight: 700 })
+    // Offline too (no fetch at all): still the real face, never a mapped look-alike.
+    const offline = await ensureBrandFonts({ headingFont: 'Space Grotesk' }, { cacheDir: tmpCache() })
+    expect(offline.heading).toMatchObject({ family: 'Space Grotesk', source: 'bundled' })
+    expect(resolveFonts({ headingFont: 'Space Grotesk' }).heading).toEqual({ family: 'Space Grotesk', weight: 700 })
+  })
+
+  it('Space Grotesk glyph coverage: es-CR copy incl. ₡ in the face itself; anything it lacks falls back per glyph', () => {
+    for (const weight of [400, 700]) {
+      expect(missingGlyphs('¿¡Ñ ñ ₡9.900 áéíóú ÁÉÍÓÚ ü € $ % · – — “”', 'Space Grotesk', weight)).toEqual([])
+      expect(hasAllGlyphs('¿¡Ñ ₡14.900 · Envío gratis', { family: 'Space Grotesk', weight })).toBe(true)
+    }
+    // A glyph the face lacks (Cyrillic) is reported missing and drawn with the Fira Sans fallback.
+    expect(missingGlyphs('Жж', 'Space Grotesk', 700)).toEqual(['Ж', 'ж'])
+    expect(hasAllGlyphs('₡9.900 Жж', { family: 'Space Grotesk', weight: 700 })).toBe(true)
+    // ₡ measures with Space Grotesk's own advance, not the fallback's.
+    expect(measureText('₡', { family: 'Space Grotesk', weight: 700 }, 100)).not.toBeCloseTo(measureText('₡', { family: 'Fira Sans', weight: 700 }, 100), 3)
+  })
+
+  it('the renderer draws the headline in bundled Space Grotesk without any fetch', async () => {
+    const scene = await makeScene(600, 750, 'light')
+    const r = await renderAd({ format: 'handheld_overlay', ratio: '4:5', sceneImage: scene, copy: SAMPLE_COPY, visual: { headingFont: 'Space Grotesk', bodyFont: 'Space Grotesk' }, language: 'es', layoutFamily: 'editorial_minimal', fonts: { fetch: null, cacheDir: tmpCache() } })
+    expect(r.layoutReport.elements.find((e) => e.role === 'headline')!.fontFamily).toBe('Space Grotesk')
+    expect(r.layoutReport.fonts.resolution?.heading).toMatchObject({ family: 'Space Grotesk', source: 'bundled' })
+  })
+
+  it('without fetch: an unbundled grotesque maps to the closest bundled family (Fira Sans), never the rounded default', async () => {
+    const res = await ensureBrandFonts({ headingFont: 'Brand Grotesk' }, { cacheDir: tmpCache() })
     expect(res.heading).toMatchObject({ family: 'Fira Sans', source: 'mapped' })
     expect(res.heading.note).toMatch(/not bundled/)
-    expect(resolveFonts({ headingFont: 'Space Grotesk' }).heading.family).toBe('Fira Sans')
+    expect(resolveFonts({ headingFont: 'Brand Grotesk' }).heading.family).toBe('Fira Sans')
   })
 
   it('unknown family on Google: mapped fallback + negative cache (no refetch)', async () => {
