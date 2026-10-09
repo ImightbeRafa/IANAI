@@ -14,7 +14,7 @@ import { createMemoryMcpApprovalStore, type McpApprovalStore } from '../../api/l
 import { handleMcpJsonRpc } from '../../api/lib/mcp/protocol'
 import type { McpDbClient } from '../../api/lib/mcp/user-tools'
 import { caseById } from './helpers'
-import { fakeRenderer, fakeStorage, runnerGateway, type RunnerGateway } from './runner-fakes'
+import { fakeImageLoader, fakeRenderer, fakeStorage, runnerGateway, type RunnerGateway } from './runner-fakes'
 
 export const USER_A = '00000000-0000-4000-8000-00000000000a'
 export const USER_B = '00000000-0000-4000-8000-00000000000b'
@@ -72,6 +72,8 @@ export function createDoorEnv(options: { credits?: number; ownedIds?: string[]; 
     },
     ...(options.savedBrandDb ? { savedBrandDb: options.savedBrandDb } : {}),
     ...(options.library ? { library: options.library } : {}),
+    // Exact mode (default with a product photo) loads photos: synthetic, no network.
+    loadImage: fakeImageLoader(),
   })
   return { store, gateway, renderer, storage, charges, logs, ingestCalls, credits, service }
 }

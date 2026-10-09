@@ -1,13 +1,18 @@
 /**
  * renderAd: scene (bytes/URL) + copy + brand visual → finished ad PNG.
  *
- *   scene (sharp cover-fit)
+ *   scene / plate (sharp cover-fit)
  *   + under layer (scrims, cards, dividers; SVG → resvg)
- *   + product cut-out (+ soft shadow) and logo (sharp composite)
- *   = base → contrast is measured here per text box, scrims are strengthened until ≥ 4.5:1
+ *     → contrast is measured here per text box, scrims are strengthened until ≥ 4.5:1
+ *   + real product cut-out(s) (fidelity/composite.ts: contact + cast shadow, capped harmonization)
+ *   + optional relight hook (exact mode; kept only when fidelity holds)
+ *   + logo (background removed, variant picked for the background under its slot)
+ *   = base
  *   + over layer (pills/icons as SVG + text via satori → resvg)
  *   = final PNG
  *
+ * Text never sits on the product: groups that intersect the product box are moved to free
+ * zones (render/avoid.ts); in exact mode the product box shrinks when nothing can move.
  * All on-image text comes from `copy`, so it is exact by construction.
  */
 import { Resvg } from '@resvg/resvg-js'
@@ -16,19 +21,11 @@ import sharp, { type OverlayOptions } from 'sharp'
 import type { AdFormat, AspectRatio } from '../types.js'
 import { blend, contrastFromLuminance, contrastRatio, INK, luminance, parseColor, readableOn, toHex, WHITE, type Rgb } from './color.js'
 import { cssFamily, resolveFonts, satoriFonts } from './fonts.js'
+import { compositeProducts, layoutProductGroup, type PlacedProduct } from '../fidelity/composite.js'
+import { avoidRegions, overlayBoxes } from './avoid.js'
 import { ALL_RATIOS, inside, makeFrame, union, type Frame } from './frame.js'
-import {
-  decodeLayer,
-  dropShadow,
-  fitInside,
-  loadImageBytes,
-  opaqueMeanColor,
-  prepareScene,
-  regionStats,
-  resizeLayer,
-  trimTransparent,
-  type PreparedLayer,
-} from './image.js'
+import { decodeLayer, loadImageBytes, prepareScene, regionStats, resizeLayer, trimTransparent, type PreparedLayer } from './image.js'
+import { pickLogoVariant, prepareLogo, type LogoVariantName, type LogoVariants } from './logo.js'
 import { makePalette, type Ctx, type IconNode, type NormalizedCopy, type RectNode, type TemplateLayout, type TextNode, type Zone } from './layout.js'
 import { TEMPLATES } from './templates.js'
 import { normalizeText } from './text.js'
@@ -41,20 +38,28 @@ const PLAN_CONTRAST = 5
 const MAX_SCRIM = 0.94
 const SCALES = [1, 0.93, 0.86, 0.8, 0.74, 0.68, 0.62, 0.56]
 const CUTOUT_FORMATS: AdFormat[] = ['offer_graphic', 'variant_card', 'explainer']
+/** Formats that may show real parts next to the hero (H3). */
+const PARTS_FORMATS: AdFormat[] = ['offer_graphic', 'explainer']
+/** Exact mode: product-box shrink steps when text cannot be moved off it. */
+const PRODUCT_SHRINK = [1, 0.9, 0.8, 0.7, 0.6]
 
 interface Assets {
   scene: ImageInput
+  /** Original scene size (for mapping a normalized product bbox through the cover crop). */
+  sceneSize: { width: number; height: number } | null
   product: PreparedLayer | null
-  logo: PreparedLayer | null
-  logoColor: Rgb | null
+  parts: PreparedLayer[]
+  logo: LogoVariants | null
   warnings: string[]
 }
 
 async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> {
   const warnings: string[] = []
+  const exact = input.productMode === 'exact'
   let product: PreparedLayer | null = null
+  const parts: PreparedLayer[] = []
   if (input.productCutout) {
-    if (!CUTOUT_FORMATS.includes(input.format)) {
+    if (!exact && !CUTOUT_FORMATS.includes(input.format)) {
       warnings.push(`productCutout ignored for ${input.format} (scene carries the product)`)
     } else {
       const layer = await decodeLayer(input.productCutout)
@@ -62,21 +67,45 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
       else warnings.push('productCutout could not be decoded; skipped')
     }
   }
-  let logo: PreparedLayer | null = null
-  let logoColor: Rgb | null = null
+  if (exact && product && input.productParts?.length && PARTS_FORMATS.includes(input.format)) {
+    for (const p of input.productParts.slice(0, 3)) {
+      const layer = await decodeLayer(p)
+      if (layer) parts.push(await trimTransparent(layer))
+      else warnings.push('product part could not be decoded; skipped')
+    }
+  }
+  let logo: LogoVariants | null = null
   const logoSrc = input.logo ?? input.visual?.logoUrl
   if (logoSrc) {
-    const layer = await decodeLayer(logoSrc)
-    if (layer) {
-      logo = await trimTransparent(layer)
-      logoColor = await opaqueMeanColor(logo.png)
-    } else {
+    try {
+      logo = await prepareLogo(await loadImageBytes(logoSrc))
+    } catch {
       warnings.push('logo could not be loaded/decoded; skipped')
     }
   }
   // Decode the scene bytes once (re-used for every ratio).
   const scene = await loadImageBytes(input.sceneImage)
-  return { scene, product, logo, logoColor, warnings }
+  let sceneSize: Assets['sceneSize'] = null
+  try {
+    const m = await sharp(scene).metadata()
+    if (m.width && m.height) sceneSize = m.autoOrient ? { width: m.autoOrient.width, height: m.autoOrient.height } : { width: m.width, height: m.height }
+  } catch {
+    sceneSize = null
+  }
+  return { scene, sceneSize, product, parts, logo, warnings }
+}
+
+/** Normalized scene bbox → canvas box through prepareScene's centered cover crop. */
+export function mapSceneBox(n: { x0: number; y0: number; x1: number; y1: number }, scene: { width: number; height: number }, W: number, H: number): Box | null {
+  const s = Math.max(W / scene.width, H / scene.height)
+  const ox = (scene.width * s - W) / 2
+  const oy = (scene.height * s - H) / 2
+  const x0 = Math.max(0, n.x0 * scene.width * s - ox)
+  const y0 = Math.max(0, n.y0 * scene.height * s - oy)
+  const x1 = Math.min(W, n.x1 * scene.width * s - ox)
+  const y1 = Math.min(H, n.y1 * scene.height * s - oy)
+  if (x1 - x0 < 4 || y1 - y0 < 4) return null
+  return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) }
 }
 
 function normalizeCopy(copy: RenderAdInput['copy']): NormalizedCopy {
@@ -260,89 +289,149 @@ function textTree(texts: TextNode[], colorOf: (t: TextNode) => Rgb, frame: Frame
 // Main
 // ---------------------------------------------------------------------------
 
-async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<RenderAdResult> {
+/** Layout only (no pixels): template at the largest type scale that fits. */
+export function planLayout(input: {
+  format: AdFormat
+  ratio: AspectRatio
+  copy: RenderAdInput['copy']
+  visual?: RenderAdInput['visual']
+  language: RenderAdInput['language']
+  product?: { width: number; height: number }
+  logo?: { width: number; height: number }
+  exact?: boolean
+}): { layout: TemplateLayout; scale: number; frame: Frame; fonts: ReturnType<typeof resolveFonts>; palette: ReturnType<typeof makePalette> } {
   const frame = makeFrame(input.ratio)
   const fonts = resolveFonts(input.visual)
   const palette = makePalette(parseColor(input.visual?.primaryColor), parseColor(input.visual?.secondaryColor), parseColor(input.visual?.accentColor))
   const copy = normalizeCopy(input.copy)
-  const warnings = [...assets.warnings]
-  if (!copy.headline) warnings.push('empty headline')
-  const scene = await prepareScene(assets.scene, frame.W, frame.H)
   const template = TEMPLATES[input.format]
   if (!template) throw new Error(`unknown ad format: ${input.format}`)
-
-  // 1) Layout with progressive type scale until everything fits.
   let layout: TemplateLayout | null = null
   let scale = SCALES[0]
   for (const s of SCALES) {
-    const ctx: Ctx = {
-      frame,
-      fonts,
-      palette,
-      copy,
-      language: input.language,
-      s,
-      product: assets.product ? { width: assets.product.width, height: assets.product.height } : undefined,
-      logo: assets.logo ? { width: assets.logo.width, height: assets.logo.height } : undefined,
-    }
+    const ctx: Ctx = { frame, fonts, palette, copy, language: input.language, s, product: input.product, logo: input.logo, exact: input.exact }
     layout = template(ctx)
     scale = s
     if (layoutFits(layout, frame)) break
   }
   if (!layout) throw new Error('layout failed')
+  return { layout, scale, frame, fonts, palette }
+}
+
+/**
+ * Where the product would land for each ratio (exact mode), in canvas px. Used to tell the
+ * plate model where to leave an empty surface.
+ */
+export function planProductBoxes(
+  input: Omit<Parameters<typeof planLayout>[0], 'ratio' | 'exact'> & { ratios: AspectRatio[]; product: { width: number; height: number } },
+): Partial<Record<AspectRatio, Box>> {
+  const out: Partial<Record<AspectRatio, Box>> = {}
+  for (const ratio of input.ratios) {
+    const { layout } = planLayout({ ...input, ratio, exact: true })
+    if (layout.productBox) out[ratio] = layoutProductGroup(layout.productBox, input.product, [], layout.productValign ?? 'bottom')[0]
+  }
+  return out
+}
+
+function scaleGroup(boxes: Box[], k: number, anchor: Box): Box[] {
+  if (k === 1) return boxes
+  // Shrink around the bottom-center of the layout box (the product keeps standing on its surface).
+  const ax = anchor.x + anchor.w / 2
+  const ay = anchor.y + anchor.h
+  return boxes.map((b) => ({ x: Math.round(ax + (b.x - ax) * k), y: Math.round(ay + (b.y - ay) * k), w: Math.max(1, Math.round(b.w * k)), h: Math.max(1, Math.round(b.h * k)) }))
+}
+
+/**
+ * Product placement + "text never over the product" (H4), pure (no pixels; mutates the layout's
+ * node positions). Exact mode: the real cut-out boxes; groups that intersect them move to free
+ * zones, and the product shrinks (anchored on its surface) when nothing can move. Generated mode:
+ * the scene product's bbox is the region text avoids.
+ */
+export function placeProductAndAvoidText(input: {
+  layout: TemplateLayout
+  frame: Frame
+  product: { width: number; height: number } | null
+  parts?: Array<{ width: number; height: number }>
+  exact: boolean
+  avoidRegion?: Box | null
+}): { productBoxes: Box[]; textOverProduct: boolean; avoidRegion: Box | null; warnings: string[] } {
+  const { layout, frame } = input
+  const warnings: string[] = []
+  let productBoxes: Box[] = []
+  if (input.product && layout.productBox && layout.productBox.w > 20 && layout.productBox.h > 20) {
+    productBoxes = layoutProductGroup(layout.productBox, input.product, input.exact ? input.parts ?? [] : [], layout.productValign ?? (input.exact ? 'bottom' : 'center'))
+  }
+  const fixed = layout.logoBox ? [layout.logoBox] : []
+  let textOverProduct = false
+  const avoidRegion = productBoxes.length ? null : input.avoidRegion ?? null
+  if (productBoxes.length) {
+    const anchor = layout.productBox as Box
+    const original = productBoxes
+    for (const k of PRODUCT_SHRINK) {
+      productBoxes = scaleGroup(original, k, anchor)
+      const res = avoidRegions(layout, productBoxes, frame.safe, fixed)
+      if (!res.conflicts) break
+      if (k === PRODUCT_SHRINK[PRODUCT_SHRINK.length - 1]) textOverProduct = true
+    }
+    if (productBoxes[0] !== original[0] && !textOverProduct) warnings.push('product box shrunk to keep text off the product')
+  } else if (avoidRegion) {
+    textOverProduct = avoidRegions(layout, [avoidRegion], frame.safe, fixed).conflicts > 0
+  }
+  if (textOverProduct) warnings.push('text overlaps the product (no free zone)')
+  return { productBoxes, textOverProduct, avoidRegion, warnings }
+}
+
+async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<RenderAdResult> {
+  const exact = input.productMode === 'exact' && Boolean(assets.product)
+  const logoDims = assets.logo ? { width: assets.logo.onLight.width, height: assets.logo.onLight.height } : undefined
+  const productDims = assets.product ? { width: assets.product.width, height: assets.product.height } : undefined
+  const warnings = [...assets.warnings]
+  if (!normalizeText(input.copy.headline)) warnings.push('empty headline')
+
+  // 1) Layout with progressive type scale until everything fits.
+  const { layout, scale, frame, fonts, palette } = planLayout({ ...input, product: productDims, logo: logoDims, exact })
+  const scene = await prepareScene(assets.scene, frame.W, frame.H)
   warnings.push(...layout.warnings)
   const texts = textNodes(layout)
 
-  // 2) Product + logo layers.
-  const layers: OverlayOptions[] = []
-  let productBox: Box | null = null
-  if (assets.product && layout.productBox && layout.productBox.w > 20 && layout.productBox.h > 20) {
-    productBox = fitInside(assets.product, layout.productBox, layout.productValign)
-    const png = await resizeLayer(assets.product, productBox.w, productBox.h)
-    const shadow = await dropShadow(png, productBox.w, productBox.h, Math.max(6, Math.round(productBox.w * 0.025)), 0.32)
-    if (shadow) layers.push({ input: shadow.png, left: productBox.x - shadow.pad, top: productBox.y - shadow.pad + Math.round(productBox.h * 0.02) })
-    layers.push({ input: png, left: productBox.x, top: productBox.y })
-  }
-  let logoBox: Box | null = null
-  const underExtra: RectNode[] = []
-  if (assets.logo && layout.logoBox) {
-    logoBox = layout.logoBox
-    const png = await resizeLayer(assets.logo, logoBox.w, logoBox.h)
-    // Put the logo on a small plate when it would not read on the scene.
-    if (assets.logoColor) {
-      const st = await regionStats(scene, logoBox, frame.W, frame.H)
-      const bgL = st.p50
-      if (contrastFromLuminance(luminance(assets.logoColor), bgL) < 3) {
-        const plate = readableOn(assets.logoColor)
-        const pad = 14
-        underExtra.push({ kind: 'rect', layer: 'under', box: { x: logoBox.x - pad, y: logoBox.y - pad, w: logoBox.w + pad * 2, h: logoBox.h + pad * 2 }, color: plate, radius: 16, alpha: 0.92, shadow: 'soft' })
-      }
-    }
-    layers.push({ input: png, left: logoBox.x, top: logoBox.y })
-  }
+  // 2) Product boxes (real cut-out) or the generated product's bbox, and text kept off them.
+  const avoidRegion = input.productAvoid && assets.sceneSize ? mapSceneBox(input.productAvoid, assets.sceneSize, frame.W, frame.H) : null
+  const placed = placeProductAndAvoidText({
+    layout,
+    frame,
+    product: assets.product,
+    parts: exact ? assets.parts : [],
+    exact,
+    avoidRegion,
+  })
+  const productBoxes = placed.productBoxes
+  const textOverProduct = placed.textOverProduct
+  warnings.push(...placed.warnings)
 
-  // 3) Scrim planning, then measure on the real composite and strengthen until ≥ 4.5:1.
+  let logoBox: Box | null = layout.logoBox ?? null
+
+  // 3) Scrim planning on scene + under layer, strengthened until ≥ 4.5:1 (text never sits on the product).
   const plans = await planZones(layout, scene, frame)
-  const underRects = [...layout.nodes.filter((n): n is RectNode => n.kind === 'rect' && n.layer === 'under'), ...underExtra]
-  const composeBase = async () => {
+  const underRects = layout.nodes.filter((n): n is RectNode => n.kind === 'rect' && n.layer === 'under')
+  const composeUnder = async () => {
     const under =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${frame.W}" height="${frame.H}" viewBox="0 0 ${frame.W} ${frame.H}">${SHADOW_DEFS}` +
       plans.map((p, i) => zoneSvg(p, frame, i)).join('') +
       underRects.map(rectSvg).join('') +
       '</svg>'
     return sharp(scene)
-      .composite([{ input: rasterize(under), left: 0, top: 0 }, ...layers])
+      .composite([{ input: rasterize(under), left: 0, top: 0 }])
       .png({ compressionLevel: 0 })
       .toBuffer()
   }
   const measured = new Map<TextNode, number>()
-  let base = await composeBase()
+  let under = await composeUnder()
   for (let attempt = 0; attempt < 6; attempt++) {
     let weak = false
     for (const plan of plans) {
       let worstC = Infinity
       for (const t of plan.texts) {
-        const st = await regionStats(base, t.box, frame.W, frame.H)
+        const st = await regionStats(under, t.box, frame.W, frame.H)
         const worstL = plan.text === WHITE ? st.p95 : st.p5
         const c = contrastFromLuminance(luminance(plan.text), worstL)
         measured.set(t, c)
@@ -354,8 +443,54 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
       }
     }
     if (!weak) break
-    base = await composeBase()
+    under = await composeUnder()
   }
+
+  // 4) Real product cut-out(s): shadows + capped harmonization (exact) — product pixels stay intact.
+  let base: Buffer = under
+  let placements: PlacedProduct[] = []
+  let relit = false
+  if (assets.product && productBoxes.length) {
+    const layers = [assets.product, ...(exact ? assets.parts : [])].slice(0, productBoxes.length)
+    const products = layers.map((p, i) => ({ cutout: p.png, box: productBoxes[i], role: (i ? 'part' : 'hero') as 'hero' | 'part' }))
+    const comp = await compositeProducts({ base, products, light: input.light, harmonize: exact, shadow: true, lightWrap: exact })
+    base = comp.png
+    placements = comp.placements
+    if (exact && input.relight) {
+      try {
+        const out = await input.relight(base, placements, input.ratio)
+        if (out) {
+          base = await sharp(out).resize(frame.W, frame.H, { fit: 'fill' }).removeAlpha().png({ compressionLevel: 0 }).toBuffer()
+          relit = true
+        }
+      } catch (error) {
+        warnings.push(`relight skipped: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
+  // 5) Logo: background-free variant picked for the background under its slot.
+  let logoVariant: LogoVariantName | undefined
+  if (assets.logo && logoBox) {
+    const st = await regionStats(base, logoBox, frame.W, frame.H)
+    const choice = pickLogoVariant(assets.logo, st.p50, parseColor(input.visual?.primaryColor))
+    logoVariant = choice.variant
+    const logoLayers: OverlayOptions[] = []
+    if (choice.variant === 'badge' && choice.chip) {
+      const pad = 14
+      const chipBox = { x: logoBox.x - pad, y: logoBox.y - pad, w: logoBox.w + pad * 2, h: logoBox.h + pad * 2 }
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${frame.W}" height="${frame.H}" viewBox="0 0 ${frame.W} ${frame.H}">${SHADOW_DEFS}` +
+        rectSvg({ kind: 'rect', layer: 'under', box: chipBox, color: choice.chip, radius: 16, alpha: 0.95, shadow: 'soft' }) +
+        '</svg>'
+      logoLayers.push({ input: rasterize(svg), left: 0, top: 0 })
+    }
+    logoLayers.push({ input: await resizeLayer(choice.layer, logoBox.w, logoBox.h), left: logoBox.x, top: logoBox.y })
+    base = await sharp(base).composite(logoLayers).png({ compressionLevel: 0 }).toBuffer()
+  } else {
+    logoBox = null
+  }
+  const productBox: Box | null = placements[0]?.box ?? null
 
   // 4) Pills (CTA / offer / labels) must stand out from the scene: swap the fill when it blends in.
   for (const n of layout.nodes) {
@@ -422,13 +557,26 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     safeArea: { ...frame.safe },
     elements,
     product: productBox,
+    productBoxes: placements.map((p) => ({ ...p.box })),
+    productAvoid: placed.avoidRegion,
+    textOverProduct,
+    overlays: overlayBoxes(layout),
     logo: logoBox,
+    ...(logoVariant ? { logoVariant } : {}),
     scale,
     fonts: { heading: `${fonts.heading.family} ${fonts.heading.weight}`, body: `${fonts.body.family} ${fonts.body.weight}/${fonts.body.boldWeight}` },
     fits,
     warnings,
   }
-  return { png, width: frame.W, height: frame.H, layoutReport, basePng: input.debug?.returnBase ? base : undefined }
+  return {
+    png,
+    width: frame.W,
+    height: frame.H,
+    layoutReport,
+    basePng: input.debug?.returnBase ? base : undefined,
+    ...(placements.length ? { productPlacements: placements } : {}),
+    ...(relit ? { relit } : {}),
+  }
 }
 
 /** Render one ad. */

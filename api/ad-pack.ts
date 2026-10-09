@@ -84,7 +84,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
     case 'angles':
       return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd }) }
     case 'quote':
-      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd, angleIds: body.angleIds }) }
+      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd, angleIds: body.angleIds, productFidelity: body.productFidelity, relight: body.relight }) }
     case 'start': {
       const started = await service.startPack({
         userId,
@@ -105,6 +105,10 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
         forbiddenPhrases: body.forbiddenPhrases,
         forbiddenClaims: body.forbiddenClaims,
         approved: body.approved,
+        productFidelity: body.productFidelity,
+        relight: body.relight,
+        allowedProps: body.allowedProps,
+        immutableAttributes: body.immutableAttributes,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }

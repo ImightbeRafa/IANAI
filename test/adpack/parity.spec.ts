@@ -219,7 +219,7 @@ describe('POST /api/ad-pack', () => {
     const noDna = await callWeb(handler, USER_A, { action: 'start', offer: serum.offer })
     expect(noDna.statusCode).toBe(400)
     expect((noDna.body as { code: string }).code).toBe('BAD_INPUT')
-    const badRatio = await callWeb(handler, USER_A, { action: 'start', dna: serum.dna, offer: serum.offer, ratios: ['16:9'] })
+    const badRatio = await callWeb(handler, USER_A, { action: 'start', dna: serum.dna, offer: serum.offer, ratios: ['3:2'] })
     expect((badRatio.body as { code: string }).code).toBe('BAD_INPUT')
     const noSource = await callWeb(handler, USER_A, { action: 'dna_ingest' })
     expect((noSource.body as { code: string }).code).toBe('BAD_INPUT')
@@ -359,6 +359,17 @@ describe('MCP adpack_* tools', () => {
     expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(10)
     expect(names).toContain('adpack_resize')
     expect(names).toContain('create_ads')
+    // Product fidelity options on every image door (A1/A2/F3), create_ads included.
+    for (const name of ['adpack_start', 'create_ads', 'execute_image_generate', 'execute_bulk_posts', 'execute_campaign_pack']) {
+      const props = (tools.find((t) => t.name === name)?.inputSchema as unknown as { properties: Record<string, { enum?: string[] }> }).properties
+      expect(props.productFidelity?.enum, name).toEqual(['exact', 'generated'])
+      expect(props.relight, name).toBeTruthy()
+    }
+    const startProps = (tools.find((t) => t.name === 'adpack_start')?.inputSchema as unknown as { properties: Record<string, { items?: { enum?: string[] } }> }).properties
+    expect(startProps.ratios.items?.enum).toEqual(['1:1', '4:5', '9:16', '16:9'])
+    expect(startProps.immutableAttributes).toBeTruthy()
+    const resizeProps = (tools.find((t) => t.name === 'adpack_resize')?.inputSchema as unknown as { properties: Record<string, { items?: { enum?: string[] } }> }).properties
+    expect(resizeProps.ratios.items?.enum).toEqual(['1:1', '4:5', '9:16', '16:9'])
   })
 
   it('adpack_start requires in-chat approval; after confirm it returns packId and is idempotent', async () => {

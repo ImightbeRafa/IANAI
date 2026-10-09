@@ -2,6 +2,7 @@ import { supabaseAdmin as supabase } from './supabase-admin.js'
 import { isBloomDermalPatchSku } from './product-creative-rules.js'
 import { sniffImageMime } from './fetch-image-data-url.js'
 import { fetchPublicUrl } from './url-safety.js'
+import { prepareLogo } from './adpack/render/logo.js'
 
 export interface BrandKitRow {
   id: string
@@ -276,7 +277,22 @@ export async function fetchBrandImageAsBase64(
 
 export async function fetchBrandLogoAsBase64(kit: BrandKitRow): Promise<{ mimeType: string; data: string } | null> {
   if (!kit.logo_url) return null
-  return fetchBrandImageAsBase64(kit.logo_url, `brand logo "${kit.name}"`)
+  const raw = await fetchBrandImageAsBase64(kit.logo_url, `brand logo "${kit.name}"`)
+  return raw ? cleanLogoInline(raw) : null
+}
+
+/**
+ * Logo sent to image models / overlays: opaque backgrounds (the "white square" JPEG) are removed
+ * and padding trimmed (adpack render/logo.ts), so no box is drawn around it. Falls back to the original.
+ */
+export async function cleanLogoInline(raw: { mimeType: string; data: string }): Promise<{ mimeType: string; data: string }> {
+  try {
+    const variants = await prepareLogo(Buffer.from(raw.data, 'base64'))
+    if (!variants.backgroundRemoved && variants.method !== 'svg') return raw
+    return { mimeType: 'image/png', data: variants.onLight.png.toString('base64') }
+  } catch {
+    return raw
+  }
 }
 
 const BRAND_LOGO_BUCKET = 'post-images'

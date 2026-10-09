@@ -312,14 +312,30 @@ function toolInputSchema(name: string): Record<string, unknown> {
       facts: { type: 'array', items: { type: 'object' } },
       productImageUrls: { type: 'array', items: { type: 'string' } },
       productCutoutUrl: { type: 'string' },
+      productPhotos: {
+        type: 'array',
+        maxItems: 8,
+        description: 'Real photos with a role, one per part of a multi-part product (e.g. the plane = hero, the gamepad controller = part, the box = box). Parts are never invented.',
+        items: {
+          type: 'object',
+          properties: {
+            url: { type: 'string' },
+            role: { type: 'string', enum: ['hero', 'part', 'contents', 'box', 'in_use', 'detail'] },
+            label: { type: 'string' },
+          },
+          required: ['url', 'role'],
+        },
+      },
+      allowedProps: { type: 'array', items: { type: 'string' }, description: 'Kit objects allowed in scenes besides the product.' },
+      immutableAttributes: { type: 'array', items: { type: 'string' }, description: 'Appearance facts that must never change (e.g. "hélices blancas").' },
     },
     required: ['name'],
   }
   const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10). The approval shows exactly this many; the pack never runs fewer.' }
   const adpackRatios = {
     type: 'array',
-    items: { type: 'string', enum: ['1:1', '4:5', '9:16'] },
-    description: 'Default ["4:5","9:16"] (feed + story). Add "1:1" if needed, or later for free with adpack_resize.',
+    items: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9'] },
+    description: 'Default ["4:5","9:16"] (feed + story). Add "1:1" / "16:9" if needed, or later for free with adpack_resize.',
   }
   const adpackAngleIds = {
     type: 'array',
@@ -331,6 +347,16 @@ function toolInputSchema(name: string): Record<string, unknown> {
     register: { type: 'string', enum: ['voseo', 'tuteo', 'usted'], description: 'Spanish register; with locale it is enforced, not just a tone note.' },
     forbiddenPhrases: { type: 'array', items: { type: 'string' }, description: 'Extra phrases the ads must never contain (merged with the brand kit list). Checked on image text, caption and script.' },
     forbiddenClaims: { type: 'array', items: { type: 'string' }, description: 'Claims the ads must never make (e.g. "armado en minutos"). Checked like forbiddenPhrases.' },
+  }
+  const productFidelityProps = {
+    productFidelity: {
+      type: 'string',
+      enum: ['exact', 'generated'],
+      description: 'exact (default when a product photo exists; forced when the offer locks the product appearance) = the real product photo pixels are cut out and composited into a generated scene, with a fidelity score; generated = the image model redraws the product from the reference. Same price either way.',
+    },
+    relight: { type: 'boolean', description: 'exact mode: optional light-harmonization pass (one extra image-edit call per ad, included in the quote), kept only if the product still matches (fidelity).' },
+    allowedProps: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Kit objects that may appear besides the product (ambient props like table/plants/fabric are always allowed). Defaults to the offer ad_profile.' },
+    immutableAttributes: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Product appearance facts that must never change, used in prompts and checks. Defaults to the offer ad_profile.' },
   }
   const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
   const adpackSavedBrand = {
@@ -427,7 +453,15 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'adpack_quote':
       return {
         type: 'object',
-        properties: { ...adpackSavedBrand, size: adpackSize, dna: adpackDna, offer: adpackOffer, angleIds: adpackAngleIds },
+        properties: {
+          ...adpackSavedBrand,
+          size: adpackSize,
+          dna: adpackDna,
+          offer: adpackOffer,
+          angleIds: adpackAngleIds,
+          productFidelity: productFidelityProps.productFidelity,
+          relight: productFidelityProps.relight,
+        },
         additionalProperties: false,
       }
     case 'adpack_start':
@@ -448,6 +482,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ratios: adpackRatios,
           ...adpackLanguageRules,
           businessId: { type: 'string', description: 'dna/offer path only: brand folder to link the pack to.' },
+          ...productFidelityProps,
           approvalRequestId: {
             type: 'string',
             description: 'After in-chat confirm_execute approve. Do not invent. Retry with the exact same arguments.',
@@ -491,7 +526,12 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           packId: adpackPackId,
           itemId: { type: 'string', description: 'itemId of a finished ad (from adpack_status / deliverable)' },
-          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] }, minItems: 1, description: 'Ratios to add, e.g. ["1:1"].' },
+          ratios: {
+            type: 'array',
+            items: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9'] },
+            minItems: 1,
+            description: 'Ratios to add, e.g. ["1:1"]. Exact-mode ads re-composite the same real-product cut-out (fidelity re-checked, text kept off the product).',
+          },
         },
         required: ['packId', 'itemId', 'ratios'],
         additionalProperties: false,
@@ -504,7 +544,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string', description: 'Offer id from list_offers (optional; default = most recent offer).' },
           mode: { type: 'string', enum: ['pack', 'single', 'carousel', 'edit'], description: 'pack (default) = N static ads; single = 1 static ad; carousel = slides from a script; edit = change one existing image.' },
           count: { type: 'number', minimum: 1, maximum: 20, description: 'pack: ads (default 10); carousel: slides (2-5); single/edit: 1.' },
-          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] }, description: 'pack/single default ["4:5","9:16"]; carousel/edit: one ratio.' },
+          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9', '3:4'] }, description: 'pack/single default ["4:5","9:16"] (16:9 available); carousel/edit: one ratio.' },
           brief: { type: 'string', maxLength: 500, description: 'pack/single: campaign context (never a fact); carousel: design direction; edit: the change (if editPrompt is not given).' },
           angleIds: adpackAngleIds,
           brandKitId: { type: 'string' },
@@ -512,6 +552,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           productImageIds: productImageIdsProp,
           productImageIdsByAd: productImageIdsByAdProp,
           ...correctionProps,
+          ...productFidelityProps,
           scriptId: { type: 'string', description: 'carousel: script to turn into slides.' },
           scriptContent: { type: 'string', description: 'carousel: script text (instead of scriptId).' },
           subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },
@@ -760,12 +801,13 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ...brand,
           offerId: { type: 'string' },
           scene: { type: 'string' },
-          aspectRatio: { type: 'string' },
+          aspectRatio: { type: 'string', description: '1:1, 4:5, 9:16 or 16:9 (default 9:16). Ratios Grok lacks (4:5) are generated at the nearest native ratio and reframed.' },
           aspectRatioFallback: {
             type: 'boolean',
-            description: 'Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed.',
+            description: 'Deprecated (no longer needed): every supported ratio works.',
           },
           imageModel: { type: 'string', enum: ['grok-imagine'] },
+          ...productFidelityProps,
           productImageId: { type: 'string' },
           referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           referenceMode: { type: 'string', enum: ['use', 'none'] },
@@ -899,11 +941,12 @@ function toolInputSchema(name: string): Record<string, unknown> {
           approvalRequestId: { type: 'string' },
           imageModel: { type: 'string' },
           styleDnaId: { type: 'string' },
-          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
+          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9', '3:4'] },
           aspectRatioFallback: {
             type: 'boolean',
-            description: 'Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed.',
+            description: 'Deprecated (no longer needed): every supported ratio works.',
           },
+          ...productFidelityProps,
           scene: { type: 'string' },
           guidePrompt: { type: 'string' },
           productImageId: { type: 'string' },

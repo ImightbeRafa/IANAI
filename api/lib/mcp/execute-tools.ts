@@ -19,6 +19,9 @@ import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import { runGrokPostFirstGen } from '../grok-image-generate.js'
+import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
+import { createModelGateway } from '../adpack/gateway.js'
+import { exactResultDataUrl, generateExactProductImage, parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
 import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
 import {
@@ -584,6 +587,7 @@ export async function mcpExecuteImageGenerate(options: {
   const guidePrompt = optionalTrimmedString(options.args.guidePrompt)
   const referenceMode = parseReferenceMode(options.args.referenceMode) || 'use'
   const aspectRatioFallback = options.args.aspectRatioFallback === true
+  const fidelityArgs = parseImageFidelityArgs(options.args)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
@@ -596,6 +600,7 @@ export async function mcpExecuteImageGenerate(options: {
     referenceMode,
     guidePrompt,
     sessionId: sessionIdArg,
+    ...fidelityArgs,
   }
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
@@ -613,8 +618,10 @@ export async function mcpExecuteImageGenerate(options: {
     referenceImageIds: selectedReferenceIds,
     productImageId,
   })
-  // Validate aspect early (fail before approval if unsupported).
-  resolveGrokAspectRatio(boundInput.aspectRatio, { allowFallback: aspectRatioFallback })
+  // Validate aspect early (fail before approval if unsupported). 1:1 / 4:5 / 9:16 / 16:9 always work (F3).
+  resolveImageRatio(boundInput.aspectRatio)
+  // Exact product mode needs a product photo: fail before approval when explicitly asked without one.
+  resolveToolProductFidelity(fidelityArgs.productFidelity, productAssets.length > 0 || Boolean(productImageId))
   await resolveOwnedReferenceUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -695,6 +702,7 @@ export async function mcpExecuteImageGenerate(options: {
         appOrigin: options.appOrigin,
         ctxPreview,
         quote,
+        ...fidelityArgs,
       })
       await finalizeMcpApproval({
         approvalStore: options.approvalStore,
@@ -739,12 +747,15 @@ async function runImageGenerateBody(options: {
   appOrigin?: string
   ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
   quote: number
+  productFidelity?: 'exact' | 'generated'
+  relight?: boolean
+  allowedProps?: string[]
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
-  const appliedAspectRatio = resolveGrokAspectRatio(options.aspectRatio, {
-    allowFallback: options.aspectRatioFallback === true,
-  })
+  // Every supported ratio works: Grok-missing ones (4:5) are generated at the nearest native ratio and reframed.
+  const ratioPlan = resolveImageRatio(options.aspectRatio)
+  const appliedAspectRatio = ratioPlan.requested
 
   const guide = await mcpGuideImage(options.db, options.user, {
     brandId: options.brandId,
@@ -774,15 +785,53 @@ async function runImageGenerateBody(options: {
     productImageId: options.productImageId,
   })
 
-  const generated = await runGrokPostFirstGen({
-    apiKey: xaiKey(),
-    prompt,
-    aspectRatio: appliedAspectRatio,
-    aspectRatioFallback: options.aspectRatioFallback === true,
-    productReferenceUrls: productUrls,
-    supportReferenceUrls: supportUrls,
-    language: 'es',
-  })
+  const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0)
+  let fidelity: Record<string, unknown> | null = null
+  let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
+  if (fidelityMode === 'exact') {
+    // Real product pixels on a generated plate (A1); the job fails rather than deliver a redrawn product.
+    const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
+    const exact = await generateExactProductImage({
+      gateway: createModelGateway(),
+      photos: photosFromUrls(productUrls),
+      ratio: appliedAspectRatio,
+      brandName: options.ctxPreview.brand.name,
+      offerName,
+      language: 'es',
+      sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
+      styleNotes: kit?.visualStyleNotes || undefined,
+      palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
+      allowedProps: options.allowedProps,
+      relight: options.relight === true,
+    })
+    if (!exact.ok) throw new Error(exact.error)
+    fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE }
+    generated = {
+      imageDataUrl: exactResultDataUrl(exact),
+      providerModel: exact.plateModel || 'grok-imagine',
+      estimatedCostUsd: exact.costUsd,
+      resolution: `${exact.width}x${exact.height}`,
+      quality: 'medium',
+      aspectRatio: appliedAspectRatio,
+      mode: 'exact_composite',
+      lockApplied: true,
+    }
+  } else {
+    const grok = await runGrokPostFirstGen({
+      apiKey: xaiKey(),
+      prompt,
+      aspectRatio: ratioPlan.generateAt,
+      productReferenceUrls: productUrls,
+      supportReferenceUrls: supportUrls,
+      language: 'es',
+    })
+    generated = { ...grok }
+    if (ratioPlan.needsReframe && grok.imageDataUrl.startsWith('data:')) {
+      const bytes = Buffer.from(grok.imageDataUrl.slice(grok.imageDataUrl.indexOf(',') + 1), 'base64')
+      const framed = await reframeToRatio(bytes, appliedAspectRatio, { mode: 'cover', format: 'jpeg' })
+      generated = { ...grok, imageDataUrl: `data:image/jpeg;base64,${framed.bytes.toString('base64')}`, aspectRatio: appliedAspectRatio }
+    }
+  }
 
   const persistStarted = Date.now()
   const { sessionId } = await options.artifactStore.ensureExecuteSession({
@@ -868,6 +917,8 @@ async function runImageGenerateBody(options: {
     grokMode: generated.mode,
     lockApplied: generated.lockApplied,
     estimatedCostUsd: generated.estimatedCostUsd,
+    productFidelity: fidelityMode,
+    ...(fidelity ? { fidelity } : {}),
     prompt,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
     note: 'Image saved to Advance library as high-quality JPEG (HTTPS URL only — no blob in job result). Open deepLink to view in chat.',
@@ -1863,3 +1914,4 @@ async function runCarouselGenerateBody(options: {
     status: 'completed',
   }, charged, options.quote, 'execute_carousel_generate')
 }
+

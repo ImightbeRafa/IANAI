@@ -29,5 +29,18 @@ export function createSupabaseAdPackStorage(client?: SupabaseClient | null): AdP
       const { data } = db.storage.from(ADPACK_BUCKET).getPublicUrl(path)
       return { url: data.publicUrl }
     },
+    async uploadAt(input) {
+      const { error } = await db.storage.from(ADPACK_BUCKET).upload(input.path, input.bytes, { contentType: input.contentType, upsert: true })
+      if (error) throw new Error(`adpack_upload_failed: ${error.message}`)
+      const { data } = db.storage.from(ADPACK_BUCKET).getPublicUrl(input.path)
+      return { url: data.publicUrl }
+    },
+    async download(path) {
+      const { data, error } = await db.storage.from(ADPACK_BUCKET).download(path)
+      if (error || !data) return null
+      const bytes = new Uint8Array(await data.arrayBuffer())
+      const { data: pub } = db.storage.from(ADPACK_BUCKET).getPublicUrl(path)
+      return { bytes, url: pub.publicUrl }
+    },
   }
 }

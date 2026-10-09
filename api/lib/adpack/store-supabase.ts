@@ -23,7 +23,8 @@ export function packToRow(pack: Pack): Row {
     quoted_credits: pack.quotedCredits,
     source: pack.source,
     dna: pack.dna,
-    offer: pack.offer,
+    // Render options (product fidelity) ride inside the offer jsonb until a dedicated column exists.
+    offer: pack.render ? { ...pack.offer, [PACK_RENDER_KEY]: pack.render } : pack.offer,
     // Column from migration 083; only sent when set so packs without a brief insert on 082 alone.
     ...(pack.brief ? { brief: pack.brief } : {}),
     created_at: pack.createdAt,
@@ -31,7 +32,17 @@ export function packToRow(pack: Pack): Row {
   }
 }
 
+/** Key of the pack render options inside `ad_packs.offer` (no migration needed). */
+export const PACK_RENDER_KEY = 'packRender'
+
+function splitOffer(raw: unknown): { offer: Pack['offer']; render?: Pack['render'] } {
+  if (!raw || typeof raw !== 'object') return { offer: raw as Pack['offer'] }
+  const { [PACK_RENDER_KEY]: render, ...offer } = raw as Record<string, unknown>
+  return { offer: offer as unknown as Pack['offer'], ...(render && typeof render === 'object' ? { render: render as Pack['render'] } : {}) }
+}
+
 export function rowToPack(r: Row): Pack {
+  const { offer, render } = splitOffer(r.offer)
   return {
     id: String(r.id),
     userId: String(r.user_id),
@@ -43,7 +54,8 @@ export function rowToPack(r: Row): Pack {
     quotedCredits: Number(r.quoted_credits ?? 0),
     source: (r.source as Pack['source']) ?? 'web',
     dna: r.dna as Pack['dna'],
-    offer: r.offer as Pack['offer'],
+    offer,
+    ...(render ? { render } : {}),
     ...(typeof r.brief === 'string' && r.brief ? { brief: r.brief } : {}),
     createdAt: iso(r.created_at) ?? '',
     updatedAt: iso(r.updated_at) ?? '',
@@ -119,6 +131,8 @@ export function rowToItem(r: Row): PackItem {
     sceneAttempts: r.scene_attempts === null || r.scene_attempts === undefined ? undefined : Number(r.scene_attempts),
     chargedAt: iso(r.charged_at),
     libraryImages: Array.isArray(r.library_images) && r.library_images.length ? (r.library_images as PackItem['libraryImages']) : undefined,
+    // Fidelity is persisted inside scene_check (no dedicated column yet).
+    fidelity: (r.scene_check as { fidelity?: PackItem['fidelity'] } | null)?.fidelity ?? undefined,
   }
   for (const [k, v] of Object.entries(extra)) if (v !== undefined) (item as unknown as Row)[k] = v
   return item

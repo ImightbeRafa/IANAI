@@ -409,7 +409,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Prefer create_ads for ads (exact text, feed+story). Generate one free-form image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'Prefer create_ads for ads (exact text, feed+story). Generate one free-form image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ratios 1:1, 4:5, 9:16, 16:9. productFidelity "exact" (default with a product photo) keeps the real product pixels on a generated scene and returns fidelity {score, passed}; "generated" redraws it. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
       'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
@@ -566,7 +566,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd = {"1": [id]} per ad. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
       'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
-      'Guarantees: only confirmed facts are used for prices/claims; images keep the real product photo; text on the image is rendered exactly (never drawn by the image model). Takes ~2 min per 10 ads. ' +
+      'Guarantees: only confirmed facts are used for prices/claims; text on the image is rendered exactly (never drawn by the image model). ' +
+      'productFidelity "exact" (default when the offer has a product photo): the real product photo pixels are cut out and composited into a generated scene, scored for fidelity, and an ad whose product does not match is failed (never delivered); "generated" lets the image model redraw the product. Saved offers with lockProductAppearance always run exact; ad_profile immutableAttributes / allowedProps and tagged photos (primary/hero/part/caja/contenido-kit/en-uso/detalle) are applied automatically. Optional: relight (one extra image-edit call per ad, included in the approved price), allowedProps (kit objects allowed in scenes), immutableAttributes (e.g. "hélices blancas"), offer.productPhotos with roles for multi-part products. Takes ~2 min per 10 ads. ' +
       'Returns packId; then poll adpack_status every ~20-30 s until moreWork=false.',
     enabled: true,
     requiresApproval: true,
@@ -579,7 +580,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
       'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
-      'When finished it returns deliverable {ads[{index, format, headline, caption, links{4:5,9:16,…}, files[{ratio, url, width, height, format:"png", placement}], forbiddenHits[]}], captionsText, deepLink}: present it as a numbered list of full-res files + captions (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. ' +
+      'When finished it returns deliverable {ads[{index, format, headline, caption, links{4:5,9:16,…}, files[{ratio, url, width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
       'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,
     requiresApproval: false,
@@ -613,7 +614,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'sync_write',
     description:
-      'Ad Pack: FREE — render a finished ad into more ratios (e.g. add 1:1 or 9:16) from its stored scene and text. Renderer only: no model calls, no credits, no approval. ' +
+      'Ad Pack: FREE — render a finished ad into more ratios (1:1, 4:5, 9:16, 16:9) from its stored scene and text. Renderer only: no model calls, no credits, no approval. Exact-mode ads re-composite the same real-product cut-out on the stored background (fidelity re-checked per ratio; a ratio that fails is listed in rejected, not delivered); method says composite or scene. ' +
       'Returns the ad with every render {ratio, imageUrl, width, height, format}; new renders are saved to the offer library.',
     enabled: true,
     requiresApproval: false,

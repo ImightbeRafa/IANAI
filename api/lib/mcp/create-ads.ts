@@ -30,13 +30,14 @@ export class CreateAdsInputError extends Error {
 
 const bad = (message: string) => new CreateAdsInputError(message)
 
-const PACK_RATIOS = new Set(['1:1', '4:5', '9:16'])
+const PACK_RATIOS = new Set(['1:1', '4:5', '9:16', '16:9'])
 
 /** adpack_start arguments create_ads forwards unchanged in pack/single mode. */
 export const PACK_PASSTHROUGH = [
   'brief', 'angleIds', 'brandKitId', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
   'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
   'includeDna', 'language',
+  'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
 ] as const
 const CAROUSEL_RATIOS = new Set(['1:1', '4:5', '9:16', '3:4'])
 
@@ -79,7 +80,7 @@ export function routeCreateAds(args: Record<string, unknown>): CreateAdsRoute {
     case 'pack':
     case 'single': {
       if (mode === 'single' && count !== undefined && count !== 1) throw bad('mode single makes exactly 1 ad (use mode pack for more)')
-      if (ratios?.some((r) => !PACK_RATIOS.has(r))) throw bad('pack/single ratios: 1:1, 4:5, 9:16 (default 4:5 + 9:16)')
+      if (ratios?.some((r) => !PACK_RATIOS.has(r))) throw bad('pack/single ratios: 1:1, 4:5, 9:16, 16:9 (default 4:5 + 9:16)')
       const out: Record<string, unknown> = { ...base }
       const size = mode === 'single' ? 1 : count
       if (size !== undefined) out.size = size

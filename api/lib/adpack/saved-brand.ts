@@ -25,6 +25,7 @@ import { detectLanguage } from './dna/classify.js'
 import { buildBrandDna, computeGaps } from './dna/merge.js'
 import { cleanText, isHexColor, makeFact, uniqStrings, type DnaPart } from './dna/part.js'
 import { mapSiteAnalysis } from './dna/website.js'
+import { roleFromImageRow, roleFromLabel } from './fidelity/photos.js'
 import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKey, OfferInput } from './types.js'
 import { isPlaceholderValue, stripPlaceholderParts } from '../placeholder-guard.js'
 import { audienceLines, readBrandProfile, type BrandProfile } from '../brand-profile.js'
@@ -429,8 +430,32 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   if (productId) offer.productId = productId
   if (profileFacts?.notIncluded.length) offer.notIncluded = profileFacts.notIncluded
   if (profileFacts?.strictClaims) offer.strictClaims = true
-  if (profileFacts?.productLock) offer.productLock = profileFacts.productLock
+  if (profileFacts?.productLock) {
+    // WS2 ad_profile → WS1 fidelity options: lock forces exact mode (resolveRenderOptions).
+    const lock = profileFacts.productLock
+    offer.productLock = lock
+    if (lock.lockProductAppearance) offer.lockProductAppearance = true
+    if (lock.immutableAttributes.length) offer.immutableAttributes = [...lock.immutableAttributes]
+    if (lock.allowedProps.length) offer.allowedProps = [...lock.allowedProps]
+  }
   if (Object.keys(byAd).length) offer.productImageUrlsByAd = byAd
+  // Role per photo: 085 tags / primary first, then the free role ("control") or label; first untagged = hero.
+  const rowOf = new Map(usable.map((r) => [urlOf(r), r]))
+  const tagged = productUrls.map((url) => {
+    const row = rowOf.get(url)
+    const fromTags = row ? roleFromImageRow(row) : undefined
+    const freeRole = s(row ?? null, 'role', 80)
+    const label = freeRole || s(row ?? null, 'label', 80)
+    const role = fromTags ?? roleFromLabel(freeRole) ?? roleFromLabel(s(row ?? null, 'label', 80))
+    return { url, label, id: s(row ?? null, 'id', 64), role, explicit: fromTags !== undefined }
+  })
+  if (tagged.some((t) => t.explicit || (t.role && t.role !== 'detail' && t.role !== 'hero'))) {
+    let heroSet = tagged.some((t) => t.role === 'hero')
+    offer.productPhotos = tagged.map((t) => {
+      const role = t.role ?? (heroSet ? 'detail' : ((heroSet = true), 'hero'))
+      return { url: t.url, role, ...(t.label ? { label: t.label } : {}), ...(t.id ? { id: t.id } : {}) }
+    })
+  }
   return { dna, offer, gaps: dna.gaps, notes }
 }
 

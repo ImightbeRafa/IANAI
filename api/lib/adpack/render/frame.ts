@@ -5,9 +5,13 @@ export const RATIO_SIZE: Record<AspectRatio, { width: number; height: number }> 
   '1:1': { width: 1080, height: 1080 },
   '4:5': { width: 1080, height: 1350 },
   '9:16': { width: 1080, height: 1920 },
+  '16:9': { width: 1920, height: 1080 },
 }
 
+/** Default pack ratios (feed + story). */
 export const ALL_RATIOS: AspectRatio[] = ['1:1', '4:5', '9:16']
+/** Every ratio the renderer supports (adds landscape 16:9). */
+export const EXTENDED_RATIOS: AspectRatio[] = ['1:1', '4:5', '9:16', '16:9']
 
 export interface Frame {
   ratio: AspectRatio
@@ -33,6 +37,7 @@ export function makeFrame(ratio: AspectRatio): Frame {
     return { ratio, W, H, safe: { x: side, y: top, w: W - side * 2, h: H - top - bottom }, type: 1.1, tall: true }
   }
   const m = 60
+  if (ratio === '16:9') return { ratio, W, H, safe: { x: 80, y: m, w: W - 160, h: H - m * 2 }, type: 1, tall: false }
   return { ratio, W, H, safe: { x: m, y: m, w: W - m * 2, h: H - m * 2 }, type: ratio === '4:5' ? 1.04 : 1, tall: false }
 }
 

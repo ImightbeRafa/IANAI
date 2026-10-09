@@ -83,6 +83,8 @@ export type BulkPostItem = {
   generationId: string
   approach: string
   error?: string
+  /** Product fidelity of the image (exact mode: real product pixels, masked SSIM / ΔE). */
+  fidelity?: { score: number; passed: boolean; method: 'composite' | 'relit' | 'generated'; ssim?: number; deltaE?: number }
 }
 
 export type ExpandedProductRef = {

@@ -10,6 +10,8 @@ import type {
   AdCopy,
   AdLanguage,
   AspectRatio,
+  FidelityMethod,
+  ProductFidelityMode,
   BrandDna,
   CopyCheckIssue,
   DnaFact,
@@ -126,6 +128,9 @@ export interface AdPackQuoteRequest extends AdPackSavedBrandRef {
   offer?: OfferInput
   /** Same selection as start: the quote is for exactly these angles. */
   angleIds?: string[]
+  /** Same render options as start (relight changes the price; productFidelity does not). */
+  productFidelity?: ProductFidelityMode
+  relight?: boolean
 }
 
 /**
@@ -185,12 +190,24 @@ export interface AdPackStartRequest {
    * created and the call fails with PLAN_CHANGED { approved, planned }.
    */
   approved?: { items: number; total: number }
+  /** 'exact' (default when a product photo exists): real product pixels on a generated plate. 'generated': model-drawn product. */
+  productFidelity?: ProductFidelityMode
+  /** Optional relight pass (exact mode); kept only when fidelity still passes. */
+  relight?: boolean
+  /** Kit objects allowed in scenes besides the product (ambient props are always allowed). */
+  allowedProps?: string[]
+  /** Appearance facts that must never change, e.g. "hélices blancas". */
+  immutableAttributes?: string[]
 }
 
 export interface AdPackResizeRequest {
   packId: string
   itemId: string
-  /** Ratios to add (1:1, 4:5, 9:16). Free: re-renders the stored scene + copy, no model calls. */
+  /**
+   * Ratios to add (1:1, 4:5, 9:16, 16:9). Free: no model calls. Exact-mode ads re-composite the
+   * stored plate + real-product cut-outs (fidelity re-scored, text kept off the product); ads
+   * without stored cut-outs re-render the stored final scene (fidelity.method says which).
+   */
   ratios: AspectRatio[]
 }
 
@@ -199,6 +216,10 @@ export interface AdPackResizeResponse {
   /** Ratios rendered by this call (already present ones are skipped). */
   added: AspectRatio[]
   chargedCredits: 0
+  /** 'composite' = stored plate + real-product cut-outs (fidelity re-scored); 'scene' = stored final scene. */
+  method?: 'composite' | 'scene'
+  /** New ratios not delivered because the product fidelity check failed. */
+  rejected?: Array<{ ratio: AspectRatio; fidelity: AdPackFidelityView }>
 }
 
 export interface AdPackStatusRequest {
@@ -261,8 +282,10 @@ export interface AdPackQuote {
   size: number
   /** Total credits for the pack. */
   credits: number
-  /** Credits per ad (one `image_standard`, copy included). */
+  /** Credits per ad (one `image_standard`, copy included; + one more with relight). */
   perAd: number
+  /** Relight requested in exact mode: its image-edit call is part of the price. */
+  relight?: true
   /** Angle ids the quote covers (exactly `size` of them). */
   angleIds?: string[]
 }
@@ -293,7 +316,18 @@ export interface AdPackItemView {
   libraryImageIds?: string[]
   /** Brand forbidden phrases/claims found in this ad's copy (empty when verified clean). */
   forbiddenHits?: Array<{ phrase: string; field: string }>
+  /** Product fidelity (A4): exact = masked SSIM/ΔE vs the real cut-out; generated = vision verdict. */
+  fidelity?: AdPackFidelityView
   error?: string
+}
+
+export interface AdPackFidelityView {
+  score: number
+  passed: boolean
+  method: FidelityMethod
+  ssim?: number
+  deltaE?: number
+  diffImageUrl?: string
 }
 
 export interface AdPackProgressView {
@@ -309,6 +343,10 @@ export interface AdPackStatusResponse {
   status: PackStatus
   size: number
   ratios: AspectRatio[]
+  /** How the product reaches the images (exact = real product pixels). */
+  productFidelity: ProductFidelityMode
+  /** Relight pass on (priced per ad; regenerating one ad costs the same per-ad price). */
+  relight?: true
   source: Pack['source']
   quotedCredits: number
   /** Credits charged so far (charged items × per-ad credits). */

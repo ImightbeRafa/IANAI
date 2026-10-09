@@ -106,7 +106,7 @@ describe('G4 + H6: feed + story by default, stable files per ratio', () => {
     const e = env()
     const { packId, status } = await finishedPack(e)
     const itemId = (status.payload.deliverable as { ads: Array<{ itemId: string }> }).ads[0].itemId
-    const bad = await callMcp(e, USER_A, 'adpack_resize', { packId, itemId, ratios: ['16:9'] })
+    const bad = await callMcp(e, USER_A, 'adpack_resize', { packId, itemId, ratios: ['2:3'] }) // 16:9 is valid since WS1
     expect(bad.isError).toBe(true)
     expect((bad.payload.error as { code: string }).code).toBe('BAD_INPUT')
   })

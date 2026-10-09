@@ -61,7 +61,9 @@ import { createSupabaseAdPackStorage } from './storage.js'
 import { buildStatusExtras } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
-import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
+import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto } from './types.js'
+import { hasUsableProductPhoto, isProductPhotoRole } from './fidelity/photos.js'
+import type { ImageLoader } from './fidelity/pipeline.js'
 import type { DnaPart } from './dna/part.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
@@ -72,7 +74,7 @@ export const ADPACK_INLINE_BUDGET_MS = 8_000
 export const ADPACK_MAX_UPLOADS = 12
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const RATIOS: ReadonlySet<AspectRatio> = new Set(['1:1', '4:5', '9:16'])
+const RATIOS: ReadonlySet<AspectRatio> = new Set(['1:1', '4:5', '9:16', '16:9'])
 const TERMINAL_PACK: ReadonlySet<PackStatus> = new Set(['done', 'partial', 'failed', 'cancelled'])
 /** Packs whose finished ads are saved to the offer library. */
 const COMPLETE_PACK: ReadonlySet<PackStatus> = new Set(['done', 'partial'])
@@ -166,6 +168,8 @@ export interface AdPackDeps {
   library?: AdPackLibrary
   /** Web-app origin for deep links (default https://advanceai.studio). */
   appOrigin?: string
+  /** Product photo / cut-out loader for exact mode (tests inject; default fetches data/https URLs). */
+  loadImage?: ImageLoader
 }
 
 /** Lazily create on first use so a missing env var fails the call that needs it, not module load. */
@@ -269,7 +273,7 @@ export function parseRatios(raw: unknown): AspectRatio[] {
   if (!Array.isArray(raw) || !raw.length) throw bad('ratios must be a non-empty array')
   const out: AspectRatio[] = []
   for (const r of raw) {
-    if (typeof r !== 'string' || !RATIOS.has(r as AspectRatio)) throw bad(`Unsupported ratio: ${String(r)} (use 1:1, 4:5, 9:16)`)
+    if (typeof r !== 'string' || !RATIOS.has(r as AspectRatio)) throw bad(`Unsupported ratio: ${String(r)} (use 1:1, 4:5, 9:16, 16:9)`)
     if (!out.includes(r as AspectRatio)) out.push(r as AspectRatio)
   }
   return out
@@ -350,7 +354,66 @@ export function parseOffer(raw: unknown): OfferInput {
     }
     if (Object.keys(byAd).length) offer.productImageUrlsByAd = byAd
   }
+  if (raw.productPhotos !== undefined) offer.productPhotos = parseProductPhotos(raw.productPhotos, 'offer.productPhotos')
+  const allowed = parseStringList(raw.allowedProps, 'offer.allowedProps')
+  if (allowed) offer.allowedProps = allowed
+  const immutable = parseStringList(raw.immutableAttributes, 'offer.immutableAttributes')
+  if (immutable) offer.immutableAttributes = immutable
+  if (raw.lockProductAppearance === true) offer.lockProductAppearance = true
   return offer
+}
+
+/** Role-tagged product photos (multi-part products). */
+export function parseProductPhotos(raw: unknown, label: string): ProductPhoto[] {
+  if (!Array.isArray(raw)) throw bad(`${label} must be an array of {url, role}`)
+  return raw.slice(0, 8).map((p, i) => {
+    if (!isObj(p) || typeof p.url !== 'string' || !isAllowedImageUrl(p.url)) throw bad(`${label}[${i}].url must be an https or data:image URL`)
+    if (!isProductPhotoRole(p.role)) throw bad(`${label}[${i}].role must be one of hero, part, contents, box, in_use, detail`)
+    const photo: ProductPhoto = { url: p.url, role: p.role }
+    const lbl = str(p.label, 80)
+    if (lbl) photo.label = lbl
+    const id = str(p.id, 64)
+    if (id) photo.id = id
+    return photo
+  })
+}
+
+/** Short owner strings (props, immutable attributes): ≤ 12 items × 60 chars. */
+export function parseStringList(raw: unknown, label: string): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) throw bad(`${label} must be an array of strings`)
+  const out = [...new Set((raw as string[]).map((v) => v.replace(/[\r\n`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 12)
+  return out.length ? out : undefined
+}
+
+/**
+ * Product fidelity options for a pack. Default 'exact' whenever the offer has a usable product
+ * photo; 'generated' only when asked or no photo. The owner's product lock (offer
+ * `lockProductAppearance`, or the saved ad_profile `productLock`) forces 'exact': a locked
+ * product is never redrawn, so a request for 'generated' is upgraded to 'exact'.
+ * allowedProps / immutableAttributes: request → offer → ad_profile productLock.
+ */
+export function resolveRenderOptions(raw: { productFidelity?: unknown; relight?: unknown; allowedProps?: unknown; immutableAttributes?: unknown }, offer: OfferInput): PackRenderOptions {
+  const mode = raw.productFidelity
+  if (mode !== undefined && mode !== null && mode !== 'exact' && mode !== 'generated') throw bad('productFidelity must be exact or generated')
+  if (raw.relight !== undefined && raw.relight !== null && typeof raw.relight !== 'boolean') throw bad('relight must be a boolean')
+  const hasPhoto = hasUsableProductPhoto(offer)
+  const locked = offer.lockProductAppearance === true || offer.productLock?.lockProductAppearance === true
+  if ((mode === 'exact' || locked) && !hasPhoto) {
+    throw bad(locked
+      ? 'This offer locks the product appearance (lockProductAppearance), which needs a real product photo: upload one or unlock the offer'
+      : 'productFidelity exact needs a real product photo (offer.productImageUrls / productPhotos)')
+  }
+  const productFidelity = locked ? 'exact' : mode === 'generated' ? 'generated' : hasPhoto ? 'exact' : 'generated'
+  const lock = offer.productLock
+  const allowedProps = parseStringList(raw.allowedProps, 'allowedProps') ?? offer.allowedProps ?? (lock?.allowedProps.length ? lock.allowedProps : undefined)
+  const immutableAttributes = parseStringList(raw.immutableAttributes, 'immutableAttributes') ?? offer.immutableAttributes ?? (lock?.immutableAttributes.length ? lock.immutableAttributes : undefined)
+  return {
+    productFidelity,
+    ...(raw.relight === true && productFidelity === 'exact' ? { relight: true } : {}),
+    ...(allowedProps?.length ? { allowedProps } : {}),
+    ...(immutableAttributes?.length ? { immutableAttributes } : {}),
+  }
 }
 
 function parseOptionalUuid(raw: unknown, label: string): string | undefined {
@@ -441,7 +504,8 @@ function parseCopyPatch(raw: unknown): AdPackCopyPatch {
 
 const REGISTERS = new Set(['voseo', 'tuteo', 'usted'])
 
-function parseStringList(raw: unknown, label: string): string[] | undefined {
+/** Forbidden phrases / claims: ≤ 30 items × 120 chars (longer limits than parseStringList). */
+function parsePhraseList(raw: unknown, label: string): string[] | undefined {
   if (raw === undefined || raw === null) return undefined
   if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) throw bad(`${label} must be an array of strings`)
   return (raw as string[]).map((v) => v.trim().slice(0, 120)).filter(Boolean).slice(0, 30)
@@ -473,16 +537,16 @@ export function applyDnaOverrides(dna: BrandDna, input: DnaOverridesInput): Bran
     if (typeof input.register !== 'string' || !REGISTERS.has(input.register)) throw bad('register must be voseo, tuteo or usted')
     out.register = input.register as BrandDna['register']
   }
-  const phrases = parseStringList(input.forbiddenPhrases, 'forbiddenPhrases')
-  const claims = parseStringList(input.forbiddenClaims, 'forbiddenClaims')
+  const phrases = parsePhraseList(input.forbiddenPhrases, 'forbiddenPhrases')
+  const claims = parsePhraseList(input.forbiddenClaims, 'forbiddenClaims')
   if (phrases?.length) out.forbiddenPhrases = [...new Set([...(dna.forbiddenPhrases ?? []), ...phrases])]
   if (claims?.length) out.forbiddenClaims = [...new Set([...(dna.forbiddenClaims ?? []), ...claims])]
   return out
 }
 
-/** Plan summary for a count of ads (credits = per-ad × count). */
-export function adPackPlanSummary(items: number): AdPackPlanSummary {
-  const q = quotePack(items)
+/** Plan summary for a count of ads (credits = per-ad × count; relight adds its model call per ad). */
+export function adPackPlanSummary(items: number, opts: { relight?: boolean } = {}): AdPackPlanSummary {
+  const q = quotePack(items, opts)
   return { items, unitCost: q.perAd, total: q.credits, currency: 'credits' }
 }
 
@@ -525,7 +589,20 @@ export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrase
     charged: Boolean(item.chargedAt),
     ...(libraryIdsFor(item).length ? { libraryImageIds: libraryIdsFor(item) } : {}),
     ...(dna && item.copy ? { forbiddenHits: findForbiddenHits(item.copy, dna).map((h) => ({ phrase: h.phrase, field: h.field })) } : {}),
+    ...(item.fidelity ? { fidelity: fidelityView(item.fidelity) } : {}),
     ...(item.error ? { error: item.error } : {}),
+  }
+}
+
+/** Public fidelity (A4): score, passed, method, ssim/ΔE and the heatmap link when present. */
+export function fidelityView(f: NonNullable<PackItem['fidelity']>): NonNullable<AdPackItemView['fidelity']> {
+  return {
+    score: f.score,
+    passed: f.passed,
+    method: f.method,
+    ...(f.ssim !== null && f.ssim !== undefined ? { ssim: f.ssim } : {}),
+    ...(f.deltaE !== null && f.deltaE !== undefined ? { deltaE: f.deltaE } : {}),
+    ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}),
   }
 }
 
@@ -537,7 +614,7 @@ function libraryIdsFor(item: PackItem): string[] {
 
 function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string, language?: AdLanguage): AdPackStatusResponse {
   const progress: PackProgress = summarizePack(pack, items)
-  const perAd = quotePack(1).perAd
+  const perAd = quotePack(1, { relight: pack.render?.relight }).perAd
   // Charges for the current attempt of each ad (a regenerate clears `chargedAt` until it is re-charged).
   const chargedCredits = items.filter((i) => i.chargedAt).length * perAd
   const leaseActive = items.some((i) => i.leaseUntil && Date.parse(i.leaseUntil) > nowMs && i.status !== 'done' && i.status !== 'failed')
@@ -557,6 +634,8 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     status: pack.status,
     size: pack.size,
     ratios: pack.ratios,
+    productFidelity: pack.render?.productFidelity ?? 'generated',
+    ...(pack.render?.relight ? { relight: true } : {}),
     source: pack.source,
     quotedCredits: pack.quotedCredits,
     chargedCredits,
@@ -634,7 +713,7 @@ export interface AdPackService {
   confirmDna(input: { userId: string; dna: unknown; edits: unknown }): Promise<AdPackConfirmDnaResponse>
   planAngles(input: { userId: string; dna?: unknown; offer?: unknown; size?: unknown } & SavedBrandRefInput): Promise<AdPackAnglesResponse>
   /** Quote for exactly the ads start would run (same resolver; `angleIds` = that selection). */
-  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; angleIds?: unknown } & SavedBrandRefInput): Promise<AdPackQuote>
+  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; angleIds?: unknown; productFidelity?: unknown; relight?: unknown } & SavedBrandRefInput): Promise<AdPackQuote>
   startPack(input: {
     userId: string
     /** dna + offer, OR brandId (+ offerId / brandKitId): the server builds them from the saved brand. */
@@ -657,6 +736,14 @@ export interface AdPackService {
     packId?: string
     /** What the user approved: a different plan now → PLAN_CHANGED, nothing is created (F1). */
     approved?: unknown
+    /** 'exact' (default with a product photo) = real product pixels; 'generated' = model-drawn product. */
+    productFidelity?: unknown
+    /** Optional relight pass in exact mode (kept only when fidelity holds; one extra model call per ad, quoted). */
+    relight?: unknown
+    /** Kit objects allowed in scenes besides the product. */
+    allowedProps?: unknown
+    /** Appearance facts that must never change (prompts + vision checks). */
+    immutableAttributes?: unknown
   } & DnaOverridesInput): Promise<AdPackStartResponse>
   getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
@@ -835,6 +922,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       userId: input.userId,
       budgetMs: input.budgetMs ?? ADPACK_BACKGROUND_BUDGET_MS,
       concurrency: deps.concurrency,
+      ...(deps.loadImage ? { loadImage: deps.loadImage } : {}),
     })
     if (COMPLETE_PACK.has(progress.status)) await persistLibrary(input.userId, packId)
     return progress
@@ -847,9 +935,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     return toStatusView(pack, items, now(), input.appOrigin ?? deps.appOrigin, language)
   }
 
-  const quoteFor = (size: number): AdPackQuote => {
-    const q = quotePack(size)
-    return { size, credits: q.credits, perAd: q.perAd }
+  const quoteFor = (size: number, relight?: boolean): AdPackQuote => {
+    const q = quotePack(size, { relight })
+    return { size, credits: q.credits, perAd: q.perAd, ...(relight ? { relight: true } : {}) }
   }
 
   return {
@@ -917,10 +1005,13 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       if ((input.dna !== undefined && input.offer !== undefined) || (input.dna === undefined && input.offer === undefined && hasValue(input.brandId))) {
         const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
         const angles = resolveAngles(dna, offer, size, angleIds)
-        return { ...quoteFor(angles.length), angleIds: angles.map((a) => a.id) }
+        // Same render resolution as start: relight only counts when the pack really runs exact.
+        const render = resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
+        return { ...quoteFor(angles.length, render.relight), angleIds: angles.map((a) => a.id) }
       }
       if (angleIds) throw bad('angleIds need dna + offer or brandId to resolve')
-      return quoteFor(size)
+      if (input.relight !== undefined && input.relight !== null && typeof input.relight !== 'boolean') throw bad('relight must be a boolean')
+      return quoteFor(size, input.relight === true && input.productFidelity !== 'generated')
     },
 
     async startPack(input) {
@@ -941,7 +1032,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       if (input.packId) {
         const existing = await deps.store.getPack(packId, input.userId)
         if (existing) {
-          return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
+          return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size, existing.pack.render?.relight), existing: true }
         }
       }
       if (fromSaved) {
@@ -957,31 +1048,32 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       dna = applyDnaOverrides(dna, input)
       const angleIds = parseAngleIds(input.angleIds)
       const approved = parseApproved(input.approved)
+      const render = resolveRenderOptions(input, offer)
       let planned: ReturnType<typeof planPack>
       try {
-        planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, brief, ids: { packId } })
+        planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, brief, render, ids: { packId } })
       } catch (err) {
         return planError(err)
       }
       if (!planned.items.length) throw bad('No angles could be planned for this offer')
-      // F1: never run (or silently shrink) a plan the user did not approve.
-      const current = adPackPlanSummary(planned.items.length)
+      // F1: never run (or silently shrink) a plan the user did not approve. Relight is part of the price.
+      const current = adPackPlanSummary(planned.items.length, { relight: render.relight })
       if (approved && (approved.items !== current.items || approved.total !== current.total)) {
         throw new AdPackError('PLAN_CHANGED', `Approved ${approved.items} ads for ${approved.total} credits, but the plan is now ${current.items} ads for ${current.total} credits. Nothing ran; ask for a fresh approval.`, {
           approved: adPackPlanSummaryFrom(approved),
           planned: current,
         })
       }
-      await requireCredits(input.userId, planned.pack.size)
+      await requireCredits(input.userId, planned.pack.size * (render.relight ? 2 : 1))
       try {
         await deps.store.createPack(planned.pack, planned.items)
       } catch (err) {
         // Concurrent retry with the same fixed id won the insert: return that pack.
         const existing = input.packId ? await deps.store.getPack(packId, input.userId).catch(() => null) : null
         if (!existing) throw err
-        return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
+        return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size, existing.pack.render?.relight), existing: true }
       }
-      return { packId, status: planned.pack.status, quote: quoteFor(planned.pack.size), existing: false }
+      return { packId, status: planned.pack.status, quote: quoteFor(planned.pack.size, render.relight), existing: false }
     },
 
     getStatus,
@@ -1011,7 +1103,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const packId = parsePackId(input.packId)
       const itemId = parseItemId(input.itemId)
       const copyPatch = parseCopyPatch(input.copy)
-      const res = await editItemText({ store: deps.store, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, copyPatch })
+      const res = await editItemText({ store: deps.store, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, copyPatch, ...(deps.loadImage ? { loadImage: deps.loadImage } : {}) })
       if (res.ok) {
         // The edited version replaces the renders: save it to the offer library too.
         if (await persistLibrary(input.userId, packId)) {
@@ -1035,19 +1127,24 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const packId = parsePackId(input.packId)
       const itemId = parseItemId(input.itemId)
       const ratios = parseRatios(input.ratios)
-      const res = await resizeItem({ store: deps.store, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, ratios })
+      const res = await resizeItem({ store: deps.store, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, ratios, ...(deps.loadImage ? { loadImage: deps.loadImage } : {}) })
       if (!res.ok) {
         if (res.error === 'pack_not_found') throw new AdPackError('NOT_FOUND', 'Pack not found')
         if (res.error === 'item_not_found') throw new AdPackError('NOT_FOUND', 'Ad not found')
+        if (res.error === 'cutout_missing') throw new AdPackError('NOT_READY', 'The stored product cut-out of this ad is missing; regenerate its scene to resize it with the real product')
         throw new AdPackError('NOT_READY', 'This ad is not rendered yet')
       }
       const loaded = await deps.store.getPack(packId, input.userId)
+      const extra = {
+        ...(res.method ? { method: res.method } : {}),
+        ...(res.rejected?.length ? { rejected: res.rejected.map((r) => ({ ratio: r.ratio, fidelity: fidelityView(r.fidelity) })) } : {}),
+      }
       // New renders go to the offer library like any finished render (idempotent per URL).
       if (res.added.length && (await persistLibrary(input.userId, packId))) {
         const fresh = (await deps.store.getPack(packId, input.userId))?.items.find((i) => i.id === itemId)
-        if (fresh) return { item: toItemView(fresh, loaded?.pack.dna), added: res.added, chargedCredits: 0 }
+        if (fresh) return { item: toItemView(fresh, loaded?.pack.dna), added: res.added, chargedCredits: 0, ...extra }
       }
-      return { item: toItemView(res.item, loaded?.pack.dna), added: res.added, chargedCredits: 0 }
+      return { item: toItemView(res.item, loaded?.pack.dna), added: res.added, chargedCredits: 0, ...extra }
     },
 
     async regenerate(input) {
@@ -1057,13 +1154,13 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const { pack, items } = await load(input.userId, packId)
       if (pack.status === 'cancelled') throw new AdPackError('NOT_READY', 'Pack was cancelled')
       if (!items.some((i) => i.id === itemId)) throw new AdPackError('NOT_FOUND', 'Ad not found')
-      await requireCredits(input.userId, 1)
+      await requireCredits(input.userId, pack.render?.relight ? 2 : 1)
       const res = await regenerateItem({ store: deps.store, packId, itemId, userId: input.userId, mode })
       if (!res.ok) {
         if (res.error === 'item_busy') throw new AdPackError('BUSY', 'This ad is still being generated')
         throw new AdPackError('NOT_FOUND', res.error === 'pack_not_found' ? 'Pack not found' : 'Ad not found')
       }
-      return { item: toItemView(res.item), quote: quoteFor(1) }
+      return { item: toItemView(res.item), quote: quoteFor(1, pack.render?.relight) }
     },
 
     async cancel(input) {

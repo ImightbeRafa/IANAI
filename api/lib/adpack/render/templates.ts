@@ -385,6 +385,16 @@ const beforeAfter: Template = (ctx) => {
   const split = { x: W / 2 }
   // Divider + arrow badge (decorative, no text).
   const d = sz(ctx, 78)
+  // Exact mode: the real product stands in the "after" half, above its label, clear of the arrow badge.
+  let productBox: Box | undefined
+  if (ctx.exact && ctx.product) {
+    const px = Math.round(W / 2 + Math.max(gutter, d / 2 + sz(ctx, 14)))
+    const pTop = regionTop
+    const rightTop = Math.min(...rightParts.map((p) => p.box.y))
+    const pBottom = rightTop - sz(ctx, 18)
+    productBox = { x: px, y: pTop, w: Math.max(1, safe.x + safe.w - px), h: Math.max(1, pBottom - pTop) }
+    if (productBox.h < ctx.frame.H * 0.18) fits = false
+  }
   const y0 = regionTop
   const y1 = Math.max(y0 + 10, regionBottom)
   // Divider only between the header and the label/action block, never through text.
@@ -395,7 +405,7 @@ const beforeAfter: Template = (ctx) => {
   const cb = { x: Math.round(split.x - d / 2), y: cy - d / 2, w: d, h: d }
   nodes.push({ kind: 'rect', layer: 'over', box: cb, color: WHITE, radius: d / 2, shadow: 'strong' })
   nodes.push({ kind: 'icon', icon: 'arrow_right', box: cb, color: ctx.palette.chipIcon })
-  return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], logoBox: logo.box, fits, warnings }
+  return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], productBox, productValign: 'bottom', logoBox: logo.box, fits, warnings }
 }
 
 const howToSteps: Template = (ctx) => {
@@ -422,10 +432,18 @@ const howToSteps: Template = (ctx) => {
     y = bottom(c.box) + sz(ctx, 18)
   })
   if (steps.length) y -= sz(ctx, 18)
-  const fits = y <= regionBottom
+  let fits = y <= regionBottom
   if (cards.length) centerVertically(cards, regionTop, y, regionBottom)
   nodes.push(...cards)
-  return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], logoBox: logo.box, fits, warnings }
+  // Exact mode: the real product in the right column next to the step cards.
+  let productBox: Box | undefined
+  if (ctx.exact && ctx.product) {
+    const gap = sz(ctx, 28)
+    const px = safe.x + (steps.length ? cardW : 0) + gap
+    productBox = { x: px, y: regionTop, w: Math.max(1, safe.x + safe.w - px), h: Math.max(1, regionBottom - regionTop) }
+    if (productBox.w < ctx.frame.W * 0.2) fits = false
+  }
+  return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], productBox, productValign: 'bottom', logoBox: logo.box, fits, warnings }
 }
 
 const variantCard: Template = (ctx) => {
@@ -542,8 +560,16 @@ const ugcPerson: Template = (ctx) => {
   if (ctx.copy.subline) y = captionBlock('subline', ctx.copy.subline, y + sz(ctx, 18), sz(ctx, 34), sz(ctx, 22), INK)
   const action = actionBlock(ctx, { x: safe.x, maxW: safe.w, align: 'center', bottomY: bottom(safe) })
   nodes.push(...action.nodes)
-  const fits = y + sz(ctx, 40) <= action.top
-  return { nodes, zones: [], logoBox: logo.box, fits, warnings }
+  let fits = y + sz(ctx, 40) <= action.top
+  // Exact mode: the real product between the caption and the action row.
+  let productBox: Box | undefined
+  if (ctx.exact && ctx.product) {
+    const pTop = y + sz(ctx, 36)
+    const pBottom = action.top - sz(ctx, 30)
+    productBox = { x: Math.round(safe.x + safe.w * 0.08), y: pTop, w: Math.round(safe.w * 0.84), h: Math.max(1, pBottom - pTop) }
+    if (productBox.h < ctx.frame.H * 0.2) fits = false
+  }
+  return { nodes, zones: [], productBox, productValign: 'bottom', logoBox: logo.box, fits, warnings }
 }
 
 const handheldOverlay: Template = (ctx) => {
@@ -556,8 +582,16 @@ const handheldOverlay: Template = (ctx) => {
   nodes.push(...head.nodes)
   const action = actionBlock(ctx, { x: safe.x, maxW: safe.w, align: 'center', bottomY: bottom(safe) })
   nodes.push(...action.nodes)
-  const fits = head.bottom + sz(ctx, 60) <= action.top
-  return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], logoBox: logo.box, fits, warnings }
+  let fits = head.bottom + sz(ctx, 60) <= action.top
+  // Exact mode: no hand can hold a composited product — it stands centered between headline and CTA.
+  let productBox: Box | undefined
+  if (ctx.exact && ctx.product) {
+    const pTop = head.bottom + sz(ctx, 40)
+    const pBottom = action.top - sz(ctx, 30)
+    productBox = { x: Math.round(safe.x + safe.w * 0.1), y: pTop, w: Math.round(safe.w * 0.8), h: Math.max(1, pBottom - pTop) }
+    if (productBox.h < ctx.frame.H * 0.2) fits = false
+  }
+  return { nodes, zones: [{ id: 'top', style: 'gradient-top' }], productBox, productValign: 'bottom', logoBox: logo.box, fits, warnings }
 }
 
 const explainer: Template = (ctx) => {

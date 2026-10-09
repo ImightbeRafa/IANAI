@@ -86,7 +86,7 @@ function uuid(): string {
 // Placeholder images (PNG via canvas in the browser; SVG data URL otherwise)
 // ---------------------------------------------------------------------------
 
-const SIZES: Record<AspectRatio, [number, number]> = { '1:1': [540, 540], '4:5': [540, 675], '9:16': [540, 960] }
+const SIZES: Record<AspectRatio, [number, number]> = { '1:1': [540, 540], '4:5': [540, 675], '9:16': [540, 960], '16:9': [960, 540] }
 
 function escapeXml(s: string): string {
   return s.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c] as string))
@@ -389,6 +389,7 @@ export function createMockAdPackApi(options: MockAdPackOptions = {}): AdPackClie
       status,
       size: pack.size,
       ratios: pack.ratios,
+      productFidelity: 'exact',
       source: 'web',
       quotedCredits: pack.size * PER_AD,
       chargedCredits: items.filter((i) => i.charged).length * PER_AD,

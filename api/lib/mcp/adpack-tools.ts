@@ -78,6 +78,7 @@ function compactItem(item: AdPackItemView) {
     charged: item.charged,
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
+    ...(item.fidelity ? { fidelity: item.fidelity } : {}),
     ...(item.error ? { error: item.error.slice(0, 160) } : {}),
   }
 }
@@ -141,6 +142,7 @@ function statusPayload(status: AdPackStatusResponse) {
     packId: status.packId,
     status: status.status,
     summary: status.summary,
+    productFidelity: status.productFidelity,
     progress: status.progress,
     quotedCredits: status.quotedCredits,
     chargedCredits: status.chargedCredits,
@@ -243,6 +245,7 @@ function startBoundInput(args: Args): Record<string, unknown> {
     'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
     'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
     'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
+    'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
   ] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
@@ -406,7 +409,7 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_angles':
         return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })) }
       case 'adpack_quote':
-        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, angleIds: args.angleIds })) }
+        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, angleIds: args.angleIds, productFidelity: args.productFidelity, relight: args.relight })) }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input = startBoundInput(args)
@@ -419,10 +422,12 @@ export async function dispatchAdPackTool(options: {
           ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
           : null
         // The quote resolves the exact angles start will run (angleIds included): what the user approves is what runs.
+        // Relight (exact mode) adds an image-edit call per ad, so it is part of the approved price.
+        const render = { productFidelity: args.productFidelity, relight: args.relight }
         const quote = preview
-          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, angleIds: args.angleIds })
-          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, angleIds: args.angleIds })
-        const plan = adPackPlanSummary(quote.size)
+          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, angleIds: args.angleIds, ...render })
+          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, angleIds: args.angleIds, ...render })
+        const plan = adPackPlanSummary(quote.size, { relight: quote.relight === true })
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
         const ratios = Array.isArray(args.ratios) && args.ratios.length ? (args.ratios as string[]).join(' + ') : '4:5 + 9:16'
         const gate = await approvedOrPrompt({
@@ -474,6 +479,10 @@ export async function dispatchAdPackTool(options: {
             register: args.register,
             forbiddenPhrases: args.forbiddenPhrases,
             forbiddenClaims: args.forbiddenClaims,
+            productFidelity: args.productFidelity,
+            relight: args.relight,
+            allowedProps: args.allowedProps,
+            immutableAttributes: args.immutableAttributes,
             source: 'mcp',
             packId: approvalRequestId,
             ...(gate.approved ? { approved: { items: gate.approved.items, total: gate.approved.total } } : {}),
@@ -535,9 +544,15 @@ export async function dispatchAdPackTool(options: {
           item: compactItem(res.item),
           added: res.added,
           chargedCredits: 0,
+          ...(res.method ? { method: res.method } : {}),
+          ...(res.rejected?.length ? { rejected: res.rejected } : {}),
           message: res.added.length
-            ? `Rendered ${res.added.join(', ')} from the same scene and text (free, no model calls).`
-            : 'The ad already has these ratios; nothing to render.',
+            ? res.method === 'composite'
+              ? `Rendered ${res.added.join(', ')} from the same real-product cut-out, background and text (free, no model calls; fidelity re-checked).`
+              : `Rendered ${res.added.join(', ')} from the same scene and text (free, no model calls).`
+            : res.rejected?.length
+              ? `Nothing delivered: the product did not stay identical in ${res.rejected.map((r) => r.ratio).join(', ')}.`
+              : 'The ad already has these ratios; nothing to render.',
         }
       }
       case 'adpack_regenerate': {
@@ -545,8 +560,8 @@ export async function dispatchAdPackTool(options: {
         const input: Record<string, unknown> = { packId: args.packId, itemId: args.itemId, mode: args.mode ?? 'scene' }
         if (typeof args.packId !== 'string' || typeof args.itemId !== 'string') throw new AdPackError('BAD_INPUT', 'packId and itemId are required')
         // Ownership check before issuing an approval.
-        await service.getStatus({ userId, packId: args.packId })
-        const plan = adPackPlanSummary(1)
+        const current = await service.getStatus({ userId, packId: args.packId })
+        const plan = adPackPlanSummary(1, { relight: current.relight === true })
         const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,

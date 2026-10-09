@@ -6,7 +6,7 @@
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
 import { findForbiddenHits } from './check-copy.js'
-import type { AdLanguage, AspectRatio, BrandDna, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AspectRatio, BrandDna, FidelityMethod, FidelityResult, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -48,6 +48,8 @@ export interface AdPackFailureView {
   reason: string
   /** Paid (one ad of credits, needs in-chat approval) retry of just this ad. */
   retry: AdPackRetryCall
+  /** Measured product fidelity when the ad failed on it (fidelity_failed). */
+  fidelity?: AdPackFidelitySummary
 }
 
 /** One downloadable image: stable public storage URL (never a signed/expiring link). */
@@ -57,8 +59,18 @@ export interface AdPackDeliverableFile {
   width: number
   height: number
   format: 'png'
-  /** "feed" (4:5), "story" (9:16), "square" (1:1). */
-  placement: 'feed' | 'story' | 'square'
+  /** "feed" (4:5), "story" (9:16), "square" (1:1), "landscape" (16:9). */
+  placement: 'feed' | 'story' | 'square' | 'landscape'
+  /** Product fidelity of this file (exact mode: masked SSIM/ΔE vs the real cut-out). */
+  fidelity?: AdPackFidelitySummary
+}
+
+/** Product fidelity (A4) so an agent can reject without guessing. */
+export interface AdPackFidelitySummary {
+  score: number
+  passed: boolean
+  method: FidelityMethod
+  diffImageUrl?: string
 }
 
 export interface AdPackDeliverableAd {
@@ -73,6 +85,8 @@ export interface AdPackDeliverableAd {
   files: AdPackDeliverableFile[]
   /** Brand forbidden phrases/claims found in the copy (verified empty for a shipped ad). */
   forbiddenHits: Array<{ phrase: string; field: string }>
+  /** Product fidelity (A4), worst ratio of the ad. */
+  fidelity?: AdPackFidelitySummary
 }
 
 export interface AdPackDeliverable {
@@ -93,7 +107,11 @@ export interface AdPackStatusExtras {
   deliverable?: AdPackDeliverable
 }
 
-const PLACEMENT: Record<AspectRatio, AdPackDeliverableFile['placement']> = { '4:5': 'feed', '9:16': 'story', '1:1': 'square' }
+const PLACEMENT: Record<AspectRatio, AdPackDeliverableFile['placement']> = { '4:5': 'feed', '9:16': 'story', '1:1': 'square', '16:9': 'landscape' }
+
+function fidelitySummary(f: FidelityResult): AdPackFidelitySummary {
+  return { score: f.score, passed: f.passed, method: f.method, ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}) }
+}
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s)
 
@@ -104,6 +122,9 @@ export function failureReason(error: string | undefined, language: AdLanguage): 
   if (e.startsWith('scene_product_mismatch')) return es ? 'producto no coincidía' : "product didn't match"
   if (e.startsWith('copy_check_failed') && e.includes('forbidden_phrase')) return es ? 'el texto usaba una frase prohibida de la marca' : 'copy used a forbidden brand phrase'
   if (e.startsWith('copy_check_failed') && e.includes('locale_register')) return es ? 'el texto no respetó el trato del idioma (locale)' : 'copy broke the locale register rule'
+  if (e.startsWith('cutout_failed')) return es ? 'no se pudo recortar el producto de la foto (subí una foto con fondo limpio)' : 'the product could not be cut out of the photo (upload one on a clean background)'
+  if (e.startsWith('fidelity_failed')) return es ? 'el producto no quedó idéntico a la foto' : 'the product did not stay identical to the photo'
+  if (e.startsWith('scene_props_failed')) return es ? 'la escena inventaba piezas u objetos del producto' : 'the scene invented product parts or objects'
   if (e.startsWith('copy_check_failed')) return es ? 'el texto no pasó las reglas de datos' : 'copy broke the facts rules'
   if (e.startsWith('copy_failed')) return es ? 'no se pudo escribir el texto' : 'copy could not be written'
   if (e.startsWith('scene_upload_failed')) return es ? 'no se pudo guardar la imagen' : 'image could not be saved'
@@ -166,7 +187,13 @@ export function buildStatusExtras(input: {
   const done = sorted.filter((i) => i.status === 'done')
   const failures: AdPackFailureView[] = sorted
     .filter((i) => i.status === 'failed')
-    .map((i) => ({ itemId: i.id, index: i.index + 1, reason: failureReason(i.error, language), retry: retryCall(input.packId, i) }))
+    .map((i) => ({
+      itemId: i.id,
+      index: i.index + 1,
+      reason: failureReason(i.error, language),
+      retry: retryCall(input.packId, i),
+      ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
+    }))
   const total = sorted.length
 
   const parts: string[] = [es ? `${done.length}/${total} listos` : `${done.length}/${total} ready`]
@@ -190,8 +217,17 @@ export function buildStatusExtras(input: {
         headline: clip(i.copy?.headline ?? '', 200),
         caption: clip(i.copy?.caption ?? '', DELIVERABLE_CAPTION_MAX),
         links: Object.fromEntries(i.renders.map((r) => [r.ratio, r.imageUrl])) as Partial<Record<AspectRatio, string>>,
-        files: i.renders.map((r) => ({ ratio: r.ratio, url: r.imageUrl, width: r.width, height: r.height, format: 'png' as const, placement: PLACEMENT[r.ratio] })),
+        files: i.renders.map((r) => ({
+          ratio: r.ratio,
+          url: r.imageUrl,
+          width: r.width,
+          height: r.height,
+          format: 'png' as const,
+          placement: PLACEMENT[r.ratio],
+          ...(r.fidelity ? { fidelity: fidelitySummary(r.fidelity) } : {}),
+        })),
         forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
+        ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
       }))
     const label = es ? 'Anuncio' : 'Ad'
     const captionsText = clip(ads.map((a) => `${a.index}. ${label} ${a.index}${a.headline ? ` — ${a.headline}` : ''}\n${a.caption}`).join('\n\n'), DELIVERABLE_CAPTIONS_TEXT_MAX)

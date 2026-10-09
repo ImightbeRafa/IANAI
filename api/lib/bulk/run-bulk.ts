@@ -3,6 +3,10 @@ import { checkUsageLimit, incrementUsage } from '../auth.js'
 import { generationUuidFromApproval } from '../credits/generation-id.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import { runGrokPostFirstGen } from '../grok-image-generate.js'
+import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
+import { createModelGateway } from '../adpack/gateway.js'
+import { exactResultDataUrl, generateExactProductImage, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
+import type { ModelGateway } from '../adpack/types.js'
 import { logApiUsage, estimateTokens } from '../usage-logger.js'
 import type { McpArtifactStore } from '../mcp/artifact-store.js'
 import type { McpBrandContext } from '../mcp/user-tools.js'
@@ -48,6 +52,15 @@ export type BulkRunContext = {
   productRefUrls?: string[]
   recentSummaries?: string[]
   styleDnas?: StyleDna[]
+  /**
+   * 'exact' (default when product refs exist): real product pixels composited into a generated
+   * scene (fidelity-scored); 'generated': the image model redraws the product from the refs.
+   */
+  productFidelity?: 'exact' | 'generated'
+  relight?: boolean
+  allowedProps?: string[]
+  /** Test seam: model gateway for exact mode (default createModelGateway()). */
+  fidelityGateway?: ModelGateway
 }
 
 const POST_APPROACHES = [
@@ -247,6 +260,10 @@ export async function runBulkPosts(options: {
         runtime.ctx.brandKit?.logoUrl || '',
       ].filter(Boolean)
 
+  const fidelityMode = resolveToolProductFidelity(runtime.productFidelity, productRefs.length > 0)
+  // Every supported ratio works (4:5 → nearest native + reframe).
+  const ratioPlan = resolveImageRatio(runtime.aspectRatio || '9:16')
+  let fidelityGateway: ModelGateway | null = runtime.fidelityGateway ?? null
   const items: BulkPostItem[] = []
   for (let i = 0; i < angles.length; i += 1) {
     if (options.signal?.aborted) break
@@ -286,15 +303,42 @@ export async function runBulkPosts(options: {
         runtime.guidePrompt ? `Additional user direction: ${runtime.guidePrompt}` : '',
         'No fake logos or unreadable text. Match product fidelity from refs.',
       ].filter(Boolean).join('. ')
-      const generated = await runGrokPostFirstGen({
-        apiKey: xaiKey(),
-        prompt,
-        aspectRatio: runtime.aspectRatio || '9:16',
-        aspectRatioFallback: runtime.aspectRatioFallback === true,
-        productReferenceUrls: rotatedProduct.slice(0, 3),
-        supportReferenceUrls: supportRefs.slice(0, 3),
-        language: runtime.language,
-      })
+      let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; mode: string; lockApplied: boolean }
+      let fidelity: BulkPostItem['fidelity']
+      if (fidelityMode === 'exact') {
+        // Real product pixels (A1): the plate model never sees the product; no redrawn SKU is delivered.
+        fidelityGateway ??= createModelGateway()
+        const exact = await generateExactProductImage({
+          gateway: fidelityGateway,
+          photos: photosFromUrls(rotatedProduct.length ? [...rotatedProduct, ...productRefs] : productRefs),
+          ratio: ratioPlan.requested,
+          brandName: runtime.ctx.brand.name,
+          offerName,
+          language: runtime.language === 'en' ? 'en' : 'es',
+          sceneHint: [`Buyer niche: ${angle.niche}`, `Visual approach: ${approach}`, runtime.scene, runtime.guidePrompt].filter(Boolean).join('. '),
+          styleNotes: runtime.ctx.brandKit?.visualStyleNotes || undefined,
+          allowedProps: runtime.allowedProps,
+          relight: runtime.relight === true,
+          variation: absoluteIndex,
+        })
+        if (!exact.ok) throw new Error(exact.error)
+        fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE }
+        generated = { imageDataUrl: exactResultDataUrl(exact), providerModel: exact.plateModel || imageModel, estimatedCostUsd: exact.costUsd, resolution: `${exact.width}x${exact.height}`, quality: 'medium', mode: 'exact_composite', lockApplied: true }
+      } else {
+        const grok = await runGrokPostFirstGen({
+          apiKey: xaiKey(),
+          prompt,
+          aspectRatio: ratioPlan.generateAt,
+          productReferenceUrls: rotatedProduct.slice(0, 3),
+          supportReferenceUrls: supportRefs.slice(0, 3),
+          language: runtime.language,
+        })
+        generated = { ...grok }
+        if (ratioPlan.needsReframe && grok.imageDataUrl.startsWith('data:')) {
+          const framed = await reframeToRatio(Buffer.from(grok.imageDataUrl.slice(grok.imageDataUrl.indexOf(',') + 1), 'base64'), ratioPlan.requested, { mode: 'cover', format: 'jpeg' })
+          generated.imageDataUrl = `data:image/jpeg;base64,${framed.bytes.toString('base64')}`
+        }
+      }
       const saved = await runtime.artifactStore.saveImageArtifact({
         userId: runtime.user.id,
         brandId: runtime.brandId,
@@ -312,6 +356,8 @@ export async function runBulkPosts(options: {
           quality: generated.quality,
           grokMode: generated.mode,
           lockApplied: generated.lockApplied,
+          productFidelity: fidelityMode,
+          ...(fidelity ? { fidelity } : {}),
         },
       })
       await logApiUsage({
@@ -349,6 +395,7 @@ export async function runBulkPosts(options: {
           charged: incrementResult?.creditsCharged ?? imageCreditsEach(imageModel),
           generationId,
           approach,
+          ...(fidelity ? { fidelity } : {}),
         })
       } catch (chargeErr) {
         items.push({

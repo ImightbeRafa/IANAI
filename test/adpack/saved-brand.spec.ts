@@ -355,9 +355,17 @@ describe('saved-brand doors (web + MCP parity)', () => {
     expect(wS.offer.productImageUrls[0]).toBe('https://cdn.example/serum.jpg')
     expect(wS.items.every((i) => i.status === 'done' && i.renders === 2)).toBe(true)
 
-    // Product lock: every scene used the real product photo as reference 0.
+    // Exact product (default with a photo): the image model only draws product-free plates (never sees the
+    // product), and every ad composites the real cut-out of the saved photo with a passing fidelity score.
     expect(web.gateway.sceneCalls.length).toBeGreaterThanOrEqual(10)
-    expect(web.gateway.sceneCalls.every((c) => c.refs[0] === 'https://cdn.example/serum.jpg')).toBe(true)
+    expect(web.gateway.sceneCalls.every((c) => c.refs.length === 0)).toBe(true)
+    for (const item of web.store.items.values()) {
+      if (item.packId !== wPackId) continue
+      expect(item.scene?.kind).toBe('plate')
+      expect(item.scene?.cutouts?.[0]?.sourceUrl).toBe('https://cdn.example/serum.jpg')
+      expect(item.fidelity).toMatchObject({ passed: true, method: 'composite' })
+    }
+    expect(web.store.packs.get(wPackId)?.render?.productFidelity).toBe('exact')
 
     // ---- brief: stored sanitized, in every copy prompt as context, never a fact
     expect(wS.brief).toBe(brief)
