@@ -315,7 +315,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate an image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'Generate an image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ratios 1:1, 4:5, 9:16, 16:9. productFidelity "exact" (default with a product photo) keeps the real product pixels on a generated scene and returns fidelity {score, passed}; "generated" redraws it. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
       'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,
@@ -452,7 +452,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
       'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
-      'Guarantees: only confirmed facts are used for prices/claims; images keep the real product photo; text on the image is rendered exactly (never drawn by the image model). Takes ~2 min per 10 ads. ' +
+      'Guarantees: only confirmed facts are used for prices/claims; text on the image is rendered exactly (never drawn by the image model). ' +
+      'productFidelity "exact" (default when the offer has a product photo): the real product photo pixels are cut out and composited into a generated scene, scored for fidelity, and an ad whose product does not match is failed (never delivered); "generated" lets the image model redraw the product. Optional: relight, allowedProps (kit objects allowed in scenes), immutableAttributes (e.g. "hélices blancas"), offer.productPhotos with roles for multi-part products. Takes ~2 min per 10 ads. ' +
       'Returns packId; then poll adpack_status every ~20-30 s until moreWork=false.',
     enabled: true,
     requiresApproval: true,
@@ -465,7 +466,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
       'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
-      'When finished it returns deliverable {ads[{index, format, headline, caption, links{1:1,4:5,9:16}}], captionsText, deepLink}: present it as a numbered list of links + captions, offer captionsText to copy all captions, and share the deepLink (brand folder where every ad is saved). ' +
+      'When finished it returns deliverable {ads[{index, format, headline, caption, links{1:1,4:5,9:16}, fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of links + captions, offer captionsText to copy all captions, and share the deepLink (brand folder where every ad is saved). fidelity.passed=false never ships (the ad fails instead). ' +
       'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,
     requiresApproval: false,

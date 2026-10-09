@@ -5,6 +5,8 @@
  * - visionJson: Gemini 2.5 Flash, JSON mime type, no thinking, images inline.
  * - scene:      Grok Imagine first-gen (product lock via /images/edits when a
  *               product ref exists, compose otherwise), draft = 1k/medium.
+ * - segment:    Gemini 2.5 Flash segmentation (documented JSON: box_2d 0–1000 + mask PNG).
+ * - edit:       Grok Imagine /images/edits (exact-mode relight pass), nearest native ratio.
  *
  * Costs are list-price estimates from api/lib/model-pricing.ts.
  * `withCostLedger` wraps any gateway and records every call for benchmarks.
@@ -12,9 +14,11 @@
 import { GoogleGenAI } from '@google/genai'
 import { fetchPublicImageAsDataUrl, sniffImageMime } from '../fetch-image-data-url.js'
 import { runGrokPostFirstGen } from '../grok-image-generate.js'
+import { runGrokImageEdit } from '../grok-image-edit.js'
+import { nativeRatioFor } from '../image-ratios.js'
 import { GROK_TEXT_MODEL_EFFICIENT, grokChatComplete, type GrokChatMessage } from '../grok-models.js'
 import { estimateApiCostUsd } from '../model-pricing.js'
-import type { ModelGateway } from './types.js'
+import type { ModelGateway, SegmentationItem } from './types.js'
 
 export const ADPACK_VISION_MODEL = 'gemini-2.5-flash'
 /** Max images per vision call and max bytes per inlined image. */
@@ -77,6 +81,21 @@ export function extractJson<T = unknown>(raw: string): T {
 // ---------------------------------------------------------------------------
 // Image helpers
 // ---------------------------------------------------------------------------
+
+/** Normalize a model segmentation reply into the documented item list (drops malformed entries). */
+export function parseSegmentationItems(data: unknown): SegmentationItem[] {
+  const list = Array.isArray(data) ? data : data && typeof data === 'object' && Array.isArray((data as { masks?: unknown }).masks) ? (data as { masks: unknown[] }).masks : []
+  const out: SegmentationItem[] = []
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue
+    const r = raw as Record<string, unknown>
+    const box = r.box_2d
+    if (!Array.isArray(box) || box.length !== 4 || box.some((v) => !Number.isFinite(Number(v)))) continue
+    if (typeof r.mask !== 'string' || !r.mask) continue
+    out.push({ box_2d: box.map(Number) as [number, number, number, number], mask: r.mask, label: typeof r.label === 'string' ? r.label.slice(0, 80) : '' })
+  }
+  return out
+}
 
 /** Decode a data URL to bytes + mime. */
 export function decodeDataUrl(dataUrl: string): { bytes: Uint8Array; mimeType: string } {
@@ -213,6 +232,28 @@ export function createModelGateway(options: CreateModelGatewayOptions = {}): Mod
         productLocked: generated.lockApplied,
       }
     },
+
+    async segment(input) {
+      const model = input.model || visionModel
+      const part = await toInlinePart(input.image)
+      if (!part) throw new Error('segment_image_unavailable')
+      const response = await gemini().models.generateContent({
+        model,
+        contents: [part, { text: input.prompt || 'Give the segmentation mask for the main product. Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d", the segmentation mask in key "mask", and the text label in the key "label".' }],
+        // Segmentation works best without thinking (Gemini docs).
+        config: { temperature: 0.2, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } },
+      })
+      const usage = response.usageMetadata
+      const costUsd = estimateApiCostUsd({ model, inputTokens: usage?.promptTokenCount ?? 0, outputTokens: usage?.candidatesTokenCount ?? 0, thinkingTokens: usage?.thoughtsTokenCount ?? 0 })
+      return { items: parseSegmentationItems(extractJson(response.text ?? '[]')), costUsd, model }
+    },
+
+    async edit(input) {
+      const ratio = input.ratio ? nativeRatioFor(input.ratio).native : undefined
+      const res = await runGrokImageEdit({ apiKey: xaiKey, prompt: input.prompt, baseImageUrl: input.image, aspectRatio: ratio })
+      const { bytes, mimeType } = decodeDataUrl(res.imageDataUrl)
+      return { bytes, mimeType: sniffImageMime(bytes) ?? mimeType, costUsd: res.estimatedCostUsd, model: res.providerModel }
+    },
   }
 }
 
@@ -221,7 +262,7 @@ export function createModelGateway(options: CreateModelGatewayOptions = {}): Mod
 // ---------------------------------------------------------------------------
 
 export interface LedgerEntry {
-  kind: 'json' | 'visionJson' | 'scene'
+  kind: 'json' | 'visionJson' | 'scene' | 'segment' | 'edit'
   model: string
   ms: number
   costUsd: number
@@ -268,5 +309,9 @@ export function withCostLedger(gateway: ModelGateway, onEntry?: (entry: LedgerEn
     scene(input) {
       return track('scene', undefined, () => gateway.scene(input))
     },
+    ...(gateway.segment
+      ? { segment: (input: Parameters<NonNullable<ModelGateway['segment']>>[0]) => track('segment', input.model, () => gateway.segment!(input)) }
+      : {}),
+    ...(gateway.edit ? { edit: (input: Parameters<NonNullable<ModelGateway['edit']>>[0]) => track('edit', undefined, () => gateway.edit!(input)) } : {}),
   }
 }

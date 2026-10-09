@@ -44,7 +44,9 @@ import {
   withStatusMessage,
 } from './execute-job.js'
 import { assertMcpBulkCount } from './limits.js'
-import { assertProductReferenceGate, parseReferenceMode, resolveGrokAspectRatio } from './reference-gate.js'
+import { assertProductReferenceGate, parseReferenceMode } from './reference-gate.js'
+import { resolveImageRatio } from '../image-ratios.js'
+import { parseImageFidelityArgs } from '../adpack/fidelity/pipeline.js'
 import { mcpGetBrandContext, type McpAuthUser, type McpDbClient } from './user-tools.js'
 
 function resolveOfferId(
@@ -348,6 +350,8 @@ async function buildRuntime(options: {
     offerId: options.offerId,
     sessionId: typeof options.args.sessionId === 'string' ? options.args.sessionId : undefined,
     language: languageOf(options.args.language),
+    // Product fidelity: 'exact' (default with product refs) composites the real product pixels.
+    ...parseImageFidelityArgs(options.args),
     ctx,
     artifactStore: options.artifactStore,
     source: 'mcp',
@@ -588,7 +592,8 @@ export async function mcpExecuteBulkPosts(options: {
   })
   const aspectRatio = typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16'
   const aspectRatioFallback = args.aspectRatioFallback === true
-  resolveGrokAspectRatio(aspectRatio, { allowFallback: aspectRatioFallback })
+  // Every supported ratio works (F3): 4:5 is generated at the nearest native ratio and reframed.
+  resolveImageRatio(aspectRatio)
   const confirmedRefUrls = await resolveConfirmedProductRefUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -614,6 +619,7 @@ export async function mcpExecuteBulkPosts(options: {
     angleIds: selectedIds(args),
     aspectRatio,
     aspectRatioFallback,
+    ...parseImageFidelityArgs(args),
     scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,
@@ -1142,7 +1148,8 @@ export async function mcpExecuteCampaignPack(options: {
   })
   const aspectRatio = typeof args.aspectRatio === 'string' ? args.aspectRatio : '9:16'
   const aspectRatioFallback = args.aspectRatioFallback === true
-  resolveGrokAspectRatio(aspectRatio, { allowFallback: aspectRatioFallback })
+  // Every supported ratio works (F3): 4:5 is generated at the nearest native ratio and reframed.
+  resolveImageRatio(aspectRatio)
   const confirmedRefUrls = await resolveConfirmedProductRefUrls({
     artifactStore: options.artifactStore,
     userId: options.user.id,
@@ -1166,6 +1173,7 @@ export async function mcpExecuteCampaignPack(options: {
     angleIds: selectedIds(args),
     aspectRatio,
     aspectRatioFallback,
+    ...parseImageFidelityArgs(args),
     scene: typeof args.scene === 'string' ? args.scene.trim() : undefined,
     guidePrompt: typeof args.guidePrompt === 'string' ? args.guidePrompt.trim() : undefined,
     sessionId: typeof args.sessionId === 'string' ? args.sessionId : undefined,

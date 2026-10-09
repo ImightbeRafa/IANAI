@@ -3,6 +3,15 @@
  *
  *   planned → copy_ready → scene_ready → rendered → done   (or failed)
  *
+ * Product fidelity (pack.render.productFidelity):
+ * - 'exact' (default when a product photo exists): the scene step makes real-product cut-outs
+ *   (fidelity/segment.ts, cached by hash) and a product-free background plate (props-checked,
+ *   ≤ 2 retries → scene_props_failed); the render step composites the real pixels per ratio and
+ *   scores fidelity (masked SSIM + ΔE). A failed cut-out → cutout_failed; a low score →
+ *   fidelity_failed. A model-redrawn product is never delivered in exact mode.
+ * - 'generated': the image model draws the product from the reference (legacy); the vision check
+ *   also rejects invented parts/accessories and returns the product bbox the text avoids.
+ *
  * `advancePack` is poll-driven and runtime-agnostic: it leases items from the
  * PackStore, runs each one as far as the time budget allows, persists after
  * every step and releases the lease. Any caller (web endpoint `waitUntil`, MCP
@@ -21,15 +30,25 @@ import { checkAdCopy, repairAdCopy } from './check-copy.js'
 import { checkScene, type CheckSceneOutput } from './check-scene.js'
 import { generateAdCopy } from './copy.js'
 import { planAngles } from './plan-angles.js'
-import { generateScene, type GeneratedScene } from './scene.js'
+import { generateScene, stripCopyText, type GeneratedScene } from './scene.js'
 import { errorMessage } from './util.js'
-import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
+import { storageBlobCache, type BlobCache } from './fidelity/cache.js'
+import { prepareProductCutouts, resolveProductPhotos, defaultImageLoader, type ImageLoader, type LoadedCutout } from './fidelity/pipeline.js'
+import { checkPlate, generatePlate, plateLight, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion, type PropsReference } from './fidelity/plate.js'
+import { relightComposite } from './fidelity/relight.js'
+import { scoreFidelity, toFidelityResult, worstFidelity } from './fidelity/score.js'
+import { planProductBoxes } from './render/render.js'
+import { RATIO_SIZE } from './render/frame.js'
+import { cachedLogo } from './render/logo.js'
+import type { AdPackStorage, ChargeFn, Renderer, RenderOutput } from './runner-types.js'
 import type {
   AdCopy,
   AspectRatio,
   BrandDna,
   CopyCheckIssue,
   CopyCheckResult,
+  FidelityResult,
+  LightDirection,
   ModelGateway,
   OfferInput,
   Pack,
@@ -37,6 +56,7 @@ import type {
   PackItemStatus,
   PackStatus,
   PackStore,
+  PackRenderOptions,
   RenderedAd,
   SceneCheckResult,
 } from './types.js'
@@ -82,7 +102,12 @@ export interface PlanPackInput {
   seed?: string | number
   /** Owner's campaign brief (already sanitized). Copy-prompt context only, never facts. */
   brief?: string
+  /** Product fidelity options. Omitted → legacy generated mode (callers decide the default). */
+  render?: PackRenderOptions
 }
+
+/** Formats that may place real parts next to the hero (H3). */
+export const PARTS_FORMATS = new Set(['offer_graphic', 'explainer'])
 
 export function itemGenerationId(packId: string, index: number, attempt = 0): string {
   return generationUuidFromApproval(packId, attempt > 0 ? `adpack:${index}:r${attempt}` : `adpack:${index}`)
@@ -108,6 +133,7 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] 
     quotedCredits: quotePack(angles.length).credits,
     source: input.source,
     ...(input.brief ? { brief: input.brief } : {}),
+    ...(input.render ? { render: input.render } : {}),
     createdAt: ts,
     updatedAt: ts,
   }
@@ -211,6 +237,10 @@ export interface AdvancePackInput {
    * palette + per-format setting rotation in the scene prompt.
    */
   styleAnchor?: boolean
+  /** Exact mode: content-addressed cut-out cache (default: storage at `<userId>/adpack/cutouts/<sha256>.png`). */
+  cutoutCache?: BlobCache | null
+  /** Fetch product photos / cut-outs (default: data URL or https fetch). Tests inject fakes. */
+  loadImage?: ImageLoader
 }
 
 type StepOutcome = 'finished' | 'deferred' | 'budget'
@@ -223,6 +253,12 @@ interface RunCtx {
   /** Latest known state of every item (this call's view). */
   known: Map<string, PackItem>
   sceneBytes: Map<string, { bytes: Uint8Array; mimeType: string }>
+  /** Exact mode: cut-out bytes per item (hero first) from this call's scene step. */
+  cutoutBytes: Map<string, Uint8Array[]>
+  /** Product photo bytes / quality by URL (one download per call). */
+  photoMemo: Map<string, { bytes: Uint8Array; quality?: import('./fidelity/asset-quality.js').AssetQuality }>
+  /** Background-removed logo bytes for this pack (null = none / failed). */
+  logo: Promise<Uint8Array | null> | null
   anchorWait: Promise<void> | null
   advanced: Set<string>
 }
@@ -255,6 +291,9 @@ export async function advancePack(input: AdvancePackInput): Promise<PackProgress
     leaseMs: input.leaseMs ?? budgetMs + 60_000,
     known: new Map(loaded.items.map((i) => [i.id, i])),
     sceneBytes: new Map(),
+    cutoutBytes: new Map(),
+    photoMemo: new Map(),
+    logo: null,
     anchorWait: null,
     advanced: new Set(),
   }
@@ -433,14 +472,31 @@ const RETRY_HINT_BORDERS =
   'IMPORTANT: the previous attempt had blank bars or borders. Fill the entire frame edge to edge with one continuous photograph.'
 
 function needsRegeneration(check: SceneCheckResult): boolean {
-  return check.productMatches === false || check.strayText === true || check.borders === true
+  return check.productMatches === false || check.strayText === true || check.borders === true || Boolean(check.extraObjects?.length)
 }
 
 function toDataUrl(bytes: Uint8Array, mimeType: string): string {
   return `data:${mimeType};base64,${Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')}`
 }
 
+export function packMode(pack: Pick<Pack, 'render'>): 'exact' | 'generated' {
+  return pack.render?.productFidelity === 'exact' ? 'exact' : 'generated'
+}
+
+const RETRY_HINT_PROPS =
+  'IMPORTANT: the previous attempt added product parts or accessories that are not in the reference photos (loose parts, cables, a different remote…). Show only the product exactly as photographed; no extra parts, cables or devices.'
+
+/** Real photos other than the hero, as vision-check references (parts / box / contents). */
+function partReferences(offer: OfferInput): PropsReference[] {
+  return resolveProductPhotos(offer)
+    .slice(1)
+    .filter((p) => p.role === 'part' || p.role === 'box' || p.role === 'contents')
+    .slice(0, 2)
+    .map((p) => ({ image: p.url, role: p.role, ...(p.label ? { label: p.label } : {}) }))
+}
+
 async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promise<PackItem> {
+  if (packMode(ctx.pack) === 'exact') return stepPlate(ctx, item)
   const { gateway, storage } = ctx.input
   const { dna, offer } = ctx.pack
   const copy = item.copy
@@ -480,7 +536,15 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
     const c0 = Date.now()
     let check: CheckSceneOutput | SceneCheckResult
     try {
-      const res = await checkScene({ gateway, sceneImage: toDataUrl(scene.bytes, scene.mimeType), productRef, language: dna.language })
+      const res = await checkScene({
+        gateway,
+        sceneImage: toDataUrl(scene.bytes, scene.mimeType),
+        productRef,
+        partRefs: productRef ? partReferences(offer) : [],
+        allowedProps: ctx.pack.render?.allowedProps ?? offer.allowedProps,
+        immutableAttributes: ctx.pack.render?.immutableAttributes ?? offer.immutableAttributes,
+        language: dna.language,
+      })
       cost += res.costUsd
       check = res
     } catch (error) {
@@ -489,7 +553,14 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
     checkMs += Date.now() - c0
     candidates.push({ scene, check })
     if (!needsRegeneration(check)) break
-    hint = check.productMatches === false ? RETRY_HINT_PRODUCT : check.strayText === true ? RETRY_HINT_TEXT : RETRY_HINT_BORDERS
+    hint =
+      check.productMatches === false
+        ? RETRY_HINT_PRODUCT
+        : check.extraObjects?.length
+          ? RETRY_HINT_PROPS
+          : check.strayText === true
+            ? RETRY_HINT_TEXT
+            : RETRY_HINT_BORDERS
   }
 
   const costUsd = (item.costUsd ?? 0) + cost
@@ -506,9 +577,14 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
     ...(best.check.borders != null ? { borders: best.check.borders } : {}),
     score: best.check.score,
     ...(best.check.notes ? { notes: best.check.notes } : {}),
+    ...(best.check.extraObjects?.length ? { extraObjects: best.check.extraObjects } : {}),
+    ...(best.check.productBox ? { productBox: best.check.productBox } : {}),
   }
   if (best.check.productMatches === false) {
     return fail(ctx, item, `scene_product_mismatch after ${attempts} attempts`, { sceneCheck, costUsd, timings, sceneAttempts: attempts })
+  }
+  if (best.check.extraObjects?.length) {
+    return fail(ctx, item, `scene_props_failed: ${best.check.extraObjects.join(', ')} (after ${attempts} attempts)`, { sceneCheck, costUsd, timings, sceneAttempts: attempts })
   }
 
   const contentType = best.scene.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png'
@@ -537,6 +613,198 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
   })
 }
 
+// ---------------------------------------------------------------------------
+// Exact mode: cut-outs + plate (scene step), composite + fidelity (render step)
+// ---------------------------------------------------------------------------
+
+/** The plate the runner generates: 9:16, cover-fit to every pack ratio. */
+const PLATE_SIZE = RATIO_SIZE['9:16']
+
+/**
+ * Union of the product boxes of every pack ratio, mapped back into the 9:16 plate through the
+ * renderer's centered cover crop → where the plate must leave an empty surface.
+ */
+export function plateRegionFor(input: { pack: Pick<Pack, 'ratios' | 'dna'>; format: PackItem['angle']['format']; copy: AdCopy; product: { width: number; height: number } }): PlateRegion {
+  const boxes = planProductBoxes({
+    format: input.format,
+    ratios: input.pack.ratios,
+    copy: input.copy,
+    visual: input.pack.dna.visual,
+    language: input.pack.dna.language,
+    product: input.product,
+  })
+  let x0 = 1
+  let y0 = 1
+  let x1 = 0
+  let y1 = 0
+  for (const [ratio, b] of Object.entries(boxes) as Array<[AspectRatio, { x: number; y: number; w: number; h: number }]>) {
+    const { width: W, height: H } = RATIO_SIZE[ratio]
+    const s = Math.max(W / PLATE_SIZE.width, H / PLATE_SIZE.height)
+    const ox = (PLATE_SIZE.width * s - W) / 2
+    const oy = (PLATE_SIZE.height * s - H) / 2
+    x0 = Math.min(x0, (b.x + ox) / s / PLATE_SIZE.width)
+    y0 = Math.min(y0, (b.y + oy) / s / PLATE_SIZE.height)
+    x1 = Math.max(x1, (b.x + b.w + ox) / s / PLATE_SIZE.width)
+    y1 = Math.max(y1, (b.y + b.h + oy) / s / PLATE_SIZE.height)
+  }
+  if (x1 <= x0 || y1 <= y0) return { x0: 0.25, y0: 0.4, x1: 0.75, y1: 0.8 }
+  const c = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000
+  return { x0: c(x0), y0: c(y0), x1: c(x1), y1: c(y1) }
+}
+
+function cutoutCacheFor(ctx: RunCtx): BlobCache | null {
+  if (ctx.input.cutoutCache !== undefined) return ctx.input.cutoutCache
+  return storageBlobCache(ctx.input.storage, ctx.pack.userId, 'cutouts')
+}
+
+async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
+  const { gateway, storage } = ctx.input
+  const { dna, offer } = ctx.pack
+  const copy = item.copy
+  if (!copy) return save(ctx, item, { status: 'planned' })
+  const t0 = Date.now()
+  const format = item.angle.format
+  const photos = resolveProductPhotos(offer)
+  const cut = await prepareProductCutouts({
+    photos,
+    format,
+    language: dna.language,
+    withParts: PARTS_FORMATS.has(format),
+    gateway,
+    cache: cutoutCacheFor(ctx),
+    load: ctx.input.loadImage,
+    memo: ctx.photoMemo,
+  })
+  if (!cut.ok) {
+    return fail(ctx, item, cut.error.startsWith('cutout_failed') ? cut.error : `cutout_failed: ${cut.error}`, { timings: { ...item.timings, sceneMs: Date.now() - t0 } })
+  }
+  const cutouts: LoadedCutout[] = [cut.hero, ...cut.parts]
+  const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length
+  const light = plateLight(item.index)
+  const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height } })
+  const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
+  const refs: PropsReference[] = photos
+    .filter((p) => p.url === cut.hero.stored.sourceUrl || p.role === 'part' || p.role === 'box' || p.role === 'contents')
+    .slice(0, 3)
+    .map((p) => ({ image: p.url, role: p.role, ...(p.label ? { label: p.label } : {}) }))
+  const maxAttempts = 1 + Math.max(0, ctx.input.maxSceneRetries ?? MAX_SCENE_RETRIES)
+  let cost = 0
+  let checkMs = 0
+  let attempts = 0
+  let hint: string | undefined
+  let lastError = ''
+  let accepted: { bytes: Uint8Array; mimeType: string; width: number; height: number; model: string; check: PlateCheckResult | null } | null = null
+  let lastCheck: PlateCheckResult | null = null
+  for (let a = 0; a < maxAttempts && !accepted; a++) {
+    attempts++
+    let plate
+    try {
+      plate = await generatePlate({ gateway, format, dna, offer, placement, light, variation, allowedProps, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint })
+    } catch (error) {
+      lastError = errorMessage(error)
+      continue
+    }
+    cost += plate.costUsd
+    const c0 = Date.now()
+    let check: PlateCheckResult | null
+    try {
+      check = await checkPlate({ gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: dna.language })
+      cost += check.costUsd
+    } catch (error) {
+      check = null
+      lastError = `plate_check_unavailable: ${errorMessage(error)}`
+    }
+    checkMs += Date.now() - c0
+    lastCheck = check ?? lastCheck
+    if (!check || check.ok) accepted = { ...plate, check }
+    else hint = check.extraObjects.length ? PLATE_RETRY_HINT_PROPS : PLATE_RETRY_HINT_PLACEMENT
+  }
+  const costUsd = (item.costUsd ?? 0) + cost
+  const timings = { ...item.timings, sceneMs: Date.now() - t0 - checkMs, sceneCheckMs: checkMs }
+  if (!accepted) {
+    if (lastCheck) {
+      const why = lastCheck.extraObjects.length ? lastCheck.extraObjects.join(', ') : lastCheck.notes ?? 'placement area not clear'
+      return fail(ctx, item, `scene_props_failed: ${why} (after ${attempts} attempts)`, {
+        sceneCheck: { ok: false, productMatches: null, strayText: lastCheck.strayText, borders: lastCheck.borders, score: lastCheck.score, extraObjects: lastCheck.extraObjects, ...(lastCheck.notes ? { notes: lastCheck.notes } : {}) },
+        costUsd,
+        timings,
+        sceneAttempts: attempts,
+      })
+    }
+    return fail(ctx, item, `scene_failed: ${lastError}`, { costUsd, timings, sceneAttempts: attempts })
+  }
+  const contentType = accepted.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+  let imageUrl: string
+  try {
+    imageUrl = (await storage.upload({ userId: ctx.pack.userId, packId: ctx.pack.id, itemIndex: item.index, kind: 'plate', bytes: accepted.bytes, contentType })).url
+  } catch (error) {
+    return fail(ctx, item, `scene_upload_failed: ${errorMessage(error)}`, { costUsd, timings, sceneAttempts: attempts })
+  }
+  ctx.sceneBytes.set(item.id, { bytes: accepted.bytes, mimeType: accepted.mimeType })
+  ctx.cutoutBytes.set(item.id, cutouts.map((c) => c.bytes))
+  const pc = accepted.check
+  return save(ctx, item, {
+    status: 'scene_ready',
+    scene: {
+      imageUrl,
+      width: accepted.width,
+      height: accepted.height,
+      model: accepted.model,
+      costUsd: cost,
+      productLocked: true,
+      kind: 'plate',
+      light,
+      cutouts: cutouts.map((c) => c.stored),
+    },
+    sceneCheck: {
+      ok: true,
+      productMatches: null,
+      strayText: pc?.strayText ?? null,
+      borders: pc?.borders ?? null,
+      score: pc?.score ?? 0.5,
+      ...(pc?.notes ? { notes: pc.notes } : {}),
+      ...(cut.warnings.length ? { notes: [pc?.notes, ...cut.warnings].filter(Boolean).join(' · ').slice(0, 300) } : {}),
+    },
+    costUsd,
+    timings,
+    sceneAttempts: attempts,
+    error: undefined,
+  })
+}
+
+interface ExactRenderInputs {
+  cutouts: Uint8Array[]
+  light?: LightDirection
+}
+
+/** Cut-out bytes for an item (this call's memory, else the stored cut-out URLs). */
+async function exactInputsFromScene(item: PackItem, load: ImageLoader, memory?: Uint8Array[]): Promise<ExactRenderInputs> {
+  if (memory?.length) return { cutouts: memory, light: item.scene?.light }
+  const stored = item.scene?.cutouts ?? []
+  if (!stored.length) throw new Error('cutout_missing: no stored cut-out for this ad')
+  const cutouts: Uint8Array[] = []
+  for (const c of stored) cutouts.push(await load(c.url))
+  return { cutouts, light: item.scene?.light }
+}
+
+function scenePlacementAvoid(check: SceneCheckResult | undefined): { x0: number; y0: number; x1: number; y1: number } | undefined {
+  const b = check?.productBox
+  if (!b) return undefined
+  return { y0: b[0] / 1000, x0: b[1] / 1000, y1: b[2] / 1000, x1: b[3] / 1000 }
+}
+
+/** Fidelity of one exact render: every placed cut-out is scored, the worst wins. */
+async function scoreRender(r: RenderOutput, ratio: AspectRatio, diff: boolean): Promise<{ fidelity: FidelityResult; diffPng?: Buffer } | null> {
+  if (!r.productPlacements?.length) return null
+  let worst: Awaited<ReturnType<typeof scoreFidelity>> | null = null
+  for (const p of r.productPlacements) {
+    const s = await scoreFidelity({ image: r.png, box: p.box, reference: p.placed, method: r.relit ? 'relit' : 'composite', diff })
+    if (!worst || (worst.passed && !s.passed) || (worst.passed === s.passed && s.score < worst.score)) worst = s
+  }
+  if (!worst) return null
+  return { fidelity: toFidelityResult(worst, { ratio }), ...(worst.diffPng ? { diffPng: worst.diffPng } : {}) }
+}
+
 async function renderAllRatios(args: {
   renderer: Renderer
   storage: AdPackStorage
@@ -544,9 +812,16 @@ async function renderAllRatios(args: {
   item: PackItem
   copy: AdCopy
   sceneImage: Uint8Array | string
-}): Promise<RenderedAd[]> {
-  const { renderer, storage, pack, item, copy, sceneImage } = args
+  /** Exact mode inputs (cut-outs + light); null/undefined = generated mode. */
+  exact?: ExactRenderInputs | null
+  gateway?: ModelGateway
+  logo?: Uint8Array | null
+}): Promise<{ renders: RenderedAd[]; fidelity?: FidelityResult }> {
+  const { renderer, storage, pack, item, copy, sceneImage, exact } = args
   const out: RenderedAd[] = []
+  const outputs: Array<{ ratio: AspectRatio; r: RenderOutput }> = []
+  const relightOn = Boolean(exact && pack.render?.relight && args.gateway?.edit)
+  const gateway = args.gateway
   for (const ratio of pack.ratios) {
     const r = await renderer.render({
       format: item.angle.format,
@@ -554,8 +829,32 @@ async function renderAllRatios(args: {
       sceneImage,
       copy,
       visual: pack.dna.visual ?? {},
-      productCutout: pack.offer.productCutoutUrl,
       language: pack.dna.language,
+      ...(args.logo ? { logo: args.logo } : {}),
+      ...(exact
+        ? {
+            productMode: 'exact' as const,
+            productCutout: exact.cutouts[0],
+            ...(exact.cutouts.length > 1 ? { productParts: exact.cutouts.slice(1) } : {}),
+            ...(exact.light ? { light: exact.light } : {}),
+            ...(relightOn && gateway
+              ? {
+                  relight: async (composite: Uint8Array, placements: NonNullable<RenderOutput['productPlacements']>, rr: AspectRatio) => {
+                    const res = await relightComposite({
+                      gateway,
+                      composite: Buffer.from(composite),
+                      placements: placements.map((p) => ({ box: p.box, placed: Buffer.from(p.placed), role: p.role })),
+                      ratio: rr,
+                    })
+                    return res.relit ? new Uint8Array(res.png) : null
+                  },
+                }
+              : {}),
+          }
+        : {
+            productCutout: pack.offer.productCutoutUrl,
+            ...(scenePlacementAvoid(item.sceneCheck) ? { productAvoid: scenePlacementAvoid(item.sceneCheck) } : {}),
+          }),
     })
     const { url } = await storage.upload({
       userId: pack.userId,
@@ -565,30 +864,95 @@ async function renderAllRatios(args: {
       bytes: r.png,
       contentType: 'image/png',
     })
-    out.push({ ratio, imageUrl: url, width: r.width, height: r.height })
+    const scored = exact ? await scoreRender(r, ratio, false) : null
+    out.push({ ratio, imageUrl: url, width: r.width, height: r.height, ...(scored ? { fidelity: scored.fidelity } : {}) })
+    outputs.push({ ratio, r })
   }
-  return out
+  if (!exact) {
+    // Generated mode: no pixel alignment — fidelity is the vision verdict on the scene.
+    const sc = item.sceneCheck
+    if (!sc || sc.productMatches === null || sc.productMatches === undefined) return { renders: out }
+    const fidelity: FidelityResult = { score: Math.round(sc.score * 1000) / 1000, ssim: null, deltaE: null, passed: sc.productMatches !== false, method: 'generated' }
+    return { renders: out, fidelity }
+  }
+  const worst = worstFidelity(out)
+  if (!worst) return { renders: out }
+  // Heatmap of the worst ratio (A4), best-effort.
+  let diffImageUrl: string | undefined
+  const w = outputs.find((o) => o.ratio === worst.ratio)
+  if (w) {
+    try {
+      const again = await scoreRender(w.r, w.ratio, true)
+      if (again?.diffPng) {
+        diffImageUrl = (await storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: `fidelity-${w.ratio.replace(':', 'x')}`, bytes: new Uint8Array(again.diffPng), contentType: 'image/png' })).url
+      }
+    } catch {
+      diffImageUrl = undefined
+    }
+  }
+  return { renders: out, fidelity: { ...worst, ...(diffImageUrl ? { diffImageUrl } : {}) } }
+}
+
+/** Background-removed logo for this pack, cached by hash in storage (prod storage only). */
+function packLogo(ctx: RunCtx): Promise<Uint8Array | null> {
+  if (ctx.logo) return ctx.logo
+  const url = ctx.pack.dna.visual?.logoUrl
+  const storage = ctx.input.storage
+  // Only with a storage that supports the deterministic cache (prod); otherwise the renderer loads visual.logoUrl itself.
+  if (!url || !storage.download || !storage.uploadAt) return (ctx.logo = Promise.resolve(null))
+  ctx.logo = (async () => {
+    try {
+      const bytes = await (ctx.input.loadImage ?? defaultImageLoader)(url)
+      return (await cachedLogo(bytes, storageBlobCache(storage, ctx.pack.userId, 'logos'))).png
+    } catch {
+      return null
+    }
+  })()
+  return ctx.logo
 }
 
 async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   if (!item.copy || !item.scene) return fail(ctx, item, 'render_missing_inputs')
   const t0 = Date.now()
   const cached = ctx.sceneBytes.get(item.id)
+  const exactMode = packMode(ctx.pack) === 'exact'
+  let exact: ExactRenderInputs | null = null
+  if (exactMode) {
+    try {
+      exact = await exactInputsFromScene(item, ctx.input.loadImage ?? defaultImageLoader, ctx.cutoutBytes.get(item.id))
+    } catch (error) {
+      return fail(ctx, item, `cutout_failed: ${errorMessage(error)}`, { timings: { ...item.timings, renderMs: Date.now() - t0 } })
+    }
+  }
+  const logo = await packLogo(ctx)
   let lastError = ''
   for (let attempt = 0; attempt < 2; attempt++) {
+    let rendered: Awaited<ReturnType<typeof renderAllRatios>>
     try {
-      const renders = await renderAllRatios({
+      rendered = await renderAllRatios({
         renderer: ctx.input.renderer,
         storage: ctx.input.storage,
         pack: ctx.pack,
         item,
         copy: item.copy,
         sceneImage: cached?.bytes ?? item.scene.imageUrl,
+        exact,
+        gateway: ctx.input.gateway,
+        logo,
       })
-      return save(ctx, item, { status: 'rendered', renders, timings: { ...item.timings, renderMs: Date.now() - t0 }, error: undefined })
     } catch (error) {
       lastError = errorMessage(error)
+      continue
     }
+    const timings = { ...item.timings, renderMs: Date.now() - t0 }
+    const fidelity = rendered.fidelity
+    const sceneCheck = fidelity ? { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity } : item.sceneCheck
+    if (exactMode && fidelity && !fidelity.passed) {
+      // Never deliver an altered product: the renders are not kept.
+      return fail(ctx, item, `fidelity_failed: ssim ${fidelity.ssim} / ΔE ${fidelity.deltaE} (${fidelity.ratio ?? 'render'})`, { fidelity, sceneCheck, renders: [], timings })
+    }
+    if (exactMode && !fidelity) return fail(ctx, item, 'fidelity_failed: product placement missing in render', { renders: [], timings })
+    return save(ctx, item, { status: 'rendered', renders: rendered.renders, ...(fidelity ? { fidelity, sceneCheck } : {}), timings, error: undefined })
   }
   return fail(ctx, item, `render_failed: ${lastError}`, { timings: { ...item.timings, renderMs: Date.now() - t0 } })
 }
@@ -625,6 +989,8 @@ export interface EditItemTextInput {
   itemId: string
   userId: string
   copyPatch: CopyTextPatch
+  /** Exact mode: loads the stored cut-outs (tests inject). */
+  loadImage?: ImageLoader
 }
 
 export type EditItemTextResult =
@@ -656,8 +1022,25 @@ export async function editItemText(input: EditItemTextInput): Promise<EditItemTe
   if (blocking.length) return { ok: false, error: 'copy_rejected', issues: blocking }
 
   const t0 = Date.now()
-  const renders = await renderAllRatios({ renderer: input.renderer, storage: input.storage, pack, item, copy, sceneImage: item.scene.imageUrl })
-  const next: Partial<PackItem> = { copy, copyCheck: check, renders, timings: { ...item.timings, renderMs: Date.now() - t0 } }
+  const rendered = await renderAllRatios({
+    renderer: input.renderer,
+    storage: input.storage,
+    pack,
+    item,
+    copy,
+    sceneImage: item.scene.imageUrl,
+    exact: packMode(pack) === 'exact' ? await exactInputsFromScene(item, input.loadImage ?? defaultImageLoader) : null,
+  })
+  // Same scene and cut-out: fidelity is re-measured on the new renders.
+  const renders = rendered.renders
+  const fidelity = rendered.fidelity ?? item.fidelity
+  const next: Partial<PackItem> = {
+    copy,
+    copyCheck: check,
+    renders,
+    timings: { ...item.timings, renderMs: Date.now() - t0 },
+    ...(fidelity ? { fidelity, sceneCheck: { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity } } : {}),
+  }
   await input.store.updateItem(item.id, next)
   return { ok: true, item: { ...item, ...next, updatedAt: nowIso() } }
 }
@@ -697,6 +1080,7 @@ export async function regenerateItem(input: RegenerateItemInput): Promise<Regene
     leaseUntil: undefined,
     sceneAttempts: undefined,
     timings: undefined,
+    fidelity: undefined,
   }
   await input.store.updateItem(item.id, patch)
   if (loaded.pack.status !== 'running') await input.store.updatePack(loaded.pack.id, { status: 'running' })

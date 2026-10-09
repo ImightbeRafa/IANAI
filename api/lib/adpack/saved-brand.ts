@@ -25,6 +25,7 @@ import { detectLanguage } from './dna/classify.js'
 import { buildBrandDna, computeGaps } from './dna/merge.js'
 import { cleanText, isHexColor, makeFact, uniqStrings, type DnaPart } from './dna/part.js'
 import { mapSiteAnalysis } from './dna/website.js'
+import { roleFromLabel } from './fidelity/photos.js'
 import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKey, OfferInput } from './types.js'
 
 type Row = Record<string, unknown>
@@ -362,6 +363,16 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   }
   const productId = s(product, 'id', 64)
   if (productId) offer.productId = productId
+  // Role per photo from the owner's label ("control", "caja", "contenido"…); first untagged = hero.
+  const labelOf = new Map(usable.map((r) => [s(r, 'image_url', 1000), { label: s(r, 'label', 80), id: s(r, 'id', 64) }]))
+  const tagged = productUrls.map((url) => ({ url, ...labelOf.get(url), role: roleFromLabel(labelOf.get(url)?.label) }))
+  if (tagged.some((t) => t.role && t.role !== 'detail' && t.role !== 'hero')) {
+    let heroSet = tagged.some((t) => t.role === 'hero')
+    offer.productPhotos = tagged.map((t) => {
+      const role = t.role ?? (heroSet ? 'detail' : ((heroSet = true), 'hero'))
+      return { url: t.url, role, ...(t.label ? { label: t.label } : {}), ...(t.id ? { id: t.id } : {}) }
+    })
+  }
   return { dna, offer, gaps: dna.gaps, notes }
 }
 

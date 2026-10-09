@@ -101,7 +101,7 @@ export interface BuildScenePromptInput {
 }
 
 /** Remove any on-image copy strings that leaked into the scene brief. */
-function stripCopyText(brief: string, copy: AdCopy): string {
+export function stripCopyText(brief: string, copy: AdCopy): string {
   let out = brief.replace(SCENE_NO_TEXT_CLAUSE, ' ')
   const strings = [copy.headline, copy.subline, copy.cta, copy.offerLine, ...(copy.bullets ?? [])]
     .map((s) => (s ?? '').trim())

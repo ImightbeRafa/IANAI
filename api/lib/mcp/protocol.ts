@@ -164,8 +164,34 @@ function toolInputSchema(name: string): Record<string, unknown> {
       facts: { type: 'array', items: { type: 'object' } },
       productImageUrls: { type: 'array', items: { type: 'string' } },
       productCutoutUrl: { type: 'string' },
+      productPhotos: {
+        type: 'array',
+        maxItems: 8,
+        description: 'Real photos with a role, one per part of a multi-part product (e.g. the plane = hero, the gamepad controller = part, the box = box). Parts are never invented.',
+        items: {
+          type: 'object',
+          properties: {
+            url: { type: 'string' },
+            role: { type: 'string', enum: ['hero', 'part', 'contents', 'box', 'in_use', 'detail'] },
+            label: { type: 'string' },
+          },
+          required: ['url', 'role'],
+        },
+      },
+      allowedProps: { type: 'array', items: { type: 'string' }, description: 'Kit objects allowed in scenes besides the product.' },
+      immutableAttributes: { type: 'array', items: { type: 'string' }, description: 'Appearance facts that must never change (e.g. "hélices blancas").' },
     },
     required: ['name'],
+  }
+  const productFidelityProps = {
+    productFidelity: {
+      type: 'string',
+      enum: ['exact', 'generated'],
+      description: 'exact (default when a product photo exists) = the real product photo pixels are cut out and composited into a generated scene, with a fidelity score; generated = the image model redraws the product from the reference.',
+    },
+    relight: { type: 'boolean', description: 'exact mode: optional light-harmonization pass, kept only if the product still matches (fidelity).' },
+    allowedProps: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Kit objects that may appear besides the product (ambient props like table/plants/fabric are always allowed).' },
+    immutableAttributes: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Product appearance facts that must never change, used in prompts and checks.' },
   }
   const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10).' }
   const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
@@ -270,8 +296,9 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offer: adpackOffer,
           size: adpackSize,
           angleIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of angle ids from adpack_angles (same size).' },
-          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] } },
+          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9'] } },
           businessId: { type: 'string', description: 'dna/offer path only: brand folder to link the pack to.' },
+          ...productFidelityProps,
           approvalRequestId: {
             type: 'string',
             description: 'After in-chat confirm_execute approve. Do not invent. Retry with the exact same arguments.',
@@ -463,12 +490,13 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ...brand,
           offerId: { type: 'string' },
           scene: { type: 'string' },
-          aspectRatio: { type: 'string' },
+          aspectRatio: { type: 'string', description: '1:1, 4:5, 9:16 or 16:9 (default 9:16). Ratios Grok lacks (4:5) are generated at the nearest native ratio and reframed.' },
           aspectRatioFallback: {
             type: 'boolean',
-            description: 'Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed.',
+            description: 'Deprecated (no longer needed): every supported ratio works.',
           },
           imageModel: { type: 'string', enum: ['grok-imagine'] },
+          ...productFidelityProps,
           productImageId: { type: 'string' },
           referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           referenceMode: { type: 'string', enum: ['use', 'none'] },
@@ -602,11 +630,12 @@ function toolInputSchema(name: string): Record<string, unknown> {
           approvalRequestId: { type: 'string' },
           imageModel: { type: 'string' },
           styleDnaId: { type: 'string' },
-          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] },
+          aspectRatio: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9', '3:4'] },
           aspectRatioFallback: {
             type: 'boolean',
-            description: 'Opt-in closest-ratio map (e.g. 4:5→3:4). Default false = fail closed.',
+            description: 'Deprecated (no longer needed): every supported ratio works.',
           },
+          ...productFidelityProps,
           scene: { type: 'string' },
           guidePrompt: { type: 'string' },
           productImageId: { type: 'string' },

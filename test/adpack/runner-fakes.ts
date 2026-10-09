@@ -1,4 +1,6 @@
-import type { AdPackStorage, ChargeFn, Renderer, RenderInput, UploadInput } from '../../api/lib/adpack/runner-types'
+import sharp from 'sharp'
+import { fitBox } from '../../api/lib/adpack/fidelity/composite'
+import type { AdPackStorage, ChargeFn, Renderer, RenderInput, RenderOutput, UploadInput } from '../../api/lib/adpack/runner-types'
 import { adpackAssetPath } from '../../api/lib/adpack/storage'
 import type { AspectRatio, ModelGateway } from '../../api/lib/adpack/types'
 import { goodSerumCopy } from './helpers'
@@ -129,16 +131,70 @@ export function runnerGateway(options: RunnerGatewayOptions = {}): RunnerGateway
   return gw
 }
 
-const RATIO_SIZE: Record<AspectRatio, [number, number]> = { '1:1': [1080, 1080], '4:5': [1080, 1350], '9:16': [1080, 1920] }
+const RATIO_SIZE: Record<AspectRatio, [number, number]> = { '1:1': [1080, 1080], '4:5': [1080, 1350], '9:16': [1080, 1920], '16:9': [1920, 1080] }
 
-export function fakeRenderer(): Renderer & { calls: RenderInput[] } {
+/** Synthetic studio product photo: a teal "bottle" with a cap and a label band on white. */
+let photoCache: Promise<Uint8Array> | null = null
+export function syntheticProductPhoto(): Promise<Uint8Array> {
+  photoCache ??= (async () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800">' +
+      '<rect width="600" height="800" fill="#ffffff"/>' +
+      '<rect x="210" y="120" width="180" height="90" rx="16" fill="#1f2937"/>' +
+      '<rect x="170" y="200" width="260" height="480" rx="40" fill="#0f766e"/>' +
+      '<rect x="170" y="380" width="260" height="120" fill="#f59e0b"/>' +
+      '<circle cx="300" cy="300" r="40" fill="#e0f2f1"/>' +
+      '</svg>'
+    return new Uint8Array(await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer())
+  })()
+  return photoCache
+}
+
+/** No-network image loader: every product photo URL resolves to the synthetic photo (cut-out URLs too). */
+export function fakeImageLoader(overrides: Record<string, () => Promise<Uint8Array>> = {}): ((url: string) => Promise<Uint8Array>) & { calls: string[] } {
+  const calls: string[] = []
+  const fn = (async (url: string) => {
+    calls.push(url)
+    const o = overrides[url]
+    if (o) return o()
+    if (url.startsWith('data:')) return new Uint8Array(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64'))
+    return syntheticProductPhoto()
+  }) as ((url: string) => Promise<Uint8Array>) & { calls: string[] }
+  fn.calls = calls
+  return fn
+}
+
+async function toBytes(v: Uint8Array | string): Promise<Buffer> {
+  if (typeof v !== 'string') return Buffer.from(v)
+  if (v.startsWith('data:')) return Buffer.from(v.slice(v.indexOf(',') + 1), 'base64')
+  return Buffer.from(await syntheticProductPhoto())
+}
+
+/**
+ * Fake renderer. Exact mode: pastes the cut-out unchanged on a small gray canvas and reports the
+ * placement (so the runner's fidelity score is real); `alter` corrupts the product pixels.
+ */
+export function fakeRenderer(options: { alter?: boolean } = {}): Renderer & { calls: RenderInput[] } {
   const calls: RenderInput[] = []
   return {
     calls,
-    async render(input) {
+    async render(input): Promise<RenderOutput> {
       calls.push(input)
       const [width, height] = RATIO_SIZE[input.ratio]
-      return { png: PNG_1X1, width, height }
+      if (input.productMode !== 'exact' || !input.productCutout) return { png: PNG_1X1, width, height }
+      const W = Math.round(width / 4)
+      const H = Math.round(height / 4)
+      const cut = await toBytes(input.productCutout)
+      const meta = await sharp(cut).metadata()
+      const box = fitBox({ width: meta.width ?? 1, height: meta.height ?? 1 }, { x: Math.round(W * 0.5), y: Math.round(H * 0.3), w: Math.round(W * 0.42), h: Math.round(H * 0.6) }, 'bottom')
+      const placed = await sharp(cut).ensureAlpha().resize(box.w, box.h, { fit: 'fill' }).png().toBuffer()
+      let layer = placed
+      if (options.alter) layer = await sharp(placed).modulate({ hue: 160, saturation: 2 }).negate({ alpha: false }).png().toBuffer()
+      const png = await sharp({ create: { width: W, height: H, channels: 3, background: '#d6d3d1' } })
+        .composite([{ input: layer, left: box.x, top: box.y }])
+        .png()
+        .toBuffer()
+      return { png: new Uint8Array(png), width, height, productPlacements: [{ box, placed: new Uint8Array(placed), role: 'hero' }] }
     },
   }
 }

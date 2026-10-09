@@ -65,6 +65,7 @@ function compactItem(item: AdPackItemView) {
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl })),
     charged: item.charged,
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
+    ...(item.fidelity ? { fidelity: item.fidelity } : {}),
     ...(item.error ? { error: item.error.slice(0, 160) } : {}),
   }
 }
@@ -82,6 +83,7 @@ function statusPayload(status: AdPackStatusResponse) {
     packId: status.packId,
     status: status.status,
     summary: status.summary,
+    productFidelity: status.productFidelity,
     progress: status.progress,
     quotedCredits: status.quotedCredits,
     chargedCredits: status.chargedCredits,
@@ -175,7 +177,7 @@ async function finalize(options: {
 
 function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
-  for (const key of ['size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds'] as const) {
+  for (const key of ['size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds', 'productFidelity', 'relight', 'allowedProps', 'immutableAttributes'] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
   return bound
@@ -290,6 +292,10 @@ export async function dispatchAdPackTool(options: {
           ratios: args.ratios,
           businessId: args.businessId,
           brandKitId: args.brandKitId,
+          productFidelity: args.productFidelity,
+          relight: args.relight,
+          allowedProps: args.allowedProps,
+          immutableAttributes: args.immutableAttributes,
           source: 'mcp',
           packId: approvalRequestId,
         })

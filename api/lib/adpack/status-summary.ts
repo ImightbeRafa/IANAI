@@ -5,7 +5,7 @@
  * `toStatusView` in service.ts, so the fields are identical everywhere.
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
-import type { AdLanguage, AspectRatio, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AspectRatio, FidelityMethod, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -57,6 +57,8 @@ export interface AdPackDeliverableAd {
   headline: string
   caption: string
   links: Partial<Record<AspectRatio, string>>
+  /** Product fidelity (A4) so an agent can reject without guessing. */
+  fidelity?: { score: number; passed: boolean; method: FidelityMethod; diffImageUrl?: string }
 }
 
 export interface AdPackDeliverable {
@@ -84,6 +86,9 @@ export function failureReason(error: string | undefined, language: AdLanguage): 
   const e = error ?? ''
   const es = language === 'es'
   if (e.startsWith('scene_product_mismatch')) return es ? 'producto no coincidía' : "product didn't match"
+  if (e.startsWith('cutout_failed')) return es ? 'no se pudo recortar el producto de la foto (subí una foto con fondo limpio)' : 'the product could not be cut out of the photo (upload one on a clean background)'
+  if (e.startsWith('fidelity_failed')) return es ? 'el producto no quedó idéntico a la foto' : 'the product did not stay identical to the photo'
+  if (e.startsWith('scene_props_failed')) return es ? 'la escena inventaba piezas u objetos del producto' : 'the scene invented product parts or objects'
   if (e.startsWith('copy_check_failed')) return es ? 'el texto no pasó las reglas de datos' : 'copy broke the facts rules'
   if (e.startsWith('copy_failed')) return es ? 'no se pudo escribir el texto' : 'copy could not be written'
   if (e.startsWith('scene_upload_failed')) return es ? 'no se pudo guardar la imagen' : 'image could not be saved'
@@ -168,6 +173,9 @@ export function buildStatusExtras(input: {
         headline: clip(i.copy?.headline ?? '', 200),
         caption: clip(i.copy?.caption ?? '', DELIVERABLE_CAPTION_MAX),
         links: Object.fromEntries(i.renders.map((r) => [r.ratio, r.imageUrl])) as Partial<Record<AspectRatio, string>>,
+        ...(i.fidelity
+          ? { fidelity: { score: i.fidelity.score, passed: i.fidelity.passed, method: i.fidelity.method, ...(i.fidelity.diffImageUrl ? { diffImageUrl: i.fidelity.diffImageUrl } : {}) } }
+          : {}),
       }))
     const label = es ? 'Anuncio' : 'Ad'
     const captionsText = clip(ads.map((a) => `${a.index}. ${label} ${a.index}${a.headline ? ` — ${a.headline}` : ''}\n${a.caption}`).join('\n\n'), DELIVERABLE_CAPTIONS_TEXT_MAX)

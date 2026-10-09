@@ -4,7 +4,15 @@
  * The runner never imports the renderer, storage or credits directly so tests
  * and the benchmark inject fakes, and the web / MCP doors inject real ones.
  */
-import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual } from './types.js'
+import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LightDirection } from './types.js'
+
+/** Placement of a real-product cut-out in a render (canvas px). */
+export interface RenderProductPlacement {
+  box: { x: number; y: number; w: number; h: number }
+  /** The cut-out resized to the box, before harmonization (PNG) — the fidelity reference. */
+  placed: Uint8Array
+  role: 'hero' | 'part'
+}
 
 export interface RenderInput {
   format: AdFormat
@@ -16,12 +24,30 @@ export interface RenderInput {
   /** Optional transparent product cut-out (URL / data URL / bytes). */
   productCutout?: Uint8Array | string
   language: AdLanguage
+  /** 'exact': the cut-out is the product on EVERY format (real pixels composited on the plate). */
+  productMode?: 'exact' | 'overlay'
+  /** Real part cut-outs placed next to the hero (offer_graphic / explainer, exact mode). */
+  productParts?: Array<Uint8Array | string>
+  /** Plate light direction (contact shadow side). */
+  light?: LightDirection
+  /** Generated mode: product bbox in the scene, normalized 0–1 (text is laid out around it). */
+  productAvoid?: { x0: number; y0: number; x1: number; y1: number }
+  /** Logo override (already background-removed bytes); falls back to visual.logoUrl. */
+  logo?: Uint8Array | string
+  /** Optional relight hook on the text-free composite (exact mode). Returns null to keep the composite. */
+  relight?: (composite: Uint8Array, placements: RenderProductPlacement[], ratio: AspectRatio) => Promise<Uint8Array | null>
 }
 
 export interface RenderOutput {
   png: Uint8Array
   width: number
   height: number
+  /** Exact mode: where each real cut-out landed (for the fidelity score). */
+  productPlacements?: RenderProductPlacement[]
+  /** True when the relight pass was kept. */
+  relit?: boolean
+  /** True when some text could not be kept off the product box. */
+  textOverProduct?: boolean
 }
 
 /** Deterministic text layer (Satori → resvg). Real impl: `./render` (see render-adapter.ts). */
@@ -29,7 +55,7 @@ export interface Renderer {
   render(input: RenderInput): Promise<RenderOutput>
 }
 
-export type StoredAssetKind = 'scene' | `render-${string}`
+export type StoredAssetKind = 'scene' | 'plate' | `render-${string}` | `fidelity-${string}` | `cache-${string}`
 
 export interface UploadInput {
   userId: string
@@ -43,6 +69,10 @@ export interface UploadInput {
 /** Public asset storage (Supabase `post-images` in prod). */
 export interface AdPackStorage {
   upload(input: UploadInput): Promise<{ url: string }>
+  /** Upsert at a deterministic path (content-addressed caches). Optional. */
+  uploadAt?(input: { path: string; bytes: Uint8Array; contentType: 'image/png' | 'image/jpeg' }): Promise<{ url: string }>
+  /** Read a deterministic path; null when missing. Optional. */
+  download?(path: string): Promise<{ bytes: Uint8Array; url: string } | null>
 }
 
 /**

@@ -95,6 +95,10 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
         ratios: body.ratios,
         businessId: body.businessId,
         brandKitId: body.brandKitId,
+        productFidelity: body.productFidelity,
+        relight: body.relight,
+        allowedProps: body.allowedProps,
+        immutableAttributes: body.immutableAttributes,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }

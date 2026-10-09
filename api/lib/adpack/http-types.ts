@@ -10,6 +10,8 @@ import type {
   AdCopy,
   AdLanguage,
   AspectRatio,
+  FidelityMethod,
+  ProductFidelityMode,
   BrandDna,
   CopyCheckIssue,
   DnaFact,
@@ -147,6 +149,14 @@ export interface AdPackStartRequest {
   ratios?: AspectRatio[]
   businessId?: string
   brandKitId?: string
+  /** 'exact' (default when a product photo exists): real product pixels on a generated plate. 'generated': model-drawn product. */
+  productFidelity?: ProductFidelityMode
+  /** Optional relight pass (exact mode); kept only when fidelity still passes. */
+  relight?: boolean
+  /** Kit objects allowed in scenes besides the product (ambient props are always allowed). */
+  allowedProps?: string[]
+  /** Appearance facts that must never change, e.g. "hélices blancas". */
+  immutableAttributes?: string[]
 }
 
 export interface AdPackStatusRequest {
@@ -236,7 +246,18 @@ export interface AdPackItemView {
   charged: boolean
   /** product_images ids of renders saved to the offer library (kind 'generated'). */
   libraryImageIds?: string[]
+  /** Product fidelity (A4): exact = masked SSIM/ΔE vs the real cut-out; generated = vision verdict. */
+  fidelity?: AdPackFidelityView
   error?: string
+}
+
+export interface AdPackFidelityView {
+  score: number
+  passed: boolean
+  method: FidelityMethod
+  ssim?: number
+  deltaE?: number
+  diffImageUrl?: string
 }
 
 export interface AdPackProgressView {
@@ -252,6 +273,8 @@ export interface AdPackStatusResponse {
   status: PackStatus
   size: number
   ratios: AspectRatio[]
+  /** How the product reaches the images (exact = real product pixels). */
+  productFidelity: ProductFidelityMode
   source: Pack['source']
   quotedCredits: number
   /** Credits charged so far (charged items × per-ad credits). */

@@ -167,7 +167,7 @@ export async function mcpGuideImage(
     aspectRatio,
     aspectRatioNote:
       aspectRatio === '4:5'
-        ? 'Grok Imagine does not natively support 4:5 — EXECUTE will fail unless aspectRatioFallback:true (maps to 3:4) or user picks 9:16 / 1:1 / 3:4.'
+        ? '4:5 is supported: it is generated at the nearest native ratio (3:4) and reframed to an exact 4:5 (no aspectRatioFallback needed).'
         : 'Pass this exact aspectRatio to execute_image_generate.',
     prompt,
     clarify: {

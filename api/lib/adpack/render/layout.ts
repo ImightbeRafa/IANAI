@@ -101,6 +101,11 @@ export interface Ctx {
   s: number
   product?: { width: number; height: number }
   logo?: { width: number; height: number }
+  /**
+   * Exact product mode: the real cut-out is the product on every format, so every template
+   * reserves a product box (formats that used to rely on the scene's product too).
+   */
+  exact?: boolean
 }
 
 /** Fonts used for each role. */

@@ -128,6 +128,78 @@ export interface OfferInput {
   productImageUrls: string[]
   /** Optional transparent cut-out of the hero product (PNG URL), created once and reused. */
   productCutoutUrl?: string
+  /**
+   * Real product photos with their role (multi-part products: hero, the controller, the box,
+   * kit contents…). One cut-out per photo in exact mode; parts are never synthesized.
+   * Absent → `productImageUrls` (first = hero, the rest = alternate shots).
+   */
+  productPhotos?: ProductPhoto[]
+  /** Kit objects that MAY appear in a scene besides the product (e.g. "caja", "manual"). Ambient props are always allowed. */
+  allowedProps?: string[]
+  /** Appearance facts that must never change, e.g. "ala de papel blanca", "hélices blancas". Prompts + vision checks. */
+  immutableAttributes?: string[]
+  /** Brand/offer-level product lock: image tools must keep the real product pixels (exact mode). */
+  lockProductAppearance?: boolean
+}
+
+/** What a real product photo shows. */
+export type ProductPhotoRole = 'hero' | 'part' | 'contents' | 'box' | 'in_use' | 'detail'
+
+export interface ProductPhoto {
+  url: string
+  role: ProductPhotoRole
+  /** Owner label, e.g. "control tipo gamepad". */
+  label?: string
+  /** product_images.id when known. */
+  id?: string
+}
+
+/**
+ * How the product reaches the ad image:
+ * - exact: real product pixels (segmented cut-out) composited into a generated background plate;
+ * - generated: the image model draws the product from the reference photo (legacy).
+ */
+export type ProductFidelityMode = 'exact' | 'generated'
+
+/** Pack-level render options (persisted with the pack). */
+export interface PackRenderOptions {
+  productFidelity: ProductFidelityMode
+  /** Optional model relight pass on the composite (exact mode), kept only when fidelity holds. */
+  relight?: boolean
+  allowedProps?: string[]
+  immutableAttributes?: string[]
+}
+
+export type FidelityMethod = 'composite' | 'relit' | 'generated'
+
+/** Product fidelity of a finished image (inside the product mask vs the real cut-out). */
+export interface FidelityResult {
+  /** 0–1 combined score (1 = identical). */
+  score: number
+  /** Masked grayscale SSIM (8×8 windows); null for generated mode (no pixel alignment). */
+  ssim: number | null
+  /** Mean ΔE (CIE76, Lab) inside the mask; null for generated mode. */
+  deltaE: number | null
+  passed: boolean
+  method: FidelityMethod
+  /** Heatmap PNG of the per-pixel difference (exact mode, worst ratio). */
+  diffImageUrl?: string
+  /** Ratio the item-level value was taken from (the worst one). */
+  ratio?: AspectRatio
+}
+
+/** Light direction of a background plate (drives the composite's contact shadow). */
+export type LightDirection = 'left' | 'right' | 'top'
+
+export interface StoredCutout {
+  url: string
+  role: ProductPhotoRole
+  label?: string
+  /** How the cut-out was made ('cache' = reused from the content-addressed cache). */
+  method: 'alpha' | 'flood' | 'model' | 'cache'
+  /** sha256 of the source photo bytes (cache key). */
+  sourceHash: string
+  sourceUrl: string
 }
 
 // ---------------------------------------------------------------------------
@@ -152,7 +224,7 @@ export type AdFormat =
   | 'handheld_overlay' // product in hand, lifestyle, one bold line
   | 'explainer' // "what is it / how it works" infographic
 
-export type AspectRatio = '1:1' | '4:5' | '9:16'
+export type AspectRatio = '1:1' | '4:5' | '9:16' | '16:9'
 
 export type HookType =
   | 'pain'
@@ -238,6 +310,12 @@ export interface SceneResult {
   costUsd: number
   /** True when the product reference was applied (product lock). */
   productLocked: boolean
+  /** 'plate' = product-free background for exact mode (the product is composited at render). */
+  kind?: 'scene' | 'plate'
+  /** Plate light direction (exact mode). */
+  light?: LightDirection
+  /** Real-product cut-outs composited onto the plate (exact mode). First = hero. */
+  cutouts?: StoredCutout[]
 }
 
 export interface SceneCheckResult {
@@ -249,6 +327,12 @@ export interface SceneCheckResult {
   /** 0–1 */
   score: number
   notes?: string
+  /** Product parts / accessories / devices in the scene that are not in the reference photos nor allowed props. */
+  extraObjects?: string[]
+  /** Product bounding box in the scene, [y0, x0, y1, x1] normalized 0–1000 (generated mode; text avoids it). */
+  productBox?: [number, number, number, number]
+  /** Persisted copy of PackItem.fidelity (stored in the scene_check jsonb; no extra column). */
+  fidelity?: FidelityResult
 }
 
 export interface RenderedAd {
@@ -256,6 +340,8 @@ export interface RenderedAd {
   imageUrl: string
   width: number
   height: number
+  /** Product fidelity of this render (exact: masked SSIM/ΔE vs the cut-out). */
+  fidelity?: FidelityResult
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +385,8 @@ export interface PackItem {
   chargedAt?: string
   /** Renders saved to the offer library (`product_images`, kind 'generated'). One entry per saved render URL. */
   libraryImages?: LibraryImage[]
+  /** Item-level product fidelity (worst ratio). Persisted inside scene_check.fidelity. */
+  fidelity?: FidelityResult
 }
 
 export interface LibraryImage {
@@ -334,6 +422,8 @@ export interface Pack {
    * Creative direction for angle/copy prompts only — never a fact or claim.
    */
   brief?: string
+  /** Product fidelity / scene options. Absent (packs created before exact mode) → generated. */
+  render?: PackRenderOptions
   createdAt: string
   updatedAt: string
 }
@@ -364,4 +454,19 @@ export interface ModelGateway {
    * `styleRefs` are optional style anchors (e.g. the pack's first scene), never a product lock.
    */
   scene(input: { prompt: string; refs: string[]; ratio: AspectRatio; draft: boolean; styleRefs?: string[]; language?: AdLanguage }): Promise<{ bytes: Uint8Array; mimeType: string; costUsd: number; model: string; productLocked: boolean }>
+  /**
+   * Optional: model segmentation (Gemini 2.5 Flash). Returns the documented format —
+   * box_2d [y0, x0, y1, x1] normalized 0–1000 and a probability-mask PNG (base64) for that box.
+   */
+  segment?(input: { image: string; prompt?: string; model?: string }): Promise<{ items: SegmentationItem[]; costUsd: number; model: string }>
+  /** Optional: image edit (relight pass). `image` is a data URL or https URL. */
+  edit?(input: { image: string; prompt: string; ratio?: string }): Promise<{ bytes: Uint8Array; mimeType: string; costUsd: number; model: string }>
+}
+
+export interface SegmentationItem {
+  /** [y0, x0, y1, x1], 0–1000. */
+  box_2d: [number, number, number, number]
+  /** Probability mask PNG (base64, with or without a data: prefix) covering box_2d. */
+  mask: string
+  label: string
 }

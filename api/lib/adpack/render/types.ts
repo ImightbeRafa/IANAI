@@ -1,7 +1,7 @@
 /**
  * Render-engine types (additive to ../types.ts; nothing there is changed).
  */
-import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual } from '../types.js'
+import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LightDirection } from '../types.js'
 
 /** Raw bytes, an http(s) URL (fetched with global fetch) or a data: URL. */
 export type ImageInput = Uint8Array | ArrayBuffer | string
@@ -27,6 +27,16 @@ export interface RenderAdInput {
   language: AdLanguage
   /** QA/test only: also return the composited background (everything except the top text/UI layer). */
   debug?: { returnBase?: boolean }
+  /** 'exact': the real cut-out is the product on every format (composited, harmonized, scored by the caller). */
+  productMode?: 'exact' | 'overlay'
+  /** Real part cut-outs next to the hero (exact mode, offer_graphic / explainer). */
+  productParts?: ImageInput[]
+  /** Plate light direction (shadow side). */
+  light?: LightDirection
+  /** Generated mode: product bbox in the scene image, normalized 0–1; text is kept off it. */
+  productAvoid?: { x0: number; y0: number; x1: number; y1: number }
+  /** Exact mode relight hook on the text-free composite; null keeps the deterministic composite. */
+  relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part' }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
 }
 
 export type TextRole = 'headline' | 'subline' | 'bullet' | 'offer' | 'cta' | 'label' | 'step_number'
@@ -60,8 +70,19 @@ export interface LayoutReport {
   /** Area text is allowed in (Meta safe zones + margins). */
   safeArea: Box
   elements: LayoutTextElement[]
+  /** Hero product box (real cut-out), or null. */
   product: Box | null
+  /** Every placed real cut-out (hero + parts). */
+  productBoxes?: Box[]
+  /** Generated mode: the scene product's bbox mapped onto this canvas (text avoided it). */
+  productAvoid?: Box | null
+  /** True when some text / pill could not be kept off the product. */
+  textOverProduct?: boolean
+  /** Boxes of every text, pill, card and icon drawn over the scene. */
+  overlays?: Box[]
   logo: Box | null
+  /** Logo variant used for this background. */
+  logoVariant?: 'onLight' | 'onDark' | 'badge'
   /** Font-size scale applied to the whole template (1 = nominal). */
   scale: number
   fonts: { heading: string; body: string }
@@ -77,4 +98,8 @@ export interface RenderAdResult {
   layoutReport: LayoutReport
   /** Only with debug.returnBase. */
   basePng?: Buffer
+  /** Real cut-outs as placed (pre-harmonization) — fidelity references. */
+  productPlacements?: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part' }>
+  /** True when the relight hook result was kept. */
+  relit?: boolean
 }
