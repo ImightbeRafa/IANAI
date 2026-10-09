@@ -396,14 +396,15 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
 export type ToolProductFidelity = 'exact' | 'generated'
 
 /**
- * `productFidelity` for single-image tools: default 'exact' when a product reference exists;
- * 'generated' when asked or without a product photo. Exact without a photo is an input error.
+ * `productFidelity` for single-image tools: default 'generated' (the web-app Grok flow with PRODUCT LOCK);
+ * 'exact' (real-pixel cutout composite) is opt-in. Exact without a photo is an input error.
  */
 export function resolveToolProductFidelity(raw: unknown, hasProductRef: boolean): ToolProductFidelity {
   if (raw !== undefined && raw !== null && raw !== 'exact' && raw !== 'generated') throw new Error('productFidelity must be "exact" or "generated"')
   if (raw === 'exact' && !hasProductRef) throw new Error('productFidelity "exact" needs a product photo (productImageId / product reference).')
-  if (raw === 'generated') return 'generated'
-  return hasProductRef ? 'exact' : 'generated'
+  if (raw === 'exact') return 'exact'
+  // Web-app path by default (Grok /edits + PRODUCT LOCK); 'exact' (cutout composite) is opt-in only.
+  return 'generated'
 }
 
 /** Photos from plain product URLs (first = hero) for the tools that only know URLs. */

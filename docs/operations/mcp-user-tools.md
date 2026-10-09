@@ -37,6 +37,15 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.15.0 — classic image tools = the web app's image (Grok product-lock flow)
+
+Registry / server version **0.15.0**. **No migration**, no new env/secret/binding/route/cron. Proofs: `test/web-post-image.spec.ts`, `test/web-mcp-parity.spec.ts` (real web handler vs MCP, same xAI request), `test/mcp-web-image-flow.spec.ts`, `test/mcp-image-postcheck.spec.ts`, `test/run-bulk-exact.spec.ts`.
+
+- **One generation path.** `api/lib/web-post-image.ts` holds what Grok receives (slim post prompt `buildSlimGrokPostPrompt`, logo stamp rules, CTA guardrails, 3-reference budget with the kit logo as style ref, `/images/edits` product-lock vs `/images/generations`, 4:5→3:4, prompt-length clamp retry). `api/generate-image.ts` (web chat) and the MCP tools `execute_image_generate`, `execute_bulk_posts`, `execute_campaign_pack` call it. Web request is unchanged (before/after dumps in the PR).
+- **`productFidelity` default is `generated`** (the web path) for these tools; `exact` (real-pixel cutout composite, no text/logo) is opt-in. `create_ads` / `adpack_*` are unchanged (their own default stays `exact`).
+- **New `execute_image_generate` inputs:** `copy` (on-image guion), `textDensity` (hard|medium|standard), `postStyle` (venta-directa|anuncio-conversion), `ctaStrength`, `lockProductAppearance`, `immutableAttributes`. The offer price/silhouette, brand palette/voice/visual notes, kit logo, kit reference photos (auto-appended as product refs, `referenceMode:"none"` skips) and the offer's `ad_profile` lock are attached automatically; 2+ confirmed product photos allowed. Without `copy` the offer name + price is used (`copySource` says which).
+- **Free local post-check, warning only.** Every generated result carries `fidelityCheck {status, score}` and, when the product's colour / silhouette / part count differs from the reference photo, `fidelity_warning {code, reason, score, details}` — in the execute result, `get_execute_result`, the saved artifact metadata and each bulk/campaign item — plus `qa {ratioOk, textPresent, logo, safeZones:"not_checked", warnings[]}` (text/safe-zone checks are heuristics, not OCR). Never blocks, retries, or changes credits. Discard images that carry a `fidelity_warning`.
+
 ### 0.14.0 — real-test fixes (packs without polling, plan before paying, Style DNA control)
 
 Registry / server version **0.14.0**. **No migration** (085 columns only). Proofs: `test/adpack/background.spec.ts`, `test/adpack/approval-plan.spec.ts`, `test/mcp-tools-v014.spec.ts` (+ updated door / journey tests).
@@ -179,7 +188,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.14.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.15.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

@@ -1,3 +1,12 @@
+## 2026-10-09 — MCP 0.15.0: classic image tools use the web app's Grok flow
+
+**Area:** api (generate-image, mcp, bulk), docs — no migration
+**Files:** `api/lib/web-post-image.ts` (new), `api/generate-image.ts`, `api/lib/mcp/{web-image,image-postcheck,execute-tools,protocol,tool-registry,create-ads}.ts`, `api/lib/bulk/run-bulk.ts`, `api/lib/adpack/fidelity/pipeline.ts`, tests, `docs/operations/mcp-user-tools.md`
+
+- **Shared builder:** the web route's Grok post branch (prompt, refs/budget, logo, request, clamp retry) moved to `api/lib/web-post-image.ts`; web request unchanged (real-handler before/after dumps identical); MCP `execute_image_generate` / bulk / campaign pack call the same functions.
+- **Default `productFidelity: generated`** for those tools (`exact` opt-in). New inputs `copy`, `textDensity`, `postStyle`, `ctaStrength`, `lockProductAppearance`.
+- **Warning-only post-check:** `fidelity_warning` (colour/shape/part count vs the reference) + `qa` on results and `get_execute_result`; never blocks or charges.
+
 ## 2026-10-09 — Ad Pack v3 + MCP 0.14 merged: one plan, composed retries, background ratio regenerate
 
 **Area:** api (adpack, mcp), docs — no migration

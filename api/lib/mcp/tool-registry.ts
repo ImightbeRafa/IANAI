@@ -29,7 +29,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.14.0'
+export const MCP_REGISTRY_VERSION = '0.15.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -487,7 +487,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Prefer create_ads for ads (exact text, feed+story). Generate one free-form image via Advance at max Grok quality 2k/medium (credits), with optional library reference ids and guidePrompt. Ratios 1:1, 4:5, 9:16, 16:9. productFidelity "exact" (default with a product photo) keeps the real product pixels on a generated scene and returns fidelity {score, passed}; "generated" redraws it. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
+      'Same image as the web chat (/chat generate): one Grok Imagine product-lock call (2k/medium, credits) with the web prompt builder — pass copy (on-image guion), textDensity, postStyle, ctaStrength; the offer price/silhouette/lock, brand palette/voice and the kit logo are attached automatically; confirmed product photos (2+) plus kit reference photos are the product refs. Ratios 1:1, 4:5, 9:16, 16:9. productFidelity "generated" (DEFAULT) = web path, with a free local fidelity check: if the product colour/shape/part count differs from the photo the result carries fidelity_warning {reason, score} (also in get_execute_result) — discard those; never blocks or charges more. "exact" (opt-in) keeps the real product pixels on a generated scene with no text/logo. For designed ads with exact rendered text use create_ads. Ask in chat via userPrompt + confirm_execute — do not lead with a raw approval URL. ' +
       'After approve, returns quickly with jobId (status=running); poll get_execute_result until completed (includes imageUrl). Same approvalRequestId is idempotent.',
     enabled: true,
     requiresApproval: true,

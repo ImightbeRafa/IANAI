@@ -1,0 +1,168 @@
+/**
+ * execute_image_generate end to end (approval → job → get_execute_result), mocked xAI:
+ * the MCP image now goes through the web Grok flow (api/lib/web-post-image.ts) by default and the
+ * result carries the free local `fidelity_warning` (warning only: same credits, same job status).
+ */
+import sharp from 'sharp'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../api/lib/auth.js', () => ({
+  checkUsageLimit: vi.fn(async () => ({ allowed: true })),
+  incrementUsage: vi.fn(async () => ({ creditsCharged: 6 })),
+  deductBonusImage: vi.fn(async () => undefined),
+  quoteLegacyActionCredits: vi.fn(() => 6),
+}))
+vi.mock('../api/lib/usage-logger.js', () => ({
+  logApiUsage: vi.fn(async () => undefined),
+  estimateTokens: vi.fn(() => 1),
+}))
+
+import { approveMcpApprovalRequest, createMemoryMcpApprovalStore } from '../api/lib/mcp/approval'
+import { mcpExecuteImageGenerate } from '../api/lib/mcp/execute-tools'
+import { getMcpExecuteResult, setMcpExecuteScheduler } from '../api/lib/mcp/execute-job'
+import type { McpArtifactStore } from '../api/lib/mcp/artifact-store'
+import type { McpDbClient } from '../api/lib/mcp/user-tools'
+
+type Rect = { x: number; y: number; w: number; h: number; c: string }
+const rects = (rs: Rect[]) => rs.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="6" fill="${r.c}"/>`).join('')
+async function png(w: number, h: number, bg: string, body: string, fmt: 'png' | 'jpeg' = 'png'): Promise<Buffer> {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cfd8c2"/><stop offset="1" stop-color="#6b7a5c"/></linearGradient></defs><rect width="${w}" height="${h}" fill="${bg === 'scene' ? 'url(#g)' : bg}"/>${body}</svg>`
+  const s = sharp(Buffer.from(svg))
+  return fmt === 'png' ? s.png().toBuffer() : s.jpeg({ quality: 95 }).toBuffer()
+}
+const PRODUCT: Rect[] = [
+  { x: 130, y: 120, w: 140, h: 200, c: '#c0392b' },
+  { x: 150, y: 70, w: 100, h: 50, c: '#1f4e9c' },
+  { x: 130, y: 320, w: 140, h: 40, c: '#e5b81f' },
+]
+const placed = (rs: Rect[]) => rs.map((r) => ({ ...r, x: 90 + (r.x - 130) * 0.55, y: 150 + (r.y - 70) * 0.55, w: r.w * 0.55, h: r.h * 0.55 }))
+const dataUrl = (b: Buffer, mime = 'image/png') => `data:${mime};base64,${b.toString('base64')}`
+
+let xai: Array<{ url: string; body: Record<string, any> }> = []
+let generated: Buffer
+
+const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+async function setup() {
+  const ref1 = dataUrl(await png(400, 400, '#ffffff', rects(PRODUCT)))
+  const ref2 = dataUrl(await png(400, 400, '#fdfdfd', rects(PRODUCT)), 'image/png')
+  const kitRef = dataUrl(await png(400, 400, '#fbfbfb', rects(PRODUCT)))
+  const db: McpDbClient = {
+    async listBusinessesForUser() { return [{ id: 'b1', name: 'Prototipo' }] },
+    async getBusinessForUser(userId, brandId) { return userId === 'u1' && brandId === 'b1' ? { id: 'b1', name: 'Prototipo', userId: 'u1' } : null },
+    async listOffersForBrand() {
+      return [{ id: 'o1', name: 'Avión Prototipo', price: '₡14.900', productDescription: 'Avión de papel con motores', technicalSpecs: 'Silueta: planeador blanco con hélices rojas', type: 'juguete' }]
+    },
+    async getBrandKitForBrand() {
+      return { id: 'k1', name: 'Prototipo', primaryColor: '#0b3d91', logoUrl: LOGO, brandVoice: 'cercano', visualStyleNotes: 'luz natural', referenceImages: [kitRef] }
+    },
+  }
+  const images: Record<string, { id: string; kind: string; label: string; imageUrl: string }> = {
+    p1: { id: 'p1', kind: 'product', label: 'hero', imageUrl: ref1 },
+    p2: { id: 'p2', kind: 'product', label: 'part', imageUrl: ref2 },
+  }
+  const saved: Array<Record<string, unknown>> = []
+  const artifactStore = {
+    async ensureExecuteSession() { return { sessionId: 's1' } },
+    async listOwnedAssets() { return Object.values(images) },
+    async getOwnedProductImage(o: { imageId: string }) { return images[o.imageId] ?? null },
+    async saveImageArtifact(o: Record<string, unknown>) { saved.push(o); return { messageId: 'm1', productImageId: 'img-new', imageUrl: 'https://cdn.example/new.jpg' } },
+  } as unknown as McpArtifactStore
+  return { db, artifactStore, saved }
+}
+
+async function runJob(args: Record<string, unknown>, offerStore?: unknown) {
+  const { db, artifactStore, saved } = await setup()
+  const approvalStore = createMemoryMcpApprovalStore()
+  const work: Array<() => Promise<void>> = []
+  setMcpExecuteScheduler((w) => { work.push(w) })
+  const base = { db, approvalStore, artifactStore, user: { id: 'u1' }, offerStore: offerStore as never }
+  const first = await mcpExecuteImageGenerate({ ...base, args: { brandId: 'b1', offerId: 'o1', aspectRatio: '4:5', referenceImageIds: ['p1', 'p2'], productImageId: 'p1', ...args } })
+  const approvalRequestId = String(first.approvalRequestId)
+  await approveMcpApprovalRequest(approvalStore, { approvalRequestId, userId: 'u1' })
+  const started = await mcpExecuteImageGenerate({ ...base, args: { brandId: 'b1', offerId: 'o1', aspectRatio: '4:5', referenceImageIds: ['p1', 'p2'], productImageId: 'p1', ...args, approvalRequestId } })
+  expect(started.status).toBe('running')
+  for (const w of work) await w()
+  const status = await getMcpExecuteResult({ approvalStore, userId: 'u1', jobId: approvalRequestId })
+  return { status, saved }
+}
+
+beforeEach(async () => {
+  xai = []
+  process.env.XAI_API_KEY = 'test-key'
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+    xai.push({ url, body: JSON.parse(init.body) })
+    return new Response(JSON.stringify({ data: [{ b64_json: generated.toString('base64') }] }), { status: 200 })
+  }))
+})
+afterEach(() => { vi.unstubAllGlobals() })
+
+describe('execute_image_generate = web flow by default', () => {
+  it('faithful product: web prompt + both photos + kit ref + logo in ONE xAI call, no fidelity_warning, credits unchanged', async () => {
+    generated = await png(600, 800, 'scene', rects(placed(PRODUCT)), 'jpeg')
+    const { status, saved } = await runJob({ copy: 'Papel arriba. Motores abajo.', textDensity: 'hard', immutableAttributes: ['hélices rojas'] })
+    expect(xai).toHaveLength(1)
+    expect(xai[0].url).toContain('/images/edits')
+    expect(xai[0].body.aspect_ratio).toBe('3:4')
+    expect(xai[0].body.images).toHaveLength(3) // 3-ref budget: 2 product photos (+kit ref trimmed) … logo kept as style ref
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toContain('Papel arriba. Motores abajo.')
+    expect(prompt).toContain('₡14.900')
+    expect(prompt).toContain('hélices rojas')
+    expect(prompt).toMatch(/logo/i)
+    expect(status.status).toBe('completed')
+    expect(status.productFidelity).toBe('generated')
+    expect(status.grokMode).toBe('product_lock_scene')
+    if (status.fidelity_warning) throw new Error(JSON.stringify(status.fidelity_warning))
+    expect(status.fidelity_warning).toBeUndefined()
+    expect((status.fidelityCheck as { status: string }).status).toBe('ok')
+    expect(status.chargedCredits).toBe(6)
+    expect(status.appliedAspectRatio).toBe('4:5')
+    expect(saved[0].metadata).toMatchObject({ aspectRatio: '4:5', lockApplied: true })
+  })
+
+  it('changed product colour: fidelity_warning with reason + score in the execute result AND get_execute_result; still completed and charged the same', async () => {
+    const changed = PRODUCT.map((r, i) => (i === 0 ? { ...r, c: '#2e9e4f' } : r))
+    generated = await png(600, 800, 'scene', rects(placed(changed)), 'jpeg')
+    const { status, saved } = await runJob({ copy: 'Armalo vos' })
+    expect(status.status).toBe('completed')
+    expect(status.chargedCredits).toBe(6)
+    const w = status.fidelity_warning as { code: string; reason: string; score: number }
+    expect(w.code).toBe('fidelity_warning')
+    expect(w.reason).toMatch(/colour|shape|part/)
+    expect(typeof w.score).toBe('number')
+    expect(saved[0].metadata).toHaveProperty('fidelity_warning')
+  })
+
+  it('productFidelity "exact" stays opt-in: it does not call the web Grok flow', async () => {
+    generated = await png(600, 800, 'scene', rects(placed(PRODUCT)), 'jpeg')
+    const { db, artifactStore } = await setup()
+    const approvalStore = createMemoryMcpApprovalStore()
+    const r = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', productFidelity: 'exact', referenceImageIds: ['p1'], productImageId: 'p1' } })
+    const rec = await approvalStore.findById(String(r.approvalRequestId))
+    expect(rec?.inputJson).toMatchObject({ productFidelity: 'exact' })
+    expect(xai).toHaveLength(0)
+  })
+
+  it('reads the offer lock from ad_profile via the offer store', async () => {
+    generated = await png(600, 800, 'scene', rects(placed(PRODUCT)), 'jpeg')
+    const offerStore = { getOffer: vi.fn(async () => ({ id: 'o1', ad_profile: { lockProductAppearance: true, immutableAttributes: ['cuerpo blanco'] } })) }
+    await runJob({ copy: 'Hola' }, offerStore)
+    expect(offerStore.getOffer).toHaveBeenCalled()
+    expect(String(xai[0].body.prompt)).toContain('cuerpo blanco')
+  })
+
+  it('a Grok prompt-length rejection is retried once with the clamp (MCP path)', async () => {
+    generated = await png(600, 800, 'scene', rects(placed(PRODUCT)), 'jpeg')
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      xai.push({ url, body: JSON.parse(init.body) })
+      if (n++ === 0) return new Response('prompt length exceeds the maximum allowed length of 8000', { status: 400 })
+      return new Response(JSON.stringify({ data: [{ b64_json: generated.toString('base64') }] }), { status: 200 })
+    }))
+    const { status } = await runJob({ copy: 'x'.repeat(1100) })
+    expect(xai).toHaveLength(2)
+    expect(status.status).toBe('completed')
+    expect(status.retriedWithClamp).toBe(true)
+  })
+})

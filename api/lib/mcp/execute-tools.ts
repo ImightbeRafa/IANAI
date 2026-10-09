@@ -18,8 +18,9 @@ import { usageTimingMetadata } from '../usage-timings.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { runGrokPostFirstGen } from '../grok-image-generate.js'
-import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
+import { generateWebStyleImage, offerLockFromRow, postCheckSummary } from './web-image.js'
+import type { McpOfferStore } from './offer-tools.js'
+import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
 import { exactResultDataUrl, generateExactProductImage, parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
@@ -265,6 +266,41 @@ async function finalizeMcpApproval(options: {
     input: options.input,
   })
   if (!consumed.ok) throw new Error(consumed.reason)
+}
+
+const WEB_POST_STYLES = new Set(['venta-directa', 'anuncio-conversion'])
+const WEB_TEXT_DENSITIES = new Set(['hard', 'medium', 'standard'])
+
+/** Web-flow inputs for execute_image_generate: guion copy, density, post style, CTA strength, offer lock overrides. */
+export function parseWebPostArgs(args: Record<string, unknown>): {
+  copy?: string
+  textDensity?: string
+  postStyle?: string
+  ctaStrength?: string
+  immutableAttributes?: string[]
+  lockProductAppearance?: boolean
+} {
+  const out: ReturnType<typeof parseWebPostArgs> = {}
+  const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
+  if (copy) out.copy = copy
+  if (args.textDensity !== undefined) {
+    if (typeof args.textDensity !== 'string' || !WEB_TEXT_DENSITIES.has(args.textDensity)) throw new Error('textDensity must be "hard", "medium" or "standard"')
+    out.textDensity = args.textDensity
+  }
+  if (args.postStyle !== undefined) {
+    if (typeof args.postStyle !== 'string' || !WEB_POST_STYLES.has(args.postStyle)) throw new Error('postStyle must be "venta-directa" or "anuncio-conversion"')
+    out.postStyle = args.postStyle
+  }
+  if (args.ctaStrength !== undefined) {
+    if (typeof args.ctaStrength !== 'string' || !CTA_STRENGTHS.includes(args.ctaStrength as CTAStrength)) throw new Error('ctaStrength must be none, soft, brand_mention or sales')
+    out.ctaStrength = args.ctaStrength
+  }
+  if (Array.isArray(args.immutableAttributes)) {
+    const attrs = args.immutableAttributes.filter((a): a is string => typeof a === 'string').map((a) => a.trim().slice(0, 160)).filter(Boolean).slice(0, 12)
+    if (attrs.length) out.immutableAttributes = attrs
+  }
+  if (args.lockProductAppearance === true) out.lockProductAppearance = true
+  return out
 }
 
 function xaiKey(): string {
@@ -568,6 +604,8 @@ export async function mcpExecuteImageGenerate(options: {
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
+  /** Optional: reads the offer's ad_profile (lockProductAppearance / immutableAttributes). */
+  offerStore?: McpOfferStore | null
 }): Promise<Record<string, unknown>> {
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
@@ -588,6 +626,7 @@ export async function mcpExecuteImageGenerate(options: {
   const referenceMode = parseReferenceMode(options.args.referenceMode) || 'use'
   const aspectRatioFallback = options.args.aspectRatioFallback === true
   const fidelityArgs = parseImageFidelityArgs(options.args)
+  const webArgs = parseWebPostArgs(options.args)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
@@ -601,6 +640,7 @@ export async function mcpExecuteImageGenerate(options: {
     guidePrompt,
     sessionId: sessionIdArg,
     ...fidelityArgs,
+    ...webArgs,
   }
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
@@ -702,7 +742,10 @@ export async function mcpExecuteImageGenerate(options: {
         appOrigin: options.appOrigin,
         ctxPreview,
         quote,
+        referenceMode,
+        offerStore: options.offerStore,
         ...fidelityArgs,
+        ...webArgs,
       })
       await finalizeMcpApproval({
         approvalStore: options.approvalStore,
@@ -751,6 +794,14 @@ async function runImageGenerateBody(options: {
   /** 'ai' adds the guarded AI relight pass; the deterministic relight stage always runs (free). */
   relight?: 'ai'
   allowedProps?: string[]
+  referenceMode?: 'use' | 'none'
+  offerStore?: McpOfferStore | null
+  copy?: string
+  textDensity?: string
+  postStyle?: string
+  ctaStrength?: string
+  immutableAttributes?: string[]
+  lockProductAppearance?: boolean
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -788,6 +839,8 @@ async function runImageGenerateBody(options: {
 
   const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0)
   let fidelity: Record<string, unknown> | null = null
+  let promptUsed = prompt
+  let postCheck: Record<string, unknown> | null = null
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
   if (fidelityMode === 'exact') {
     // Real product pixels on a generated plate (A1); the job fails rather than deliver a redrawn product.
@@ -818,20 +871,35 @@ async function runImageGenerateBody(options: {
       lockApplied: true,
     }
   } else {
-    const grok = await runGrokPostFirstGen({
-      apiKey: xaiKey(),
-      prompt,
-      aspectRatio: ratioPlan.generateAt,
-      productReferenceUrls: productUrls,
-      supportReferenceUrls: supportUrls,
-      language: 'es',
-    })
-    generated = { ...grok }
-    if (ratioPlan.needsReframe && grok.imageDataUrl.startsWith('data:')) {
-      const bytes = Buffer.from(grok.imageDataUrl.slice(grok.imageDataUrl.indexOf(',') + 1), 'base64')
-      const framed = await reframeToRatio(bytes, appliedAspectRatio, { mode: 'cover', format: 'jpeg' })
-      generated = { ...grok, imageDataUrl: `data:image/jpeg;base64,${framed.bytes.toString('base64')}`, aspectRatio: appliedAspectRatio }
+    // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).
+    const offerRow = options.offerStore
+      ? await options.offerStore.getOffer({ userId: options.user.id, brandId: options.brandId, offerId: options.offerId }).catch(() => null)
+      : null
+    const rowLock = offerLockFromRow(offerRow as Record<string, unknown> | null)
+    const lock = {
+      lockProductAppearance: options.lockProductAppearance ?? rowLock.lockProductAppearance,
+      immutableAttributes: options.immutableAttributes?.length ? options.immutableAttributes : rowLock.immutableAttributes,
     }
+    const web = await generateWebStyleImage({
+      apiKey: xaiKey(),
+      ctx: options.ctxPreview,
+      offerId: options.offerId,
+      aspectRatio: options.aspectRatio,
+      language: 'es',
+      copy: options.copy,
+      scene: options.scene,
+      guidePrompt: options.guidePrompt,
+      postStyle: options.postStyle,
+      textDensity: options.textDensity,
+      ctaStrength: options.ctaStrength,
+      productUrls,
+      supportUrls,
+      referenceMode: options.referenceMode,
+      lock,
+    })
+    generated = web.generated
+    promptUsed = web.prompt
+    postCheck = postCheckSummary(web)
   }
 
   const persistStarted = Date.now()
@@ -857,6 +925,7 @@ async function runImageGenerateBody(options: {
       aspectRatio: generated.aspectRatio,
       grokMode: generated.mode,
       lockApplied: generated.lockApplied,
+      ...(postCheck?.fidelity_warning ? { fidelity_warning: postCheck.fidelity_warning } : {}),
     },
   })
 
@@ -920,7 +989,8 @@ async function runImageGenerateBody(options: {
     estimatedCostUsd: generated.estimatedCostUsd,
     productFidelity: fidelityMode,
     ...(fidelity ? { fidelity } : {}),
-    prompt,
+    ...(postCheck || {}),
+    prompt: promptUsed,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
     note: 'Image saved to Advance library as high-quality JPEG (HTTPS URL only — no blob in job result). Open deepLink to view in chat.',
   }, charged, options.quote, 'execute_image_generate')
