@@ -139,6 +139,11 @@ function build(text: string, lines: string[], spec: FitSpec, size: number, fits:
 }
 
 /** Largest font size (integer px) at which `text` fits the box. */
+/** A wrapped line never starts or ends with a dangling " · " separator (the break replaces it). */
+export function tidySeparators(lines: string[]): string[] {
+  return lines.map((l) => l.replace(/^\s*[·•]\s+/, '').replace(/\s+[·•]\s*$/, '').trim()).filter((l) => l.length > 0)
+}
+
 export function fitText(spec: FitSpec): FittedText {
   const text = normalizeText(spec.text)
   const words = wrapTokens(text)
@@ -152,7 +157,7 @@ export function fitText(spec: FitSpec): FittedText {
       const height = Math.round(size * spec.lineHeight) * lines.length
       if (spec.maxHeight && height > spec.maxHeight) continue
       const finalLines = spec.balance ? balanceLines(words, spec.font, size, spec.maxWidth, lines) : lines
-      return build(text, finalLines, spec, size, true)
+      return build(text, tidySeparators(finalLines), spec, size, true)
     }
     return null
   }

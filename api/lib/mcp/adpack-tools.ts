@@ -90,7 +90,7 @@ function compactItem(item: AdPackItemView) {
     layoutFamily: item.layoutFamily ?? null,
     ...(item.variation !== undefined ? { variation: item.variation } : {}),
     // Stable public storage URLs (never signed / expiring) with explicit size + format (G4).
-    renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}), width: r.width, height: r.height, format: 'png' as const })),
+    renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}), width: r.width, height: r.height, format: 'png' as const, ...(r.qa ? { qa: r.qa } : {}) })),
     charged: item.charged,
     ...(item.autoRetries ? { autoRetries: item.autoRetries } : {}),
     ...(item.fontsUsed ? { fontsUsed: item.fontsUsed } : {}),

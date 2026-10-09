@@ -94,6 +94,8 @@ export interface Zone {
   tone?: 'dark' | 'light'
   /** Fade length as a fraction of the canvas height/width (default 0.16). */
   fade?: number
+  /** Preferred dark text colour when ink text is chosen (kept only when it reads ≥ 4.5:1). */
+  ink?: Rgb
 }
 
 export interface TemplateLayout {

@@ -40,6 +40,7 @@ export function createDefaultRenderer(): Renderer {
         ...(input.layoutFamily ? { layoutFamily: input.layoutFamily } : {}),
         // Generated mode only (exact mode avoids the composite's own placement).
         ...(input.productBox ? { productBox: input.productBox } : {}),
+        ...(input.studioBleed ? { studioBleed: { ...input.studioBleed, layer: toBufferOrString(input.studioBleed.layer)! } } : {}),
         // Brand fonts: bundled → disk cache → Google Fonts (ADPACK_FONT_FETCH=0 disables network).
         fonts: { fetch: fontFetchEnabled() ? (globalThis.fetch as unknown as FetchLike) : null },
       })
@@ -54,6 +55,18 @@ export function createDefaultRenderer(): Renderer {
         layoutFamily: out.layoutReport.layoutFamily,
         placement: out.layoutReport.placement,
         fontsUsed: fontsUsedFrom(out.layoutReport.fonts),
+        qaReport: {
+          width: out.layoutReport.width,
+          height: out.layoutReport.height,
+          elements: out.layoutReport.elements.map((e) => ({ role: e.role, text: e.text, lines: e.lines, box: e.box, contrast: e.contrast, fits: e.fits })),
+          productBox: out.layoutReport.productBox ?? null,
+          productBoxRespected: out.layoutReport.productBoxRespected,
+          textOverProduct: out.layoutReport.textOverProduct,
+          logo: out.layoutReport.logo ?? null,
+          ...(out.layoutReport.logoSelfContained !== undefined ? { logoSelfContained: out.layoutReport.logoSelfContained } : {}),
+          ...(out.layoutReport.logoContrast !== undefined ? { logoContrast: out.layoutReport.logoContrast } : {}),
+          ...(out.layoutReport.bleed ? { bleed: { scale: out.layoutReport.bleed.scale, edgesTouched: out.layoutReport.bleed.edgesTouched } } : {}),
+        },
       }
     },
   }

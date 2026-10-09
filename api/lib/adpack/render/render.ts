@@ -30,6 +30,7 @@ import { composeFamily, FAMILY_SPECS, type LayoutFamily } from './families.js'
 import { ensureBrandFonts, type FontResolution } from './font-resolver.js'
 import { cssFamily, familyFonts, resolveFonts, satoriFonts, type ResolvedFonts } from './fonts.js'
 import { compositeProducts, layoutProductGroup, unionBox, type PlacedProduct } from '../fidelity/composite.js'
+import { compositeBleed, type StudioBleedLayer } from '../fidelity/bleed.js'
 import { estimateLight, gradeFor, gradeImage, lightSummary, type LightModel } from '../fidelity/harmonize.js'
 import { avoidRegions, blockingNodes, overlayBoxes } from './avoid.js'
 import { ALL_RATIOS, inside, makeFrame, overlaps, union, type Frame } from './frame.js'
@@ -63,6 +64,8 @@ interface Assets {
   kitLogos: KitLogo[]
   /** Brand fonts (kit upload → bundled → disk cache → Google Fonts → GitHub), resolved once. */
   fonts: FontResolution
+  /** Round 1b studio bleed layer (exact mode): replaces the cut-out composite. */
+  bleed: StudioBleedLayer | null
   warnings: string[]
 }
 
@@ -71,7 +74,17 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
   const exact = input.productMode === 'exact'
   let product: PreparedLayer | null = null
   const parts: PreparedLayer[] = []
-  if (input.productCutout) {
+  let bleed: StudioBleedLayer | null = null
+  if (exact && input.studioBleed) {
+    const layer = await decodeLayer(input.studioBleed.layer)
+    if (layer) {
+      const pb = input.studioBleed.productBox
+      bleed = { png: layer.png, width: layer.width, height: layer.height, productBox: { ...pb }, backdrop: input.studioBleed.backdrop, edgesTouched: input.studioBleed.edgesTouched ?? [], sourceWidth: layer.width, sourceHeight: layer.height, shadowShare: 1 }
+      // Layout sees the product (+ its real shadow) bbox; the fade ring is canvas tone.
+      product = { png: layer.png, width: Math.max(1, pb.w), height: Math.max(1, pb.h) }
+    } else warnings.push('studio bleed layer could not be decoded; using the cut-out')
+  }
+  if (input.productCutout && !bleed) {
     if (!exact && !CUTOUT_FORMATS.includes(input.format)) {
       warnings.push(`productCutout ignored for ${input.format} (scene carries the product)`)
     } else {
@@ -125,7 +138,7 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
     const r = fonts[role]
     if (r.note) warnings.push(`${role} font "${r.requested ?? ''}": ${r.note}; using ${r.family}`)
   }
-  return { scene, sceneSize, product, parts, logo, kitLogos, fonts, warnings }
+  return { scene, sceneSize, product, parts: bleed ? [] : parts, logo, kitLogos, fonts, bleed, warnings }
 }
 
 type CornerBox = { x0: number; y0: number; x1: number; y1: number }
@@ -256,7 +269,7 @@ async function planZones(layout: TemplateLayout, scene: Buffer, frame: Frame): P
       zone: veryBusy && zone.style !== 'box' ? { ...zone, style: 'box' } : zone,
       texts,
       box,
-      text: useInk ? INK : WHITE,
+      text: useInk ? (zone.ink && contrastRatio(zone.ink, stats.darkest) >= PLAN_CONTRAST ? zone.ink : INK) : WHITE,
       scrim: useInk ? WHITE : BLACK,
       alpha: Math.min(MAX_SCRIM, Math.max(floor, useInk ? aInk : aWhite)),
     })
@@ -670,7 +683,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   let productBoxes = placed.productBoxes
   // P1 #7: ground the product on the plate's surface line (never standing against the wall).
   let grounding: LayoutReport['grounding']
-  if (exact && productBoxes.length && !input.topDown) {
+  if (exact && !assets.bleed && productBoxes.length && !input.topDown) {
     const g = await groundOnSurface(scene, frame, layout, productBoxes)
     grounding = g.report
     if (g.boxes !== productBoxes) {
@@ -683,7 +696,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   const productBoxRespected = productOverlap(layout, guarded, composited) === 0
   // Exact mode relight stage, part 1: light model of the clean plate around the product slot and
   // the shared grade on the plate itself (before panels / scrims, so brand colors stay exact).
-  const harmonize = exact && input.harmonize !== false && productBoxes.length > 0
+  const harmonize = exact && !assets.bleed && input.harmonize !== false && productBoxes.length > 0
   let lightModel: LightModel | null = null
   if (harmonize) {
     lightModel = await estimateLight(scene, unionBox(productBoxes), { light: input.light ?? (input.topDown ? 'top' : undefined), surface: input.topDown ? 'matte' : input.surface })
@@ -743,7 +756,16 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   let base: Buffer = under
   let placements: PlacedProduct[] = []
   let relit = false
-  if (assets.product && productBoxes.length) {
+  let bleedReport: LayoutReport['bleed']
+  if (assets.bleed && productBoxes.length) {
+    // Studio bleed: native photo pixels (with their real contact shadow + AO and light) faded into
+    // the canvas; one global backdrop gain; Lanczos-3 resample (+ unsharp only when enlarging).
+    const b = await compositeBleed(base, assets.bleed, productBoxes[0])
+    base = b.png
+    placements = [{ box: b.box, placed: b.placed, role: 'hero' }]
+    bleedReport = { gain: b.gain.map((g) => Math.round(g * 1000) / 1000) as [number, number, number], scale: b.upscale, upscaled: b.upscale > 1, edgesTouched: assets.bleed.edgesTouched }
+    if (b.upscale > 1) warnings.push(`product enlarged ${b.upscale}x (Lanczos-3 resample + unsharp; not super-resolution)`)
+  } else if (assets.product && productBoxes.length) {
     const layers = [assets.product, ...(exact ? assets.parts : [])].slice(0, productBoxes.length)
     const products = layers.map((p, i) => ({ cutout: p.png, box: productBoxes[i], role: (i ? 'part' : 'hero') as 'hero' | 'part' }))
     // Part 2: shading, white balance, the same grade, light wrap, shadows, reflection, grain.
@@ -877,6 +899,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     productBoxes: placements.map((p) => ({ ...p.box })),
     productAvoid: placed.avoidRegion,
     ...(grounding ? { grounding } : {}),
+    ...(bleedReport ? { bleed: bleedReport } : {}),
     ...(input.topDown ? { view: 'overhead' as const } : {}),
     textOverProduct: !productBoxRespected,
     overlays: overlayBoxes(layout),

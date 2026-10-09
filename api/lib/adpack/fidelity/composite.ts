@@ -15,6 +15,7 @@
 import sharp, { type OverlayOptions } from 'sharp'
 import type { Box } from '../render/types.js'
 import type { LightDirection, PlateSurface } from '../types.js'
+import { matteLayer } from './matte.js'
 import { applyGroundEffects, estimateLight, gradeFor, gradeRaw, harmonizeLayer, whiteBalanceGains, HARMONIZE_LIMITS, type Grade, type HarmonizeReport, type LightModel } from './harmonize.js'
 
 /** Per-channel white-balance cap (owner rule: light may change, identity color may not). */
@@ -48,6 +49,8 @@ export interface CompositeOptions {
   gradeBase?: boolean
   /** Overhead plate + flat lay (P1 #6): drop shadow under every piece, no cast shadow / reflection. */
   topDown?: boolean
+  /** Round 1b: feather + decontaminate the cut-out edge (default true). */
+  matte?: boolean
 }
 
 export interface CompositeResult {
@@ -159,7 +162,10 @@ export async function compositeProducts(opts: CompositeOptions): Promise<Composi
     const background = cropRaw(raw, W, H, box)
     const bgPng = await sharp(background, { raw: { width: box.w, height: box.h, channels: 3 } }).png().toBuffer()
     placements.push({ box, placed, role: opts.products[k].role ?? (placements.length ? 'part' : 'hero'), background: bgPng })
-    layers.push({ placed, rgba, box, background })
+    // Round 1b (B): feathered 1–2 px edge + colour decontamination on what is drawn (the fidelity
+    // reference above stays the plain resized cut-out; interior pixels are identical).
+    const matted = opts.matte === false ? placed : await matteLayer(placed)
+    layers.push({ placed: matted, rgba, box, background })
   }
 
   // Ground effects go on the plate before the products (they sit under them).

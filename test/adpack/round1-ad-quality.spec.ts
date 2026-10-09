@@ -279,7 +279,8 @@ describe('round 1 · P6 price badge: labelled first price, never a line ending i
     for (const width of [120, 150, 180, 220, 260, 320]) {
       const fitted = fitText({ text: '1 kit ₡14.900 · 2 kits ₡29.800 · Envío gratis llevando 2 kits o más', font, maxWidth: width, maxLines: 6, maxSize: 40, minSize: 14, lineHeight: 1.1 })
       for (const line of fitted.lines) expect(line.trim().endsWith('·'), `${width}: ${JSON.stringify(fitted.lines)}`).toBe(false)
-      expect(fitted.lines.join(' ')).toBe(fitted.text)
+      // round 1b: a separator that the wrap leaves at a line edge is dropped (the break replaces it)
+      expect(fitted.lines.join(' ').replace(/\s*·\s*/g, ' ')).toBe(fitted.text.replace(/\s*·\s*/g, ' '))
     }
   })
 })

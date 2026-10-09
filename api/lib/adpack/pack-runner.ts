@@ -46,6 +46,12 @@ import { storageBlobCache, type BlobCache } from './fidelity/cache.js'
 import { prepareProductCutouts, resolveProductPhotos, defaultImageLoader, type ImageLoader, type LoadedCutout } from './fidelity/pipeline.js'
 import { checkPlate, generatePlate, plateLight, plateSurface, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion, type PropsReference } from './fidelity/plate.js'
 import { relightComposite } from './fidelity/relight.js'
+import { analyzeAssetQuality } from './fidelity/asset-quality.js'
+import { upscaleProductPhoto } from './fidelity/upscale.js'
+import { analyzeStudioBackdrop, buildStudioBleed, studioCanvas, STUDIO_SHADOW_MIN } from './fidelity/bleed.js'
+import { runQaGate, type QaGateResult, type QaRequiredFact } from './qa-gate.js'
+import { buildCopyContext } from './copy-shared.js'
+import { textCarriesFact } from './claims.js'
 import { BACKGROUND_LEAK_MAX, fidelityFailReason, scoreFidelity, toFidelityResult, worstFidelity } from './fidelity/score.js'
 import { planProductBoxes } from './render/render.js'
 import { RATIO_SIZE } from './render/frame.js'
@@ -78,6 +84,7 @@ import type {
   RejectedRatio,
   AdPhotoRef,
   SceneCheckResult,
+  QaGateSummary,
 } from './types.js'
 
 /** Feed (4:5) + story (9:16) by default (H6); '1:1' stays available on request or via a free resize. */
@@ -364,6 +371,8 @@ interface RunCtx {
   sceneBytes: Map<string, { bytes: Uint8Array; mimeType: string }>
   /** Exact mode: cut-out bytes per item (hero first) from this call's scene step. */
   cutoutBytes: Map<string, Uint8Array[]>
+  /** Round 1b: studio-bleed layer bytes per item from this call's scene step. */
+  bleedBytes: Map<string, Uint8Array>
   /** Product photo bytes / quality by URL (one download per call). */
   photoMemo: Map<string, { bytes: Uint8Array; quality?: import('./fidelity/asset-quality.js').AssetQuality }>
   /** Background-removed logo bytes for this pack (null = none / failed). */
@@ -403,6 +412,7 @@ export async function advancePack(input: AdvancePackInput): Promise<PackProgress
     known: new Map(loaded.items.map((i) => [i.id, i])),
     sceneBytes: new Map(),
     cutoutBytes: new Map(),
+    bleedBytes: new Map(),
     photoMemo: new Map(),
     logo: null,
     anchorWait: null,
@@ -481,6 +491,9 @@ export const MAX_AUTO_RETRIES = 2
  */
 export function autoRetryMode(error: string): 'copy' | 'scene' | null {
   if (/^copy_(check_)?failed/.test(error)) return 'copy'
+  // Round 1b QA gate: copy problems rewrite the copy; pixel / layout problems re-run the scene.
+  if (/^qa_gate_failed: [^(]*\b(headline|required_facts)\b/.test(error)) return 'copy'
+  if (/^qa_gate_failed/.test(error)) return 'scene'
   if (/^(fidelity_failed|scene_props_failed|scene_failed|scene_product_mismatch|scene_upload_failed|render_failed)/.test(error)) return 'scene'
   return null
 }
@@ -983,6 +996,25 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length + retries
   const light: LightDirection = overhead ? 'top' : plateLight(item.index + retries)
   const surface = overhead ? 'matte' : plateSurface(format, variation)
+  // Round 1b: a studio-shot hero keeps its own backdrop, contact shadows and light (bleed into a
+  // procedural canvas, no paid plate). Anything else falls through to cut-out + generated plate.
+  // (Real kit parts next to the hero are composited by the cut-out path, so a part photo opts out.)
+  if (!overhead && !keptParts.length && (ctx.pack.render?.studioBleed ?? 'auto') !== 'off') {
+    const studio = await tryStudioBleed(ctx, item, cut.hero.stored.sourceUrl, light)
+    if (studio) {
+      ctx.sceneBytes.set(item.id, { bytes: studio.canvas, mimeType: 'image/png' })
+      ctx.cutoutBytes.set(item.id, [cut.hero.bytes])
+      ctx.bleedBytes.set(item.id, studio.layer)
+      return save(ctx, item, {
+        status: 'scene_ready',
+        scene: { imageUrl: studio.canvasUrl, width: STUDIO_CANVAS.width, height: STUDIO_CANVAS.height, model: 'studio-canvas', costUsd: 0, productLocked: true, kind: 'plate', light, surface: 'matte', cutouts: [cut.hero.stored], view: 'perspective', bleed: studio.ref },
+        sceneCheck: { ok: true, productMatches: null, strayText: false, borders: false, score: 1, notes: ['studio bleed: real photo backdrop + shadows kept, procedural canvas', ...cut.warnings].join(' · ').slice(0, 300) },
+        timings: { ...item.timings, sceneMs: Date.now() - t0 },
+        sceneAttempts: 1,
+        error: undefined,
+      })
+    }
+  }
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
   const immutableAttributes = ctx.pack.render?.immutableAttributes ?? offer.immutableAttributes
@@ -1077,17 +1109,65 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   })
 }
 
+/** Procedural studio canvas size (cover-fit to every ratio by the renderer). */
+const STUDIO_CANVAS = { width: 1080, height: 1920 }
+
+/** Canvas tone: the brand's light colour when it is a light near-neutral, else the photo's own backdrop. */
+function studioTone(secondary: string | undefined, backdrop: { r: number; g: number; b: number }): { r: number; g: number; b: number } {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(secondary ?? '').trim())
+  if (m) {
+    const v = parseInt(m[1], 16)
+    const c = { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 }
+    const L = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255
+    const spread = Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b)
+    if (L >= 0.82 && spread <= 34) return c
+  }
+  return backdrop
+}
+
+/** Round 1b: studio bleed for an item's hero photo, or null when the photo is not a studio shot. */
+async function tryStudioBleed(ctx: RunCtx, item: PackItem, sourceUrl: string, light: LightDirection): Promise<{ layer: Uint8Array; canvas: Uint8Array; canvasUrl: string; ref: NonNullable<NonNullable<PackItem['scene']>['bleed']> } | null> {
+  try {
+    const bytes = ctx.photoMemo.get(sourceUrl)?.bytes ?? (await (ctx.input.loadImage ?? defaultImageLoader)(sourceUrl))
+    const an = await analyzeStudioBackdrop(bytes)
+    if (!an.eligible) return null
+    // Low-resolution photo: the existing deterministic step (Lanczos-3 ≤ 2× + edge-aware unsharp,
+    // SSIM / silhouette verified, never redrawn) runs before the bleed. Resampling, not super-res.
+    let source: Uint8Array = bytes
+    const quality = ctx.photoMemo.get(sourceUrl)?.quality ?? (await analyzeAssetQuality(bytes, ctx.pack.dna.language))
+    if (quality?.lowResolution) {
+      const up = await upscaleProductPhoto(bytes)
+      if (up.upscaled) source = up.bytes
+    }
+    const layer = await buildStudioBleed(source)
+    if (layer.shadowShare < STUDIO_SHADOW_MIN) return null
+    const tone = studioTone(ctx.pack.dna.visual?.secondaryColor, layer.backdrop)
+    const canvas = await studioCanvas(STUDIO_CANVAS.width, STUDIO_CANVAS.height, tone, light)
+    const storage = ctx.input.storage
+    const layerUrl = (await storage.upload({ userId: ctx.pack.userId, packId: ctx.pack.id, itemIndex: item.index, kind: 'plate', bytes: new Uint8Array(layer.png), contentType: 'image/png' })).url
+    const canvasUrl = (await storage.upload({ userId: ctx.pack.userId, packId: ctx.pack.id, itemIndex: item.index, kind: 'plate', bytes: new Uint8Array(canvas), contentType: 'image/png' })).url
+    return { layer: new Uint8Array(layer.png), canvas: new Uint8Array(canvas), canvasUrl, ref: { url: layerUrl, productBox: layer.productBox, backdrop: layer.backdrop, edgesTouched: layer.edgesTouched, sourceUrl } }
+  } catch (error) {
+    console.warn('[adpack] studio bleed skipped', item.id, errorMessage(error).slice(0, 160))
+    return null
+  }
+}
+
 interface ExactRenderInputs {
   cutouts: Uint8Array[]
   light?: LightDirection
   surface?: PlateSurface
   /** Overhead plate + flat lay (P1 #6). */
   topDown?: boolean
+  /** Round 1b studio bleed layer (replaces the cut-out composite). */
+  bleed?: { bytes: Uint8Array; ref: NonNullable<NonNullable<PackItem['scene']>['bleed']> }
 }
 
 /** Cut-out bytes for an item (this call's memory, else the stored cut-out URLs). */
-async function exactInputsFromScene(item: PackItem, load: ImageLoader, memory?: Uint8Array[]): Promise<ExactRenderInputs> {
-  const extra = { light: item.scene?.light, ...(item.scene?.surface ? { surface: item.scene.surface } : {}), ...(item.scene?.view === 'overhead' ? { topDown: true } : {}) }
+async function exactInputsFromScene(item: PackItem, load: ImageLoader, memory?: Uint8Array[], bleedMemory?: Uint8Array): Promise<ExactRenderInputs> {
+  const ref = item.scene?.bleed
+  const bleed = ref ? { bytes: bleedMemory ?? (await load(ref.url)), ref } : undefined
+  const extra = { light: item.scene?.light, ...(item.scene?.surface ? { surface: item.scene.surface } : {}), ...(item.scene?.view === 'overhead' ? { topDown: true } : {}), ...(bleed ? { bleed } : {}) }
   if (memory?.length) return { cutouts: memory, ...extra }
   const stored = item.scene?.cutouts ?? []
   if (!stored.length) throw new Error('cutout_missing: no stored cut-out for this ad')
@@ -1190,7 +1270,8 @@ async function renderAllRatios(args: {
   // relight 'auto' (default) = the renderer's deterministic stage; 'ai' adds the free, guarded model pass.
   const relightOn = Boolean(exact && !args.relightAuto && packRelightMode(pack) === 'ai' && args.gateway?.edit)
   const gateway = args.gateway
-  const renderRatio = (ratio: AspectRatio, withAi: boolean) =>
+  const familyFor = (f?: LayoutFamily) => f ?? (exact?.bleed ? 'studio_hero' : item.angle.layoutFamily)
+  const renderRatio = (ratio: AspectRatio, withAi: boolean, family?: LayoutFamily) =>
     renderer.render({
       format: item.angle.format,
       ratio,
@@ -1199,12 +1280,13 @@ async function renderAllRatios(args: {
       visual: pack.dna.visual ?? {},
       language: pack.dna.language,
       // Every family supports both modes; resize keeps the item's family (fonts come from dna.visual).
-      ...(item.angle.layoutFamily ? { layoutFamily: item.angle.layoutFamily } : {}),
+      ...(familyFor(family) ? { layoutFamily: familyFor(family) } : {}),
       ...(args.logo ? { logo: args.logo } : {}),
       ...(exact
         ? {
             productMode: 'exact' as const,
             productCutout: exact.cutouts[0],
+            ...(exact.bleed ? { studioBleed: { layer: exact.bleed.bytes, productBox: exact.bleed.ref.productBox, backdrop: exact.bleed.ref.backdrop, edgesTouched: exact.bleed.ref.edgesTouched } } : {}),
             ...(exact.cutouts.length > 1 ? { productParts: exact.cutouts.slice(1) } : {}),
             ...(exact.light ? { light: exact.light } : {}),
             ...(exact.surface ? { surface: exact.surface } : {}),
@@ -1231,7 +1313,10 @@ async function renderAllRatios(args: {
           }),
     })
   const recall = exact ? cutoutRecallOf(item) : undefined
-  const backgroundLeak = exact ? cutoutLeakOf(item) : undefined
+  // A studio bleed has no cut edge: the cut-out's leftover backdrop does not apply.
+  const backgroundLeak = exact && !exact.bleed ? cutoutLeakOf(item) : undefined
+  const gateOn = Boolean(exact) && (pack.render?.qaGate ?? 'on') !== 'off'
+  const gateInputs = gateOn ? qaGateInputsFor(pack, item, copy) : null
   const outputs = new Map<AspectRatio, RenderOutput>()
   for (const ratio of args.ratios ?? pack.ratios) {
     let r = await renderRatio(ratio, relightOn)
@@ -1257,6 +1342,35 @@ async function renderAllRatios(args: {
           ...(fallback ? { relightFallback: 'auto' as const } : {}),
         }
       : undefined
+    // Round 1b QA gate: alternate layouts first; a render failing a hard check is never delivered.
+    let qa: QaGateSummary | undefined
+    if (gateInputs && fidelity?.passed && r.qaReport) {
+      const tried: LayoutFamily[] = []
+      const first = familyFor(undefined)
+      const order = qaFamilyOrder(first, item.angle.format, Boolean(exact?.bleed))
+      let gate = await gateRender(r, ratio, gateInputs, Boolean(exact?.bleed), backgroundLeak)
+      tried.push(r.layoutFamily ?? first ?? 'bold_pill')
+      for (const alt of order) {
+        if (gate.passed) break
+        if (tried.includes(alt)) continue
+        const again = await renderRatio(ratio, false, alt)
+        const againScored = await scoreRender(again, ratio, false)
+        tried.push(alt)
+        if (!againScored?.fidelity.passed || !again.qaReport) continue
+        const g2 = await gateRender(again, ratio, gateInputs, Boolean(exact?.bleed), backgroundLeak)
+        if (g2.passed || g2.score > gate.score) {
+          r = again
+          scored = againScored
+          gate = g2
+        }
+      }
+      qa = toQaSummary(gate, tried.length, r.layoutFamily)
+      if (!gate.passed) {
+        const f: FidelityResult = fidelity
+        rejected.push({ ratio, reason: `qa_gate_failed: ${gate.failed.join(', ')}${gate.metrics.find((m) => !m.passed)?.detail ? ` (${gate.metrics.find((m) => !m.passed)!.detail})` : ''}`.slice(0, 300), fidelity: { ...f, passed: false }, qa })
+        continue
+      }
+    }
     if (exact && (!fidelity || !fidelity.passed)) {
       // Never deliver an altered product: this ratio is listed, not uploaded as a render.
       const f: FidelityResult = fidelity ?? { score: 0, ssim: null, deltaE: null, passed: false, method: 'composite', ratio }
@@ -1281,7 +1395,7 @@ async function renderAllRatios(args: {
       contentType: 'image/png',
     })
     const jpgUrl = await uploadJpgTwin(storage, pack, item, ratio, r.png)
-    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(fidelity ? { fidelity } : {}), ...(r.fontsUsed ? { fontsUsed: r.fontsUsed } : {}) })
+    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(fidelity ? { fidelity } : {}), ...(r.fontsUsed ? { fontsUsed: r.fontsUsed } : {}), ...(qa ? { qa } : {}) })
     outputs.set(ratio, r)
   }
   if (!exact) {
@@ -1307,6 +1421,58 @@ async function renderAllRatios(args: {
     }
   }
   return { renders: out, fidelity: { ...worst, ...(diffImageUrl ? { diffImageUrl } : {}) }, rejected }
+}
+
+/** Round 1b: what the QA gate checks for an item (required facts + allowed claims). */
+interface QaGateInputs {
+  requiredFacts: QaRequiredFact[]
+  caption: string
+  headline: string
+  claims: string[]
+}
+
+function qaGateInputsFor(pack: Pack, item: PackItem, copy: AdCopy): QaGateInputs | null {
+  try {
+    const cc = buildCopyContext(pack.dna, offerForItem(pack.offer, item.index), item.angle, pack.dna.language)
+    const requiredFacts: QaRequiredFact[] = cc.mustAppear.map((m) => ({ key: m.group, value: m.fact.value, ...(m.group === 'price' && copy.offerLine ? { onImage: true } : {}) }))
+    return { requiredFacts, caption: copy.caption ?? '', headline: copy.headline ?? '', claims: cc.confirmed.map((f) => f.value) }
+  } catch {
+    return { requiredFacts: [], caption: copy.caption ?? '', headline: copy.headline ?? '', claims: [] }
+  }
+}
+
+/** Alternate families tried (in order) when a render fails the gate. */
+export function qaFamilyOrder(first: LayoutFamily | undefined, format: PackItem['angle']['format'], bleed: boolean): LayoutFamily[] {
+  const base: LayoutFamily[] = bleed ? ['studio_hero', 'editorial_minimal', 'full_bleed_type'] : ['badge_corner', 'editorial_minimal', 'full_bleed_type', 'split_panel']
+  const ok = base.filter((f) => f !== first && (f === 'studio_hero' ? ['offer_graphic', 'variant_card', 'explainer'].includes(format) : true))
+  return ok.slice(0, 2)
+}
+
+async function gateRender(r: RenderOutput, ratio: AspectRatio, g: QaGateInputs, bleed: boolean, backgroundLeak?: number): Promise<QaGateResult> {
+  return runQaGate({
+    png: r.png,
+    ratio,
+    report: r.qaReport!,
+    ...(r.productPlacements?.[0] && !bleed ? { heroPlaced: r.productPlacements[0].placed } : {}),
+    bleed,
+    ...(backgroundLeak !== undefined ? { backgroundLeak } : {}),
+    requiredFacts: g.requiredFacts,
+    caption: g.caption,
+    headline: g.headline,
+    claims: g.claims,
+    matchFact: (text, fact) => textCarriesFact(text, fact),
+  })
+}
+
+function toQaSummary(g: QaGateResult, attempts: number, family?: LayoutFamily): QaGateSummary {
+  return {
+    passed: g.passed,
+    score: g.score,
+    failed: g.failed,
+    metrics: g.metrics.map((m) => ({ id: m.id, value: m.value, threshold: m.threshold, passed: m.passed, ...(m.detail ? { detail: m.detail } : {}) })),
+    attempts,
+    ...(family ? { layoutFamily: family } : {}),
+  }
 }
 
 /** The worst rejected ratio's fidelity (item-level value when nothing was delivered). */
@@ -1340,7 +1506,7 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   let exact: ExactRenderInputs | null = null
   if (exactMode) {
     try {
-      exact = await exactInputsFromScene(item, ctx.input.loadImage ?? defaultImageLoader, ctx.cutoutBytes.get(item.id))
+      exact = await exactInputsFromScene(item, ctx.input.loadImage ?? defaultImageLoader, ctx.cutoutBytes.get(item.id), ctx.bleedBytes.get(item.id))
     } catch (error) {
       return fail(ctx, item, `cutout_failed: ${errorMessage(error)}`, { timings: { ...item.timings, renderMs: Date.now() - t0 } })
     }
@@ -1375,7 +1541,8 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
       // P0 #3: no ratio kept the real product → the ad fails (no charge); every ratio is listed.
       const worst = rejectedRatios[0] ? rejectedRatios.reduce((w, r) => (r.fidelity.score < w.fidelity.score ? r : w)) : null
       if (!worst) return fail(ctx, item, 'fidelity_failed: product placement missing in render', { renders: [], timings })
-      return fail(ctx, item, `fidelity_failed: ${worst.reason} (${rejectedRatios.map((r) => r.ratio).join(', ')})`, { fidelity: worst.fidelity, sceneCheck, renders: [], rejectedRatios, timings })
+      const prefix = worst.qa ? '' : 'fidelity_failed: '
+      return fail(ctx, item, `${prefix}${worst.reason} (${rejectedRatios.map((r) => r.ratio).join(', ')})`, { fidelity: worst.fidelity, sceneCheck, renders: [], rejectedRatios, timings })
     }
     // Fidelity order per ratio: AI relight → deterministic relight fallback (renderAllRatios) →
     // one re-plate AT that ratio (here, free, no item retry used) → listed in rejectedRatios.
@@ -1385,6 +1552,11 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     if (exactMode && exact && renders.length && rejectedNow.length && ctx.input.ratioReplate !== false && Date.now() < ctx.deadline) {
       const still: RejectedRatio[] = []
       for (const rj of rejectedNow) {
+        // A QA-gate rejection already tried the alternate layouts; a new plate does not fix it.
+        if (rj.qa || exact.bleed) {
+          still.push(rj)
+          continue
+        }
         try {
           const rp = await replateOneRatio({ gateway: ctx.input.gateway, renderer: ctx.input.renderer, storage: ctx.input.storage, pack: ctx.pack, item, copy: item.copy, exact, ratio: rj.ratio, maxPlateRetries: 0 })
           replateCost += rp.costUsd

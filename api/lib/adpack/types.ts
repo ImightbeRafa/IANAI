@@ -24,7 +24,7 @@ export type AngleCategory =
   | 'prueba_social'
 
 /** Visual layout families (see render/families.ts). */
-export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native'
+export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native' | 'studio_hero'
 
 /** How much the planner decides on its own: high = angle, hook, format, layout and scene; guided = the agent's picks are kept. */
 export type CreativeFreedom = 'high' | 'guided'
@@ -266,6 +266,10 @@ export interface PackRenderOptions {
   relight?: RelightMode
   allowedProps?: string[]
   immutableAttributes?: string[]
+  /** Round 1b: 'auto' (default) bleeds studio-shot photos into a procedural canvas; 'off' = always cut-out + plate. */
+  studioBleed?: 'auto' | 'off'
+  /** Round 1b: QA gate on exact renders ('on' default; 'off' only for QA comparisons). */
+  qaGate?: 'on' | 'off'
 }
 
 /** composite = plain cut-out (no harmonization); harmonized = deterministic relight stage; relit = + AI pass; generated = model-drawn. */
@@ -312,6 +316,8 @@ export interface RejectedRatio {
   /** One-line reason (e.g. "detail ssim 0.84 < 0.88"). */
   reason: string
   fidelity: FidelityResult
+  /** Round 1b: QA gate scores when the ratio failed the gate (after the alternate layouts). */
+  qa?: QaGateSummary
 }
 
 /** The real product photo an ad used (P1 #8). */
@@ -547,6 +553,33 @@ export interface SceneResult {
    * product detection (another step); the renderer never places copy over it.
    */
   productBox?: { x: number; y: number; w: number; h: number }
+  /**
+   * Round 1b studio bleed (exact mode): the hero photo is a studio shot, so its own backdrop,
+   * contact shadows and light are kept — the layer is faded into a procedural canvas (`imageUrl`,
+   * model 'studio-canvas', no paid plate). Absent = cut-out + generated plate.
+   */
+  bleed?: StudioBleedRef
+}
+
+/** Round 1b: stored studio-bleed layer of an ad (fidelity/bleed.ts). */
+export interface StudioBleedRef {
+  url: string
+  productBox: { x: number; y: number; w: number; h: number }
+  backdrop: { r: number; g: number; b: number }
+  edgesTouched: string[]
+  sourceUrl: string
+}
+
+/** Round 1b QA gate summary of one delivered / rejected render (qa-gate.ts). */
+export interface QaGateSummary {
+  passed: boolean
+  score: number
+  failed: string[]
+  metrics: Array<{ id: string; value: number | null; threshold: string; passed: boolean; detail?: string }>
+  /** Render attempts used for this ratio (1 = first layout passed). */
+  attempts: number
+  /** Layout family that passed (or the last tried). */
+  layoutFamily?: LayoutFamily
 }
 
 export interface SceneCheckResult {
@@ -584,6 +617,8 @@ export interface RenderedAd {
   plateUrl?: string
   /** #9: fonts actually drawn in this render (stored in the renders jsonb, no migration). */
   fontsUsed?: FontsUsed
+  /** Round 1b QA gate scores of this render (stored in the renders jsonb, no migration). */
+  qa?: QaGateSummary
 }
 
 /** #9: the families a render actually drew, and every fallback taken (brand font missing, glyphs). */

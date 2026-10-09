@@ -72,6 +72,12 @@ export interface RenderAdInput {
   /** @deprecated Corner form of `productBox` (normalized 0–1); folded into `productBox`. */
   productAvoid?: { x0: number; y0: number; x1: number; y1: number }
   /** Exact mode relight hook on the text-free composite; null keeps the deterministic composite. */
+  /**
+   * Round 1b studio bleed (exact mode): the real photo's own backdrop, shadows and light are kept —
+   * the layer (fidelity/bleed.ts) is faded into a procedural studio canvas (`sceneImage`) instead of
+   * cutting the product out. No synthetic shadow / relight is added (the photo's are real).
+   */
+  studioBleed?: { layer: ImageInput; productBox: Box; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[] }
   relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part'; background?: Buffer }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
 }
 
@@ -120,6 +126,8 @@ export interface LayoutReport {
    * base rests on the surface instead of against the wall.
    */
   grounding?: { surfaceLineY: number | null; baseY: number; snappedPx: number }
+  /** Round 1b studio bleed: backdrop gain, resample scale (>1 = enlarged, Lanczos-3, not super-res). */
+  bleed?: { gain: [number, number, number]; scale: number; upscaled: boolean; edgesTouched: string[] }
   /** 'overhead' when a flat lay was composited on a top-down plate (P1 #6). */
   view?: 'overhead'
   /** Boxes of every text, pill, card and icon drawn over the scene. */

@@ -122,6 +122,14 @@ export const FAMILY_SPECS: Record<LayoutFamily, FamilySpec> = {
     sceneHint: (f) =>
       f === 'before_after' ? '' : 'product in the upper-middle of the frame; the lower 40% simple and low-detail (a white card covers it)',
   },
+  studio_hero: {
+    id: 'studio_hero',
+    label: { es: 'Estudio editorial', en: 'Studio editorial' },
+    description: 'Approved v1 look: studio canvas with the real photo bled in large, kicker with accent rule, big headline, price as type with the shipping rule, facts line, text-link CTA and a large logo badge. Used automatically for studio-bleed renders.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
   ugc_native: {
     id: 'ugc_native',
     label: { es: 'Post nativo', en: 'Native post' },
@@ -674,10 +682,12 @@ function splitColumns(
 }
 
 /** Logo slot of a given max height at a corner of a box. */
-function logoIn(ctx: Ctx, area: Box, side: 'left' | 'right', maxH = 56): { box?: Box; nextY: number } {
+function logoIn(ctx: Ctx, area: Box, side: 'left' | 'right', maxH = 84): { box?: Box; nextY: number } {
   if (!ctx.logo) return { nextY: area.y }
-  const mh = Math.round(maxH * ctx.frame.type)
-  const s = Math.min(220 / ctx.logo.width, mh / ctx.logo.height)
+  // Square / tall logos get more height (same visual weight as a wide wordmark).
+  const aspect = ctx.logo.width / ctx.logo.height
+  const mh = Math.round(maxH * ctx.frame.type * (aspect < 1.4 ? 1.3 : 1))
+  const s = Math.min(300 / ctx.logo.width, mh / ctx.logo.height)
   const w = Math.max(1, Math.round(ctx.logo.width * s))
   const h = Math.max(1, Math.round(ctx.logo.height * s))
   const x = side === 'left' ? area.x : area.x + area.w - w
@@ -891,7 +901,7 @@ function fullBleedType(ctx: Ctx): TemplateLayout {
   const warnings: string[] = []
   const c = contentOf(ctx, warnings)
   const atTop = ctx.placement === 'top'
-  const logo = logoIn(ctx, S, atTop ? 'right' : 'left', 50)
+  const logo = logoIn(ctx, S, atTop ? 'right' : 'left', 80)
   const z = 'type'
   const st = new Stack(0)
   st.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'left', size: 146, min: 58, lines: 4, prefer: 3, lh: Math.min(1.0, headlineLh(ctx)), surface: { zone: z } }); return { nodes: [t], bottom: bottom(t.box) } })
@@ -962,7 +972,7 @@ function badgeCorner(ctx: Ctx): TemplateLayout {
   const stickerFill = ensureReadableFill(ctx.palette.badge)
   const btnFill = ensureReadableFill(ctx.palette.primary)
   if (c.split) {
-    const logo = logoIn(ctx, S, 'left', 48)
+    const logo = logoIn(ctx, S, 'left', 80)
     const top = new Stack(logo.box ? logo.nextY : S.y)
     top.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'center', size: 78, min: 40, lines: 3, surface: { zone: 'top' } }); return { nodes: [t], bottom: bottom(t.box) } })
     if (c.subline) top.add(sz(ctx, 14), (y) => { const t = sublineText(ctx, c.subline, { x: S.x + S.w * 0.06, y, w: S.w * 0.88, align: 'center', size: 30, surface: { zone: 'top' } }); return { nodes: [t], bottom: bottom(t.box) } })
@@ -987,7 +997,7 @@ function badgeCorner(ctx: Ctx): TemplateLayout {
   // Headline top-left, sticker top-right, spec strip + squared button at the bottom.
   const D = Math.round(Math.min(S.w * 0.34, sz(ctx, 300)))
   const sticker = offerSticker(ctx, { right: right(S), top: S.y, fill: stickerFill, maxD: D })
-  const logo = logoIn(ctx, S, 'left', 48)
+  const logo = logoIn(ctx, S, 'left', 80)
   const headW = sticker ? S.w - sticker.box.w - sz(ctx, 36) : Math.round(S.w * 0.82)
   const top = new Stack(logo.box ? logo.nextY : S.y)
   top.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: headW, align: 'left', size: 80, min: 38, lines: 4, prefer: 3, surface: { zone: 'top' } }); return { nodes: [t], bottom: bottom(t.box) } })
@@ -1073,7 +1083,7 @@ function framedCard(ctx: Ctx): TemplateLayout {
     { kind: 'rect', layer: 'under', box: { x: cardX + pad, y: cardY, w: sz(ctx, 70), h: Math.max(5, sz(ctx, 7)) }, color: ctx.palette.accent, radius: 0, decor: true },
     ...st.nodes,
   ]
-  const logo = atTop ? logoIn(ctx, { x: S.x, y: bottom(S) - Math.round(56 * ctx.frame.type), w: S.w, h: 60 }, 'left') : logoIn(ctx, S, 'left')
+  const logo = atTop ? logoIn(ctx, { x: S.x, y: bottom(S) - Math.round(84 * ctx.frame.type), w: S.w, h: 88 }, 'left') : logoIn(ctx, S, 'left')
   const freeTop = atTop ? cardY + cardH + sz(ctx, 24) : logo.box ? logo.nextY : S.y
   const freeBottom = atTop ? (logo.box ? logo.box.y - sz(ctx, 20) : bottom(S)) : cardY - sz(ctx, 24)
   const productBox = c.cutout && ctx.product ? { x: S.x, y: freeTop, w: S.w, h: Math.max(1, freeBottom - freeTop) } : undefined
@@ -1164,6 +1174,69 @@ function ugcNative(ctx: Ctx): TemplateLayout {
 }
 
 // ---------------------------------------------------------------------------
+// studio_hero (round 1b) — the approved Prototipo v1 look: studio canvas, real photo bled in large,
+// mono-style kicker with an accent rule, big two-line headline, price as type with the shipping
+// rule underneath, compact facts line, text-link CTA and a large self-contained logo badge
+// bottom-right. Chosen automatically for studio-bleed renders (not in the rotation).
+// ---------------------------------------------------------------------------
+
+function studioHero(ctx: Ctx): TemplateLayout {
+  const { safe: S, tall } = ctx.frame
+  const warnings: string[] = []
+  const c = contentOf(ctx, warnings)
+  const nodes: Node[] = []
+  const ink = ctx.palette.primary
+  const accent = ctx.palette.accent
+  // Kicker: accent rule + subline (small), top-left.
+  let topY = S.y
+  if (c.subline) {
+    const ruleW = sz(ctx, 46)
+    const ruleGap = sz(ctx, 16)
+    const t = sublineText(ctx, c.subline, { x: S.x + ruleW + ruleGap, y: S.y, w: S.w - ruleW - ruleGap, align: 'left', size: tall ? 28 : 26, lines: 2, surface: { zone: 'kick' } })
+    const lh = t.fitted.lineHeightPx
+    nodes.push({ kind: 'rect', layer: 'over', box: { x: S.x, y: Math.round(S.y + lh / 2 - 2), w: ruleW, h: Math.max(3, sz(ctx, 4)) }, color: accent, radius: 1, decor: true })
+    nodes.push(t)
+    topY = bottom(t.box)
+  }
+  // Bottom group (anchored to the safe bottom): headline, price, shipping, facts, CTA + logo row.
+  const z = 'studio'
+  const parts = ctx.copy.offer ? ctx.copy.offer.split(' · ').map((p) => p.trim()).filter(Boolean) : []
+  const shipIdx = parts.length >= 2 ? parts.findIndex((p, i) => i > 0 && SHIPPING_PART_RE.test(p)) : -1
+  const priceText = shipIdx > 0 ? parts.filter((_, i) => i !== shipIdx).join(' · ') : ctx.copy.offer
+  const shipText = shipIdx > 0 ? parts[shipIdx] : ''
+  const st = new Stack(0)
+  st.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'left', size: tall ? 104 : 92, min: 46, lines: 3, prefer: 2, lh: Math.min(1.04, headlineLh(ctx)), surface: { zone: z } }); return { nodes: [t], bottom: bottom(t.box) } })
+  if (priceText) st.add(sz(ctx, 22), (y) => { const t = textNode('offer', priceText, { x: S.x, y, maxW: S.w, align: 'left', font: headingFont(ctx), size: sz(ctx, tall ? 72 : 64), min: sz(ctx, 34), lines: 2, prefer: 1, preferMin: sz(ctx, 44), lh: 1.08, segmentBreaks: true, zone: z, color: ink }); return { nodes: [t], bottom: bottom(t.box) } })
+  if (shipText) st.add(sz(ctx, 10), (y) => { const t = textNode('offer', shipText, { x: S.x, y, maxW: S.w, align: 'left', font: bodyFont(ctx, true), size: sz(ctx, 26), min: sz(ctx, 20), lines: 2, lh: 1.25, zone: z, color: ink }); return { nodes: [t], bottom: bottom(t.box) } })
+  if (c.list?.items.length) st.add(sz(ctx, 18), (y) => inlineList(ctx, c.list!.items, { x: S.x, y, w: S.w, zone: z, dot: accent, size: 24 }))
+  const logo = logoIn(ctx, { x: S.x, y: 0, w: S.w, h: 0 }, 'right', tall ? 92 : 88)
+  const logoW = logo.box ? logo.box.w + sz(ctx, 30) : 0
+  st.add(sz(ctx, 26), (y) => {
+    const cta = ctaLink(ctx, { x: S.x, y, maxW: S.w - logoW, align: 'left', surface: { zone: z }, size: 30 })
+    const rowH = Math.max(cta?.box.h ?? 0, logo.box?.h ?? 0)
+    const out: Node[] = []
+    if (cta) {
+      moveNodes(cta.nodes, 0, (rowH - cta.box.h) / 2)
+      out.push(...cta.nodes)
+    }
+    if (logo.box) logo.box = { ...logo.box, y: Math.round(y + (rowH - logo.box.h) / 2) }
+    return { nodes: out, bottom: y + rowH }
+  })
+  const h = st.y
+  moveNodes(st.nodes, 0, bottom(S) - h)
+  if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+  nodes.push(...st.nodes)
+  const groupTop = bottom(S) - h
+  let productBox: Box | undefined
+  if (c.cutout && ctx.product) {
+    const y0 = topY + sz(ctx, tall ? 60 : 36)
+    productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, groupTop - sz(ctx, tall ? 50 : 30) - y0) }
+  }
+  const fits = groupTop >= topY + sz(ctx, 40) && (!productBox || productBox.h >= ctx.frame.H * 0.24)
+  return { nodes, zones: [{ id: 'kick', style: 'gradient-top', tone: 'light', fade: 0.12, ink }, { id: z, style: 'gradient-bottom', tone: 'light', fade: 0.2, ink }], productBox, productValign: 'bottom', logoBox: logo.box, fits, warnings }
+}
+
+// ---------------------------------------------------------------------------
 // Registry + mirroring
 // ---------------------------------------------------------------------------
 
@@ -1188,6 +1261,7 @@ const COMPOSERS: Record<Exclude<LayoutFamily, 'bold_pill'>, (ctx: Ctx) => Templa
   badge_corner: badgeCorner,
   framed_card: framedCard,
   ugc_native: ugcNative,
+  studio_hero: studioHero,
 }
 
 /** Lay out one format in one family at `ctx.placement` / `ctx.s`. */

@@ -469,16 +469,25 @@ describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, app
     }
 
     // Exact product: every composited cut-out comes from an imported photo (parts never invented).
+    // Round 1b: a studio-shot photo (light seamless backdrop + its own contact shadow) is bled into a
+    // procedural canvas — no paid plate at all; any other photo still gets the plate flow below.
     const plateCalls = w.gateway.sceneCalls
-    expect(plateCalls.length).toBeGreaterThanOrEqual(2)
-    for (const call of plateCalls) {
-      expect(call.refs).toEqual([]) // the image model never sees (and never redraws) the product
-      expect(call.prompt).toContain('NO product')
-      expect(call.prompt).toContain('hélice blanca') // immutable attributes reach the plate prompt
+    const allItems = (await w.packStore.getPack(approvalRequestId, USER))!.items
+    const bledItems = allItems.filter((i) => i.scene?.bleed)
+    for (const i of bledItems) expect(i.scene).toMatchObject({ model: 'studio-canvas', costUsd: 0 })
+    if (bledItems.length === allItems.length) {
+      expect(plateCalls.length).toBe(0)
+    } else {
+      expect(plateCalls.length).toBeGreaterThanOrEqual(allItems.length - bledItems.length)
+      for (const call of plateCalls) {
+        expect(call.refs).toEqual([]) // the image model never sees (and never redraws) the product
+        expect(call.prompt).toContain('NO product')
+        expect(call.prompt).toContain('hélice blanca') // immutable attributes reach the plate prompt
+      }
+      const plateChecks = w.gateway.visionCalls.filter((c) => c.user.includes('background plate'))
+      expect(plateChecks.length).toBeGreaterThanOrEqual(allItems.length - bledItems.length)
+      expect(plateChecks.every((c) => c.user.includes('chasis negro'))).toBe(true)
     }
-    const plateChecks = w.gateway.visionCalls.filter((c) => c.user.includes('background plate'))
-    expect(plateChecks.length).toBeGreaterThanOrEqual(2)
-    expect(plateChecks.every((c) => c.user.includes('chasis negro'))).toBe(true)
     // Credits charged = approved total (one charge per finished ad).
     expect(w.charges.length * PER_AD).toBe(prompt.payload.approval.total)
     expect(status.payload.chargedCredits).toBe(prompt.payload.approval.total)

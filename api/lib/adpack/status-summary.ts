@@ -6,7 +6,7 @@
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
 import { findForbiddenHits } from './check-copy.js'
-import type { AdLanguage, AdPhotoRef, AngleCategory, AspectRatio, BrandDna, CopyCheckIssue, FactKey, FidelityMethod, FidelityResult, FontsUsed, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AdPhotoRef, AngleCategory, AspectRatio, BrandDna, CopyCheckIssue, FactKey, FidelityMethod, FidelityResult, FontsUsed, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus, QaGateSummary } from './types.js'
 
 /** The real photo(s) an ad used (P1 #8): exact = its cut-outs' sources, generated = the locked scene photo. */
 export function photoViews(item: Pick<PackItem, 'scene'>): { photo?: AdPhotoRef; parts?: AdPhotoRef[] } {
@@ -118,6 +118,8 @@ export interface AdPackDeliverableFile {
   placement: 'feed' | 'story' | 'square' | 'landscape'
   /** Product fidelity of this file (exact mode: detail SSIM, silhouette IoU, hue shift vs the real cut-out). */
   fidelity?: AdPackFidelitySummary
+  /** Round 1b: automated QA gate scores of this file (edge, shadow, sharpness, safe zones, text, facts, logo, headline, contrast). */
+  qa?: QaGateSummary
 }
 
 /**
@@ -143,6 +145,8 @@ export interface AdPackRejectedRatioSummary {
   ratio: AspectRatio
   reason: string
   fidelity: AdPackFidelitySummary
+  /** Round 1b: QA gate scores when the gate (not fidelity) rejected the ratio. */
+  qa?: QaGateSummary
   retry: { tool: 'adpack_regenerate'; arguments: { packId: string; itemId: string; ratio: AspectRatio }; call: string }
 }
 
@@ -218,7 +222,7 @@ function fidelitySummary(f: FidelityResult): AdPackFidelitySummary {
 function rejectedRatioSummaries(packId: string, item: PackItem): AdPackRejectedRatioSummary[] {
   return (item.rejectedRatios ?? []).map((r) => {
     const args = { packId, itemId: item.id, ratio: r.ratio }
-    return { ratio: r.ratio, reason: r.reason, fidelity: fidelitySummary(r.fidelity), retry: { tool: 'adpack_regenerate' as const, arguments: args, call: `adpack_regenerate ${JSON.stringify(args)}` } }
+    return { ratio: r.ratio, reason: r.reason, fidelity: fidelitySummary(r.fidelity), ...(r.qa ? { qa: r.qa } : {}), retry: { tool: 'adpack_regenerate' as const, arguments: args, call: `adpack_regenerate ${JSON.stringify(args)}` } }
   })
 }
 
@@ -236,6 +240,7 @@ export function failureReason(error: string | undefined, language: AdLanguage): 
   if (e.startsWith('copy_check_failed') && e.includes('urgency')) return es ? 'el texto metía presión/urgencia que la marca no usa' : 'copy used urgency the brand does not allow'
   if (e.startsWith('cutout_incomplete')) return es ? 'el recorte perdía piezas del producto (subí la foto con fondo que contraste o un PNG recortado por pieza)' : 'the cut-out dropped product pieces (upload a photo on a contrasting background or a cut-out PNG per piece)'
   if (e.startsWith('cutout_failed')) return es ? 'no se pudo recortar el producto de la foto (subí una foto con fondo limpio)' : 'the product could not be cut out of the photo (upload one on a clean background)'
+  if (e.startsWith('qa_gate_failed')) return es ? 'el control de calidad automático rechazó la imagen (ver qa en rejectedRatios)' : 'the automatic quality gate rejected the image (see qa in rejectedRatios)'
   if (e.startsWith('fidelity_failed')) return es ? 'el producto no quedó idéntico a la foto' : 'the product did not stay identical to the photo'
   if (e.startsWith('scene_props_failed')) return es ? 'la escena inventaba piezas u objetos del producto' : 'the scene invented product parts or objects'
   if (e.startsWith('copy_check_failed')) return es ? 'el texto no pasó las reglas de datos' : 'copy broke the facts rules'
@@ -358,6 +363,7 @@ export function buildStatusExtras(input: {
           format: 'png' as const,
           placement: PLACEMENT[r.ratio],
           ...(r.fidelity ? { fidelity: fidelitySummary(r.fidelity) } : {}),
+          ...(r.qa ? { qa: r.qa } : {}),
         })),
         forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
         attempts: 1 + (i.angle.autoRetry?.count ?? 0),
