@@ -125,7 +125,31 @@ export const FAMILY_SPECS: Record<LayoutFamily, FamilySpec> = {
   studio_hero: {
     id: 'studio_hero',
     label: { es: 'Estudio editorial', en: 'Studio editorial' },
-    description: 'Approved v1 look: studio canvas with the real photo bled in large, kicker with accent rule, big headline, price as type with the shipping rule, facts line, text-link CTA and a large logo badge. Used automatically for studio-bleed renders.',
+    description: 'Approved v1 look (cream, product top, text bottom): studio canvas with the real photo bled in large, kicker with accent rule, big headline, price as type with the shipping rule, facts line, text-link CTA and a large logo badge. Used automatically for studio-bleed renders.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
+  studio_top: {
+    id: 'studio_top',
+    label: { es: 'Estudio titular arriba', en: 'Estudio titular arriba' },
+    description: 'Studio canvas: headline with accent underline on top, the real photo bled in large, price + facts + CTA row at the bottom. Studio-bleed renders only.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
+  studio_navy_top: {
+    id: 'studio_navy_top',
+    label: { es: 'Estudio banda navy arriba', en: 'Estudio banda navy arriba' },
+    description: 'Navy band on top with headline, price and shipping rule; the real photo bled in large on the studio canvas; CTA + logo row at the bottom. Studio-bleed renders only.',
+    formats: ['offer_graphic', 'variant_card', 'explainer'],
+    placements: () => ['default'],
+    sceneHint: () => '',
+  },
+  studio_navy_bottom: {
+    id: 'studio_navy_bottom',
+    label: { es: 'Estudio banda navy abajo', en: 'Estudio banda navy abajo' },
+    description: 'Real photo bled in large on the studio canvas; navy band at the bottom with headline, price, shipping rule, CTA and logo. Studio-bleed renders only.',
     formats: ['offer_graphic', 'variant_card', 'explainer'],
     placements: () => ['default'],
     sceneHint: () => '',
@@ -687,7 +711,7 @@ function logoIn(ctx: Ctx, area: Box, side: 'left' | 'right', maxH = 84): { box?:
   // Square / tall logos get more height (same visual weight as a wide wordmark).
   const aspect = ctx.logo.width / ctx.logo.height
   const mh = Math.round(maxH * ctx.frame.type * (aspect < 1.4 ? 1.3 : 1))
-  const s = Math.min(300 / ctx.logo.width, mh / ctx.logo.height)
+  const s = Math.min((aspect >= 4 ? 420 : 300) / ctx.logo.width, mh / ctx.logo.height)
   const w = Math.max(1, Math.round(ctx.logo.width * s))
   const h = Math.max(1, Math.round(ctx.logo.height * s))
   const x = side === 'left' ? area.x : area.x + area.w - w
@@ -1174,67 +1198,174 @@ function ugcNative(ctx: Ctx): TemplateLayout {
 }
 
 // ---------------------------------------------------------------------------
-// studio_hero (round 1b) — the approved Prototipo v1 look: studio canvas, real photo bled in large,
-// mono-style kicker with an accent rule, big two-line headline, price as type with the shipping
-// rule underneath, compact facts line, text-link CTA and a large self-contained logo badge
-// bottom-right. Chosen automatically for studio-bleed renders (not in the rotation).
+// Studio families (rounds 1b–1c) — the approved Prototipo v1 look on a procedural studio canvas
+// with the real photo bled in BIG. Four distinct compositions rotate per angle so a pack never
+// repeats a layout:
+//   studio_hero       cream · product top, headline + price + facts + CTA bottom-left
+//   studio_top        cream · headline top with accent underline, product middle, price/CTA row bottom
+//   studio_navy_top   navy band top (headline, price, facts) · product on cream · CTA row bottom
+//   studio_navy_bottom cream product top · navy band bottom (headline, price, facts, CTA, logo)
+// Each ad carries at most: 1 headline, 1 price line, 1 small facts line (the shipping rule), a CTA
+// and the logo. Long facts (age, not-included, WhatsApp) live in the caption.
 // ---------------------------------------------------------------------------
 
-function studioHero(ctx: Ctx): TemplateLayout {
-  const { safe: S, tall } = ctx.frame
+type StudioVariant = 'hero' | 'top' | 'navy_top' | 'navy_bottom'
+
+interface StudioParts {
+  priceText: string
+  shipText: string
+}
+
+function studioParts(ctx: Ctx): StudioParts {
+  const parts = ctx.copy.offer ? ctx.copy.offer.split(' · ').map((p) => p.trim()).filter(Boolean) : []
+  const shipIdx = parts.length >= 2 ? parts.findIndex((p, i) => i > 0 && SHIPPING_PART_RE.test(p)) : -1
+  return { priceText: shipIdx > 0 ? parts.filter((_, i) => i !== shipIdx).join(' · ') : ctx.copy.offer ?? '', shipText: shipIdx > 0 ? parts[shipIdx] : '' }
+}
+
+function studioLayout(ctx: Ctx, variant: StudioVariant): TemplateLayout {
+  const { safe: S, tall, W, H } = ctx.frame
   const warnings: string[] = []
   const c = contentOf(ctx, warnings)
   const nodes: Node[] = []
-  const ink = ctx.palette.primary
   const accent = ctx.palette.accent
-  // Kicker: accent rule + subline (small), top-left.
-  let topY = S.y
-  if (c.subline) {
-    const ruleW = sz(ctx, 46)
-    const ruleGap = sz(ctx, 16)
-    const t = sublineText(ctx, c.subline, { x: S.x + ruleW + ruleGap, y: S.y, w: S.w - ruleW - ruleGap, align: 'left', size: tall ? 28 : 26, lines: 2, surface: { zone: 'kick' } })
-    const lh = t.fitted.lineHeightPx
-    nodes.push({ kind: 'rect', layer: 'over', box: { x: S.x, y: Math.round(S.y + lh / 2 - 2), w: ruleW, h: Math.max(3, sz(ctx, 4)) }, color: accent, radius: 1, decor: true })
-    nodes.push(t)
-    topY = bottom(t.box)
+  const dark = (ctx.canvasLum ?? 1) < 0.4
+  const P = ensureReadableFill(ctx.palette.primary)
+  const onP = readableOn(P)
+  const accentP = accentOn(ctx, P)
+  const ink = dark ? WHITE : ctx.palette.primary
+  const { priceText, shipText } = studioParts(ctx)
+  const LIGHT = 'studio'
+  const surface = (band: boolean): Surface => (band ? { fill: P } : { zone: LIGHT })
+  const colorFor = (band: boolean): Rgb | undefined => (band ? onP : ink)
+  const shipColor = (band: boolean): Rgb | undefined => (band ? (contrastRatio(accentP, P) >= 4.5 ? accentP : onP) : ink)
+
+  const headline = (y: number, band: boolean, size: number): { nodes: Node[]; bottom: number } => {
+    const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'left', size, min: 46, lines: 3, prefer: 2, lh: Math.min(1.04, headlineLh(ctx)), surface: surface(band) })
+    return { nodes: [t], bottom: bottom(t.box) }
   }
-  // Bottom group (anchored to the safe bottom): headline, price, shipping, facts, CTA + logo row.
-  const z = 'studio'
-  const parts = ctx.copy.offer ? ctx.copy.offer.split(' · ').map((p) => p.trim()).filter(Boolean) : []
-  const shipIdx = parts.length >= 2 ? parts.findIndex((p, i) => i > 0 && SHIPPING_PART_RE.test(p)) : -1
-  const priceText = shipIdx > 0 ? parts.filter((_, i) => i !== shipIdx).join(' · ') : ctx.copy.offer
-  const shipText = shipIdx > 0 ? parts[shipIdx] : ''
-  const st = new Stack(0)
-  st.add(0, (y) => { const t = headlineText(ctx, c.headline, { x: S.x, y, w: S.w, align: 'left', size: tall ? 104 : 92, min: 46, lines: 3, prefer: 2, lh: Math.min(1.04, headlineLh(ctx)), surface: { zone: z } }); return { nodes: [t], bottom: bottom(t.box) } })
-  if (priceText) st.add(sz(ctx, 22), (y) => { const t = textNode('offer', priceText, { x: S.x, y, maxW: S.w, align: 'left', font: headingFont(ctx), size: sz(ctx, tall ? 72 : 64), min: sz(ctx, 34), lines: 2, prefer: 1, preferMin: sz(ctx, 44), lh: 1.08, segmentBreaks: true, zone: z, color: ink }); return { nodes: [t], bottom: bottom(t.box) } })
-  if (shipText) st.add(sz(ctx, 10), (y) => { const t = textNode('offer', shipText, { x: S.x, y, maxW: S.w, align: 'left', font: bodyFont(ctx, true), size: sz(ctx, 26), min: sz(ctx, 20), lines: 2, lh: 1.25, zone: z, color: ink }); return { nodes: [t], bottom: bottom(t.box) } })
-  if (c.list?.items.length) st.add(sz(ctx, 18), (y) => inlineList(ctx, c.list!.items, { x: S.x, y, w: S.w, zone: z, dot: accent, size: 24 }))
+  const price = (y: number, band: boolean): { nodes: Node[]; bottom: number } | null => {
+    if (!priceText) return null
+    const t = textNode('offer', priceText, { x: S.x, y, maxW: S.w, align: 'left', font: headingFont(ctx), size: sz(ctx, tall ? 72 : 64), min: sz(ctx, 34), lines: 2, prefer: 1, preferMin: sz(ctx, 46), lh: 1.08, segmentBreaks: true, ...(band ? { fill: P, color: onP } : { zone: LIGHT, color: ink }) })
+    return { nodes: [t], bottom: bottom(t.box) }
+  }
+  const facts = (y: number, band: boolean): { nodes: Node[]; bottom: number } | null => {
+    if (!shipText) return null
+    const t = textNode('offer', shipText, { x: S.x, y, maxW: S.w, align: 'left', font: bodyFont(ctx, true), size: sz(ctx, 28), min: sz(ctx, 20), lines: 2, lh: 1.25, ...(band ? { fill: P, color: shipColor(true) } : { zone: LIGHT, color: shipColor(false) }) })
+    return { nodes: [t], bottom: bottom(t.box) }
+  }
   const logo = logoIn(ctx, { x: S.x, y: 0, w: S.w, h: 0 }, 'right', tall ? 92 : 88)
-  const logoW = logo.box ? logo.box.w + sz(ctx, 30) : 0
-  st.add(sz(ctx, 26), (y) => {
-    const cta = ctaLink(ctx, { x: S.x, y, maxW: S.w - logoW, align: 'left', surface: { zone: z }, size: 30 })
-    const rowH = Math.max(cta?.box.h ?? 0, logo.box?.h ?? 0)
+  // No logo asset: the brand name stands in as a large text wordmark (the gate reports it as such).
+  const wordmark = (band: boolean): TextNode | null =>
+    !logo.box && ctx.brandName
+      ? textNode('bullet', ctx.brandName, { x: 0, y: 0, maxW: Math.round(S.w * 0.42), align: 'left', font: headingFont(ctx), size: sz(ctx, tall ? 60 : 54), min: sz(ctx, 38), lines: 1, lh: 1.1, ...(band ? { fill: P, color: onP } : { zone: LIGHT, color: ink }) })
+      : null
+  const logoW = logo.box ? logo.box.w + sz(ctx, 30) : (wordmark(false)?.box.w ?? 0) + (ctx.brandName && !logo.box ? sz(ctx, 30) : 0)
+  const ctaRow = (y: number, band: boolean): { nodes: Node[]; bottom: number } => {
+    const cta = ctaLink(ctx, { x: S.x, y, maxW: S.w - logoW, align: 'left', surface: surface(band), size: 30 })
+    const wm = wordmark(band)
+    const rowH = Math.max(cta?.box.h ?? 0, logo.box?.h ?? 0, wm?.box.h ?? 0)
     const out: Node[] = []
+    if (wm) {
+      wm.box = { ...wm.box, x: Math.round(right(S) - wm.box.w), y: Math.round(y + (rowH - wm.box.h) / 2) }
+      out.push(wm)
+    }
     if (cta) {
       moveNodes(cta.nodes, 0, (rowH - cta.box.h) / 2)
       out.push(...cta.nodes)
     }
     if (logo.box) logo.box = { ...logo.box, y: Math.round(y + (rowH - logo.box.h) / 2) }
     return { nodes: out, bottom: y + rowH }
-  })
-  const h = st.y
-  moveNodes(st.nodes, 0, bottom(S) - h)
-  if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
-  nodes.push(...st.nodes)
-  const groupTop = bottom(S) - h
-  let productBox: Box | undefined
-  if (c.cutout && ctx.product) {
-    const y0 = topY + sz(ctx, tall ? 60 : 36)
-    productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, groupTop - sz(ctx, tall ? 50 : 30) - y0) }
   }
-  const fits = groupTop >= topY + sz(ctx, 40) && (!productBox || productBox.h >= ctx.frame.H * 0.24)
-  return { nodes, zones: [{ id: 'kick', style: 'gradient-top', tone: 'light', fade: 0.12, ink }, { id: z, style: 'gradient-bottom', tone: 'light', fade: 0.2, ink }], productBox, productValign: 'bottom', logoBox: logo.box, fits, warnings }
+  const hSize = tall ? 104 : 92
+  const pushStack = (st: Stack) => nodes.push(...st.nodes)
+  let productBox: Box | undefined
+  let bleedClip: Box | undefined
+  let fits = true
+  const tone = dark ? ('dark' as const) : ('light' as const)
+  let zones: TemplateLayout['zones'] = [{ id: LIGHT, style: 'gradient-bottom', tone, fade: 0.2, ...(dark ? {} : { ink }) }]
+  const gapP = sz(ctx, tall ? 50 : 30)
+
+  if (variant === 'hero' || variant === 'navy_bottom') {
+    // Bottom group anchored to the safe bottom; product fills everything above it.
+    const band = variant === 'navy_bottom'
+    const st = new Stack(0)
+    st.add(0, (y) => headline(y, band, hSize))
+    st.add(sz(ctx, 22), (y) => price(y, band))
+    st.add(sz(ctx, 10), (y) => facts(y, band))
+    st.add(sz(ctx, 26), (y) => ctaRow(y, band))
+    const h = st.y
+    moveNodes(st.nodes, 0, bottom(S) - h)
+    if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+    const groupTop = bottom(S) - h
+    if (band) {
+      const pad = sz(ctx, 46)
+      const panelTop = Math.max(0, groupTop - pad)
+      nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: panelTop, w: W, h: H - panelTop }, color: P, radius: 0 })
+      nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: panelTop, w: W, h: Math.max(6, sz(ctx, 10)) }, color: accent, radius: 0, decor: true })
+      bleedClip = { x: 0, y: 0, w: W, h: panelTop }
+      zones = []
+      const y0 = S.y
+      if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, panelTop - sz(ctx, 24) - y0) }
+      fits = panelTop >= y0 + H * 0.2
+    } else {
+      const y0 = S.y + sz(ctx, tall ? 40 : 10)
+      if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, groupTop - gapP - y0) }
+      fits = groupTop >= y0 + sz(ctx, 40) && (!productBox || productBox.h >= H * 0.24)
+    }
+    pushStack(st)
+  } else if (variant === 'top') {
+    const top = new Stack(S.y)
+    top.add(0, (y) => headline(y, false, hSize))
+    const barY = top.y + sz(ctx, 16)
+    nodes.push({ kind: 'rect', layer: 'over', box: { x: S.x, y: Math.round(barY), w: sz(ctx, 150), h: Math.max(6, sz(ctx, 9)) }, color: accent, radius: 3, decor: true })
+    const topBottom = barY + Math.max(6, sz(ctx, 9))
+    const bot = new Stack(0)
+    bot.add(0, (y) => price(y, false))
+    bot.add(sz(ctx, 10), (y) => facts(y, false))
+    bot.add(sz(ctx, 26), (y) => ctaRow(y, false))
+    const h = bot.y
+    moveNodes(bot.nodes, 0, bottom(S) - h)
+    if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+    const botTop = bottom(S) - h
+    pushStack(top)
+    pushStack(bot)
+    const y0 = topBottom + sz(ctx, tall ? 40 : 12)
+    if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, botTop - gapP - y0) }
+    fits = botTop >= y0 + H * 0.2 && (!productBox || productBox.h >= H * 0.22)
+    zones = [{ id: LIGHT, style: 'gradient-top', tone, fade: 0.12, ...(dark ? {} : { ink }) }, { id: 'studio_b', style: 'gradient-bottom', tone, fade: 0.18, ...(dark ? {} : { ink }) }]
+    // bottom texts sit on the lower scrim zone
+    for (const n of bot.nodes) if (n.kind === 'text' || (n.kind === 'icon' && n.zone) || (n.kind === 'rect' && n.zone)) (n as { zone?: string }).zone = n.zone ? 'studio_b' : n.zone
+  } else {
+    // navy_top: navy band with headline, price and facts; product on cream; CTA + logo row bottom.
+    const pad = sz(ctx, 46)
+    const st = new Stack(S.y)
+    st.add(0, (y) => headline(y, true, tall ? 100 : 88))
+    st.add(sz(ctx, 20), (y) => price(y, true))
+    st.add(sz(ctx, 8), (y) => facts(y, true))
+    const bandBottom = st.y + pad
+    nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: 0, w: W, h: Math.round(bandBottom) }, color: P, radius: 0 })
+    nodes.push({ kind: 'rect', layer: 'under', box: { x: 0, y: Math.round(bandBottom), w: W, h: Math.max(6, sz(ctx, 10)) }, color: accent, radius: 0, decor: true })
+    const row = new Stack(0)
+    row.add(0, (y) => ctaRow(y, false))
+    const h = row.y
+    moveNodes(row.nodes, 0, bottom(S) - h)
+    if (logo.box) logo.box = { ...logo.box, y: logo.box.y + bottom(S) - h }
+    const rowTop = bottom(S) - h
+    pushStack(st)
+    pushStack(row)
+    const y0 = bandBottom + sz(ctx, 20)
+    bleedClip = { x: 0, y: Math.round(bandBottom + Math.max(6, sz(ctx, 10))), w: W, h: H }
+    if (c.cutout && ctx.product) productBox = { x: S.x, y: y0, w: S.w, h: Math.max(1, rowTop - gapP - y0) }
+    fits = rowTop >= y0 + H * 0.24 && (!productBox || productBox.h >= H * 0.24)
+    zones = [{ id: LIGHT, style: 'gradient-bottom', tone, fade: 0.14, ...(dark ? {} : { ink }) }]
+  }
+  return { nodes, zones, productBox, productValign: variant === 'navy_top' || variant === 'top' ? 'center' : 'bottom', ...(bleedClip ? { bleedClip } : {}), logoBox: logo.box, fits, warnings }
 }
+
+const studioHero = (ctx: Ctx) => studioLayout(ctx, 'hero')
+const studioTop = (ctx: Ctx) => studioLayout(ctx, 'top')
+const studioNavyTop = (ctx: Ctx) => studioLayout(ctx, 'navy_top')
+const studioNavyBottom = (ctx: Ctx) => studioLayout(ctx, 'navy_bottom')
 
 // ---------------------------------------------------------------------------
 // Registry + mirroring
@@ -1262,6 +1393,9 @@ const COMPOSERS: Record<Exclude<LayoutFamily, 'bold_pill'>, (ctx: Ctx) => Templa
   framed_card: framedCard,
   ugc_native: ugcNative,
   studio_hero: studioHero,
+  studio_top: studioTop,
+  studio_navy_top: studioNavyTop,
+  studio_navy_bottom: studioNavyBottom,
 }
 
 /** Lay out one format in one family at `ctx.placement` / `ctx.s`. */

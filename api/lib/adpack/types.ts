@@ -24,7 +24,7 @@ export type AngleCategory =
   | 'prueba_social'
 
 /** Visual layout families (see render/families.ts). */
-export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native' | 'studio_hero'
+export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native' | 'studio_hero' | 'studio_top' | 'studio_navy_top' | 'studio_navy_bottom'
 
 /** How much the planner decides on its own: high = angle, hook, format, layout and scene; guided = the agent's picks are kept. */
 export type CreativeFreedom = 'high' | 'guided'
@@ -266,8 +266,13 @@ export interface PackRenderOptions {
   relight?: RelightMode
   allowedProps?: string[]
   immutableAttributes?: string[]
-  /** Round 1b: 'auto' (default) bleeds studio-shot photos into a procedural canvas; 'off' = always cut-out + plate. */
-  studioBleed?: 'auto' | 'off'
+  /**
+   * Round 1b/1c: 'auto' (default) bleeds studio-shot photos into a procedural canvas and, when the
+   * chosen hero is not a studio shot, falls back to another studio-shot photo of the offer;
+   * 'required' rejects the ad (`qa_gate_failed: studio_required`) when no studio-shot photo exists
+   * (never cut-out + plate, never generative relight); 'off' = always cut-out + plate.
+   */
+  studioBleed?: 'auto' | 'off' | 'required'
   /** Round 1b: QA gate on exact renders ('on' default; 'off' only for QA comparisons). */
   qaGate?: 'on' | 'off'
 }
@@ -568,6 +573,8 @@ export interface StudioBleedRef {
   backdrop: { r: number; g: number; b: number }
   edgesTouched: string[]
   sourceUrl: string
+  /** Resampling already applied to the source before the bleed (low-res photos: de6210b upscale); the gate counts it. */
+  preScale?: number
 }
 
 /** Round 1b QA gate summary of one delivered / rejected render (qa-gate.ts). */

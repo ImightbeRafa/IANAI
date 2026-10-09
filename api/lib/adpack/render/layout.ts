@@ -104,6 +104,8 @@ export interface TemplateLayout {
   /** Area the product cut-out is fitted into (contain). */
   productBox?: Box
   productValign?: 'center' | 'bottom'
+  /** Studio bleed: clip the photo layer to this region (below/above a solid colour band). */
+  bleedClip?: Box
   logoBox?: Box
   /** Content fits its regions at this scale (no vertical overflow). */
   fits: boolean
@@ -131,6 +133,10 @@ export interface Ctx {
   placement?: string
   /** Areas (canvas px) text must never cover, e.g. the product in the scene. */
   avoid?: Box[]
+  /** Studio bleed: luminance (0–1) of the canvas the photo is bled into (dark canvases get light type). */
+  canvasLum?: number
+  /** Brand name (text wordmark stands in when there is no logo asset). */
+  brandName?: string
   /** Set when `frame.safe` is a free region around the product (not the whole safe area). */
   region?: { full: Box }
 }

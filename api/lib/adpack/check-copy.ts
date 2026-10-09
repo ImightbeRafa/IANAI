@@ -23,9 +23,12 @@ import { claimSentenceSpans, matchClaim, missingMustAppear, nearestFact } from '
 import { extractNumericClaims, numbersInFacts } from './facts.js'
 import { HARD_REGISTER_MARKERS, IAN_CORE_RULES, isHardRegister, REGISTER_DRIFT_MARKERS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, headlineMaxWords } from './patterns.js'
+import { checkOneIdeaHeadline } from './headline-rules.js'
 import { contentWordCount, normalizeText, textSimilarity, wordCount } from './util.js'
 
 export interface CheckAdCopyOptions {
+  /** Round 1c: studio ads — the headline must be one short idea (headline-rules.ts). */
+  oneIdeaHeadline?: boolean
   dna: BrandDna
   offer: OfferInput
   angle: AdAngle
@@ -271,6 +274,9 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
   if (options.language === 'es' && copy.headline) {
     const bare = findBareNounHeadline(copy.headline)
     if (bare) push('grammar', 'headline', `Headline opens with a bare noun ("${bare.match}…"): ${bare.fix}`, { path: 'headline', token: bare.match, sentence: copy.headline, offendingTokens: [bare.match] })
+  }
+  if (options.oneIdeaHeadline && copy.headline) {
+    for (const i of checkOneIdeaHeadline(copy.headline).filter((x) => x.code !== 'bare_noun' && x.code !== 'ambiguous_claim')) push('grammar', 'headline', `Studio headline must be one short concrete idea: ${i.detail}`, { path: 'headline', token: i.code, sentence: copy.headline, offendingTokens: [copy.headline] })
   }
 
   // P1 #10: comparison hooks ("No compres X de plástico", "mejor que…") need a verified comparison fact.

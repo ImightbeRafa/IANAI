@@ -79,7 +79,7 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
     const layer = await decodeLayer(input.studioBleed.layer)
     if (layer) {
       const pb = input.studioBleed.productBox
-      bleed = { png: layer.png, width: layer.width, height: layer.height, productBox: { ...pb }, backdrop: input.studioBleed.backdrop, edgesTouched: input.studioBleed.edgesTouched ?? [], sourceWidth: layer.width, sourceHeight: layer.height, shadowShare: 1 }
+      bleed = { png: layer.png, width: layer.width, height: layer.height, productBox: { ...pb }, backdrop: input.studioBleed.backdrop, edgesTouched: input.studioBleed.edgesTouched ?? [], ...(input.studioBleed.preScale && input.studioBleed.preScale > 1 ? { preScale: input.studioBleed.preScale } : {}), sourceWidth: layer.width, sourceHeight: layer.height, shadowShare: 1 }
       // Layout sees the product (+ its real shadow) bbox; the fade ring is canvas tone.
       product = { png: layer.png, width: Math.max(1, pb.w), height: Math.max(1, pb.h) }
     } else warnings.push('studio bleed layer could not be decoded; using the cut-out')
@@ -439,6 +439,9 @@ export interface PlanLayoutInput {
   placement?: string
   /** Scene product box (canvas px; generated mode) — used when no cut-out is placed. */
   avoidBox?: Box | null
+  /** Studio bleed backdrop (canvas luminance steers light/dark type) + brand name for the wordmark. */
+  studioBleed?: { backdrop: { r: number; g: number; b: number } }
+  brandName?: string
   /** Resolved brand fonts (renderAd passes the font resolver's result); default resolveFonts(visual). */
   fonts?: ResolvedFonts
 }
@@ -516,6 +519,8 @@ export function planLayout(input: PlanLayoutInput): PlannedLayout {
         exact: input.exact,
         format: input.format,
         placement: cand.base,
+        ...(input.studioBleed ? { canvasLum: (0.2126 * input.studioBleed.backdrop.r + 0.7152 * input.studioBleed.backdrop.g + 0.0722 * input.studioBleed.backdrop.b) / 255 } : {}),
+        ...(input.brandName ? { brandName: input.brandName } : {}),
         avoid: avoidBox ? [avoidBox] : [],
         ...(cand.region ? { region: { full: frame.safe } } : {}),
       }
@@ -760,7 +765,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   if (assets.bleed && productBoxes.length) {
     // Studio bleed: native photo pixels (with their real contact shadow + AO and light) faded into
     // the canvas; one global backdrop gain; Lanczos-3 resample (+ unsharp only when enlarging).
-    const b = await compositeBleed(base, assets.bleed, productBoxes[0])
+    const b = await compositeBleed(base, assets.bleed, productBoxes[0], layout.bleedClip)
     base = b.png
     placements = [{ box: b.box, placed: b.placed, role: 'hero' }]
     bleedReport = { gain: b.gain.map((g) => Math.round(g * 1000) / 1000) as [number, number, number], scale: b.upscale, upscaled: b.upscale > 1, edgesTouched: assets.bleed.edgesTouched }

@@ -21,6 +21,7 @@
  */
 import sharp from 'sharp'
 import { findBareNounHeadline, findLossyClaim } from './check-copy.js'
+import { checkOneIdeaHeadline } from './headline-rules.js'
 import type { AspectRatio } from './types.js'
 
 export type QaMetricId = 'edge_roughness' | 'shadow_present' | 'sharpness' | 'safe_zones' | 'product_framing' | 'text_overflow' | 'required_facts' | 'logo' | 'headline' | 'contrast'
@@ -102,6 +103,10 @@ export interface QaGateInput {
   headline?: string
   /** Allowed verbatim claims (ambiguous-claim check). */
   claims?: string[]
+  /** Round 1c: studio ads need a one-idea headline (≤ 9 words / 48 chars, ≤ 2 sentences, no empty adjectives). */
+  oneIdeaHeadline?: boolean
+  /** Brand name: with no logo asset, a large text wordmark of the brand name stands in (and is reported as such). */
+  brandName?: string
   /** Fact matcher (the runner passes claims.textCarriesFact); default: normalized substring / digits. */
   matchFact?: (text: string, fact: QaRequiredFact) => boolean
 }
@@ -220,12 +225,14 @@ export async function shadowShare(png: Uint8Array | Buffer, product: Box, heroPl
       const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
       const chroma = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2])
       total++
-      if (l <= ref * 0.97 && l >= ref * 0.55 && chroma <= 40) shadow++
+      if (ref <= 40 ? l >= ref + 5 && l <= ref + 110 && chroma <= 40 : l <= ref * 0.97 && l >= ref * 0.55 && chroma <= 40) shadow++
     }
   }
   if (!total) return null
   return { share: r3(shadow / total), ref: Math.round(ref) }
 }
+
+const normKey = (t: string) => String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '')
 
 // ---------------------------------------------------------------------------
 // Layout metrics (pure)
@@ -349,8 +356,11 @@ export async function runQaGate(input: QaGateInput): Promise<QaGateResult> {
   const lb = report.logo
   const area = lb ? lb.w * lb.h : 0
   const sizeOk = Boolean(lb) && area >= T.logoMinArea * (report.width / 1080) ** 2 && Math.min(lb!.w, lb!.h) >= T.logoMinSide * (report.width / 1080)
-  const logoOk = sizeOk && Boolean(report.logoSelfContained || (report.logoContrast ?? 0) >= T.logoMinContrast)
-  metrics.push({ id: 'logo', value: area, threshold: `area ≥ ${T.logoMinArea}px², side ≥ ${T.logoMinSide}px; badge or contrast ≥ ${T.logoMinContrast}`, passed: logoOk, hard: true, detail: lb ? `${lb.w}x${lb.h}px, ${report.logoSelfContained ? 'self-contained badge' : `contrast ${report.logoContrast ?? 'n/a'}`}` : 'logo missing' })
+  let logoOk = sizeOk && Boolean(report.logoSelfContained || (report.logoContrast ?? 0) >= T.logoMinContrast)
+  // No logo asset: a text wordmark of the brand name (≥ 36 px at 1080 w, contrast ≥ 4.5) names the brand.
+  const wm = !lb && input.brandName ? report.elements.find((e) => normKey(e.text) === normKey(input.brandName!) && e.box.h >= 36 * (report.width / 1080) && e.contrast >= T.minContrast) : undefined
+  if (wm) logoOk = true
+  metrics.push({ id: 'logo', value: area, threshold: `area ≥ ${T.logoMinArea}px², side ≥ ${T.logoMinSide}px; badge or contrast ≥ ${T.logoMinContrast}`, passed: logoOk, hard: true, detail: lb ? `${lb.w}x${lb.h}px, ${report.logoSelfContained ? 'self-contained badge' : `contrast ${report.logoContrast ?? 'n/a'}`}` : wm ? `text wordmark "${wm.text}" (no logo asset), contrast ${wm.contrast}` : 'logo missing' })
 
   // 9) Headline rules.
   const headline = input.headline ?? head?.text ?? ''
@@ -361,7 +371,8 @@ export async function runQaGate(input: QaGateInput): Promise<QaGateResult> {
     const hit = line ? findLossyClaim(line, input.claims ?? []) : null
     if (hit) { lossy = { line, dropped: hit.dropped }; break }
   }
-  metrics.push({ id: 'headline', value: (bare ? 1 : 0) + (lossy ? 1 : 0), threshold: 'article present, no ambiguous claim', passed: !bare && !lossy, hard: true, ...(bare ? { detail: `missing article: "${bare.match}" → "${bare.fix}"` } : lossy ? { detail: `ambiguous claim "${lossy.line}" (drops: ${lossy.dropped.join(', ')})` } : {}) })
+  const oneIdea = input.oneIdeaHeadline ? checkOneIdeaHeadline(headline, input.claims ?? []).filter((i) => i.code !== 'bare_noun' && i.code !== 'ambiguous_claim') : []
+  metrics.push({ id: 'headline', value: (bare ? 1 : 0) + (lossy ? 1 : 0) + oneIdea.length, threshold: input.oneIdeaHeadline ? 'article present, no ambiguous claim, one short idea (≤ 9 words / 48 chars)' : 'article present, no ambiguous claim', passed: !bare && !lossy && !oneIdea.length, hard: true, ...(bare ? { detail: `missing article: "${bare.match}" → "${bare.fix}"` } : lossy ? { detail: `ambiguous claim "${lossy.line}" (drops: ${lossy.dropped.join(', ')})` } : oneIdea.length ? { detail: `not one idea: ${oneIdea[0].detail}` } : {}) })
 
   // 10) Contrast.
   const worst = report.elements.length ? Math.min(...report.elements.map((e) => e.contrast)) : 0

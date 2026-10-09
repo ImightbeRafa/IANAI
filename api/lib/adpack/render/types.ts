@@ -30,6 +30,8 @@ export interface RenderAdInput {
   sceneImage: ImageInput
   copy: Pick<AdCopy, 'headline' | 'subline' | 'bullets' | 'offerLine' | 'cta'>
   visual?: DnaVisual
+  /** Brand name: rendered as a text wordmark by the studio families when there is no logo asset. */
+  brandName?: string
   /** Transparent product cut-out (PNG). Used by offer_graphic, variant_card and explainer. */
   productCutout?: ImageInput
   /** Logo bytes; overrides `visual.logoUrl` (avoids a fetch). */
@@ -77,7 +79,7 @@ export interface RenderAdInput {
    * the layer (fidelity/bleed.ts) is faded into a procedural studio canvas (`sceneImage`) instead of
    * cutting the product out. No synthetic shadow / relight is added (the photo's are real).
    */
-  studioBleed?: { layer: ImageInput; productBox: Box; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[] }
+  studioBleed?: { layer: ImageInput; productBox: Box; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[]; preScale?: number }
   relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part'; background?: Buffer }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
 }
 

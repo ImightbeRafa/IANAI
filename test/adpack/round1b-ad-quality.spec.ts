@@ -179,7 +179,8 @@ describe('round 1b · studio_hero family (the approved v1 look) + larger logo', 
   })
 
   it('qaFamilyOrder offers alternates (studio first for bleeds, never the failed one)', () => {
-    expect(qaFamilyOrder('studio_hero', 'offer_graphic', true)).toEqual(['editorial_minimal', 'full_bleed_type'])
+    expect(qaFamilyOrder('studio_hero', 'offer_graphic', true)).toEqual(['studio_navy_top', 'studio_top', 'studio_navy_bottom'])
+    expect(qaFamilyOrder('studio_top', 'offer_graphic', true)).toEqual(['studio_navy_bottom', 'studio_hero', 'studio_navy_top'])
     expect(qaFamilyOrder('badge_corner', 'offer_graphic', false)).toEqual(['editorial_minimal', 'full_bleed_type'])
     expect(qaFamilyOrder(undefined, 'before_after', true)).toEqual(['editorial_minimal', 'full_bleed_type'])
   })
@@ -248,10 +249,10 @@ describe('round 1b · pack runner: studio bleed + QA gate (auto-retry, then fail
     const { items } = await t.state()
     const item = items[0]
     expect(item.status).toBe('done')
-    expect(t.calls.some((c) => c.family === 'editorial_minimal')).toBe(true)
+    expect(t.calls.some((c) => c.family === 'studio_navy_top')).toBe(true)
     for (const r of item.renders) {
       expect(r.qa?.attempts).toBeGreaterThanOrEqual(2)
-      expect(r.qa?.layoutFamily).toBe('editorial_minimal')
+      expect(r.qa?.layoutFamily).toBe('studio_navy_top')
       expect(r.qa?.passed).toBe(true)
     }
   }, 180_000)

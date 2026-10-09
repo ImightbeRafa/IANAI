@@ -36,6 +36,72 @@ const DISEASES_EN =
   '(?:diabetes|cancer|anxiety|depression|arthritis|acne|hypertension|high blood pressure|cholesterol|insomnia|migraines?|asthma|disease|diseases|infections?|covid|psoriasis|eczema|rosacea|hair loss|thyroid|obesity)'
 
 export const COMPLIANCE_RULES: ComplianceRule[] = [
+  // --- Round 1c: functional / physiological promises (health, fitness, beauty) ---------------------
+  {
+    id: 'health_pain_promise',
+    categories: ['health_wellness', 'fitness_sports', 'beauty'],
+    severity: 'block',
+    patterns: {
+      es: [/\b(?:desaparicion|desaparece|desaparecen|desaparecer|eliminacion|elimina|eliminar|adios(?: al)?|fin (?:del|al)|se acabo el)\s+(?:del?\s+|al\s+|el\s+|tu\s+|los\s+|las\s+)?(?:dolor|dolores|molestias?)\b/],
+      en: [/\b(?:eliminates?|ends?|gets? rid of|no more|says? goodbye to)\s+(?:your\s+)?(?:back\s+|neck\s+)?(?:pain|aches?)\b/],
+    },
+    detail: {
+      es: 'No prometas que el dolor desaparece: es una promesa médica. Decí qué hace el producto (soporte, ajuste, material).',
+      en: 'Do not promise the pain goes away: it is a medical promise. Say what the product does (support, fit, material).',
+    },
+  },
+  {
+    id: 'health_immediate_lasting_result',
+    categories: ['health_wellness', 'fitness_sports', 'beauty'],
+    severity: 'block',
+    patterns: {
+      es: [/\b(?:correccion|resultados?|alivio|mejora|efecto)\s+(?:inmediat[oa]s?|instantane[oa]s?)\b/, /\binmediat[oa]s?\s+y\s+duradera?s?\b/, /\b(?:resultados?|efectos?)\s+(?:permanentes|garantizados?|para siempre)\b/],
+      en: [/\b(?:immediate|instant)\s+(?:and\s+lasting\s+)?(?:correction|results?|relief)\b/, /\b(?:permanent|guaranteed)\s+results?\b/],
+    },
+    detail: {
+      es: 'Sin promesas de resultado inmediato, duradero o garantizado en salud/cuerpo.',
+      en: 'No immediate, lasting or guaranteed outcome promises about health/body.',
+    },
+  },
+  {
+    id: 'physiological_claim',
+    categories: ['health_wellness', 'fitness_sports', 'beauty'],
+    severity: 'block',
+    patterns: {
+      es: [/\b(?:ingesta de oxigeno|oxigenacion|mejora(?:r|s)? (?:la )?circulacion|desintoxic\w+|detox|elimina(?:r)? (?:las )?toxinas|biorretroalimentacion)\b/],
+      en: [/\b(?:oxygen intake|boosts? oxygen|improves? circulation|detox\w*|flush(?:es)? toxins|biofeedback)\b/],
+    },
+    detail: {
+      es: 'Claims fisiológicos (oxígeno, circulación, toxinas, biorretroalimentación) necesitan prueba verificada: no los uses como beneficio.',
+      en: 'Physiological claims (oxygen, circulation, toxins, biofeedback) need verified proof: do not use them as a benefit.',
+    },
+  },
+  {
+    id: 'appetite_metabolism_claim',
+    categories: ['health_wellness', 'fitness_sports', 'beauty'],
+    severity: 'block',
+    patterns: {
+      es: [/\b(?:control(?:ar|a)?\s+(?:del?\s+)?(?:el\s+)?(?:apetito|antojos)|reduc\w+\s+(?:de\s+)?(?:los\s+)?antojos|suprim\w+\s+(?:el\s+)?apetito|quema(?:r|s)?\s+(?:la\s+)?grasa|acelera(?:r|s)?\s+(?:el\s+)?metabolismo|saciedad prolongada)\b/],
+      en: [/\b(?:appetite control|control (?:your )?cravings|reduces? cravings|suppress\w* appetite|burns? fat|speeds? up (?:your )?metabolism)\b/],
+    },
+    detail: {
+      es: 'Claims de apetito, antojos, metabolismo o quema de grasa son claims de peso/salud: no se permiten.',
+      en: 'Appetite, cravings, metabolism or fat-burning claims are weight/health claims: not allowed.',
+    },
+  },
+  {
+    id: 'anti_aging_mood_claim',
+    categories: ['health_wellness', 'fitness_sports', 'beauty'],
+    severity: 'warn',
+    patterns: {
+      es: [/\b(?:anti-?envejecimiento|rejuvenec\w+|bajones emocionales|equilibr\w+ (?:el )?estado emocional|paz mental)\b/],
+      en: [/\b(?:anti-?aging|rejuvenat\w+|emotional crashes)\b/],
+    },
+    detail: {
+      es: 'Anti-edad / estado emocional: claims de salud sin respaldo. Revisalo antes de usarlo.',
+      en: 'Anti-aging / emotional-state claims are unbacked health claims. Review before use.',
+    },
+  },
   // --- Health / medical (all categories: any product can overclaim) -------
   {
     id: 'health_disease_claim',

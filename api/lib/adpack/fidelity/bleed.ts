@@ -24,6 +24,8 @@ export interface Rgb3 { r: number; g: number; b: number }
 
 export interface StudioBackdrop {
   eligible: boolean
+  /** light = near-neutral light backdrop; colour = uniform saturated light backdrop; dark = near-black backdrop. */
+  mode?: 'light' | 'colour' | 'dark'
   reason: string
   /** Median border colour (sRGB). */
   backdrop: Rgb3
@@ -35,10 +37,18 @@ export interface StudioBackdrop {
   chroma: number
 }
 
+/** Overall enlargement cap of the real photo pixels (Lanczos-3 + unsharp = resampling, not super-resolution). */
+export const BLEED_MAX_UPSCALE = 1.55
+
 export const STUDIO_BLEED_RULES = {
   minUniformity: 0.8,
   minLightness: 0.55,
   maxChroma: 34,
+  /** Round 1c: a uniform coloured studio backdrop (pouch on yellow/lilac) is bled as long as it is light. */
+  maxChromaColour: 90,
+  /** Round 1c: a near-black uniform studio backdrop (dark product on black) is bled onto a dark canvas. */
+  maxDarkLightness: 0.12,
+  maxDarkChroma: 40,
   /** Per-pixel |Δ| sum vs the local backdrop that counts as "product or shadow". */
   diffThreshold: 42,
   /** Product bbox may not touch more than this many photo edges (a cropped product is not bled). */
@@ -82,15 +92,20 @@ export async function analyzeStudioBackdrop(bytes: Uint8Array | Buffer): Promise
   const lightness = lum(backdrop)
   const chroma = Math.max(backdrop.r, backdrop.g, backdrop.b) - Math.min(backdrop.r, backdrop.g, backdrop.b)
   const R = STUDIO_BLEED_RULES
+  const dark = lightness <= R.maxDarkLightness && chroma <= R.maxDarkChroma
+  const colour = lightness >= R.minLightness && chroma > R.maxChroma && chroma <= R.maxChromaColour && uniformity >= 0.9
   const reason =
     uniformity < R.minUniformity ? `backdrop not uniform (${uniformity.toFixed(2)} < ${R.minUniformity})`
-      : lightness < R.minLightness ? `backdrop too dark (${lightness.toFixed(2)})`
-        : chroma > R.maxChroma ? `backdrop too saturated (spread ${chroma})`
-          : 'studio backdrop'
-  return { eligible: reason === 'studio backdrop', reason, backdrop, uniformity: Math.round(uniformity * 1000) / 1000, lightness: Math.round(lightness * 1000) / 1000, chroma }
+      : dark || colour ? 'studio backdrop'
+        : lightness < R.minLightness ? `backdrop too dark (${lightness.toFixed(2)})`
+          : chroma > R.maxChroma ? `backdrop too saturated (spread ${chroma})`
+            : 'studio backdrop'
+  return { eligible: reason === 'studio backdrop', mode: dark ? 'dark' as const : colour ? 'colour' as const : 'light' as const, reason, backdrop, uniformity: Math.round(uniformity * 1000) / 1000, lightness: Math.round(lightness * 1000) / 1000, chroma }
 }
 
 export interface StudioBleedLayer {
+  /** Enlargement already applied to the source photo (deterministic upscale step), counted in the reported scale. */
+  preScale?: number
   /** RGBA PNG: native photo pixels, alpha 1 over the product bbox + margin, smoothstep fade outside. */
   png: Buffer
   width: number
@@ -260,7 +275,8 @@ function baseShadowShare(data: Buffer, w: number, h: number, bb: { x0: number; y
     const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
     const chroma = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2])
     n++
-    if (l <= ref * 0.97 && l >= ref * 0.55 && chroma <= 40) sh++
+    // Dark studio: the grounding is the photo's own floor light pool (brighter than the near-black backdrop).
+    if (ref <= 40 ? l >= ref + 5 && l <= ref + 110 && chroma <= 40 : l <= ref * 0.97 && l >= ref * 0.55 && chroma <= 40) sh++
   }
   return n ? Math.round((sh / n) * 1000) / 1000 : 0
 }
@@ -298,7 +314,7 @@ export interface PlacedBleed {
  * backdrop onto the canvas tone measured under the box (≤ ±12 % per channel; light/temperature
  * only — the product's relative colours and detail are untouched).
  */
-export async function compositeBleed(base: Buffer, layer: StudioBleedLayer, box: Box): Promise<PlacedBleed> {
+export async function compositeBleed(base: Buffer, layer: StudioBleedLayer, box: Box, clip?: Box): Promise<PlacedBleed> {
   // The PRODUCT bbox (not the whole layer) fits the slot; the fade ring may extend past the slot
   // (it is the canvas tone after the gain, so nothing visible lands on the copy).
   const pb = layer.productBox
@@ -311,7 +327,11 @@ export async function compositeBleed(base: Buffer, layer: StudioBleedLayer, box:
   const bx0 = touchL ? 0 : box.x
   const bx1 = touchR ? CW : box.x + box.w
   const wide: Box = { x: bx0, y: box.y, w: bx1 - bx0, h: box.h }
-  const s = Math.min(wide.w / pb.w, wide.h / pb.h)
+  // Round 1c: never enlarge the real pixels past BLEED_MAX_UPSCALE overall (counting any pre-upscale):
+  // a smaller crisp product beats a bigger soft one (the gate caps at 1.6×).
+  const pre = layer.preScale && layer.preScale > 1 ? layer.preScale : 1
+  const fit = Math.min(wide.w / pb.w, wide.h / pb.h)
+  const s = pre > 1 ? Math.min(fit, BLEED_MAX_UPSCALE / pre) : fit > 1 ? Math.min(fit, BLEED_MAX_UPSCALE) : fit
   const w = Math.max(1, Math.round(layer.width * s))
   const h = Math.max(1, Math.round(layer.height * s))
   const pw = Math.round(pb.w * s)
@@ -354,8 +374,16 @@ export async function compositeBleed(base: Buffer, layer: StudioBleedLayer, box:
   const cw = Math.min(BW, lx + w) - left
   const ch = Math.min(BH, ly + h) - top
   let layerImg = sharp(graded, { raw: { width: w, height: h, channels: 4 } })
-  if (cw < w || ch < h) layerImg = layerImg.extract({ left: left - lx, top: top - ly, width: cw, height: ch })
+  // Round 1c: a family may clip the layer to a region (e.g. below a solid colour band) so the photo's
+  // plain backdrop never paints over the band; the cut lands on the canvas tone, never on the product.
+  let ox = left, oy = top, ow = cw, oh = ch
+  if (clip) {
+    ox = Math.max(left, clip.x); oy = Math.max(top, clip.y)
+    ow = Math.min(left + cw, clip.x + clip.w) - ox; oh = Math.min(top + ch, clip.y + clip.h) - oy
+  }
+  if (ow < 1 || oh < 1) { ox = left; oy = top; ow = cw; oh = ch }
+  if (ow < w || oh < h) layerImg = layerImg.extract({ left: ox - lx, top: oy - ly, width: ow, height: oh })
   const overlay = await layerImg.png().toBuffer()
-  const png = await sharp(base).composite([{ input: overlay, left, top }]).removeAlpha().png({ compressionLevel: 0 }).toBuffer()
-  return { png, box: innerBox, placed, gain, upscale: Math.round(s * 1000) / 1000 }
+  const png = await sharp(base).composite([{ input: overlay, left: ox, top: oy }]).removeAlpha().png({ compressionLevel: 0 }).toBuffer()
+  return { png, box: innerBox, placed, gain, upscale: Math.round(s * pre * 1000) / 1000 }
 }

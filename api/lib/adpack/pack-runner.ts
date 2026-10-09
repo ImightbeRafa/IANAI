@@ -492,6 +492,7 @@ export const MAX_AUTO_RETRIES = 2
 export function autoRetryMode(error: string): 'copy' | 'scene' | null {
   if (/^copy_(check_)?failed/.test(error)) return 'copy'
   // Round 1b QA gate: copy problems rewrite the copy; pixel / layout problems re-run the scene.
+  if (/^qa_gate_failed: studio_required/.test(error)) return null // no studio photo: a re-run cannot help
   if (/^qa_gate_failed: [^(]*\b(headline|required_facts)\b/.test(error)) return 'copy'
   if (/^qa_gate_failed/.test(error)) return 'scene'
   if (/^(fidelity_failed|scene_props_failed|scene_failed|scene_product_mismatch|scene_upload_failed|render_failed)/.test(error)) return 'scene'
@@ -999,20 +1000,41 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   // Round 1b: a studio-shot hero keeps its own backdrop, contact shadows and light (bleed into a
   // procedural canvas, no paid plate). Anything else falls through to cut-out + generated plate.
   // (Real kit parts next to the hero are composited by the cut-out path, so a part photo opts out.)
-  if (!overhead && !keptParts.length && (ctx.pack.render?.studioBleed ?? 'auto') !== 'off') {
-    const studio = await tryStudioBleed(ctx, item, cut.hero.stored.sourceUrl, light)
+  const studioMode = ctx.pack.render?.studioBleed ?? 'auto'
+  if (!overhead && !keptParts.length && studioMode !== 'off') {
+    let studio = await tryStudioBleed(ctx, item, cut.hero.stored.sourceUrl, light)
+    let used = cut
+    if (!studio) {
+      // Round 1c fallback: the chosen hero is not a studio shot (or its backdrop/shadow fails the
+      // check) → another studio-shot photo of the same offer is used (still the exact product
+      // pixels; never a relight or a redraw). The ad reports which photo it really used.
+      for (const alt of studioFallbackCandidates(ctx.pack.offer, withIds, cut.hero.stored.sourceUrl)) {
+        const c2 = await prepareProductCutouts({ photos: [alt], format, ...cutoutCtx })
+        if (!c2.ok) continue
+        const s2 = await tryStudioBleed(ctx, item, c2.hero.stored.sourceUrl, light)
+        if (!s2) continue
+        c2.warnings.unshift(`photo ${photoLabel(photos[0])} is not a studio shot (gate would reject the cut-out); used studio photo ${photoLabel(alt)} instead`)
+        c2.hero = { ...c2.hero, stored: { ...c2.hero.stored, fallbackFrom: photos[0]?.id ?? photos[0]?.url ?? '' } }
+        studio = s2
+        used = c2
+        break
+      }
+    }
     if (studio) {
       ctx.sceneBytes.set(item.id, { bytes: studio.canvas, mimeType: 'image/png' })
-      ctx.cutoutBytes.set(item.id, [cut.hero.bytes])
+      ctx.cutoutBytes.set(item.id, [used.hero.bytes])
       ctx.bleedBytes.set(item.id, studio.layer)
       return save(ctx, item, {
         status: 'scene_ready',
-        scene: { imageUrl: studio.canvasUrl, width: STUDIO_CANVAS.width, height: STUDIO_CANVAS.height, model: 'studio-canvas', costUsd: 0, productLocked: true, kind: 'plate', light, surface: 'matte', cutouts: [cut.hero.stored], view: 'perspective', bleed: studio.ref },
-        sceneCheck: { ok: true, productMatches: null, strayText: false, borders: false, score: 1, notes: ['studio bleed: real photo backdrop + shadows kept, procedural canvas', ...cut.warnings].join(' · ').slice(0, 300) },
+        scene: { imageUrl: studio.canvasUrl, width: STUDIO_CANVAS.width, height: STUDIO_CANVAS.height, model: 'studio-canvas', costUsd: 0, productLocked: true, kind: 'plate', light, surface: 'matte', cutouts: [used.hero.stored], view: 'perspective', bleed: studio.ref },
+        sceneCheck: { ok: true, productMatches: null, strayText: false, borders: false, score: 1, notes: ['studio bleed: real photo backdrop + shadows kept, procedural canvas', ...used.warnings].join(' · ').slice(0, 300) },
         timings: { ...item.timings, sceneMs: Date.now() - t0 },
         sceneAttempts: 1,
         error: undefined,
       })
+    }
+    if (studioMode === 'required') {
+      return fail(ctx, item, 'qa_gate_failed: studio_required (no studio-shot photo: the cut-out is not shown pasted on a generated plate; add a photo on a plain light backdrop with its own soft shadow)', { timings: { ...item.timings, sceneMs: Date.now() - t0 } })
     }
   }
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
@@ -1109,18 +1131,29 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   })
 }
 
+/** Other product photos of the offer that could be studio shots (never kit parts / box / contents). */
+export function studioFallbackCandidates(offer: OfferInput, withIds: (o: OfferInput) => ProductPhoto[], heroUrl: string): ProductPhoto[] {
+  const rank = (p: ProductPhoto) => (p.role === 'hero' ? 0 : p.role === 'detail' ? 1 : 2)
+  return withIds(offer)
+    .filter((p) => p.url !== heroUrl && p.role !== 'part' && p.role !== 'box' && p.role !== 'contents')
+    .sort((a, b) => rank(a) - rank(b))
+    .slice(0, 4)
+}
+
 /** Procedural studio canvas size (cover-fit to every ratio by the renderer). */
 const STUDIO_CANVAS = { width: 1080, height: 1920 }
 
 /** Canvas tone: the brand's light colour when it is a light near-neutral, else the photo's own backdrop. */
-function studioTone(secondary: string | undefined, backdrop: { r: number; g: number; b: number }): { r: number; g: number; b: number } {
+export function studioTone(secondary: string | undefined, backdrop: { r: number; g: number; b: number }): { r: number; g: number; b: number } {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(secondary ?? '').trim())
   if (m) {
     const v = parseInt(m[1], 16)
     const c = { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 }
     const L = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255
     const spread = Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b)
-    if (L >= 0.82 && spread <= 34) return c
+    // The brand tone is used only when it sits within ±10 % of the photo's own backdrop (else the photo's tone wins, so no visible patch).
+    const near = (a: number, b: number) => Math.abs(a - b) / Math.max(1, b) <= 0.1
+    if (L >= 0.82 && spread <= 34 && near(c.r, backdrop.r) && near(c.g, backdrop.g) && near(c.b, backdrop.b)) return c
   }
   return backdrop
 }
@@ -1134,10 +1167,15 @@ async function tryStudioBleed(ctx: RunCtx, item: PackItem, sourceUrl: string, li
     // Low-resolution photo: the existing deterministic step (Lanczos-3 ≤ 2× + edge-aware unsharp,
     // SSIM / silhouette verified, never redrawn) runs before the bleed. Resampling, not super-res.
     let source: Uint8Array = bytes
+    let preScale = 1
     const quality = ctx.photoMemo.get(sourceUrl)?.quality ?? (await analyzeAssetQuality(bytes, ctx.pack.dna.language))
     if (quality?.lowResolution) {
       const up = await upscaleProductPhoto(bytes)
-      if (up.upscaled) source = up.bytes
+      if (up.upscaled) {
+        source = up.bytes
+        const [m0, m1] = await Promise.all([sharp(Buffer.from(bytes)).metadata(), sharp(Buffer.from(up.bytes)).metadata()])
+        if (m0.width && m1.width) preScale = Math.max(1, m1.width / m0.width)
+      }
     }
     const layer = await buildStudioBleed(source)
     if (layer.shadowShare < STUDIO_SHADOW_MIN) return null
@@ -1146,7 +1184,7 @@ async function tryStudioBleed(ctx: RunCtx, item: PackItem, sourceUrl: string, li
     const storage = ctx.input.storage
     const layerUrl = (await storage.upload({ userId: ctx.pack.userId, packId: ctx.pack.id, itemIndex: item.index, kind: 'plate', bytes: new Uint8Array(layer.png), contentType: 'image/png' })).url
     const canvasUrl = (await storage.upload({ userId: ctx.pack.userId, packId: ctx.pack.id, itemIndex: item.index, kind: 'plate', bytes: new Uint8Array(canvas), contentType: 'image/png' })).url
-    return { layer: new Uint8Array(layer.png), canvas: new Uint8Array(canvas), canvasUrl, ref: { url: layerUrl, productBox: layer.productBox, backdrop: layer.backdrop, edgesTouched: layer.edgesTouched, sourceUrl } }
+    return { layer: new Uint8Array(layer.png), canvas: new Uint8Array(canvas), canvasUrl, ref: { url: layerUrl, productBox: layer.productBox, backdrop: layer.backdrop, edgesTouched: layer.edgesTouched, sourceUrl, ...(preScale > 1 ? { preScale: Math.round(preScale * 1000) / 1000 } : {}) } }
   } catch (error) {
     console.warn('[adpack] studio bleed skipped', item.id, errorMessage(error).slice(0, 160))
     return null
@@ -1270,7 +1308,7 @@ async function renderAllRatios(args: {
   // relight 'auto' (default) = the renderer's deterministic stage; 'ai' adds the free, guarded model pass.
   const relightOn = Boolean(exact && !args.relightAuto && packRelightMode(pack) === 'ai' && args.gateway?.edit)
   const gateway = args.gateway
-  const familyFor = (f?: LayoutFamily) => f ?? (exact?.bleed ? 'studio_hero' : item.angle.layoutFamily)
+  const familyFor = (f?: LayoutFamily) => f ?? (exact?.bleed ? studioFamilyFor(item.index, item.angle.layoutFamily) : item.angle.layoutFamily)
   const renderRatio = (ratio: AspectRatio, withAi: boolean, family?: LayoutFamily) =>
     renderer.render({
       format: item.angle.format,
@@ -1286,7 +1324,8 @@ async function renderAllRatios(args: {
         ? {
             productMode: 'exact' as const,
             productCutout: exact.cutouts[0],
-            ...(exact.bleed ? { studioBleed: { layer: exact.bleed.bytes, productBox: exact.bleed.ref.productBox, backdrop: exact.bleed.ref.backdrop, edgesTouched: exact.bleed.ref.edgesTouched } } : {}),
+            ...(exact.bleed && pack.dna.brandName ? { brandName: pack.dna.brandName } : {}),
+            ...(exact.bleed ? { studioBleed: { layer: exact.bleed.bytes, productBox: exact.bleed.ref.productBox, backdrop: exact.bleed.ref.backdrop, edgesTouched: exact.bleed.ref.edgesTouched, ...(exact.bleed.ref.preScale ? { preScale: exact.bleed.ref.preScale } : {}) } } : {}),
             ...(exact.cutouts.length > 1 ? { productParts: exact.cutouts.slice(1) } : {}),
             ...(exact.light ? { light: exact.light } : {}),
             ...(exact.surface ? { surface: exact.surface } : {}),
@@ -1429,23 +1468,42 @@ interface QaGateInputs {
   caption: string
   headline: string
   claims: string[]
+  brandName?: string
 }
 
 function qaGateInputsFor(pack: Pack, item: PackItem, copy: AdCopy): QaGateInputs | null {
   try {
     const cc = buildCopyContext(pack.dna, offerForItem(pack.offer, item.index), item.angle, pack.dna.language)
     const requiredFacts: QaRequiredFact[] = cc.mustAppear.map((m) => ({ key: m.group, value: m.fact.value, ...(m.group === 'price' && copy.offerLine ? { onImage: true } : {}) }))
-    return { requiredFacts, caption: copy.caption ?? '', headline: copy.headline ?? '', claims: cc.confirmed.map((f) => f.value) }
+    return { requiredFacts, caption: copy.caption ?? '', headline: copy.headline ?? '', claims: cc.confirmed.map((f) => f.value), ...(pack.dna.brandName ? { brandName: pack.dna.brandName } : {}) }
   } catch {
     return { requiredFacts: [], caption: copy.caption ?? '', headline: copy.headline ?? '', claims: [] }
   }
 }
 
+/** Round 1c: the four studio-bleed compositions, in rotation order (a pack never repeats one before using all four). */
+export const STUDIO_FAMILIES = ['studio_hero', 'studio_navy_top', 'studio_top', 'studio_navy_bottom'] as const satisfies readonly LayoutFamily[]
+
+export function isStudioFamily(f: LayoutFamily | undefined): boolean {
+  return Boolean(f && (STUDIO_FAMILIES as readonly string[]).includes(f))
+}
+
+/** Studio family for the ad at `index` (the planner's own studio pick wins; otherwise rotate by position). */
+export function studioFamilyFor(index: number, planned?: LayoutFamily): LayoutFamily {
+  if (planned && isStudioFamily(planned)) return planned
+  return STUDIO_FAMILIES[((index % STUDIO_FAMILIES.length) + STUDIO_FAMILIES.length) % STUDIO_FAMILIES.length]
+}
+
 /** Alternate families tried (in order) when a render fails the gate. */
 export function qaFamilyOrder(first: LayoutFamily | undefined, format: PackItem['angle']['format'], bleed: boolean): LayoutFamily[] {
-  const base: LayoutFamily[] = bleed ? ['studio_hero', 'editorial_minimal', 'full_bleed_type'] : ['badge_corner', 'editorial_minimal', 'full_bleed_type', 'split_panel']
-  const ok = base.filter((f) => f !== first && (f === 'studio_hero' ? ['offer_graphic', 'variant_card', 'explainer'].includes(format) : true))
-  return ok.slice(0, 2)
+  if (bleed) {
+    // Other studio compositions first, next in the rotation after `first`.
+    const at = Math.max(0, STUDIO_FAMILIES.indexOf((first ?? 'studio_hero') as (typeof STUDIO_FAMILIES)[number]))
+    const rest = STUDIO_FAMILIES.map((_, i) => STUDIO_FAMILIES[(at + 1 + i) % STUDIO_FAMILIES.length]).filter((f) => f !== first)
+    return (['offer_graphic', 'variant_card', 'explainer'].includes(format) ? rest : (['editorial_minimal', 'full_bleed_type'] as LayoutFamily[])).slice(0, 3)
+  }
+  const base: LayoutFamily[] = ['badge_corner', 'editorial_minimal', 'full_bleed_type', 'split_panel']
+  return base.filter((f) => f !== first).slice(0, 2)
 }
 
 async function gateRender(r: RenderOutput, ratio: AspectRatio, g: QaGateInputs, bleed: boolean, backgroundLeak?: number): Promise<QaGateResult> {
@@ -1455,6 +1513,8 @@ async function gateRender(r: RenderOutput, ratio: AspectRatio, g: QaGateInputs, 
     report: r.qaReport!,
     ...(r.productPlacements?.[0] && !bleed ? { heroPlaced: r.productPlacements[0].placed } : {}),
     bleed,
+    ...(bleed ? { oneIdeaHeadline: true } : {}),
+    ...(g.brandName ? { brandName: g.brandName } : {}),
     ...(backgroundLeak !== undefined ? { backgroundLeak } : {}),
     requiredFacts: g.requiredFacts,
     caption: g.caption,

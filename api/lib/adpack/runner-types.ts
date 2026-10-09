@@ -50,7 +50,9 @@ export interface RenderInput {
    */
   productBox?: { x: number; y: number; w: number; h: number }
   /** Round 1b studio bleed layer (exact mode; see fidelity/bleed.ts). */
-  studioBleed?: { layer: Uint8Array | string; productBox: { x: number; y: number; w: number; h: number }; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[] }
+  /** Brand name for the text-wordmark fallback (no logo asset). */
+  brandName?: string
+  studioBleed?: { layer: Uint8Array | string; productBox: { x: number; y: number; w: number; h: number }; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[]; preScale?: number }
 }
 
 export interface RenderOutput {

@@ -30,6 +30,7 @@ import {
 import { buildOfferLine, extractNumericClaims, mergeFacts, numbersInFacts } from './facts.js'
 import { archetypeBlock, IAN_CORE_RULES, REGISTER_CTA_VERBS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, formatGuidance, headlineMaxWords, UNIVERSAL_AD_RULES } from './patterns.js'
+import { oneIdeaGuidance, storyForCategory } from './headline-rules.js'
 import { errorMessage, mapWithConcurrency } from './util.js'
 
 export { buildOfferLine }
@@ -150,6 +151,7 @@ function outputContract(ctx: CopyContext): string {
         '- claims: por cada frase con un dato o promesa, qué ids de HECHOS CONFIRMADOS la respaldan (field = "caption", "subline", "bullets[1]", "script.development"…; sentenceIndex desde 0). Los marcadores [[Fn]] cuentan como cita.',
         'LÍMITES DUROS (se verifican por código; si te pasás, el anuncio se descarta):',
         `- headline: el GANCHO, ≤ ${hMax} palabras y ≤ ${L.headlineChars} caracteres. Filtra y segmenta.`,
+        `- ${oneIdeaGuidance('es', storyForCategory(ctx.angle.category))}`,
         `- subline: opcional, ≤ ${L.sublineWords} palabras; desarrolla, no repite el headline.`,
         `- bullets: 0–${L.maxBullets} chips de ≤ ${L.bulletWords} palabras (sin contar y/de/en/con) y ≤ ${L.bulletChars} caracteres cada uno (datos tangibles o pasos; si un hecho es más largo, usá solo su parte clave).`,
         `- cta: ≤ ${L.ctaWords} palabras y ≤ ${L.ctaChars} caracteres, orden fría y directa en el trato de la marca (ej.: "${REGISTER_CTA_VERBS[ctx.dna.register ?? 'tuteo'][0]} para pedir"). Todo el anuncio (también caption y script) usa ese mismo trato.`,
@@ -165,6 +167,7 @@ function outputContract(ctx: CopyContext): string {
         '- claims: for each sentence with data or a promise, the CONFIRMED FACT ids that back it (field = "caption", "subline", "bullets[1]", "script.development"…; sentenceIndex from 0). [[Fn]] markers count as citations.',
         'HARD LIMITS (checked by code; exceeding them discards the ad):',
         `- headline: the HOOK, ≤ ${hMax} words and ≤ ${L.headlineChars} characters. Filters and segments.`,
+        `- ${oneIdeaGuidance('en', storyForCategory(ctx.angle.category))}`,
         `- subline: optional, ≤ ${L.sublineWords} words; develops, never repeats the headline.`,
         `- bullets: 0–${L.maxBullets} chips of ≤ ${L.bulletWords} words (not counting and/of/in/with) and ≤ ${L.bulletChars} characters each (tangible data or steps; if a fact is longer, use only its key part).`,
         `- cta: ≤ ${L.ctaWords} words and ≤ ${L.ctaChars} characters, cold and direct instruction (e.g. "Message us to order").`,

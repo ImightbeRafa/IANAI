@@ -40,6 +40,7 @@ export function createDefaultRenderer(): Renderer {
         ...(input.layoutFamily ? { layoutFamily: input.layoutFamily } : {}),
         // Generated mode only (exact mode avoids the composite's own placement).
         ...(input.productBox ? { productBox: input.productBox } : {}),
+        ...(input.brandName ? { brandName: input.brandName } : {}),
         ...(input.studioBleed ? { studioBleed: { ...input.studioBleed, layer: toBufferOrString(input.studioBleed.layer)! } } : {}),
         // Brand fonts: bundled → disk cache → Google Fonts (ADPACK_FONT_FETCH=0 disables network).
         fonts: { fetch: fontFetchEnabled() ? (globalThis.fetch as unknown as FetchLike) : null },
