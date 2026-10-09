@@ -33,6 +33,8 @@ export type BrandKitRowLike = {
   forbidden_phrases?: string[] | null
   reference_images?: string[] | null
   style_dnas?: unknown
+  /** 085 structured profile (audiences, register, do/dont, logo variants…). */
+  brand_profile?: unknown
   created_at?: string | null
 }
 

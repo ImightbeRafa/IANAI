@@ -73,15 +73,17 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
           brandId: body.brandId,
           offerId: body.offerId,
           brandKitId: body.brandKitId,
+          productImageIds: body.productImageIds,
+          productImageIdsByAd: body.productImageIdsByAd,
           refresh: body.refresh,
         }),
       }
     case 'dna_confirm':
       return { result: await service.confirmDna({ userId, dna: body.dna, edits: body.edits }) }
     case 'angles':
-      return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId }) }
+      return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd }) }
     case 'quote':
-      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId }) }
+      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd }) }
     case 'start': {
       const started = await service.startPack({
         userId,
@@ -95,6 +97,8 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
         ratios: body.ratios,
         businessId: body.businessId,
         brandKitId: body.brandKitId,
+        productImageIds: body.productImageIds,
+        productImageIdsByAd: body.productImageIdsByAd,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }

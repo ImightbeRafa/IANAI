@@ -128,6 +128,14 @@ export interface OfferInput {
   productImageUrls: string[]
   /** Optional transparent cut-out of the hero product (PNG URL), created once and reused. */
   productCutoutUrl?: string
+  /** Items the offer does NOT include (e.g. "Papel"); copy may never say they are included. */
+  notIncluded?: string[]
+  /** Owner keeps a verified-claims bank: claim-like sentences must trace to a confirmed fact. */
+  strictClaims?: boolean
+  /** A2 product lock (data model; image tools respect it). */
+  productLock?: { lockProductAppearance: boolean; immutableAttributes: string[]; allowedProps: string[] }
+  /** C3: per-ad product photos (ad index as string → https URLs, first = hero). Falls back to productImageUrls. */
+  productImageUrlsByAd?: Record<string, string[]>
 }
 
 // ---------------------------------------------------------------------------

@@ -257,12 +257,102 @@ function checkFacts(
     }
   }
 
+  checkNotIncluded(ctx, fields, push)
+  if (ctx.offer.strictClaims) checkTraceableClaims(ctx, fields, push)
+
   // Offer line must be exactly the deterministic one.
   if ((copy.offerLine ?? '') !== (ctx.offerLine ?? '')) {
     push('number_mismatch', 'offerLine', ctx.offerLine ? `Offer line must be "${ctx.offerLine}"` : 'No confirmed price/bundle: offer line must be empty')
   }
   for (const k of copy.usedFactKeys ?? []) {
     if (!confirmedKeys.has(k)) push('unconfirmed_fact', 'usedFactKeys', `Fact key "${k}" is not confirmed`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Negative facts + verified-claims bank (owner feedback B5 / H7)
+// ---------------------------------------------------------------------------
+
+const INCLUSION_RE = /\b(?:incluye|incluyen|incluido|incluida|incluidos|incluidas|viene con|vienen con|trae|traen|con todo|includes|included|comes with|come with)\b/
+const NEGATION_NEAR_RE = /\b(?:no|sin|not|without|excluye|excluded|aparte|separately|separado)\b/
+
+/** Sentence-ish chunks of a field (claims are judged per sentence). */
+export function claimSentences(text: string): string[] {
+  return String(text ?? '')
+    .split(/(?<=[.!?¡¿;:])\s+|\n+|\s+[·•|]\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/** "Papel no incluido" on the offer → copy may never say paper is included. */
+function checkNotIncluded(
+  ctx: CopyContext,
+  fields: TextField[],
+  push: (code: CopyCheckIssue['code'], field: Field, detail: string) => void
+): void {
+  const items = (ctx.offer.notIncluded ?? []).map((i) => ({ raw: i, n: normalizeText(i) })).filter((i) => i.n.length >= 3)
+  if (!items.length) return
+  for (const { field, text } of fields) {
+    for (const sentence of claimSentences(text)) {
+      const n = normalizeText(sentence)
+      for (const item of items) {
+        if (!new RegExp(`\\b${item.n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(n)) continue
+        if (INCLUSION_RE.test(n) && !NEGATION_NEAR_RE.test(n)) {
+          push('unconfirmed_fact', field, `not_included: "${sentence.slice(0, 80)}" says ${item.raw} is included, but the offer says it is not`)
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Claim-like sentence markers (normalized text). Plain persuasion ("Ideal para tus
+ * tardes") is not a claim; promises about price, shipping, contents, age, assembly,
+ * results, certifications and superlatives are.
+ */
+const CLAIM_MARKER_RE = new RegExp([
+  '\\b(?:gratis|gratuit[oa]s?|free)\\b',
+  '\\b(?:envio|envios|enviamos|shipping|ships|delivery|entrega|entregamos)\\b',
+  '\\b(?:garantia|garantizad[oa]s?|guarantee[ds]?|warranty)\\b',
+  '\\b(?:incluye|incluyen|incluido|incluida|incluidos|incluidas|viene con|vienen con|trae|traen|includes|included|comes with)\\b',
+  '\\b(?:edad|anos|ages?|years old)\\b|\\d+\\s*\\+',
+  '\\b(?:armas|arma|armado|armada|armalo|armala|ensambla\\w*|assembl\\w*|montas|listo en|lista en|ready in|en minutos|in minutes)\\b',
+  '\\b(?:certificad[oa]s?|certified|aprobad[oa]s?|approved|clinicamente|clinically|dermatologicamente|probado|tested)\\b',
+  '%',
+  '#1(?!\\d)',
+  '\\b(?:el mejor|la mejor|los mejores|las mejores|the best|numero 1|number one|unico|unica|only one)\\b',
+  '\\b(?:dura|duran|lasts|bateria|battery|autonomia)\\b',
+  '\\b(?:descuento|discount|ahorr\\w*|save|rebaja|oferta|2x1|promo)\\b',
+  '\\b(?:dos|tres|cuatro|cinco|two|three|four|five)\\s+(?:o mas|or more|kits?|unidades|units|piezas|pieces|paquetes|packs?)\\b',
+].join('|'))
+
+/** Facts that can back a claim (not the brand/offer names). */
+function tracingValues(ctx: CopyContext): string[] {
+  return ctx.confirmed
+    .filter((f) => f.key !== 'brand_name' && f.key !== 'offer_name')
+    .map((f) => normalizeText(f.value).replace(/[.!?]+$/g, '').trim())
+    .filter((v) => v.length >= 3)
+}
+
+/**
+ * Verified-claims bank: every claim-like sentence must contain (verbatim, accent- and
+ * case-insensitive) a confirmed fact or verified claim — "gratis con dos kits" fails
+ * when the fact is "Envío gratis desde 2 kits".
+ */
+function checkTraceableClaims(
+  ctx: CopyContext,
+  fields: TextField[],
+  push: (code: CopyCheckIssue['code'], field: Field, detail: string) => void
+): void {
+  const values = tracingValues(ctx)
+  for (const { field, text } of fields) {
+    if (field === 'offerLine' || field === 'cta') continue
+    for (const sentence of claimSentences(text)) {
+      const n = normalizeText(sentence)
+      if (!CLAIM_MARKER_RE.test(n)) continue
+      if (values.some((v) => n.includes(v))) continue
+      push('unconfirmed_fact', field, `untraceable_claim: "${sentence.slice(0, 90)}" is not one of the confirmed facts or verified claims (copy them exactly)`)
+    }
   }
 }
 

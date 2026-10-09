@@ -26,6 +26,10 @@ import { buildBrandDna, computeGaps } from './dna/merge.js'
 import { cleanText, isHexColor, makeFact, uniqStrings, type DnaPart } from './dna/part.js'
 import { mapSiteAnalysis } from './dna/website.js'
 import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKey, OfferInput } from './types.js'
+import { isPlaceholderValue, stripPlaceholderParts } from '../placeholder-guard.js'
+import { audienceLines, readBrandProfile, type BrandProfile } from '../brand-profile.js'
+import { orderProductImages } from '../product-image-order.js'
+import { languageFromLocale, offerProfileFacts, readOfferAdProfile, type OfferProfileFacts } from './offer-profile.js'
 
 type Row = Record<string, unknown>
 
@@ -87,16 +91,24 @@ export interface BuildDnaFromSavedBrandInput {
   /** Required when `refresh` is true; returns a fresh website part. */
   refreshWebsite?: (url: string, language: AdLanguage) => Promise<DnaPart>
   now?: () => Date
+  /** C3: photo pool (product_images ids of the offer, first = hero). */
+  productImageIds?: string[]
+  /** C3: per-ad photos (ad index → product_images ids). */
+  productImageIdsByAd?: Record<string, string[]>
 }
 
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
-const s = (row: Row | null | undefined, key: string, max = 300): string => cleanText(row?.[key], max)
+/** Saved text, or '' for placeholders ("country", "N/A", "Personas 18–65"…) so they never reach an ad (B3). */
+const s = (row: Row | null | undefined, key: string, max = 300): string => {
+  const v = cleanText(row?.[key], max)
+  return isPlaceholderValue(v) ? '' : v
+}
 const bool = (row: Row | null | undefined, key: string): boolean | undefined => (typeof row?.[key] === 'boolean' ? (row[key] as boolean) : undefined)
 const strings = (raw: unknown, max = 200, limit = 12): string[] =>
-  Array.isArray(raw) ? uniqStrings(raw.map((v) => cleanText(v, max)), limit) : []
+  Array.isArray(raw) ? uniqStrings(raw.map((v) => cleanText(v, max)).filter((v) => !isPlaceholderValue(v)), limit) : []
 const httpsOnly = (urls: string[]): string[] => urls.filter((u) => /^https:\/\//i.test(u))
 
 const PRICE_BUCKET_RE = /^(econ[oó]mico|medio|premium|low|mid|medium|high|bajo|alto)$/i
@@ -133,7 +145,8 @@ function audienceLine(raw: unknown, language: AdLanguage): string {
           : ''
   )
   const profession = a.has_specific_profession ? s(a, 'profession_description', 120) : ''
-  return [`${sex}${ages}`, scope, profession].filter(Boolean).join(', ')
+  // "Personas 18–65, todo el país" says nothing: placeholder parts are dropped (B3).
+  return stripPlaceholderParts([`${sex}${ages}`, scope, profession].filter(Boolean).join(', '))
 }
 
 /** Offer types that pin the category; everything else uses the text heuristics in buildBrandDna. */
@@ -149,9 +162,15 @@ function categoryFor(product: Row | null): BusinessCategory | undefined {
 // ---------------------------------------------------------------------------
 
 /** Product form → offer facts. Single-valued keys take the first non-empty field only (no fake conflicts). */
-export function productFacts(product: Row, business: Row | null, language: AdLanguage): { facts: DnaFact[]; notes: string[] } {
-  const facts: DnaFact[] = []
+export function productFacts(
+  product: Row,
+  business: Row | null,
+  language: AdLanguage,
+  profileFacts?: OfferProfileFacts | null,
+): { facts: DnaFact[]; notes: string[] } {
+  const facts: DnaFact[] = [...(profileFacts?.facts ?? [])]
   const notes: string[] = []
+  const fromProfile = new Set(facts.map((f) => f.key))
   const es = language === 'es'
   const add = (key: FactKey, value: string, evidence: string) => {
     const v = cleanText(value, 300)
@@ -171,9 +190,11 @@ export function productFacts(product: Row, business: Row | null, language: AdLan
     }
   }
 
-  // Price: only a concrete amount.
+  // Price: the structured ad profile wins (exact formatted amount); else only a concrete amount.
   const priceField = ['price', 're_price', 'price_range'].find((f) => concretePrice(product[f]))
-  if (priceField) add('price', concretePrice(product[priceField]) as string, `products.${priceField}`)
+  if (fromProfile.has('price')) {
+    // already added from offer.adProfile.price
+  } else if (priceField) add('price', concretePrice(product[priceField]) as string, `products.${priceField}`)
   else {
     const bucket = s(product, 'price_range', 40) || s(product, 're_price', 40)
     notes.push(bucket
@@ -182,7 +203,9 @@ export function productFacts(product: Row, business: Row | null, language: AdLan
   }
 
   // Logistics / risk reversal.
-  if (s(product, 'shipping_info')) add('shipping', s(product, 'shipping_info'), 'products.shipping_info')
+  if (fromProfile.has('shipping')) {
+    // exact shipping sentence from offer.adProfile.shipping.text
+  } else if (s(product, 'shipping_info')) add('shipping', s(product, 'shipping_info'), 'products.shipping_info')
   else if (business && bool(business, 'does_shipping') === true) {
     const method = s(business, 'shipping_method', 160)
     add('shipping', method ? (es ? `Envíos: ${method}` : `Shipping: ${method}`) : (es ? 'Hacemos envíos' : 'We ship'), method ? 'businesses.shipping_method' : 'businesses.does_shipping')
@@ -227,7 +250,7 @@ export function productFacts(product: Row, business: Row | null, language: AdLan
   }
   if (bool(product, 'svc_has_own_method') === true && s(product, 'svc_method_name')) add('custom:method', s(product, 'svc_method_name'), 'products.svc_method_name')
   if (bool(product, 'stock_limited') === true) add('custom:stock_limited', es ? 'Stock limitado' : 'Limited stock', 'products.stock_limited')
-  for (const channel of strings(business?.sales_channels, 40, 3)) {
+  if (!fromProfile.has('contact_channel')) for (const channel of strings(business?.sales_channels, 40, 3)) {
     const label = CHANNEL_LABELS[channel]?.[language]
     if (label) add('custom:sales_channel', label, 'businesses.sales_channels')
   }
@@ -238,10 +261,23 @@ export function productFacts(product: Row, business: Row | null, language: AdLan
 // Narrative part (voice, audience, pains…) — shapes copy, never a claim
 // ---------------------------------------------------------------------------
 
-function savedPart(input: { business: Row; kit: Row | null; product: Row | null; language: AdLanguage; fetchedAt: string }): DnaPart {
-  const { business, kit, product, language } = input
+function savedPart(input: {
+  business: Row
+  kit: Row | null
+  product: Row | null
+  language: AdLanguage
+  fetchedAt: string
+  brandProfile?: BrandProfile | null
+  profileFacts?: OfferProfileFacts | null
+}): DnaPart {
+  const { business, kit, product, language, brandProfile } = input
   const tone = strings(kit?.tone_keywords, 40, 6)
-  const voice = [s(kit, 'brand_voice', 240), tone.length ? tone.join(', ') : ''].filter(Boolean).join(' · ')
+  const doList = (brandProfile?.do ?? []).slice(0, 6)
+  const voice = [
+    s(kit, 'brand_voice', 240),
+    tone.length ? tone.join(', ') : '',
+    doList.length ? `${language === 'es' ? 'Hacer' : 'Do'}: ${doList.join('; ')}` : '',
+  ].filter(Boolean).join(' · ')
   const styleDnas = parseStyleDnas(kit?.style_dnas)
   const visual: DnaVisual = {}
   const color = (key: string) => {
@@ -275,9 +311,10 @@ function savedPart(input: { business: Row; kit: Row | null; product: Row | null;
     oneLiner: s(kit, 'tagline', 160) || s(product, 'product_description', 200) || s(product, 'description', 200) || undefined,
     voice: voice || undefined,
     audience: uniqStrings([
+      ...audienceLines(brandProfile),
       s(product, 'best_customers', 240), s(product, 'target_audience', 240), s(kit, 'target_audience', 240),
       s(business, 'icp_description', 240), ...audiences,
-    ], 6),
+    ].filter((a) => a && !isPlaceholderValue(a)), 6),
     pains: uniqStrings([
       s(product, 'main_problem', 240), s(product, 'real_pain', 240), s(product, 'pain_consequences', 240),
       s(product, 'svc_problem', 240), s(product, 'svc_current_pain', 240), s(product, 'failed_attempts', 240),
@@ -288,7 +325,11 @@ function savedPart(input: { business: Row; kit: Row | null; product: Row | null;
       s(product, 'svc_life_change', 240), s(product, 'customer_values', 240), s(product, 'purchase_reason', 240),
     ], 10),
     objections: uniqStrings([s(product, 'key_objection', 240), s(product, 'svc_main_objection', 240)], 10),
-    forbiddenPhrases: strings(kit?.forbidden_phrases, 120, 20),
+    forbiddenPhrases: uniqStrings([
+      ...strings(kit?.forbidden_phrases, 120, 20),
+      ...(brandProfile?.dont ?? []),
+      ...(input.profileFacts?.forbiddenPhrases ?? []),
+    ], 30),
     facts: [],
     visual,
     referenceImageUrls: httpsOnly(uniqStrings([
@@ -313,6 +354,10 @@ export interface MapSavedBrandInput {
   website?: DnaPart | null
   fetchedAt: string
   extraNotes?: string[]
+  /** C3: product_images ids to use as the photo pool, in order (first = hero). Must belong to the offer. */
+  productImageIds?: string[]
+  /** C3: per-ad photos (1-based ad number → product_images ids). */
+  productImageIdsByAd?: Record<string, string[]>
 }
 
 export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer: OfferInput; gaps: FactKey[]; notes: string[] } {
@@ -323,22 +368,41 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   // Language first (labels for synthetic values like "Hacemos envíos").
   const probe = [brandName, s(kit, 'tagline'), s(kit, 'brand_voice'), s(product, 'name'), s(product, 'product_description', 600),
     s(product, 'main_problem'), s(product, 'expected_result'), s(product, 'differentiation'), s(business, 'icp_description')].filter(Boolean).join('\n')
-  const language: AdLanguage = probe.trim() ? detectLanguage(probe) : 'es'
+  // Structured profiles (migration 085): brand kit locale/register are HARD rules; offer facts are exact strings.
+  const brandProfile = readBrandProfile(kit?.brand_profile)
+  const adProfile = readOfferAdProfile(product?.ad_profile)
+  const language: AdLanguage = languageFromLocale(brandProfile?.locale) || languageFromLocale(adProfile?.locale)
+    || (probe.trim() ? detectLanguage(probe) : 'es')
+  const profileFacts = adProfile ? offerProfileFacts(adProfile, language) : null
 
-  const { facts, notes: factNotes } = product ? productFacts(product, business, language) : productFacts({}, business, language)
+  const { facts, notes: factNotes } = product ? productFacts(product, business, language, profileFacts) : productFacts({}, business, language)
   notes.push(...factNotes.filter((n) => product || !n.startsWith('price')))
 
-  // Product photos: real product refs first (kind product, then legacy refs), never generated; context → style refs.
-  const usable = input.images.filter((row) => isReusableProductReference(row as { kind?: string | null; message_id?: string | null }))
-  const productUrls = httpsOnly(uniqStrings([
-    ...usable.filter((r) => r.kind === 'product').map((r) => s(r, 'image_url', 1000)),
-    ...usable.filter((r) => r.kind !== 'product' && r.kind !== 'context').map((r) => s(r, 'image_url', 1000)),
-    ...strings(product?.ind_product_images, 1000, 8),
-  ], 8))
-  const contextUrls = httpsOnly(usable.filter((r) => r.kind === 'context').map((r) => s(r, 'image_url', 1000)))
+  // Product photos: real product refs first (primary → hero tag → sharpest → newest; then legacy refs), never generated; context → style refs.
+  const usable = orderProductImages(input.images.filter((row) => isReusableProductReference(row as { kind?: string | null; message_id?: string | null })))
+  const urlOf = (r: Row) => s(r, 'image_url', 1000)
+  const byId = (ids: string[], label: string): string[] => ids.map((id) => {
+    const row = usable.find((r) => r.id === id && r.kind !== 'context')
+    if (!row) throw new SavedBrandError('NOT_FOUND', `${label}: product image ${id} not found on this offer (use list_assets ids of kind product)`)
+    return urlOf(row)
+  })
+  const productUrls = input.productImageIds?.length
+    ? httpsOnly(uniqStrings(byId(input.productImageIds, 'productImageIds'), 8))
+    : httpsOnly(uniqStrings([
+      ...usable.filter((r) => r.kind === 'product').map(urlOf),
+      ...usable.filter((r) => r.kind !== 'product' && r.kind !== 'context').map(urlOf),
+      ...strings(product?.ind_product_images, 1000, 8),
+    ], 8))
+  const byAd: Record<string, string[]> = {}
+  for (const [index, ids] of Object.entries(input.productImageIdsByAd ?? {})) {
+    const urls = httpsOnly(uniqStrings(byId(ids, `productImageIdsByAd.${index}`), 4))
+    // Keys are 1-based ad numbers (as shown to the user); pack items are 0-based.
+    if (urls.length && Number(index) >= 1) byAd[String(Number(index) - 1)] = urls
+  }
+  const contextUrls = httpsOnly(usable.filter((r) => r.kind === 'context').map(urlOf))
   if (!productUrls.length) notes.push('missing:product_photo — no real product photo saved on this offer; scenes will not be product-locked (upload one in the offer for best results)')
 
-  const part = savedPart({ business, kit, product, language, fetchedAt: input.fetchedAt })
+  const part = savedPart({ business, kit, product, language, fetchedAt: input.fetchedAt, brandProfile, profileFacts })
   if (contextUrls.length) part.referenceImageUrls = uniqStrings([...(part.referenceImageUrls || []), ...contextUrls], 16)
 
   const offerName = s(product, 'name', 200) || brandName
@@ -348,6 +412,7 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
     offerForm: { name: offerName, brandName, facts, productImageUrls: productUrls },
     language,
     category: categoryFor(product),
+    ...(brandProfile?.register ? { register: brandProfile.register } : {}),
   })
   const mustUse = strings(kit?.must_use_phrases, 120, 12)
   if (mustUse.length) dna.mustUsePhrases = mustUse
@@ -362,6 +427,10 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   }
   const productId = s(product, 'id', 64)
   if (productId) offer.productId = productId
+  if (profileFacts?.notIncluded.length) offer.notIncluded = profileFacts.notIncluded
+  if (profileFacts?.strictClaims) offer.strictClaims = true
+  if (profileFacts?.productLock) offer.productLock = profileFacts.productLock
+  if (Object.keys(byAd).length) offer.productImageUrlsByAd = byAd
   return { dna, offer, gaps: dna.gaps, notes }
 }
 
@@ -421,7 +490,14 @@ export async function buildDnaFromSavedBrand(input: BuildDnaFromSavedBrandInput)
     .map((row) => (typeof row?.updated_at === 'string' ? Date.parse(row.updated_at) : NaN))
     .filter((t) => Number.isFinite(t))
   const fetchedAt = stamps.length ? new Date(Math.max(...stamps)).toISOString() : now().toISOString()
-  const mapped = mapSavedBrand({ business, kit, product, images, website, fetchedAt, extraNotes: notes })
+  if ((input.productImageIds?.length || Object.keys(input.productImageIdsByAd ?? {}).length) && !product) {
+    throw new SavedBrandError('BAD_INPUT', 'productImageIds need an offer with saved product photos')
+  }
+  const mapped = mapSavedBrand({
+    business, kit, product, images, website, fetchedAt, extraNotes: notes,
+    productImageIds: input.productImageIds,
+    productImageIdsByAd: input.productImageIdsByAd,
+  })
   return {
     ...mapped,
     brandId,

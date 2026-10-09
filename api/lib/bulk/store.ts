@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { isMissingColumnError } from '../db-missing-column.js'
+import { orderProductImages } from '../product-image-order.js'
 import { isReusableProductReference } from '../product-image-refs.js'
 import { encodeGeneratedImageJpeg } from '../generated-image-jpeg.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
@@ -36,15 +38,19 @@ export async function listProductRefUrls(
 ): Promise<string[]> {
   const db = getSupabaseAdmin()
   if (!db || !userId || !offerId) return []
-  const { data, error } = await db
+  const run = (select: string) => db
     .from('product_images')
-    .select('image_url, kind, message_id')
+    .select(select)
     .eq('product_id', offerId)
     .in('kind', ['product', 'context'])
     .order('created_at', { ascending: false })
     .limit(limit)
+  // C3 (085): primary photo → hero tag → sharpest → newest. Older DBs: newest first.
+  let res = await run('image_url, kind, message_id, created_at, is_primary, tags, quality')
+  if (res.error && isMissingColumnError(res.error)) res = await run('image_url, kind, message_id, created_at')
+  const { data, error } = res
   if (error || !data) return []
-  return data
+  return orderProductImages(data as unknown as Array<{ image_url: string; kind: string | null; message_id: string | null; created_at?: string | null; is_primary?: boolean | null }>)
     .filter((row) => isReusableProductReference(row))
     .map((row) => row.image_url as string)
     .filter(Boolean)

@@ -52,7 +52,19 @@ export function factsAllowlistBlock(ctx: CopyContext): string {
     ctx.language === 'es'
       ? '(* = hechos foco de este anuncio). Cualquier número, precio, porcentaje, plazo, garantía, envío gratis, reseña o resultado que NO esté arriba está PROHIBIDO.'
       : '(* = focus facts for this ad). Any number, price, percentage, timing, guarantee, free shipping, review or result NOT listed above is FORBIDDEN.'
-  return [head, ...lines, tail].join('\n')
+  const extra: string[] = []
+  const notIncluded = ctx.offer.notIncluded ?? []
+  if (notIncluded.length) {
+    extra.push(ctx.language === 'es'
+      ? `NO INCLUIDO (nunca digas que viene incluido): ${notIncluded.join(' | ')}`
+      : `NOT INCLUDED (never say it is included): ${notIncluded.join(' | ')}`)
+  }
+  if (ctx.offer.strictClaims) {
+    extra.push(ctx.language === 'es'
+      ? 'BANCO DE CLAIMS VERIFICADOS: toda promesa (precio, envío, contenido, edad, armado, resultados, superlativos) debe copiar EXACTO uno de los hechos de arriba. Si no está arriba, no lo digas.'
+      : 'VERIFIED CLAIMS BANK: every promise (price, shipping, contents, age, assembly, results, superlatives) must copy one of the facts above EXACTLY. If it is not above, do not say it.')
+  }
+  return [head, ...lines, tail, ...extra].join('\n')
 }
 
 /** Remove unconfirmed fact values (and their stray numbers) from free DNA text. */

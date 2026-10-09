@@ -120,7 +120,7 @@ describe('buildDnaFromSavedBrand: saved brand → BrandDna + offer', () => {
     })
     expect(dna.visual.styleNotes).toContain('luz natural')
     expect(dna.oneLiner).toBe('Sérum facial de niacinamida y aloe hecho en Heredia')
-    expect(dna.audience).toEqual(expect.arrayContaining(['Mujeres de 25 a 40 con piel mixta', 'Mujeres 25–40, todo el país']))
+    expect(dna.audience).toEqual(expect.arrayContaining(['Mujeres de 25 a 40 con piel mixta', 'Mujeres 25–40']))
     expect(dna.pains).toEqual(expect.arrayContaining(['poros abiertos que se notan en fotos', 'brillo en la zona T a media tarde']))
     expect(dna.objections).toEqual(['ya probé sérums y no noté nada'])
 
@@ -290,7 +290,7 @@ describe('saved-brand doors (web + MCP parity)', () => {
     const w = await callWeb(handler, USER_A, { action: 'dna_from_brand', brandId: BIZ_A, offerId: PROD_A })
     expect(w.statusCode).toBe(200)
     const mcp = savedEnv()
-    const m = await callMcp(mcp, USER_A, 'adpack_from_brand', { brandId: BIZ_A, offerId: PROD_A })
+    const m = await callMcp(mcp, USER_A, 'adpack_from_brand', { brandId: BIZ_A, offerId: PROD_A, includeDna: true })
     expect(m.isError).toBe(false)
     const wb = w.body as Record<string, unknown>
     for (const key of ['dna', 'offer', 'gaps', 'notes', 'brandId', 'offerId', 'brandKitId', 'quote']) {

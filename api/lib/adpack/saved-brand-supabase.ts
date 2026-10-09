@@ -7,6 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { SiteAnalysisResult } from '../site-analysis.js'
 import type { SavedBrandDb, StoredSiteAnalysis } from './saved-brand.js'
+import { isMissingColumnError } from '../db-missing-column.js'
 
 const KIT_SELECT =
   'id, name, business_id, user_id, is_default, is_active, is_primary_for_business, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, must_use_phrases, forbidden_phrases, target_audience, visual_style_notes, font_primary, font_secondary, industry, reference_images, style_dnas, created_at'
@@ -43,26 +44,23 @@ export function createSupabaseSavedBrandDb(client?: SupabaseClient | null): Save
 
     async listBrandKits(userId, businessId) {
       if (!userId || !businessId) return []
-      let { data, error } = await db
+      const run = (select: string, primaryOrder = true) => db
         .from('brand_kits')
-        .select(KIT_SELECT)
+        .select(select)
         .eq('business_id', businessId)
         .eq('user_id', userId)
-        .order('is_primary_for_business', { ascending: false })
+        .order(primaryOrder ? 'is_primary_for_business' : 'is_default', { ascending: false })
         .order('created_at', { ascending: true })
-      if (error && /is_primary_for_business|style_dnas/i.test(error.message || '')) {
-        const retry = await db
-          .from('brand_kits')
-          .select(KIT_SELECT_LEGACY)
-          .eq('business_id', businessId)
-          .eq('user_id', userId)
-          .order('is_default', { ascending: false })
-          .order('created_at', { ascending: true })
-        data = (retry.data || []).map((row) => ({ ...row, is_primary_for_business: false, style_dnas: [] })) as typeof data
-        error = retry.error
+      // 085 brand_profile: optional (feature-detected so an unapplied migration never breaks packs).
+      let res = await run(`${KIT_SELECT}, brand_profile`)
+      if (res.error && isMissingColumnError(res.error, 'brand_profile')) res = await run(KIT_SELECT)
+      if (res.error && /is_primary_for_business|style_dnas/i.test(res.error.message || '')) {
+        const retry = await run(KIT_SELECT_LEGACY, false)
+        if (retry.error) throw retry.error
+        return ((retry.data || []) as unknown as Array<Record<string, unknown>>).map((row) => ({ ...row, is_primary_for_business: false, style_dnas: [] }))
       }
-      if (error) throw error
-      return (data || []) as Array<Record<string, unknown>>
+      if (res.error) throw res.error
+      return (res.data || []) as unknown as Array<Record<string, unknown>>
     },
 
     async getProduct(userId, businessId, productId) {
@@ -76,16 +74,19 @@ export function createSupabaseSavedBrandDb(client?: SupabaseClient | null): Save
 
     async listProductImages(userId, productId) {
       if (!userId || !productId) return []
-      const { data, error } = await db
+      const run = (select: string) => db
         .from('product_images')
-        .select('id, image_url, kind, label, message_id, created_at')
+        .select(select)
         .eq('product_id', productId)
         .eq('user_id', userId)
         .in('kind', ['product', 'context'])
         .order('created_at', { ascending: false })
         .limit(24)
+      // 085 adds is_primary / tags / role / quality (ordering hints); older DBs fall back.
+      let { data, error } = await run('id, image_url, kind, label, message_id, created_at, is_primary, tags, role, quality')
+      if (error && isMissingColumnError(error)) ({ data, error } = await run('id, image_url, kind, label, message_id, created_at'))
       if (error) throw error
-      return (data || []) as Array<Record<string, unknown>>
+      return (data || []) as unknown as Array<Record<string, unknown>>
     },
 
     async getLatestSiteAnalysis(userId, businessId): Promise<StoredSiteAnalysis | null> {

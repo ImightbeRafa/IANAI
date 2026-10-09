@@ -323,6 +323,26 @@ export function parseOffer(raw: unknown): OfferInput {
     if (!cut || !isAllowedImageUrl(cut)) throw bad('offer.productCutoutUrl must be an https or data:image URL')
     offer.productCutoutUrl = cut
   }
+  if (raw.notIncluded !== undefined) {
+    if (!Array.isArray(raw.notIncluded) || raw.notIncluded.some((v) => typeof v !== 'string')) throw bad('offer.notIncluded must be an array of strings')
+    const items = (raw.notIncluded as string[]).map((v) => v.trim().slice(0, 160)).filter(Boolean).slice(0, 20)
+    if (items.length) offer.notIncluded = items
+  }
+  if (raw.strictClaims === true) offer.strictClaims = true
+  if (isObj(raw.productLock)) {
+    const lock = raw.productLock
+    const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim().slice(0, 160)).slice(0, 20) : [])
+    offer.productLock = { lockProductAppearance: lock.lockProductAppearance === true, immutableAttributes: strs(lock.immutableAttributes), allowedProps: strs(lock.allowedProps) }
+  }
+  if (raw.productImageUrlsByAd !== undefined) {
+    if (!isObj(raw.productImageUrlsByAd)) throw bad('offer.productImageUrlsByAd must be an object { "<ad index>": [urls] }')
+    const byAd: Record<string, string[]> = {}
+    for (const [k, v] of Object.entries(raw.productImageUrlsByAd).slice(0, MAX_PACK_SIZE)) {
+      if (!/^\d{1,2}$/.test(k)) throw bad('offer.productImageUrlsByAd keys must be ad indexes')
+      byAd[k] = parseImageUrls(v, `offer.productImageUrlsByAd.${k}`)
+    }
+    if (Object.keys(byAd).length) offer.productImageUrlsByAd = byAd
+  }
   return offer
 }
 
@@ -494,6 +514,32 @@ export interface SavedBrandRefInput {
   brandId?: unknown
   offerId?: unknown
   brandKitId?: unknown
+  /** C3: product_images ids of the offer to use as the photo pool (first = hero). */
+  productImageIds?: unknown
+  /** C3: per-ad photos { "<ad number, 1-based as in adpack_status>": [productImageId…] }. */
+  productImageIdsByAd?: unknown
+}
+
+const IMAGE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+
+export function parseProductImageIds(raw: unknown, label = 'productImageIds'): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw) || raw.length > 8 || raw.some((v) => typeof v !== 'string' || !IMAGE_ID_RE.test(v))) {
+    throw bad(`${label} must be an array of up to 8 productImageId strings (from list_assets)`)
+  }
+  return raw.length ? [...new Set(raw as string[])] : undefined
+}
+
+export function parseProductImageIdsByAd(raw: unknown): Record<string, string[]> | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!isObj(raw)) throw bad('productImageIdsByAd must be an object { "<ad index>": [productImageId…] }')
+  const out: Record<string, string[]> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!/^\d{1,2}$/.test(k) || Number(k) < 1 || Number(k) > MAX_PACK_SIZE) throw bad(`productImageIdsByAd keys must be ad numbers 1-${MAX_PACK_SIZE} (as in adpack_status)`)
+    const ids = parseProductImageIds(v, `productImageIdsByAd.${k}`)
+    if (ids) out[k] = ids.slice(0, 4)
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 export interface AdPackService {
@@ -518,6 +564,8 @@ export interface AdPackService {
     ratios?: unknown
     businessId?: unknown
     brandKitId?: unknown
+    productImageIds?: unknown
+    productImageIdsByAd?: unknown
     source: AdPackSource
     /** Fixed id for idempotent create (MCP: the approval id). */
     packId?: string
@@ -634,6 +682,8 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     if (!brandId) throw bad('brandId is required')
     const offerId = parseOptionalUuid(ref.offerId, 'offerId')
     const brandKitId = parseOptionalUuid(ref.brandKitId, 'brandKitId')
+    const productImageIds = parseProductImageIds(ref.productImageIds)
+    const productImageIdsByAd = parseProductImageIdsByAd(ref.productImageIdsByAd)
     if (!deps.savedBrandDb) throw new AdPackError('UNAVAILABLE', 'Saved brands are not available in this runtime')
     const t0 = now()
     try {
@@ -645,6 +695,8 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         brandKitId,
         refresh: ref.refresh === true,
         refreshWebsite: deps.refreshWebsite,
+        productImageIds,
+        productImageIdsByAd,
       })
       if (res.costUsd > 0) {
         await log({
@@ -796,7 +848,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       }
       if (fromSaved) {
         // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
-        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId }, input.source)
+        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd }, input.source)
         if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
         dna = saved.dna
         offer = saved.offer

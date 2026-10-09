@@ -440,9 +440,16 @@ function toDataUrl(bytes: Uint8Array, mimeType: string): string {
   return `data:${mimeType};base64,${Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64')}`
 }
 
+/** C3: per-ad product photos (`offer.productImageUrlsByAd[index]`) override the pack-wide hero. */
+export function offerForItem(offer: OfferInput, index: number): OfferInput {
+  const urls = offer.productImageUrlsByAd?.[String(index)]?.filter(Boolean)
+  return urls?.length ? { ...offer, productImageUrls: urls } : offer
+}
+
 async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promise<PackItem> {
   const { gateway, storage } = ctx.input
-  const { dna, offer } = ctx.pack
+  const { dna } = ctx.pack
+  const offer = offerForItem(ctx.pack.offer, item.index)
   const copy = item.copy
   if (!copy) return save(ctx, item, { status: 'planned' })
   const maxAttempts = 1 + Math.max(0, ctx.input.maxSceneRetries ?? MAX_SCENE_RETRIES)
