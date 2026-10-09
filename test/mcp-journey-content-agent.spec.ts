@@ -26,7 +26,7 @@ import { createMemoryPackStore } from '../api/lib/adpack/store-memory'
 import type { AdPackStorage } from '../api/lib/adpack/runner-types'
 import type { ModelGateway } from '../api/lib/adpack/types'
 import { createMemoryMcpApprovalStore } from '../api/lib/mcp/approval'
-import { setMcpExecuteScheduler } from '../api/lib/mcp/execute-job'
+import { drainBackground, queueBackgroundWork, restoreBackgroundWork } from './adpack/background-queue'
 import { handleMcpJsonRpc } from '../api/lib/mcp/protocol'
 import type { McpStoreCapabilities } from '../api/lib/mcp/offer-tools'
 import type { RemoteFetch } from '../api/lib/mcp/remote-image'
@@ -298,14 +298,12 @@ let prevFontFetch: string | undefined
 beforeAll(() => {
   prevFontFetch = process.env.ADPACK_FONT_FETCH
   process.env.ADPACK_FONT_FETCH = '0' // brand fonts: bundled / cached only, never the network
-  setMcpExecuteScheduler(() => {}) // polls advance the pack inline (no background work)
+  queueBackgroundWork() // background slices run when the test drains them ("time passes")
 })
 afterAll(() => {
   if (prevFontFetch === undefined) delete process.env.ADPACK_FONT_FETCH
   else process.env.ADPACK_FONT_FETCH = prevFontFetch
-  setMcpExecuteScheduler((work) => {
-    void work().catch(() => {})
-  })
+  restoreBackgroundWork()
 })
 
 describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, applied }) => {
@@ -420,19 +418,25 @@ describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, app
     expect(confirm.payload.status).toBe('approved')
     const started = await rpc('create_ads', { ...adsArgs, approvalRequestId })
     expect(started.isError, JSON.stringify(started.payload).slice(0, 1500)).toBe(false)
-    expect(started.payload).toMatchObject({ status: 'completed', packId: approvalRequestId, creativeFreedom: 'high', chargedCredits: 0 })
+    // #13: running (never "completed") until the pack is terminal.
+    expect(started.payload).toMatchObject({ status: 'running', packStatus: 'planned', moreWork: true, packId: approvalRequestId, creativeFreedom: 'high', chargedCredits: 0 })
+    expect(started.payload.etaSeconds).toEqual(expect.any(Number))
+    expect(started.payload.pollAfterSeconds).toEqual(expect.any(Number))
+    const early = await rpc('get_execute_result', { jobId: approvalRequestId })
+    expect(early.payload).toMatchObject({ status: 'running', moreWork: true })
     const plan = started.payload.plan as Array<Record<string, unknown>>
     expect(plan).toHaveLength(2)
     for (const p of plan) expect(p).toMatchObject({ angleId: expect.any(String), rationale: expect.any(String), layoutFamily: expect.any(String) })
 
     // 7. Poll until done (adpack_status; get_execute_result returns the same pack status).
-    let status = await rpc('adpack_status', { packId: approvalRequestId })
-    for (let i = 0; i < 12 && status.payload.moreWork; i++) status = await rpc('adpack_status', { packId: approvalRequestId })
+    // The pack advances in background slices without polling; status is a cheap read.
+    await drainBackground()
+    const status = await rpc('adpack_status', { packId: approvalRequestId })
     expect(status.payload.failures ?? [], JSON.stringify(status.payload).slice(0, 3000)).toEqual([])
     expect(status.payload.moreWork).toBe(false)
     expect(status.payload.status).toBe('done')
     const viaJob = await rpc('get_execute_result', { jobId: approvalRequestId })
-    expect(viaJob.payload).toMatchObject({ packId: approvalRequestId, moreWork: false })
+    expect(viaJob.payload).toMatchObject({ status: 'completed', packId: approvalRequestId, moreWork: false })
     expect(viaJob.payload.deliverable.ads).toHaveLength(2)
 
     // 8. Deliverable assertions.

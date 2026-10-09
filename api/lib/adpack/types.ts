@@ -559,6 +559,11 @@ export interface PackStore {
   leaseItems(packId: string, limit: number, leaseMs: number, opts?: { excludeIds?: string[] }): Promise<PackItem[]>
   /** Patch an item. A present-but-undefined `leaseUntil` clears the lease. */
   updateItem(itemId: string, patch: Partial<PackItem>): Promise<void>
+  /**
+   * Cron sweep (service role, all users): packs still planned/running created after `createdAfterIso`,
+   * least recently updated first. Optional: stores without it are never swept.
+   */
+  listOpenPacks?(opts: { limit: number; createdAfterIso: string }): Promise<Array<{ packId: string; userId: string }>>
 }
 
 /** Model-call abstraction so tests and the benchmark can inject fakes / record cost. */

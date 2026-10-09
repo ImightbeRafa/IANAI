@@ -4,6 +4,10 @@ vi.mock('../api/lib/mcp/url-analysis-worker.js', () => ({
   processNextMcpUrlIntake: vi.fn(async () => ({ processed: false, reason: 'empty' })),
 }))
 
+vi.mock('../api/lib/adpack/cron-sweep.js', () => ({
+  runAdPackCronSweep: vi.fn(async () => ({ checked: 0, resumed: [], skipped: 0 })),
+}))
+
 import handler from '../api/mcp-guide-analysis'
 import { processNextMcpUrlIntake } from '../api/lib/mcp/url-analysis-worker.js'
 

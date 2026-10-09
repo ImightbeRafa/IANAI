@@ -67,7 +67,8 @@ import type { StyleDna } from '../bulk/types.js'
 import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
-import { buildStatusExtras } from './status-summary.js'
+import { buildStatusExtras, estimateRemainingSeconds } from './status-summary.js'
+import { ADPACK_SLICE_BUDGET_MS, kickPackAdvance, sweepStalePacks, type BackgroundSchedule, type SweepResult } from './background.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto, RelightMode } from './types.js'
@@ -76,10 +77,10 @@ import type { ImageLoader } from './fidelity/pipeline.js'
 import type { DnaPart } from './dna/part.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
-/** Background advance budget (waitUntil / MCP scheduler). */
-export const ADPACK_BACKGROUND_BUDGET_MS = 50_000
-/** Inline advance budget when a status poll finds no active worker. */
-export const ADPACK_INLINE_BUDGET_MS = 8_000
+/** Background advance budget per slice (waitUntil / MCP scheduler; slices self-continue). */
+export const ADPACK_BACKGROUND_BUDGET_MS = ADPACK_SLICE_BUDGET_MS
+/** @deprecated status no longer advances inline (#14); kept for callers that still import it. */
+export const ADPACK_INLINE_BUDGET_MS = 0
 export const ADPACK_MAX_UPLOADS = 12
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -678,6 +679,12 @@ function libraryIdsFor(item: PackItem): string[] {
   return (item.renders ?? []).map((r) => saved.get(r.imageUrl)).filter((id): id is string => Boolean(id))
 }
 
+/** Poll cadence hint: a quarter of the ETA, 10–30 s (work never depends on the poll). */
+export function retryAfterSecondsFor(etaSeconds: number | undefined): number {
+  if (etaSeconds === undefined || !Number.isFinite(etaSeconds)) return 20
+  return Math.max(10, Math.min(30, Math.round(etaSeconds / 4)))
+}
+
 function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: string, language?: AdLanguage): AdPackStatusResponse {
   const progress: PackProgress = summarizePack(pack, items)
   const perAd = quotePack(1).perAd
@@ -712,6 +719,7 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     ...(pack.businessId && deepLink ? { businessId: pack.businessId, deepLink } : {}),
     ...(pack.offer?.productId ? { offerId: pack.offer.productId } : {}),
     ...extras,
+    ...(moreWork ? { retryAfterSeconds: retryAfterSecondsFor(extras.etaSeconds) } : {}),
     createdAt: pack.createdAt,
     updatedAt: pack.updatedAt,
   }
@@ -878,11 +886,16 @@ export interface AdPackService {
   } & DnaOverridesInput): Promise<AdPackStartResponse>
   getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
-   * getStatus, but first runs a short inline advance when work remains and no worker holds a lease,
-   * and saves finished renders to the offer library once the pack completes (idempotent).
+   * getStatus as a cheap read (#14): never advances inline. With `schedule`, it kicks a background
+   * advance loop when work remains and no worker holds a lease, and schedules the (idempotent)
+   * offer-library save of a completed pack; it returns immediately either way.
    */
-  pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
+  pollStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown; schedule?: BackgroundSchedule }): Promise<AdPackStatusResponse>
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
+  /** Kick the self-continuing background loop for a pack (no-op when this process already runs one). */
+  kickAdvance(input: { userId: string; packId: string; schedule: BackgroundSchedule }): boolean
+  /** Cron: resume up to `limit` running packs nobody is advancing (no lease, no recent update). */
+  sweepStale(input: { schedule: BackgroundSchedule; limit?: number }): Promise<SweepResult>
   editText(input: { userId: string; packId: unknown; itemId: unknown; copy: unknown }): Promise<AdPackEditTextResponse>
   regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown }): Promise<AdPackRegenerateResponse>
   /** Free: re-render a finished ad into more ratios from its stored scene + copy (no model calls, no credits). */
@@ -1273,31 +1286,45 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         angles: planned.items.map((i) => ({ index: i.index + 1, angleId: i.angle.id, category: i.angle.category, hookType: i.angle.hookType, format: i.angle.format, layoutFamily: i.angle.layoutFamily, ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}), rationale: i.angle.rationale })),
         ...(dna.visual?.styleProfile ? { styleProfile: dna.visual.styleProfile } : {}),
         ...(styleNote ? { notes: [styleNote] } : {}),
+        etaSeconds: estimateRemainingSeconds(planned.items),
       }
     },
 
     getStatus,
 
     async pollStatus(input) {
+      // #14: a cheap read. Never advances inline (a model step can run far past any inline budget and
+      // time the host out); at most it kicks a background loop when nobody holds a lease.
       let status = await getStatus(input)
-      if (status.moreWork && !status.leaseActive) {
-        try {
-          await advance({ userId: input.userId, packId: status.packId, budgetMs: input.inlineBudgetMs ?? ADPACK_INLINE_BUDGET_MS })
-        } catch (err) {
-          if (isAdPackError(err)) throw err
-          console.error('[adpack] inline advance failed', err instanceof Error ? err.message : err)
-        }
-        status = await getStatus(input)
-      }
-      // A dropped background task may have finished the pack without saving: retry here (idempotent).
       const unsaved = status.items.some((i) => i.status === 'done' && i.renders.length && (i.libraryImageIds?.length ?? 0) < i.renders.length)
-      if (COMPLETE_PACK.has(status.status) && status.offerId && unsaved && (await persistLibrary(input.userId, status.packId))) {
-        status = await getStatus(input)
+      const needsLibrary = COMPLETE_PACK.has(status.status) && Boolean(status.offerId) && unsaved
+      if (input.schedule) {
+        let kicked = false
+        if (status.moreWork && !status.leaseActive) {
+          kicked = kickPackAdvance({ service: { advance }, userId: input.userId, packId: status.packId, schedule: input.schedule, now })
+        }
+        // A dropped background task may have finished the pack without saving: retry off-request (idempotent).
+        if (needsLibrary) {
+          const packId = status.packId
+          input.schedule(async () => {
+            await persistLibrary(input.userId, packId)
+          })
+        }
+        return kicked ? { ...status, backgroundKicked: true } : status
       }
+      if (needsLibrary && (await persistLibrary(input.userId, status.packId))) status = await getStatus(input)
       return status
     },
 
     advance,
+
+    kickAdvance(input) {
+      return kickPackAdvance({ service: { advance }, userId: input.userId, packId: input.packId, schedule: input.schedule, now })
+    },
+
+    async sweepStale(input) {
+      return sweepStalePacks({ store: deps.store, service: { advance }, schedule: input.schedule, limit: input.limit, now })
+    },
 
     async editText(input) {
       const packId = parsePackId(input.packId)

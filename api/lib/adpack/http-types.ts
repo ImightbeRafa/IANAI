@@ -341,6 +341,8 @@ export interface AdPackStartResponse {
   angles?: Array<{ index: number; angleId: string; category?: AngleCategory; hookType: HookType; format: AdAngle['format']; layoutFamily?: LayoutFamily; variation?: number; rationale?: string }>
   styleProfile?: StyleRenderProfile
   notes?: string[]
+  /** Estimated seconds until the pack finishes (default step timings × pending steps ÷ workers). */
+  etaSeconds?: number
 }
 
 export interface AdPackItemView {
@@ -428,6 +430,10 @@ export interface AdPackStatusResponse {
   summary: string
   /** Estimated seconds left (from this pack's per-step timings), only while moreWork. */
   etaSeconds?: number
+  /** Suggested wait before the next status read (only while moreWork); work continues in the background meanwhile. */
+  retryAfterSeconds?: number
+  /** True when this read started a background advance (nobody held a lease). */
+  backgroundKicked?: boolean
   /** Failed ads: plain-language reason + the exact adpack_regenerate call to retry. */
   failures?: AdPackFailureView[]
   /** Once finished (done / partial): links per ratio + captions per ad, numbered captionsText, deepLink. */

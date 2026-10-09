@@ -111,7 +111,7 @@ describe('F1 + F2 through the MCP door', () => {
     const approvalRequestId = String(prompt.payload.approvalRequestId)
     await callMcp(env, USER_A, 'confirm_execute', { approvalRequestId, action: 'approve' })
     const started = await callMcp(env, USER_A, 'adpack_start', { ...args, approvalRequestId })
-    expect(started.payload).toMatchObject({ status: 'completed', quote: { size: 2, credits: 2 * PER_AD } })
+    expect(started.payload).toMatchObject({ status: 'running', quote: { size: 2, credits: 2 * PER_AD } })
     const items = [...env.store.items.values()].filter((i) => i.packId === approvalRequestId)
     expect(items.map((i) => i.angle.id)).toEqual(angleIds)
 

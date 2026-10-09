@@ -2,18 +2,16 @@
  * Ad Pack — web door. POST JSON `{ action, ...fields }` (Bearer Supabase token).
  *
  * Thin wrapper over `api/lib/adpack/service.ts`; the MCP `adpack_*` tools call
- * the same service. `start` / `status` schedule a background advance with
- * `waitUntil` after responding, and `status` also runs a short inline advance
- * when no worker holds a lease (poll-driven resume: dropped background work is
- * never lost).
+ * the same service. `start` / `regenerate` kick a self-continuing background
+ * advance (waitUntil slices) after responding; `status` is a cheap read that at
+ * most kicks that loop when no worker holds a lease. The minute cron also
+ * resumes stale packs (api/mcp-guide-analysis.ts), so dropped work is never lost.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { waitUntil } from '@vercel/functions'
 import { requireAuth } from './lib/auth.js'
 import type { AdPackAction } from './lib/adpack/http-types.js'
 import {
-  ADPACK_BACKGROUND_BUDGET_MS,
-  ADPACK_INLINE_BUDGET_MS,
   adPackErrorResponse,
   AdPackError,
   getDefaultAdPackService,
@@ -114,8 +112,9 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
       return { result: started, backgroundPackId: started.packId }
     }
     case 'status': {
-      const status = await service.pollStatus({ userId, packId: body.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, language: body.language })
-      return { result: status, backgroundPackId: status.moreWork ? status.packId : undefined }
+      // #14: cheap read — at most kicks the background loop (no inline advance).
+      const status = await service.pollStatus({ userId, packId: body.packId, language: body.language, schedule: (work) => scheduleBackground(work) })
+      return { result: status }
     }
     case 'edit_text':
       return { result: await service.editText({ userId, packId: body.packId, itemId: body.itemId, copy: body.copy }) }
@@ -168,6 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const packId = outcome.backgroundPackId
   if (packId) {
-    scheduleBackground(() => service.advance({ userId: user.id, packId, budgetMs: ADPACK_BACKGROUND_BUDGET_MS }))
+    // Self-continuing slices: the pack finishes without anyone polling.
+    service.kickAdvance({ userId: user.id, packId, schedule: (work) => scheduleBackground(work) })
   }
 }

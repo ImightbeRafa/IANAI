@@ -22,6 +22,7 @@ import type { PackItem } from '../../api/lib/adpack/types'
 import { listEnabledMcpTools, getMcpTool, MCP_REGISTRY_VERSION } from '../../api/lib/mcp/tool-registry'
 import { handleMcpJsonRpc, MCP_SERVER_INFO } from '../../api/lib/mcp/protocol'
 import { setMcpExecuteScheduler } from '../../api/lib/mcp/execute-job'
+import { resetPackLoops } from '../../api/lib/adpack/background'
 import {
   PER_AD,
   USER_A,
@@ -40,10 +41,20 @@ import {
 let webBackground: Array<() => Promise<unknown>> = []
 let mcpBackground: Array<() => Promise<void>> = []
 
+/** Run captured background work (and the slices it schedules) — "time passes". */
+async function drain() {
+  for (let n = 0; n < 500 && (webBackground.length || mcpBackground.length); n++) {
+    const work = (webBackground.shift() ?? mcpBackground.shift())!
+    await work()
+  }
+}
+
 beforeEach(() => {
   webBackground = []
   mcpBackground = []
-  // Background work is captured, never run implicitly: progress must come from polls.
+  resetPackLoops()
+  // Background work is captured, never run implicitly: progress comes from background slices
+  // (drain), never from status reads.
   setAdPackBackgroundScheduler((work) => {
     webBackground.push(work)
   })
@@ -111,8 +122,9 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     const wStart = await callWeb(handler, USER_A, { action: 'start', ...startArgs(wDna2) })
     expect(wStart.statusCode).toBe(200)
     const wPackId = (wStart.body as { packId: string }).packId
-    expect(webBackground).toHaveLength(1) // scheduled, but dropped
+    expect(webBackground).toHaveLength(1) // scheduled background loop
     const wPlanned = structure(web, wPackId)
+    await drain()
     const wStatus1 = await callWeb(handler, USER_A, { action: 'status', packId: wPackId })
     const wStatus2 = await callWeb(handler, USER_A, { action: 'status', packId: wPackId })
     const wItem0 = (wStatus2.body as AdPackStatusResponse).items[0]
@@ -132,6 +144,7 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     const mPackId = String(started.payload.packId)
     expect(mcpBackground).toHaveLength(1)
     const mPlanned = structure(mcp, mPackId)
+    await drain()
     const mStatus1 = await callMcp(mcp, USER_A, 'adpack_status', { packId: mPackId })
     const mStatus2 = await callMcp(mcp, USER_A, 'adpack_status', { packId: mPackId })
     const mItem0 = (mStatus2.payload.deliverable as { ads: Array<{ itemId: string }> }).ads[0]
@@ -151,7 +164,7 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     expect(mPlanned).toEqual(wPlanned)
     expect(wPlanned.items.every((i) => i.status === 'planned')).toBe(true)
 
-    // Same status progression (poll-driven: background work never ran).
+    // Same status progression (background slices, then cheap reads).
     const w1 = wStatus1.body as AdPackStatusResponse
     const w2 = wStatus2.body as AdPackStatusResponse
     expect(w1.progress).toEqual(mStatus1.payload.progress)
@@ -254,20 +267,35 @@ describe('POST /api/ad-pack', () => {
     expect(webBackground).toHaveLength(0)
   })
 
-  it('status advances progress even when background work never ran', async () => {
+  it('status is a cheap read: it never advances inline, it only re-kicks a dropped background loop', async () => {
     const env = webEnv()
     const start = await callWeb(handler, USER_A, { action: 'start', ...startArgs(serum.dna) })
     const packId = (start.body as { packId: string }).packId
     expect(webBackground).toHaveLength(1)
+    // The host dropped the background task (container restart): no work, no loop.
+    webBackground = []
+    resetPackLoops()
     expect(env.gateway.totalCalls()).toBe(0)
     const status = await callWeb(handler, USER_A, { action: 'status', packId })
     const body = status.body as AdPackStatusResponse
-    expect(body.progress.done).toBe(10)
-    expect(body.status).toBe('done')
-    expect(body.items.every((i) => i.renders.length === 3 && i.charged)).toBe(true)
-    expect(body.chargedCredits).toBe(10 * PER_AD)
-    // Nothing left to do → no further background scheduling.
+    // Nothing ran inline: the read only scheduled a new background loop.
+    expect(env.gateway.totalCalls()).toBe(0)
+    expect(body.progress.done).toBe(0)
+    expect(body.moreWork).toBe(true)
+    expect(body.backgroundKicked).toBe(true)
+    expect(body.retryAfterSeconds).toBeGreaterThanOrEqual(10)
+    expect(body.etaSeconds).toBeGreaterThan(0)
     expect(webBackground).toHaveLength(1)
+    // A second read while that loop is pending does not stack another one.
+    await callWeb(handler, USER_A, { action: 'status', packId })
+    expect(webBackground).toHaveLength(1)
+    await drain()
+    const done = (await callWeb(handler, USER_A, { action: 'status', packId })).body as AdPackStatusResponse
+    expect(done.status).toBe('done')
+    expect(done.items.every((i) => i.renders.length === 3 && i.charged)).toBe(true)
+    expect(done.chargedCredits).toBe(10 * PER_AD)
+    // Nothing left to do → no further background scheduling.
+    expect(webBackground).toHaveLength(0)
   })
 
   it('status does not run inline while another worker holds a lease; background work completes the pack', async () => {
@@ -281,7 +309,7 @@ describe('POST /api/ad-pack', () => {
     expect((leased.body as AdPackStatusResponse).progress.done).toBe(0)
     expect(env.gateway.totalCalls()).toBe(0)
     for (const item of env.store.items.values()) delete item.leaseUntil
-    await Promise.all(webBackground.map((w) => w()))
+    await drain()
     expect(env.store.packs.get(packId)!.status).toBe('done')
   })
 
@@ -295,7 +323,7 @@ describe('POST /api/ad-pack', () => {
     const body = status.body as AdPackStatusResponse
     expect(body.status).toBe('cancelled')
     expect(body.moreWork).toBe(false)
-    await Promise.all(webBackground.map((w) => w()))
+    await drain()
     expect(env.gateway.totalCalls()).toBe(0)
     expect(env.charges).toHaveLength(0)
   })
@@ -304,11 +332,13 @@ describe('POST /api/ad-pack', () => {
     const env = webEnv()
     const start = await callWeb(handler, USER_A, { action: 'start', ...startArgs(serum.dna) })
     const packId = (start.body as { packId: string }).packId
+    await drain()
     const done = (await callWeb(handler, USER_A, { action: 'status', packId })).body as AdPackStatusResponse
     const target = done.items[3]
     const regen = await callWeb(handler, USER_A, { action: 'regenerate', packId, itemId: target.id, mode: 'scene' })
     expect(regen.statusCode).toBe(200)
     expect(regen.body).toMatchObject({ item: { status: 'copy_ready', attempts: 1, charged: false }, quote: { size: 1, credits: PER_AD } })
+    await drain()
     const after = (await callWeb(handler, USER_A, { action: 'status', packId })).body as AdPackStatusResponse
     expect(after.status).toBe('done')
     expect(env.charges).toHaveLength(11)
@@ -326,7 +356,7 @@ describe('POST /api/ad-pack', () => {
     const early = await callWeb(handler, USER_A, { action: 'edit_text', packId, itemId, copy: { headline: 'Hola' } })
     expect(early.statusCode).toBe(409)
     expect((early.body as { code: string }).code).toBe('NOT_READY')
-    await callWeb(handler, USER_A, { action: 'status', packId })
+    await drain()
     const lie = await callWeb(handler, USER_A, { action: 'edit_text', packId, itemId, copy: { headline: 'Solo ₡1.000 hoy' } })
     expect(lie.statusCode).toBe(422)
     expect((lie.body as { code: string; issues: unknown[] }).code).toBe('COPY_REJECTED')
@@ -388,7 +418,9 @@ describe('MCP adpack_* tools', () => {
     await callMcp(env, USER_A, 'confirm_execute', { approvalRequestId, action: 'approve' })
     const started = await callMcp(env, USER_A, 'adpack_start', { ...args, approvalRequestId })
     expect(started.isError).toBe(false)
-    expect(started.payload).toMatchObject({ status: 'completed', packId: approvalRequestId, nextTool: 'adpack_status' })
+    // #13: work has begun, nothing is finished yet.
+    expect(started.payload).toMatchObject({ status: 'running', packStatus: 'planned', moreWork: true, packId: approvalRequestId, nextTool: 'adpack_status' })
+    expect(started.payload.statusMessage).toBe('Advance está generando un pack de anuncios… / Advance is generating an ad pack…')
     expect(env.store.packs.get(approvalRequestId)?.source).toBe('mcp')
     expect(mcpBackground).toHaveLength(1)
 
@@ -400,10 +432,12 @@ describe('MCP adpack_* tools', () => {
     const tampered = await callMcp(env, USER_A, 'adpack_start', { ...args, size: 20, approvalRequestId })
     expect(tampered.isError).toBe(true)
 
-    // Background work (when the host keeps it) completes the pack.
-    await Promise.all(mcpBackground.map((w) => w()))
+    // Background work completes the pack (no poll needed); the replay then says "completed".
+    await drain()
     expect(env.store.packs.get(approvalRequestId)!.status).toBe('done')
     expect(env.charges).toHaveLength(10)
+    const replay = await callMcp(env, USER_A, 'adpack_start', { ...args, approvalRequestId })
+    expect(replay.payload).toMatchObject({ status: 'completed', packStatus: 'done', moreWork: false, replayed: true })
   })
 
   it('adpack_start surfaces INSUFFICIENT_CREDITS after approval without creating a pack', async () => {
@@ -414,10 +448,11 @@ describe('MCP adpack_* tools', () => {
     expect(env.store.packs.size).toBe(0)
   })
 
-  it("adpack_status polls resume work and hide other users' packs", async () => {
+  it("adpack_status reads the background result and hides other users' packs", async () => {
     const env = mcpEnv()
     const { started } = await mcpStartApproved(env, USER_A, startArgs(serum.dna))
     const packId = String(started.payload.packId)
+    await drain()
     const other = await callMcp(env, USER_B, 'adpack_status', { packId })
     expect(other.isError).toBe(true)
     expect((other.payload.error as { code: string }).code).toBe('NOT_FOUND')
@@ -437,6 +472,7 @@ describe('MCP adpack_* tools', () => {
     const env = mcpEnv()
     const { started } = await mcpStartApproved(env, USER_A, startArgs(serum.dna))
     const packId = String(started.payload.packId)
+    await drain()
     const status = await callMcp(env, USER_A, 'adpack_status', { packId })
     const itemId = (status.payload.deliverable as { ads: Array<{ itemId: string }> }).ads[2].itemId
 
@@ -450,7 +486,8 @@ describe('MCP adpack_* tools', () => {
     const approvalRequestId = String(prompt.payload.approvalRequestId)
     await callMcp(env, USER_A, 'confirm_execute', { approvalRequestId, action: 'approve' })
     const regen = await callMcp(env, USER_A, 'adpack_regenerate', { packId, itemId, approvalRequestId })
-    expect(regen.payload).toMatchObject({ status: 'completed', packId, item: { itemId, status: 'copy_ready' } })
+    expect(regen.payload).toMatchObject({ status: 'running', packId, item: { itemId, status: 'copy_ready' } })
+    await drain()
     const after = await callMcp(env, USER_A, 'adpack_status', { packId })
     expect(after.payload.status).toBe('done')
     expect(env.charges).toHaveLength(11)

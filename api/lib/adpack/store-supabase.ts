@@ -194,6 +194,19 @@ export function createSupabasePackStore(client?: SupabaseClient | null): PackSto
       return ((data as Row[] | null) ?? []).map(rowToItem).sort((a, b) => a.index - b.index)
     },
 
+    async listOpenPacks({ limit, createdAfterIso }) {
+      // Cron sweep (service role): small, bounded read; the caller checks leases per pack.
+      const { data, error } = await db
+        .from('ad_packs')
+        .select('id,user_id')
+        .in('status', ['planned', 'running'])
+        .gte('created_at', createdAfterIso)
+        .order('updated_at', { ascending: true })
+        .limit(Math.max(1, limit))
+      if (error) throw new Error(`adpack_list_open_failed: ${error.message}`)
+      return ((data as Row[] | null) ?? []).map((r) => ({ packId: String(r.id), userId: String(r.user_id) }))
+    },
+
     async updateItem(itemId, patch) {
       const { error } = await db.from('ad_pack_items').update(patchToRow<PackItem>(patch, ITEM_PATCH_COLUMNS)).eq('id', itemId)
       if (error) throw new Error(`adpack_update_item_failed: ${error.message}`)

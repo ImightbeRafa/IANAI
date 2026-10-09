@@ -14,11 +14,10 @@
  *   lease, so a dropped background task never stalls the pack.
  */
 import {
-  ADPACK_BACKGROUND_BUDGET_MS,
-  ADPACK_INLINE_BUDGET_MS,
   AdPackError,
   adPackPlanSummary,
   deepLinkForAdPack,
+  retryAfterSecondsFor,
   isAdPackError,
   type AdPackService,
 } from '../adpack/service.js'
@@ -56,14 +55,22 @@ function rethrow(err: unknown): never {
   throw err
 }
 
+/**
+ * #14: kick the self-continuing background loop (slice after slice, no poll needed). A second kick
+ * while this process already runs the pack's loop is a no-op; leases keep other workers apart.
+ */
 function scheduleAdvance(service: AdPackService, userId: string, packId: string): void {
-  scheduleMcpExecuteWork(async () => {
-    await service.advance({ userId, packId, budgetMs: ADPACK_BACKGROUND_BUDGET_MS })
-  })
+  service.kickAdvance({ userId, packId, schedule: scheduleMcpExecuteWork })
 }
 
-/** Poll cadence suggested to the host while a pack runs (background work continues between polls). */
+/** Default poll cadence suggested to the host while a pack runs (background work continues between polls). */
 export const ADPACK_POLL_AFTER_MS = 20_000
+
+/** #13: the pack is still working unless it reached a terminal state. */
+const TERMINAL_PACK_STATUSES = new Set(['done', 'partial', 'failed', 'cancelled'])
+export function jobStatusForPack(packStatus: string): 'running' | 'completed' {
+  return TERMINAL_PACK_STATUSES.has(packStatus) ? 'completed' : 'running'
+}
 
 /** Compact per-ad row (no copy blocks / DNA): captions live once, in `deliverable`. */
 function compactItem(item: AdPackItemView) {
@@ -154,6 +161,8 @@ function statusPayload(status: AdPackStatusResponse) {
     chargedCredits: status.chargedCredits,
     moreWork: status.moreWork,
     ...(status.etaSeconds !== undefined ? { etaSeconds: status.etaSeconds } : {}),
+    ...(status.retryAfterSeconds !== undefined ? { retryAfterSeconds: status.retryAfterSeconds } : {}),
+    ...(status.backgroundKicked ? { backgroundKicked: true } : {}),
     // While running: per-ad rows (finished ads already have links). Once finished: the deliverable replaces them.
     ...(finished ? {} : { items: status.items.map(compactItem) }),
     ...(status.failures?.length ? { failures: status.failures } : {}),
@@ -162,11 +171,11 @@ function statusPayload(status: AdPackStatusResponse) {
     statusMessage: status.summary,
     ...(status.moreWork
       ? {
-        retryAfterMs: ADPACK_POLL_AFTER_MS,
+        retryAfterMs: (status.retryAfterSeconds ?? ADPACK_POLL_AFTER_MS / 1000) * 1000,
         nextTool: 'adpack_status',
         instructionsForGrok: es
-          ? `Decile al usuario el resumen ("${status.summary}"). Volvé a llamar adpack_status con este packId en ~20-30 s (no más seguido); el trabajo sigue en segundo plano. Pará cuando moreWork=false.${failedHint}`
-          : `Tell the user the summary ("${status.summary}"). Call adpack_status again with this packId in ~20-30 s (not more often); work continues in the background. Stop when moreWork=false.${failedHint}`,
+          ? `Decile al usuario el resumen ("${status.summary}"). El pack avanza solo en segundo plano (no hace falta consultar para que avance). Si querés novedades, volvé a llamar adpack_status con este packId en ~${status.retryAfterSeconds ?? 20} s (no más seguido). Pará cuando moreWork=false.${failedHint}`
+          : `Tell the user the summary ("${status.summary}"). The pack advances on its own in the background (polling is not needed for progress). For an update, call adpack_status again with this packId in ~${status.retryAfterSeconds ?? 20} s (not more often). Stop when moreWork=false.${failedHint}`,
       }
       : finished
         ? {
@@ -176,6 +185,24 @@ function statusPayload(status: AdPackStatusResponse) {
         }
         : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }
+}
+
+/** A replayed start/regenerate answer with the pack's CURRENT state (running until terminal). */
+function withLivePackStatus(stored: Record<string, unknown>, status: AdPackStatusResponse | null, toolName: string): Record<string, unknown> {
+  if (!status) return stored
+  const job = jobStatusForPack(status.status)
+  return withStatusMessage({
+    ...stored,
+    status: job,
+    packStatus: status.status,
+    moreWork: status.moreWork,
+    chargedCredits: status.chargedCredits,
+    ...(status.etaSeconds !== undefined ? { etaSeconds: status.etaSeconds } : {}),
+    ...(status.retryAfterSeconds !== undefined ? { pollAfterSeconds: status.retryAfterSeconds, retryAfterMs: status.retryAfterSeconds * 1000 } : {}),
+    summary: status.summary,
+    statusMessage: undefined,
+    ...(status.deliverable ? { deliverable: status.deliverable } : {}),
+  }, toolName)
 }
 
 async function approvedOrPrompt(options: {
@@ -214,7 +241,8 @@ async function approvedOrPrompt(options: {
     toolName: options.toolName,
     input: options.input,
   })
-  if (replay.ok && replay.result && typeof replay.result === 'object' && (replay.result as { status?: unknown }).status === 'completed') {
+  const replayedStatus = replay.ok && replay.result && typeof replay.result === 'object' ? (replay.result as { status?: unknown }).status : undefined
+  if (replayedStatus === 'completed' || replayedStatus === 'running') {
     return { replay: { ...(replay.result as Record<string, unknown>), replayed: true } }
   }
   const ready = await assertMcpApprovalReady(options.approvalStore, {
@@ -486,8 +514,9 @@ export async function dispatchAdPackTool(options: {
         }
         if ('replay' in gate) {
           const packId = String(gate.replay.packId || '')
-          if (packId) scheduleAdvance(service, userId, packId)
-          return gate.replay
+          if (!packId) return gate.replay
+          scheduleAdvance(service, userId, packId)
+          return withLivePackStatus(gate.replay, await service.getStatus({ userId, packId, appOrigin: options.appOrigin }).catch(() => null), 'adpack_start')
         }
         if (gate.approved && !samePlan(gate.approved, plan)) {
           return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: plan })
@@ -533,12 +562,18 @@ export async function dispatchAdPackTool(options: {
           }
           throw err
         }
+        const etaSeconds = started.etaSeconds ?? Math.max(60, Math.round(started.quote.size * 12))
+        const pollAfterSeconds = retryAfterSecondsFor(etaSeconds)
+        // #13: work has begun, nothing is finished — never "completed" until the pack is terminal.
         const result = withStatusMessage({
-          status: 'completed',
+          status: jobStatusForPack(started.status),
           jobId: approvalRequestId,
           approvalRequestId,
           packId: started.packId,
           packStatus: started.status,
+          moreWork: jobStatusForPack(started.status) === 'running',
+          etaSeconds,
+          pollAfterSeconds,
           quote: started.quote,
           quotedCreditCost: started.quote.credits,
           ...(started.creativeFreedom ? { creativeFreedom: started.creativeFreedom } : {}),
@@ -548,18 +583,18 @@ export async function dispatchAdPackTool(options: {
           // Credits are charged per finished ad while the pack runs.
           chargedCredits: 0,
           nextTool: 'adpack_status',
-          estimatedSeconds: Math.max(60, Math.round(started.quote.size * 12)),
+          estimatedSeconds: etaSeconds,
           ...(linkedBrandId(args) ? { deepLink: deepLinkForAdPack(options.appOrigin, linkedBrandId(args) as string, started.packId) } : {}),
-          retryAfterMs: ADPACK_POLL_AFTER_MS,
-          message: 'Pack started (~2 min per 10 ads). Tell the user it is running, then poll adpack_status with this packId every ~20-30 s until moreWork=false; credits are charged per finished ad. When done, present deliverable.ads (links + captions), captionsText and the brand-folder deepLink.',
+          retryAfterMs: pollAfterSeconds * 1000,
+          message: `Pack running in the background (~${etaSeconds} s). Tell the user it is RUNNING (not finished). It advances without polling; check adpack_status with this packId in ~${pollAfterSeconds} s (not more often) until moreWork=false. Credits are charged per finished ad only. When done, present deliverable.ads (links + captions), captionsText and the brand-folder deepLink.`,
         }, 'adpack_start')
         await finalize({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', input, approvalRequestId, result })
         scheduleAdvance(service, userId, started.packId)
         return result
       }
       case 'adpack_status': {
-        const status = await service.pollStatus({ userId, packId: args.packId, inlineBudgetMs: ADPACK_INLINE_BUDGET_MS, appOrigin: options.appOrigin, language: args.language })
-        if (status.moreWork) scheduleAdvance(service, userId, status.packId)
+        // #14: cheap read; at most kicks a background loop when nobody holds a lease.
+        const status = await service.pollStatus({ userId, packId: args.packId, appOrigin: options.appOrigin, language: args.language, schedule: scheduleMcpExecuteWork })
         return statusPayload(status)
       }
       case 'adpack_edit_text': {
@@ -620,13 +655,16 @@ export async function dispatchAdPackTool(options: {
           appOrigin: options.appOrigin,
         })
         if ('prompt' in gate) return gate.prompt
-        if ('replay' in gate) return gate.replay
+        if ('replay' in gate) {
+          scheduleAdvance(service, userId, args.packId)
+          return withLivePackStatus(gate.replay, await service.getStatus({ userId, packId: args.packId, appOrigin: options.appOrigin }).catch(() => null), 'adpack_regenerate')
+        }
         if (gate.approved && !samePlan(gate.approved, plan)) {
           return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_regenerate', approvalRequestId, approved: gate.approved, planned: plan })
         }
         const regen = await service.regenerate({ userId, packId: args.packId, itemId: args.itemId, mode: input.mode })
         const result = withStatusMessage({
-          status: 'completed',
+          status: 'running',
           jobId: approvalRequestId,
           approvalRequestId,
           packId: args.packId,

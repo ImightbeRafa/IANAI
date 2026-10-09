@@ -26,7 +26,7 @@ import {
   failureReason,
 } from '../../api/lib/adpack/status-summary'
 import type { PackItem } from '../../api/lib/adpack/types'
-import { setMcpExecuteScheduler } from '../../api/lib/mcp/execute-job'
+import { drainBackground, queueBackgroundWork, restoreBackgroundWork } from './background-queue'
 import { USER_A, callMcp, callWeb, createDoorEnv, createMemoryMcpApprovalStore, mcpStartApproved, serum } from './door-harness'
 import { goodSerumCopy } from './helpers'
 
@@ -134,20 +134,12 @@ describe('buildStatusExtras', () => {
 })
 
 describe('status summary through both doors', () => {
-  let mcpBackground: Array<() => Promise<void>> = []
   beforeEach(() => {
-    mcpBackground = []
-    setAdPackBackgroundScheduler(() => {})
-    setMcpExecuteScheduler((work) => {
-      mcpBackground.push(work)
-    })
+    queueBackgroundWork(setAdPackBackgroundScheduler)
   })
   afterEach(() => {
-    setAdPackBackgroundScheduler(null)
+    restoreBackgroundWork()
     setDefaultAdPackService(null)
-    setMcpExecuteScheduler((work) => {
-      void work().catch(() => {})
-    })
   })
 
   it('a failed ad shows the same summary + failures (with the exact retry call) on web and MCP', async () => {
@@ -155,7 +147,7 @@ describe('status summary through both doors', () => {
     setDefaultAdPackService(env.service)
     const { started } = await mcpStartApproved(env, USER_A, { dna: serum.dna, offer: serum.offer, size: 3 })
     const packId = String(started.payload.packId)
-    await callMcp(env, USER_A, 'adpack_status', { packId })
+    await drainBackground()
     const target = [...env.store.items.values()].find((i) => i.packId === packId && i.index === 1)!
     await env.store.updateItem(target.id, { status: 'failed', error: 'scene_product_mismatch after 3 attempts', renders: [] })
     await env.store.updatePack(packId, { status: 'partial' })
@@ -177,18 +169,23 @@ describe('status summary through both doors', () => {
     expect(mcpEn.summary).toBe(webEn.summary)
   })
 
-  it('while running, MCP suggests a 20 s poll cadence and returns compact rows without captions', async () => {
+  it('while running, MCP suggests a poll cadence from the ETA and returns compact rows without captions', async () => {
     const env = { ...createDoorEnv(), approvalStore: createMemoryMcpApprovalStore() }
     const { started } = await mcpStartApproved(env, USER_A, { dna: serum.dna, offer: serum.offer, size: 3 })
     const packId = String(started.payload.packId)
-    expect(started.payload.retryAfterMs).toBe(20_000)
+    const poll = Number(started.payload.pollAfterSeconds)
+    expect(poll).toBeGreaterThanOrEqual(10)
+    expect(poll).toBeLessThanOrEqual(30)
+    expect(started.payload.retryAfterMs).toBe(poll * 1000)
     const future = new Date(Date.now() + 60_000).toISOString()
     for (const i of env.store.items.values()) i.leaseUntil = future
     const running = (await callMcp(env, USER_A, 'adpack_status', { packId })).payload
-    expect(running).toMatchObject({ moreWork: true, retryAfterMs: 20_000, nextTool: 'adpack_status' })
+    expect(running).toMatchObject({ moreWork: true, nextTool: 'adpack_status' })
+    expect(running.retryAfterMs).toBe(Number(running.retryAfterSeconds) * 1000)
+    expect(running.backgroundKicked).toBeUndefined() // a worker holds the lease: nothing kicked
     expect(String(running.summary)).toMatch(/^0\/3 listos · ~\d+ s restantes$/)
     expect(typeof running.etaSeconds).toBe('number')
-    expect(String(running.instructionsForGrok)).toContain('20-30 s')
+    expect(String(running.instructionsForGrok)).toContain(`~${running.retryAfterSeconds} s`)
     const rows = running.items as Array<Record<string, unknown>>
     expect(rows).toHaveLength(3)
     expect(rows.every((r) => !('caption' in r) && !('copy' in r))).toBe(true)

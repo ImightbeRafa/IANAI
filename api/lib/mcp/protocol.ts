@@ -60,7 +60,7 @@ import {
 } from './bulk-tools.js'
 import type { McpApprovalStore } from './approval.js'
 import type { McpArtifactStore } from './artifact-store.js'
-import { getMcpExecuteResult, scheduleMcpExecuteWork } from './execute-job.js'
+import { buildExecuteStatusMessage, getMcpExecuteResult, scheduleMcpExecuteWork } from './execute-job.js'
 import {
   mcpArchiveBrand,
   mcpDeleteAsset,
@@ -1768,10 +1768,16 @@ async function dispatchEnabledTool(options: {
         if (packId && (result.toolName === 'adpack_start' || result.toolName === 'adpack_regenerate' || packId === jobId)) {
           try {
             const pack = await dispatchEnabledTool({ ...options, name: 'adpack_status', args: { packId } }) as Record<string, unknown>
+            // #13: the job is "running" until the pack is terminal (never "completed" while it works).
+            const running = pack.moreWork === true || !['done', 'partial', 'failed', 'cancelled'].includes(String(pack.status))
             return {
               ...result,
+              status: running ? 'running' : 'completed',
+              statusMessage: buildExecuteStatusMessage(String(result.toolName || 'adpack_start'), running ? 'running' : 'completed'),
               packStatus: pack.status,
               moreWork: pack.moreWork,
+              ...(typeof pack.etaSeconds === 'number' ? { etaSeconds: pack.etaSeconds } : {}),
+              ...(typeof pack.retryAfterSeconds === 'number' ? { retryAfterSeconds: pack.retryAfterSeconds, retryAfterMs: pack.retryAfterSeconds * 1000 } : {}),
               pack,
               ...(pack.deliverable ? { deliverable: pack.deliverable } : {}),
               nextTool: pack.moreWork ? 'adpack_status' : undefined,
