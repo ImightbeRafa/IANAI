@@ -28,6 +28,7 @@ export const MCP_FEATURES = [
   'halo_warning',
   'server_version_in_results',
   'safe_zone_autofix',
+  'code_composited_logo_cta',
   'accessory_refs_budget_5',
   'caption_field',
   'fidelity_palette_fallback',

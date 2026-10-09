@@ -13,6 +13,8 @@ import { buildCaption, capCopyBlocks } from './copy-layout.js'
 import { checkExtraObjects, type ExtraObjectsFinding } from './extra-objects.js'
 import { checkGeneratedProductFidelity, locateLogoBox, qaSeverity, runMcpImageQa, tidyCopySeparators, type FidelityCheckResult, type FidelityWarning, type McpImageQa } from './image-postcheck.js'
 import { enforceSafeZones, type SafeZoneFix } from './safe-zone-fix.js'
+import { compositeBrandLayers, type CompositeReport } from './composite-ad.js'
+import { fetchPublicImageDetailed } from '../fetch-image-data-url.js'
 import type { McpBrandContext } from './user-tools.js'
 
 export type OfferLock = {
@@ -117,6 +119,13 @@ export type WebStyleImageInput = {
    */
   enforceSafeZones?: boolean
   /**
+   * Default true (MCP rules on): Grok is told NOT to draw the logo or any CTA button and to leave the top / bottom bands empty;
+   * afterwards the REAL kit logo and ONE button with the exact `copy` CTA text are composited in code inside the safe zones
+   * (gradient scrim sampled from the picture, brand palette, text contrast ≥ 4.5:1, same pixel size). No logo asset → no logo
+   * (qa.logoUnavailable), never a text chip. false = the legacy flow where Grok draws logo + CTA.
+   */
+  compositeLayers?: boolean
+  /**
    * Default true: MCP-only prompt rules (binding scene, strict lock / no invented props, safe zones, separator hygiene).
    * false = the legacy web prompt (scene as factual context) — used by the web⇄MCP parity test to prove the shared
    * builder is byte-identical to the web route.
@@ -158,6 +167,8 @@ export type WebStyleImageOutput = {
   safeZoneFix?: SafeZoneFix
   /** The QA verdict of the image as Grok drew it, before the deterministic fix (only when a fix was applied). */
   qaBeforeFix?: { safeZones: McpImageQa['safeZones']; severity: number; issues: string[] }
+  /** Round 5b: what the code compositor drew (real logo, exact CTA, scrim) — absent on the legacy flow. */
+  compositeLayers?: CompositeReport
   /** Ready-to-paste caption (es-CR, short): headline / price / facts + the lines moved off the image + the CTA. Deterministic. */
   caption: string
 }
@@ -196,6 +207,16 @@ function retryHintFor(qa: McpImageQa, language: 'es' | 'en'): string {
   return bits.join('; ')
 }
 
+/** Retry hint for the composited flow: the only retry-worthy defects are text in the bands / drawn buttons / separators. */
+function retryHintComposite(qa: McpImageQa, language: 'es' | 'en'): string {
+  const es = language !== 'en'
+  const bits: string[] = []
+  if (qa.safeZoneIssues.length) bits.push(es ? 'había texto u objetos en el 10% superior o el 12% inferior: dejá esas franjas VACÍAS y poné el titular y el precio en la franja del medio' : 'text or objects sat in the top 10% or the bottom 12%: leave those bands EMPTY and put the headline and price in the middle band')
+  if (qa.ctaButtons > 0) bits.push(es ? 'se dibujó un botón o logo: NO dibujes botones, CTA ni logo (se agregan por código)' : 'a button or logo was drawn: do NOT draw buttons, CTAs or a logo (they are added in code)')
+  if (qa.separatorLines.length) bits.push(es ? 'sin separadores sueltos al inicio o final de línea' : 'no dangling separators at the start or end of a line')
+  return bits.join('; ')
+}
+
 export async function generateWebStyleImage(input: WebStyleImageInput): Promise<WebStyleImageOutput> {
   const { ctx } = input
   const offer = ctx.offers.find((o) => o.id === input.offerId)
@@ -231,6 +252,9 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     copySource,
   })
 
+  // Round 5b: logo + CTA are composited in code (MCP rules on only; the web-parity path keeps the legacy prompt).
+  const composite = withRules && input.compositeLayers !== false
+  const promptCopy = composite && ctaText ? copy.split(/\r?\n/).filter((l) => l.trim() !== ctaText.trim()).join('\n').trim() || copy : copy
   const useKitRefs = input.referenceMode !== 'none'
   const accessories = useKitRefs ? (input.accessories || []).filter((a) => a.imageUrl) : []
   const baseOptions = {
@@ -239,8 +263,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     language: language as 'es' | 'en',
     postStyle: input.postStyle || 'venta-directa',
     textDensity: input.textDensity || 'hard',
-    ctaStrength: input.ctaStrength,
-    copy,
+    ctaStrength: composite ? 'none' : input.ctaStrength,
+    copy: promptCopy,
     businessContext,
     palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
     brandVoice: kit?.brandVoice,
@@ -253,7 +277,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     accessoryUrls: accessories.map((a) => a.imageUrl),
     kitReferenceUrls: useKitRefs ? kit?.referenceImages || [] : [],
     supportUrls: input.supportUrls || [],
-    logoUrl: kit?.logoUrl || null,
+    // composite: the logo is stamped in code from the asset, so it is not sent to Grok as a reference (it would redraw it).
+    logoUrl: composite ? null : kit?.logoUrl || null,
     lockProductAppearance: input.lock?.lockProductAppearance,
     immutableAttributes: input.lock?.immutableAttributes,
   }
@@ -264,6 +289,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     requestedRatio: ratioPlan.requested,
     ...(ctaText ? { ctaText } : {}),
     layoutCap: input.layoutCap !== false,
+    ...(composite ? { compositeLayers: true } : {}),
     accessoryLabels: accessories.map((a) => a.label),
     // xAI /images/edits takes up to 5 references: hero + 2nd product photo + the real box / controller + logo.
     ...(accessories.length ? { refBudget: 5 } : {}),
@@ -294,37 +320,45 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     })
   }
   const enforce = input.enforceSafeZones !== false
-  // With enforcement on, safe-zone defects are fixed in code, so only the other defects justify a second (paid) generation.
-  const effSeverity = (q: McpImageQa) => (enforce ? qaSeverity({ ...q, safeZoneIssues: [] }) : q.severity)
+  // Legacy flow only: safe-zone defects fixed in code (scale-in) so they do not justify a second paid generation.
+  const effSeverity = (q: McpImageQa) => {
+    if (composite) return qaSeverity({ ...q, ctaButtons: q.ctaButtons > 0 ? q.ctaButtons + 1 : 0 })
+    return enforce ? qaSeverity({ ...q, safeZoneIssues: [] }) : q.severity
+  }
   const retryWorthy = (q: McpImageQa) => effSeverity(q) > 0
+  // Composited flow: the scene as Grok drew it has no logo / CTA / copy-band text yet, so the QA only checks bands, buttons, separators.
+  const qaScene = (imageDataUrl: string) =>
+    runMcpImageQa({ generatedDataUrl: imageDataUrl, requestedRatio: ratioPlan.requested, copyRequested: false, logoAttached: true, logoExpected: false, copy: promptCopy, copyChanges: tidied.changes })
+  const check = (url: string, logoDataUrl?: string | null) => (composite ? qaScene(url) : qaFor(url, logoDataUrl))
+  const hint = (q: McpImageQa) => (composite ? retryHintComposite(q, language) : retryHintFor(q, language))
 
   let grok = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules() } : {}) })
   let framed = await reframe(grok.imageDataUrl, grok.aspectRatio)
-  let qa = await qaFor(framed.imageDataUrl, grok.logoDataUrl)
+  let qa = await check(framed.imageDataUrl, grok.logoDataUrl)
   const autoRetry: WebStyleImageOutput['autoRetry'] = { requested: input.autoRetry === true, attempted: false }
   let totalCost = grok.estimatedCostUsd
   if (input.autoRetry === true && retryWorthy(qa)) {
     // One corrective regeneration inside the same job: no second approval, no second charge (the caller charges once).
     autoRetry.attempted = true
-    autoRetry.reason = retryHintFor(qa, language)
+    autoRetry.reason = hint(qa)
     autoRetry.firstQa = { safeZones: qa.safeZones, textPresent: qa.textPresent, issues: qa.warnings.slice(0, 6) }
     try {
       const second = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules(autoRetry.reason) } : {}) })
       totalCost += second.estimatedCostUsd
       const secondFramed = await reframe(second.imageDataUrl, second.aspectRatio)
-      const secondQa = await qaFor(secondFramed.imageDataUrl, second.logoDataUrl)
-      autoRetry.firstSeverity = qa.severity
-      autoRetry.retrySeverity = secondQa.severity
+      const secondQa = await check(secondFramed.imageDataUrl, second.logoDataUrl)
+      autoRetry.firstSeverity = effSeverity(qa)
+      autoRetry.retrySeverity = effSeverity(secondQa)
       // Keep the BETTER image by QA result (lower weighted defect score); a tie keeps the first (no change for the same price).
       if (effSeverity(secondQa) < effSeverity(qa)) {
         grok = second
         framed = secondFramed
         qa = secondQa
         autoRetry.kept = 'retry'
-        autoRetry.keptReason = `retry QA severity ${secondQa.severity} < first ${autoRetry.firstSeverity}`
+        autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} < first ${autoRetry.firstSeverity}`
       } else {
         autoRetry.kept = 'first'
-        autoRetry.keptReason = `retry QA severity ${secondQa.severity} was not better than the first ${autoRetry.firstSeverity}`
+        autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} was not better than the first ${autoRetry.firstSeverity}`
       }
     } catch (err) {
       autoRetry.kept = 'first'
@@ -333,31 +367,78 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   }
   const { aspectRatio } = framed
   let imageDataUrl = framed.imageDataUrl
+  // Fidelity / props checks look at the picture exactly as Grok drew it (before any code layer).
   const preFixImageDataUrl = imageDataUrl
 
-  // Deterministic safe-zone fix (free, local, same pixel size): the logo / CTA / text end up inside the margins every time.
   let safeZoneFix: SafeZoneFix | undefined
   let qaBeforeFix: WebStyleImageOutput['qaBeforeFix']
-  if (enforce && qa.safeZoneIssues.length && imageDataUrl.startsWith('data:')) {
+  let layers: CompositeReport | undefined
+  const decode = (url: string) => Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')
+  const fixBySquash = async (logo: Buffer | null) => {
+    if (!enforce || !qa.safeZoneIssues.length || !imageDataUrl.startsWith('data:')) return
     try {
-      const logoBytes = grok.logoDataUrl?.startsWith('data:') ? Buffer.from(grok.logoDataUrl.slice(grok.logoDataUrl.indexOf(',') + 1), 'base64') : null
-      const fixed = await enforceSafeZones({
-        bytes: Buffer.from(imageDataUrl.slice(imageDataUrl.indexOf(',') + 1), 'base64'),
-        ratio: ratioPlan.requested,
-        logo: logoBytes,
-        issues: qa.safeZoneIssues,
-      })
+      const fixed = await enforceSafeZones({ bytes: decode(imageDataUrl), ratio: ratioPlan.requested, logo, issues: qa.safeZoneIssues })
       if (fixed.fix.applied) {
         const fixedUrl = `data:image/jpeg;base64,${fixed.bytes.toString('base64')}`
-        const fixedQa = await qaFor(fixedUrl, grok.logoDataUrl)
+        const fixedQa = await check(fixedUrl, grok.logoDataUrl)
         qaBeforeFix = { safeZones: qa.safeZones, severity: qa.severity, issues: qa.warnings.slice(0, 6) }
         safeZoneFix = fixed.fix
         imageDataUrl = fixedUrl
         qa = fixedQa
       }
     } catch (err) {
-      safeZoneFix = { applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: qa.safeZoneIssues, after: qa.safeZoneIssues, note: `safe-zone fix unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
+      safeZoneFix = { method: 'scale_in_fallback', applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: qa.safeZoneIssues, after: qa.safeZoneIssues, note: `safe-zone fix unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
     }
+  }
+
+  if (composite && imageDataUrl.startsWith('data:')) {
+    // LAST RESORT (never the default): headline / price text still inside the bands after the retry → scale the scene in, THEN add the logo + CTA.
+    await fixBySquash(null)
+    let logoBytes: Buffer | null = null
+    let logoNote = ''
+    if (kit?.logoUrl) {
+      try {
+        const fetched = await fetchPublicImageDetailed(kit.logoUrl)
+        if ('dataUrl' in fetched) logoBytes = decode(fetched.dataUrl)
+        else logoNote = `logo asset not loaded: ${fetched.failure.url} → ${fetched.failure.status ? `HTTP ${fetched.failure.status}` : fetched.failure.reason}`
+      } catch (err) {
+        logoNote = `logo asset not loaded: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`
+      }
+    }
+    try {
+      const done = await compositeBrandLayers({
+        bytes: decode(imageDataUrl),
+        ratio: ratioPlan.requested,
+        logo: logoBytes,
+        ...(ctaText ? { ctaText } : {}),
+        palette: { primary: kit?.primaryColor, secondary: kit?.secondaryColor, accent: kit?.accentColor },
+      })
+      layers = done.report
+      if (layers.logo.status === 'unavailable' && logoNote) layers.logo.reason = logoNote
+      imageDataUrl = `data:image/jpeg;base64,${done.bytes.toString('base64')}`
+      const w = done.report.width
+      const h = done.report.height
+      const lb = done.report.logo.box
+      qa = await runMcpImageQa({
+        generatedDataUrl: imageDataUrl,
+        requestedRatio: ratioPlan.requested,
+        copyRequested: Boolean(copy),
+        logoAttached: done.report.logo.status === 'drawn',
+        logoExpected: Boolean(kit),
+        copy,
+        copyChanges: tidied.changes,
+        logoBox: lb ? { x0: lb.x / w, y0: lb.y / h, x1: (lb.x + lb.w) / w, y1: (lb.y + lb.h) / h } : null,
+      })
+      if (done.report.logo.status === 'unavailable') qa.logoUnavailable = true
+      if (!ctaText) qa.warnings.push('the copy has no CTA line: no button was drawn')
+      else if (done.report.cta.fits === false) qa.warnings.push('the CTA text is long: the button text was shrunk to fit')
+    } catch (err) {
+      qa.warnings.push(`logo / CTA compositor unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`)
+    }
+  } else {
+    // Legacy flow (Grok draws logo + CTA): deterministic scale-in fix as before, with the real logo re-stamped if it was clipped.
+    const logoBytes = grok.logoDataUrl?.startsWith('data:') ? decode(grok.logoDataUrl) : null
+    await fixBySquash(logoBytes)
   }
 
   // Free local fidelity post-check — warning only, on the image we keep.
@@ -407,12 +488,13 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     providerRetries: grok.providerRetries,
     ...(safeZoneFix ? { safeZoneFix } : {}),
     ...(qaBeforeFix ? { qaBeforeFix } : {}),
+    ...(layers ? { compositeLayers: layers } : {}),
     caption: buildCaption({ onImage: copy, overflow: capped?.overflow ?? [], cta: ctaText, language }),
   }
 }
 
 /** Compact, result-safe summary of the post-check (no image bytes). */
-export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption'>>): Record<string, unknown> {
+export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries' | 'safeZoneFix' | 'qaBeforeFix' | 'caption' | 'compositeLayers'>>): Record<string, unknown> {
   return {
     ...(out.fidelity_warning ? { fidelity_warning: out.fidelity_warning } : {}),
     fidelityCheck: out.fidelityCheck.status === 'skipped'
@@ -432,6 +514,7 @@ export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' 
     ...(out.copyOverflow?.length ? { copyOverflow: out.copyOverflow } : {}),
     ...(out.providerRetries ? { providerRetries: out.providerRetries } : {}),
     ...(out.safeZoneFix ? { safeZoneFix: out.safeZoneFix } : {}),
+    ...(out.compositeLayers ? { compositeLayers: out.compositeLayers } : {}),
     ...(out.qaBeforeFix ? { qaBeforeFix: out.qaBeforeFix } : {}),
     ...(out.caption ? { caption: out.caption } : {}),
   }

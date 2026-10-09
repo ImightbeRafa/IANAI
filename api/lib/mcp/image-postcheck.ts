@@ -487,6 +487,8 @@ export type McpImageQa = {
   status: 'pass' | 'fail'
   /** Weighted defect score used to keep the better image after an auto-retry (0 = clean). */
   severity: number
+  /** true when the brand kit has no usable logo asset: nothing was drawn in its place (never a text chip). */
+  logoUnavailable?: boolean
   warnings: string[]
 }
 

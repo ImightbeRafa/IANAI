@@ -121,6 +121,11 @@ export type WebPostMcpRules = {
   ctaText?: string
   /** Cap the layout to: headline, one price line, one facts line, one CTA, logo. */
   layoutCap?: boolean
+  /**
+   * Round 5b: the logo and the CTA button are composited in CODE after generation (real kit logo asset + exact CTA text),
+   * so Grok must draw neither and must leave the top / bottom bands empty.
+   */
+  compositeLayers?: boolean
   /** Reference slots sent to Grok (the web route is fixed at 3; xAI /images/edits accepts up to 5). MCP only. */
   refBudget?: number
 }
@@ -160,20 +165,37 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
   const es = language !== 'en'
   const m = safeZoneMargins(rules.requestedRatio || '4:5')
   const lines: string[] = []
-  // RULE 1 — margins first: the prompt clamp trims the tail, never the opening instructions.
-  const topPct = pct(Math.max(0.08, m.top))
-  const botPct = pct(Math.max(0.08, m.bottom))
-  lines.push(es
-    ? `REGLA 1 — MÁRGENES (Instagram recorta la UI): el titular y el logo quedan FUERA del ${topPct} superior; el botón CTA y todo texto quedan FUERA del ${botPct} inferior (el CTA termina a ≥ ${pct(Math.max(0.08, m.bottom) + 0.03)} del borde de abajo) y a ${pct(m.side)} de los costados. Nada toca ni se corta en el borde.`
-    : `RULE 1 — MARGINS (Instagram crops its UI): the headline and logo stay OUT of the top ${topPct}; the CTA button and all text stay OUT of the bottom ${botPct} (the CTA ends ≥ ${pct(Math.max(0.08, m.bottom) + 0.03)} above the bottom edge) and ${pct(m.side)} from the sides. Nothing touches or is cut by an edge.`)
   const cta = (rules.ctaText || '').trim().slice(0, 120)
-  lines.push(es
-    ? `UN SOLO CTA${cta ? `: el único botón/llamado a la acción dice EXACTAMENTE «${cta}»` : ': el único botón/llamado a la acción es el de la copy'}. PROHIBIDO un segundo botón, banner o texto de acción distinto (nada de "Pedí acá", "Comprá ya", flechas ni sellos extra).`
-    : `ONE CTA ONLY${cta ? `: the only button / call to action says EXACTLY "${cta}"` : ': the only button / call to action is the one in the copy'}. FORBIDDEN: a second button, banner or different action text (no "Order here", "Buy now", arrows or extra badges).`)
-  if (rules.layoutCap !== false) {
+  if (rules.compositeLayers) {
+    // The logo and the CTA are composited in code afterwards: Grok paints the scene, the product and the headline / price / facts only.
+    const freeTop = pct(m.top > 0.1 ? m.top + 0.02 : 0.1)
+    const freeBot = pct(m.top > 0.1 ? m.bottom + 0.02 : 0.12)
     lines.push(es
-      ? 'COMPOSICIÓN LIMPIA: como máximo estos bloques de texto — un titular, UNA línea de precio, UNA línea de datos, UN CTA — más el logo y el producto grande. Ningún otro texto, sello, viñeta ni bloque; aire entre bloques.'
-      : 'CLEAN LAYOUT: at most these text blocks — one headline, ONE price line, ONE facts line, ONE CTA — plus the logo and a large product. No other text, badges, bullets or blocks; air between blocks.')
+      ? `REGLA 1 — FRANJAS LIBRES (Instagram tapa su UI): el ${freeTop} superior y el ${freeBot} inferior de la imagen quedan VACÍOS: sin texto, sin logo, sin botón, sin sellos; solo fondo/escena que continúa hasta el borde. El titular y la línea de precio van en la franja del medio, a ${pct(m.side)} de los costados. Nada toca ni se corta en el borde.`
+      : `RULE 1 — FREE BANDS (Instagram covers its UI): the top ${freeTop} and the bottom ${freeBot} of the picture stay EMPTY: no text, no logo, no button, no badges; only the background/scene running to the edge. The headline and the price line go in the middle band, ${pct(m.side)} from the sides. Nothing touches or is cut by an edge.`)
+    lines.push(es
+      ? 'SIN LOGO NI BOTÓN: NO dibujes el logo de la marca, ni ningún botón, CTA, llamado a la acción, flecha, sello o insignia (el logo y el botón se agregan después, por código). Ningún texto de acción.'
+      : 'NO LOGO, NO BUTTON: do NOT draw the brand logo, nor any button, CTA, call to action, arrow, seal or badge (the logo and the button are added afterwards, in code). No action text.')
+    if (rules.layoutCap !== false) {
+      lines.push(es
+        ? 'COMPOSICIÓN LIMPIA: como máximo estos bloques de texto — un titular, UNA línea de precio, UNA línea de datos — más el producto grande. Ningún otro texto, sello, viñeta ni bloque; aire entre bloques.'
+        : 'CLEAN LAYOUT: at most these text blocks — one headline, ONE price line, ONE facts line — plus a large product. No other text, badges, bullets or blocks; air between blocks.')
+    }
+  } else {
+    // RULE 1 — margins first: the prompt clamp trims the tail, never the opening instructions.
+    const topPct = pct(Math.max(0.08, m.top))
+    const botPct = pct(Math.max(0.08, m.bottom))
+    lines.push(es
+      ? `REGLA 1 — MÁRGENES (Instagram recorta la UI): el titular y el logo quedan FUERA del ${topPct} superior; el botón CTA y todo texto quedan FUERA del ${botPct} inferior (el CTA termina a ≥ ${pct(Math.max(0.08, m.bottom) + 0.03)} del borde de abajo) y a ${pct(m.side)} de los costados. Nada toca ni se corta en el borde.`
+      : `RULE 1 — MARGINS (Instagram crops its UI): the headline and logo stay OUT of the top ${topPct}; the CTA button and all text stay OUT of the bottom ${botPct} (the CTA ends ≥ ${pct(Math.max(0.08, m.bottom) + 0.03)} above the bottom edge) and ${pct(m.side)} from the sides. Nothing touches or is cut by an edge.`)
+    lines.push(es
+      ? `UN SOLO CTA${cta ? `: el único botón/llamado a la acción dice EXACTAMENTE «${cta}»` : ': el único botón/llamado a la acción es el de la copy'}. PROHIBIDO un segundo botón, banner o texto de acción distinto (nada de "Pedí acá", "Comprá ya", flechas ni sellos extra).`
+      : `ONE CTA ONLY${cta ? `: the only button / call to action says EXACTLY "${cta}"` : ': the only button / call to action is the one in the copy'}. FORBIDDEN: a second button, banner or different action text (no "Order here", "Buy now", arrows or extra badges).`)
+    if (rules.layoutCap !== false) {
+      lines.push(es
+        ? 'COMPOSICIÓN LIMPIA: como máximo estos bloques de texto — un titular, UNA línea de precio, UNA línea de datos, UN CTA — más el logo y el producto grande. Ningún otro texto, sello, viñeta ni bloque; aire entre bloques.'
+        : 'CLEAN LAYOUT: at most these text blocks — one headline, ONE price line, ONE facts line, ONE CTA — plus the logo and a large product. No other text, badges, bullets or blocks; air between blocks.')
+    }
   }
   if (rules.strict && ctx.hasProductRefs) {
     const allowed = (rules.allowedProps || []).map((a) => a.trim()).filter(Boolean).slice(0, 8)
@@ -249,9 +271,18 @@ export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
     ...(sceneRecipe ? { sceneRecipe } : {}),
   })
   if (!mcp) return base
+  // Composited flow (MCP only): the CTA button is drawn in code, so the generic "… → CTA" / "1 CTA" / CTA-example lines of the web builder go.
+  const body = mcp.compositeLayers
+    ? base
+        .split('\n')
+        .filter((l) => !/^\s*-\s*(CTA\b|Preferred (organic )?CTA|CTA orgánico)/i.test(l) && !/^CTA:/.test(l))
+        .join('\n')
+        .replace(/\s*→\s*CTA\b/g, '')
+        .replace(/,\s*1 CTA\b/g, '')
+    : base
   // MCP rules go FIRST: the prompt clamp trims the tail of the head, never the opening instructions.
   const rules = buildMcpPromptRules(langCode, mcp, { hasProductRefs: input.hasProductRefs })
-  return [rules, base].filter(Boolean).join('\n\n')
+  return [rules, body].filter(Boolean).join('\n\n')
 }
 
 /** Product refs first, brand logo as style ref, scene refs last; capped at 3. */

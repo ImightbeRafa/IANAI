@@ -15,6 +15,8 @@ import { checkSafeZones, type SafeZoneIssue } from './image-postcheck.js'
 import { safeZoneMargins } from './safe-zones.js'
 
 export type SafeZoneFix = {
+  /** LAST-RESORT only: the picture is scaled into a same-size canvas. Never the default fix (logo / CTA are composited in code instead). */
+  method: 'scale_in_fallback'
   applied: boolean
   /** Uniform scale applied to the picture inside the canvas (1 = untouched). */
   scale: number
@@ -231,7 +233,7 @@ export async function enforceSafeZones(input: { bytes: Buffer; ratio: string; lo
   const w = meta.width || 0
   const h = meta.height || 0
   const issues = input.issues ?? (w && h ? await checkSafeZones(input.bytes, input.ratio) : [])
-  const none: SafeZoneFix = { applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: issues, after: issues, note: 'no safe-zone violation' }
+  const none: SafeZoneFix = { method: 'scale_in_fallback', applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: issues, after: issues, note: 'no safe-zone violation' }
   if (!w || !h || !issues.length) return { bytes: input.bytes, fix: none }
 
   const m = safeZoneMargins(input.ratio)
@@ -261,7 +263,7 @@ export async function enforceSafeZones(input: { bytes: Buffer; ratio: string; lo
     if (!after.length) {
       return {
         bytes,
-        fix: { applied: true, scale, padTop: Math.round(y0 * 1000) / 1000, padBottom: Math.round((1 - y0 - scale) * 1000) / 1000, attempts: attempt + 1, logoRestored, before: issues, after: [], note: `scaled the picture to ${Math.round(scale * 100)}% inside a ${w}x${h} canvas with edge-matched padding${logoRestored ? ' and re-stamped the real logo' : ''}` },
+        fix: { method: 'scale_in_fallback', applied: true, scale, padTop: Math.round(y0 * 1000) / 1000, padBottom: Math.round((1 - y0 - scale) * 1000) / 1000, attempts: attempt + 1, logoRestored, before: issues, after: [], note: `scaled the picture to ${Math.round(scale * 100)}% inside a ${w}x${h} canvas with edge-matched padding${logoRestored ? ' and re-stamped the real logo' : ''}` },
       }
     }
   }
@@ -269,6 +271,6 @@ export async function enforceSafeZones(input: { bytes: Buffer; ratio: string; lo
   const y0 = padTop + (room - l.scale) / 2
   return {
     bytes: l.bytes,
-    fix: { applied: true, scale: l.scale, padTop: Math.round(y0 * 1000) / 1000, padBottom: Math.round((1 - y0 - l.scale) * 1000) / 1000, attempts: SHRINK.length, logoRestored, before: issues, after: l.after, note: 'scaled in but the QA still reports a violation (review by eye)' },
+    fix: { method: 'scale_in_fallback', applied: true, scale: l.scale, padTop: Math.round(y0 * 1000) / 1000, padBottom: Math.round((1 - y0 - l.scale) * 1000) / 1000, attempts: SHRINK.length, logoRestored, before: issues, after: l.after, note: 'scaled in but the QA still reports a violation (review by eye)' },
   }
 }

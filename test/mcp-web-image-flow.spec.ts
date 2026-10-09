@@ -3,6 +3,7 @@
  * the MCP image now goes through the web Grok flow (api/lib/web-post-image.ts) by default and the
  * result carries the free local `fidelity_warning` (warning only: same credits, same job status).
  */
+import { readFileSync } from 'node:fs'
 import sharp from 'sharp'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -41,6 +42,8 @@ const dataUrl = (b: Buffer, mime = 'image/png') => `data:${mime};base64,${b.toSt
 
 let xai: Array<{ url: string; body: Record<string, any> }> = []
 let generated: Buffer
+/** undefined = the 1x1 test logo; null = the kit has NO logo asset; string = that logo (data URL). */
+let logoOverride: string | null | undefined
 
 const LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -55,7 +58,7 @@ async function setup() {
       return [{ id: 'o1', name: 'Avión Prototipo', price: '₡14.900', productDescription: 'Avión de papel con motores', technicalSpecs: 'Silueta: planeador blanco con hélices rojas', type: 'juguete' }]
     },
     async getBrandKitForBrand() {
-      return { id: 'k1', name: 'Prototipo', primaryColor: '#0b3d91', logoUrl: LOGO, brandVoice: 'cercano', visualStyleNotes: 'luz natural', referenceImages: [kitRef] }
+      return { id: 'k1', name: 'Prototipo', primaryColor: '#0b3d91', logoUrl: logoOverride === undefined ? LOGO : logoOverride, brandVoice: 'cercano', visualStyleNotes: 'luz natural', referenceImages: [kitRef] }
     },
   }
   const images: Record<string, { id: string; kind: string; label: string; imageUrl: string }> = {
@@ -72,7 +75,9 @@ async function setup() {
   return { db, artifactStore, saved }
 }
 
-async function runJob(args: Record<string, unknown>, offerStore?: unknown) {
+/** Rounds 1-5 assert the legacy flow (Grok draws logo + CTA): compositeLayers:false unless a test says otherwise (round 5b tests below). */
+async function runJob(args0: Record<string, unknown>, offerStore?: unknown) {
+  const args = { compositeLayers: false, ...args0 }
   const { db, artifactStore, saved } = await setup()
   const approvalStore = createMemoryMcpApprovalStore()
   const work: Array<() => Promise<void>> = []
@@ -90,6 +95,7 @@ async function runJob(args: Record<string, unknown>, offerStore?: unknown) {
 
 beforeEach(async () => {
   xai = []
+  logoOverride = undefined
   process.env.XAI_API_KEY = 'test-key'
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
     xai.push({ url, body: JSON.parse(init.body) })
@@ -428,5 +434,124 @@ describe('round 5: deterministic safe zones, echoed args, caption, accessory ref
     expect(caption).toContain('Desde 8 años con supervisión de un adulto.')
     expect(caption.trim().endsWith('👉 Escribinos por DM')).toBe(true)
     expect(status.copyOverflow).toEqual(['Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto'])
+  })
+})
+
+describe('round 5b: logo + CTA composited in code (default); the model draws neither', () => {
+  const KIT_LOGO = readFileSync(new URL('./fixtures/round5b/kit-logo-prototipo.png', import.meta.url))
+  const KIT_LOGO_URL = `data:image/png;base64,${KIT_LOGO.toString('base64')}`
+  const COPY = 'El plan de sábado\n₡14.900\nEnvío gratis llevando 2 kits\nEscribinos por DM'
+  async function scene(headlineY = 560): Promise<Buffer> {
+    const noise = Buffer.alloc(800 * 1000 * 3)
+    for (let i = 0; i < noise.length; i++) noise[i] = 90 + ((i * 2654435761) >>> 28) * 3
+    const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><text x="60" y="${headlineY}" font-size="64" font-family="sans-serif" fill="#ffffff">El plan de sabado</text></svg>`)
+    return sharp(noise, { raw: { width: 800, height: 1000, channels: 3 } }).blur(14).composite([{ input: label }]).jpeg({ quality: 90 }).toBuffer()
+  }
+  function sequence(images: Buffer[]) {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      xai.push({ url, body: JSON.parse(init.body) })
+      const img = images[Math.min(n++, images.length - 1)]
+      return new Response(JSON.stringify({ data: [{ b64_json: img.toString('base64') }] }), { status: 200 })
+    }))
+  }
+  const runC = (args: Record<string, unknown>) => runJob({ compositeLayers: true, ...args })
+
+  it('default flow: the prompt forbids logo + buttons and frees the bands; the logo is NOT sent as a reference; the saved image has the real logo + the exact CTA, same size', async () => {
+    logoOverride = KIT_LOGO_URL
+    sequence([await scene()])
+    const { status, saved } = await runC({ copy: COPY })
+    expect(xai).toHaveLength(1)
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toContain('NO dibujes el logo de la marca, ni ningún botón')
+    expect(prompt).toContain('VACÍOS')
+    expect(prompt).not.toContain('Escribinos por DM') // the CTA text is for the compositor only
+    expect(prompt).toContain('El plan de sábado')
+    expect(prompt.replace(/SIN LOGO NI BOTÓN[^\n]*/, '')).not.toMatch(/\bCTA\b|Escribime/) // no leftover CTA instruction of the web builder
+    // references: hero + accessory + kit ref (the logo is not sent: the model would redraw it)
+    const imgs = JSON.stringify(xai[0].body.images)
+    expect(imgs).not.toContain(KIT_LOGO.subarray(60, 120).toString('base64').slice(0, 24))
+    expect(xai[0].body.images).toHaveLength(3)
+    expect(status.status).toBe('completed')
+    const layers = status.compositeLayers as { logo: { status: string; box: { y: number; h: number } }; cta: { status: string; text: string; box: { y: number; h: number } }; height: number; width: number }
+    expect(layers.logo.status).toBe('drawn')
+    expect(layers.cta.text).toBe('Escribinos por DM')
+    expect(layers.logo.box.y).toBeGreaterThanOrEqual(Math.round(layers.height * 0.08))
+    expect(layers.cta.box.y + layers.cta.box.h).toBeLessThanOrEqual(Math.round(layers.height * 0.92))
+    const qa = status.qa as { logo: string; safeZones: string; status: string; ctaButtons: number }
+    expect(qa.logo).toBe('attached')
+    expect(qa.safeZones).toBe('ok')
+    expect(qa.ctaButtons).toBe(1)
+    expect(status.safeZoneFix).toBeUndefined() // no shrink / padding by default
+    const meta = await sharp(Buffer.from(String(saved[0].imageDataUrl).split(',')[1], 'base64')).metadata()
+    expect([meta.width, meta.height]).toEqual([layers.width, layers.height])
+    expect(meta.width! / meta.height!).toBeCloseTo(4 / 5, 2)
+    expect(status.chargedCredits).toBe(6)
+    expect(String(status.caption)).toContain('Escribinos por DM')
+  })
+
+  it('no logo asset in the kit: no logo is drawn, qa.logoUnavailable is set, the CTA is still composited (never a text chip)', async () => {
+    logoOverride = null
+    sequence([await scene()])
+    const { status } = await runC({ copy: COPY })
+    expect(status.status).toBe('completed')
+    expect((status.compositeLayers as { logo: { status: string } }).logo.status).toBe('unavailable')
+    expect((status.qa as { logoUnavailable?: boolean }).logoUnavailable).toBe(true)
+    expect((status.qa as { logo: string }).logo).toBe('none')
+    expect((status.compositeLayers as { cta: { status: string } }).cta.status).toBe('drawn')
+  })
+
+  it('autoRetry: headline inside the bands → ONE corrective regeneration (hint names the bands), the better image is kept, ONE charge; no scale-in needed', async () => {
+    logoOverride = KIT_LOGO_URL
+    sequence([await scene(40), await scene(560)])
+    vi.mocked(incrementUsage).mockClear()
+    const { status } = await runC({ copy: COPY, autoRetry: true })
+    expect(xai).toHaveLength(2)
+    expect(String(xai[1].body.prompt)).toContain('CORRECCIÓN')
+    expect(String(xai[1].body.prompt)).toContain('VACÍAS')
+    const ar = status.autoRetry as { attempted: boolean; kept: string }
+    expect(ar.attempted).toBe(true)
+    expect(ar.kept).toBe('retry')
+    expect(status.safeZoneFix).toBeUndefined()
+    expect((status.qa as { safeZones: string }).safeZones).toBe('ok')
+    expect(status.chargedCredits).toBe(6)
+    expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
+  })
+
+  it('LAST RESORT: the retry failed too → the scene is scaled in (safeZoneFix.method scale_in_fallback) and THEN the logo + CTA are composited at full size', async () => {
+    logoOverride = KIT_LOGO_URL
+    sequence([await scene(40), await scene(40)])
+    const { status, saved } = await runC({ copy: COPY, autoRetry: true })
+    expect(xai).toHaveLength(2)
+    const fix = status.safeZoneFix as { method: string; applied: boolean; scale: number }
+    expect(fix.method).toBe('scale_in_fallback')
+    expect(fix.applied).toBe(true)
+    expect((status.qa as { safeZones: string }).safeZones).toBe('ok')
+    const layers = status.compositeLayers as { logo: { status: string; box: { h: number; w: number } }; cta: { status: string }; height: number }
+    expect(layers.logo.status).toBe('drawn')
+    expect(layers.cta.status).toBe('drawn')
+    const meta = await sharp(Buffer.from(String(saved[0].imageDataUrl).split(',')[1], 'base64')).metadata()
+    expect(meta.width! / meta.height!).toBeCloseTo(4 / 5, 2)
+    // without autoRetry the same violation is also handled only by the fallback (one call)
+    xai = []
+    sequence([await scene(40)])
+    const again = await runC({ copy: COPY })
+    expect(xai).toHaveLength(1)
+    expect((again.status.safeZoneFix as { method: string }).method).toBe('scale_in_fallback')
+    // enforceSafeZones:false = report only: no scale-in at all
+    xai = []
+    sequence([await scene(40)])
+    const off = await runC({ copy: COPY, enforceSafeZones: false })
+    expect(off.status.safeZoneFix).toBeUndefined()
+    expect((off.status.qa as { safeZones: string }).safeZones).toBe('violation')
+  })
+
+  it('compositeLayers is echoed with its effective default and can be turned off (legacy: the model draws logo + CTA)', async () => {
+    const { db, artifactStore } = await setup()
+    const approvalStore = createMemoryMcpApprovalStore()
+    const r = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', referenceImageIds: ['p1'], productImageId: 'p1' } })
+    expect((await approvalStore.findById(String(r.approvalRequestId)))?.inputJson).toMatchObject({ compositeLayers: true })
+    const r2 = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', compositeLayers: false, referenceImageIds: ['p1'], productImageId: 'p1' } })
+    expect((await approvalStore.findById(String(r2.approvalRequestId)))?.inputJson).toMatchObject({ compositeLayers: false })
   })
 })

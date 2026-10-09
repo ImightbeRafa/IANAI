@@ -304,6 +304,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   autoRetry?: boolean
   layoutCap?: boolean
   enforceSafeZones?: boolean
+  compositeLayers?: boolean
 } {
   const out: ReturnType<typeof parseWebPostArgs> = {}
   const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
@@ -329,6 +330,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   out.autoRetry = args.autoRetry === true
   out.layoutCap = args.layoutCap !== false
   out.enforceSafeZones = args.enforceSafeZones !== false
+  out.compositeLayers = args.compositeLayers !== false
   return out
 }
 
@@ -837,6 +839,7 @@ async function runImageGenerateBody(options: {
   autoRetry?: boolean
   layoutCap?: boolean
   enforceSafeZones?: boolean
+  compositeLayers?: boolean
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -981,6 +984,7 @@ async function runImageGenerateBody(options: {
       autoRetry: options.autoRetry,
       layoutCap: options.layoutCap,
       enforceSafeZones: options.enforceSafeZones,
+      compositeLayers: options.compositeLayers,
     })
     generated = web.generated
     promptUsed = web.prompt
