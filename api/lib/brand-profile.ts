@@ -39,6 +39,8 @@ export interface BrandProfile {
   dont?: string[]
   logoVariants?: BrandLogoVariant[]
   styleDnaIds?: string[]
+  /** #22: the brand's default offer (set_default_offer), used when a tool omits offerId. */
+  defaultOfferId?: string
   winnerAdUrls?: string[]
   documents?: BrandDocument[]
   updatedAt?: string
@@ -100,7 +102,7 @@ export interface ParseBrandProfileOptions {
 }
 
 /** Keys of BrandProfile accepted in a patch (top-level replace semantics; null clears). */
-export const BRAND_PROFILE_PATCH_KEYS = ['audiences', 'locale', 'register', 'do', 'dont', 'logoVariants', 'styleDnaIds', 'winnerAdUrls', 'documents'] as const
+export const BRAND_PROFILE_PATCH_KEYS = ['audiences', 'locale', 'register', 'do', 'dont', 'logoVariants', 'styleDnaIds', 'defaultOfferId', 'winnerAdUrls', 'documents'] as const
 
 export function parseBrandProfilePatch(
   patch: Record<string, unknown>,
@@ -111,9 +113,9 @@ export function parseBrandProfilePatch(
   const next: BrandProfile = { ...(existing ?? {}) }
   const changed: string[] = []
   const has = (key: string) => Object.prototype.hasOwnProperty.call(patch, key)
-  const set = <K extends keyof BrandProfile>(key: K, value: BrandProfile[K] | undefined) => {
+  const set = <K extends keyof BrandProfile>(key: K, value: BrandProfile[K] | undefined, keepEmpty = false) => {
     changed.push(key)
-    if (value === undefined || (Array.isArray(value) && !value.length)) delete next[key]
+    if (value === undefined || (Array.isArray(value) && !value.length && !keepEmpty)) delete next[key]
     else next[key] = value
   }
 
@@ -168,11 +170,20 @@ export function parseBrandProfilePatch(
     }
   }
   if (has('styleDnaIds')) {
-    const ids = patch.styleDnaIds === null ? [] : cleanList('styleDnaIds', patch.styleDnaIds, ignored)
-    const known = options.knownStyleDnaIds
-    const unknown = known ? ids.filter((id) => !known.includes(id)) : []
-    if (unknown.length) throw new BrandProfileError('styleDnaIds', `unknown Style DNA id(s): ${unknown.join(', ')} (see list_style_dnas)`)
-    set('styleDnaIds', ids)
+    // #12: [] is an explicit "no Style DNA" (kept); null clears the selection (every kit Style DNA applies).
+    if (patch.styleDnaIds === null) set('styleDnaIds', undefined)
+    else {
+      const ids = cleanList('styleDnaIds', patch.styleDnaIds, ignored)
+      const known = options.knownStyleDnaIds
+      const unknown = known ? ids.filter((id) => !known.includes(id)) : []
+      if (unknown.length) throw new BrandProfileError('styleDnaIds', `unknown Style DNA id(s): ${unknown.join(', ')} (see list_style_dnas)`)
+      set('styleDnaIds', ids, true)
+    }
+  }
+  if (has('defaultOfferId')) {
+    const raw = patch.defaultOfferId
+    if (raw !== null && (typeof raw !== 'string' || !/^[0-9a-f-]{36}$/i.test(raw))) throw new BrandProfileError('defaultOfferId', 'must be an offer id (uuid) or null')
+    set('defaultOfferId', (raw as string | null) ?? undefined)
   }
   if (has('winnerAdUrls')) {
     const raw = patch.winnerAdUrls
@@ -212,6 +223,17 @@ export function readBrandProfile(raw: unknown): BrandProfile | null {
   delete out.updatedAt
   if (typeof raw.updatedAt === 'string') out.updatedAt = raw.updatedAt
   return Object.keys(out).length ? out : null
+}
+
+/**
+ * #12: the kit Style DNAs that may shape a pack. `useStyleDna: false` → none; a saved
+ * `styleDnaIds` selection → exactly those ([] = none, never an implicit dna_1); no selection → all.
+ */
+export function activeStyleDnaIds(allIds: string[], profile: BrandProfile | null | undefined, useStyleDna?: boolean): string[] {
+  if (useStyleDna === false) return []
+  const selected = profile?.styleDnaIds
+  if (selected) return allIds.filter((id) => selected.includes(id))
+  return allIds
 }
 
 /** One human line per audience for the DNA ("Papás 30–45, GAM"); placeholders never survive. */

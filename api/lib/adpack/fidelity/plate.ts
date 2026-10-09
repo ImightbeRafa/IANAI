@@ -197,12 +197,12 @@ const asBool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : typ
 
 export function asObjectList(v: unknown): string[] {
   if (!Array.isArray(v)) return []
-  return [...new Set(v.map((x) => String(x ?? '').trim().slice(0, 60)).filter(Boolean))].slice(0, 8)
+  return [...new Set(v.map((x) => String(x ?? '').trim().slice(0, 160)).filter(Boolean))].slice(0, 12)
 }
 
 export function partsLine(refs: PropsReference[]): string {
   if (!refs.length) return ''
-  return refs.map((r, i) => `Reference ${i + 2}: ${r.label ? `"${r.label.slice(0, 60)}"` : 'product'} (${r.role})`).join('; ')
+  return refs.map((r, i) => `Reference ${i + 2}: ${r.label ? `"${r.label.slice(0, 160)}"` : 'product'} (${r.role})`).join('; ')
 }
 
 export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; placement?: PlateRegion; language: AdLanguage; immutableAttributes?: string[] }): { system: string; user: string } {

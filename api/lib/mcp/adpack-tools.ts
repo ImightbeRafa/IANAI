@@ -251,7 +251,7 @@ async function approvedOrPrompt(options: {
     input: options.input,
   })
   const replayedStatus = replay.ok && replay.result && typeof replay.result === 'object' ? (replay.result as { status?: unknown }).status : undefined
-  if (replayedStatus === 'completed' || replayedStatus === 'running') {
+  if (replay.ok && (replayedStatus === 'completed' || replayedStatus === 'running')) {
     return { replay: { ...(replay.result as Record<string, unknown>), replayed: true } }
   }
   const ready = await assertMcpApprovalReady(options.approvalStore, {
@@ -286,7 +286,7 @@ function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
   for (const key of [
     'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
-    'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId',
+    'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId', 'useStyleDna',
     'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
     'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
     'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
@@ -431,6 +431,7 @@ export async function dispatchAdPackTool(options: {
           productImageIds: args.productImageIds,
           productImageIdsByAd: args.productImageIdsByAd,
           refresh: args.refresh,
+          useStyleDna: args.useStyleDna,
         })
         // G2: the server resolves the profile by id; the full DNA (~3 KB) is only echoed on request.
         const { dna, ...rest } = full
@@ -451,7 +452,7 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_dna_confirm':
         return { ...(await service.confirmDna({ userId, dna: args.dna, edits: args.edits })) }
       case 'adpack_angles': {
-        const res = await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brief: args.brief, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
+        const res = await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brief: args.brief, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, useStyleDna: args.useStyleDna })
         return {
           ...res,
           nextStep: 'Each angle has id (stable catalog id <category>-<hookType>-<format>), category, hookType, format and rationale. Pass the ids you want as adpack_start {angleIds}; ids from guide_bulk_angles (adpackAngleId) and legacy aNN-… ids work too.',
@@ -470,6 +471,7 @@ export async function dispatchAdPackTool(options: {
             brandKitId: args.brandKitId,
             productImageIds: args.productImageIds,
             productImageIdsByAd: args.productImageIdsByAd,
+            useStyleDna: args.useStyleDna,
             angleIds: args.angleIds,
             angles: args.angles,
             variations: args.variations,
@@ -490,7 +492,7 @@ export async function dispatchAdPackTool(options: {
         // B2: corrections are written once, on the first call (the approved retry repeats the same arguments).
         const saved = approvalRequestId ? undefined : await persist()
         const preview = usesSavedBrand(args)
-          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
+          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd, useStyleDna: args.useStyleDna })
           : null
         // The quote resolves the exact angles start will run (angleIds included): what the user approves is what runs.
         // Relighting (exact mode, 'auto' or 'ai') is included and free: it never changes the price.
@@ -556,6 +558,7 @@ export async function dispatchAdPackTool(options: {
             creativeFreedom: args.creativeFreedom,
             layoutFamily: args.layoutFamily,
             styleDnaId: args.styleDnaId,
+            useStyleDna: args.useStyleDna,
             ratios: args.ratios,
             businessId: args.businessId,
             brandKitId: args.brandKitId,

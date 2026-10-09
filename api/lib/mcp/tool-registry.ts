@@ -29,7 +29,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.13.0'
+export const MCP_REGISTRY_VERSION = '0.14.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -270,6 +270,27 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: false,
   },
   {
+    name: 'update_brand',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Edit the brand record {brandId, name?, location?, salesChannels? (website|messages|physical), doesShipping?, shippingMethod?, icpDescription?} — same fields as create_brand / the web brand form. ' +
+      'Placeholder values ("country", "N/A", "Personas 18–65") are never stored (reported in ignoredPlaceholders); null clears a field; over-long text is a clear error, never cut. Free sync write, no credits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'set_default_offer',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Pick the brand\'s default offer {brandId, offerId}: create_ads / adpack_start / adpack_from_brand use it whenever offerId is omitted (instead of the newest offer); list_brands reports it as defaultOfferId. Stored on the primary brand kit profile. Free.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
     name: 'set_primary_brand_kit',
     group: 'brand_workspace',
     risk: 'sync_write',
@@ -343,6 +364,26 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description: 'Create or update a Style DNA on the brand kit (no generation credits).',
     enabled: true,
     requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'detach_style_dna',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Stop a Style DNA from shaping the brand\'s ads {brandKitId, styleDnaId}: it stays saved on the kit (list_style_dnas) but is removed from the kit\'s styleDnaIds selection, so its notes/references never reach a pack. Re-attach with update_brand_kit {styleDnaIds}. Free. (One pack only: create_ads/adpack_start {useStyleDna:false}.)',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'delete_style_dna',
+    group: 'deletes',
+    risk: 'delete',
+    description:
+      'Permanently delete a Style DNA from the kit {brandKitId, styleDnaId, confirm: "<exact Style DNA name>"} after in-chat confirm_execute (no credits). detach_style_dna keeps it but stops using it.',
+    enabled: true,
+    requiresApproval: true,
     consumesAdvanceCredits: false,
   },
 

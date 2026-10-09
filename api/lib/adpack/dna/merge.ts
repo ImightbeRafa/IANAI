@@ -11,7 +11,7 @@
 
 import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKey, FactSource } from '../types.js'
 import { detectCountryHint, detectLanguage, detectRegister, heuristicCategory, scoreCategories } from './classify.js'
-import { cleanText, makeFact, uniqStrings, type DnaPart } from './part.js'
+import { cleanText, dedupeAudiences, makeFact, uniqStrings, type DnaPart } from './part.js'
 
 export const SOURCE_PRECEDENCE: FactSource[] = ['user', 'offer_form', 'upload', 'website', 'instagram', 'inferred']
 
@@ -270,13 +270,16 @@ export function buildBrandDna(input: BuildBrandDnaInput): BrandDna {
   }
   const voice = firstString(parts, (p) => p.voice)
   if (voice) dna.voice = voice
-  const lists: Array<[keyof Pick<BrandDna, 'audience' | 'pains' | 'desires' | 'objections' | 'forbiddenPhrases'>, number]> = [
-    ['audience', 6], ['pains', 10], ['desires', 10], ['objections', 10], ['forbiddenPhrases', 20],
+  const lists: Array<[keyof Pick<BrandDna, 'pains' | 'desires' | 'objections' | 'forbiddenPhrases'>, number]> = [
+    ['pains', 10], ['desires', 10], ['objections', 10], ['forbiddenPhrases', 20],
   ]
   for (const [field, limit] of lists) {
     const values = mergeLists(parts, (p) => p[field], limit)
     if (values.length) dna[field] = values
   }
+  // #22: audiences from every source, near-duplicates merged into the most specific line, max 3.
+  const audience = dedupeAudiences(mergeLists(parts, (p) => p.audience, 24), 3)
+  if (audience.length) dna.audience = audience
   if (customerPhrases.length) dna.customerPhrases = customerPhrases
 
   const productImageUrls = uniqStrings([...(input.offerForm?.productImageUrls || []), ...(input.uploads?.productImageUrls || [])], 12)

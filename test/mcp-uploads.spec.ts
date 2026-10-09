@@ -47,7 +47,8 @@ describe('finalize_upload (C1)', () => {
     await expect(mcpFinalizeUpload({ store: world.offerStore, brandKitStore: world.kitStore, user, args: { uploadId } })).rejects.toThrow(/PUT the bytes/)
     world.offerStore.objects.set(String(res.path), { size: 2048, contentType: 'image/png' })
     const done = await mcpFinalizeUpload({ store: world.offerStore, brandKitStore: world.kitStore, user, args: { uploadId } })
-    expect(done).toMatchObject({ status: 'finalized', target: 'product_images', offerId: PROD_A, url: `${STORAGE_PUBLIC}${res.path}`, role: 'control' })
+    // #18: a legacy free role ("control") is kept as the photo label / part name; role is the shared enum.
+    expect(done).toMatchObject({ status: 'finalized', target: 'product_images', offerId: PROD_A, url: `${STORAGE_PUBLIC}${res.path}`, label: 'control', role: 'part' })
     const row = world.db.images.find((i) => i.id === done.productImageId)!
     expect(row).toMatchObject({ product_id: PROD_A, user_id: USER_A, kind: 'product', role: 'control', image_url: done.url })
     const again = await mcpFinalizeUpload({ store: world.offerStore, brandKitStore: world.kitStore, user, args: { uploadId } })

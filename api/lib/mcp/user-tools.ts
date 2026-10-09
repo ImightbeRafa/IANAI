@@ -16,7 +16,7 @@ export type McpBrandSummary = {
   offerCount?: number
   hasPrimaryKit?: boolean
   defaultOfferId?: string | null
-  defaultOfferResolution?: 'first_offer_with_brand_kit' | 'first_offer' | 'none'
+  defaultOfferResolution?: 'set_default_offer' | 'first_offer_with_brand_kit' | 'first_offer' | 'none'
   nameCollisionWarning?: string | null
   siblingBrandIds?: string[]
   /** Soft-archived (archive_brand). Only listed with includeArchived. */
@@ -251,16 +251,21 @@ export async function mcpListBrandsWithDuplicates(
           })),
     ])
     const kitReady = Boolean(kitBundle.brandKit)
-    const defaultOffer = offers[0]
+    // #22: an explicit default offer (set_default_offer, kit profile) wins over "newest".
+    const chosenId = (kitBundle.brandKit as McpBrandKitContext | null | undefined)?.brandProfile?.defaultOfferId
+    const chosen = chosenId ? offers.find((o) => o.id === chosenId) : undefined
+    const defaultOffer = chosen ?? offers[0]
     return {
       ...brand,
       kitReady,
       offerCount: offers.length,
       hasPrimaryKit: kitBundle.brandKits.some((kit) => kit.isPrimaryForBusiness),
       defaultOfferId: defaultOffer?.id || null,
-      defaultOfferResolution: defaultOffer
-        ? (kitReady ? 'first_offer_with_brand_kit' : 'first_offer')
-        : 'none',
+      defaultOfferResolution: chosen
+        ? 'set_default_offer'
+        : defaultOffer
+          ? (kitReady ? 'first_offer_with_brand_kit' : 'first_offer')
+          : 'none',
     } satisfies McpBrandSummary
   }))
 

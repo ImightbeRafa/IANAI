@@ -115,7 +115,10 @@ describe('buildDnaFromSavedBrand: saved brand → BrandDna + offer', () => {
     })
     expect(dna.visual.styleNotes).toContain('luz natural')
     expect(dna.oneLiner).toBe('Sérum facial de niacinamida y aloe hecho en Heredia')
-    expect(dna.audience).toEqual(expect.arrayContaining(['Mujeres de 25 a 40 con piel mixta', 'Mujeres 25–40']))
+    // #22: near-duplicate audiences from several sources collapse into the most specific line (max 3).
+    expect(dna.audience).toContain('Mujeres de 25 a 40 con piel mixta')
+    expect(dna.audience).not.toContain('Mujeres 25–40')
+    expect(dna.audience!.length).toBeLessThanOrEqual(3)
     expect(dna.pains).toEqual(expect.arrayContaining(['poros abiertos que se notan en fotos', 'brillo en la zona T a media tarde']))
     expect(dna.objections).toEqual(['ya probé sérums y no noté nada'])
 

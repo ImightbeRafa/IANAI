@@ -55,12 +55,16 @@ export type McpOfferStore = {
   statObject: (o: { path: string }) => Promise<{ size: number; contentType: string | null } | null>
   removeObject: (o: { path: string }) => Promise<void>
   publicUrl: (path: string) => string
+  /** #18: object bytes (finalize_upload quality report). Optional: absent → no quality report. */
+  downloadObject?: (o: { path: string }) => Promise<Uint8Array | null>
   uploadBytes: (o: { path: string; bytes: Uint8Array; contentType: string }) => Promise<string>
   insertUploadRecord: (o: { userId: string; brandId: string; metadata: Row }) => Promise<{ id: string }>
   getUploadRecord: (o: { userId: string; uploadId: string }) => Promise<{ id: string; brandId: string; metadata: Row } | null>
   updateUploadRecord: (o: { userId: string; uploadId: string; metadata: Row }) => Promise<void>
   /** create_brand: insert an owned `businesses` row (same columns as the web brand form). */
   insertBusiness?: (o: { userId: string; row: Row }) => Promise<Row>
+  /** #22 update_brand: patch an owned `businesses` row (same columns as the web brand form). */
+  updateBusiness?: (o: { userId: string; brandId: string; patch: Row }) => Promise<Row | null>
 }
 
 export const PRODUCT_TYPES = ['product', 'service', 'restaurant', 'real_estate', 'indumentaria'] as const
@@ -296,7 +300,9 @@ function imageView(row: Row): Row {
     isPrimary: row.is_primary === true,
     tags: Array.isArray(row.tags) ? row.tags : [],
     role: row.role ?? null,
+    label: row.label ?? null,
     quality: row.quality ?? null,
+    sourceUrl: row.source_url ?? null,
   }
 }
 
@@ -334,8 +340,16 @@ export async function mcpTagProductImage(options: { store: McpOfferStore; user: 
   const patch: Row = { tags }
   if ('role' in options.args) {
     const role = options.args.role
-    if (role !== null && (typeof role !== 'string' || role.trim().length > 60)) throw new OfferInputError('role must be a string of at most 60 characters, or null')
+    if (role !== null && (typeof role !== 'string' || role.trim().length > 160)) throw new OfferInputError(`role (part name) must be a string of at most 160 characters, or null${typeof role === 'string' ? ` (got ${role.trim().length})` : ''}`)
     patch.role = typeof role === 'string' && role.trim() && !isPlaceholderValue(role) ? role.trim() : null
+  }
+  if ('label' in options.args) {
+    // #18: rename a photo (e.g. replace "MCP upload — IMG_2041.jpg").
+    const label = options.args.label
+    if (label !== null && typeof label !== 'string') throw new OfferInputError('label must be a string or null')
+    const v = typeof label === 'string' ? label.replace(/\s+/g, ' ').trim() : ''
+    if (v.length > 160) throw new OfferInputError(`label is ${v.length} characters; the maximum is 160 (nothing was saved)`)
+    patch.label = v && !isPlaceholderValue(v) ? v : null
   }
   const { image } = await ownedOfferImage(options.store, options.user, options.args)
   const updated = await options.store.updateProductImage({ userId: options.user.id, imageId: String(image.id), patch })

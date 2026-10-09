@@ -15,6 +15,12 @@ export type McpOwnedImage = {
   label?: string | null
   kind?: 'product' | 'context' | 'generated'
   createdAt?: string | null
+  /** #20 (migration 085 columns; absent before it). */
+  tags?: string[]
+  role?: string | null
+  isPrimary?: boolean
+  quality?: Record<string, unknown> | null
+  sourceUrl?: string | null
 }
 
 export type McpOwnedScript = {
@@ -610,16 +616,22 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
       const offerIds = (products || []).map((row) => row.id as string)
       if (!offerIds.length) return []
 
-      let imageQuery = db
-        .from('product_images')
-        .select('id, image_url, product_id, session_id, label, kind, created_at')
-        .eq('user_id', options.userId)
-        .in('product_id', offerIds)
-      if (options.kind) imageQuery = imageQuery.eq('kind', options.kind)
-      const { data, error } = await imageQuery
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      return (data || []).map((row) => ({
+      // #20: role, tags, primary, quality and source link (085 columns); fall back to the base columns.
+      const run = async (columns: string) => {
+        let imageQuery = db
+          .from('product_images')
+          .select(columns)
+          .eq('user_id', options.userId)
+          .in('product_id', offerIds)
+        if (options.kind) imageQuery = imageQuery.eq('kind', options.kind)
+        return imageQuery.order('created_at', { ascending: false })
+      }
+      const BASE = 'id, image_url, product_id, session_id, label, kind, created_at'
+      let res = await run(`${BASE}, tags, role, is_primary, quality, source_url`)
+      if (res.error && isMissingColumnError(res.error)) res = await run(BASE)
+      if (res.error) throw res.error
+      const rows = (res.data || []) as unknown as Array<Record<string, unknown>>
+      return rows.map((row) => ({
         id: row.id as string,
         imageUrl: row.image_url as string,
         offerId: row.product_id as string,
@@ -627,6 +639,11 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
         label: (row.label as string | null) ?? null,
         kind: row.kind as McpOwnedImage['kind'],
         createdAt: (row.created_at as string | null) ?? null,
+        ...('tags' in row ? { tags: Array.isArray(row.tags) ? (row.tags as string[]) : [] } : {}),
+        ...('role' in row ? { role: (row.role as string | null) ?? null } : {}),
+        ...('is_primary' in row ? { isPrimary: row.is_primary === true } : {}),
+        ...('quality' in row ? { quality: (row.quality as Record<string, unknown> | null) ?? null } : {}),
+        ...('source_url' in row ? { sourceUrl: (row.source_url as string | null) ?? null } : {}),
       }))
     },
 

@@ -75,6 +75,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
           productImageIds: body.productImageIds,
           productImageIdsByAd: body.productImageIdsByAd,
           refresh: body.refresh,
+          useStyleDna: body.useStyleDna,
         }),
       }
     case 'dna_confirm':
@@ -82,7 +83,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
     case 'angles':
       return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd }) }
     case 'quote':
-      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd, angleIds: body.angleIds, angles: body.angles, variations: body.variations, creativeFreedom: body.creativeFreedom, layoutFamily: body.layoutFamily, ratios: body.ratios, productFidelity: body.productFidelity, relight: body.relight, withPlan: true }) }
+      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, productImageIds: body.productImageIds, productImageIdsByAd: body.productImageIdsByAd, useStyleDna: body.useStyleDna, angleIds: body.angleIds, ratios: body.ratios, productFidelity: body.productFidelity, relight: body.relight, withPlan: true }) }
     case 'start': {
       const started = await service.startPack({
         userId,
@@ -107,6 +108,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
         relight: body.relight,
         allowedProps: body.allowedProps,
         immutableAttributes: body.immutableAttributes,
+        useStyleDna: body.useStyleDna,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }

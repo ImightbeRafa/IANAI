@@ -165,7 +165,11 @@ export interface AdPackFromBrandResponse {
   brandKitId?: string
   websiteUrl?: string
   /** Style DNAs on the brand kit (pass one as styleDnaId to adpack_start). */
-  styleDnas?: Array<{ id: string; name: string; kind: string; references: number; analyzed: boolean }>
+  styleDnas?: Array<{ id: string; name: string; kind: string; references: number; analyzed: boolean; active?: boolean }>
+  /** #12: Style DNAs whose notes / references shape this brand's packs ([] = none; useStyleDna:false → []). */
+  activeStyleDnaIds?: string[]
+  /** #19: saved values that had to be shortened for the ads ({field, from, to}); nothing is cut silently. */
+  truncated?: Array<{ field: string; from: number; to: number }>
   /** Quote for the default pack size. */
   quote: AdPackQuote
 }

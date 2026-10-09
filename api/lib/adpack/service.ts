@@ -387,7 +387,8 @@ export function parseProductPhotos(raw: unknown, label: string): ProductPhoto[] 
     if (!isObj(p) || typeof p.url !== 'string' || !isAllowedImageUrl(p.url)) throw bad(`${label}[${i}].url must be an https or data:image URL`)
     if (!isProductPhotoRole(p.role)) throw bad(`${label}[${i}].role must be one of hero, part, contents, box, in_use, detail`)
     const photo: ProductPhoto = { url: p.url, role: p.role }
-    const lbl = str(p.label, 80)
+    const lbl = typeof p.label === 'string' ? p.label.replace(/\s+/g, ' ').trim() : ''
+    if (lbl.length > 160) throw bad(`${label}[${i}].label is ${lbl.length} characters; the maximum is 160`)
     if (lbl) photo.label = lbl
     const id = str(p.id, 64)
     if (id) photo.id = id
@@ -395,11 +396,15 @@ export function parseProductPhotos(raw: unknown, label: string): ProductPhoto[] 
   })
 }
 
-/** Short owner strings (props, immutable attributes): ≤ 12 items × 60 chars. */
+/** Short owner strings (props, immutable attributes): ≤ 12 items × 160 chars; longer → BAD_INPUT (#19, never cut). */
 export function parseStringList(raw: unknown, label: string): string[] | undefined {
   if (raw === undefined || raw === null) return undefined
   if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) throw bad(`${label} must be an array of strings`)
-  const out = [...new Set((raw as string[]).map((v) => v.replace(/[\r\n`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 12)
+  if (raw.length > 12) throw bad(`${label} has ${raw.length} items; the maximum is 12`)
+  const cleaned = (raw as string[]).map((v) => v.replace(/[\r\n`]/g, ' ').replace(/\s+/g, ' ').trim())
+  const long = cleaned.findIndex((v) => v.length > 160)
+  if (long >= 0) throw bad(`${label}[${long}] is ${cleaned[long].length} characters; the maximum is 160`)
+  const out = [...new Set(cleaned.filter(Boolean))]
   return out.length ? out : undefined
 }
 
@@ -841,6 +846,15 @@ export interface SavedBrandRefInput {
   productImageIds?: unknown
   /** C3: per-ad photos { "<ad number, 1-based as in adpack_status>": [productImageId…] }. */
   productImageIdsByAd?: unknown
+  /** #12: false → no Style DNA influence (notes, references, layout profile). */
+  useStyleDna?: unknown
+}
+
+/** #12: `useStyleDna` is true / false / omitted; anything else is BAD_INPUT. */
+export function parseUseStyleDna(raw: unknown): boolean | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'boolean') throw bad('useStyleDna must be true or false')
+  return raw
 }
 
 const IMAGE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -898,6 +912,8 @@ export interface AdPackService {
     layoutFamily?: unknown
     /** Brand kit Style DNA id (list_style_dnas): layout family, density and weight follow its winners. */
     styleDnaId?: unknown
+    /** #12: false → no Style DNA influence at all (conflicts with styleDnaId). */
+    useStyleDna?: unknown
     ratios?: unknown
     businessId?: unknown
     brandKitId?: unknown
@@ -1040,6 +1056,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     const brandKitId = parseOptionalUuid(ref.brandKitId, 'brandKitId')
     const productImageIds = parseProductImageIds(ref.productImageIds)
     const productImageIdsByAd = parseProductImageIdsByAd(ref.productImageIdsByAd)
+    const useStyleDna = parseUseStyleDna(ref.useStyleDna)
     if (!deps.savedBrandDb) throw new AdPackError('UNAVAILABLE', 'Saved brands are not available in this runtime')
     const t0 = now()
     try {
@@ -1053,6 +1070,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         refreshWebsite: deps.refreshWebsite,
         productImageIds,
         productImageIdsByAd,
+        ...(useStyleDna !== undefined ? { useStyleDna } : {}),
       })
       if (res.costUsd > 0) {
         await log({
@@ -1170,7 +1188,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         ...(saved.offerId ? { offerId: saved.offerId } : {}),
         ...(saved.brandKitId ? { brandKitId: saved.brandKitId } : {}),
         ...(saved.websiteUrl ? { websiteUrl: saved.websiteUrl } : {}),
-        ...(saved.styleDnas?.length ? { styleDnas: saved.styleDnas.map((d) => ({ id: d.id, name: d.name, kind: d.kind, references: d.referenceUrls.length, analyzed: Boolean(d.analysis) })) } : {}),
+        ...(saved.styleDnas?.length ? { styleDnas: saved.styleDnas.map((d) => ({ id: d.id, name: d.name, kind: d.kind, references: d.referenceUrls.length, analyzed: Boolean(d.analysis), active: (saved.activeStyleDnaIds ?? []).includes(d.id) })) } : {}),
+        activeStyleDnaIds: saved.activeStyleDnaIds ?? [],
+        ...(saved.truncated?.length ? { truncated: saved.truncated } : {}),
         quote: quoteFor(planned.length),
       }
     },
@@ -1240,7 +1260,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       let savedStyleDnas: StyleDna[] | undefined
       if (fromSaved) {
         // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
-        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd }, input.source)
+        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd, useStyleDna: input.useStyleDna }, input.source)
         if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
         savedStyleDnas = saved.styleDnas ?? []
         dna = saved.dna
@@ -1254,6 +1274,14 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const approved = parseApproved(input.approved)
       const render = resolveRenderOptions(input, offer)
       const styleDnaId = parseStyleDnaId(input.styleDnaId)
+      const useStyleDna = parseUseStyleDna(input.useStyleDna)
+      if (useStyleDna === false && styleDnaId) throw bad('styleDnaId conflicts with useStyleDna:false (drop one of them)')
+      if (useStyleDna === false && dna.visual?.styleProfile) {
+        // dna path: an agent-supplied Style DNA profile is ignored too.
+        const { styleProfile: _sp, ...visual } = dna.visual
+        void _sp
+        dna = { ...dna, visual }
+      }
       let styleNote: string | undefined
       if (styleDnaId) {
         if (!savedStyleDnas) throw bad('styleDnaId needs brandId (the style DNA lives on the brand kit)')

@@ -11,7 +11,7 @@ export function isProductPhotoRole(v: unknown): v is ProductPhotoRole {
 
 /** Immutable product attributes (sanitized, ≤ 8, ≤ 60 chars) — shared by prompts and checks. */
 export function cleanAttributes(list: string[] | undefined): string[] {
-  return [...new Set((list ?? []).map((a) => String(a ?? '').replace(/[\r\n"`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 8)
+  return [...new Set((list ?? []).map((a) => String(a ?? '').replace(/[\r\n"`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160)).filter(Boolean))].slice(0, 12)
 }
 
 /** Explicit role prefix written by import_image before migration 085 ("[part] control"). */

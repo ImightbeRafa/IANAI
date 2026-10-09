@@ -24,7 +24,7 @@ import {
 } from './offer-tools.js'
 import { mcpCreateUploadUrl, mcpFinalizeUpload, LOGO_VARIANTS, UPLOAD_KINDS } from './upload-tools.js'
 import { IMPORT_BATCH_MAX, IMPORT_KINDS, IMPORT_ROLES, mcpImportImage, mcpImportImages } from './import-image-tools.js'
-import { mcpCreateBrand, SALES_CHANNELS } from './brand-tools.js'
+import { mcpCreateBrand, mcpSetDefaultOffer, mcpUpdateBrand, SALES_CHANNELS } from './brand-tools.js'
 import type { RemoteFetch } from './remote-image.js'
 import { createRehoster, type RehostFn } from './asset-rehost.js'
 import { PRODUCT_IMAGE_TAGS } from '../product-image-order.js'
@@ -72,6 +72,8 @@ import { mcpConfirmExecute } from './confirm-execute.js'
 import {
   mcpCreateBrandKit,
   mcpDeleteBrandKit,
+  mcpDeleteStyleDna,
+  mcpDetachStyleDna,
   mcpGetBrandKit,
   mcpLinkBrandKit,
   mcpListBrandKits,
@@ -80,13 +82,16 @@ import {
   type McpBrandKitStore,
 } from './brand-kit-tools.js'
 import { auditMcpToolCall } from './tool-audit.js'
+import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fidelity/photos.js'
+import { readBrandProfile } from '../brand-profile.js'
+import { resolveBrandKitForBusiness } from '../brand-kit-resolve.js'
 import { isAdPackMcpTool } from './adpack-tool-names.js'
 import type { AdPackService } from '../adpack/service.js'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.13.0',
+  version: '0.14.0',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -388,6 +393,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
     brandKitId: { type: 'string', description: 'Optional linked brand kit id (default = primary kit).' },
     productImageIds: productImageIdsProp,
     productImageIdsByAd: productImageIdsByAdProp,
+    useStyleDna: { type: 'boolean', description: 'false = no Style DNA influence at all (notes, references, layout profile); default: the brand\'s selected Style DNAs (update_brand_kit styleDnaIds; [] = none).' },
   }
   const correctionProps = {
     saveToOffer: { type: 'boolean', description: 'Persist offerPatch into the saved offer (same as update_offer) before building the pack.' },
@@ -575,6 +581,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           // pack/single: same creative controls as adpack_start (angleIds, angles, variations, creativeFreedom, layoutFamily).
           ...adpackSelection,
           styleDnaId: { type: 'string', description: 'pack/single: Style DNA id from list_style_dnas; layouts follow the winning ads of the brand.' },
+          useStyleDna: { type: 'boolean', description: 'pack/single: false = no Style DNA influence at all (conflicts with styleDnaId).' },
           brandKitId: { type: 'string' },
           ...adpackLanguageRules,
           productImageIds: productImageIdsProp,
@@ -652,7 +659,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         url: { type: 'string', description: 'Google Drive share link (any shape), Dropbox link or public https image URL.' },
         kind: { type: 'string', enum: [...IMPORT_KINDS] },
         role: { type: 'string', enum: [...IMPORT_ROLES], description: 'product_photo: what the photo shows — hero (the product), part (a separate kit part, e.g. the controller), box, contents (everything in the kit), in_use, detail.' },
-        label: { type: 'string', maxLength: 80, description: 'Short name of what is shown, e.g. "control tipo gamepad".' },
+        label: { type: 'string', maxLength: 160, description: 'Short name of what is shown, e.g. "control tipo gamepad" (max 160; longer is an error, never cut).' },
         variant: { type: 'string', enum: [...LOGO_VARIANTS], description: 'logo only (default primary).' },
         offerId: { type: 'string', description: 'Offer to attach a product photo / reference to (required for product_photo when the brand has several offers).' },
         setPrimary: { type: 'boolean', description: 'product_photo role hero: make it the primary photo (default true).' },
@@ -722,6 +729,48 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['brandId', 'brandKitId'],
         additionalProperties: false,
       }
+    case 'update_brand':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          name: { type: 'string', maxLength: 120 },
+          location: { type: ['string', 'null'], maxLength: 200 },
+          salesChannels: { type: 'array', items: { type: 'string', enum: [...SALES_CHANNELS] } },
+          doesShipping: { type: 'boolean' },
+          shippingMethod: { type: ['string', 'null'], maxLength: 200 },
+          icpDescription: { type: ['string', 'null'], maxLength: 1000, description: 'Who buys (ideal customer), in the owner\'s words. Placeholders like "country" are rejected.' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'set_default_offer':
+      return {
+        type: 'object',
+        properties: { ...brand, offerId: { type: 'string', description: 'Offer id from list_offers.' } },
+        required: ['brandId', 'offerId'],
+        additionalProperties: false,
+      }
+    case 'detach_style_dna':
+      return {
+        type: 'object',
+        properties: { brandKitId: { type: 'string', description: 'Kit id (list_brand_kits).' }, styleDnaId: { type: 'string', description: 'Style DNA id (list_style_dnas).' }, brandId: { type: 'string' } },
+        required: ['brandKitId', 'styleDnaId'],
+        additionalProperties: false,
+      }
+    case 'delete_style_dna':
+      return {
+        type: 'object',
+        properties: {
+          brandKitId: { type: 'string' },
+          styleDnaId: { type: 'string' },
+          brandId: { type: 'string' },
+          confirm: { type: 'string', description: 'Type the exact Style DNA name.' },
+          approvalRequestId: { type: 'string' },
+        },
+        required: ['brandKitId', 'styleDnaId', 'confirm'],
+        additionalProperties: false,
+      }
     case 'set_primary_product_image':
       return {
         type: 'object',
@@ -739,7 +788,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           productImageId: { type: 'string' },
           tags: { type: 'array', items: { type: 'string', enum: [...PRODUCT_IMAGE_TAGS] }, maxItems: PRODUCT_IMAGE_TAGS.length },
-          role: { type: 'string', description: 'Kit part shown, e.g. "control", "caja" (max 60 chars).' },
+          role: { type: 'string', maxLength: 160, description: 'Part name shown, e.g. "control tipo gamepad" (max 160 chars; null clears).' },
+          label: { type: ['string', 'null'], maxLength: 160, description: 'Rename the photo (max 160 chars; null clears).' },
           offerId: { type: 'string' },
           brandId: { type: 'string' },
         },
@@ -753,10 +803,14 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ...brand,
           offerId: { type: 'string', description: 'Required for product_photo.' },
           kind: { type: 'string', enum: [...UPLOAD_KINDS] },
-          role: { type: 'string', description: 'product_photo: kit part ("control", "caja"); logo: variant (primary|light|dark|badge|wordmark|icon).' },
+          role: { type: 'string', enum: [...IMPORT_ROLES], description: 'product_photo: same roles as import_image — hero (the product), part, box, contents, in_use, detail. (Logos: use variant.)' },
+          variant: { type: 'string', enum: [...LOGO_VARIANTS], description: 'logo only (default primary).' },
+          label: { type: 'string', maxLength: 160, description: 'Short name of what is shown, e.g. "control tipo gamepad" (default: a clean name from the file).' },
+          tags: { type: 'array', items: { type: 'string', enum: [...PRODUCT_IMAGE_TAGS] }, maxItems: PRODUCT_IMAGE_TAGS.length, description: 'product_photo: extra tags (the role tag is added automatically).' },
+          setPrimary: { type: 'boolean', description: 'product_photo role hero: make it the primary photo (default true).' },
           filename: { type: 'string' },
           contentType: { type: 'string', description: 'image/png | image/jpeg | image/webp (logo also image/svg+xml; document application/pdf).' },
-          sizeBytes: { type: 'number' },
+          sizeBytes: { type: 'number', minimum: 0, description: 'Optional; 0 or omitted when unknown (the real size is checked at finalize_upload).' },
         },
         required: ['brandId', 'kind', 'filename', 'contentType'],
         additionalProperties: false,
@@ -1535,19 +1589,31 @@ async function dispatchEnabledTool(options: {
         offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
         kind,
       })
+      // #20: audit the photo setup after import — role, tags, primary, quality, source link, label.
+      const kitAssets = options.brandKitStore && !kind ? await listKitAssets(options.brandKitStore, options.user.id, brandId).catch(() => null) : null
       return {
         brandId,
         offerId: typeof options.args.offerId === 'string' ? options.args.offerId : null,
         kind: kind || 'all',
-        assets: assets.map((asset) => ({
-          id: asset.id,
-          productImageId: asset.id,
-          offerId: asset.offerId,
-          imageUrl: asset.imageUrl,
-          kind: asset.kind,
-          label: asset.label || null,
-          createdAt: asset.createdAt || null,
-        })),
+        assets: assets.map((asset) => {
+          const photoRole = asset.kind === 'product' ? (roleFromImageRow({ tags: asset.tags, is_primary: asset.isPrimary }) ?? roleFromLabel(asset.role ?? undefined) ?? roleFromLabel(asset.label ?? undefined) ?? null) : null
+          return {
+            id: asset.id,
+            productImageId: asset.id,
+            offerId: asset.offerId,
+            imageUrl: asset.imageUrl,
+            kind: asset.kind,
+            label: asset.label ? stripRolePrefix(asset.label) || asset.label : null,
+            role: photoRole,
+            partName: asset.role ?? null,
+            tags: asset.tags ?? [],
+            isPrimary: asset.isPrimary === true,
+            quality: asset.quality ?? null,
+            sourceUrl: asset.sourceUrl ?? null,
+            createdAt: asset.createdAt || null,
+          }
+        }),
+        ...(kitAssets ? { kitAssets } : {}),
       }
     }
     case 'list_scripts': {
@@ -1622,6 +1688,23 @@ async function dispatchEnabledTool(options: {
         user: options.user,
         args: options.args,
       })
+    }
+    case 'update_brand': {
+      if (!options.offerStore) throw new Error('Brand store not configured')
+      return mcpUpdateBrand({ db: options.db, store: options.offerStore, user: options.user, args: options.args })
+    }
+    case 'set_default_offer': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpSetDefaultOffer({ db: options.db, kitStore: options.brandKitStore, user: options.user, args: options.args })
+    }
+    case 'detach_style_dna': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpDetachStyleDna({ store: options.brandKitStore, user: options.user, args: options.args })
+    }
+    case 'delete_style_dna': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      if (!options.approvalStore) throw new Error('Approval store not configured')
+      return mcpDeleteStyleDna({ store: options.brandKitStore, approvalStore: options.approvalStore, user: options.user, args: options.args, appOrigin: options.appOrigin })
     }
     case 'delete_brand_kit': {
       if (!options.brandKitStore) throw new Error('Brand kit store not configured')
@@ -1956,5 +2039,21 @@ async function dispatchEnabledTool(options: {
     }
     default:
       throw new Error(`Unhandled tool: ${options.name}`)
+  }
+}
+
+/** #20: the brand kit's assets (primary kit): logo + variants, reference images, winners, documents. */
+async function listKitAssets(store: McpBrandKitStore, userId: string, brandId: string): Promise<Record<string, unknown> | null> {
+  const kits = await store.listKits({ userId, brandId, includeInactive: true })
+  const kit = resolveBrandKitForBusiness({ linkedKits: kits }).kit
+  if (!kit) return null
+  const profile = readBrandProfile(kit.brand_profile)
+  return {
+    brandKitId: kit.id,
+    logoUrl: kit.logo_url ?? null,
+    logoVariants: (profile?.logoVariants ?? []).map((v) => ({ url: v.url, variant: v.variant, sourceUrl: v.sourceUrl ?? null })),
+    referenceImages: Array.isArray(kit.reference_images) ? kit.reference_images : [],
+    winnerAdUrls: profile?.winnerAdUrls ?? [],
+    documents: (profile?.documents ?? []).map((d) => ({ url: d.url, filename: d.filename ?? null })),
   }
 }

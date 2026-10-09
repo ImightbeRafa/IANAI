@@ -20,6 +20,7 @@ import {
 import type { McpAuthUser, McpBrandKitContext, McpDbClient } from './user-tools.js'
 import { isPlaceholderValue, type IgnoredPlaceholder } from '../placeholder-guard.js'
 import {
+  activeStyleDnaIds,
   BRAND_PROFILE_PATCH_KEYS,
   BrandProfileError,
   parseBrandProfilePatch,
@@ -130,9 +131,14 @@ function mapKitSummary(row: BrandKitRowLike): McpBrandKitSummary {
 }
 
 function mapKitDetail(row: BrandKitRowLike): Record<string, unknown> {
+  const profile = readBrandProfile(row.brand_profile)
+  const dnaIds = parseStyleDnas(row.style_dnas).map((d) => d.id)
   return {
     ...mapKitSummary(row),
-    brandProfile: readBrandProfile(row.brand_profile),
+    brandProfile: profile,
+    // #12: always echoed. null = no explicit selection (every kit Style DNA applies); [] = none.
+    styleDnaIds: profile?.styleDnaIds ?? null,
+    activeStyleDnaIds: activeStyleDnaIds(dnaIds, profile),
     logoUrl: row.logo_url ?? null,
     fontPrimary: row.font_primary ?? null,
     fontSecondary: row.font_secondary ?? null,
@@ -376,7 +382,7 @@ export interface KitWritePlan {
 }
 
 /** Profile keys accepted at the top level of create/update_brand_kit (stored in brand_profile). */
-export const KIT_PROFILE_ARG_KEYS = BRAND_PROFILE_PATCH_KEYS
+export const KIT_PROFILE_ARG_KEYS = BRAND_PROFILE_PATCH_KEYS.filter((k) => k !== 'defaultOfferId')
 
 /**
  * Validate kit args into a brand_kits patch: classic columns + brand_profile (085),
@@ -756,6 +762,115 @@ export async function mcpDeleteBrandKit(options: {
     toolName: 'delete_brand_kit',
     input: boundInput,
   })
+  if (!consumed.ok) throw new Error(consumed.reason)
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// #12: Style DNA detach (free) / delete (destructive: typed confirm + in-chat approval)
+// ---------------------------------------------------------------------------
+
+async function kitWithStyleDna(options: { store: McpBrandKitStore; user: McpAuthUser; args: Record<string, unknown> }) {
+  const kitId = asString(options.args.brandKitId) || asString(options.args.kitId)
+  const styleDnaId = asString(options.args.styleDnaId)
+  if (!kitId) throw Object.assign(new Error('brandKitId is required (list_brand_kits)'), { code: 'BAD_INPUT' })
+  if (!styleDnaId) throw Object.assign(new Error('styleDnaId is required (list_style_dnas)'), { code: 'BAD_INPUT' })
+  const kit = await options.store.getKit({ userId: options.user.id, kitId })
+  if (!kit) throw Object.assign(new Error('Brand kit not found'), { code: 'NOT_FOUND' })
+  const brandId = asString(options.args.brandId)
+  if (brandId && kit.business_id && kit.business_id !== brandId) throw Object.assign(new Error('Brand kit is linked to a different brand'), { code: 'NOT_FOUND' })
+  const dnas = parseStyleDnas(kit.style_dnas)
+  const dna = dnas.find((d) => d.id === styleDnaId)
+  if (!dna) throw Object.assign(new Error(`Style DNA ${styleDnaId} not found on this kit (list_style_dnas)`), { code: 'NOT_FOUND' })
+  return { kitId, styleDnaId, kit, dnas, dna, profile: readBrandProfile(kit.brand_profile) }
+}
+
+/** Detach: the Style DNA stays on the kit but no longer shapes packs (explicit selection without it). */
+export async function mcpDetachStyleDna(options: { store: McpBrandKitStore; user: McpAuthUser; args: Record<string, unknown> }): Promise<Record<string, unknown>> {
+  const { kitId, styleDnaId, dnas, profile } = await kitWithStyleDna(options)
+  const supported = options.store.hasBrandProfile ? await options.store.hasBrandProfile() : false
+  if (!supported) {
+    throw Object.assign(new Error(`Migration ${MIGRATION_085} is not applied: the Style DNA selection cannot be saved (delete_style_dna removes it instead).`), { code: 'UNAVAILABLE' })
+  }
+  const current = activeStyleDnaIds(dnas.map((d) => d.id), profile)
+  const next = current.filter((id) => id !== styleDnaId)
+  const changed = current.length !== next.length || profile?.styleDnaIds === undefined
+  if (changed) {
+    const brandProfile: BrandProfile = { ...(profile ?? {}), styleDnaIds: next, updatedAt: new Date().toISOString() }
+    await options.store.updateKit({ userId: options.user.id, kitId, patch: { brand_profile: brandProfile, updated_at: new Date().toISOString() } })
+  }
+  return {
+    status: current.includes(styleDnaId) ? 'detached' : 'unchanged',
+    brandKitId: kitId,
+    styleDnaId,
+    styleDnaIds: next,
+    activeStyleDnaIds: next,
+    message: 'The Style DNA stays saved on the kit (list_style_dnas) but no longer shapes ads. Re-attach it with update_brand_kit { styleDnaIds: [...] }; delete it for good with delete_style_dna.',
+    creditsNote: 'Free sync write — no Advance credits.',
+  }
+}
+
+/** Delete: removes the Style DNA from the kit and from the selection. Typed confirm (its name) + in-chat approval. */
+export async function mcpDeleteStyleDna(options: {
+  store: McpBrandKitStore
+  approvalStore: McpApprovalStore
+  user: McpAuthUser
+  args: Record<string, unknown>
+  appOrigin?: string
+}): Promise<Record<string, unknown>> {
+  const { kitId, styleDnaId, kit, dnas, dna, profile } = await kitWithStyleDna(options)
+  const confirm = asString(options.args.confirm)
+  const approvalRequestId = asString(options.args.approvalRequestId)
+  if (!confirm || confirm !== dna.name) {
+    throw Object.assign(new Error(`Type the exact Style DNA name to confirm delete: "${dna.name}" (or detach_style_dna to keep it but stop using it)`), { code: 'BAD_INPUT' })
+  }
+  const boundInput = { brandKitId: kitId, styleDnaId, confirm }
+  if (!approvalRequestId) {
+    return issueMcpChatApproval({
+      approvalStore: options.approvalStore,
+      userId: options.user.id,
+      toolName: 'delete_style_dna',
+      input: boundInput,
+      quotedCreditCost: 0,
+      appOrigin: options.appOrigin,
+      summaryEs: `Eliminar el Style DNA "${dna.name}" del kit "${kit.name}"`,
+      summaryEn: `Delete Style DNA "${dna.name}" from kit "${kit.name}"`,
+      extra: {
+        preview: { brandKitId: kitId, styleDnaId, name: dna.name, references: dna.referenceUrls.length, analyzed: Boolean(dna.analysis) },
+        warning: 'This permanently removes the Style DNA (its references and analysis) from the kit. Cannot be undone; detach_style_dna keeps it but stops using it.',
+      },
+    })
+  }
+  const replay = await replayMcpApprovalResult(options.approvalStore, { approvalRequestId, userId: options.user.id, toolName: 'delete_style_dna', input: boundInput })
+  if (replay.ok) return { ...(replay.result as Record<string, unknown>), replayed: true }
+  const ready = await assertMcpApprovalReady(options.approvalStore, { approvalRequestId, userId: options.user.id, toolName: 'delete_style_dna', input: boundInput })
+  if (!ready.ok) throw new Error(ready.reason)
+
+  const remaining = dnas.filter((d) => d.id !== styleDnaId)
+  const patch: Record<string, unknown> = { style_dnas: remaining, updated_at: new Date().toISOString() }
+  let selection: string[] | null = profile?.styleDnaIds ?? null
+  if (profile?.styleDnaIds) {
+    selection = profile.styleDnaIds.filter((id) => id !== styleDnaId)
+    patch.brand_profile = { ...profile, styleDnaIds: selection, updatedAt: new Date().toISOString() }
+  }
+  try {
+    await options.store.updateKit({ userId: options.user.id, kitId, patch })
+  } catch (err) {
+    if (!('brand_profile' in patch) || !isMissingColumnError(err, 'brand_profile')) throw err
+    delete patch.brand_profile
+    await options.store.updateKit({ userId: options.user.id, kitId, patch })
+  }
+  const result = {
+    status: 'deleted',
+    brandKitId: kitId,
+    styleDnaId,
+    name: dna.name,
+    styleDnas: remaining.map((d) => ({ id: d.id, name: d.name })),
+    styleDnaIds: selection,
+    creditsNote: 'Free delete — no Advance credits.',
+  }
+  await storeMcpApprovalResult(options.approvalStore, { approvalRequestId, result })
+  const consumed = await consumeMcpApprovalRequest(options.approvalStore, { approvalRequestId, userId: options.user.id, toolName: 'delete_style_dna', input: boundInput })
   if (!consumed.ok) throw new Error(consumed.reason)
   return result
 }
