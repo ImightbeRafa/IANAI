@@ -174,9 +174,9 @@ describe('round 5b: the MCP prompt tells Grok NOT to draw the logo or any button
   it('compositeLayers rules: free top 10% / bottom 12%, no logo / no button, no CTA block in the layout cap; the legacy rules are unchanged without the flag', () => {
     const on = buildMcpPromptRules('es', { requestedRatio: '4:5', ctaText: CTA, layoutCap: true, compositeLayers: true }, { hasProductRefs: true })
     expect(on).toContain('el 18% superior y el 16% inferior')
-    expect(on).toContain('VACÍOS')
-    expect(on).toContain('NO dibujes el logo de la marca, ni ningún botón')
-    expect(on).toContain('franja del medio')
+    expect(on).toContain('SOLO ESCENA')
+    expect(on).toContain('NINGÚN logo')
+    expect(on).toContain('LIBRES')
     expect(on).not.toContain('UN CTA')
     expect(on).not.toContain('UN SOLO CTA')
     expect(on).not.toContain(CTA) // the CTA text is not given to the image model at all
@@ -187,7 +187,7 @@ describe('round 5b: the MCP prompt tells Grok NOT to draw the logo or any button
     expect(off).toContain('UN SOLO CTA')
     expect(off).toContain(`«${CTA}»`)
     const en = buildMcpPromptRules('en', { requestedRatio: '4:5', compositeLayers: true }, { hasProductRefs: false })
-    expect(en).toContain('do NOT draw the brand logo, nor any button')
+    expect(en).toMatch(/ONLY the scene|SCENE ONLY/i)
   })
 })
 

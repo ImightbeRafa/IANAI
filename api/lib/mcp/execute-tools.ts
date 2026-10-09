@@ -329,8 +329,9 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   // Always echoed (boundInput / executeArguments) so the caller sees the value that is actually applied, defaults included.
   out.autoRetry = args.autoRetry === true
   out.layoutCap = args.layoutCap !== false
-  out.enforceSafeZones = args.enforceSafeZones !== false
   out.compositeLayers = args.compositeLayers !== false
+  // Composite flow (default): the layout puts everything inside the safe zones, so the scale-in is OFF unless explicitly requested. Legacy flow keeps it ON.
+  out.enforceSafeZones = out.compositeLayers ? args.enforceSafeZones === true : args.enforceSafeZones !== false
   return out
 }
 
@@ -958,12 +959,19 @@ async function runImageGenerateBody(options: {
     // Accessory photos (box / controller / contents): the ones the caller selected explicitly, plus the offer's photos that
     // match an `allowedProps` entry. Never attached when not allowed (default = no props), so they win reference slots
     // (budget up to 5 on the MCP path: hero + 2nd product photo + accessories + logo).
-    const accessories = [...selectedAccessories, ...pickAccessoryPhotos(allProductAssets, {
+    const accessoryRows = [...selectedAccessories, ...pickAccessoryPhotos(allProductAssets, {
       excludeIds: [...options.referenceImageIds, ...selectedAccessories.map((a) => a.id)],
       lockText: (lock.allowedProps || []).join(' '),
       onlyMatching: true,
       max: Math.max(0, 2 - selectedAccessories.length),
-    })].slice(0, 2).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
+    })].slice(0, 2)
+    const accessories = accessoryRows.map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
+    // The offer's OTHER real box / contents / part photos (not attached): used only to flag them when they show up in the scene without being allowed.
+    const libraryPhotos = pickAccessoryPhotos(allProductAssets, {
+      excludeIds: [...options.referenceImageIds, ...accessoryRows.map((a) => a.id)],
+      lockText: '',
+      max: 3,
+    }).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
     const web = await generateWebStyleImage({
       apiKey: xaiKey(),
       ctx: options.ctxPreview,
@@ -981,6 +989,7 @@ async function runImageGenerateBody(options: {
       referenceMode: options.referenceMode,
       lock,
       accessories,
+      libraryPhotos,
       autoRetry: options.autoRetry,
       layoutCap: options.layoutCap,
       enforceSafeZones: options.enforceSafeZones,

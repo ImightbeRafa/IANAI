@@ -1,3 +1,11 @@
+## 2026-10-09 — MCP 0.19.0: scene-only generation, all ad text composited in code, no scale-in by default, props check, qa.status tiers
+
+**Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file
+**Files:** `api/lib/mcp/{layout-ad,composite-ad,copy-layout,extra-objects,image-postcheck,safe-zones,web-image,execute-tools,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (MCP rules object only; web request unchanged), tests `test/round6-layout.spec.ts`, `test/mcp-web-image-flow.spec.ts`, fixtures `test/fixtures/round6/*`
+
+- Model asked for the scene only; headline / price / facts / CTA / logo laid out in code from the real text boxes (no overlaps, ≥ 1.5 % H gaps, fits, contrast ≥ 4.5, safe zones, same pixel size). Scale-in is opt-in only and always a `fail`.
+- `qa.status` pass | warning | fail; `ctaButtons` from the compositor; props check flags the blue USB cable and the unlisted TOPGT box on the round-5c images; autoRetry keeps the lower-severity image (regression-tested); accessory prompt strengthened.
+
 ## 2026-10-09 — MCP 0.18.0: safe zones enforced in code, accessory ref slots, caption, palette fidelity fallback, build commit file
 
 **Area:** api (mcp, web-post-image), scripts, docs — no migration, no new env/secret/binding/route/cron

@@ -204,7 +204,7 @@ describe('MCP defaults and inputs', () => {
 
   it('parseWebPostArgs validates copy/density/style/cta/lock', () => {
     expect(parseWebPostArgs({ copy: ' Hola ', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', ' b '], lockProductAppearance: true }))
-      .toEqual({ copy: 'Hola', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', 'b'], lockProductAppearance: true, autoRetry: false, layoutCap: true, enforceSafeZones: true, compositeLayers: true })
+      .toEqual({ copy: 'Hola', textDensity: 'medium', postStyle: 'anuncio-conversion', ctaStrength: 'soft', immutableAttributes: ['a', 'b'], lockProductAppearance: true, autoRetry: false, layoutCap: true, compositeLayers: true, enforceSafeZones: false })
     expect(() => parseWebPostArgs({ textDensity: 'huge' })).toThrow()
     expect(() => parseWebPostArgs({ postStyle: 'x' })).toThrow()
   })
@@ -228,7 +228,7 @@ describe('generateWebStyleImage (MCP bridge, mocked xAI)', () => {
     }))
     const out = await generateWebStyleImage({
       apiKey: 'k', ctx: CTX, offerId: 'off-1', aspectRatio: '4:5', copy: 'Papel arriba. Motores abajo.', scene: 'taller de papá',
-      productUrls: [ref(1)], lock: { lockProductAppearance: true, immutableAttributes: ['hélices rojas'] },
+      productUrls: [ref(1)], lock: { lockProductAppearance: true, immutableAttributes: ['hélices rojas'] }, compositeLayers: false,
     })
     expect(calls[0].body.aspect_ratio).toBe('3:4')
     const meta = await sharp(Buffer.from(out.generated.imageDataUrl.split(',')[1], 'base64')).metadata()
@@ -244,7 +244,7 @@ describe('generateWebStyleImage (MCP bridge, mocked xAI)', () => {
 
   it('falls back to the offer name + price when no copy is given, and says so', async () => {
     mockXai()
-    const out = await generateWebStyleImage({ apiKey: 'k', ctx: CTX, offerId: 'off-1', aspectRatio: '9:16', productUrls: [ref(1)] })
+    const out = await generateWebStyleImage({ apiKey: 'k', ctx: CTX, offerId: 'off-1', aspectRatio: '9:16', productUrls: [ref(1)], compositeLayers: false })
     expect(out.copySource).toBe('offer_default')
     expect(String(calls[0].body.prompt)).toContain('Avión Prototipo — ₡14.900')
   })

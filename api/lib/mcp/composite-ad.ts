@@ -41,11 +41,11 @@ export type CompositeReport = {
   zones: { top: number; bottom: number }
 }
 
-type Box = { x: number; y: number; w: number; h: number }
+export type Box = { x: number; y: number; w: number; h: number }
 
-const rasterize = (svg: string): Buffer => new Resvg(svg, { fitTo: { mode: 'original' }, font: { loadSystemFonts: false }, background: 'rgba(0,0,0,0)' }).render().asPng()
+export const rasterize = (svg: string): Buffer => new Resvg(svg, { fitTo: { mode: 'original' }, font: { loadSystemFonts: false }, background: 'rgba(0,0,0,0)' }).render().asPng()
 
-function meanRegion(raw: Buffer, w: number, h: number, box: Box): { color: Rgb; lum: number } {
+export function meanRegion(raw: Buffer, w: number, h: number, box: Box): { color: Rgb; lum: number } {
   const x0 = Math.max(0, Math.floor(box.x)), x1 = Math.min(w, Math.ceil(box.x + box.w))
   const y0 = Math.max(0, Math.floor(box.y)), y1 = Math.min(h, Math.ceil(box.y + box.h))
   let r = 0, g = 0, b = 0, n = 0
@@ -56,7 +56,7 @@ function meanRegion(raw: Buffer, w: number, h: number, box: Box): { color: Rgb; 
 }
 
 /** Edge-energy lookup (share of "busy" pixels inside a box) on a 360 px wide grey copy: text and product edges are busy, wall / table are not. */
-async function edgeMap(raw: Buffer, W: number, H: number): Promise<(box: Box) => number> {
+export async function edgeMap(raw: Buffer, W: number, H: number): Promise<(box: Box) => number> {
   const w = 360
   const h = Math.max(1, Math.round((H * w) / W))
   const g = await sharp(raw, { raw: { width: W, height: H, channels: 3 } }).resize(w, h, { kernel: 'lanczos3' }).greyscale().raw().toBuffer()
@@ -71,6 +71,41 @@ async function edgeMap(raw: Buffer, W: number, H: number): Promise<(box: Box) =>
   }
 }
 
+
+/** The CTA pill (exact text, brand palette, text contrast ≥ 4.5:1, distinct from the scrim it sits on) as a transparent PNG. */
+export async function renderCtaPill(input: {
+  text: string
+  btnH: number
+  W: number
+  scrimMean: Rgb
+  palette?: CompositeInput['palette']
+  fonts?: CompositeInput['fonts']
+}): Promise<{ png: Buffer; btnW: number; fill: Rgb; ink: Rgb; fontSize: number; fits: boolean }> {
+  const { text: cta, btnH, W, scrimMean } = input
+  // fill: brand palette, readable text on it (≥ 4.5:1), and distinct from the scrim it sits on
+  const pal = [input.palette?.accent, input.palette?.primary, input.palette?.secondary].map((c) => parseColor(c)).filter((c): c is Rgb => Boolean(c)).map((c) => ensureReadableFill(c))
+  const options = [...pal, WHITE, INK]
+  const fill = options.find((c) => contrastRatio(c, scrimMean) >= 1.8) ?? options.reduce((b, c) => (contrastRatio(c, scrimMean) > contrastRatio(b, scrimMean) ? c : b), options[0])
+  const ink = readableOn(fill)
+  const fonts = resolveFonts({ headingFont: input.fonts?.headingFont ?? undefined, bodyFont: input.fonts?.bodyFont ?? undefined } as never)
+  const ref = { family: fonts.body.family, weight: fonts.body.boldWeight }
+  let fontSize = Math.round(btnH * 0.44)
+  const padX = Math.round(btnH * 0.9)
+  const maxW = Math.round(W * 0.84)
+  let textW = measureText(cta, ref, fontSize)
+  while (textW + padX * 2 > maxW && fontSize > btnH * 0.28) { fontSize -= 1; textW = measureText(cta, ref, fontSize) }
+  const btnW = Math.min(maxW, Math.round(textW + padX * 2))
+  const fits = textW + padX * 2 <= maxW + 1
+  const svg = await satori({
+    type: 'div',
+    props: {
+      style: { display: 'flex', width: btnW, height: btnH, alignItems: 'center', justifyContent: 'center', backgroundColor: toHex(fill), borderRadius: Math.round(btnH * 0.3), color: toHex(ink), fontFamily: cssFamily(ref.family), fontWeight: ref.weight, fontSize, whiteSpace: 'nowrap' },
+      children: cta,
+    },
+  } as unknown as Parameters<typeof satori>[0], { width: btnW, height: btnH, fonts: satoriFonts([fonts.body.family]) })
+  return { png: rasterize(svg), btnW, fill, ink, fontSize, fits }
+}
+
 export async function compositeBrandLayers(input: CompositeInput): Promise<{ bytes: Buffer; report: CompositeReport }> {
   const base = sharp(input.bytes).rotate().removeAlpha()
   const meta = await base.metadata()
@@ -80,7 +115,7 @@ export async function compositeBrandLayers(input: CompositeInput): Promise<{ byt
   const raw = await base.clone().raw().toBuffer()
   const m = safeZoneMargins(input.ratio)
   const story = m.top > 0.1
-  const layers: sharp.OverlayOptions[] = []
+  const layers: import("sharp").OverlayOptions[] = []
   const busy = await edgeMap(raw, W, H)
   const report: CompositeReport = { method: 'composite', width: W, height: H, logo: { status: 'not_requested' }, cta: { status: 'none' }, scrim: null, zones: { top: m.top, bottom: m.bottom } }
 
@@ -99,28 +134,8 @@ export async function compositeBrandLayers(input: CompositeInput): Promise<{ byt
     report.scrim = { color: toHex(dark), maxAlpha }
     const scrimMean = blend(dark, maxAlpha, around.color)
 
-    // fill: brand palette, readable text on it (≥ 4.5:1), and distinct from the scrim it sits on
-    const pal = [input.palette?.accent, input.palette?.primary, input.palette?.secondary].map((c) => parseColor(c)).filter((c): c is Rgb => Boolean(c)).map((c) => ensureReadableFill(c))
-    const options = [...pal, WHITE, INK]
-    const fill = options.find((c) => contrastRatio(c, scrimMean) >= 1.8) ?? options.reduce((b, c) => (contrastRatio(c, scrimMean) > contrastRatio(b, scrimMean) ? c : b), options[0])
-    const ink = readableOn(fill)
-    const fonts = resolveFonts({ headingFont: input.fonts?.headingFont ?? undefined, bodyFont: input.fonts?.bodyFont ?? undefined } as never)
-    const ref = { family: fonts.body.family, weight: fonts.body.boldWeight }
-    let fontSize = Math.round(btnH * 0.44)
-    const padX = Math.round(btnH * 0.9)
-    const maxW = Math.round(W * 0.84)
-    let textW = measureText(cta, ref, fontSize)
-    while (textW + padX * 2 > maxW && fontSize > btnH * 0.28) { fontSize -= 1; textW = measureText(cta, ref, fontSize) }
-    const btnW = Math.min(maxW, Math.round(textW + padX * 2))
-    const fits = textW + padX * 2 <= maxW + 1
-    const svg = await satori({
-      type: 'div',
-      props: {
-        style: { display: 'flex', width: btnW, height: btnH, alignItems: 'center', justifyContent: 'center', backgroundColor: toHex(fill), borderRadius: Math.round(btnH * 0.3), color: toHex(ink), fontFamily: cssFamily(ref.family), fontWeight: ref.weight, fontSize, whiteSpace: 'nowrap' },
-        children: cta,
-      },
-    } as unknown as Parameters<typeof satori>[0], { width: btnW, height: btnH, fonts: satoriFonts([fonts.body.family]) })
-    const btnPng = rasterize(svg)
+    const pill = await renderCtaPill({ text: cta, btnH, W, scrimMean, palette: input.palette, fonts: input.fonts })
+    const { png: btnPng, btnW, fill, ink, fontSize, fits } = pill
     const by = bottomEdge - btnH
     // Calmest spot of the bottom band: centre / left / right, scored by local edge density (+ overlap with the located product).
     const sideX = Math.round(W * m.side)

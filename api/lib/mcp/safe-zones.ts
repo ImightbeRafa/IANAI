@@ -13,3 +13,8 @@ export function freeBands(ratio: string): { top: number; bottom: number } {
   const m = safeZoneMargins(ratio)
   return m.top > 0.1 ? { top: 0.24, bottom: 0.27 } : { top: 0.18, bottom: 0.16 }
 }
+
+/** Where the calm "text zone" ends (fraction of the height): headline / price / facts are laid out between the free top band and this line. */
+export function textZoneEnd(ratio: string): number {
+  return safeZoneMargins(ratio).top > 0.1 ? 0.42 : 0.38
+}

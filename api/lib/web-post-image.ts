@@ -13,7 +13,7 @@
 import { withProviderRetry } from './mcp/provider-retry.js'
 import type { CTAStrength } from '../data/organic-script-prompts.js'
 import { describeReferenceFailures, fetchPublicImageDetailed, type ReferenceImageFailure } from './fetch-image-data-url.js'
-import { freeBands, safeZoneMargins } from './mcp/safe-zones.js'
+import { freeBands, safeZoneMargins, textZoneEnd } from './mcp/safe-zones.js'
 import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
@@ -167,20 +167,25 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
   const lines: string[] = []
   const cta = (rules.ctaText || '').trim().slice(0, 120)
   if (rules.compositeLayers) {
-    // The logo and the CTA are composited in code afterwards: Grok paints the scene, the product and the headline / price / facts only.
+    // Round 6: the SCENE ONLY. Logo, headline, price, facts and the CTA are all composited in code afterwards.
     const bands = freeBands(rules.requestedRatio || '4:5')
     const freeTop = pct(bands.top)
     const freeBot = pct(bands.bottom)
+    const zoneEnd = pct(textZoneEnd(rules.requestedRatio || '4:5'))
+    const bottomStart = pct(1 - bands.bottom)
     lines.push(es
-      ? `REGLA 1 — FRANJAS LIBRES (Instagram tapa su UI): el ${freeTop} superior y el ${freeBot} inferior de la imagen quedan VACÍOS: sin texto, sin logo, sin botón, sin sellos; solo fondo/escena que continúa hasta el borde. El titular y la línea de precio van en la franja del medio, a ${pct(m.side)} de los costados. Nada toca ni se corta en el borde.`
-      : `RULE 1 — FREE BANDS (Instagram covers its UI): the top ${freeTop} and the bottom ${freeBot} of the picture stay EMPTY: no text, no logo, no button, no badges; only the background/scene running to the edge. The headline and the price line go in the middle band, ${pct(m.side)} from the sides. Nothing touches or is cut by an edge.`)
+      ? 'REGLA 1 — SOLO ESCENA: generá ÚNICAMENTE la escena fotográfica con el producto. NINGÚN texto de ningún tipo (ni titular, ni precio, ni datos, ni letras o números sueltos, ni marca de agua), NINGÚN logo, NINGÚN botón, CTA, flecha, sello o insignia: todo eso se agrega después por código. Única excepción: lo impreso en el empaque o en el producto real de las fotos de referencia.'
+      : 'RULE 1 — SCENE ONLY: generate ONLY the photographic scene with the product. NO text of any kind (no headline, price, facts, stray letters or numbers, watermark), NO logo, NO button, CTA, arrow, seal or badge: all of that is added afterwards, in code. Only exception: what is printed on the real packaging / product in the reference photos.')
     lines.push(es
-      ? 'SIN LOGO NI BOTÓN: NO dibujes el logo de la marca, ni ningún botón, CTA, llamado a la acción, flecha, sello o insignia (el logo y el botón se agregan después, por código). Ningún texto de acción.'
-      : 'NO LOGO, NO BUTTON: do NOT draw the brand logo, nor any button, CTA, call to action, arrow, seal or badge (the logo and the button are added afterwards, in code). No action text.')
+      ? `REGLA 2 — ZONAS: el ${freeTop} superior y el ${freeBot} inferior de la imagen quedan LIBRES de contenido importante: solo fondo / escena que continúa hasta el borde, sin producto ni objetos. Entre el ${freeTop} y el ${zoneEnd} de arriba dejá una franja CALMA (pared o superficie lisa, sin objetos ni texto) donde irá el texto; el producto y los objetos van entre el ${zoneEnd} y el ${bottomStart}, centrados y bien visibles.`
+      : `RULE 2 — ZONES: the top ${freeTop} and the bottom ${freeBot} of the picture stay FREE of key content: only background / scene running to the edge, no product or objects. Between ${freeTop} and ${zoneEnd} from the top leave a CALM band (plain wall or surface, no objects or text) where the text will go; the product and the objects sit between ${zoneEnd} and ${bottomStart}, centred and clearly visible.`)
+    lines.push(es
+      ? 'SIN OBJETOS EXTRA: ningún objeto que no esté en las fotos de referencia adjuntas ni en la lista de extras permitidos (ni cables, cajas, controles, herramientas, hojas ni empaques inventados).'
+      : 'NO EXTRA OBJECTS: no object that is not in the attached reference photos or in the allowed-extras list (no invented cables, boxes, controllers, tools, sheets or packaging).')
     if (rules.layoutCap !== false) {
       lines.push(es
-        ? 'COMPOSICIÓN LIMPIA: como máximo estos bloques de texto — un titular, UNA línea de precio, UNA línea de datos — más el producto grande. Ningún otro texto, sello, viñeta ni bloque; aire entre bloques.'
-        : 'CLEAN LAYOUT: at most these text blocks — one headline, ONE price line, ONE facts line — plus a large product. No other text, badges, bullets or blocks; air between blocks.')
+        ? 'COMPOSICIÓN LIMPIA: el producto grande y nada más que lo necesario; sin sellos, viñetas, marcos, bordes ni tarjetas; la imagen llena todo el canvas hasta el borde (nada de marco ni márgenes).'
+        : 'CLEAN LAYOUT: a large product and nothing more than needed; no seals, bullets, frames, borders or cards; the picture fills the whole canvas to the edge (no frame, no margins).')
     }
   } else {
     // RULE 1 — margins first: the prompt clamp trims the tail, never the opening instructions.
@@ -209,8 +214,8 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
       : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: no box, packaging, controller/gamepad, cable, tool, spare part, drawn sheet, logo, accessory or invented printed text. Only the product${accessories.length ? ', the accessories in the attached photos' : ''} and the surface/ambience.${allowed.length ? ` Only extras allowed: ${allowed.join('; ')}.` : ' No extras allowed.'}`)
     if (accessories.length) {
       lines.push(es
-        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente (misma impresión, forma, botones y tamaño relativo al producto; una caja plana sigue plana, un control pequeño sigue pequeño); no son el producto principal y no los inventes distintos.`
-        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully (same print, shape, buttons and size relative to the product; a flat box stays flat, a small controller stays small); they are not the main product and must not be reinvented.`)
+        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente: misma forma, mismos botones y palancas (la misma cantidad), misma impresión y el mismo tamaño relativo al producto principal (un control de mano es PEQUEÑO frente a un avión o una caja: no lo agrandes ni lo conviertas en un control de consola; una caja plana sigue plana). NO los agrandes, NO los restilices, NO los inventes distintos.`
+        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully: same shape, same buttons and sticks (same count), same print and the SAME size relative to the main product (a handheld controller is SMALL next to a plane or a box: do not enlarge it or turn it into a console gamepad; a flat box stays flat). Do NOT enlarge, restyle or reinvent them.`)
     }
   }
   lines.push(es
@@ -272,15 +277,27 @@ export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
     ...(sceneRecipe ? { sceneRecipe } : {}),
   })
   if (!mcp) return base
-  // Composited flow (MCP only): the CTA button is drawn in code, so the generic "… → CTA" / "1 CTA" / CTA-example lines of the web builder go.
-  const body = mcp.compositeLayers
-    ? base
-        .split('\n')
-        .filter((l) => !/^\s*-\s*(CTA\b|Preferred (organic )?CTA|CTA orgánico)/i.test(l) && !/^CTA:/.test(l))
-        .join('\n')
-        .replace(/\s*→\s*CTA\b/g, '')
-        .replace(/,\s*1 CTA\b/g, '')
-    : base
+  // Composited flow (MCP only): every text and the logo / button are drawn in code, so the generic copy / density / CTA / price lines of the web builder go
+  // and the model is asked for the scene only.
+  let body = base
+  if (mcp.compositeLayers) {
+    const sceneOnlyEs = 'ESCENA SIN TEXTO: no escribas ningún texto en la imagen; el texto se agrega después por código.'
+    const sceneOnlyEn = 'TEXT-FREE SCENE: do not write any text on the image; the text is added afterwards, in code.'
+    const blocks = base.split('\n\n').flatMap((blk) => {
+      if (/^(Densidad|HARD density|MEDIUM density|STANDARD density)/i.test(blk)) return []
+      if (/^(Texto visible:|Visible text:)/.test(blk)) return [langCode === 'en' ? sceneOnlyEn : sceneOnlyEs]
+      if (/^(Precio listado|List price)/.test(blk)) return []
+      if (/^(COPY DEL USUARIO|USER COPY)/.test(blk)) return []
+      return [blk]
+    })
+    body = blocks
+      .join('\n\n')
+      .split('\n')
+      .filter((l) => !/^\s*-\s*(CTA\b|Preferred (organic )?CTA|CTA orgánico)/i.test(l) && !/^CTA:/.test(l))
+      .join('\n')
+      .replace(/\s*→\s*CTA\b/g, '')
+      .replace(/,\s*1 CTA\b/g, '')
+  }
   // MCP rules go FIRST: the prompt clamp trims the tail of the head, never the opening instructions.
   const rules = buildMcpPromptRules(langCode, mcp, { hasProductRefs: input.hasProductRefs })
   return [rules, body].filter(Boolean).join('\n\n')

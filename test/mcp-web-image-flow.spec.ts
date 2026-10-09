@@ -418,7 +418,7 @@ describe('round 5: deterministic safe zones, echoed args, caption, accessory ref
     const approvalStore = createMemoryMcpApprovalStore()
     const r = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', scene: 'Gimnasio', referenceImageIds: ['p1'], productImageId: 'p1' } })
     const rec = await approvalStore.findById(String(r.approvalRequestId))
-    expect(rec?.inputJson).toMatchObject({ layoutCap: true, autoRetry: false, enforceSafeZones: true, allowedProps: [], productFidelity: 'generated', scene: 'Gimnasio' })
+    expect(rec?.inputJson).toMatchObject({ layoutCap: true, autoRetry: false, enforceSafeZones: false, compositeLayers: true, allowedProps: [], productFidelity: 'generated', scene: 'Gimnasio' })
     const r2 = await mcpExecuteImageGenerate({ db, approvalStore, artifactStore, user: { id: 'u1' }, args: { brandId: 'b1', offerId: 'o1', layoutCap: false, autoRetry: true, enforceSafeZones: false, allowedProps: ['caja'], referenceImageIds: ['p1'], productImageId: 'p1' } })
     const rec2 = await approvalStore.findById(String(r2.approvalRequestId))
     expect(rec2?.inputJson).toMatchObject({ layoutCap: false, autoRetry: true, enforceSafeZones: false, allowedProps: ['caja'] })
@@ -463,11 +463,11 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     const { status, saved } = await runC({ copy: COPY })
     expect(xai).toHaveLength(1)
     const prompt = String(xai[0].body.prompt)
-    expect(prompt).toContain('NO dibujes el logo de la marca, ni ningún botón')
-    expect(prompt).toContain('VACÍOS')
+    expect(prompt).toContain('SOLO ESCENA')
+    expect(prompt).toContain('NINGÚN logo')
+    expect(prompt).toContain('el 18% superior y el 16% inferior')
     expect(prompt).not.toContain('Escribinos por DM') // the CTA text is for the compositor only
-    expect(prompt).toContain('El plan de sábado')
-    expect(prompt.replace(/SIN LOGO NI BOTÓN[^\n]*/, '')).not.toMatch(/\bCTA\b|Escribime/) // no leftover CTA instruction of the web builder
+    expect(prompt).not.toContain('El plan de sábado') // round 6: the headline is not given to the image model either
     // references: hero + accessory + kit ref (the logo is not sent: the model would redraw it)
     const imgs = JSON.stringify(xai[0].body.images)
     expect(imgs).not.toContain(KIT_LOGO.subarray(60, 120).toString('base64').slice(0, 24))
@@ -508,7 +508,7 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     const { status } = await runC({ copy: COPY, autoRetry: true })
     expect(xai).toHaveLength(2)
     expect(String(xai[1].body.prompt)).toContain('CORRECCIÓN')
-    expect(String(xai[1].body.prompt)).toContain('VACÍAS')
+    expect(String(xai[1].body.prompt)).toContain('LIBRES')
     const ar = status.autoRetry as { attempted: boolean; kept: string }
     expect(ar.attempted).toBe(true)
     expect(ar.kept).toBe('retry')
@@ -518,32 +518,45 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
   })
 
-  it('LAST RESORT: the retry failed too → the scene is scaled in (safeZoneFix.method scale_in_fallback) and THEN the logo + CTA are composited at full size', async () => {
+  it('round 6: NEVER scales in by default — text left in the bands is reported as a defect (qa fail), the picture keeps its full-bleed size; scale-in is explicit opt-in and is a defect too', async () => {
     logoOverride = KIT_LOGO_URL
     sequence([await scene(40), await scene(40)])
     const { status, saved } = await runC({ copy: COPY, autoRetry: true })
     expect(xai).toHaveLength(2)
-    const fix = status.safeZoneFix as { method: string; applied: boolean; scale: number }
-    expect(fix.method).toBe('scale_in_fallback')
-    expect(fix.applied).toBe(true)
-    expect((status.qa as { safeZones: string }).safeZones).toBe('ok')
-    const layers = status.compositeLayers as { logo: { status: string; box: { h: number; w: number } }; cta: { status: string }; height: number }
+    expect(status.safeZoneFix).toBeUndefined() // no shrink, no frame, no padding
+    const qa = status.qa as { safeZones: string; status: string; scaleInUsed?: boolean }
+    expect(qa.safeZones).toBe('violation')
+    expect(qa.status).toBe('fail')
+    const layers = status.compositeLayers as { logo: { status: string }; cta: { status: string }; width: number; height: number }
     expect(layers.logo.status).toBe('drawn')
     expect(layers.cta.status).toBe('drawn')
     const meta = await sharp(Buffer.from(String(saved[0].imageDataUrl).split(',')[1], 'base64')).metadata()
-    expect(meta.width! / meta.height!).toBeCloseTo(4 / 5, 2)
-    // without autoRetry the same violation is also handled only by the fallback (one call)
+    expect([meta.width, meta.height]).toEqual([layers.width, layers.height])
+    // explicit opt-in: the old scale-in runs, but qa never says 'pass' and flags scaleInUsed
     xai = []
     sequence([await scene(40)])
-    const again = await runC({ copy: COPY })
-    expect(xai).toHaveLength(1)
-    expect((again.status.safeZoneFix as { method: string }).method).toBe('scale_in_fallback')
-    // enforceSafeZones:false = report only: no scale-in at all
-    xai = []
-    sequence([await scene(40)])
-    const off = await runC({ copy: COPY, enforceSafeZones: false })
-    expect(off.status.safeZoneFix).toBeUndefined()
-    expect((off.status.qa as { safeZones: string }).safeZones).toBe('violation')
+    const optIn = await runC({ copy: COPY, enforceSafeZones: true })
+    expect((optIn.status.safeZoneFix as { method: string; applied: boolean }).method).toBe('scale_in_fallback')
+    const q2 = optIn.status.qa as { status: string; scaleInUsed?: boolean; severity: number; warnings: string[] }
+    expect(q2.scaleInUsed).toBe(true)
+    expect(q2.status).toBe('fail')
+    expect(q2.warnings.join(' ')).toMatch(/scale-in fallback used/)
+  })
+
+  it('round 6: an invented prop (saturated magenta cable the references do not have) → props_warning AND qa.status "warning"; the CTA count comes from the compositor (1)', async () => {
+    logoOverride = KIT_LOGO_URL
+    const base = await scene(560)
+    const cable = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect x="150" y="620" width="480" height="70" rx="30" fill="#d010a0"/></svg>')
+    sequence([await sharp(base).composite([{ input: cable }]).jpeg({ quality: 92 }).toBuffer()])
+    const { status } = await runC({ copy: COPY })
+    expect(status.status).toBe('completed')
+    expect((status.props_warning as { code: string } | undefined)?.code).toBe('props_warning')
+    const qa = status.qa as { status: string; ctaButtons: number; warnings: string[]; scaleInUsed?: boolean }
+    expect(qa.status).toBe('warning')
+    expect(qa.warnings.join(' ')).toMatch(/props:/)
+    expect(qa.ctaButtons).toBe(1)
+    expect(qa.scaleInUsed).toBeFalsy()
+    expect(status.safeZoneFix).toBeUndefined()
   })
 
   it('compositeLayers is echoed with its effective default and can be turned off (legacy: the model draws logo + CTA)', async () => {

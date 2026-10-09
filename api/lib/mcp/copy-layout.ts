@@ -4,7 +4,7 @@
  * caption instead (nothing is silently lost: they are reported in the result as `copyOverflow`).
  */
 const CTA_RE = /(escrib|\bdm\b|whatsapp|wasap|pedí|pedi\b|comprá|compra\b|cotiz|reserv|ordená|mensaje|link en bio|visit|llamá|contact|order|buy|shop|message us|book|call)/i
-const PRICE_RE = /([₡$€£]\s?\d|\d[\d.,]*\s?(colones|usd|mxn|eur|dólares|dolares)\b|\bprecio\b|\bprice\b)/i
+export const PRICE_RE = /([₡$€£]\s?\d|\d[\d.,]*\s?(colones|usd|mxn|eur|dólares|dolares)\b|\bprecio\b|\bprice\b)/i
 
 export type CappedCopy = { onImage: string; overflow: string[]; cta?: string; capped: boolean }
 

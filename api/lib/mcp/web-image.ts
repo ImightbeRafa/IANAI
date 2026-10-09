@@ -10,10 +10,11 @@ import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
 import type { ProductCreativeRow } from '../product-creative-rules.js'
 import { runWebPostGrokImage, type WebPostGrokImageResult } from '../web-post-image.js'
 import { buildCaption, capCopyBlocks } from './copy-layout.js'
-import { checkExtraObjects, type ExtraObjectsFinding } from './extra-objects.js'
+import { checkExtraObjects, findUnlistedObjects, labelMatchesAllowed, type ExtraObjectsFinding, type UnlistedObject } from './extra-objects.js'
 import { checkGeneratedProductFidelity, locateLogoBox, qaSeverity, runMcpImageQa, tidyCopySeparators, type FidelityCheckResult, type FidelityWarning, type McpImageQa } from './image-postcheck.js'
 import { enforceSafeZones, type SafeZoneFix } from './safe-zone-fix.js'
-import { compositeBrandLayers, type CompositeReport } from './composite-ad.js'
+import { layoutAdLayers, splitCopyBlocks, type AdLayoutReport } from './layout-ad.js'
+import { freeBands } from './safe-zones.js'
 import { fetchPublicImageDetailed } from '../fetch-image-data-url.js'
 import type { McpBrandContext } from './user-tools.js'
 
@@ -113,16 +114,19 @@ export type WebStyleImageInput = {
   /** Default true: condense a long copy to headline + 1 price line + 1 facts line + 1 CTA; the rest comes back as `copyOverflow` for the caption. */
   layoutCap?: boolean
   /**
-   * Default true: if the QA finds the logo / CTA / text inside the Instagram UI margins, FIX it in code (scale the picture
-   * into a safe canvas of the same pixel size with edge-matched padding, re-stamp the real logo if it was clipped).
-   * Free, local, no model call, no extra charge. false = report only (legacy behaviour).
+   * Legacy flow (compositeLayers:false) default true: if the QA finds the logo / CTA / text inside the Instagram UI margins, FIX it in code
+   * (scale the picture into a safe canvas of the same pixel size with edge-matched padding, re-stamp the real logo if it was clipped).
+   * Composite flow (default): NEVER by default — the layout places everything inside the safe zones, the picture is never shrunk or framed;
+   * only an explicit `true` allows this scale-in as a last resort, and the QA then reports it as a defect (never 'pass').
    */
   enforceSafeZones?: boolean
+  /** Real offer photos (box / contents / parts) NOT attached: when their object shows up in the scene without being in allowedProps it is flagged (warning only). */
+  libraryPhotos?: Array<{ imageUrl: string; label: string }>
   /**
-   * Default true (MCP rules on): Grok is told NOT to draw the logo or any CTA button and to leave the top / bottom bands empty;
-   * afterwards the REAL kit logo and ONE button with the exact `copy` CTA text are composited in code inside the safe zones
-   * (gradient scrim sampled from the picture, brand palette, text contrast ≥ 4.5:1, same pixel size). No logo asset → no logo
-   * (qa.logoUnavailable), never a text chip. false = the legacy flow where Grok draws logo + CTA.
+   * Default true (MCP rules on, round 6): Grok is asked for the SCENE ONLY (no text, logo or button; empty top / bottom bands). Afterwards the REAL
+   * kit logo, the headline, the price line, the facts line and ONE CTA with the exact `copy` text are composited in code inside the safe zones
+   * (brand fonts + colours, layout from the real text boxes, no overlaps, ≥ 1.5 % of the height between elements, text contrast ≥ 4.5:1, same pixel size,
+   * no shrink / frame). No logo asset → no logo (qa.logoUnavailable), never a text chip. false = the legacy flow where Grok draws all the text.
    */
   compositeLayers?: boolean
   /**
@@ -155,9 +159,9 @@ export type WebStyleImageOutput = {
   autoRetry: { requested: boolean; attempted: boolean; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
   references: { used: WebPostGrokImageResult['referencesUsed']; warnings: WebPostGrokImageResult['referenceWarnings'] }
   /** What was allowed in the scene. Local pixel detection of invented props is not available: prevented at the prompt/reference level. */
-  propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding }
+  propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding; unlisted?: Array<{ label: string; inliers: number }> }
   /** Warning only: colours next to the product that no reference explains (possible invented props). */
-  props_warning?: { code: 'props_warning'; reason: string; clusters: ExtraObjectsFinding['clusters'] }
+  props_warning?: { code: 'props_warning'; reason: string; clusters: ExtraObjectsFinding['clusters']; unlisted?: Array<{ label: string; inliers: number }> }
   copyNormalised: string[]
   /** Copy lines moved off the image by the layout cap (put them in the caption). */
   copyOverflow: string[]
@@ -168,7 +172,7 @@ export type WebStyleImageOutput = {
   /** The QA verdict of the image as Grok drew it, before the deterministic fix (only when a fix was applied). */
   qaBeforeFix?: { safeZones: McpImageQa['safeZones']; severity: number; issues: string[] }
   /** Round 5b: what the code compositor drew (real logo, exact CTA, scrim) — absent on the legacy flow. */
-  compositeLayers?: CompositeReport
+  compositeLayers?: AdLayoutReport
   /** Ready-to-paste caption (es-CR, short): headline / price / facts + the lines moved off the image + the CTA. Deterministic. */
   caption: string
 }
@@ -207,14 +211,25 @@ function retryHintFor(qa: McpImageQa, language: 'es' | 'en'): string {
   return bits.join('; ')
 }
 
-/** Retry hint for the composited flow: the only retry-worthy defects are text in the bands / drawn buttons / separators. */
-function retryHintComposite(qa: McpImageQa, language: 'es' | 'en'): string {
+/** Retry hint for the composited (scene-only) flow: the only retry-worthy defects are text / objects in the free bands, drawn buttons / logos, separators. */
+function retryHintComposite(qa: McpImageQa, language: 'es' | 'en', ratio: string): string {
   const es = language !== 'en'
+  const bands = freeBands(ratio)
+  const top = `${Math.round(bands.top * 100)}%`
+  const bot = `${Math.round(bands.bottom * 100)}%`
   const bits: string[] = []
-  if (qa.safeZoneIssues.length) bits.push(es ? 'había texto u objetos en el 10% superior o el 12% inferior: dejá esas franjas VACÍAS y poné el titular y el precio en la franja del medio' : 'text or objects sat in the top 10% or the bottom 12%: leave those bands EMPTY and put the headline and price in the middle band')
+  if (qa.safeZoneIssues.length) bits.push(es ? `había texto u objetos en el ${top} superior o el ${bot} inferior: dejá esas franjas LIBRES (solo fondo), generá la escena SIN NINGÚN TEXTO y poné el producto más abajo` : `text or objects sat in the top ${top} or the bottom ${bot}: leave those bands FREE (background only), generate the scene with NO TEXT at all and move the product lower`)
   if (qa.ctaButtons > 0) bits.push(es ? 'se dibujó un botón o logo: NO dibujes botones, CTA ni logo (se agregan por código)' : 'a button or logo was drawn: do NOT draw buttons, CTAs or a logo (they are added in code)')
   if (qa.separatorLines.length) bits.push(es ? 'sin separadores sueltos al inicio o final de línea' : 'no dangling separators at the start or end of a line')
   return bits.join('; ')
+}
+
+/**
+ * Auto-retry selection. QA severity is a DEFECT score: LOWER is better (0 = clean). The retry replaces the first image only when its score is
+ * strictly lower; a tie keeps the first (same price, no change). Exported so the rule is unit-tested on the real round-5c numbers.
+ */
+export function pickBetterBySeverity(first: number, retry: number): 'first' | 'retry' {
+  return retry < first ? 'retry' : 'first'
 }
 
 const productBoxOf = (f: FidelityCheckResult): { x0: number; y0: number; x1: number; y1: number } | undefined =>
@@ -259,7 +274,12 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const composite = withRules && input.compositeLayers !== false
   const promptCopy = composite && ctaText ? copy.split(/\r?\n/).filter((l) => l.trim() !== ctaText.trim()).join('\n').trim() || copy : copy
   const useKitRefs = input.referenceMode !== 'none'
-  const accessories = useKitRefs ? (input.accessories || []).filter((a) => a.imageUrl) : []
+  const allowedList = (input.lock?.allowedProps || []).map((a) => a.trim()).filter(Boolean)
+  const accessoryCandidates = useKitRefs ? (input.accessories || []).filter((a) => a.imageUrl) : []
+  // allowedProps governs (default = no props): an accessory photo that the allowed list does not name is NOT attached (attaching it while the prompt
+  // says "only these extras" made Grok draw the TOPGT box / the controller anyway). Add it to allowedProps to include it.
+  const accessories = withRules && allowedList.length ? accessoryCandidates.filter((a) => labelMatchesAllowed(a.label, allowedList)) : accessoryCandidates
+  const droppedAccessories = accessoryCandidates.filter((a) => !accessories.includes(a))
   const baseOptions = {
     apiKey: input.apiKey,
     aspectRatio: ratioPlan.generateAt,
@@ -330,10 +350,10 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   }
   const retryWorthy = (q: McpImageQa) => effSeverity(q) > 0
   // Composited flow: the scene as Grok drew it has no logo / CTA / copy-band text yet, so the QA only checks bands, buttons, separators.
-  const qaScene = (imageDataUrl: string) =>
-    runMcpImageQa({ generatedDataUrl: imageDataUrl, requestedRatio: ratioPlan.requested, copyRequested: false, logoAttached: true, logoExpected: false, copy: promptCopy, copyChanges: tidied.changes })
+  const qaScene = (imageDataUrl: string, excludeBoxes?: Array<{ x0: number; y0: number; x1: number; y1: number }>) =>
+    runMcpImageQa({ generatedDataUrl: imageDataUrl, requestedRatio: ratioPlan.requested, copyRequested: false, logoAttached: true, logoExpected: false, copy: promptCopy, copyChanges: tidied.changes, sceneOnly: { bands: freeBands(ratioPlan.requested), ...(excludeBoxes?.length ? { excludeBoxes } : {}) } })
   const check = (url: string, logoDataUrl?: string | null) => (composite ? qaScene(url) : qaFor(url, logoDataUrl))
-  const hint = (q: McpImageQa) => (composite ? retryHintComposite(q, language) : retryHintFor(q, language))
+  const hint = (q: McpImageQa) => (composite ? retryHintComposite(q, language, ratioPlan.requested) : retryHintFor(q, language))
 
   let grok = await runWebPostGrokImage({ ...baseOptions, ...(withRules ? { mcp: mcpRules() } : {}) })
   let framed = await reframe(grok.imageDataUrl, grok.aspectRatio)
@@ -353,15 +373,15 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       autoRetry.firstSeverity = effSeverity(qa)
       autoRetry.retrySeverity = effSeverity(secondQa)
       // Keep the BETTER image by QA result (lower weighted defect score); a tie keeps the first (no change for the same price).
-      if (effSeverity(secondQa) < effSeverity(qa)) {
+      if (pickBetterBySeverity(effSeverity(qa), effSeverity(secondQa)) === 'retry') {
         grok = second
         framed = secondFramed
         qa = secondQa
         autoRetry.kept = 'retry'
-        autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} < first ${autoRetry.firstSeverity}`
+        autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} < first ${autoRetry.firstSeverity} (lower = fewer defects)`
       } else {
         autoRetry.kept = 'first'
-        autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} was not better than the first ${autoRetry.firstSeverity}`
+        autoRetry.keptReason = `retry QA severity ${autoRetry.retrySeverity} was not lower than the first ${autoRetry.firstSeverity} (lower = fewer defects)`
       }
     } catch (err) {
       autoRetry.kept = 'first'
@@ -375,10 +395,10 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
 
   let safeZoneFix: SafeZoneFix | undefined
   let qaBeforeFix: WebStyleImageOutput['qaBeforeFix']
-  let layers: CompositeReport | undefined
+  let layers: AdLayoutReport | undefined
   const decode = (url: string) => Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')
   const fixBySquash = async (logo: Buffer | null) => {
-    if (!enforce || !qa.safeZoneIssues.length || !imageDataUrl.startsWith('data:')) return
+    if (!(composite ? input.enforceSafeZones === true : enforce) || !qa.safeZoneIssues.length || !imageDataUrl.startsWith('data:')) return
     try {
       const fixed = await enforceSafeZones({ bytes: decode(imageDataUrl), ratio: ratioPlan.requested, logo, issues: qa.safeZoneIssues })
       if (fixed.fix.applied) {
@@ -388,6 +408,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
         safeZoneFix = fixed.fix
         imageDataUrl = fixedUrl
         qa = fixedQa
+        qa.scaleInUsed = true
       }
     } catch (err) {
       safeZoneFix = { method: 'scale_in_fallback', applied: false, scale: 1, padTop: 0, padBottom: 0, attempts: 0, logoRestored: false, before: qa.safeZoneIssues, after: qa.safeZoneIssues, note: `safe-zone fix unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
@@ -398,16 +419,37 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const fidelityCheck = grok.lockApplied
     ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: preFixImageDataUrl })
     : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
-  // Free local props check (colour novelty vs every reference sent): warning only.
+  // Free local props check (colour novelty vs every reference sent + real offer photos that are not allowed): warning only.
   let propsCheck: ExtraObjectsFinding | undefined
+  let unlisted: UnlistedObject[] = []
+  const productBox = productBoxOf(fidelityCheck)
+  const accessoryRefCount = grok.referencesUsed.filter((k) => k === 'accessory').length
   try {
     const imgBytes = Buffer.from(preFixImageDataUrl.slice(preFixImageDataUrl.indexOf(',') + 1), 'base64')
     const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map((u) => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'))
-    const box = fidelityCheck.status === 'ok' || fidelityCheck.status === 'unverified' ? fidelityCheck.details.productBox : fidelityCheck.status === 'warning' ? fidelityCheck.warning.details.productBox : undefined
-    if (preFixImageDataUrl.startsWith('data:') && refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: box ?? null, allowedCount: (input.lock?.allowedProps || []).length })
+    if (preFixImageDataUrl.startsWith('data:') && refBytes.length) {
+      // The allowed props explain colours only when they have no photo of their own: the budget is the listed props without an attached accessory photo (≤ 2).
+      propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: productBox ?? null, allowedCount: Math.min(2, Math.max(0, allowedList.length - accessoryRefCount)), mode: composite ? 'scene' : 'strict' })
+    }
+    // Real photos of objects the allowed list does NOT name (dropped accessories + the offer's other box / contents photos): do they show up in the scene?
+    const lib = [...droppedAccessories, ...(input.libraryPhotos || []).filter((p) => p.imageUrl && !labelMatchesAllowed(p.label, allowedList))].slice(0, 3)
+    if (withRules && lib.length && preFixImageDataUrl.startsWith('data:')) {
+      const objects: Array<{ label: string; bytes: Buffer }> = []
+      for (const o of lib) {
+        const got = await fetchPublicImageDetailed(o.imageUrl).catch(() => null)
+        if (got && 'dataUrl' in got) objects.push({ label: o.label, bytes: Buffer.from(got.dataUrl.slice(got.dataUrl.indexOf(',') + 1), 'base64') })
+      }
+      unlisted = await findUnlistedObjects({ generated: imgBytes, objects })
+    }
   } catch { /* heuristic only */ }
+  const propsFlagged = Boolean(propsCheck?.suspected) || unlisted.length > 0
+  const propsReason = [
+    propsCheck?.suspected ? propsCheck.note : '',
+    unlisted.length ? `real photo(s) of ${unlisted.map((u) => `"${u.label}"`).join(', ')} show up in the scene but the allowed props do not name them (invented / unlisted prop)` : '',
+  ].filter(Boolean).join('; ')
+
   if (composite && imageDataUrl.startsWith('data:')) {
-    // LAST RESORT (never the default): headline / price text still inside the bands after the retry → scale the scene in, THEN add the logo + CTA.
+    // Explicit opt-in only (enforceSafeZones:true): scale the scene in when text is still inside the free bands after the retry. Never the default.
     await fixBySquash(null)
     let logoBytes: Buffer | null = null
     let logoNote = ''
@@ -420,55 +462,91 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
         logoNote = `logo asset not loaded: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`
       }
     }
-    const sceneIssues = qa.safeZoneIssues
+    // Where the located things are (fractions): the product, unlisted objects, and the attached real accessories (box / controller) — the CTA and the text stay off them.
+    let accessoryBoxes: Array<{ x0: number; y0: number; x1: number; y1: number }> = []
+    if (accessories.length && imageDataUrl.startsWith('data:')) {
+      try {
+        const objs: Array<{ label: string; bytes: Buffer }> = []
+        for (const o of accessories.slice(0, 2)) {
+          const got = await fetchPublicImageDetailed(o.imageUrl).catch(() => null)
+          if (got && 'dataUrl' in got) objs.push({ label: o.label, bytes: decode(got.dataUrl) })
+        }
+        accessoryBoxes = (await findUnlistedObjects({ generated: decode(imageDataUrl), objects: objs })).map((u) => u.box)
+      } catch { /* best effort */ }
+    }
+    const avoid = [...(productBox ? [productBox] : []), ...unlisted.map((u) => u.box), ...accessoryBoxes]
     try {
-      const done = await compositeBrandLayers({
-        bytes: decode(imageDataUrl),
+      const sceneUrl = imageDataUrl
+      const blocks = splitCopyBlocks(copy, ctaText)
+      const done = await layoutAdLayers({
+        bytes: decode(sceneUrl),
         ratio: ratioPlan.requested,
         logo: logoBytes,
-        ...(ctaText ? { ctaText } : {}),
+        blocks,
         palette: { primary: kit?.primaryColor, secondary: kit?.secondaryColor, accent: kit?.accentColor },
-        // Where the located product is (fractions): the CTA button is kept off it.
-        avoid: productBoxOf(fidelityCheck) ? [productBoxOf(fidelityCheck)!] : [],
+        fonts: { headingFont: kit?.fontPrimary ?? null, bodyFont: null },
+        // Where the located product / unlisted objects are (fractions): text and the CTA are kept off them.
+        avoid,
       })
       layers = done.report
       if (layers.logo.status === 'unavailable' && logoNote) layers.logo.reason = logoNote
       imageDataUrl = `data:image/jpeg;base64,${done.bytes.toString('base64')}`
-      const w = done.report.width
-      const h = done.report.height
-      const lb = done.report.logo.box
-      qa = await runMcpImageQa({
-        generatedDataUrl: imageDataUrl,
-        requestedRatio: ratioPlan.requested,
-        copyRequested: Boolean(copy),
-        logoAttached: done.report.logo.status === 'drawn',
-        logoExpected: Boolean(kit),
-        copy,
-        copyChanges: tidied.changes,
-        logoBox: lb ? { x0: lb.x / w, y0: lb.y / h, x1: (lb.x + lb.w) / w, y1: (lb.y + lb.h) / h } : null,
-      })
-      // The logo and the button are placed inside the safe zones BY CONSTRUCTION; the slab heuristic can mistake the scrim under the
-      // pill for a button touching the edge. The safe-zone verdict is therefore the one of the scene (after any last-resort fix).
-      qa.safeZoneIssues = sceneIssues
-      qa.safeZones = sceneIssues.length ? 'violation' : 'ok'
-      qa.warnings = [...qa.warnings.filter((w) => !w.startsWith('safe zone:')), ...sceneIssues.map((i) => `safe zone: ${i.detail}`)]
-      qa.status = qa.safeZones === 'violation' || qa.separatorLines.length > 0 || qa.textPresent === 'no' || qa.extraCtaRisk ? 'fail' : 'pass'
-      qa.severity = qaSeverity(qa)
-      if (done.report.logo.status === 'unavailable') qa.logoUnavailable = true
-      if (done.report.cta.busy) {
+      // QA of the SCENE (what Grok drew: any text / button in the free bands, separators) + the layout report of what the code drew.
+      const sceneQa = await qaScene(sceneUrl, productBox ? [productBox] : undefined)
+      const r = done.report
+      const drewText = r.text.drawn
+      const wantsText = Boolean(blocks.headline || blocks.price || blocks.facts?.length)
+      const layoutIssues: string[] = []
+      if (r.layout.overlaps.length) layoutIssues.push(`layout overlap: ${r.layout.overlaps.join(', ')}`)
+      if (!r.text.fits) layoutIssues.push('some text did not fit its box')
+      if (r.text.lowContrast) layoutIssues.push('text contrast below 4.5:1')
+      if (!r.layout.insideSafeZones) layoutIssues.push('an element sits outside the safe zones')
+      qa = {
+        ...sceneQa,
+        textLayers: 'code',
+        textPresent: wantsText ? (drewText ? 'yes' : 'no') : 'not_requested',
+        logo: r.logo.status === 'drawn' ? 'attached' : 'none',
+        // The count comes from the compositor's own layer report (our ONE pill) + anything button-like Grok drew in the free bands.
+        ctaButtons: (r.cta.status === 'drawn' ? 1 : 0) + sceneQa.ctaButtons,
+        extraCtaRisk: sceneQa.ctaButtons > 0,
+        safeZones: sceneQa.safeZoneIssues.length || !r.layout.insideSafeZones ? 'violation' : 'ok',
+        warnings: [...sceneQa.warnings.filter((w) => !w.startsWith('the brand kit has no logo')), ...layoutIssues],
+      }
+      if (r.logo.status === 'unavailable') qa.logoUnavailable = true
+      if (r.cta.busy) {
         qa.ctaBusy = true
         qa.warnings.push('the CTA button sits on a busy area / the product: every slot of the bottom band was busy (compositeLayers.cta.busy)')
       }
+      if (r.text.textOverProduct) qa.warnings.push('the scene left no calm area for the text: it was laid over the top of the objects on a soft scrim (compositeLayers.text.textOverProduct)')
       if (!ctaText) qa.warnings.push('the copy has no CTA line: no button was drawn')
-      else if (done.report.cta.fits === false) qa.warnings.push('the CTA text is long: the button text was shrunk to fit')
+      else if (r.cta.fits === false) qa.warnings.push('the CTA text is long: the button text was shrunk to fit')
+      qa.severity = qaSeverity({ ...qa, safeZoneIssues: sceneQa.safeZoneIssues }) + (r.layout.overlaps.length ? 3 : 0) + (r.text.lowContrast ? 2 : 0) + (!r.text.fits ? 2 : 0)
     } catch (err) {
-      qa.warnings.push(`logo / CTA compositor unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`)
+      qa.warnings.push(`layout compositor unavailable: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`)
+      qa.textPresent = 'no'
+      qa.status = 'fail'
     }
   } else {
     // Legacy flow (Grok draws logo + CTA): deterministic scale-in fix as before, with the real logo re-stamped if it was clipped.
     const logoBytes = grok.logoDataUrl?.startsWith('data:') ? decode(grok.logoDataUrl) : null
     await fixBySquash(logoBytes)
   }
+
+  // ---- final verdict: defects fail, flagged-but-usable results warn, scale-in is never a 'pass' ---------------------------------
+  if (safeZoneFix?.applied) {
+    qa.scaleInUsed = true
+    qa.warnings.push(`scale-in fallback used: the picture was shrunk to ${Math.round(safeZoneFix.scale * 100)}% inside a padded canvas (visible frame) — treat as a defect and regenerate`)
+    qa.severity = Math.max(qa.severity, 5) + 5
+  }
+  if (composite && layers) {
+    const r = layers
+    const layoutBad = r.layout.overlaps.length > 0 || !r.text.fits || r.text.lowContrast || !r.layout.insideSafeZones
+    qa.status = qa.safeZones === 'violation' || qa.separatorLines.length > 0 || qa.textPresent === 'no' || qa.extraCtaRisk || layoutBad || qa.scaleInUsed ? 'fail' : 'pass'
+  } else if (qa.scaleInUsed) qa.status = 'fail'
+  if (droppedAccessories.length) qa.warnings.push(`accessory photo(s) not attached (not named in allowedProps): ${droppedAccessories.map((a) => '"' + a.label + '"').join(', ')} - add them to allowedProps to include them`)
+  if (propsFlagged) qa.warnings.push(`props: ${propsReason}`)
+  if (fidelityCheck.status === 'warning') qa.warnings.push(`fidelity: ${fidelityCheck.warning.reason}`)
+  if (qa.status === 'pass' && (propsFlagged || fidelityCheck.status === 'warning' || qa.ctaBusy || layers?.text.textOverProduct)) qa.status = 'warning'
 
   return {
     generated: {
@@ -498,8 +576,9 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       verifiedLocally: Boolean(propsCheck),
       source: (input.lock?.allowedProps || []).length ? 'input' : 'none',
       ...(propsCheck ? { check: propsCheck } : {}),
+      ...(unlisted.length ? { unlisted: unlisted.map((u) => ({ label: u.label, inliers: u.inliers })) } : {}),
     },
-    ...(propsCheck?.suspected ? { props_warning: { code: 'props_warning' as const, reason: propsCheck.note, clusters: propsCheck.clusters } } : {}),
+    ...(propsFlagged ? { props_warning: { code: 'props_warning' as const, reason: propsReason, clusters: propsCheck?.clusters ?? [], ...(unlisted.length ? { unlisted: unlisted.map((u) => ({ label: u.label, inliers: u.inliers })) } : {}) } } : {}),
     copyNormalised: tidied.changes,
     copyOverflow: capped?.overflow ?? [],
     providerRetries: grok.providerRetries,

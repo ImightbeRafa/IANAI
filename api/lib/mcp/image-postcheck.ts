@@ -483,14 +483,20 @@ export type McpImageQa = {
   ctaButtons: number
   /** true when 2+ button-like blocks were found: an invented second CTA is likely (heuristic; a text-only CTA is not detectable). */
   extraCtaRisk: boolean
-  /** 'pass' | 'fail' — fail = a retryable defect (safe zones, orphan separators, missing text, extra CTA risk). */
-  status: 'pass' | 'fail'
+  /** 'fail' = a defect (safe zones, orphan separators, missing text, extra CTA risk, layout overlap, scale-in used); 'warning' = usable but flagged (props, fidelity, busy CTA, text over the objects); 'pass' = clean. */
+  status: 'pass' | 'warning' | 'fail'
   /** Weighted defect score used to keep the better image after an auto-retry (0 = clean). */
   severity: number
   /** true when the brand kit has no usable logo asset: nothing was drawn in its place (never a text chip). */
   logoUnavailable?: boolean
   /** true when the code-composited CTA button could not find a calm spot in the bottom band (see compositeLayers.cta.busy). */
   ctaBusy?: boolean
+  /** Round 6: text was drawn by the code layout over a scene-only picture. 'code' = headline / price / facts / logo / CTA are composited, not generated. */
+  textLayers?: 'code'
+  /** Scene-only flow: did the generated scene carry text-like content inside the free bands (it should carry none)? */
+  sceneText?: 'clean' | 'text_in_bands'
+  /** true when the deterministic scale-in fallback shrank the picture (opt-in last resort): always a defect, never 'pass'. */
+  scaleInUsed?: boolean
   warnings: string[]
 }
 
@@ -557,14 +563,15 @@ async function bandEdgeDensity(bytes: Buffer): Promise<{ top: number; bottom: nu
  *    in the outermost rows/columns that contrasts with the pixels just inside it;
  *  - text-like edge energy inside the Instagram UI margin band (bottom/top).
  */
-export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<SafeZoneIssue[]> {
+export async function checkSafeZones(bytes: Buffer, ratio: string, opts: { /** Scene-only flow: look for ANY text-like content in these larger bands (fractions of the height) instead of the 8 % UI margins. */ bands?: { top: number; bottom: number } } = {}): Promise<SafeZoneIssue[]> {
   const { data, info } = await sharp(bytes).rotate().removeAlpha().resize({ width: 200 }).raw().toBuffer({ resolveWithObject: true })
   const w = info.width
   const h = info.height
   const px = (x: number, y: number): [number, number, number] => [data[(y * w + x) * 3], data[(y * w + x) * 3 + 1], data[(y * w + x) * 3 + 2]]
   const dist = (a: [number, number, number], b: [number, number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
   const issues: SafeZoneIssue[] = []
-  const m = safeZoneMargins(ratio)
+  const m = opts.bands ? { ...safeZoneMargins(ratio), ...opts.bands } : safeZoneMargins(ratio)
+  const sceneBands = Boolean(opts.bands)
 
   // 1) flat block (CTA button) touching the top/bottom edge: a flat run in the outermost row that contrasts with
   //    the pixels `inset` rows inside AND is a bounded slab (2–14% of the height thick, then a sharp edge). A photo
@@ -619,9 +626,11 @@ export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<Safe
     return n ? edges / n : 0
   }
   const bottomBand = textBand(Math.floor(h * (1 - m.bottom)), h)
-  if (bottomBand > 0.035 && !issues.some((i) => i.edge === 'bottom')) issues.push({ edge: 'bottom', kind: 'text_in_unsafe_band', detail: `text-like content inside the bottom ${Math.round(m.bottom * 100)}% (Instagram UI zone)`, amount: Math.round(bottomBand * 1000) / 1000 })
+  const bandLimit = sceneBands ? 0.045 : 0.035
+  const bandName = sceneBands ? 'free' : 'Instagram UI zone'
+  if (bottomBand > bandLimit && !issues.some((i) => i.edge === 'bottom')) issues.push({ edge: 'bottom', kind: 'text_in_unsafe_band', detail: `text-like content inside the bottom ${Math.round(m.bottom * 100)}% (${bandName === 'free' ? 'free band: the scene must carry no text' : bandName})`, amount: Math.round(bottomBand * 1000) / 1000 })
   const topBand = textBand(0, Math.floor(h * m.top))
-  if (topBand > 0.035 && !issues.some((i) => i.edge === 'top')) issues.push({ edge: 'top', kind: 'text_in_unsafe_band', detail: `text-like content inside the top ${Math.round(m.top * 100)}% (Instagram UI zone)`, amount: Math.round(topBand * 1000) / 1000 })
+  if (topBand > bandLimit && !issues.some((i) => i.edge === 'top')) issues.push({ edge: 'top', kind: 'text_in_unsafe_band', detail: `text-like content inside the top ${Math.round(m.top * 100)}% (${bandName === 'free' ? 'free band: the scene must carry no text' : bandName})`, amount: Math.round(topBand * 1000) / 1000 })
   return issues
 }
 
@@ -631,7 +640,7 @@ export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<Safe
  * rounded-rectangle (aspect 2.2–9, 14–65 % of the width, 2.5–12 % of the height) and mostly filled (text leaves holes).
  * Heuristic: a CTA drawn as plain text is not detectable; a textured scene rarely forms such a block.
  */
-export async function countCtaButtons(bytes: Buffer, opts: { logoBox?: { x0: number; y0: number; x1: number; y1: number } | null } = {}): Promise<number> {
+export async function countCtaButtons(bytes: Buffer, opts: { logoBox?: { x0: number; y0: number; x1: number; y1: number } | null; /** Regions (fractions) that are never a button: the located product, its box art, accessories. */ exclude?: Array<{ x0: number; y0: number; x1: number; y1: number }>; /** Scene-only flow: only blocks whose centre sits in these bands count (nothing is supposed to be drawn there). */ onlyBands?: { top: number; bottom: number } } = {}): Promise<number> {
   const { data, info } = await sharp(bytes).rotate().removeAlpha().resize({ width: 200 }).blur(0.8).raw().toBuffer({ resolveWithObject: true })
   const w = info.width
   const h = info.height
@@ -661,7 +670,7 @@ export async function countCtaButtons(bytes: Buffer, opts: { logoBox?: { x0: num
       if (dup) continue
       // The brand logo plate is a rounded rectangle too: it is never a CTA (a plate that sits wholly in the top 18 % band,
       // or overlaps the located logo, is skipped).
-      if (comp.y1 / h < 0.18) continue
+      if (!opts.onlyBands && comp.y1 / h < 0.18) continue
       // A button never touches the left/right border (the safe-zone side margin is 5 %): a block that does is scene surface
       // (the round-5 table edge was counted as a second button).
       if (comp.x0 <= 1 || comp.x1 >= w - 2) continue
@@ -671,6 +680,15 @@ export async function countCtaButtons(bytes: Buffer, opts: { logoBox?: { x0: num
         const iy = Math.max(0, Math.min(comp.y1 / h, lb.y1) - Math.max(comp.y0 / h, lb.y0))
         if (ix * iy > 0.4 * ((comp.x1 - comp.x0 + 1) / w) * ((comp.y1 - comp.y0 + 1) / h)) continue
       }
+      const cx = (comp.y0 + comp.y1) / 2 / h
+      if (opts.onlyBands && cx > opts.onlyBands.top && cx < 1 - opts.onlyBands.bottom) continue
+      let excluded = false
+      for (const ex of opts.exclude ?? []) {
+        const ix = Math.max(0, Math.min((comp.x1 + 1) / w, ex.x1) - Math.max(comp.x0 / w, ex.x0))
+        const iy = Math.max(0, Math.min((comp.y1 + 1) / h, ex.y1) - Math.max(comp.y0 / h, ex.y0))
+        if (ix * iy > 0.3 * ((comp.x1 - comp.x0 + 1) / w) * ((comp.y1 - comp.y0 + 1) / h)) excluded = true
+      }
+      if (excluded) continue
       boxes.push({ x0: comp.x0, y0: comp.y0, x1: comp.x1, y1: comp.y1 })
       buttons++
     }
@@ -693,8 +711,9 @@ export async function locateLogoBox(logo: Buffer, generated: Buffer): Promise<{ 
 }
 
 /** Weighted defect score (0 = clean). Used to keep the BETTER image after the single auto-retry. */
-export function qaSeverity(qa: Pick<McpImageQa, 'safeZoneIssues' | 'textPresent' | 'separatorLines' | 'ctaButtons'>): number {
+export function qaSeverity(qa: Pick<McpImageQa, 'safeZoneIssues' | 'textPresent' | 'separatorLines' | 'ctaButtons'> & { scaleInUsed?: boolean }): number {
   let v = 0
+  if (qa.scaleInUsed) v += 5
   for (const i of qa.safeZoneIssues) v += i.kind === 'block_touches_edge' ? 3 + Math.min(1, i.amount ?? 0) : 2 + Math.min(2, (i.amount ?? 0) * 20)
   if (qa.textPresent === 'no') v += 4
   v += qa.separatorLines.length
@@ -714,6 +733,11 @@ export async function runMcpImageQa(input: {
   copyChanges?: string[]
   /** Where the brand logo sits (fractions of the image) when known: excluded from the button count. */
   logoBox?: { x0: number; y0: number; x1: number; y1: number } | null
+  /**
+   * Round 6 scene-only flow: the picture is the SCENE (no text, logo or button is expected anywhere in it). Look for text-like
+   * content / button-like blocks inside these free bands only, and never count the located product / box art as buttons.
+   */
+  sceneOnly?: { bands: { top: number; bottom: number }; excludeBoxes?: Array<{ x0: number; y0: number; x1: number; y1: number }> }
 }): Promise<McpImageQa> {
   const warnings: string[] = []
   let ratioOk = true
@@ -741,23 +765,23 @@ export async function runMcpImageQa(input: {
       /* heuristic only */
     }
     try {
-      safeZoneIssues = await checkSafeZones(bytes, input.requestedRatio)
+      safeZoneIssues = await checkSafeZones(bytes, input.requestedRatio, input.sceneOnly ? { bands: input.sceneOnly.bands } : {})
       safeZones = safeZoneIssues.length ? 'violation' : 'ok'
       for (const i of safeZoneIssues) warnings.push(`safe zone: ${i.detail}`)
     } catch {
       safeZones = 'not_checked'
     }
     try {
-      ctaButtons = await countCtaButtons(bytes, { logoBox: input.logoBox })
+      ctaButtons = await countCtaButtons(bytes, input.sceneOnly ? { exclude: input.sceneOnly.excludeBoxes, onlyBands: input.sceneOnly.bands } : { logoBox: input.logoBox })
     } catch { /* heuristic only */ }
   }
   const separatorLines = input.copy ? findSeparatorLines(input.copy) : []
   for (const l of separatorLines) warnings.push(`copy line ${l.line} ${l.where === 'end' ? 'ends' : 'starts'} with a separator ("${l.text.slice(0, 60)}")`)
   const logo: McpImageQa['logo'] = input.logoAttached ? 'attached' : input.logoExpected ? 'none' : 'not_requested'
   if (logo === 'none') warnings.push('the brand kit has no logo to stamp')
-  const extraCtaRisk = ctaButtons > 1
-  if (extraCtaRisk) warnings.push(`${ctaButtons} button-like blocks found: the copy has exactly one CTA, a second button may have been invented (heuristic)`)
+  const extraCtaRisk = input.sceneOnly ? ctaButtons > 0 : ctaButtons > 1
+  if (extraCtaRisk) warnings.push(input.sceneOnly ? `${ctaButtons} button-like block(s) found in the free bands of a scene that must carry none (the CTA is drawn in code)` : `${ctaButtons} button-like blocks found: the copy has exactly one CTA, a second button may have been invented (heuristic)`)
   const status: McpImageQa['status'] = safeZones === 'violation' || separatorLines.length > 0 || textPresent === 'no' || extraCtaRisk ? 'fail' : 'pass'
   const severity = qaSeverity({ safeZoneIssues, textPresent, separatorLines, ctaButtons })
-  return { ratioOk, textPresent, logo, safeZones, safeZoneIssues, separatorLines, copyNormalised: input.copyChanges ?? [], ctaButtons, extraCtaRisk, status, severity, warnings }
+  return { ratioOk, textPresent, logo, safeZones, safeZoneIssues, separatorLines, copyNormalised: input.copyChanges ?? [], ctaButtons, extraCtaRisk, status, severity, ...(input.sceneOnly ? { sceneText: (safeZoneIssues.length ? 'text_in_bands' : 'clean') as 'clean' | 'text_in_bands' } : {}), warnings }
 }

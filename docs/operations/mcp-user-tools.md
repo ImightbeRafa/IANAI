@@ -37,6 +37,17 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.19.0 — scene-only generation + ALL text composited in code, no scale-in by default, props check, `qa.status` tiers
+
+Registry / server version **0.19.0**. **No migration**, no new env/secret/binding/route/cron, no new dependency, **no new font files** (the layout reuses the adpack fonts already copied to `dist-api/lib/adpack/render/fonts`). Proofs: `test/round6-layout.spec.ts`, `test/mcp-web-image-flow.spec.ts` (round 5b/6 blocks), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- **`execute_image_generate` (default `compositeLayers:true`)** asks the model for the **scene only**: no headline, price, facts, logo, button or any other text; the top 18 % / bottom 16 % (9:16: 24 % / 27 %) stay free of key content; no objects other than the references and `allowedProps`. Afterwards `api/lib/mcp/layout-ad.ts` composites in code (sharp + satori + resvg, brand fonts + palette from the kit): the headline, ONE price line, the facts line, ONE CTA with the exact `copy` text and the real kit logo. Layout from the real text boxes: no overlaps, ≥ 1.5 % of the height between any two elements, text shrunk / wrapped before it is ever clipped, contrast ≥ 4.5:1 against the worst pixel (soft scrim only when needed), logo and CTA placed **after** the text, CTA kept off the located product / accessories / unlisted objects (edge density + deviation from the band; `compositeLayers.cta.busy` when forced). Output pixel size and ratio are unchanged: **the picture is never shrunk, framed or padded.** `compositeLayers:false` = the old flow (model draws everything).
+- **`enforceSafeZones`** is now **false by default in the composite flow** (true by default only with `compositeLayers:false`). `true` = explicit opt-in last resort (old scale-in); the result then has `qa.scaleInUsed:true`, `qa.status:"fail"` and a warning. A scale-in is never `pass`.
+- **`qa.status`** is `pass | warning | fail`: `fail` = defect (text / objects in the free bands, orphan separators, extra button risk, layout overlap / contrast / fit, scale-in); `warning` = usable but flagged (`props_warning`, `fidelity_warning`, busy CTA, text laid over the objects); `pass` = clean. `qa.textLayers:"code"`, `qa.sceneText`, `qa.ctaButtons` comes from the compositor's own layer report (our one pill) plus anything button-like the model drew in the free bands (the logo plate and the product-box art are no longer counted). New result field `compositeLayers.layout {elements, gapPx, minGap, overlaps, insideSafeZones}`.
+- **Props:** `allowedProps` governs which real accessory photos are attached as references (an unlisted box / controller photo is NOT attached and is reported in `qa.warnings`); colour novelty is lightness-aware (a blue cable on a navy wall, a USB cable, is now flagged; faithful shading is not); real offer photos of objects that are NOT allowed (e.g. the TOPGT box) are searched in the scene by feature matching → `props_warning.unlisted`, `propsPolicy.unlisted`, `qa.status:"warning"`. Warning only; never blocks or charges.
+- **autoRetry:** keeps the image with the **lower** `qa.severity` (it is a defect score: 0 = clean). Round 5c's "retry 10 vs first 6" meant the retry was WORSE (more defects), so keeping the first was right; a tie keeps the first. `pickBetterBySeverity` is exported and tested on those numbers. In the composite flow the QA looks at the scene's free bands, and the retry hint says so.
+- **Accessory prompt:** the controller is small relative to a plane (the exact shape, the same number of sticks and buttons, "do not enlarge or restyle into a console pad"). Compositing the real controller crop was evaluated and skipped (no robust cut-out of a black object on a dark table; a mis-cut is worse than a warning); a redrawn accessory no longer feature-matches its reference photo, so no size warning is possible without a model.
+
 ### 0.18.0 — deterministic safe zones, accessory slots, caption, palette fidelity fallback
 
 Registry / server version **0.18.0**. **No migration**, no new env/secret/binding/route/cron. Proofs: `test/round5-mcp.spec.ts` (Round 5 raw image fixtures), `test/mcp-web-image-flow.spec.ts` (round 5 block), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -221,7 +232,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.18.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.19.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`
