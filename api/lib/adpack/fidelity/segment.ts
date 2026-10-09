@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import type { ModelGateway, ProductPhotoRole, SegmentationItem } from '../types.js'
 import { borderBackground, bordersTouched, components, deltaE, dilate, erode, labImage } from './pixels.js'
+import { BACKGROUND_LEAK_MAX, backgroundLeakShare } from './score.js'
 import { addMissedObjects, cutoutRecall, estimateForeground, isFlatLayEstimate, MIN_CUTOUT_RECALL, type CutoutRecall, type ForegroundEstimate } from './recall.js'
 
 export type CutoutMethod = 'alpha' | 'flood' | 'model'
@@ -44,6 +45,8 @@ export interface CutoutOk {
   recall?: CutoutRecall
   /** Top-down kit layout (role 'contents' or ≥ 3 separated objects): overhead plate, no perspective. */
   flatLay?: boolean
+  /** Share of the cut-out that is still the source photo's backdrop / its shadow (round 1, P2). */
+  backgroundLeak?: number
 }
 
 export interface CutoutFailed {
@@ -75,6 +78,9 @@ export const CUTOUT_MAX_COVERAGE = 0.9
 /** Largest component / all foreground. */
 export const CUTOUT_MIN_DOMINANCE = 0.75
 const WORK_SIDE = 1024
+/** Strict flood retry (round 1): backdrop ΔE and neighbor continuity caps. */
+export const STRICT_FLOOD_TOLERANCE = 5
+export const STRICT_FLOOD_LOCAL = 3.5
 const DEFAULT_MAX_SIDE = 2048
 
 export function sha256Hex(bytes: Uint8Array): string {
@@ -241,7 +247,7 @@ export interface FloodOptions {
 }
 
 /** Background mask (1 = background) by flooding from the borders; null when the border is not uniform. */
-export function floodBackground(lab: Float32Array, w: number, h: number, opts: FloodOptions = {}): { bg: Uint8Array; bgLab: [number, number, number] } | string {
+export function floodBackground(lab: Float32Array, w: number, h: number, opts: FloodOptions = {}): { bg: Uint8Array; bgLab: [number, number, number]; tol: number; local: number } | string {
   const border = borderBackground(lab, w, h, 10)
   if (border.uniformity < 0.6) return `background not uniform (${Math.round(border.uniformity * 100)}% of the border matches)`
   const tol = opts.tolerance ?? Math.min(24, Math.max(10, border.spread * 2.5 + 6))
@@ -279,7 +285,123 @@ export function floodBackground(lab: Float32Array, w: number, h: number, opts: F
     if (i >= w) visit(i, i - w)
     if (i < w * (h - 1)) visit(i, i + w)
   }
-  return { bg, bgLab: border.lab }
+  return { bg, bgLab: border.lab, tol, local }
+}
+
+/** Trapped background (round-1 halo): min area of an enclosed background pocket that is removed (share of the frame). */
+export const TRAPPED_BG_MIN_AREA = 0.0003
+/** Soft shadow: same hue as the backdrop (|Δa| / |Δb| caps), darker, reached through a smooth gradient only. */
+const SHADOW_MAX_DA = 2.5
+const SHADOW_MAX_DB = 1.8
+const SHADOW_MAX_DARKEN = 50
+const SHADOW_LOCAL = 3.5
+
+/**
+ * Remove background the edge flood could not reach (round 1, Prototipo plane "halo"):
+ *  1. enclosed pockets — regions inside the silhouette that match the backdrop with the SAME rules as
+ *     the edge flood (|ΔE| ≤ tol from the backdrop, ≤ local between neighbors) and cover ≥ 0.03% of
+ *     the frame with a mean ΔE ≤ tol/2 (smaller / off-color ones stay: specular / noise holes);
+ *  2. soft shadows — grown from the background into pixels with the backdrop's hue (Δa ≤ 2.5,
+ *     Δb ≤ 1.8), darker (≤ 50 L) and reached through a smooth gradient (≤ 3.5 ΔE per step). A hard
+ *     product edge (paper, black frame, grey propeller with a different hue) stops it.
+ * Returns the new foreground mask (1 = product) and the removed share of the frame.
+ */
+export function removeTrappedBackground(
+  lab: Float32Array,
+  w: number,
+  h: number,
+  fgIn: Uint8Array,
+  bgLab: [number, number, number],
+  tol: number,
+  local = 7,
+): { fg: Uint8Array; removedPockets: number; removedShadow: number } {
+  const n = w * h
+  const fg = fgIn.slice()
+  const [L0, A0, B0] = bgLab
+  // 1) Enclosed pockets with the flood's own rules.
+  const pocket = new Uint8Array(n)
+  const stack = new Int32Array(n)
+  const seen = new Uint8Array(n)
+  let removedPockets = 0
+  for (let s = 0; s < n; s++) {
+    if (!fg[s] || seen[s] || deltaE(lab, s, L0, A0, B0) > tol) continue
+    let sp = 0
+    const members: number[] = []
+    let sumDe = 0
+    seen[s] = 1
+    stack[sp++] = s
+    while (sp) {
+      const i = stack[--sp]
+      members.push(i)
+      sumDe += deltaE(lab, i, L0, A0, B0)
+      const x = i % w
+      const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < n - w ? i + w : -1]
+      for (const j of nb) {
+        if (j < 0 || seen[j] || !fg[j]) continue
+        if (deltaE(lab, j, L0, A0, B0) > tol) continue
+        if (deltaE(lab, j, lab[i * 3], lab[i * 3 + 1], lab[i * 3 + 2]) > local) continue
+        seen[j] = 1
+        stack[sp++] = j
+      }
+    }
+    // Mean ΔE ≤ tol/2: a real backdrop pocket sits at the backdrop color, a bright product panel
+    // (white paper next to an off-white wall) only grazes the tolerance.
+    if (members.length >= n * TRAPPED_BG_MIN_AREA && sumDe / members.length <= tol / 2) {
+      for (const i of members) pocket[i] = 1
+      removedPockets += members.length
+    }
+  }
+  for (let i = 0; i < n; i++) if (pocket[i]) fg[i] = 0
+  // 2) Soft shadows grown from every background pixel bordering the silhouette.
+  const isShadow = (j: number) => {
+    const L = lab[j * 3]
+    return L <= L0 + tol / 2 && L >= L0 - SHADOW_MAX_DARKEN && Math.abs(lab[j * 3 + 1] - A0) <= SHADOW_MAX_DA && Math.abs(lab[j * 3 + 2] - B0) <= SHADOW_MAX_DB
+  }
+  const nbOf = (i: number) => {
+    const x = i % w
+    return [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < n - w ? i + w : -1]
+  }
+  const smooth = (i: number, j: number) => deltaE(lab, j, lab[i * 3], lab[i * 3 + 1], lab[i * 3 + 2]) <= SHADOW_LOCAL
+  let sp = 0
+  for (let i = 0; i < n; i++) {
+    if (fg[i]) continue
+    if (nbOf(i).some((j) => j >= 0 && fg[j])) stack[sp++] = i
+  }
+  let removedShadow = 0
+  while (sp) {
+    const i = stack[--sp]
+    for (const j of nbOf(i)) {
+      if (j < 0 || !fg[j] || !isShadow(j) || !smooth(i, j)) continue
+      fg[j] = 0
+      removedShadow++
+      stack[sp++] = j
+    }
+  }
+  // 3) Enclosed shaded pockets (e.g. the gradient trapped between landing-gear legs): seeded only by
+  //    pixels at the backdrop's own color (|ΔL| ≤ tol/2 + backdrop hue), grown through the shadow
+  //    rule, removed when the pocket covers ≥ 0.03% of the frame.
+  seen.fill(0)
+  for (let s = 0; s < n; s++) {
+    if (!fg[s] || seen[s] || !isShadow(s) || Math.abs(lab[s * 3] - L0) > tol / 2) continue
+    let sp2 = 0
+    const members: number[] = []
+    seen[s] = 1
+    stack[sp2++] = s
+    while (sp2) {
+      const i = stack[--sp2]
+      members.push(i)
+      for (const j of nbOf(i)) {
+        if (j < 0 || seen[j] || !fg[j] || !isShadow(j) || !smooth(i, j)) continue
+        seen[j] = 1
+        stack[sp2++] = j
+      }
+    }
+    if (members.length >= n * TRAPPED_BG_MIN_AREA) {
+      for (const i of members) fg[i] = 0
+      removedShadow += members.length
+    }
+  }
+  return { fg, removedPockets: removedPockets / n, removedShadow: removedShadow / n }
 }
 
 function labToRgbApprox(raw: Raw, bg: Uint8Array): [number, number, number] {
@@ -302,7 +424,7 @@ interface WorkImage {
   raw: Raw
   lab: Float32Array
   /** Border flood with the default options (null when the border is not uniform). */
-  flood: { bg: Uint8Array; bgLab: [number, number, number] } | null
+  flood: { bg: Uint8Array; bgLab: [number, number, number]; tol: number; local: number } | null
   /** Independent foreground estimate (recall reference); null when not measurable. */
   est: ForegroundEstimate | null
 }
@@ -325,6 +447,9 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions, 
   if (typeof flood === 'string') return flood
   let fg: Uint8Array = new Uint8Array(n)
   for (let i = 0; i < n; i++) fg[i] = flood.bg[i] ? 0 : 1
+  // Round 1: enclosed backdrop pockets + soft floor shadows the edge flood could not reach.
+  // Flat lays keep their pieces' gaps (pockets between pieces are already edge-connected or tiny).
+  if (!opts.allowMulti) fg = removeTrappedBackground(lab, work.w, work.h, fg, flood.bgLab, flood.tol, flood.local).fg
   // Open (remove specks / noise), close (seal 1–2 px gaps along the silhouette).
   fg = dilate(erode(fg, work.w, work.h, 1), work.w, work.h, 1)
   fg = erode(dilate(fg, work.w, work.h, 2), work.w, work.h, 2)
@@ -335,6 +460,9 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions, 
   if (opts.allowMulti && wi?.est) fg = addMissedObjects(wi.est, fg)
   const why = validateMask(fg, work.w, work.h, { allowMulti: opts.allowMulti })
   if (why) return why
+  // Round 1 (P2): backdrop baked into the cut-out is a failure (next strategy), never a "product".
+  const leak = opts.allowMulti ? 0 : backgroundLeakShare(lab, fg, work.w, work.h, flood.bgLab)
+  if (leak > BACKGROUND_LEAK_MAX) return `background left in cutout ${(leak * 100).toFixed(1)}% > ${BACKGROUND_LEAK_MAX * 100}%`
   let area = 0
   for (let i = 0; i < n; i++) area += fg[i]
   const bgMask = new Uint8Array(n)
@@ -342,7 +470,7 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions, 
   const bgRgb = labToRgbApprox(work, bgMask)
   const full = await rawRgba(bytes, maxSide)
   const cut = await buildCutout(full, fg, work.w, work.h, bgRgb)
-  return { cut: { ok: true, ...cut, method: 'flood', coverage: area / n, sourceHash: '', rejected: [] }, mask: fg }
+  return { cut: { ok: true, ...cut, method: 'flood', coverage: area / n, sourceHash: '', rejected: [], ...(opts.allowMulti ? {} : { backgroundLeak: leak }) }, mask: fg }
 }
 
 // ---------------------------------------------------------------------------
@@ -407,11 +535,22 @@ async function tryModel(bytes: Uint8Array, maxSide: number, input: SegmentProduc
   fg = keepMain(fg, work.w, work.h, allowMulti)
   const why = validateMask(fg, work.w, work.h, { allowMulti })
   if (why) return why
+  let leak: number | undefined
+  if (!allowMulti) {
+    const lab = wi?.lab ?? labImage(work.data, work.channels, work.w * work.h)
+    // Only a photo with a real backdrop (flood found one, or a mostly uniform border) has one to leak.
+    const border = wi?.flood ? null : borderBackground(lab, work.w, work.h, 10)
+    const backdrop = wi?.flood?.bgLab ?? (border && border.uniformity >= 0.6 ? border.lab : null)
+    if (backdrop) {
+      leak = backgroundLeakShare(lab, fg, work.w, work.h, backdrop)
+      if (leak > BACKGROUND_LEAK_MAX) return `background left in cutout ${(leak * 100).toFixed(1)}% > ${BACKGROUND_LEAK_MAX * 100}%`
+    }
+  }
   let area = 0
   for (let i = 0; i < fg.length; i++) area += fg[i]
   const full = await rawRgba(bytes, maxSide)
   const cut = await buildCutout(full, fg, work.w, work.h, null)
-  return { cut: { ok: true, ...cut, method: 'model', coverage: area / fg.length, sourceHash: '', rejected: [] }, mask: fg }
+  return { cut: { ok: true, ...cut, method: 'model', coverage: area / fg.length, sourceHash: '', rejected: [], ...(leak !== undefined ? { backgroundLeak: leak } : {}) }, mask: fg }
 }
 
 /** Segment one real product photo. Never throws for image content problems (returns cutout_failed). */
@@ -440,11 +579,15 @@ export async function segmentProduct(input: SegmentProductInput): Promise<Cutout
   // Single products only count objects around the product (a prop elsewhere is not the product).
   const measure = (mask: Uint8Array): CutoutRecall | undefined => (wi?.est ? cutoutRecall(wi.est, mask, { scopeToMain: !allowMulti }) : undefined)
   let incomplete: { recall: CutoutRecall; method: CutoutMethod } | null = null
-  const steps: Array<[CutoutMethod, () => Promise<Attempt>]> = [
-    ['flood', () => tryFlood(bytes, maxSide, { allowMulti }, wi)],
-    ['model', () => tryModel(bytes, maxSide, input, allowMulti, wi)],
+  // Round 1: a strict flood (ΔE ≤ 5, ≤ 3.5 between neighbors) is retried for single products when the
+  // default one fails — near-white paper on an off-white wall (Prototipo side photo) leaks into the
+  // default tolerance and splits the product ("largest 61% of foreground").
+  const steps: Array<[string, CutoutMethod, () => Promise<Attempt>]> = [
+    ['flood', 'flood', () => tryFlood(bytes, maxSide, { allowMulti }, wi)],
+    ...(allowMulti ? [] : [['flood-strict', 'flood', () => tryFlood(bytes, maxSide, { allowMulti, tolerance: STRICT_FLOOD_TOLERANCE, localTolerance: STRICT_FLOOD_LOCAL })] as [string, CutoutMethod, () => Promise<Attempt>]]),
+    ['model', 'model', () => tryModel(bytes, maxSide, input, allowMulti, wi)],
   ]
-  for (const [name, run] of steps) {
+  for (const [name, method, run] of steps) {
     let res: Attempt
     try {
       res = await run()
@@ -459,7 +602,7 @@ export async function segmentProduct(input: SegmentProductInput): Promise<Cutout
     if (recall && recall.recall < MIN_CUTOUT_RECALL) {
       // Pieces of the product were dropped: try the next strategy (model), never deliver it.
       rejected.push(`${name}: recall ${recall.recall} < ${MIN_CUTOUT_RECALL} (${recall.components.kept}/${recall.components.source} pieces, area ${recall.areaRecall}, color ${recall.colorCoverage})`)
-      if (!incomplete || recall.recall > incomplete.recall.recall) incomplete = { recall, method: name }
+      if (!incomplete || recall.recall > incomplete.recall.recall) incomplete = { recall, method }
       continue
     }
     return { ...res.cut, sourceHash, rejected, ...(recall ? { recall } : {}), ...(flatLay ? { flatLay: true } : {}) }

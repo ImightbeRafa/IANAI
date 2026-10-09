@@ -46,7 +46,7 @@ import { storageBlobCache, type BlobCache } from './fidelity/cache.js'
 import { prepareProductCutouts, resolveProductPhotos, defaultImageLoader, type ImageLoader, type LoadedCutout } from './fidelity/pipeline.js'
 import { checkPlate, generatePlate, plateLight, plateSurface, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion, type PropsReference } from './fidelity/plate.js'
 import { relightComposite } from './fidelity/relight.js'
-import { fidelityFailReason, scoreFidelity, toFidelityResult, worstFidelity } from './fidelity/score.js'
+import { BACKGROUND_LEAK_MAX, fidelityFailReason, scoreFidelity, toFidelityResult, worstFidelity } from './fidelity/score.js'
 import { planProductBoxes } from './render/render.js'
 import { RATIO_SIZE } from './render/frame.js'
 import { cachedLogo } from './render/logo.js'
@@ -724,6 +724,25 @@ export function photoRefFor(offer: Pick<OfferInput, 'productPhotos' | 'photoIdsB
   return { url, ...(id ? { productImageId: id } : {}), ...(p?.role ? { role: p.role } : {}), ...(p?.label ? { label: p.label } : {}) }
 }
 
+/**
+ * Round 1 (P4): fallback pool when an ad's pinned photo(s) cannot be cut out — every other product
+ * photo of the offer (hero / detail / untagged first; kit parts, box and contents shots are never a
+ * hero), followed by the kit parts the pinned set carried.
+ */
+export function pinnedPhotoFallback(offer: OfferInput, pinned: ProductPhoto[]): ProductPhoto[] {
+  const pinnedUrls = new Set(pinned.filter((p) => p.role !== 'part' && p.role !== 'box' && p.role !== 'contents').map((p) => p.url))
+  const all = resolveProductPhotos(offer).map((p) => (p.id || !offer.photoIdsByUrl?.[p.url] ? p : { ...p, id: offer.photoIdsByUrl[p.url] }))
+  const heroes = all.filter((p) => !pinnedUrls.has(p.url) && p.role !== 'part' && p.role !== 'box' && p.role !== 'contents')
+  if (!heroes.length) return []
+  const parts = pinned.filter((p) => p.role === 'part')
+  return [...heroes, ...parts.filter((p) => !heroes.some((h) => h.url === p.url))]
+}
+
+function photoLabel(p: ProductPhoto | undefined): string {
+  if (!p) return 'photo'
+  return p.id ? `${p.id.slice(0, 8)}${p.label ? ` (${p.label.slice(0, 40)})` : ''}` : p.label ? `"${p.label.slice(0, 40)}"` : p.url.slice(-40)
+}
+
 /** True when the ad's photos were picked per ad (the first one is the hero, whatever the format prefers). */
 function hasPerAdPhotos(offer: OfferInput, index: number): boolean {
   return Boolean(offer.productImageUrlsByAd?.[String(index)]?.filter(Boolean).length)
@@ -928,18 +947,26 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const t0 = Date.now()
   const format = item.angle.format
   // product_images ids travel with the photos so each ad reports which photo it used (P1 #8).
-  const photos = resolveProductPhotos(offer).map((p) => (p.id || !offer.photoIdsByUrl?.[p.url] ? p : { ...p, id: offer.photoIdsByUrl[p.url] }))
-  const cut = await prepareProductCutouts({
-    photos,
-    // A per-ad pick is the hero whatever the format would prefer (hero role ranks first by default).
-    format: perAd ? undefined : format,
-    language: dna.language,
-    withParts: PARTS_FORMATS.has(format),
-    gateway,
-    cache: cutoutCacheFor(ctx),
-    load: ctx.input.loadImage,
-    memo: ctx.photoMemo,
-  })
+  const withIds = (o: OfferInput) => resolveProductPhotos(o).map((p) => (p.id || !o.photoIdsByUrl?.[p.url] ? p : { ...p, id: o.photoIdsByUrl[p.url] }))
+  let photos = withIds(offer)
+  const cutoutCtx = { language: dna.language, withParts: PARTS_FORMATS.has(format), gateway, cache: cutoutCacheFor(ctx), load: ctx.input.loadImage, memo: ctx.photoMemo }
+  // A per-ad pick is the hero whatever the format would prefer (hero role ranks first by default).
+  let cut = await prepareProductCutouts({ photos, format: perAd ? undefined : format, ...cutoutCtx })
+  if (!cut.ok && perAd) {
+    // Round 1 (P4): a pinned photo whose cut-out fails no longer kills the ad — the offer's other
+    // product photos (never kit/box/contents shots) are tried before failing; the ad reports the
+    // photo it actually used and a note says why the pinned one was skipped.
+    const fallback = pinnedPhotoFallback(ctx.pack.offer, photos)
+    if (fallback.length) {
+      const alt = await prepareProductCutouts({ photos: fallback, format, ...cutoutCtx })
+      if (alt.ok) {
+        alt.warnings.unshift(`pinned photo ${photoLabel(photos[0])} skipped (${cut.error.slice(0, 120)}); used ${photoLabel(fallback.find((p) => p.url === alt.hero.stored.sourceUrl) ?? fallback[0])} instead`)
+        alt.hero = { ...alt.hero, stored: { ...alt.hero.stored, fallbackFrom: photos[0]?.id ?? photos[0]?.url ?? '' } }
+        cut = alt
+        photos = fallback
+      }
+    }
+  }
   if (!cut.ok) {
     const known = cut.error.startsWith('cutout_failed') || cut.error.startsWith('cutout_incomplete')
     return fail(ctx, item, known ? cut.error : `cutout_failed: ${cut.error}`, { timings: { ...item.timings, sceneMs: Date.now() - t0 } })
@@ -1135,6 +1162,12 @@ function cutoutRecallOf(item: Pick<PackItem, 'scene'>): number | undefined {
   return values.length ? Math.min(...values) : undefined
 }
 
+/** Highest backdrop share left in an item's cut-outs (round 1, P2), when measured. */
+function cutoutLeakOf(item: Pick<PackItem, 'scene'>): number | undefined {
+  const values = (item.scene?.cutouts ?? []).map((c) => c.backgroundLeak).filter((v): v is number => typeof v === 'number')
+  return values.length ? Math.max(...values) : undefined
+}
+
 async function renderAllRatios(args: {
   renderer: Renderer
   storage: AdPackStorage
@@ -1198,6 +1231,7 @@ async function renderAllRatios(args: {
           }),
     })
   const recall = exact ? cutoutRecallOf(item) : undefined
+  const backgroundLeak = exact ? cutoutLeakOf(item) : undefined
   const outputs = new Map<AspectRatio, RenderOutput>()
   for (const ratio of args.ratios ?? pack.ratios) {
     let r = await renderRatio(ratio, relightOn)
@@ -1214,7 +1248,14 @@ async function renderAllRatios(args: {
       }
     }
     const fidelity: FidelityResult | undefined = scored
-      ? { ...scored.fidelity, ...(recall !== undefined ? { recall } : {}), ...(fallback ? { relightFallback: 'auto' as const } : {}) }
+      ? {
+          ...scored.fidelity,
+          ...(recall !== undefined ? { recall } : {}),
+          ...(backgroundLeak !== undefined ? { backgroundLeak } : {}),
+          // A cut-out that still carries the photo's backdrop never passes (round 1 halo scored 0.95).
+          ...(backgroundLeak !== undefined && backgroundLeak > BACKGROUND_LEAK_MAX ? { passed: false } : {}),
+          ...(fallback ? { relightFallback: 'auto' as const } : {}),
+        }
       : undefined
     if (exact && (!fidelity || !fidelity.passed)) {
       // Never deliver an altered product: this ratio is listed, not uploaded as a render.

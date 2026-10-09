@@ -43,11 +43,11 @@ export const COMPLIANCE_RULES: ComplianceRule[] = [
     severity: 'block',
     patterns: {
       es: [
-        new RegExp(`\\b(?:cura|curan|curar|sana|sanar|elimina|eliminar|trata|tratar|combate|combatir|previene|prevenir|revierte|revertir)\\s+(?:(?:el|la|los|las|tu|su)\\s+)?${DISEASES_ES}`),
+        new RegExp(`\\b(?:cura|curan|curar|sana|sanar|elimina|eliminar|trata|tratar|combate|combatir|previene|prevenir|revierte|revertir|calma|calmar|calmas|alivia|aliviar|alivias|quita|quitar)\\s+(?:(?:el|la|los|las|tu|su)\\s+)?${DISEASES_ES}`),
         /\bcura (?:definitiva|natural|milagrosa)\b/,
       ],
       en: [
-        new RegExp(`\\b(?:cures?|heals?|treats?|prevents?|reverses?|eliminates?|fights?)\\s+(?:(?:the|your)\\s+)?${DISEASES_EN}`),
+        new RegExp(`\\b(?:cures?|heals?|treats?|prevents?|reverses?|eliminates?|fights?|calms?|relieves?)\\s+(?:(?:the|your)\\s+)?${DISEASES_EN}`),
         /\b(?:miracle|natural) cure\b/,
       ],
     },
@@ -371,6 +371,35 @@ export function checkCompliance(
     }
   }
   return issues
+}
+
+/** Fact keys that are claims about the product (not logistics/price): quarantined when banned. */
+const CLAIM_FACT_KEYS: ReadonlySet<string> = new Set(['result_claim', 'how_it_works', 'differentiator', 'custom:allowed_claim', 'custom:verified_claim', 'custom:technical_specs', 'social_proof', 'guarantee'])
+
+export interface BannedFact {
+  key: string
+  value: string
+  ruleId: string
+  match: string
+}
+
+/**
+ * Platform (round 1): an offer can carry banned health claims as CONFIRMED facts ("sin efectos
+ * secundarios", "calmar la ansiedad"). Confirmed facts are the copy's allowlist, so those would be
+ * handed to the writer as truths. Every claim-type fact that trips a BLOCK compliance rule for the
+ * brand's category is quarantined: it stops being confirmed (never offered to the writer, and copy
+ * that repeats it fails as unconfirmed + compliance). Pure; returns the new list and what was blocked.
+ */
+export function quarantineBannedFacts<T extends { key: string; value: string; confirmed: boolean }>(facts: T[], category: BusinessCategory, language: AdLanguage): { facts: T[]; banned: BannedFact[] } {
+  const banned: BannedFact[] = []
+  const out = facts.map((f) => {
+    if (!f.confirmed || !CLAIM_FACT_KEYS.has(f.key)) return f
+    const hit = checkCompliance(f.value, category, language).find((i) => i.severity === 'block')
+    if (!hit) return f
+    banned.push({ key: f.key, value: f.value, ruleId: hit.ruleId, match: hit.match })
+    return { ...f, confirmed: false }
+  })
+  return { facts: out, banned }
 }
 
 function isExempt(match: string, keys: FactKey[], confirmed: DnaFact[]): boolean {

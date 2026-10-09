@@ -11,7 +11,7 @@ import type { AdLanguage, AdPhotoRef, AngleCategory, AspectRatio, BrandDna, Copy
 /** The real photo(s) an ad used (P1 #8): exact = its cut-outs' sources, generated = the locked scene photo. */
 export function photoViews(item: Pick<PackItem, 'scene'>): { photo?: AdPhotoRef; parts?: AdPhotoRef[] } {
   const cutouts = item.scene?.cutouts ?? []
-  const ref = (c: (typeof cutouts)[number]): AdPhotoRef => ({ url: c.sourceUrl, role: c.role, ...(c.productImageId ? { productImageId: c.productImageId } : {}), ...(c.label ? { label: c.label } : {}) })
+  const ref = (c: (typeof cutouts)[number]): AdPhotoRef => ({ url: c.sourceUrl, role: c.role, ...(c.productImageId ? { productImageId: c.productImageId } : {}), ...(c.label ? { label: c.label } : {}), ...(c.fallbackFrom ? { fallbackFrom: c.fallbackFrom } : {}) })
   if (cutouts.length) return { photo: ref(cutouts[0]), ...(cutouts.length > 1 ? { parts: cutouts.slice(1).map(ref) } : {}) }
   return item.scene?.sourcePhoto ? { photo: item.scene.sourcePhoto } : {}
 }
@@ -255,7 +255,12 @@ function retryCall(packId: string, item: PackItem): AdPackRetryCall {
 }
 
 /** Remaining wall time: per-step averages of this pack's finished ads (defaults until one finishes) ÷ concurrency. */
-export function estimateRemainingSeconds(items: PackItem[]): number {
+/**
+ * Round-1 P7: the step an item sits in has already been running since `updatedAt`, so its share
+ * shrinks with the elapsed time (down to 15% of the step average) instead of repeating the same
+ * "~35 s" on every poll while an item waits at copy_ready.
+ */
+export function estimateRemainingSeconds(items: PackItem[], nowMs: number = Date.now()): number {
   const pending = items.filter((i) => i.status !== 'done' && i.status !== 'failed')
   if (!pending.length) return 0
   const avg = { ...DEFAULT_STEP_MS }
@@ -263,7 +268,12 @@ export function estimateRemainingSeconds(items: PackItem[]): number {
     const samples = items.filter((i) => i.status === 'done').map((i) => i.timings?.[step]).filter((v): v is number => typeof v === 'number' && v >= 0)
     if (samples.length) avg[step] = samples.reduce((s, v) => s + v, 0) / samples.length
   }
-  const totalMs = pending.reduce((s, i) => s + REMAINING_STEPS[i.status].reduce((t, step) => t + avg[step], 0), 0)
+  const totalMs = pending.reduce((s, i) => {
+    const steps = REMAINING_STEPS[i.status]
+    const since = Date.parse(i.updatedAt ?? '')
+    const elapsed = Number.isFinite(since) ? Math.max(0, nowMs - since) : 0
+    return s + steps.reduce((t, step, k) => t + (k === 0 ? Math.max(avg[step] * 0.15, avg[step] - elapsed) : avg[step]), 0)
+  }, 0)
   const lanes = Math.min(ETA_CONCURRENCY, pending.length)
   const seconds = totalMs / lanes / 1000
   return Math.max(5, Math.ceil(seconds / 5) * 5)

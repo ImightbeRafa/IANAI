@@ -172,6 +172,8 @@ export interface TextOpts {
   lh?: number
   balance?: boolean
   maxH?: number
+  /** Break "a · b" offer lines at the separators first (round-1 P6). */
+  segmentBreaks?: boolean
   color?: Rgb
   fill?: Rgb
   zone?: string
@@ -190,6 +192,7 @@ export function textNode(role: TextRole, str: string, o: TextOpts): TextNode {
     lineHeight: o.lh ?? 1.2,
     balance: o.balance ?? true,
     maxHeight: o.maxH,
+    ...(o.segmentBreaks ? { segmentBreaks: true } : {}),
   })
   const w = Math.min(o.maxW, fitted.width)
   const x = o.align === 'left' ? o.x : o.align === 'right' ? o.x + o.maxW - w : o.x + (o.maxW - w) / 2

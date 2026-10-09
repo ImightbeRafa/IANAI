@@ -300,6 +300,8 @@ export interface FidelityResult {
   ratio?: AspectRatio
   /** Cut-out recall vs the source photo (0–1, P0 #4): pieces the cut-out kept / pieces in the photo. */
   recall?: number | null
+  /** Share of the cut-out that is the source photo's backdrop / its shadow (round 1, P2); > 4% fails. */
+  backgroundLeak?: number | null
   /** The AI relight pass failed fidelity on this ratio and the deterministic ('auto') render was kept. */
   relightFallback?: 'auto'
 }
@@ -319,6 +321,8 @@ export interface AdPhotoRef {
   url: string
   role?: ProductPhotoRole
   label?: string
+  /** Round-1 P4: the pinned photo (id or url) whose cut-out failed, so this one was used instead. */
+  fallbackFrom?: string
 }
 
 /** Light direction of a background plate (drives the composite's contact shadow). */
@@ -339,6 +343,10 @@ export interface StoredCutout {
   recall?: number
   /** Top-down kit layout (flat lay): composited on an overhead plate, never in perspective (P1 #6). */
   flatLay?: boolean
+  /** Share of the cut-out still showing the source photo's backdrop / shadow (round 1, P2). */
+  backgroundLeak?: number
+  /** Round-1 P4: pinned photo (id or url) that failed to cut out; this cut-out is its replacement. */
+  fallbackFrom?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +491,8 @@ export interface CopyCheckIssue {
     | 'grammar'
     /** Comparison hook ("No compres X de plástico") without a verified comparison fact. */
     | 'unverified_comparison'
+    /** Lossy squeeze of a confirmed claim that drops its object ("Redoblás si se gasta"). Blocking after repair. */
+    | 'ambiguous_claim'
   field: keyof AdCopy | 'script'
   detail: string
   /** Exact location, e.g. "bullets[2]" or "script.hook" (defaults to `field`). */

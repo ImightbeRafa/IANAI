@@ -36,7 +36,8 @@ import { issueMcpChatApproval } from './approval-prompt.js'
 import { scheduleMcpExecuteWork, withStatusMessage } from './execute-job.js'
 import type { McpAuthUser, McpDbClient } from './user-tools.js'
 import { isAdPackMcpTool, type AdPackMcpToolName } from './adpack-tool-names.js'
-import type { BrandDna } from '../adpack/types.js'
+import type { BrandDna, DnaFact } from '../adpack/types.js'
+import { quarantineBannedFacts } from '../adpack/compliance.js'
 import { mcpUpdateOffer, type McpOfferStore } from './offer-tools.js'
 import { mcpUpdateBrandKit, resolveMcpBrandKit, type McpBrandKitStore } from './brand-kit-tools.js'
 import type { RehostFn } from './asset-rehost.js'
@@ -77,7 +78,8 @@ export function jobStatusForPack(packStatus: string): 'running' | 'completed' {
 function compactItem(item: AdPackItemView) {
   return {
     itemId: item.id,
-    index: item.index,
+    // Round-1 P7: 1-based like plan[].index, failures[].index, deliverable.ads[].index and productImageIdsByAd keys.
+    index: item.index + 1,
     status: item.status,
     format: item.format,
     headline: item.headline ?? null,
@@ -450,6 +452,18 @@ async function persistCorrections(options: {
   return saved
 }
 
+/** Round-1 P7: `creditsRemaining` on quote / approval / status payloads when the balance is readable. */
+async function creditsField(service: AdPackService, userId: string): Promise<{ creditsRemaining?: number }> {
+  if (typeof service.creditsRemaining !== 'function') return {}
+  const n = await service.creditsRemaining(userId).catch(() => null)
+  return typeof n === 'number' ? { creditsRemaining: n } : {}
+}
+
+/** Round-1 P7: whether the offer only ships traceable claims (verified-claims bank) and its size. */
+export function claimsPolicyOf(offer: { strictClaims?: boolean; facts?: Array<{ key: string }> } | null | undefined): { strictClaims: boolean; verifiedClaims: number } {
+  return { strictClaims: offer?.strictClaims === true, verifiedClaims: (offer?.facts ?? []).filter((f) => f.key === 'custom:verified_claim').length }
+}
+
 export async function dispatchAdPackTool(options: {
   name: AdPackMcpToolName
   args: Args
@@ -506,6 +520,11 @@ export async function dispatchAdPackTool(options: {
         return {
           ...res,
           missingPrice,
+          claimsPolicy: {
+            ...claimsPolicyOf(res.offer as { strictClaims?: boolean; facts?: Array<{ key: string }> }),
+            // Saved facts that break a blocking compliance rule: never used as allowed claims.
+            bannedClaims: quarantineBannedFacts(((res.offer as { facts?: DnaFact[] }).facts ?? []), dna.category, dna.language === 'en' ? 'en' : 'es').banned,
+          },
           nextTool: 'adpack_start',
           nextStep: missingPrice
             ? `BEFORE starting: tell the user the offer has no concrete price, so no ad will show a price${res.gaps.length > 1 ? `, and that these facts are also missing: ${res.gaps.filter((g) => g !== 'price').join(', ')}` : ''}. Ask if they want to add the price to the offer in AdvanceAI first or continue without it. Only then call ${startCall} (use these exact ids; no dna/offer needed).`
@@ -526,6 +545,7 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_quote':
         return {
           ...(await service.quote({ userId, ...startLikeArgs(args), source: 'mcp', withPlan: true })),
+          ...(await creditsField(service, userId)),
         }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
@@ -579,6 +599,7 @@ export async function dispatchAdPackTool(options: {
           return {
             ...gate.prompt,
             quote,
+            ...(await creditsField(service, userId)),
             ...(quote.plan?.length
               ? { planNote: 'plan[] = what each ad will be (angle, why, layout family, planned photo, format, ratios). Show it with the cost; the approved run follows it. The photo is the planned pick; a blurry/unusable photo is swapped for the next best one at run time.' }
               : {}),
@@ -653,7 +674,7 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_status': {
         // #14: cheap read; at most kicks a background loop when nobody holds a lease.
         const status = await service.pollStatus({ userId, packId: args.packId, appOrigin: options.appOrigin, language: args.language, schedule: scheduleMcpExecuteWork })
-        return statusPayload(status)
+        return { ...statusPayload(status), ...(await creditsField(service, userId)) }
       }
       case 'adpack_edit_text': {
         try {

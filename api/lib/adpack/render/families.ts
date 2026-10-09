@@ -556,13 +556,25 @@ function offerTag(ctx: Ctx, o: { x: number; y: number; maxW: number; align: Alig
   })
 }
 
-/** Round price sticker (falls back to a rounded tag when the offer is too long for a circle). */
+/** Shipping / delivery part of an offer line ("Envío gratis llevando 2 kits o más"). */
+const SHIPPING_PART_RE = /\b(?:env[ií]os?|shipping|delivery|despacho|entrega)\b/i
+
+/**
+ * Round price sticker (falls back to a rounded tag when the offer is too long for a circle).
+ * Round-1 P6: prices break at their " · " separators ("1 kit ₡14.900" / "2 kits ₡29.800"), never
+ * after a dangling "·", and a shipping rule rides in a ribbon under the circle instead of being
+ * squeezed into it at an unreadable size.
+ */
 function offerSticker(ctx: Ctx, o: { right: number; top: number; fill: Rgb; maxD: number }): { nodes: Node[]; box: Box } | null {
   if (!ctx.copy.offer) return null
   const ring = Math.max(4, sz(ctx, 7))
+  const parts = ctx.copy.offer.split(' · ').map((p) => p.trim()).filter(Boolean)
+  const shipIdx = parts.length >= 2 ? parts.findIndex((p, i) => i > 0 && SHIPPING_PART_RE.test(p)) : -1
+  const circleText = shipIdx > 0 ? parts.filter((_, i) => i !== shipIdx).join(' · ') : ctx.copy.offer
+  const ribbonText = shipIdx > 0 ? parts[shipIdx] : ''
   for (const d of [o.maxD, Math.round(o.maxD * 1.12)]) {
     const inner = Math.round(d * 0.72)
-    const t = textNode('offer', ctx.copy.offer, {
+    const t = textNode('offer', circleText, {
       x: 0,
       y: 0,
       maxW: inner,
@@ -576,18 +588,43 @@ function offerSticker(ctx: Ctx, o: { right: number; top: number; fill: Rgb; maxD
       lh: 1.08,
       maxH: inner,
       fill: o.fill,
+      segmentBreaks: true,
     })
     if (!t.fitted.fits || t.box.h > inner) continue
     const box = { x: o.right - d, y: o.top, w: d, h: d }
     t.box = { ...t.box, x: Math.round(box.x + (d - t.box.w) / 2), y: Math.round(box.y + (d - t.box.h) / 2) }
-    return {
-      nodes: [
-        { kind: 'rect', layer: 'over', box: { x: box.x - ring, y: box.y - ring, w: d + ring * 2, h: d + ring * 2 }, color: WHITE, radius: (d + ring * 2) / 2, shadow: 'strong', decor: true },
-        { kind: 'rect', layer: 'over', box, color: o.fill, radius: d / 2, pill: { role: 'offer', text: t, icons: [] } },
-        t,
-      ],
-      box,
+    const nodes: Node[] = [
+      { kind: 'rect', layer: 'over', box: { x: box.x - ring, y: box.y - ring, w: d + ring * 2, h: d + ring * 2 }, color: WHITE, radius: (d + ring * 2) / 2, shadow: 'strong', decor: true },
+      { kind: 'rect', layer: 'over', box, color: o.fill, radius: d / 2, pill: { role: 'offer', text: t, icons: [] } },
+      t,
+    ]
+    let outer = box
+    if (ribbonText) {
+      const w = d + ring * 2
+      // Same role: it IS the offer line's last part (the report lists both offer blocks).
+      const ribbon = pill('offer', ribbonText, {
+        x: box.x - ring,
+        y: box.y + d + ring + sz(ctx, 10),
+        maxW: w,
+        align: 'center',
+        fill: WHITE,
+        textColor: readableTint(o.fill, WHITE),
+        font: headingFont(ctx),
+        size: Math.max(sz(ctx, 20), Math.round(d * 0.085)),
+        min: Math.max(sz(ctx, 16), Math.round(d * 0.06)),
+        lines: 2,
+        lh: 1.08,
+        padX: sz(ctx, 14),
+        padY: sz(ctx, 8),
+        radius: sz(ctx, 12),
+        shadow: 'soft',
+      })
+      if (!ribbon.text.fitted.fits) continue
+      nodes.push(...ribbon.nodes)
+      const x0 = Math.min(box.x, ribbon.box.x)
+      outer = { x: x0, y: box.y, w: Math.max(box.x + d, ribbon.box.x + ribbon.box.w) - x0, h: ribbon.box.y + ribbon.box.h - box.y }
     }
+    return { nodes, box: outer }
   }
   const tag = offerTag(ctx, { x: o.right - o.maxD * 1.6, y: o.top, maxW: Math.round(o.maxD * 1.6), align: 'right', fill: o.fill, size: 40, radius: sz(ctx, 18) })
   return tag ? { nodes: tag.nodes, box: tag.box } : null

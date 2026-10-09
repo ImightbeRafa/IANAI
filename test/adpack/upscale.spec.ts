@@ -85,7 +85,7 @@ describe('upscale before the cut-out (pipeline) + asset-quality report', () => {
     expect(res.hero.upscale).toMatchObject({ from: { width: 420, height: 560 }, to: { width: 840, height: 1120 } })
     // The cut-out is made from the 2× photo (≈ 2× the product's size at 420 px).
     expect(res.hero.height).toBeGreaterThan(560)
-    expect([...cache.entries.keys()][0]).toMatch(/-sr840x1120$/)
+    expect([...cache.entries.keys()][0]).toMatch(/-sr840x1120-seg2$/)
     // Second run hits the cache (same key, no re-upscale needed).
     const again = await prepareProductCutouts({ photos: [{ url: 'https://x.test/hero.jpg', role: 'hero' }], load: async () => new Uint8Array(small), cache })
     expect(again.ok && again.hero.stored.method).toBe('cache')
