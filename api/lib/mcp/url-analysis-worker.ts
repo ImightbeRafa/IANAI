@@ -13,6 +13,8 @@ import { getSupabaseAdmin } from '../supabase-admin.js'
 import { runSiteAnalysis, SITE_ANALYSIS_MODEL } from '../site-analysis.js'
 import { logApiUsage } from '../usage-logger.js'
 import { assertPublicHttpUrl } from '../url-safety.js'
+import { createRehoster, UPLOAD_BUCKET } from './asset-rehost.js'
+import { rehostReferenceImages } from './rehost-references.js'
 import {
   buildFillOnlyBrandKitPatchWithReview,
   buildFillOnlyBusinessPatch,
@@ -165,6 +167,19 @@ export async function processClaimedMcpUrlIntake(
       (business.name as string) || 'Brand'
     )
     const kitPatch = kitMerge.patch
+    // Copy the site's photos into Advance storage (post-images) so dead/changed source URLs cannot break generation.
+    if (Array.isArray(kitPatch.reference_images) && kitPatch.reference_images.length > 0) {
+      const rehoster = createRehoster({
+        upload: async ({ path, bytes, contentType }) => {
+          const { error } = await db.storage.from(UPLOAD_BUCKET).upload(path, bytes, { contentType, upsert: false })
+          if (error) throw error
+          return db.storage.from(UPLOAD_BUCKET).getPublicUrl(path).data.publicUrl
+        },
+      })
+      const copied = await rehostReferenceImages(kitPatch.reference_images as string[], row.user_id, rehoster)
+      kitPatch.reference_images = copied.urls
+      if (copied.warnings.length) analysis.warnings = [...(analysis.warnings || []), ...copied.warnings.slice(0, 4)]
+    }
     if (kitMerge.reviewRequired) {
       analysis.warnings = [
         ...(analysis.warnings || []),

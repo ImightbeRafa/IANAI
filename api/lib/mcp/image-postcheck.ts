@@ -16,6 +16,10 @@
 import sharp from 'sharp'
 import { components, deltaE3, erode, labImage } from '../adpack/fidelity/pixels.js'
 import { floodBackground } from '../adpack/fidelity/segment.js'
+import { compareLocatedRegion, locateProduct } from './feature-match.js'
+import { safeZoneMargins } from './safe-zones.js'
+
+export { safeZoneMargins }
 
 export const POSTCHECK_THRESHOLD = {
   /** Gain-corrected mean ΔE76 of the product colour. */
@@ -40,19 +44,31 @@ export type FidelityWarning = {
   /** 0 (different product) – 1 (same product). */
   score: number
   details: {
-    colourDeltaE: number
-    silhouetteIoU: number
-    refParts: number
-    genParts: number
-    scale: number
+    method: 'features' | 'colour'
     referenceIndex: number
+    /** true = the product was located by feature match, so the structural comparison is trusted. */
+    confident: boolean
+    inliers?: number
+    /** Share (0–1) of the product's textured regions that still match the reference. */
+    preserved?: number
+    cells?: number
+    scale?: number
+    colourDeltaE?: number
   }
+  /** Possible invented objects next to the product (heuristic, low confidence). */
+  props?: PropsFinding
 }
+
+type LegacyColourDetails = { colourDeltaE: number; silhouetteIoU: number; refParts: number; genParts: number; scale: number; referenceIndex: number }
 
 export type FidelityCheckResult =
   | { status: 'ok'; score: number; details: FidelityWarning['details'] }
   | { status: 'warning'; score: number; warning: FidelityWarning }
+  /** Product not locatable (dark / low-texture / heavily changed): colour only, no shape verdict, no score. */
+  | { status: 'unverified'; reason: string; details: FidelityWarning['details'] }
   | { status: 'skipped'; reason: string }
+
+export type PropsFinding = { suspected: boolean; count: number; note: string }
 
 type RefTemplate = {
   w: number
@@ -203,7 +219,7 @@ function matchTemplate(genLab: Float32Array, gw: number, gh: number, resizedFor:
   return best
 }
 
-async function compareOne(tpl: RefTemplate, generated: Buffer, referenceIndex: number): Promise<{ score: number; details: FidelityWarning['details'] }> {
+async function compareOne(tpl: RefTemplate, generated: Buffer, referenceIndex: number): Promise<{ score: number; details: LegacyColourDetails }> {
   const gen = await sharp(generated).rotate().flatten({ background: '#ffffff' }).resize({ width: GEN_WIDTH }).removeAlpha().raw().toBuffer({ resolveWithObject: true })
   const gw = gen.info.width
   const gh = gen.info.height
@@ -286,9 +302,21 @@ async function compareOne(tpl: RefTemplate, generated: Buffer, referenceIndex: n
   }
 }
 
+/** Minimum RANSAC inliers to trust the feature location (below this the product is "not located"). */
+export const MIN_LOCATED_INLIERS = 15
+/** Warn when less than this share of the product's textured regions still matches the reference. */
+export const PRESERVED_MIN = 0.75
+/** A comparison over fewer textured cells than this is not trusted. */
+export const MIN_COMPARED_CELLS = 40
+
 /**
- * Compare a generated image with the product reference photo(s). Warning only; the best-matching
+ * Compare a generated image with the product reference photo(s). Warning only; the best-located
  * reference decides (a kit with several photos is fine if the image matches one of them).
+ *
+ *  - Located by feature match (strong, ≥15 inliers): masked structural comparison of the product
+ *    region → warns when the product's own details (folds, gear, parts) no longer correlate.
+ *  - Not located (dark / low-texture / heavily redrawn products): only the colour check can run, and
+ *    the result is `unverified` — never a shape verdict, never a false "ok".
  */
 export async function checkGeneratedProductFidelity(input: {
   referenceDataUrls: string[]
@@ -297,29 +325,57 @@ export async function checkGeneratedProductFidelity(input: {
   try {
     const generated = dataUrlBytes(input.generatedDataUrl)
     if (!generated) return { status: 'skipped', reason: 'generated image is not inline' }
+    const refs = input.referenceDataUrls.slice(0, 3)
+    let best: { index: number; inliers: number; preserved: number; cells: number; scale: number; bbox: { x0: number; y0: number; x1: number; y1: number } } | null = null
+    let colour: { score: number; details: LegacyColourDetails } | null = null
     const skips: string[] = []
-    let best: { score: number; details: FidelityWarning['details'] } | null = null
-    for (let i = 0; i < input.referenceDataUrls.length; i++) {
-      const bytes = dataUrlBytes(input.referenceDataUrls[i])
+    for (let i = 0; i < refs.length; i++) {
+      const bytes = dataUrlBytes(refs[i])
       if (!bytes) { skips.push('reference not inline'); continue }
-      const tpl = await buildTemplate(bytes)
-      if (typeof tpl === 'string') { skips.push(tpl); continue }
-      const res = await compareOne(tpl, generated, i)
-      if (!best || res.score > best.score) best = res
+      try {
+        const found = await locateProduct(bytes, generated)
+        if (found.located && found.located.inliers >= MIN_LOCATED_INLIERS) {
+          const cmp = compareLocatedRegion(found.ref, found.gen, found.refKps, found.located.transform)
+          if (cmp && cmp.cells >= MIN_COMPARED_CELLS && (!best || found.located.inliers > best.inliers)) {
+            best = { index: i, inliers: found.located.inliers, preserved: cmp.preserved, cells: cmp.cells, scale: found.located.scale, bbox: cmp.bbox }
+          }
+        }
+      } catch (err) {
+        skips.push(`feature match unavailable: ${err instanceof Error ? err.message : 'error'}`)
+      }
+      if (i === 0 || !colour) {
+        const tpl = await buildTemplate(bytes)
+        if (typeof tpl === 'string') skips.push(tpl)
+        else {
+          const res = await compareOne(tpl, generated, i)
+          if (!colour || res.score > colour.score) colour = res
+        }
+      }
     }
-    if (!best) return { status: 'skipped', reason: skips[0] || 'no product reference to compare' }
-    const d = best.details
+    const colourDeltaE = colour?.details.colourDeltaE
+    const colourBad = typeof colourDeltaE === 'number' && colourDeltaE > POSTCHECK_THRESHOLD.colourDeltaE
     const reasons: string[] = []
-    if (d.colourDeltaE > POSTCHECK_THRESHOLD.colourDeltaE) reasons.push(`product colour differs from the reference (ΔE ${d.colourDeltaE} > ${POSTCHECK_THRESHOLD.colourDeltaE})`)
-    if (d.silhouetteIoU < POSTCHECK_THRESHOLD.silhouetteIoU) reasons.push(`product shape differs from the reference (silhouette match ${d.silhouetteIoU} < ${POSTCHECK_THRESHOLD.silhouetteIoU})`)
-    if (Math.abs(d.genParts - d.refParts) >= POSTCHECK_THRESHOLD.partDiff) reasons.push(`part count changed (reference ${d.refParts}, generated ${d.genParts})`)
-    if (best.score < POSTCHECK_THRESHOLD.score && reasons.length === 0) reasons.push(`overall product match ${best.score} < ${POSTCHECK_THRESHOLD.score}`)
-    if (reasons.length === 0) return { status: 'ok', score: best.score, details: d }
-    return {
-      status: 'warning',
-      score: best.score,
-      warning: { code: 'fidelity_warning', reason: reasons.join('; '), score: best.score, details: d },
+    if (best && best.preserved < PRESERVED_MIN) {
+      reasons.push(`product details differ from the reference photo (only ${Math.round(best.preserved * 100)}% of its textured regions match at the located position, < ${Math.round(PRESERVED_MIN * 100)}%): folds, wheels, tail or parts may have been redrawn`)
     }
+    if (colourBad) reasons.push(`product colour differs from the reference (ΔE ${colourDeltaE} > ${POSTCHECK_THRESHOLD.colourDeltaE})`)
+    const details: FidelityWarning['details'] = {
+      method: best ? 'features' : 'colour',
+      referenceIndex: best ? best.index : (colour?.details.referenceIndex ?? 0),
+      confident: Boolean(best),
+      ...(best ? { inliers: best.inliers, preserved: Math.round(best.preserved * 100) / 100, cells: best.cells, scale: Math.round(best.scale * 100) / 100 } : {}),
+      ...(typeof colourDeltaE === 'number' ? { colourDeltaE } : {}),
+    }
+    const colourScore = colour ? Math.max(0, 1 - (colour.details.colourDeltaE) / (POSTCHECK_THRESHOLD.colourDeltaE * 2)) : 1
+    const score = Math.round((best ? Math.min(best.preserved, colourScore) : colourScore) * 100) / 100
+    if (reasons.length) {
+      return { status: 'warning', score, warning: { code: 'fidelity_warning', reason: reasons.join('; '), score, details } }
+    }
+    if (best) return { status: 'ok', score, details }
+    if (colour) {
+      return { status: 'unverified', reason: 'product not located by feature match (dark, low-texture or heavily changed): colour is consistent, shape not verified', details }
+    }
+    return { status: 'skipped', reason: skips[0] || 'no product reference to compare' }
   } catch (err) {
     return { status: 'skipped', reason: `fidelity check unavailable: ${err instanceof Error ? err.message : 'error'}` }
   }
@@ -329,15 +385,62 @@ export async function checkGeneratedProductFidelity(input: {
 // Safety-net QA (heuristic, warning only)
 // ---------------------------------------------------------------------------
 
+export type SafeZoneIssue = { edge: 'top' | 'bottom' | 'left' | 'right'; kind: 'block_touches_edge' | 'text_in_unsafe_band'; detail: string }
+
 export type McpImageQa = {
   ratioOk: boolean
   textPresent: 'yes' | 'no' | 'not_requested'
   logo: 'attached' | 'none' | 'not_requested'
-  safeZones: 'not_checked'
+  /** 'ok' = no UI block/text in the Instagram UI margins; 'violation' = see safeZoneIssues. */
+  safeZones: 'ok' | 'violation' | 'not_checked'
+  safeZoneIssues: SafeZoneIssue[]
+  /** Copy lines that start or end with a separator (orphan "·"), as received. */
+  separatorLines: Array<{ line: number; text: string; where: 'start' | 'end' }>
+  /** Separator fixes applied to the copy before drawing it (e.g. a long "a · b" line split at the "·"). */
+  copyNormalised: string[]
+  /** 'pass' | 'fail' — fail = a retryable defect (safe zones, orphan separators, missing text). */
+  status: 'pass' | 'fail'
   warnings: string[]
 }
 
-/** Edge density (0–1) of a horizontal band: text-like high-frequency content. */
+/** Lines of the copy that start or end with a separator glyph (never the "₡" / "+" of a price / number). */
+export function findSeparatorLines(copy: string): McpImageQa['separatorLines'] {
+  const out: McpImageQa['separatorLines'] = []
+  copy.split(/\r?\n/).forEach((raw, i) => {
+    const text = raw.trim()
+    if (!text) return
+    if (/^[·•|—–]\s/.test(text) || /^[·•|]$/.test(text)) out.push({ line: i + 1, text, where: 'start' })
+    if (/\s[·•|—–]$/.test(text) || /[·•|]$/.test(text)) out.push({ line: i + 1, text, where: 'end' })
+  })
+  return out
+}
+
+/**
+ * MCP copy hygiene: drop leading/trailing separators and split long "a · b" lines at the separator,
+ * so Grok cannot wrap a line and leave the "·" orphaned at its end. Wording is never changed.
+ */
+export function tidyCopySeparators(copy: string, maxLine = 38): { copy: string; changes: string[] } {
+  const changes: string[] = []
+  const lines: string[] = []
+  copy.split(/\r?\n/).forEach((raw, i) => {
+    let text = raw.trim()
+    const before = text
+    text = text.replace(/^[\s·•|—–]+(?=\S)/, '').replace(/(?<=\S)[\s·•|—–]+$/, '')
+    if (text !== before) changes.push(`line ${i + 1}: removed a leading/trailing separator`)
+    if (text.length > maxLine && / [·•|] /.test(text)) {
+      const parts = text.split(/ [·•|] /).map((t) => t.trim()).filter(Boolean)
+      if (parts.length > 1 && parts.every((p) => p.length >= 6)) {
+        changes.push(`line ${i + 1}: split at the separator into ${parts.length} lines`)
+        lines.push(...parts)
+        return
+      }
+    }
+    lines.push(text)
+  })
+  return { copy: lines.join('\n'), changes }
+}
+
+/** Edge density (0–1) of horizontal bands: text-like high-frequency content. */
 async function bandEdgeDensity(bytes: Buffer): Promise<{ top: number; bottom: number; mid: number; width: number; height: number }> {
   const { data, info } = await sharp(bytes).rotate().greyscale().resize({ width: 256 }).raw().toBuffer({ resolveWithObject: true })
   const w = info.width
@@ -357,16 +460,96 @@ async function bandEdgeDensity(bytes: Buffer): Promise<{ top: number; bottom: nu
   return { top: dens(0, Math.floor(h * 0.3)), bottom: dens(Math.floor(h * 0.7), h), mid: dens(Math.floor(h * 0.3), Math.floor(h * 0.7)), width: info.width, height: info.height }
 }
 
+/**
+ * Safe-zone check (free, local). Two defects:
+ *  - a flat UI block (CTA button) whose edge touches the canvas border: a flat horizontal/vertical run
+ *    in the outermost rows/columns that contrasts with the pixels just inside it;
+ *  - text-like edge energy inside the Instagram UI margin band (bottom/top).
+ */
+export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<SafeZoneIssue[]> {
+  const { data, info } = await sharp(bytes).rotate().removeAlpha().resize({ width: 200 }).raw().toBuffer({ resolveWithObject: true })
+  const w = info.width
+  const h = info.height
+  const px = (x: number, y: number): [number, number, number] => [data[(y * w + x) * 3], data[(y * w + x) * 3 + 1], data[(y * w + x) * 3 + 2]]
+  const dist = (a: [number, number, number], b: [number, number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+  const issues: SafeZoneIssue[] = []
+  const m = safeZoneMargins(ratio)
+
+  // 1) flat block (CTA button) touching the top/bottom edge: a flat run in the outermost row that contrasts with
+  //    the pixels `inset` rows inside AND is a bounded slab (2–14% of the height thick, then a sharp edge). A photo
+  //    surface that simply continues to the border (table, floor) is thicker than that and is not flagged.
+  const slab = (edge: 'top' | 'bottom') => {
+    const dir = edge === 'bottom' ? -1 : 1
+    // The button "touches" the edge when its outer rim is within 3% of the canvas of the border.
+    for (let off = 0; off <= Math.max(2, Math.round(h * 0.03)); off++) {
+      const y = edge === 'bottom' ? h - 2 - off : 1 + off
+      if (y < 1 || y >= h - 1) break
+      let run = 0
+      let best = 0
+      let bestEnd = 0
+      for (let x = 1; x < w; x++) {
+        const flat = dist(px(x, y), px(x - 1, y)) < 14
+        if (flat) { run++; if (run > best) { best = run; bestEnd = x } } else run = 0
+      }
+      const span = best / w
+      if (span < 0.12 || span > 0.92) continue
+      // thickness measured at a column 10% in from the run's left end (clear of the label text)
+      const col = Math.min(w - 1, Math.max(0, bestEnd - best + Math.round(best * 0.1)))
+      const ref = px(col, y)
+      let t = 0
+      for (let k = 0; k < h; k++) {
+        const yy = y + dir * k
+        if (yy < 0 || yy >= h) break
+        if (dist(px(col, yy), ref) < 30) t++
+        else break
+      }
+      const next = y + dir * (t + 1)
+      const sharpEdge = next >= 0 && next < h && dist(px(col, next), ref) > 60
+      if (t >= Math.round(h * 0.02) && t <= Math.round(h * 0.14) && sharpEdge) {
+        issues.push({ edge, kind: 'block_touches_edge', detail: `a flat block (~${Math.round(span * 100)}% of the width, e.g. the CTA button) touches the ${edge} edge` })
+        return
+      }
+    }
+  }
+  slab('bottom')
+  // (a flat block at the top edge is usually the photo itself, not a button: only the bottom CTA is checked as a slab)
+
+  // 2) text-like energy inside the unsafe bands (strong, dense, short transitions).
+  const textBand = (y0: number, y1: number) => {
+    let edges = 0
+    let n = 0
+    for (let y = Math.max(1, y0); y < Math.min(h, y1); y++) {
+      for (let x = 1; x < w; x++) {
+        const d = dist(px(x, y), px(x - 1, y))
+        if (d > 110) edges++
+        n++
+      }
+    }
+    return n ? edges / n : 0
+  }
+  const bottomBand = textBand(Math.floor(h * (1 - m.bottom)), h)
+  if (bottomBand > 0.035 && !issues.some((i) => i.edge === 'bottom')) issues.push({ edge: 'bottom', kind: 'text_in_unsafe_band', detail: `text-like content inside the bottom ${Math.round(m.bottom * 100)}% (Instagram UI zone)` })
+  const topBand = textBand(0, Math.floor(h * m.top))
+  if (topBand > 0.035 && !issues.some((i) => i.edge === 'top')) issues.push({ edge: 'top', kind: 'text_in_unsafe_band', detail: `text-like content inside the top ${Math.round(m.top * 100)}% (Instagram UI zone)` })
+  return issues
+}
+
 export async function runMcpImageQa(input: {
   generatedDataUrl: string
   requestedRatio: string
   copyRequested: boolean
   logoAttached: boolean
   logoExpected: boolean
+  /** The on-image copy as sent (for the separator check). */
+  copy?: string
+  /** Separator fixes already applied to the copy (reported, not flagged). */
+  copyChanges?: string[]
 }): Promise<McpImageQa> {
   const warnings: string[] = []
   let ratioOk = true
   let textPresent: McpImageQa['textPresent'] = input.copyRequested ? 'yes' : 'not_requested'
+  let safeZones: McpImageQa['safeZones'] = 'not_checked'
+  let safeZoneIssues: SafeZoneIssue[] = []
   const bytes = dataUrlBytes(input.generatedDataUrl)
   if (bytes) {
     try {
@@ -386,9 +569,18 @@ export async function runMcpImageQa(input: {
     } catch {
       /* heuristic only */
     }
+    try {
+      safeZoneIssues = await checkSafeZones(bytes, input.requestedRatio)
+      safeZones = safeZoneIssues.length ? 'violation' : 'ok'
+      for (const i of safeZoneIssues) warnings.push(`safe zone: ${i.detail}`)
+    } catch {
+      safeZones = 'not_checked'
+    }
   }
+  const separatorLines = input.copy ? findSeparatorLines(input.copy) : []
+  for (const l of separatorLines) warnings.push(`copy line ${l.line} ${l.where === 'end' ? 'ends' : 'starts'} with a separator ("${l.text.slice(0, 60)}")`)
   const logo: McpImageQa['logo'] = input.logoAttached ? 'attached' : input.logoExpected ? 'none' : 'not_requested'
   if (logo === 'none') warnings.push('the brand kit has no logo to stamp')
-  return { ratioOk, textPresent, logo, safeZones: 'not_checked', warnings }
+  const status: McpImageQa['status'] = safeZones === 'violation' || separatorLines.length > 0 || textPresent === 'no' ? 'fail' : 'pass'
+  return { ratioOk, textPresent, logo, safeZones, safeZoneIssues, separatorLines, copyNormalised: input.copyChanges ?? [], status, warnings }
 }
-

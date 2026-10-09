@@ -66,3 +66,27 @@ export async function resolveReferenceImageDataUrls(urls: string[]): Promise<str
   }
   return out
 }
+
+export type ReferenceImageFailure = { url: string; status?: number; reason: string }
+
+/** Like fetchPublicImageAsDataUrl, but says WHY a photo failed (HTTP status / reason) so dead asset URLs are diagnosable. */
+export async function fetchPublicImageDetailed(url: string): Promise<{ dataUrl: string } | { failure: ReferenceImageFailure }> {
+  if (url.startsWith('data:image/')) return { dataUrl: url }
+  try {
+    const resp = await fetchPublicUrl(url, { timeoutMs: 15000, maxRedirects: 3 })
+    if (!resp.ok) return { failure: { url, status: resp.status, reason: `HTTP ${resp.status}` } }
+    const buffer = await resp.arrayBuffer()
+    if (buffer.byteLength > MAX_IMAGE_BYTES) return { failure: { url, reason: `image larger than ${MAX_IMAGE_BYTES} bytes` } }
+    const bytes = new Uint8Array(buffer)
+    const headerType = (resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+    const mime = headerType.startsWith('image/') ? (headerType === 'image/jpg' ? 'image/jpeg' : headerType) : sniffImageMime(bytes)
+    if (!mime) return { failure: { url, status: resp.status, reason: `not an image (content-type "${headerType || 'none'}")` } }
+    return { dataUrl: `data:${mime};base64,${Buffer.from(buffer).toString('base64')}` }
+  } catch (err) {
+    return { failure: { url, reason: err instanceof Error ? err.message.slice(0, 160) : 'fetch failed' } }
+  }
+}
+
+export function describeReferenceFailures(failures: ReferenceImageFailure[]): string {
+  return failures.map((f) => `${f.url.slice(0, 200)} → ${f.reason}`).join('; ')
+}

@@ -17,6 +17,7 @@ vi.mock('../api/lib/usage-logger.js', () => ({
   estimateTokens: vi.fn(() => 1),
 }))
 
+import { incrementUsage } from '../api/lib/auth.js'
 import { approveMcpApprovalRequest, createMemoryMcpApprovalStore } from '../api/lib/mcp/approval'
 import { mcpExecuteImageGenerate } from '../api/lib/mcp/execute-tools'
 import { getMcpExecuteResult, setMcpExecuteScheduler } from '../api/lib/mcp/execute-job'
@@ -115,7 +116,8 @@ describe('execute_image_generate = web flow by default', () => {
     expect(status.grokMode).toBe('product_lock_scene')
     if (status.fidelity_warning) throw new Error(JSON.stringify(status.fidelity_warning))
     expect(status.fidelity_warning).toBeUndefined()
-    expect((status.fidelityCheck as { status: string }).status).toBe('ok')
+    // Flat synthetic shapes have no texture to locate: colour consistent, shape not verified (never a warning).
+    expect(['ok', 'unverified']).toContain((status.fidelityCheck as { status: string }).status)
     expect(status.chargedCredits).toBe(6)
     expect(status.appliedAspectRatio).toBe('4:5')
     expect(saved[0].metadata).toMatchObject({ aspectRatio: '4:5', lockApplied: true })
@@ -166,3 +168,87 @@ describe('execute_image_generate = web flow by default', () => {
     expect(status.retriedWithClamp).toBe(true)
   })
 })
+
+describe('round 3: safe zones, QA auto-retry (single charge), scene, props, accessories', () => {
+  async function ad(buttonBottomGap: number): Promise<Buffer> {
+    const noise = Buffer.alloc(800 * 1000 * 3)
+    for (let i = 0; i < noise.length; i++) noise[i] = 90 + ((i * 2654435761) >>> 28) * 3
+    const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect x="250" y="${1000 - buttonBottomGap - 90}" width="300" height="90" rx="14" fill="#2ec4b6"/><text x="400" y="${1000 - buttonBottomGap - 32}" font-size="38" font-family="sans-serif" text-anchor="middle" fill="#0b1a2a">Escribinos por DM</text><text x="60" y="250" font-size="64" font-family="sans-serif" fill="#ffffff">Un regalo que armas</text></svg>`)
+    return sharp(noise, { raw: { width: 800, height: 1000, channels: 3 } }).blur(14).composite([{ input: label }]).jpeg({ quality: 90 }).toBuffer()
+  }
+  function sequence(images: Buffer[]) {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      xai.push({ url, body: JSON.parse(init.body) })
+      const img = images[Math.min(n++, images.length - 1)]
+      return new Response(JSON.stringify({ data: [{ b64_json: img.toString('base64') }] }), { status: 200 })
+    }))
+  }
+
+  it('qa.safeZones flags a CTA that touches the bottom edge (no retry unless asked): status fail, credits unchanged', async () => {
+    sequence([await ad(6)])
+    vi.mocked(incrementUsage).mockClear()
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM' })
+    expect(xai).toHaveLength(1)
+    const qa = status.qa as { safeZones: string; status: string; safeZoneIssues: Array<{ edge: string }> }
+    expect(qa.safeZones).toBe('violation')
+    expect(qa.status).toBe('fail')
+    expect(qa.safeZoneIssues.some((i) => i.edge === 'bottom')).toBe(true)
+    expect((status.autoRetry as { attempted: boolean }).attempted).toBe(false)
+    expect(status.chargedCredits).toBe(6)
+    expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
+  })
+
+  it('autoRetry:true regenerates ONCE with a corrective hint, keeps the better image and charges once', async () => {
+    sequence([await ad(6), await ad(190)])
+    vi.mocked(incrementUsage).mockClear()
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    expect(xai).toHaveLength(2)
+    expect(String(xai[0].body.prompt)).not.toContain('CORRECCIÓN')
+    expect(String(xai[1].body.prompt)).toMatch(/CORRECCIÓN.*CTA/s)
+    const ar = status.autoRetry as { attempted: boolean; kept: string; reason: string }
+    expect(ar).toMatchObject({ attempted: true, kept: 'retry' })
+    expect((status.qa as { safeZones: string }).safeZones).toBe('ok')
+    expect(status.status).toBe('completed')
+    expect(status.chargedCredits).toBe(6)
+    expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1) // one charge for two model calls
+  })
+
+  it('autoRetry keeps the first image when the retry is no better, and never retries a second time', async () => {
+    sequence([await ad(6), await ad(6), await ad(190)])
+    const { status } = await runJob({ copy: 'Hola', autoRetry: true })
+    expect(xai).toHaveLength(2)
+    expect((status.autoRetry as { kept: string }).kept).toBe('first')
+  })
+
+  it('a clean first image never triggers the retry', async () => {
+    sequence([await ad(190)])
+    const { status } = await runJob({ copy: 'Hola', autoRetry: true })
+    expect(xai).toHaveLength(1)
+    expect((status.autoRetry as { attempted: boolean }).attempted).toBe(false)
+  })
+
+  it('scene is a binding instruction (not "Contexto factual"), props are forbidden, safe zones are in the prompt', async () => {
+    sequence([await ad(190)])
+    await runJob({ copy: 'Hola', scene: 'Gimnasio oscuro, banco de madera, luz lateral fría' })
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toContain('ESCENA OBLIGATORIA DEL PEDIDO')
+    expect(prompt).toContain('Gimnasio oscuro, banco de madera, luz lateral fría')
+    const factual = prompt.split('Contexto factual (NO renderizar):')[1] || ''
+    expect(factual).not.toContain('Gimnasio')
+    expect(prompt).not.toContain('mesada / estante de uso real') // generic niche recipe replaced
+    expect(prompt).toMatch(/NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues/)
+    expect(prompt).toMatch(/PROHIBIDO añadir objetos que no estén en las fotos de referencia/)
+    expect(prompt).toMatch(/ZONAS SEGURAS/)
+    expect(prompt).toMatch(/12% del borde inferior|11% del borde inferior/)
+  })
+
+  it('the copy is normalised so no orphan "·" can be drawn, and the change is reported in qa', async () => {
+    sequence([await ad(190)])
+    const { status } = await runJob({ copy: 'Un regalo\nPapel y 3 pilas AA no incluidos · Desde 8 años con supervisión de un adulto' })
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toContain('Papel y 3 pilas AA no incluidos\nDesde 8 años con supervisión de un adulto')
+    expect((status.qa as { copyNormalised: string[] }).copyNormalised.length).toBe(1)
+  })
+})
+

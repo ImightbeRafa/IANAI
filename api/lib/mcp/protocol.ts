@@ -91,7 +91,7 @@ import type { AdPackService } from '../adpack/service.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.15.0',
+  version: '0.16.0',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -998,7 +998,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           offerId: { type: 'string' },
-          scene: { type: 'string' },
+          scene: { type: 'string', maxLength: 600, description: 'BINDING scene instruction: the background MUST be this place (e.g. "gimnasio oscuro con banco de madera"); it overrides the generic niche recipe. Only objects named here, in the reference photos or in the offer allowedProps may appear.' },
           aspectRatio: { type: 'string', description: '1:1, 4:5, 9:16 or 16:9 (default 9:16). Ratios Grok lacks (4:5) are generated at the nearest native ratio and reframed.' },
           aspectRatioFallback: {
             type: 'boolean',
@@ -1009,15 +1009,16 @@ function toolInputSchema(name: string): Record<string, unknown> {
           productFidelity: {
             type: 'string',
             enum: ['exact', 'generated'],
-            description: 'generated (DEFAULT, the web-app path) = the same Grok /images/edits product-lock flow as the web chat: rich prompt (copy, price, CTA, brand voice/palette, logo as reference, offer silhouette/lock), the image model draws the scene and the text. The result carries a free local fidelity check: fidelity_warning {reason, score} when the product colour/shape/part count differs from the photo (warning only, never blocks or charges more). exact (opt-in) = real product pixels cut out and composited, no text/logo.',
+            description: 'generated (DEFAULT, the web-app path) = the same Grok /images/edits product-lock flow as the web chat: rich prompt (copy, price, CTA, brand voice/palette, logo as reference, offer silhouette/lock), the image model draws the scene and the text. The result carries a free local fidelity check: fidelity_warning {reason, score} when the located product no longer matches the photo structurally (folds, wheels, tail, parts) or its colour changed; status "unverified" when the product cannot be located (dark/low-texture photos) — warning only, never blocks or charges more. exact (opt-in) = real product pixels cut out and composited, no text/logo.',
           },
           lockProductAppearance: { type: 'boolean', description: 'Force the product-lock rules for this image (defaults to the offer ad_profile).' },
-          copy: { type: 'string', maxLength: 1200, description: 'On-image copy / guion (headline, price line, CTA). The image model writes it verbatim like the web chat. Without it the offer name + price is used (copySource reports which).' },
-          textDensity: { type: 'string', enum: ['hard', 'medium', 'standard'], description: 'Text density like the web chat (default hard = 1 headline + 1-2 points + 1 CTA).' },
-          postStyle: { type: 'string', enum: ['venta-directa', 'anuncio-conversion'], description: 'Web post style (default venta-directa).' },
-          ctaStrength: { type: 'string', enum: ['none', 'soft', 'brand_mention', 'sales'], description: 'CTA guardrails like the web chat (default sales).' },
+          copy: { type: 'string', maxLength: 1200, description: 'PLAIN STRING (not an object; use \\n between lines): on-image copy / guion — headline, price line, CTA. The image model writes it verbatim like the web chat. Long "a · b" lines are split at the separator so no orphan "·" is drawn (qa.copyNormalised). Without it the offer name + price is used (copySource reports which).' },
+          textDensity: { type: 'string', enum: ['hard', 'medium', 'standard'], description: 'Exactly one of "hard" (default: 1 headline + 1-2 points + 1 CTA), "medium" (1 headline + 2-3 points + 1 CTA) or "standard" (up to 5 points).' },
+          postStyle: { type: 'string', enum: ['venta-directa', 'anuncio-conversion'], description: 'Exactly "venta-directa" (default) or "anuncio-conversion" — hyphens, never underscores.' },
+          ctaStrength: { type: 'string', enum: ['none', 'soft', 'brand_mention', 'sales'], description: 'Exactly one of "none", "soft", "brand_mention" or "sales" (default "sales"; underscore in brand_mention).' },
+          autoRetry: { type: 'boolean', description: 'Opt-in (default false). If the free safety-net QA fails (CTA/text inside the Instagram UI margins, or the copy text is missing) regenerate ONCE with a corrective hint and keep the better image. Same job and approval: the credits are charged once (only our model cost doubles). The result reports autoRetry {attempted, kept, reason}.' },
           productImageId: { type: 'string' },
-          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Confirmed product photos (2+ allowed). The brand kit reference photos are auto-appended as product refs and the kit logo is attached as a style ref, like the web chat (referenceMode "none" skips the kit photos).' },
+          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Confirmed product photos (2+ allowed). The real box / contents / part photos (e.g. the controller) are attached as extra references (hero first, then the best accessory, then the logo; max 3 refs) and the brand kit reference photos are auto-appended as product refs and the kit logo is attached as a style ref, like the web chat (referenceMode "none" skips the kit photos).' },
           referenceMode: { type: 'string', enum: ['use', 'none'] },
           guidePrompt: { type: 'string' },
           sessionId: { type: 'string' },

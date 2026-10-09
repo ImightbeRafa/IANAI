@@ -37,6 +37,15 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.16.0 — no invented props, binding `scene`, safe zones, QA auto-retry, rehosted photos
+
+Registry / server version **0.16.0**. **No migration**, no new env/secret/binding/route/cron. Proofs: `test/round3-mcp-web-post.spec.ts`, `test/mcp-image-postcheck.spec.ts` (Round-2 real images as fixtures), `test/mcp-web-image-flow.spec.ts`, `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- `execute_image_generate` inputs: `postStyle` = `venta-directa` | `anuncio-conversion`; `ctaStrength` = `none` | `soft` | `brand_mention` | `sales`; `textDensity` enum; `copy` = plain string with `\n` between lines; `scene` = binding instruction; `autoRetry` (default false).
+- Result `qa`: `ratio`, `text`, `logo`, `safeZones` (`ok` | `violation`), `safeZoneIssues`, `separatorLines`, `copyNormalised`, `status` (`pass` | `fail`); `autoRetry` `{attempted, kept: first | retry, reason}`. With `autoRetry: true` and `qa.status = fail` the image is regenerated once (corrective hint) and the better one is kept; **one charge**, same generation id.
+- `fidelity_warning` (warning only): feature match on the product region + props check; `unverified` means the product could not be located (no verdict). Known sensitivity: removing roughly a quarter of a product or more is flagged; a small detail change may pass.
+- Photos: site analysis copies `reference_images` into `post-images`; a dead URL error reads `<url> → HTTP <status>`.
+
 ### 0.15.0 — classic image tools = the web app's image (Grok product-lock flow)
 
 Registry / server version **0.15.0**. **No migration**, no new env/secret/binding/route/cron. Proofs: `test/web-post-image.spec.ts`, `test/web-mcp-parity.spec.ts` (real web handler vs MCP, same xAI request), `test/mcp-web-image-flow.spec.ts`, `test/mcp-image-postcheck.spec.ts`, `test/run-bulk-exact.spec.ts`.
@@ -188,7 +197,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.15.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.16.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

@@ -1,3 +1,17 @@
+## 2026-10-09 — MCP 0.16.0: product lock without invented props, binding `scene`, safe zones + QA auto-retry, rehosted photos
+
+**Area:** api (mcp, web-post-image, fetch), docs — no migration, no new env/secret/binding/route/cron
+**Files:** `api/lib/web-post-image.ts`, `api/lib/mcp/{web-image,image-postcheck,feature-match,safe-zones,rehost-references,execute-tools,url-analysis-worker,protocol,tool-registry}.ts`, `api/lib/fetch-image-data-url.ts`, tests, `docs/operations/mcp-user-tools.md`
+
+- **Web request unchanged:** every stronger rule is behind an `mcp` options object in the shared lib (web never passes it); `test/web-mcp-parity.spec.ts` + the legacy-reconstruction cases in `test/web-post-image.spec.ts` stay green.
+- **Product lock / props (MCP only):** "do not alter shape, parts, wheels, landing gear, tail, folds"; no object that is not in the lock or the reference photos (no invented box, controller, packaging, logo). The offer's real box / contents / part photos are attached as extra references (hero first, best accessory next, logo keeps its style slot, max 3).
+- **`scene` is binding** ("ESCENA OBLIGATORIA DEL PEDIDO") and replaces the generic niche recipe.
+- **Safe zones** (4:5 and 9:16 IG UI margins) in the prompt and checked after the render (`qa.safeZones`, `qa.safeZoneIssues`, `qa.status`). New opt-in `autoRetry: true` regenerates once with a corrective hint, keeps the better image, one charge.
+- **Fidelity post-check** is now a local feature match (FAST/BRIEF + RANSAC) on the located product region, with NCC on textured cells; the global silhouette test is gone. Status `ok` / `warning` / `unverified`; still warning-only.
+- **Dead photos:** the error names the URL and HTTP status; site analysis copies `reference_images` into `post-images` storage.
+- **Text QA:** `qa.separatorLines` + `qa.copyNormalised` (orphan `·`); the copy sent to Grok is normalised.
+- Tool schema publishes the exact enums (`postStyle`, `ctaStrength`, `textDensity`), `copy` as a plain string, `autoRetry`.
+
 ## 2026-10-09 — MCP 0.15.0: classic image tools use the web app's Grok flow
 
 **Area:** api (generate-image, mcp, bulk), docs — no migration

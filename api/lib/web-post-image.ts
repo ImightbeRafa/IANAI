@@ -11,7 +11,8 @@
  * inputs it always used, so its request is unchanged; the MCP calls `runWebPostGrokImage`.
  */
 import type { CTAStrength } from '../data/organic-script-prompts.js'
-import { fetchPublicImageAsDataUrl, resolveReferenceImageDataUrls } from './fetch-image-data-url.js'
+import { describeReferenceFailures, fetchPublicImageDetailed, type ReferenceImageFailure } from './fetch-image-data-url.js'
+import { safeZoneMargins } from './mcp/safe-zones.js'
 import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
@@ -21,12 +22,15 @@ import {
 import { resolveGrokImageApiMode } from './grok-image-generate.js'
 import {
   buildSlimGrokPostPrompt,
+  GROK_IMAGE_MAX_PROMPT_BYTES,
+  grokPromptUtf8ByteLength,
   GROK_IMAGE_RETRY_PROMPT_BYTES,
   isGrokPromptLengthError,
   isShellMetaImagePrompt,
   prepareGrokImagePrompt,
 } from './grok-image-prompt.js'
 import { selectGrokReferenceBudget } from './image-prompt-context.js'
+import { buildSceneRecipe } from './image-scene-recipe.js'
 import {
   buildLogoStampRules,
   buildPostCtaGuardrails,
@@ -90,12 +94,120 @@ export type WebPostPromptInput = {
   hasBrandLogo: boolean
   ctaStrength?: unknown
   productRow?: ProductCreativeRow | null
+  /** MCP only. Absent on the web route → the prompt is byte-identical to the legacy one. */
+  mcp?: WebPostMcpRules
+}
+
+/**
+ * MCP-only prompt rules (never passed by the web route):
+ *  - `scene` becomes the binding SCENE RECIPE (instead of a "Contexto factual (NO renderizar)" line),
+ *  - strict product lock + no invented props, Instagram safe-zone margins, separator hygiene,
+ *  - an optional corrective hint for the one QA auto-retry.
+ */
+export type WebPostMcpRules = {
+  scene?: string
+  /** Strict product lock + no props that are not in the references / the scene / the allowed list. */
+  strict?: boolean
+  /** Extra objects the offer explicitly allows (offer ad_profile allowedProps / lock attributes). */
+  allowedProps?: string[]
+  /** Requested ratio, for the Instagram UI margins ('4:5', '9:16', …). */
+  requestedRatio?: string
+  /** Labels of real accessory photos attached as extra references (e.g. 'caja', 'control'). */
+  accessoryLabels?: string[]
+  /** Corrective instruction for the single QA retry. */
+  retryHint?: string
+}
+
+const pct = (v: number) => `${Math.round(v * 100)}%`
+
+/** Binding scene recipe built from the user's `scene` input (overrides the generic niche recipe). */
+export function buildBindingSceneRecipe(language: 'es' | 'en', scene: string, strict: boolean): string {
+  const text = scene.replace(/\s+/g, ' ').trim().slice(0, 600)
+  if (language === 'en') {
+    return `MANDATORY SCENE (SCENE RECIPE — DO NOT RENDER AS TEXT; the user's request overrides any generic place):
+- Place and mood: ${text}
+- The background MUST be that place. FORBIDDEN: a boutique/shop, office or any other generic place instead.
+- Product light MUST match the set (same direction and temperature); soft contact shadows.
+- Set props: ONLY what the scene names${strict ? '; no other objects' : ''}.
+Goal: a complete photographed place, not a studio void.
+`
+  }
+  return `ESCENA OBLIGATORIA DEL PEDIDO (SCENE RECIPE — NO RENDERIZAR COMO TEXTO; manda sobre cualquier lugar genérico):
+- Lugar y ambiente: ${text}
+- El fondo DEBE ser ese lugar. PROHIBIDO una boutique/tienda, oficina u otro lugar genérico en su lugar.
+- Luz del producto: DEBE coincidir con el entorno (misma dirección y temperatura); sombras de contacto suaves.
+- Props de set: SOLO lo que nombra la escena${strict ? '; ningún otro objeto' : ''}.
+Objetivo: entorno fotografiado completo — un lugar real, no un vacío de estudio.
+`
+}
+
+/** Generic recipe with its free-for-all "set props" line replaced by the strict no-invented-props rule. */
+function strictenGenericRecipe(language: 'es' | 'en', recipe: string): string {
+  if (!recipe) return recipe
+  return language === 'en'
+    ? recipe.replace(/^- Set props.*$/m, '- Set props: only a use-surface, ambient light and a contact shadow; NO box, controller, accessory, logo or object that is not in the reference photos')
+    : recipe.replace(/^- Props de set.*$/m, '- Props de set: solo superficie de uso, luz de ambiente y sombra de contacto; NINGUNA caja, control, accesorio, logo ni objeto que no esté en las fotos de referencia')
+}
+
+export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRules, ctx: { hasProductRefs: boolean }): string {
+  const es = language !== 'en'
+  const m = safeZoneMargins(rules.requestedRatio || '4:5')
+  const lines: string[] = []
+  if (rules.strict && ctx.hasProductRefs) {
+    const allowed = (rules.allowedProps || []).map((a) => a.trim()).filter(Boolean).slice(0, 8)
+    const accessories = (rules.accessoryLabels || []).map((a) => a.trim()).filter(Boolean).slice(0, 3)
+    lines.push(es
+      ? 'PRODUCTO BLOQUEADO (reforzado): NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues, cables, hélices, proporciones ni colores. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
+      : 'PRODUCT LOCK (reinforced): do NOT alter shape, parts, wheels, landing gear, tail, folds, wires, propellers, proportions or colours. It is the SAME physical object as the photo; only the environment and light change.')
+    lines.push(es
+      ? `PROPS: PROHIBIDO añadir objetos que no estén en las fotos de referencia adjuntas ni nombrados en la escena: ninguna caja, empaque, control/gamepad, logo, accesorio ni texto impreso inventado.${allowed.length ? ` Permitido: ${allowed.join('; ')}.` : ''}`
+      : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: no box, packaging, controller/gamepad, logo, accessory or invented printed text.${allowed.length ? ` Allowed: ${allowed.join('; ')}.` : ''}`)
+    if (accessories.length) {
+      lines.push(es
+        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente (misma impresión y forma); no son el producto principal y no los inventes distintos.`
+        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully (same print and shape); they are not the main product and must not be reinvented.`)
+    }
+  }
+  lines.push(es
+    ? `ZONAS SEGURAS (UI de Instagram): dejá libre ${pct(m.top)} arriba, ${pct(m.bottom)} abajo y ${pct(m.side)} a cada lado: ningún texto, logo ni botón dentro de esos márgenes. El botón CTA se ve COMPLETO, a ≥ ${pct(m.bottom + 0.03)} del borde inferior, sin tocar ni cortarse en el borde.`
+    : `SAFE ZONES (Instagram UI): keep ${pct(m.top)} free at the top, ${pct(m.bottom)} at the bottom and ${pct(m.side)} on each side: no text, logo or button inside those margins. The CTA button is fully visible, ≥ ${pct(m.bottom + 0.03)} above the bottom edge, never touching or cut by the edge.`)
+  lines.push(es
+    ? 'SEPARADORES: nunca dejes "·", "|" o "—" sueltos al inicio o al final de una línea; si una línea se parte, el separador desaparece.'
+    : 'SEPARATORS: never leave "·", "|" or "—" dangling at the start or end of a line; if a line wraps, the separator disappears.')
+  if (rules.retryHint?.trim()) {
+    lines.push(es
+      ? `CORRECCIÓN (el intento anterior falló el control de calidad): ${rules.retryHint.trim().slice(0, 400)}`
+      : `FIX (the previous attempt failed quality control): ${rules.retryHint.trim().slice(0, 400)}`)
+  }
+  return lines.join('\n')
 }
 
 /** The slim post prompt exactly as the web route assembles it. */
 export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
   const langCode = input.language === 'en' ? 'en' : 'es'
-  return buildSlimGrokPostPrompt({
+  const category = input.productRow?.product_category_custom || input.productRow?.product_category || null
+  const offerName = input.productRow?.name || null
+  const mcp = input.mcp
+  let sceneRecipe: string | undefined
+  if (mcp) {
+    const strict = mcp.strict === true
+    if (mcp.scene?.trim()) sceneRecipe = buildBindingSceneRecipe(langCode, mcp.scene, strict)
+    else if (strict) {
+      const generic = buildSceneRecipe({
+        language: typeof input.language === 'string' ? input.language : 'es',
+        postStyle: typeof input.postStyle === 'string' ? input.postStyle : 'venta-directa',
+        productSubStyle: typeof input.productSubStyle === 'string' ? input.productSubStyle : null,
+        hasSceneRef: input.hasSceneRef === true,
+        niche: null,
+        category,
+        offerName,
+        scriptContext: input.userCopy,
+        businessContext: typeof input.businessContext === 'string' ? input.businessContext : null,
+      })
+      sceneRecipe = strictenGenericRecipe(langCode, generic) || undefined
+    }
+  }
+  const base = buildSlimGrokPostPrompt({
     language: typeof input.language === 'string' ? input.language : 'es',
     postStyle: typeof input.postStyle === 'string' ? input.postStyle : 'venta-directa',
     productSubStyle: typeof input.productSubStyle === 'string' ? input.productSubStyle : null,
@@ -112,10 +224,15 @@ export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
     logoStampRules: buildLogoStampRules(langCode, input.hasBrandLogo, { bloomSku: input.bloomSku }),
     ctaGuardrails: buildPostCtaGuardrails(langCode, normalizeWebCtaStrength(input.ctaStrength)),
     hasBrandLogo: input.hasBrandLogo,
-    category: input.productRow?.product_category_custom || input.productRow?.product_category || null,
-    offerName: input.productRow?.name || null,
+    category,
+    offerName,
     scriptContext: input.userCopy,
+    ...(sceneRecipe ? { sceneRecipe } : {}),
   })
+  if (!mcp) return base
+  // MCP rules go FIRST: the prompt clamp trims the tail of the head, never the opening instructions.
+  const rules = buildMcpPromptRules(langCode, mcp, { hasProductRefs: input.hasProductRefs })
+  return [rules, base].filter(Boolean).join('\n\n')
 }
 
 /** Product refs first, brand logo as style ref, scene refs last; capped at 3. */
@@ -252,6 +369,14 @@ export type WebPostGrokImageOptions = {
   /** Offer lock (ad_profile) — appended as an extra immutable-attributes rule when present. */
   lockProductAppearance?: boolean
   immutableAttributes?: string[]
+  /** MCP only: the user's `scene` as a binding instruction + strict lock / props / safe zones / retry hint. */
+  mcp?: WebPostMcpRules
+  /**
+   * MCP only: real accessory photos of the offer (box, controller, contents). Appended right after the confirmed
+   * product photos so they win the 3-reference budget over kit refs: hero first, then the best accessory, then
+   * the logo (style ref); with no logo a second accessory fits.
+   */
+  accessoryUrls?: string[]
 }
 
 export type WebPostGrokImageResult = {
@@ -268,6 +393,10 @@ export type WebPostGrokImageResult = {
   retriedWithClamp: boolean
   /** Product reference photos (data URLs) the request carried — for the local fidelity post-check. */
   productReferenceDataUrls: string[]
+  /** Which kinds of references made the 3-slot budget, in request order. */
+  referencesUsed: Array<'product' | 'accessory' | 'kit' | 'logo' | 'scene'>
+  /** Optional references (kit / accessory / scene) that could not be loaded: url + HTTP status or reason. */
+  referenceWarnings: ReferenceImageFailure[]
   /** The request exactly as POSTed (images omitted → lengths only) — for parity evidence. */
   request: Record<string, unknown>
   prompt: string
@@ -285,17 +414,50 @@ function uniqueUrls(urls: Array<string | null | undefined>, max: number): string
   return out
 }
 
+/** Offer attributes that describe a separate object (box, controller, cable…) rather than the product itself. */
+const ACCESSORY_ATTR_RE = /\b(caja|box|empaque|packaging|control|gamepad|mando|remote|cable|usb|cargador|charger|manual|estuche|bolsa|pouch)\b/i
+
 export function lockRulesBlock(
   language: 'es' | 'en',
-  lock: { lockProductAppearance?: boolean; immutableAttributes?: string[] }
+  lock: { lockProductAppearance?: boolean; immutableAttributes?: string[] },
+  opts: { strict?: boolean; accessoriesAttached?: boolean } = {}
 ): string {
   const attrs = (lock.immutableAttributes || []).map((a) => a.trim()).filter(Boolean)
   if (!lock.lockProductAppearance && attrs.length === 0) return ''
   const es = language !== 'en'
-  const list = attrs.length ? ` ${es ? 'Atributos inmutables' : 'Immutable attributes'}: ${attrs.join('; ')}.` : ''
+  if (!opts.strict) {
+    const list = attrs.length ? ` ${es ? 'Atributos inmutables' : 'Immutable attributes'}: ${attrs.join('; ')}.` : ''
+    return es
+      ? `PRODUCTO BLOQUEADO por la oferta: forma, color, partes y marca idénticas a la foto de referencia; no inventes variantes.${list}`
+      : `PRODUCT LOCKED by the offer: shape, colour, parts and branding identical to the reference photo; do not invent variants.${list}`
+  }
+  // Strict (MCP): attributes about other objects must not invite the model to draw them from imagination.
+  const own = attrs.filter((a) => !ACCESSORY_ATTR_RE.test(a))
+  const other = attrs.filter((a) => ACCESSORY_ATTR_RE.test(a))
+  const ownList = own.length ? ` ${es ? 'Atributos inmutables' : 'Immutable attributes'}: ${own.join('; ')}.` : ''
+  const otherList = other.length
+    ? (opts.accessoriesAttached
+      ? (es
+        ? ` Accesorios reales (copiar SOLO de la foto adjunta, con su impresión real): ${other.join('; ')}.`
+        : ` Real accessories (copy ONLY from the attached photo, with their real print): ${other.join('; ')}.`)
+      : (es
+        ? ` Accesorios del kit (${other.join('; ')}) NO tienen foto adjunta: NO los dibujes ni los inventes.`
+        : ` Kit accessories (${other.join('; ')}) have no attached photo: do NOT draw or invent them.`))
+    : ''
   return es
-    ? `PRODUCTO BLOQUEADO por la oferta: forma, color, partes y marca idénticas a la foto de referencia; no inventes variantes.${list}`
-    : `PRODUCT LOCKED by the offer: shape, colour, parts and branding identical to the reference photo; do not invent variants.${list}`
+    ? `PRODUCTO BLOQUEADO por la oferta: forma, color, partes y marca idénticas a la foto de referencia; no inventes variantes.${ownList}${otherList}`
+    : `PRODUCT LOCKED by the offer: shape, colour, parts and branding identical to the reference photo; do not invent variants.${ownList}${otherList}`
+}
+
+async function loadReferences(urls: string[]): Promise<{ loaded: Array<{ url: string; dataUrl: string }>; failures: ReferenceImageFailure[] }> {
+  const loaded: Array<{ url: string; dataUrl: string }> = []
+  const failures: ReferenceImageFailure[] = []
+  for (const url of urls) {
+    const res = await fetchPublicImageDetailed(url)
+    if ('dataUrl' in res) loaded.push({ url, dataUrl: res.dataUrl })
+    else failures.push(res.failure)
+  }
+  return { loaded, failures }
 }
 
 /** Shared xAI call for the MCP tools: same prompt/refs/request/retry as the web post flow. */
@@ -305,30 +467,53 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
   const scope: BloomSkuScope = { productId: options.offerId ?? null, brandKitId: options.brandKitId ?? null }
   const row = options.productRow || null
 
-  // Reference hydration — confirmed product photos first, then kit refs (web appends them as product refs, 4 slots max).
+  // Reference hydration — confirmed product photos first, then real accessory photos, then kit refs (4 slots max).
   const confirmed = uniqueUrls(options.productUrls, MAX_INPUT_SLOTS)
   const supportUrls = uniqueUrls(options.supportUrls || [], MAX_INPUT_SLOTS)
   const slotsLeft = Math.max(0, MAX_INPUT_SLOTS - confirmed.length - supportUrls.length)
-  const kitUrls = uniqueUrls(options.kitReferenceUrls || [], slotsLeft).filter((u) => !confirmed.includes(u))
-  const productUrls = [...confirmed, ...kitUrls]
-  const productData = await resolveReferenceImageDataUrls(productUrls)
-  if (productUrls.length > 0 && productData.length === 0) {
-    throw new Error('Could not load product reference images. Re-upload kit photos and try again.')
+  const accessoryUrls = uniqueUrls(options.accessoryUrls || [], Math.min(2, slotsLeft)).filter((u) => !confirmed.includes(u))
+  const kitUrls = uniqueUrls(options.kitReferenceUrls || [], Math.max(0, slotsLeft - accessoryUrls.length)).filter((u) => !confirmed.includes(u) && !accessoryUrls.includes(u))
+  const confirmedLoad = await loadReferences(confirmed)
+  if (confirmed.length > 0 && confirmedLoad.loaded.length < confirmed.length) {
+    // The confirmed photo IS the product truth: never silently swap it for a kit photo.
+    throw new Error(`Could not load product reference images: ${describeReferenceFailures(confirmedLoad.failures)}. Re-import the photo into Advance storage (import_image) and try again.`)
   }
-  const supportData = await resolveReferenceImageDataUrls(supportUrls)
+  const accessoryLoad = await loadReferences(accessoryUrls)
+  const kitLoad = await loadReferences(kitUrls)
+  const productData = [...confirmedLoad.loaded, ...accessoryLoad.loaded, ...kitLoad.loaded].map((r) => r.dataUrl)
+  const referenceWarnings = [...accessoryLoad.failures, ...kitLoad.failures]
+  const supportLoad = await loadReferences(supportUrls)
+  referenceWarnings.push(...supportLoad.failures)
+  const supportData = supportLoad.loaded.map((r) => r.dataUrl)
 
   let logoDataUrl: string | null = null
   const logoSource = (options.logoUrl || '').trim()
   if (logoSource) {
-    logoDataUrl = logoSource.startsWith('data:') ? logoSource : await fetchPublicImageAsDataUrl(logoSource)
-    if (!logoDataUrl) throw new Error('Could not load the brand logo. Re-upload it and try again.')
+    if (logoSource.startsWith('data:')) logoDataUrl = logoSource
+    else {
+      const logo = await fetchPublicImageDetailed(logoSource)
+      if (!('dataUrl' in logo)) throw new Error(`Could not load the brand logo: ${describeReferenceFailures([logo.failure])}. Re-upload it and try again.`)
+      logoDataUrl = logo.dataUrl
+    }
   }
 
   const referenceUrls = selectWebPostReferenceUrls({ productUrls: productData, logoDataUrl, supportUrls: supportData })
-  const lockBlock = lockRulesBlock(language, options)
+  const kindOf = (dataUrl: string): WebPostGrokImageResult['referencesUsed'][number] => {
+    if (confirmedLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'product'
+    if (accessoryLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'accessory'
+    if (kitLoad.loaded.some((r) => r.dataUrl === dataUrl)) return 'kit'
+    if (dataUrl === logoDataUrl) return 'logo'
+    return 'scene'
+  }
+  const referencesUsed = referenceUrls.map(kindOf)
+  const accessoriesInRequest = referencesUsed.filter((k) => k === 'accessory').length
+  const lockBlock = lockRulesBlock(language, options, { strict: options.mcp?.strict === true, accessoriesAttached: accessoriesInRequest > 0 })
   const rawCopy = (options.copy || '').trim()
   const userCopy = rawCopy && !isShellMetaImagePrompt(rawCopy) ? rawCopy : ''
-  const sourcePrompt = [
+  const mcpRules: WebPostMcpRules | undefined = options.mcp
+    ? { ...options.mcp, accessoryLabels: accessoriesInRequest ? options.mcp.accessoryLabels : [] }
+    : undefined
+  const assemble = (businessContext: string | null, brandVisual: string | null | undefined) => [
     buildWebPostSourcePrompt({
       language,
       postStyle: options.postStyle || 'venta-directa',
@@ -336,8 +521,8 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
       userCopy,
       palette: (options.palette || []).filter(Boolean).slice(0, 3).join(', '),
       brandVoice: options.brandVoice,
-      brandVisual: options.brandVisual,
-      businessContext: options.businessContext ?? null,
+      brandVisual,
+      businessContext,
       hasProductRefs: productData.length > 0,
       hasSceneRef: supportData.length > 0,
       productSilhouette: row ? resolveProductSilhouette(row, language, options.brandName, scope) : null,
@@ -346,9 +531,16 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
       hasBrandLogo: Boolean(logoDataUrl),
       ctaStrength: options.ctaStrength,
       productRow: row,
+      ...(mcpRules ? { mcp: mcpRules } : {}),
     }),
     lockBlock,
   ].filter(Boolean).join('\n\n')
+  let sourcePrompt = assemble(options.businessContext ?? null, options.brandVisual)
+  if (mcpRules) {
+    // The MCP rules add ~1.3 KB: shed the least important context before the clamp would cut something else.
+    if (grokPromptUtf8ByteLength(sourcePrompt) > GROK_IMAGE_MAX_PROMPT_BYTES) sourcePrompt = assemble(null, options.brandVisual)
+    if (grokPromptUtf8ByteLength(sourcePrompt) > GROK_IMAGE_MAX_PROMPT_BYTES) sourcePrompt = assemble(null, null)
+  }
 
   const api = resolveWebGrokApi(productData.length, referenceUrls.length)
   const buildRequest = (prompt: string) => buildWebGrokRequest({ prompt, aspectRatio, referenceUrls, logoDataUrl, api })
@@ -384,7 +576,9 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
     lockApplied: api.mode === 'product_lock_scene',
     referenceCount: referenceUrls.length,
     retriedWithClamp: retried,
-    productReferenceDataUrls: productData,
+    productReferenceDataUrls: [...confirmedLoad.loaded, ...kitLoad.loaded].map((r) => r.dataUrl),
+    referencesUsed,
+    referenceWarnings,
     request: buildRequest(prepared.prompt),
     prompt: prepared.prompt,
   }

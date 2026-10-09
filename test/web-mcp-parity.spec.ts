@@ -122,7 +122,7 @@ describe('web route ⇄ MCP: identical xAI request for the same input', () => {
       offers: [offer],
       brandKit: { id: KIT.id, name: KIT.name, primaryColor: KIT.primary_color, secondaryColor: KIT.secondary_color, accentColor: KIT.accent_color, logoUrl: LOGO, brandVoice: KIT.brand_voice, visualStyleNotes: KIT.visual_style_notes, referenceImages: [] },
     } as unknown as McpBrandContext
-    await generateWebStyleImage({ apiKey: 'test-key', ctx, offerId: offer.id, aspectRatio: ratio, copy, scene, productUrls: [p1, p2] })
+    await generateWebStyleImage({ apiKey: 'test-key', ctx, offerId: offer.id, aspectRatio: ratio, copy, scene, productUrls: [p1, p2], mcpRules: false })
     const mcp = xai.pop()!
 
     expect(mcp.url).toBe(web.url)

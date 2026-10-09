@@ -18,7 +18,7 @@ import { usageTimingMetadata } from '../usage-timings.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { generateWebStyleImage, offerLockFromRow, postCheckSummary } from './web-image.js'
+import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary } from './web-image.js'
 import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
@@ -279,6 +279,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   ctaStrength?: string
   immutableAttributes?: string[]
   lockProductAppearance?: boolean
+  autoRetry?: boolean
 } {
   const out: ReturnType<typeof parseWebPostArgs> = {}
   const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
@@ -300,6 +301,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
     if (attrs.length) out.immutableAttributes = attrs
   }
   if (args.lockProductAppearance === true) out.lockProductAppearance = true
+  if (args.autoRetry === true) out.autoRetry = true
   return out
 }
 
@@ -802,6 +804,7 @@ async function runImageGenerateBody(options: {
   ctaStrength?: string
   immutableAttributes?: string[]
   lockProductAppearance?: boolean
+  autoRetry?: boolean
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -879,7 +882,20 @@ async function runImageGenerateBody(options: {
     const lock = {
       lockProductAppearance: options.lockProductAppearance ?? rowLock.lockProductAppearance,
       immutableAttributes: options.immutableAttributes?.length ? options.immutableAttributes : rowLock.immutableAttributes,
+      allowedProps: rowLock.allowedProps,
+      forbidExtraProps: rowLock.forbidExtraProps,
     }
+    // Real box / controller / contents photos of the offer ride along as extra references (hero first, logo kept).
+    const allProductAssets = await options.artifactStore.listOwnedAssets({
+      userId: options.user.id,
+      brandId: options.brandId,
+      offerId: options.offerId,
+      kind: 'product',
+    }).catch(() => [])
+    const accessories = pickAccessoryPhotos(allProductAssets, {
+      excludeIds: options.referenceImageIds,
+      lockText: [...(lock.immutableAttributes || []), options.scene || ''].join(' '),
+    })
     const web = await generateWebStyleImage({
       apiKey: xaiKey(),
       ctx: options.ctxPreview,
@@ -896,6 +912,8 @@ async function runImageGenerateBody(options: {
       supportUrls,
       referenceMode: options.referenceMode,
       lock,
+      accessories,
+      autoRetry: options.autoRetry,
     })
     generated = web.generated
     promptUsed = web.prompt

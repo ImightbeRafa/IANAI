@@ -211,8 +211,10 @@ describe('MCP defaults and inputs', () => {
 
   it('reads the offer lock from ad_profile', () => {
     expect(offerLockFromRow({ ad_profile: { lockProductAppearance: true, immutableAttributes: ['hélices rojas'] } }))
-      .toEqual({ lockProductAppearance: true, immutableAttributes: ['hélices rojas'] })
-    expect(offerLockFromRow(null)).toEqual({})
+      .toEqual({ lockProductAppearance: true, immutableAttributes: ['hélices rojas'], allowedProps: [], forbidExtraProps: true })
+    expect(offerLockFromRow({ ad_profile: { allowedProps: ['hoja A4'] } }).allowedProps).toEqual(['hoja A4'])
+    // MCP: no object outside the lock / references / scene / allowed list, whatever the row says.
+    expect(offerLockFromRow(null)).toEqual({ forbidExtraProps: true })
   })
 })
 
