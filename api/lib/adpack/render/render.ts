@@ -15,8 +15,10 @@ import satori from 'satori'
 import sharp, { type OverlayOptions } from 'sharp'
 import type { AdFormat, AspectRatio } from '../types.js'
 import { blend, contrastFromLuminance, contrastRatio, INK, luminance, parseColor, readableOn, toHex, WHITE, type Rgb } from './color.js'
-import { cssFamily, resolveFonts, satoriFonts } from './fonts.js'
-import { ALL_RATIOS, inside, makeFrame, union, type Frame } from './frame.js'
+import { composeFamily, FAMILY_SPECS, type LayoutFamily } from './families.js'
+import { ensureBrandFonts, type FontResolution } from './font-resolver.js'
+import { cssFamily, satoriFonts } from './fonts.js'
+import { ALL_RATIOS, inside, makeFrame, overlaps, union, type Frame } from './frame.js'
 import {
   decodeLayer,
   dropShadow,
@@ -32,7 +34,7 @@ import {
 import { makePalette, type Ctx, type IconNode, type NormalizedCopy, type RectNode, type TemplateLayout, type TextNode, type Zone } from './layout.js'
 import { TEMPLATES } from './templates.js'
 import { normalizeText } from './text.js'
-import type { Box, ImageInput, LayoutReport, LayoutTextElement, RenderAdInput, RenderAdResult } from './types.js'
+import type { Box, ImageInput, LayoutReport, LayoutTextElement, NormalizedBox, RenderAdInput, RenderAdResult } from './types.js'
 
 const BLACK: Rgb = { r: 0, g: 0, b: 0 }
 const MIN_CONTRAST = 4.5
@@ -44,9 +46,12 @@ const CUTOUT_FORMATS: AdFormat[] = ['offer_graphic', 'variant_card', 'explainer'
 
 interface Assets {
   scene: ImageInput
+  /** Scene size after EXIF orientation (for mapping the normalized product box). */
+  sceneSize: { width: number; height: number } | null
   product: PreparedLayer | null
   logo: PreparedLayer | null
   logoColor: Rgb | null
+  fonts: FontResolution
   warnings: string[]
 }
 
@@ -76,7 +81,69 @@ async function loadAssets(input: Omit<RenderAdInput, 'ratio'>): Promise<Assets> 
   }
   // Decode the scene bytes once (re-used for every ratio).
   const scene = await loadImageBytes(input.sceneImage)
-  return { scene, product, logo, logoColor, warnings }
+  let sceneSize: Assets['sceneSize'] = null
+  if (input.productBox) {
+    try {
+      const meta = await sharp(scene).metadata()
+      if (meta.width && meta.height) sceneSize = (meta.orientation ?? 1) >= 5 ? { width: meta.height, height: meta.width } : { width: meta.width, height: meta.height }
+    } catch {
+      warnings.push('productBox ignored: scene size unreadable')
+    }
+  }
+  const fonts = await ensureBrandFonts(input.visual, input.fonts)
+  for (const role of ['heading', 'body'] as const) {
+    const r = fonts[role]
+    if (r.note) warnings.push(`${role} font "${r.requested ?? ''}": ${r.note}; using ${r.family}`)
+  }
+  return { scene, sceneSize, product, logo, logoColor, fonts, warnings }
+}
+
+/** Normalized scene box → canvas px through the same centered cover-fit as prepareScene. */
+export function mapSceneBox(nb: NormalizedBox, scene: { width: number; height: number }, W: number, H: number): Box | null {
+  const vals = [nb.x, nb.y, nb.w, nb.h]
+  if (vals.some((v) => typeof v !== 'number' || !Number.isFinite(v)) || nb.w <= 0 || nb.h <= 0) return null
+  const scale = Math.max(W / scene.width, H / scene.height)
+  const dw = scene.width * scale
+  const dh = scene.height * scale
+  const ox = (dw - W) / 2
+  const oy = (dh - H) / 2
+  const x0 = Math.max(0, Math.min(W, nb.x * dw - ox))
+  const y0 = Math.max(0, Math.min(H, nb.y * dh - oy))
+  const x1 = Math.max(0, Math.min(W, (nb.x + nb.w) * dw - ox))
+  const y1 = Math.max(0, Math.min(H, (nb.y + nb.h) * dh - oy))
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null
+  return { x: Math.round(x0), y: Math.round(y0), w: Math.round(x1 - x0), h: Math.round(y1 - y0) }
+}
+
+/** Free rectangles of the safe area around the product box (largest first, too-small ones dropped). */
+function freeRegions(p: Box, frame: Frame): Array<{ side: 'left' | 'right' | 'top' | 'bottom'; box: Box }> {
+  const S = frame.safe
+  const gap = 56
+  const out: Array<{ side: 'left' | 'right' | 'top' | 'bottom'; box: Box }> = [
+    { side: 'left', box: { x: S.x, y: S.y, w: p.x - gap - S.x, h: S.h } },
+    { side: 'right', box: { x: p.x + p.w + gap, y: S.y, w: S.x + S.w - (p.x + p.w + gap), h: S.h } },
+    { side: 'top', box: { x: S.x, y: S.y, w: S.w, h: p.y - gap - S.y } },
+    { side: 'bottom', box: { x: S.x, y: p.y + p.h + gap, w: S.w, h: S.y + S.h - (p.y + p.h + gap) } },
+  ]
+  return out
+    .filter((r) => r.box.w >= S.w * 0.36 && r.box.h >= S.h * 0.18)
+    .sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h)
+}
+
+/** Nodes that must stay off the product: text, cards, panels, pills (decor and scrims are fine). */
+function collisionArea(layout: TemplateLayout, avoid: Box[]): number {
+  let area = 0
+  for (const n of layout.nodes) {
+    if (n.kind === 'rect' && n.decor) continue
+    if (n.kind === 'icon') continue
+    for (const a of avoid) {
+      if (!overlaps(n.box, a)) continue
+      const w = Math.min(n.box.x + n.box.w, a.x + a.w) - Math.max(n.box.x, a.x)
+      const h = Math.min(n.box.y + n.box.h, a.y + a.h) - Math.max(n.box.y, a.y)
+      if (w > 2 && h > 2) area += w * h
+    }
+  }
+  return area
 }
 
 function normalizeCopy(copy: RenderAdInput['copy']): NormalizedCopy {
@@ -125,11 +192,11 @@ async function planZones(layout: TemplateLayout, scene: Buffer, frame: Frame): P
     const stats = await regionStats(scene, box, frame.W, frame.H)
     const aWhite = alphaNeeded(WHITE, BLACK, stats.brightest)
     const aInk = alphaNeeded(INK, WHITE, stats.darkest)
-    const useInk = aInk + 0.1 < aWhite
+    const useInk = zone.tone === 'dark' ? false : zone.tone === 'light' ? true : aInk + 0.1 < aWhite
     const busy = stats.spread > 0.09
     // Very busy backgrounds (patterns, foliage, crowds) get a solid-ish panel instead of a wash.
     const veryBusy = stats.spread > 0.2
-    const floor = veryBusy ? 0.88 : useInk ? (busy ? 0.45 : 0) : busy ? 0.5 : 0.25
+    const floor = Math.max(zone.minAlpha ?? 0, veryBusy ? 0.88 : useInk ? (busy ? 0.45 : 0) : busy ? 0.5 : 0.25)
     plans.push({
       zone: veryBusy && zone.style !== 'box' ? { ...zone, style: 'box' } : zone,
       texts,
@@ -154,7 +221,17 @@ const SHADOW_DEFS =
 
 const n2 = (v: number) => (Math.round(v * 100) / 100).toString()
 
+function roundedRectPath(b: Box, radius: number): string {
+  const r = Math.min(radius, b.w / 2, b.h / 2)
+  const { x, y, w, h } = b
+  return `M${n2(x + r)} ${n2(y)}H${n2(x + w - r)}A${n2(r)} ${n2(r)} 0 0 1 ${n2(x + w)} ${n2(y + r)}V${n2(y + h - r)}A${n2(r)} ${n2(r)} 0 0 1 ${n2(x + w - r)} ${n2(y + h)}H${n2(x + r)}A${n2(r)} ${n2(r)} 0 0 1 ${n2(x)} ${n2(y + h - r)}V${n2(y + r)}A${n2(r)} ${n2(r)} 0 0 1 ${n2(x + r)} ${n2(y)}Z`
+}
+
 function rectSvg(r: RectNode): string {
+  if (r.hole) {
+    const outer = `M${n2(r.box.x)} ${n2(r.box.y)}H${n2(r.box.x + r.box.w)}V${n2(r.box.y + r.box.h)}H${n2(r.box.x)}Z`
+    return `<path d="${outer}${roundedRectPath(r.hole.box, r.hole.radius)}" fill="${toHex(r.color)}" fill-opacity="${r.alpha ?? 1}" fill-rule="evenodd"/>`
+  }
   const { x, y, w, h } = r.box
   const rx = Math.min(r.radius, w / 2, h / 2)
   const filter = r.shadow ? ` filter="url(#sh-${r.shadow})"` : ''
@@ -185,8 +262,23 @@ function zoneSvg(plan: ZonePlan, frame: Frame, idx: number): string {
     const padY = Math.round(Math.max(20, big * 0.18))
     return `<rect x="${n2(b.x - padX)}" y="${n2(b.y - padY)}" width="${n2(b.w + padX * 2)}" height="${n2(b.h + padY * 2)}" rx="${Math.round(padY * 1.2)}" fill="${c}" fill-opacity="${a}"/>`
   }
-  const fade = Math.round(H * 0.16)
+  const fade = Math.round(H * (plan.zone.fade ?? 0.16))
   const id = `zg${idx}`
+  if (plan.zone.style === 'gradient-left' || plan.zone.style === 'gradient-right') {
+    const hf = Math.round(W * (plan.zone.fade ?? 0.16))
+    const left = plan.zone.style === 'gradient-left'
+    const solidEnd = left ? plan.box.x + plan.box.w + 24 : W - (plan.box.x - 24)
+    const bandW = Math.min(W, solidEnd + hf)
+    const o1 = Math.min(1, solidEnd / bandW)
+    const o2 = Math.min(1, (solidEnd + hf * 0.5) / bandW)
+    const [x1, x2] = left ? ['0', '1'] : ['1', '0']
+    return (
+      `<defs><linearGradient id="${id}" x1="${x1}" y1="0" x2="${x2}" y2="0">` +
+      `<stop offset="0" stop-color="${c}" stop-opacity="${a}"/><stop offset="${n2(o1)}" stop-color="${c}" stop-opacity="${a}"/>` +
+      `<stop offset="${n2(o2)}" stop-color="${c}" stop-opacity="${n2(a * 0.42)}"/><stop offset="1" stop-color="${c}" stop-opacity="0"/>` +
+      `</linearGradient></defs><rect x="${left ? 0 : W - bandW}" y="0" width="${bandW}" height="${H}" fill="url(#${id})"/>`
+    )
+  }
   if (plan.zone.style === 'gradient-top') {
     const solidEnd = plan.box.y + plan.box.h + 24
     const bandH = Math.min(H, solidEnd + fade)
@@ -262,34 +354,73 @@ function textTree(texts: TextNode[], colorOf: (t: TextNode) => Rgb, frame: Frame
 
 async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<RenderAdResult> {
   const frame = makeFrame(input.ratio)
-  const fonts = resolveFonts(input.visual)
+  const fonts = assets.fonts.fonts
   const palette = makePalette(parseColor(input.visual?.primaryColor), parseColor(input.visual?.secondaryColor), parseColor(input.visual?.accentColor))
   const copy = normalizeCopy(input.copy)
   const warnings = [...assets.warnings]
   if (!copy.headline) warnings.push('empty headline')
   const scene = await prepareScene(assets.scene, frame.W, frame.H)
-  const template = TEMPLATES[input.format]
-  if (!template) throw new Error(`unknown ad format: ${input.format}`)
+  if (!TEMPLATES[input.format]) throw new Error(`unknown ad format: ${input.format}`)
+  const family: LayoutFamily = input.layoutFamily && FAMILY_SPECS[input.layoutFamily] ? input.layoutFamily : 'bold_pill'
+  const avoidBox = input.productBox && assets.sceneSize ? mapSceneBox(input.productBox, assets.sceneSize, frame.W, frame.H) : null
+  const avoid = avoidBox ? [avoidBox] : []
 
-  // 1) Layout with progressive type scale until everything fits.
+  // 1) Layout: per placement variant, progressive type scale until everything fits; the first
+  //    placement whose copy stays off the product box wins. With a product box, the family is
+  //    also laid out inside each free region around it (left / right / above / below).
+  const named = [...FAMILY_SPECS[family].placements(input.format)]
+  if (input.placement && named.includes(input.placement)) named.sort((a, b) => (a === input.placement ? -1 : b === input.placement ? 1 : 0))
+  const candidates: Array<{ placement: string; base: string; region?: Box }> = named.map((p) => ({ placement: p, base: p }))
+  if (avoidBox) {
+    for (const fr of freeRegions(avoidBox, frame)) {
+      const prefer = fr.side === 'left' || fr.side === 'right' ? [fr.side, 'left', 'top', 'bottom'] : [fr.side, 'top', 'bottom', 'left']
+      const base = prefer.find((p) => named.includes(p)) ?? named[0]
+      candidates.push({ placement: `${base}@${fr.side}`, base, region: fr.box })
+    }
+  }
   let layout: TemplateLayout | null = null
   let scale = SCALES[0]
-  for (const s of SCALES) {
-    const ctx: Ctx = {
-      frame,
-      fonts,
-      palette,
-      copy,
-      language: input.language,
-      s,
-      product: assets.product ? { width: assets.product.width, height: assets.product.height } : undefined,
-      logo: assets.logo ? { width: assets.logo.width, height: assets.logo.height } : undefined,
+  let placement = candidates[0].placement
+  let best: { layout: TemplateLayout; scale: number; placement: string; fits: boolean; collision: number } | null = null
+  for (const cand of candidates) {
+    const f: Frame = cand.region ? { ...frame, safe: cand.region, tall: cand.region.h / cand.region.w > 1.5 } : frame
+    let candidate: TemplateLayout | null = null
+    let candScale = SCALES[0]
+    for (const s of SCALES) {
+      const ctx: Ctx = {
+        frame: f,
+        fonts,
+        palette,
+        copy,
+        language: input.language,
+        s,
+        product: assets.product ? { width: assets.product.width, height: assets.product.height } : undefined,
+        logo: assets.logo ? { width: assets.logo.width, height: assets.logo.height } : undefined,
+        format: input.format,
+        placement: cand.base,
+        avoid,
+        ...(cand.region ? { region: { full: frame.safe } } : {}),
+      }
+      candidate = composeFamily(family, ctx)
+      candScale = s
+      if (layoutFits(candidate, f)) break
     }
-    layout = template(ctx)
-    scale = s
-    if (layoutFits(layout, frame)) break
+    if (!candidate) continue
+    const fits = layoutFits(candidate, f) && layoutFits(candidate, frame)
+    const collision = avoid.length ? collisionArea(candidate, avoid) : 0
+    const better =
+      !best ||
+      (fits && !best.fits) ||
+      (fits === best.fits && collision < best.collision)
+    if (better) best = { layout: candidate, scale: candScale, placement: cand.placement, fits, collision }
+    if (fits && collision === 0) break
   }
-  if (!layout) throw new Error('layout failed')
+  if (!best) throw new Error('layout failed')
+  layout = best.layout
+  scale = best.scale
+  placement = best.placement
+  const productBoxRespected = best.collision === 0
+  if (!productBoxRespected) warnings.push('copy overlaps the product box in every placement of this family (least-overlapping placement used)')
   warnings.push(...layout.warnings)
   const texts = textNodes(layout)
 
@@ -310,8 +441,12 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     const png = await resizeLayer(assets.logo, logoBox.w, logoBox.h)
     // Put the logo on a small plate when it would not read on the scene.
     if (assets.logoColor) {
-      const st = await regionStats(scene, logoBox, frame.W, frame.H)
-      const bgL = st.p50
+      const lb = logoBox
+      // A logo sitting on a family's solid panel/card is judged against that fill, not the photo.
+      const host = [...layout.nodes]
+        .reverse()
+        .find((n): n is RectNode => n.kind === 'rect' && n.layer === 'under' && !n.hole && (n.alpha ?? 1) >= 0.9 && inside(lb, n.box, 0))
+      const bgL = host ? luminance(host.color) : (await regionStats(scene, logoBox, frame.W, frame.H)).p50
       if (contrastFromLuminance(luminance(assets.logoColor), bgL) < 3) {
         const plate = readableOn(assets.logoColor)
         const pad = 14
@@ -323,6 +458,15 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
 
   // 3) Scrim planning, then measure on the real composite and strengthen until ≥ 4.5:1.
   const plans = await planZones(layout, scene, frame)
+  // Rules, underlines, outline buttons and link arrows follow their zone's text color.
+  const zoneText = new Map(plans.map((p) => [p.zone.id, p.text]))
+  for (const n of layout.nodes) {
+    if ((n.kind === 'rect' || n.kind === 'icon') && n.zone) {
+      const c = zoneText.get(n.zone) ?? WHITE
+      n.color = c
+      if (n.kind === 'rect' && n.stroke) n.stroke = { ...n.stroke, color: c }
+    }
+  }
   const underRects = [...layout.nodes.filter((n): n is RectNode => n.kind === 'rect' && n.layer === 'under'), ...underExtra]
   const composeBase = async () => {
     const under =
@@ -380,7 +524,11 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
   const shapes = layout.nodes
     .map((n) => (n.kind === 'rect' && n.layer === 'over' ? rectSvg(n) : n.kind === 'icon' ? iconSvg(n) : ''))
     .join('')
-  const textSvg = await satori(textTree(texts, colorOf, frame) as unknown as Parameters<typeof satori>[0], { width: frame.W, height: frame.H, fonts: satoriFonts() })
+  const textSvg = await satori(textTree(texts, colorOf, frame) as unknown as Parameters<typeof satori>[0], {
+    width: frame.W,
+    height: frame.H,
+    fonts: satoriFonts([fonts.heading.family, fonts.body.family]),
+  })
   const open = textSvg.indexOf('>') + 1
   const overSvg = textSvg.slice(0, open) + SHADOW_DEFS + shapes + textSvg.slice(open)
   const png = await sharp(base)
@@ -424,7 +572,15 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
     product: productBox,
     logo: logoBox,
     scale,
-    fonts: { heading: `${fonts.heading.family} ${fonts.heading.weight}`, body: `${fonts.body.family} ${fonts.body.weight}/${fonts.body.boldWeight}` },
+    layoutFamily: family,
+    placement,
+    productBox: avoidBox,
+    productBoxRespected,
+    fonts: {
+      heading: `${fonts.heading.family} ${fonts.heading.weight}`,
+      body: `${fonts.body.family} ${fonts.body.weight}/${fonts.body.boldWeight}`,
+      resolution: { heading: assets.fonts.heading, body: assets.fonts.body },
+    },
     fits,
     warnings,
   }

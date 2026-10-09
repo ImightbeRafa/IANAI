@@ -103,3 +103,27 @@ export function shade(c: Rgb, amount: number): Rgb {
 export function sameColor(a: Rgb, b: Rgb): boolean {
   return Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b) < 12
 }
+
+/** Best text color on `bg` and its contrast. */
+export function bestTextContrast(bg: Rgb): number {
+  return Math.max(contrastRatio(WHITE, bg), contrastRatio(INK, bg))
+}
+
+/**
+ * A solid fill that carries readable text: mid-luminance brand colors (where neither white
+ * nor ink reaches 4.5:1) are darkened (or lightened) just enough. Hue is kept.
+ */
+export function ensureReadableFill(c: Rgb, min = 4.6): Rgb {
+  if (bestTextContrast(c) >= min) return c
+  const darker = luminance(c) < 0.3
+  for (let a = 0.06; a <= 0.9; a += 0.06) {
+    const next = shade(c, darker ? -a : a)
+    if (bestTextContrast(next) >= min) return next
+  }
+  return darker ? shade(c, -0.6) : shade(c, 0.85)
+}
+
+/** `fg` when it reads on `bg` at ≥ min, otherwise white/ink. */
+export function readableTint(fg: Rgb, bg: Rgb, min = 4.6): Rgb {
+  return contrastRatio(fg, bg) >= min ? fg : readableOn(bg)
+}

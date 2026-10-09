@@ -2,11 +2,21 @@
  * Render-engine types (additive to ../types.ts; nothing there is changed).
  */
 import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual } from '../types.js'
+import type { LayoutFamily } from './families.js'
+import type { FontResolution, FontResolverOptions } from './font-resolver.js'
 
 /** Raw bytes, an http(s) URL (fetched with global fetch) or a data: URL. */
 export type ImageInput = Uint8Array | ArrayBuffer | string
 
 export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** Box in fractions (0–1) of the scene image's width/height. */
+export interface NormalizedBox {
   x: number
   y: number
   w: number
@@ -25,6 +35,18 @@ export interface RenderAdInput {
   /** Logo bytes; overrides `visual.logoUrl` (avoids a fetch). */
   logo?: ImageInput
   language: AdLanguage
+  /** Visual system (see families.ts). Default 'bold_pill' (the original templates). */
+  layoutFamily?: LayoutFamily
+  /** Force a placement variant of the family first (e.g. 'right'); others are still tried if text would cover the product. */
+  placement?: string
+  /**
+   * Where the product sits in the SCENE image (fractions of its width/height, before cover-fit),
+   * computed upstream (segmentation / vision). Text, chips, cards and panels are never placed over it:
+   * the renderer tries the family's placement variants until nothing collides.
+   */
+  productBox?: NormalizedBox
+  /** Brand font loading (network fetch, disk cache). Omitted → bundled/registered fonts only. */
+  fonts?: FontResolverOptions
   /** QA/test only: also return the composited background (everything except the top text/UI layer). */
   debug?: { returnBase?: boolean }
 }
@@ -64,7 +86,14 @@ export interface LayoutReport {
   logo: Box | null
   /** Font-size scale applied to the whole template (1 = nominal). */
   scale: number
-  fonts: { heading: string; body: string }
+  /** Visual family and the placement variant that was used. */
+  layoutFamily: LayoutFamily
+  placement: string
+  /** The input product box mapped to canvas px (null when none was given). */
+  productBox: Box | null
+  /** False only when no placement could keep copy off the product box (a warning says so). */
+  productBoxRespected: boolean
+  fonts: { heading: string; body: string; resolution?: { heading: FontResolution['heading']; body: FontResolution['body'] } }
   /** All text fits its box, nothing overflows the canvas/safe area. */
   fits: boolean
   warnings: string[]

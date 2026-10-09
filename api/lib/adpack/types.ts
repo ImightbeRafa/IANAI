@@ -73,9 +73,12 @@ export interface DnaVisual {
   primaryColor?: string
   secondaryColor?: string
   accentColor?: string
-  /** Font family names; the renderer maps them to bundled fonts. */
+  /** Font family names (the kit's). The renderer loads them (bundled → cache → Google Fonts) or maps to the closest bundled family. */
   headingFont?: string
   bodyFont?: string
+  /** Uploaded custom font files (kit assets, TTF/OTF over https). Used before the Google lookup. */
+  headingFontUrl?: string
+  bodyFontUrl?: string
   logoUrl?: string
   /** e.g. "clean white studio, bright fruit splashes, bold sans headlines". */
   styleNotes?: string
