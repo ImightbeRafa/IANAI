@@ -33,7 +33,21 @@ Enabled tools now:
 
 **Brand kits (sync write, no credits):** `create_brand_kit`, `update_brand_kit` (every kit field — see 0.11 below), `set_primary_brand_kit`, `link_brand_kit` (PatchHouse / explicit `business_id`; no cross-brand moves). `delete_brand_kit` requires typed name + in-chat `confirm_execute`.
 
+**Brands (sync write, no credits, 0.13):** `create_brand` (+ primary kit), `import_image` / `import_images` (Drive/Dropbox/https → Advance storage, roles, quality, logo cleanup).
+
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
+
+### 0.13.0 — a brand entirely via MCP (Content agent journey)
+
+Registry / server version **0.13.0**. **No migration** (works with 085 applied or pending). Step-by-step call sequence: [`content-agent-runbook.md`](./content-agent-runbook.md). Proof: `test/mcp-journey-content-agent.spec.ts` (MCP entry only; real renderer + fidelity; 085 applied and pending).
+
+| Tool / change | Inputs | Notes |
+|---|---|---|
+| `create_brand` (new) | `name`, `location?`, `salesChannels?` (website\|messages\|physical), `doesShipping?`, `shippingMethod?`, `icpDescription?`, `createKit?` (default true), `kit?` {update_brand_kit fields}, `allowDuplicate?` | Same `businesses` columns as the web brand form + primary kit in one call. A non-archived brand with the same normalized name is returned as `status: "exists"` (nothing created). |
+| `import_image` / `import_images` (new) | `brandId`, `offerId?`, `url`, `kind` product_photo\|logo\|reference_ad\|winner_ad, `role?` hero\|part\|box\|contents\|in_use\|detail, `label?`, `variant?` (logo), `setPrimary?`; batch `items[]` ≤ 12 | Google Drive (every share shape incl. `drive.usercontent…`, large-file virus-scan confirm form, legacy confirm/cookie), Dropbox (`dl=1`), any public https. HTML from Drive → `DRIVE_NOT_PUBLIC`; folders/Docs/HEIC/GIF/oversize → coded errors. Magic-byte check, streaming size cap, `assertPublicHttpUrl` (+ DNS per redirect in prod). Bytes copied to `post-images/<userId>/uploads/…`; link kept as `sourceUrl` (`source_url` with 085). Product photo → `product_images` with 085 `tags`/`role`/`quality`/`source_url` (hero → `is_primary`); 085 pending → role as `[role] label` prefix parsed by the pack. Returns the C4 quality report. Logo → background removed (color key / alpha / SVG), cleaned transparent PNG set as kit logo, report returned. reference_ad + offerId → offer `context` image; winner_ad → kit winners + the `winners` Style DNA (`styleDnaId` for create_ads). |
+| Rehost (C2) | — | `createRehoster` (kit logo/reference URLs, `workspace_save_artifact`) now uses the same downloader (Drive confirm, not-public detection). |
+| Ad Pack | — | Every render also gets a full-res **`jpgUrl`** (q92, same pixels) next to the PNG `url`: `adpack_status` items/deliverable files, `adpack_resize`. `get_execute_result { jobId: packId }` returns the live pack status + deliverable. `immutableAttributes` now also reach the exact-mode plate prompt, plate (props) check and relight prompt, and the generated-mode scene prompt (plus "only the parts in the photos"). |
+| Approvals (F2) | — | Unchanged builder; new `test/mcp-approval-neutral.spec.ts` scans every MCP module (no persona, no hand-rolled `approval_required`, no web fallback) and checks the builder for every approval tool. |
 
 ### 0.12.0 — ad-pack premium merge (WS1 exact fidelity × WS3 creative system)
 
@@ -149,7 +163,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.12.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.13.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

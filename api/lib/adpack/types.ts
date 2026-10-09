@@ -424,7 +424,10 @@ export interface SceneCheckResult {
 
 export interface RenderedAd {
   ratio: AspectRatio
+  /** Stable public full-res PNG URL (never signed / expiring). */
   imageUrl: string
+  /** Same render as a full-res JPG (stable public URL), when it could be encoded. */
+  jpgUrl?: string
   width: number
   height: number
   /** Product fidelity of this render (exact: masked SSIM/ΔE vs the cut-out). */

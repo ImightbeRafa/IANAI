@@ -10,12 +10,19 @@ import sharp from 'sharp'
 import type { ModelGateway } from '../types.js'
 import type { PlacedProduct } from './composite.js'
 import { scoreFidelity, type FidelityScore } from './score.js'
+import { cleanAttributes } from './plate.js'
 
 export const RELIGHT_PROMPT = [
   'Harmonize the lighting of this photo only: adjust light, soft shadows, reflections and color grading so the product sits naturally in the scene.',
   'Do NOT change the product: same shape, proportions, colors, parts, label and exact position and size.',
   'Do not add, remove or move any object. Do not add text, letters or logos. Keep the framing identical.',
 ].join(' ')
+
+/** Relight prompt + the offer's immutable attributes (A2: "hélices blancas" must stay white after relighting). */
+export function relightPrompt(immutableAttributes?: string[]): string {
+  const attrs = cleanAttributes(immutableAttributes)
+  return attrs.length ? `${RELIGHT_PROMPT} These product attributes must stay exactly as they are: ${attrs.join('; ')}.` : RELIGHT_PROMPT
+}
 
 export interface RelightResult {
   png: Buffer
@@ -31,6 +38,7 @@ export async function relightComposite(input: {
   composite: Buffer
   placements: PlacedProduct[]
   ratio?: string
+  immutableAttributes?: string[]
 }): Promise<RelightResult> {
   if (!input.gateway.edit) return { png: input.composite, relit: false, scores: [], costUsd: 0, reason: 'edit_unavailable' }
   const meta = await sharp(input.composite).metadata()
@@ -40,7 +48,7 @@ export async function relightComposite(input: {
   let relitPng: Buffer
   try {
     const dataUrl = `data:image/png;base64,${(await sharp(input.composite).png().toBuffer()).toString('base64')}`
-    const res = await input.gateway.edit({ image: dataUrl, prompt: RELIGHT_PROMPT, ratio: input.ratio })
+    const res = await input.gateway.edit({ image: dataUrl, prompt: relightPrompt(input.immutableAttributes), ratio: input.ratio })
     costUsd = res.costUsd ?? 0
     // Same canvas as the composite so the product masks line up (a misaligned result fails the score).
     relitPng = await sharp(res.bytes).resize(W, H, { fit: 'fill' }).removeAlpha().png().toBuffer()

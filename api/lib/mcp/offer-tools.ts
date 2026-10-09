@@ -59,6 +59,8 @@ export type McpOfferStore = {
   insertUploadRecord: (o: { userId: string; brandId: string; metadata: Row }) => Promise<{ id: string }>
   getUploadRecord: (o: { userId: string; uploadId: string }) => Promise<{ id: string; brandId: string; metadata: Row } | null>
   updateUploadRecord: (o: { userId: string; uploadId: string; metadata: Row }) => Promise<void>
+  /** create_brand: insert an owned `businesses` row (same columns as the web brand form). */
+  insertBusiness?: (o: { userId: string; row: Row }) => Promise<Row>
 }
 
 export const PRODUCT_TYPES = ['product', 'service', 'restaurant', 'real_estate', 'indumentaria'] as const

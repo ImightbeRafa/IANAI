@@ -55,7 +55,10 @@ export interface AdPackFailureView {
 /** One downloadable image: stable public storage URL (never a signed/expiring link). */
 export interface AdPackDeliverableFile {
   ratio: AspectRatio
+  /** Full-res PNG, stable public storage URL. */
   url: string
+  /** Same image as full-res JPG (stable public URL), when available. */
+  jpgUrl?: string
   width: number
   height: number
   format: 'png'
@@ -234,6 +237,7 @@ export function buildStatusExtras(input: {
         files: i.renders.map((r) => ({
           ratio: r.ratio,
           url: r.imageUrl,
+          ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}),
           width: r.width,
           height: r.height,
           format: 'png' as const,

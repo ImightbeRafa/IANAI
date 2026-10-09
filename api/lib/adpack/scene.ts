@@ -12,6 +12,7 @@ import { imageSize } from './image-size.js'
 import { FAMILY_SPECS, familySceneHint } from './render/families.js'
 import { copySpaceHint } from './render/frame.js'
 import { escapeRegExp } from './util.js'
+import { cleanAttributes } from './fidelity/photos.js'
 import type { AdAngle, AdCopy, AdFormat, AspectRatio, BrandDna, BusinessCategory, ModelGateway, OfferInput } from './types.js'
 
 /** Ratio every scene is generated at (tallest; cover-fit to the others). */
@@ -99,6 +100,8 @@ export interface BuildScenePromptInput {
   anchor?: { imageUrl: string } | null
   /** Rotates the background/setting per item (pack index). */
   variation?: number
+  /** Product appearance facts that never change (default: offer.immutableAttributes). */
+  immutableAttributes?: string[]
 }
 
 /** Remove any on-image copy strings that leaked into the scene brief. */
@@ -127,6 +130,7 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
   const pattern = getFormatPattern(angle.format)
   const hasProductRef = (offer.productImageUrls ?? []).length > 0
   const brief = stripCopyText(copy.sceneBrief ?? '', copy)
+  const attrs = cleanAttributes(input.immutableAttributes ?? offer.immutableAttributes)
   const what = dna.oneLiner ? `${offer.name} (${dna.oneLiner})` : offer.name
   // Non-default layout families put copy elsewhere (side panel, bottom type, inset card…).
   const familyHint = angle.layoutFamily && angle.layoutFamily !== 'bold_pill' ? familySceneHint(angle.layoutFamily, angle.format) : ''
@@ -135,6 +139,10 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
     hasProductRef
       ? 'Use the attached product photo as the exact product: identical shape, colors, materials and label.'
       : 'Show the product object only; do not write its name.',
+    hasProductRef && attrs.length ? `These product attributes must stay exactly as in the photo: ${attrs.join('; ')}.` : '',
+    hasProductRef
+      ? 'Show only the product parts that appear in the attached photos; never add extra parts, accessories, cables, controllers, spare pieces or packaging that are not in them.'
+      : '',
     brief ? `Scene: ${brief}` : '',
     `Format intent: ${pattern.sceneIntent}`,
     angle.sceneDirection ? `Angle direction (${angle.category ?? 'angle'}): ${angle.sceneDirection}.` : '',

@@ -127,7 +127,8 @@ describe('rehost external URLs (C2)', () => {
     const upload = vi.fn(async () => 'never')
     const html = await createRehoster({ upload, fetchImpl: okFetch(new TextEncoder().encode('<html>login</html>')) })({ userId: USER_A, url: 'https://drive.google.com/file/d/abc/view' })
     expect(html).toMatchObject({ url: 'https://drive.google.com/file/d/abc/view', rehosted: false })
-    expect(html.warning).toMatch(/not a PNG\/JPEG\/WebP/)
+    // Drive answered with a web page (login / request access): the file is not public.
+    expect(html.warning).toMatch(/no es público/)
     const big = await createRehoster({ upload, fetchImpl: okFetch(PNG, { 'content-length': String(50 * 1024 * 1024) }) })({ userId: USER_A, url: 'https://cdn.example/big.png' })
     expect(big.warning).toMatch(/larger than 15 MB/)
     const denied = await createRehoster({ upload, fetchImpl: vi.fn(async () => new Response('no', { status: 403 })) })({ userId: USER_A, url: 'https://cdn.example/x.png' })

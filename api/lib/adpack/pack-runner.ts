@@ -24,6 +24,7 @@
  * - Partial success: a single item never throws out of the runner.
  */
 import { randomUUID } from 'node:crypto'
+import sharp from 'sharp'
 import { quoteCredits } from '../credits/catalog.js'
 import { deterministicGenerationUuid, generationUuidFromApproval } from '../credits/generation-id.js'
 import { checkAdCopy, repairAdCopy } from './check-copy.js'
@@ -691,6 +692,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
         offer,
         anchor: anchorUrl ? { imageUrl: anchorUrl } : null,
         variation,
+        immutableAttributes: ctx.pack.render?.immutableAttributes ?? offer.immutableAttributes,
         draft: ctx.input.draft ?? true,
         promptSuffix: hint,
       })
@@ -854,6 +856,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const light = plateLight(item.index)
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
+  const immutableAttributes = ctx.pack.render?.immutableAttributes ?? offer.immutableAttributes
   const refs: PropsReference[] = photos
     .filter((p) => p.url === cut.hero.stored.sourceUrl || p.role === 'part' || p.role === 'box' || p.role === 'contents')
     .slice(0, 3)
@@ -870,7 +873,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     attempts++
     let plate
     try {
-      plate = await generatePlate({ gateway, format, dna, offer, placement, light, variation, allowedProps, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint })
+      plate = await generatePlate({ gateway, format, dna, offer, placement, light, variation, allowedProps, immutableAttributes, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint })
     } catch (error) {
       lastError = errorMessage(error)
       continue
@@ -879,7 +882,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     const c0 = Date.now()
     let check: PlateCheckResult | null
     try {
-      check = await checkPlate({ gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: dna.language })
+      check = await checkPlate({ gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: dna.language, immutableAttributes })
       cost += check.costUsd
     } catch (error) {
       check = null
@@ -988,6 +991,27 @@ async function scoreRender(r: RenderOutput, ratio: AspectRatio, diff: boolean): 
   return { fidelity: toFidelityResult(worst, { ratio }), ...(worst.diffPng ? { diffPng: worst.diffPng } : {}) }
 }
 
+/**
+ * Full-res JPG twin of a render (item 5 / G4): same pixels flattened on white, q92, stored next to
+ * the PNG at a stable public URL. Best-effort: a failure only means no `jpgUrl` (the PNG ships).
+ */
+async function uploadJpgTwin(storage: AdPackStorage, pack: Pack, item: PackItem, ratio: AspectRatio, png: Uint8Array): Promise<string | undefined> {
+  try {
+    const jpg = await sharp(Buffer.from(png.buffer, png.byteOffset, png.byteLength)).flatten({ background: '#ffffff' }).jpeg({ quality: 92, mozjpeg: true }).toBuffer()
+    const { url } = await storage.upload({
+      userId: pack.userId,
+      packId: pack.id,
+      itemIndex: item.index,
+      kind: `render-${ratio.replace(':', 'x')}-jpg`,
+      bytes: new Uint8Array(jpg),
+      contentType: 'image/jpeg',
+    })
+    return url
+  } catch {
+    return undefined
+  }
+}
+
 async function renderAllRatios(args: {
   renderer: Renderer
   storage: AdPackStorage
@@ -1032,6 +1056,7 @@ async function renderAllRatios(args: {
                       composite: Buffer.from(composite),
                       placements: placements.map((p) => ({ box: p.box, placed: Buffer.from(p.placed), role: p.role })),
                       ratio: rr,
+                      immutableAttributes: pack.render?.immutableAttributes ?? pack.offer.immutableAttributes,
                     })
                     return res.relit ? new Uint8Array(res.png) : null
                   },
@@ -1053,7 +1078,8 @@ async function renderAllRatios(args: {
       contentType: 'image/png',
     })
     const scored = exact ? await scoreRender(r, ratio, false) : null
-    out.push({ ratio, imageUrl: url, width: r.width, height: r.height, ...(scored ? { fidelity: scored.fidelity } : {}) })
+    const jpgUrl = await uploadJpgTwin(storage, pack, item, ratio, r.png)
+    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(scored ? { fidelity: scored.fidelity } : {}) })
     outputs.push({ ratio, r })
   }
   if (!exact) {

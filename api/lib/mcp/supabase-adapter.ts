@@ -1002,6 +1002,21 @@ export function createMcpOfferStore(): McpOfferStore | null {
       return { id: data.id as string, brandId: data.business_id as string, metadata: (data.metadata || {}) as Record<string, unknown> }
     },
 
+    async insertBusiness({ userId, row }) {
+      // Same columns as the web brand form (src/services/database.ts createBusiness); owner forced server-side.
+      const allowed: Record<string, unknown> = {}
+      for (const key of ['name', 'sales_channels', 'location', 'does_shipping', 'shipping_method', 'icp_description']) {
+        if (row[key] !== undefined) allowed[key] = row[key]
+      }
+      const { data, error } = await db
+        .from('businesses')
+        .insert({ ...allowed, owner_id: userId, client_id: null })
+        .select('id, name, location, sales_channels')
+        .single()
+      if (error) throw error
+      return asRow(data)
+    },
+
     async updateUploadRecord({ userId, uploadId, metadata }) {
       const { error } = await db
         .from('mcp_workspace_notes')

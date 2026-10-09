@@ -22,7 +22,10 @@ import {
   mcpUpdateOffer,
   type McpOfferStore,
 } from './offer-tools.js'
-import { mcpCreateUploadUrl, mcpFinalizeUpload, UPLOAD_KINDS } from './upload-tools.js'
+import { mcpCreateUploadUrl, mcpFinalizeUpload, LOGO_VARIANTS, UPLOAD_KINDS } from './upload-tools.js'
+import { IMPORT_BATCH_MAX, IMPORT_KINDS, IMPORT_ROLES, mcpImportImage, mcpImportImages } from './import-image-tools.js'
+import { mcpCreateBrand, SALES_CHANNELS } from './brand-tools.js'
+import type { RemoteFetch } from './remote-image.js'
 import { createRehoster, type RehostFn } from './asset-rehost.js'
 import { PRODUCT_IMAGE_TAGS } from '../product-image-order.js'
 import { getMcpUrlContextStatus, saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
@@ -83,7 +86,7 @@ import type { AdPackService } from '../adpack/service.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.12.0',
+  version: '0.13.0',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -621,6 +624,60 @@ function toolInputSchema(name: string): Record<string, unknown> {
         required: ['brandId'],
         additionalProperties: false,
       }
+    case 'create_brand':
+      return {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Real brand name.' },
+          location: { type: 'string' },
+          salesChannels: { type: 'array', items: { type: 'string', enum: [...SALES_CHANNELS] } },
+          doesShipping: { type: 'boolean' },
+          shippingMethod: { type: 'string' },
+          icpDescription: { type: 'string', description: 'Who buys (ideal customer), in the owner\'s words.' },
+          createKit: { type: 'boolean', description: 'Create the primary brand kit too (default true).' },
+          kit: { type: 'object', description: 'Optional kit fields now (same as update_brand_kit).', properties: kitWritable, additionalProperties: false },
+          allowDuplicate: { type: 'boolean', description: 'Create even if a brand with the same name exists (default false: the existing brand is returned).' },
+        },
+        required: ['name'],
+        additionalProperties: false,
+      }
+    case 'import_image':
+    case 'import_images': {
+      const item = {
+        url: { type: 'string', description: 'Google Drive share link (any shape), Dropbox link or public https image URL.' },
+        kind: { type: 'string', enum: [...IMPORT_KINDS] },
+        role: { type: 'string', enum: [...IMPORT_ROLES], description: 'product_photo: what the photo shows — hero (the product), part (a separate kit part, e.g. the controller), box, contents (everything in the kit), in_use, detail.' },
+        label: { type: 'string', maxLength: 80, description: 'Short name of what is shown, e.g. "control tipo gamepad".' },
+        variant: { type: 'string', enum: [...LOGO_VARIANTS], description: 'logo only (default primary).' },
+        offerId: { type: 'string', description: 'Offer to attach a product photo / reference to (required for product_photo when the brand has several offers).' },
+        setPrimary: { type: 'boolean', description: 'product_photo role hero: make it the primary photo (default true).' },
+      }
+      if (name === 'import_image') {
+        return {
+          type: 'object',
+          properties: { ...brand, brandKitId: { type: 'string' }, ...item },
+          required: ['brandId', 'url', 'kind'],
+          additionalProperties: false,
+        }
+      }
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: item.offerId,
+          kind: { ...item.kind, description: 'Default kind for items without one.' },
+          brandKitId: { type: 'string' },
+          items: {
+            type: 'array',
+            minItems: 1,
+            maxItems: IMPORT_BATCH_MAX,
+            items: { type: 'object', properties: item, required: ['url'], additionalProperties: false },
+          },
+        },
+        required: ['brandId', 'items'],
+        additionalProperties: false,
+      }
+    }
     case 'list_offers':
     case 'guide_brand_pack':
       return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
@@ -1212,6 +1269,8 @@ export async function handleMcpJsonRpc(options: {
   offerStore?: McpOfferStore | null
   /** C2 rehost of external image URLs (defaults to one built on offerStore storage). */
   rehost?: RehostFn | null
+  /** Download of external images (import_image, rehost). Default: SSRF-safe fetchPublicUrl. Tests inject a fake. */
+  remoteFetch?: RemoteFetch | null
   /** Ad Pack service (defaults to the shared Supabase-backed service). */
   adPackService?: AdPackService | null
   isAdmin?: boolean
@@ -1272,8 +1331,9 @@ export async function handleMcpJsonRpc(options: {
           rehost: options.rehost !== undefined
             ? options.rehost
             : options.offerStore
-              ? createRehoster({ upload: (o) => options.offerStore!.uploadBytes(o) })
+              ? createRehoster({ upload: (o) => options.offerStore!.uploadBytes(o), ...(options.remoteFetch ? { fetchImpl: options.remoteFetch } : {}) })
               : null,
+          remoteFetch: options.remoteFetch,
           adPackService: options.adPackService,
           isAdmin,
           appOrigin: options.appOrigin,
@@ -1337,6 +1397,7 @@ async function dispatchEnabledTool(options: {
   brandKitStore?: McpBrandKitStore | null
   offerStore?: McpOfferStore | null
   rehost?: RehostFn | null
+  remoteFetch?: RemoteFetch | null
   adPackService?: AdPackService | null
   isAdmin?: boolean
   appOrigin?: string
@@ -1403,6 +1464,23 @@ async function dispatchEnabledTool(options: {
         defaultOfferPolicy:
           'Always select by brandId (never by name). Default list hides kitReady:false (includeIncomplete:true for all) and archived brands (includeArchived:true). Duplicates are never merged automatically: show possibleDuplicates to the user and archive extras with archive_brand only after they confirm.',
       }
+    }
+    case 'create_brand': {
+      if (!options.offerStore) throw new Error('Brand store not configured')
+      return mcpCreateBrand({ db: options.db, store: options.offerStore, kitStore: options.brandKitStore, user: options.user, args: options.args, rehost: options.rehost })
+    }
+    case 'import_image':
+    case 'import_images': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      const deps = {
+        db: options.db,
+        store: options.offerStore,
+        kitStore: options.brandKitStore,
+        user: options.user,
+        args: options.args,
+        ...(options.remoteFetch ? { fetchImpl: options.remoteFetch } : {}),
+      }
+      return options.name === 'import_image' ? mcpImportImage(deps) : mcpImportImages(deps)
     }
     case 'create_offer': {
       if (!options.offerStore) throw new Error('Offer store not configured')
@@ -1670,7 +1748,7 @@ async function dispatchEnabledTool(options: {
         })
       }
       try {
-        return await getMcpExecuteResult({
+        const result = await getMcpExecuteResult({
           approvalStore: options.approvalStore,
           userId: options.user.id,
           jobId,
@@ -1679,6 +1757,26 @@ async function dispatchEnabledTool(options: {
               ? options.args.approvalRequestId
               : undefined,
         })
+        // Ad Pack jobs (adpack_start / create_ads pack): the job only says "started" — attach the live
+        // pack status so the same poll returns progress and, when finished, the deliverable
+        // (stable full-res PNG + JPG URLs per ad and ratio).
+        const packId = typeof result.packId === 'string' ? result.packId : ''
+        if (packId && (result.toolName === 'adpack_start' || result.toolName === 'adpack_regenerate' || packId === jobId)) {
+          try {
+            const pack = await dispatchEnabledTool({ ...options, name: 'adpack_status', args: { packId } }) as Record<string, unknown>
+            return {
+              ...result,
+              packStatus: pack.status,
+              moreWork: pack.moreWork,
+              pack,
+              ...(pack.deliverable ? { deliverable: pack.deliverable } : {}),
+              nextTool: pack.moreWork ? 'adpack_status' : undefined,
+            }
+          } catch {
+            return result
+          }
+        }
+        return result
       } catch (err) {
         // G3: a URL-intake jobId (workspace_save_url_context) resolves here too, running the work inline.
         if (jobId && err instanceof Error && err.message === 'Job not found' && options.urlIntakeStore?.getUrlIntake) {

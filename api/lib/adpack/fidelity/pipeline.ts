@@ -180,6 +180,8 @@ export interface ExactImageInput {
   styleNotes?: string
   palette?: string[]
   allowedProps?: string[]
+  /** Product appearance facts that never change (plate prompt, plate check, relight). */
+  immutableAttributes?: string[]
   relight?: boolean
   cache?: BlobCache | null
   load?: ImageLoader
@@ -251,7 +253,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   for (let a = 0; a < attempts && !plateBytes; a++) {
     let plate
     try {
-      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, variation: input.variation, allowedProps: input.allowedProps, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
+      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, variation: input.variation, allowedProps: input.allowedProps, immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
     } catch (error) {
       warnings.push(`plate attempt ${a + 1} failed: ${error instanceof Error ? error.message : String(error)}`)
       continue
@@ -261,7 +263,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
     const reframed = await reframeToRatio(plate.bytes, input.ratio, { mode: 'cover' })
     const canvas = await sharp(reframed.bytes).resize(size.width, size.height, { fit: 'cover' }).removeAlpha().png().toBuffer()
     try {
-      lastCheck = await checkPlate({ gateway: input.gateway, plateImage: `data:image/png;base64,${canvas.toString('base64')}`, refs, allowedProps: input.allowedProps, placement: region, language: input.language })
+      lastCheck = await checkPlate({ gateway: input.gateway, plateImage: `data:image/png;base64,${canvas.toString('base64')}`, refs, allowedProps: input.allowedProps, placement: region, language: input.language, immutableAttributes: input.immutableAttributes })
       costUsd += lastCheck.costUsd
     } catch (error) {
       warnings.push(`plate check unavailable: ${error instanceof Error ? error.message : String(error)}`)
@@ -280,7 +282,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   let png = comp.png
   let method: FidelityResult['method'] = 'composite'
   if (input.relight) {
-    const rl = await relightComposite({ gateway: input.gateway, composite: png, placements: comp.placements, ratio: input.ratio })
+    const rl = await relightComposite({ gateway: input.gateway, composite: png, placements: comp.placements, ratio: input.ratio, immutableAttributes: input.immutableAttributes })
     costUsd += rl.costUsd
     if (rl.relit) {
       png = rl.png

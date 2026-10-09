@@ -8,8 +8,8 @@
  * caller keeps the original URL and gets a warning — existing link flows keep working.
  */
 import { randomUUID } from 'node:crypto'
-import { sniffImageMime } from '../fetch-image-data-url.js'
-import { assertPublicHttpUrl, fetchPublicUrl } from '../url-safety.js'
+import { assertPublicHttpUrl } from '../url-safety.js'
+import { defaultRemoteFetch, downloadRemoteImage, resolveDownloadUrl } from './remote-image.js'
 
 export const REHOST_MAX_BYTES = 15 * 1024 * 1024
 export const REHOST_TIMEOUT_MS = 15_000
@@ -40,23 +40,9 @@ export function isOwnedStorageUrl(url: string, userId: string): boolean {
   return new RegExp(`/storage/v1/object/(?:public|sign)/${UPLOAD_BUCKET}/${userId.replace(/[^A-Za-z0-9-]/g, '')}/`, 'i').test(url)
 }
 
-/** Google Drive share links → direct download link (other URLs unchanged). */
+/** Google Drive share links (every common shape) / Dropbox → direct download link (other URLs unchanged). */
 export function directDownloadUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    if (u.hostname === 'drive.google.com') {
-      const m = u.pathname.match(/\/file\/d\/([A-Za-z0-9_-]+)/)
-      const id = m?.[1] || u.searchParams.get('id')
-      if (id) return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`
-    }
-    if (/(^|\.)dropbox\.com$/.test(u.hostname) && u.searchParams.get('dl') === '0') {
-      u.searchParams.set('dl', '1')
-      return u.toString()
-    }
-  } catch {
-    // fall through
-  }
-  return url
+  return resolveDownloadUrl(url).url
 }
 
 /** Lowercase, ascii, [a-z0-9._-], ≤ 60 chars, keeps the extension. */
@@ -74,7 +60,7 @@ export function uploadPath(userId: string, filename: string, id: string): string
 }
 
 export function createRehoster(deps: RehostDeps): RehostFn {
-  const fetchImpl = deps.fetchImpl ?? ((url, init) => fetchPublicUrl(url, { timeoutMs: init.timeoutMs }))
+  const fetchImpl = deps.fetchImpl ?? defaultRemoteFetch
   const newId = deps.newId ?? randomUUID
   return async ({ userId, url, label }) => {
     const original = url.trim()
@@ -83,17 +69,11 @@ export function createRehoster(deps: RehostDeps): RehostFn {
     if (isOwnedStorageUrl(original, userId)) return { url: original, rehosted: false }
     try {
       assertPublicHttpUrl(original)
-      const res = await fetchImpl(directDownloadUrl(original), { timeoutMs: REHOST_TIMEOUT_MS })
-      if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`)
-      const declared = Number(res.headers.get('content-length') || 0)
-      if (declared > REHOST_MAX_BYTES) throw new Error(`file is larger than ${REHOST_MAX_BYTES / 1024 / 1024} MB`)
-      const bytes = new Uint8Array(await res.arrayBuffer())
-      if (!bytes.length) throw new Error('empty file')
-      if (bytes.length > REHOST_MAX_BYTES) throw new Error(`file is larger than ${REHOST_MAX_BYTES / 1024 / 1024} MB`)
-      const mime = sniffImageMime(bytes)
-      if (!mime || !REHOST_MIMES.has(mime)) {
-        throw new Error('not a PNG/JPEG/WebP image (a Drive link must be shared as "anyone with the link")')
-      }
+      // Same downloader as import_image: Drive confirm interstitial, HTML → "not public", byte cap, magic bytes.
+      const got = await downloadRemoteImage(original, { fetchImpl, maxBytes: REHOST_MAX_BYTES, timeoutMs: REHOST_TIMEOUT_MS })
+      const bytes = got.bytes
+      const mime = got.mime
+      if (!REHOST_MIMES.has(mime)) throw new Error('not a PNG/JPEG/WebP image')
       const nameFromUrl = (() => {
         try {
           return decodeURIComponent(new URL(original).pathname.split('/').filter(Boolean).pop() || '')

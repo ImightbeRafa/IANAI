@@ -25,7 +25,7 @@ export interface McpWorld {
   caps: McpStoreCapabilities
   mcpDb: McpDbClient
   offerStore: McpOfferStore & {
-    objects: Map<string, { size: number; contentType: string | null }>
+    objects: Map<string, { size: number; contentType: string | null; bytes?: Uint8Array }>
     uploads: Map<string, { id: string; userId: string; brandId: string; metadata: Row }>
     removed: string[]
     writes: number
@@ -37,14 +37,16 @@ export function createMcpWorld(options: { caps?: Partial<McpStoreCapabilities>; 
   const db = options.db ?? fakeSavedBrandDb()
   const caps: McpStoreCapabilities = { adProfile: true, imageMeta: true, archive: true, brandProfile: true, ...options.caps }
   let seq = 0
-  const nextId = (prefix: string) => `${prefix}-${++seq}`
+  // UUID-shaped like the real tables (the Ad Pack validates brandId / offerId as UUIDs).
+  const KIND_CODE: Record<string, string> = { brand: 'b', offer: 'f', img: 'e', kit: 'c' }
+  const nextId = (prefix: string) => `${(KIND_CODE[prefix] ?? 'a').repeat(8)}-0000-4000-8000-${String(++seq).padStart(12, '0')}`
 
   const IMAGE_META = ['is_primary', 'tags', 'role', 'quality', 'source_url']
   const checkImagePatch = (patch: Row) => {
     if (!caps.imageMeta) for (const k of IMAGE_META) if (k in patch) throw missingColumn('product_images', k)
   }
 
-  const objects = new Map<string, { size: number; contentType: string | null }>()
+  const objects = new Map<string, { size: number; contentType: string | null; bytes?: Uint8Array }>()
   const uploads = new Map<string, { id: string; userId: string; brandId: string; metadata: Row }>()
   const offerStore: McpWorld['offerStore'] = {
     objects,
@@ -110,8 +112,13 @@ export function createMcpWorld(options: { caps?: Partial<McpStoreCapabilities>; 
       return `${STORAGE_PUBLIC}${path}`
     },
     async uploadBytes({ path, bytes, contentType }) {
-      objects.set(path, { size: bytes.length, contentType })
+      objects.set(path, { size: bytes.length, contentType, bytes })
       return `${STORAGE_PUBLIC}${path}`
+    },
+    async insertBusiness({ userId, row }) {
+      const full = { ...row, id: nextId('brand'), owner_id: userId, created_at: new Date().toISOString() }
+      db.businesses.push(full)
+      return { ...full }
     },
     async insertUploadRecord({ userId, brandId, metadata }) {
       const id = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`

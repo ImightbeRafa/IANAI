@@ -10,7 +10,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { MIGRATION_085 } from '../db-missing-column.js'
-import { readBrandProfile } from '../brand-profile.js'
+import { readBrandProfile, type BrandLogoVariant, type BrandLogoVariantKind } from '../brand-profile.js'
 import { resolveBrandKitForBusiness } from '../brand-kit-resolve.js'
 import { safeFilename, uploadPath } from './asset-rehost.js'
 import type { McpBrandKitStore } from './brand-kit-tools.js'
@@ -119,6 +119,64 @@ async function primaryKit(kitStore: McpBrandKitStore, userId: string, brandId: s
   return resolved.kit as unknown as Row
 }
 
+export const LOGO_VARIANTS = ['primary', 'light', 'dark', 'badge', 'wordmark', 'icon'] as const
+
+/**
+ * Attach a stored file to the brand's kit (primary kit, or `brandKitId`): logo (+ 085 variant),
+ * reference ad, winner ad (085; else saved as a reference), document (085). Shared by
+ * finalize_upload and import_image.
+ */
+export async function saveKitAsset(options: {
+  store: Pick<McpOfferStore, 'capabilities'>
+  kitStore: McpBrandKitStore
+  userId: string
+  brandId: string
+  brandKitId?: string
+  kind: Exclude<UploadKind, 'product_photo'>
+  url: string
+  role?: string
+  filename?: string
+  /** Original external link (kept on 085 logo variants). */
+  sourceUrl?: string
+}): Promise<{ brandKitId: string; warnings: string[]; logoUrlSet: boolean }> {
+  const { kitStore, userId, brandId, kind, url, role } = options
+  const warnings: string[] = []
+  let kit: Row
+  if (options.brandKitId) {
+    const found = await kitStore.getKit({ userId, kitId: options.brandKitId })
+    if (!found || (found.business_id && found.business_id !== brandId)) throw new UploadInputError('brandKitId not found for this brand')
+    kit = found as unknown as Row
+  } else kit = await primaryKit(kitStore, userId, brandId)
+  const kitId = String(kit.id)
+  const caps = await options.store.capabilities()
+  const profile = readBrandProfile(kit.brand_profile) ?? {}
+  const patch: Row = { updated_at: new Date().toISOString() }
+  let logoUrlSet = false
+  if (kind === 'logo') {
+    const variant = role && (LOGO_VARIANTS as readonly string[]).includes(role) ? role : 'primary'
+    if (!kit.logo_url || variant === 'primary') {
+      patch.logo_url = url
+      logoUrlSet = true
+    }
+    if (caps.brandProfile) {
+      const entry: BrandLogoVariant = { url, variant: variant as BrandLogoVariantKind, ...(options.sourceUrl ? { sourceUrl: options.sourceUrl } : {}) }
+      patch.brand_profile = { ...profile, logoVariants: [...(profile.logoVariants ?? []).filter((v) => v.variant !== variant), entry] }
+    } else if (variant !== 'primary') warnings.push(`logo variant "${variant}" stored as the main logo only (migration ${MIGRATION_085} pending)`)
+  } else if (kind === 'reference_ad' || (kind === 'winner_ad' && !caps.brandProfile)) {
+    const refs = Array.isArray(kit.reference_images) ? (kit.reference_images as string[]) : []
+    patch.reference_images = [...refs.filter((r) => r !== url), url].slice(-16)
+    if (kind === 'winner_ad') warnings.push(`saved as a style reference (winner ads list needs migration ${MIGRATION_085})`)
+  } else if (kind === 'winner_ad') {
+    patch.brand_profile = { ...profile, winnerAdUrls: [...(profile.winnerAdUrls ?? []).filter((u) => u !== url), url].slice(-20) }
+  } else if (kind === 'document') {
+    if (caps.brandProfile) {
+      patch.brand_profile = { ...profile, documents: [...(profile.documents ?? []), { url, filename: options.filename || 'document.pdf' }].slice(-20) }
+    } else warnings.push(`document stored in Advance storage but not listed on the kit (migration ${MIGRATION_085} pending)`)
+  }
+  if (Object.keys(patch).length > 1) await kitStore.updateKit({ userId, kitId, patch })
+  return { brandKitId: kitId, warnings, logoUrlSet }
+}
+
 export async function mcpFinalizeUpload(options: {
   store: McpOfferStore
   brandKitStore?: McpBrandKitStore | null
@@ -181,31 +239,9 @@ export async function mcpFinalizeUpload(options: {
     saved = { target: 'product_images', productImageId: row.id, offerId }
   } else {
     if (!options.brandKitStore) throw new Error('Brand kit store not configured')
-    const kitStore = options.brandKitStore
-    const kit = await primaryKit(kitStore, user.id, record.brandId)
-    const kitId = String(kit.id)
-    const caps = await store.capabilities()
-    const profile = readBrandProfile(kit.brand_profile) ?? {}
-    const patch: Row = { updated_at: new Date().toISOString() }
-    if (kind === 'logo') {
-      const variant = role && ['primary', 'light', 'dark', 'badge', 'wordmark', 'icon'].includes(role) ? role : 'primary'
-      if (!kit.logo_url || variant === 'primary') patch.logo_url = url
-      if (caps.brandProfile) {
-        patch.brand_profile = { ...profile, logoVariants: [...(profile.logoVariants ?? []).filter((v) => v.variant !== variant), { url, variant }] }
-      } else if (variant !== 'primary') warnings.push(`logo variant "${variant}" stored as the main logo only (migration ${MIGRATION_085} pending)`)
-    } else if (kind === 'reference_ad' || (kind === 'winner_ad' && !caps.brandProfile)) {
-      const refs = Array.isArray(kit.reference_images) ? (kit.reference_images as string[]) : []
-      patch.reference_images = [...refs.filter((r) => r !== url), url].slice(-16)
-      if (kind === 'winner_ad') warnings.push(`saved as a style reference (winner ads list needs migration ${MIGRATION_085})`)
-    } else if (kind === 'winner_ad') {
-      patch.brand_profile = { ...profile, winnerAdUrls: [...(profile.winnerAdUrls ?? []).filter((u) => u !== url), url].slice(-20) }
-    } else if (kind === 'document') {
-      if (caps.brandProfile) {
-        patch.brand_profile = { ...profile, documents: [...(profile.documents ?? []), { url, filename: String(meta.filename || 'document.pdf') }].slice(-20) }
-      } else warnings.push(`document stored in Advance storage but not listed on the kit (migration ${MIGRATION_085} pending)`)
-    }
-    if (Object.keys(patch).length > 1) await kitStore.updateKit({ userId: user.id, kitId, patch })
-    saved = { target: 'brand_kit', brandKitId: kitId, assetKind: kind }
+    const kitSaved = await saveKitAsset({ store, kitStore: options.brandKitStore, userId: user.id, brandId: record.brandId, kind, url, role, filename: String(meta.filename || 'document.pdf') })
+    warnings.push(...kitSaved.warnings)
+    saved = { target: 'brand_kit', brandKitId: kitSaved.brandKitId, assetKind: kind }
   }
 
   const out: Row = {

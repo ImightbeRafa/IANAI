@@ -9,6 +9,7 @@
  */
 import { SCENE_COMPOSITION_RULES, SCENE_STRICT_NO_TEXT, SCENE_RATIO, sceneSetting } from '../scene.js'
 import { imageSize } from '../image-size.js'
+import { cleanAttributes } from './photos.js'
 import type { AdFormat, AdLanguage, AspectRatio, BrandDna, LightDirection, ModelGateway, OfferInput, ProductPhotoRole } from '../types.js'
 
 /** Ambient props always allowed in a plate / scene (never product parts). */
@@ -74,7 +75,11 @@ export interface BuildPlatePromptInput {
   sceneBrief?: string
   /** Plate ratio (default 9:16, cover-fit to the pack ratios). */
   ratio?: AspectRatio
+  /** Product appearance facts that never change (default: offer.immutableAttributes). */
+  immutableAttributes?: string[]
 }
+
+export { cleanAttributes }
 
 function visualLine(dna: BrandDna): string {
   const v = dna.visual ?? {}
@@ -103,6 +108,7 @@ export function buildPlatePrompt(input: BuildPlatePromptInput): string {
   const props = cleanProps(input.allowedProps)
   const ambient = [...AMBIENT_PROPS, ...props]
   const mood = plateBrief(input.sceneBrief)
+  const attrs = cleanAttributes(input.immutableAttributes ?? input.offer.immutableAttributes)
   return [
     `Text-free advertising background photo, ${input.ratio ?? SCENE_RATIO} ${(input.ratio ?? SCENE_RATIO) === '16:9' ? 'landscape' : (input.ratio ?? SCENE_RATIO) === '1:1' ? 'square' : 'vertical'}, for ${input.offer.name ? `a product called "${input.offer.name.slice(0, 80)}"` : 'a product'} that will be placed into it afterwards.`,
     `Setting: ${plateSetting(input.format, input.variation ?? 0)}`,
@@ -111,6 +117,9 @@ export function buildPlatePrompt(input: BuildPlatePromptInput): string {
     `Lighting: ${lightPhrase(input.light)}; consistent shadows on the surface.`,
     'STRICT: the image must contain NO product, no devices, no electronics, no parts, no accessories, no cables, no remotes or controllers, no packaging or boxes, no bottles, no tools, no text and no logos. No people and no hands.',
     `Only these ambient props are allowed, sparingly and away from the placement area: ${ambient.join(', ')}.`,
+    attrs.length
+      ? `The real product is composited later from its photo and never changes (${attrs.join('; ')}): do not draw it, any part of it or anything resembling it; choose background tones that keep those attributes clearly visible.`
+      : '',
     visualLine(input.dna),
     SCENE_COMPOSITION_RULES.replace(/The product is the hero:[^.]*\./, '').trim(),
     SCENE_STRICT_NO_TEXT,
@@ -177,8 +186,9 @@ export function partsLine(refs: PropsReference[]): string {
   return refs.map((r, i) => `Reference ${i + 2}: ${r.label ? `"${r.label.slice(0, 60)}"` : 'product'} (${r.role})`).join('; ')
 }
 
-export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; placement?: PlateRegion; language: AdLanguage }): { system: string; user: string } {
+export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; placement?: PlateRegion; language: AdLanguage; immutableAttributes?: string[] }): { system: string; user: string } {
   const allowed = [...AMBIENT_PROPS, ...cleanProps(input.allowedProps)]
+  const attrs = cleanAttributes(input.immutableAttributes)
   return {
     system: [
       'You are a strict QA reviewer for product-free advertising background plates. Reply with JSON only.',
@@ -187,6 +197,7 @@ export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedPr
     user: [
       'Image 1 is a background plate that must NOT contain the product or any part of it: the real product will be composited later.',
       input.refs.length ? `The other images are the real product and its parts (${partsLine(input.refs)}). Anything resembling them in image 1 is an error.` : '',
+      attrs.length ? `The product is recognizable by: ${attrs.join('; ')}. Any object with these traits in image 1 is an error (list it in extraObjects).` : '',
       `extraObjects: list every device, electronic item, product, product part, accessory, cable, remote/controller, propeller, wheel, tool, bottle, box or packaging visible in image 1 (short names). Allowed ambient props that are NOT errors: ${allowed.join(', ')}. Empty list when there are none.`,
       'strayText: true if there is any text, letters, numbers, logo or watermark.',
       'borders: true if the photo does not fill the frame (bars, frames, letterboxing, collage panels).',
@@ -207,9 +218,10 @@ export async function checkPlate(input: {
   placement?: PlateRegion
   language: AdLanguage
   model?: string
+  immutableAttributes?: string[]
 }): Promise<PlateCheckResult> {
   const refs = input.refs.slice(0, 3)
-  const prompt = buildPlateCheckPrompt({ refs, allowedProps: input.allowedProps, placement: input.placement, language: input.language })
+  const prompt = buildPlateCheckPrompt({ refs, allowedProps: input.allowedProps, placement: input.placement, language: input.language, immutableAttributes: input.immutableAttributes })
   const res = await input.gateway.visionJson<Record<string, unknown>>({ ...prompt, images: [input.plateImage, ...refs.map((r) => r.image)], model: input.model })
   const raw = (res.data ?? {}) as Record<string, unknown>
   const extraObjects = asObjectList(raw.extraObjects)

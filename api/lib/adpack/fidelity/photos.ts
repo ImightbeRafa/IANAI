@@ -9,8 +9,33 @@ export function isProductPhotoRole(v: unknown): v is ProductPhotoRole {
   return typeof v === 'string' && (PRODUCT_PHOTO_ROLES as string[]).includes(v)
 }
 
+/** Immutable product attributes (sanitized, ≤ 8, ≤ 60 chars) — shared by prompts and checks. */
+export function cleanAttributes(list: string[] | undefined): string[] {
+  return [...new Set((list ?? []).map((a) => String(a ?? '').replace(/[\r\n"`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 8)
+}
+
+/** Explicit role prefix written by import_image before migration 085 ("[part] control"). */
+const ROLE_PREFIX_RE = /^\s*\[(hero|part|contents|box|in_use|detail)\]\s*/i
+
+/** Label that carries the role explicitly (pre-085 storage of import_image roles). */
+export function labelWithRole(role: ProductPhotoRole, label?: string | null): string {
+  const rest = stripRolePrefix(label)
+  return `[${role}]${rest ? ` ${rest}` : ''}`
+}
+
+/** Label without the explicit role prefix (for display / prompts). */
+export function stripRolePrefix(label: string | null | undefined): string {
+  return String(label ?? '').replace(ROLE_PREFIX_RE, '').trim()
+}
+
+export function hasRolePrefix(label: string | null | undefined): boolean {
+  return ROLE_PREFIX_RE.test(String(label ?? ''))
+}
+
 /** Owner label → role (saved product_images rows carry free-text labels; no role column yet). */
 export function roleFromLabel(label: string | null | undefined): ProductPhotoRole | undefined {
+  const explicit = String(label ?? '').match(ROLE_PREFIX_RE)
+  if (explicit) return explicit[1].toLowerCase() as ProductPhotoRole
   const s = String(label ?? '').toLowerCase()
   if (!s) return undefined
   if (/\b(hero|principal|main|portada)\b/.test(s)) return 'hero'

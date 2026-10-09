@@ -26,7 +26,7 @@ import { detectLanguage } from './dna/classify.js'
 import { buildBrandDna, computeGaps } from './dna/merge.js'
 import { cleanText, isHexColor, makeFact, uniqStrings, type DnaPart } from './dna/part.js'
 import { mapSiteAnalysis } from './dna/website.js'
-import { roleFromImageRow, roleFromLabel } from './fidelity/photos.js'
+import { hasRolePrefix, roleFromImageRow, roleFromLabel, stripRolePrefix } from './fidelity/photos.js'
 import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKey, OfferInput } from './types.js'
 import { isPlaceholderValue, stripPlaceholderParts } from '../placeholder-guard.js'
 import { audienceLines, readBrandProfile, type BrandProfile } from '../brand-profile.js'
@@ -448,9 +448,11 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
     const row = rowOf.get(url)
     const fromTags = row ? roleFromImageRow(row) : undefined
     const freeRole = s(row ?? null, 'role', 80)
-    const label = freeRole || s(row ?? null, 'label', 80)
-    const role = fromTags ?? roleFromLabel(freeRole) ?? roleFromLabel(s(row ?? null, 'label', 80))
-    return { url, label, id: s(row ?? null, 'id', 64), role, explicit: fromTags !== undefined }
+    const rawLabel = s(row ?? null, 'label', 80)
+    // import_image before 085 stores the role as an explicit "[part] …" label prefix.
+    const label = stripRolePrefix(freeRole || rawLabel)
+    const role = fromTags ?? roleFromLabel(freeRole) ?? roleFromLabel(rawLabel)
+    return { url, label, id: s(row ?? null, 'id', 64), role, explicit: fromTags !== undefined || hasRolePrefix(rawLabel) }
   })
   if (tagged.some((t) => t.explicit || (t.role && t.role !== 'detail' && t.role !== 'hero'))) {
     let heroSet = tagged.some((t) => t.role === 'hero')

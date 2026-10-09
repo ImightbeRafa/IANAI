@@ -80,7 +80,7 @@ function compactItem(item: AdPackItemView) {
     layoutFamily: item.layoutFamily ?? null,
     ...(item.variation !== undefined ? { variation: item.variation } : {}),
     // Stable public storage URLs (never signed / expiring) with explicit size + format (G4).
-    renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, width: r.width, height: r.height, format: 'png' as const })),
+    renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}), width: r.width, height: r.height, format: 'png' as const })),
     charged: item.charged,
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
@@ -171,8 +171,8 @@ function statusPayload(status: AdPackStatusResponse) {
       : finished
         ? {
           instructionsForGrok: es
-            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + ángulo (category, hookType) y por qué (rationale) + sus files (url full-res por ratio: 4:5 feed, 9:16 historia; 1:1 si se pidió) + su caption. Ofrecé deliverable.captionsText para copiar todo junto. Otro formato (p. ej. 1:1) sale gratis con adpack_resize.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}${forbiddenHint}`
-            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + angle (category, hookType) and why (rationale) + its files (full-res url per ratio: 4:5 feed, 9:16 story; 1:1 if requested) + its caption. Offer deliverable.captionsText to copy all captions at once. Another ratio (e.g. 1:1) is free with adpack_resize.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}${forbiddenHint}`,
+            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + ángulo (category, hookType) y por qué (rationale) + sus files (url PNG full-res y jpgUrl por ratio: 4:5 feed, 9:16 historia; 1:1 si se pidió) + su caption. Ofrecé deliverable.captionsText para copiar todo junto. Otro formato (p. ej. 1:1) sale gratis con adpack_resize.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}${forbiddenHint}`
+            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + angle (category, hookType) and why (rationale) + its files (full-res PNG url and jpgUrl per ratio: 4:5 feed, 9:16 story; 1:1 if requested) + its caption. Offer deliverable.captionsText to copy all captions at once. Another ratio (e.g. 1:1) is free with adpack_resize.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}${forbiddenHint}`,
         }
         : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }

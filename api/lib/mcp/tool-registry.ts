@@ -29,7 +29,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.12.0'
+export const MCP_REGISTRY_VERSION = '0.13.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -94,6 +94,42 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     risk: 'read',
     description:
       'Get one brand with offers and brand kit for GUIDE or EXECUTE. Optional brandKitId selects among linked kits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'create_brand',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Create a brand from zero {name, location?, salesChannels? (website|messages|physical), doesShipping?, shippingMethod?, icpDescription?} — same record as the web brand form — and, by default, its primary brand kit (createKit:false to skip; kit {…update_brand_kit fields} to fill it now). ' +
+      'If a brand with the same name already exists it is returned with status "exists" and nothing is created (allowDuplicate:true to force). Free sync write, no credits. ' +
+      'Next: update_brand_kit → import_image {kind:"logo"} → create_offer → import_images (product photos with roles) → create_ads.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'import_image',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Import ONE image from a Google Drive share link (any shape: /file/d/<id>/view, open?id=, uc?id=, drive.usercontent…), Dropbox or any public https URL into a brand or offer: ' +
+      '{brandId, offerId?, url, kind: product_photo|logo|reference_ad|winner_ad, role?: hero|part|box|contents|in_use|detail (product_photo), label? (e.g. "control"), variant? (logo: primary|light|dark|badge|wordmark|icon), setPrimary?}. ' +
+      'The bytes are copied into Advance storage (the Drive link is kept only as sourceUrl), validated (real PNG/JPEG/WebP, SVG for logos; size caps; public hosts only) and analyzed: returns url, productImageId, quality {width, height, sharpness, backgroundClean, warnings}. ' +
+      'A role:"hero" photo becomes the primary photo. Ads only show product parts that have a real photo with a role. A logo is cleaned (solid background removed → transparent PNG) and set on the primary kit; the cleanup report is returned. ' +
+      'A Drive file that is not shared publicly answers DRIVE_NOT_PUBLIC ("el archivo de Drive no es público") — ask the owner to share it as "Anyone with the link". Free, no credits. Several images at once: import_images.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'import_images',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Batch import_image: {brandId, offerId?, items: [{url, kind, role?, label?, variant?, offerId?}] (max 12)}. Same validation and storage copy per item; one failure never stops the others (results[] with status imported|error and a plain error.message per item). Free, no credits.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -388,7 +424,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Poll any async EXECUTE job by jobId (same as approvalRequestId). Returns running|completed|failed plus a bilingual statusMessage. ' +
       'Keep polling after an EXECUTE tool returns status=running so the artifact reaches chat without MCP client timeout. ' +
-      'A failed result with code PLAN_CHANGED means nothing ran (approved vs planned differ): ask for a fresh approval. Also resolves workspace_save_url_context jobIds.',
+      'A failed result with code PLAN_CHANGED means nothing ran (approved vs planned differ): ask for a fresh approval. Also resolves workspace_save_url_context jobIds. ' +
+      'For an Ad Pack job (adpack_start / create_ads pack, jobId = packId) it also returns the live pack status (pack, moreWork) and, when finished, the same deliverable as adpack_status.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -581,7 +618,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
       'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
-      'When finished it returns deliverable {ads[{index, format, angleId, category, hookType, rationale, layoutFamily, variation?, headline, caption, links{4:5,9:16,…}, files[{ratio, url, width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions with the angle and why (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
+      'When finished it returns deliverable {ads[{index, format, angleId, category, hookType, rationale, layoutFamily, variation?, headline, caption, links{4:5,9:16,…}, files[{ratio, url (full-res PNG), jpgUrl (same image as full-res JPG), width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions with the angle and why (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
       'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,
     requiresApproval: false,

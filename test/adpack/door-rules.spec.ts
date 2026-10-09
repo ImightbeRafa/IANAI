@@ -62,11 +62,11 @@ describe('G4 + H6: feed + story by default, stable files per ratio', () => {
     for (const ad of ads) {
       expect(Object.keys(ad.links)).toEqual(['4:5', '9:16'])
       expect(ad.files).toEqual([
-        { ratio: '4:5', url: expect.stringMatching(/^https:\/\/storage\.test\//), width: 1080, height: 1350, format: 'png', placement: 'feed' },
-        { ratio: '9:16', url: expect.stringMatching(/^https:\/\/storage\.test\//), width: 1080, height: 1920, format: 'png', placement: 'story' },
+        { ratio: '4:5', url: expect.stringMatching(/^https:\/\/storage\.test\/.*\.png$/), jpgUrl: expect.stringMatching(/^https:\/\/storage\.test\/.*\.jpg$/), width: 1080, height: 1350, format: 'png', placement: 'feed' },
+        { ratio: '9:16', url: expect.stringMatching(/^https:\/\/storage\.test\/.*\.png$/), jpgUrl: expect.stringMatching(/^https:\/\/storage\.test\/.*\.jpg$/), width: 1080, height: 1920, format: 'png', placement: 'story' },
       ])
       // Public storage URLs, never signed / expiring.
-      expect(ad.files.every((f) => !/token=|X-Amz-|sign/i.test(String(f.url)))).toBe(true)
+      expect(ad.files.every((f) => !/token=|X-Amz-|sign/i.test(`${String(f.url)} ${String(f.jpgUrl)}`))).toBe(true)
       expect(ad.forbiddenHits).toEqual([])
     }
   })
