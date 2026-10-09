@@ -51,6 +51,7 @@ import {
   planPack,
   quotePack,
   regenerateItem,
+  regenerateRatio,
   resizeItem,
   summarizePack,
   type PackProgress,
@@ -67,7 +68,7 @@ import type { StyleDna } from '../bulk/types.js'
 import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
-import { buildStatusExtras } from './status-summary.js'
+import { buildStatusExtras, photoViews } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto, RelightMode } from './types.js'
@@ -623,9 +624,9 @@ function planError(err: unknown): never {
  * or guide angles + angleIds (planner board ids, catalog ids, legacy ids). Unusable ids → BAD_INPUT
  * with `rejectedAngles` / `unknownAngleIds`, before any approval.
  */
-function resolveAngles(dna: BrandDna, offer: OfferInput, size: number, sel: { angleIds?: string[]; angles?: AdAngle[] } = {}, brief?: string): AdAngle[] {
+function resolveAngles(dna: BrandDna, offer: OfferInput, size: number, sel: { angleIds?: string[]; angles?: AdAngle[] } = {}, brief?: string, productFidelity?: 'exact' | 'generated'): AdAngle[] {
   try {
-    return resolvePackAngles({ dna, offer, size, language: dna.language, angleIds: sel.angleIds, angles: sel.angles, brief, preferHook: dna.visual?.styleProfile?.hookType })
+    return resolvePackAngles({ dna, offer, size, language: dna.language, angleIds: sel.angleIds, angles: sel.angles, brief, preferHook: dna.visual?.styleProfile?.hookType, ...(productFidelity ? { productFidelity } : {}) })
   } catch (err) {
     return planError(err)
   }
@@ -657,6 +658,8 @@ export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrase
     ...(libraryIdsFor(item).length ? { libraryImageIds: libraryIdsFor(item) } : {}),
     ...(dna && item.copy ? { forbiddenHits: findForbiddenHits(item.copy, dna).map((h) => ({ phrase: h.phrase, field: h.field })) } : {}),
     ...(item.fidelity ? { fidelity: fidelityView(item.fidelity) } : {}),
+    ...(item.rejectedRatios?.length ? { rejectedRatios: item.rejectedRatios.map((r) => ({ ratio: r.ratio, reason: r.reason, fidelity: fidelityView(r.fidelity) })) } : {}),
+    ...photoViews(item),
     ...(item.error ? { error: item.error } : {}),
   }
 }
@@ -675,6 +678,8 @@ export function fidelityView(f: NonNullable<PackItem['fidelity']>): NonNullable<
     ...(num(f.hueShift) ? { hueShift: f.hueShift as number } : {}),
     ...(num(f.chromaRatio) ? { chromaRatio: f.chromaRatio as number } : {}),
     ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}),
+    ...(num(f.recall) ? { recall: f.recall as number } : {}),
+    ...(f.relightFallback ? { relightFallback: f.relightFallback } : {}),
   }
 }
 
@@ -804,6 +809,8 @@ export interface SavedBrandRefInput {
   productImageIds?: unknown
   /** C3: per-ad photos { "<ad number, 1-based as in adpack_status>": [productImageId…] }. */
   productImageIdsByAd?: unknown
+  /** Alias of productImageIdsByAd (P1 #8): { "<ad number>": [productImageId…] }. */
+  photoPerAd?: unknown
 }
 
 const IMAGE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
@@ -866,6 +873,10 @@ export interface AdPackService {
     brandKitId?: unknown
     productImageIds?: unknown
     productImageIdsByAd?: unknown
+    /** Alias of productImageIdsByAd. */
+    photoPerAd?: unknown
+    /** P1 #8: the hero / primary photo appears in at least one ad (default true). */
+    heroRequired?: unknown
     source: AdPackSource
     /** Fixed id for idempotent create (MCP: the approval id). */
     packId?: string
@@ -890,7 +901,8 @@ export interface AdPackService {
   pollStatus(input: { userId: string; packId: unknown; inlineBudgetMs?: number; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
   editText(input: { userId: string; packId: unknown; itemId: unknown; copy: unknown }): Promise<AdPackEditTextResponse>
-  regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown }): Promise<AdPackRegenerateResponse>
+  /** mode copy | scene (paid, async); `ratio` = regenerate just that ratio of a delivered ad (free, synchronous, P0 #3). */
+  regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown; ratio?: unknown }): Promise<AdPackRegenerateResponse>
   /** Free: re-render a finished ad into more ratios from its stored scene + copy (no model calls, no credits). */
   resize(input: { userId: string; packId: unknown; itemId: unknown; ratios: unknown }): Promise<AdPackResizeResponse>
   cancel(input: { userId: string; packId: unknown }): Promise<AdPackCancelResponse>
@@ -997,7 +1009,8 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     const offerId = parseOptionalUuid(ref.offerId, 'offerId')
     const brandKitId = parseOptionalUuid(ref.brandKitId, 'brandKitId')
     const productImageIds = parseProductImageIds(ref.productImageIds)
-    const productImageIdsByAd = parseProductImageIdsByAd(ref.productImageIdsByAd)
+    if (ref.productImageIdsByAd !== undefined && ref.photoPerAd !== undefined && JSON.stringify(ref.productImageIdsByAd) !== JSON.stringify(ref.photoPerAd)) throw bad('photoPerAd is an alias of productImageIdsByAd: send only one')
+    const productImageIdsByAd = parseProductImageIdsByAd(ref.productImageIdsByAd ?? ref.photoPerAd)
     if (!deps.savedBrandDb) throw new AdPackError('UNAVAILABLE', 'Saved brands are not available in this runtime')
     const t0 = now()
     try {
@@ -1151,11 +1164,12 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
         const brief = parseBrief(input.brief)
         const guideAngles = guideAnglesFor(sel.guideAngles, dna, offer, brief)
-        const angles = resolveAngles(dna, offer, size, { angleIds: sel.angleIds, angles: guideAngles }, brief)
+        // Same render resolution as start (validates productFidelity / relight; relight is free) — it
+        // also decides which formats can be fulfilled (exact mode: no fake hands, P1 #7).
+        const render = resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
+        const angles = resolveAngles(dna, offer, size, { angleIds: sel.angleIds, angles: guideAngles }, brief, render.productFidelity)
         const ads = packAdCount(angles.length, sel.variations)
         if (ads > MAX_PACK_SIZE) throw bad(`angles × variations = ${ads} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
-        // Same render resolution as start (validates productFidelity / relight; relight is free).
-        resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
         return quoteFor(ads, { variations: sel.variations, angleIds: angles.map((a) => a.id) })
       }
       if (sel.angleIds || sel.guideAngles.length) throw bad('angleIds / angles need dna + offer or brandId to resolve')
@@ -1189,7 +1203,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       let savedStyleDnas: StyleDna[] | undefined
       if (fromSaved) {
         // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
-        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd }, input.source)
+        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd, photoPerAd: input.photoPerAd }, input.source)
         if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
         savedStyleDnas = saved.styleDnas ?? []
         dna = saved.dna
@@ -1202,6 +1216,8 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const sel = parseSelection(input)
       const approved = parseApproved(input.approved)
       const render = resolveRenderOptions(input, offer)
+      if (input.heroRequired !== undefined && input.heroRequired !== null && typeof input.heroRequired !== 'boolean') throw bad('heroRequired must be a boolean')
+      const heroRequired = typeof input.heroRequired === 'boolean' ? input.heroRequired : undefined
       const styleDnaId = parseStyleDnaId(input.styleDnaId)
       let styleNote: string | undefined
       if (styleDnaId) {
@@ -1240,6 +1256,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           brandKitId,
           brief,
           render,
+          ...(heroRequired !== undefined ? { heroRequired } : {}),
           ids: { packId },
         })
       } catch (err) {
@@ -1360,6 +1377,29 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       const { pack, items } = await load(input.userId, packId)
       if (pack.status === 'cancelled') throw new AdPackError('NOT_READY', 'Pack was cancelled')
       if (!items.some((i) => i.id === itemId)) throw new AdPackError('NOT_FOUND', 'Ad not found')
+      if (input.ratio !== undefined && input.ratio !== null) {
+        // P0 #3: one ratio of a delivered ad — free (the ad was charged once), synchronous.
+        const [ratio] = parseRatios([input.ratio])
+        if (input.mode !== undefined && input.mode !== 'scene') throw bad('ratio regenerates the image of one ratio only (mode scene); omit mode or use scene')
+        const res = await regenerateRatio({ store: deps.store, gateway: deps.gateway, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, ratio, ...(deps.loadImage ? { loadImage: deps.loadImage } : {}) })
+        if (!res.ok) {
+          if (res.error === 'item_busy') throw new AdPackError('BUSY', 'This ad is still being generated')
+          if (res.error === 'pack_not_found' || res.error === 'item_not_found') throw new AdPackError('NOT_FOUND', res.error === 'pack_not_found' ? 'Pack not found' : 'Ad not found')
+          if (res.error === 'ratio_not_in_pack') throw bad(`ratio ${ratio} is not part of this ad (use adpack_resize to add a new ratio)`)
+          if (res.error === 'not_exact') throw new AdPackError('NOT_READY', 'Ratio-only regeneration needs an exact-mode ad (real product composite); regenerate the whole ad with mode scene')
+          if (res.error === 'cutout_missing') throw new AdPackError('NOT_READY', 'The stored product cut-out of this ad is missing; regenerate the whole ad with mode scene')
+          throw new AdPackError('NOT_READY', 'This ad has no delivered ratio yet; regenerate the whole ad with mode scene')
+        }
+        if (res.costUsd > 0) {
+          await log({ userId: input.userId, feature: 'image', model: ADPACK_IMAGE_MODEL, costUsd: res.costUsd, source: pack.source, durationMs: 0, metadata: { feature: 'adpack_regenerate_ratio', packId, itemIndex: res.item.index, ratio } })
+        }
+        if (res.delivered) await persistLibrary(input.userId, packId)
+        return {
+          item: toItemView(res.item, pack.dna),
+          quote: quoteFor(0),
+          ratio: { ratio, delivered: res.delivered, method: res.method, ...(res.rejected ? { rejected: { ratio: res.rejected.ratio, reason: res.rejected.reason, fidelity: fidelityView(res.rejected.fidelity) } } : {}) },
+        }
+      }
       await requireCredits(input.userId, 1)
       const res = await regenerateItem({ store: deps.store, packId, itemId, userId: input.userId, mode })
       if (!res.ok) {

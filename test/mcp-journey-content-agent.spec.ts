@@ -177,7 +177,8 @@ function journeyGateway(plate: Uint8Array) {
         data: {
           headline: HEADLINES[i],
           subline: SUBLINES[i],
-          bullets: facts.slice(0, 2),
+          // how_to_steps needs ≥ 2 steps (exact mode plans no hand-held format without an in-use photo).
+          bullets: facts.length >= 2 ? facts.slice(0, 2) : [...facts, 'Llevalo al parque', 'Volalo en familia'].slice(0, 2),
           cta: 'Pedí el tuyo',
           caption,
           script: { hook: 'Mirá cómo vuela este avión de papel.', development: 'Lo llevás al parque y lo hacés volar con el control.', cta: 'Escribinos y pedí el tuyo.' },

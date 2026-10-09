@@ -637,6 +637,9 @@ async function groundOnSurface(scene: Buffer, frame: Frame, layout: TemplateLayo
   const bottom = Math.max(...moved.map((b) => b.y + b.h))
   if (bottom > frame.H - 0.02 * frame.H) return { boxes, report }
   if (productOverlap(layout, moved, true) > productOverlap(layout, boxes, true)) return { boxes, report }
+  // Nothing drawn over the scene (text, pills, cards, icons) may end up on the moved product.
+  const hits = (list: Box[]) => overlayBoxes(layout).filter((o) => list.some((b) => overlaps(o, b))).length
+  if (hits(moved) > hits(boxes)) return { boxes, report }
   return { boxes: moved, report: { ...report, snappedPx: shift } }
 }
 

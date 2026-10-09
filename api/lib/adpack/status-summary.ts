@@ -6,7 +6,15 @@
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
 import { findForbiddenHits } from './check-copy.js'
-import type { AdLanguage, AngleCategory, AspectRatio, BrandDna, FidelityMethod, FidelityResult, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AdPhotoRef, AngleCategory, AspectRatio, BrandDna, FidelityMethod, FidelityResult, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
+
+/** The real photo(s) an ad used (P1 #8): exact = its cut-outs' sources, generated = the locked scene photo. */
+export function photoViews(item: Pick<PackItem, 'scene'>): { photo?: AdPhotoRef; parts?: AdPhotoRef[] } {
+  const cutouts = item.scene?.cutouts ?? []
+  const ref = (c: (typeof cutouts)[number]): AdPhotoRef => ({ url: c.sourceUrl, role: c.role, ...(c.productImageId ? { productImageId: c.productImageId } : {}), ...(c.label ? { label: c.label } : {}) })
+  if (cutouts.length) return { photo: ref(cutouts[0]), ...(cutouts.length > 1 ? { parts: cutouts.slice(1).map(ref) } : {}) }
+  return item.scene?.sourcePhoto ? { photo: item.scene.sourcePhoto } : {}
+}
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -82,6 +90,16 @@ export interface AdPackFidelitySummary {
   silhouetteIoU?: number
   hueShift?: number
   diffImageUrl?: string
+  /** Cut-out recall vs the source photo (0–1, P0 #4). */
+  recall?: number
+}
+
+/** A ratio not delivered (product changed there) + the FREE call that regenerates only it (P0 #3). */
+export interface AdPackRejectedRatioSummary {
+  ratio: AspectRatio
+  reason: string
+  fidelity: AdPackFidelitySummary
+  retry: { tool: 'adpack_regenerate'; arguments: { packId: string; itemId: string; ratio: AspectRatio }; call: string }
 }
 
 export interface AdPackDeliverableAd {
@@ -106,6 +124,11 @@ export interface AdPackDeliverableAd {
   forbiddenHits: Array<{ phrase: string; field: string }>
   /** Product fidelity (A4), worst ratio of the ad. */
   fidelity?: AdPackFidelitySummary
+  /** The real product photo this ad used (P1 #8) and the part photos next to it. */
+  photo?: AdPhotoRef
+  parts?: AdPhotoRef[]
+  /** Ratios not delivered (the product changed there), each with its free regenerate call (P0 #3). */
+  rejectedRatios?: AdPackRejectedRatioSummary[]
 }
 
 export interface AdPackDeliverable {
@@ -138,7 +161,15 @@ function fidelitySummary(f: FidelityResult): AdPackFidelitySummary {
     ...(typeof f.silhouetteIoU === 'number' ? { silhouetteIoU: f.silhouetteIoU } : {}),
     ...(typeof f.hueShift === 'number' ? { hueShift: f.hueShift } : {}),
     ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}),
+    ...(typeof f.recall === 'number' ? { recall: f.recall } : {}),
   }
+}
+
+function rejectedRatioSummaries(packId: string, item: PackItem): AdPackRejectedRatioSummary[] {
+  return (item.rejectedRatios ?? []).map((r) => {
+    const args = { packId, itemId: item.id, ratio: r.ratio }
+    return { ratio: r.ratio, reason: r.reason, fidelity: fidelitySummary(r.fidelity), retry: { tool: 'adpack_regenerate' as const, arguments: args, call: `adpack_regenerate ${JSON.stringify(args)}` } }
+  })
 }
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s)
@@ -150,6 +181,7 @@ export function failureReason(error: string | undefined, language: AdLanguage): 
   if (e.startsWith('scene_product_mismatch')) return es ? 'producto no coincidía' : "product didn't match"
   if (e.startsWith('copy_check_failed') && e.includes('forbidden_phrase')) return es ? 'el texto usaba una frase prohibida de la marca' : 'copy used a forbidden brand phrase'
   if (e.startsWith('copy_check_failed') && e.includes('locale_register')) return es ? 'el texto no respetó el trato del idioma (locale)' : 'copy broke the locale register rule'
+  if (e.startsWith('cutout_incomplete')) return es ? 'el recorte perdía piezas del producto (subí la foto con fondo que contraste o un PNG recortado por pieza)' : 'the cut-out dropped product pieces (upload a photo on a contrasting background or a cut-out PNG per piece)'
   if (e.startsWith('cutout_failed')) return es ? 'no se pudo recortar el producto de la foto (subí una foto con fondo limpio)' : 'the product could not be cut out of the photo (upload one on a clean background)'
   if (e.startsWith('fidelity_failed')) return es ? 'el producto no quedó idéntico a la foto' : 'the product did not stay identical to the photo'
   if (e.startsWith('scene_props_failed')) return es ? 'la escena inventaba piezas u objetos del producto' : 'the scene invented product parts or objects'
@@ -263,6 +295,8 @@ export function buildStatusExtras(input: {
         })),
         forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
         ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
+        ...photoViews(i),
+        ...(i.rejectedRatios?.length ? { rejectedRatios: rejectedRatioSummaries(input.packId, i) } : {}),
       }))
     const label = es ? 'Anuncio' : 'Ad'
     const captionsText = clip(ads.map((a) => `${a.index}. ${label} ${a.index}${a.headline ? ` — ${a.headline}` : ''}\n${a.caption}`).join('\n\n'), DELIVERABLE_CAPTIONS_TEXT_MAX)

@@ -85,6 +85,11 @@ function compactItem(item: AdPackItemView) {
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
     ...(item.fidelity ? { fidelity: item.fidelity } : {}),
+    // P0 #3: ratios not delivered (product changed) — regenerate one free with adpack_regenerate { ratio }.
+    ...(item.rejectedRatios?.length ? { rejectedRatios: item.rejectedRatios } : {}),
+    // P1 #8: the real photo this ad used (+ parts).
+    ...(item.photo ? { photo: item.photo } : {}),
+    ...(item.parts?.length ? { parts: item.parts } : {}),
     ...(item.error ? { error: item.error.slice(0, 160) } : {}),
   }
 }
@@ -250,7 +255,7 @@ function startBoundInput(args: Args): Record<string, unknown> {
   for (const key of [
     'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
     'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId',
-    'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
+    'productImageIds', 'productImageIdsByAd', 'photoPerAd', 'heroRequired', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
     'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
     'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
   ] as const) {
@@ -393,6 +398,7 @@ export async function dispatchAdPackTool(options: {
           brandKitId: args.brandKitId,
           productImageIds: args.productImageIds,
           productImageIdsByAd: args.productImageIdsByAd,
+          photoPerAd: args.photoPerAd,
           refresh: args.refresh,
         })
         // G2: the server resolves the profile by id; the full DNA (~3 KB) is only echoed on request.
@@ -433,6 +439,7 @@ export async function dispatchAdPackTool(options: {
             brandKitId: args.brandKitId,
             productImageIds: args.productImageIds,
             productImageIdsByAd: args.productImageIdsByAd,
+            photoPerAd: args.photoPerAd,
             angleIds: args.angleIds,
             angles: args.angles,
             variations: args.variations,
@@ -513,6 +520,8 @@ export async function dispatchAdPackTool(options: {
             brandKitId: args.brandKitId,
             productImageIds: args.productImageIds,
             productImageIdsByAd: args.productImageIdsByAd,
+            photoPerAd: args.photoPerAd,
+            heroRequired: args.heroRequired,
             locale: args.locale,
             register: args.register,
             forbiddenPhrases: args.forbiddenPhrases,
@@ -600,6 +609,22 @@ export async function dispatchAdPackTool(options: {
         }
       }
       case 'adpack_regenerate': {
+        if (args.ratio !== undefined && args.ratio !== null) {
+          // P0 #3: one ratio of a delivered ad — free (charged once with the ad), no approval needed.
+          const res = await service.regenerate({ userId, packId: args.packId, itemId: args.itemId, mode: args.mode, ratio: args.ratio })
+          const r = res.ratio
+          return {
+            status: r?.delivered ? 'regenerated' : 'rejected',
+            packId: args.packId,
+            item: compactItem(res.item),
+            ...(r ? { ratio: r.ratio, method: r.method, delivered: r.delivered } : {}),
+            ...(r?.rejected ? { rejected: [r.rejected] } : {}),
+            chargedCredits: 0,
+            message: r?.delivered
+              ? `${r.ratio} regenerated (${r.method === 'replate' ? 'new background for this ratio' : 're-composited on the same background'}); the other ratios are unchanged. Free.`
+              : `${r?.ratio ?? 'The ratio'} still did not keep the real product identical (${r?.rejected?.reason ?? 'fidelity'}); nothing was delivered for it. Free.`,
+          }
+        }
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input: Record<string, unknown> = { packId: args.packId, itemId: args.itemId, mode: args.mode ?? 'scene' }
         if (typeof args.packId !== 'string' || typeof args.itemId !== 'string') throw new AdPackError('BAD_INPUT', 'packId and itemId are required')

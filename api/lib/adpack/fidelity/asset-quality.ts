@@ -3,8 +3,9 @@
  * background cleanliness, plain-language warnings, and the photo picker used per ad.
  *
  * `pickProductImage` is pure: it prefers the requested role, then the format's preferred roles,
- * then the sharpest / highest-resolution photo — and never a blurry or tiny photo when a better
- * one exists.
+ * then the owner's primary photo, then the sharpest / highest-resolution photo — never a blurry or
+ * tiny photo when a better one of the same role exists. Sharpness is measured at a normalized
+ * 1024 px scale, so an upscaled studio photo is not mistaken for a blurry one (P3 #17).
  */
 import sharp from 'sharp'
 import type { AdFormat, AdLanguage, ProductPhotoRole } from '../types.js'
@@ -182,14 +183,13 @@ export function pickProductImage(pool: PoolImage[], opts: { format?: AdFormat; r
     const exact = list.filter((p) => p.role === opts.role)
     if (exact.length) list = exact
   }
-  // Never a blurry / tiny photo when a better one exists (the owner's primary photo always stays).
-  const strong = list.filter((p) => p.primary || !isWeak(p.quality))
-  if (strong.length) list = strong
   const prefs = opts.role ? [opts.role] : FORMAT_ROLE_PREFERENCE[opts.format ?? 'offer_graphic'] ?? ['hero']
   const roleRank = (p: PoolImage) => {
     const i = p.role ? prefs.indexOf(p.role) : -1
     return i >= 0 ? i : p.role ? prefs.length + 1 : prefs.length // untagged photos rank just after the preferred roles
   }
   const primaryRank = (p: PoolImage) => (p.primary ? 0 : 1)
-  return [...list].sort((a, b) => roleRank(a) - roleRank(b) || primaryRank(a) - primaryRank(b) || (b.quality?.score ?? 0) - (a.quality?.score ?? 0) || pool.indexOf(a) - pool.indexOf(b))[0]
+  // Within the same role (and primary flag), never a blurry / tiny photo when a better one exists.
+  const weakRank = (p: PoolImage) => (isWeak(p.quality) ? 1 : 0)
+  return [...list].sort((a, b) => roleRank(a) - roleRank(b) || primaryRank(a) - primaryRank(b) || weakRank(a) - weakRank(b) || (b.quality?.score ?? 0) - (a.quality?.score ?? 0) || pool.indexOf(a) - pool.indexOf(b))[0]
 }

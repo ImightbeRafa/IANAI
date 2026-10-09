@@ -35,7 +35,7 @@ const PACK_RATIOS = new Set(['1:1', '4:5', '9:16', '16:9'])
 /** adpack_start arguments create_ads forwards unchanged in pack/single mode. */
 export const PACK_PASSTHROUGH = [
   'brief', 'angleIds', 'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId', 'brandKitId', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
-  'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
+  'productImageIds', 'productImageIdsByAd', 'photoPerAd', 'heroRequired', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
   'includeDna', 'language',
   'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
 ] as const

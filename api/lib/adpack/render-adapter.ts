@@ -29,6 +29,7 @@ export function createDefaultRenderer(): Renderer {
         ...(input.productParts?.length ? { productParts: input.productParts.map((p) => toBufferOrString(p)!) } : {}),
         ...(input.light ? { light: input.light } : {}),
         ...(input.surface ? { surface: input.surface } : {}),
+        ...(input.topDown ? { topDown: true } : {}),
         ...(relight
           ? {
               relight: (composite, placements, ratio) =>

@@ -451,6 +451,13 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   if (Object.keys(byAd).length) offer.productImageUrlsByAd = byAd
   // Role per photo: 085 tags / primary first, then the free role ("control") or label; first untagged = hero.
   const rowOf = new Map(usable.map((r) => [urlOf(r), r]))
+  // P1 #8: which product_images row each ad used is reported back (id per photo URL).
+  const idsByUrl: Record<string, string> = {}
+  for (const url of [...productUrls, ...Object.values(byAd).flat()]) {
+    const id = s(rowOf.get(url) ?? null, 'id', 64)
+    if (id) idsByUrl[url] = id
+  }
+  if (Object.keys(idsByUrl).length) offer.photoIdsByUrl = idsByUrl
   const tagged = productUrls.map((url) => {
     const row = rowOf.get(url)
     const fromTags = row ? roleFromImageRow(row) : undefined

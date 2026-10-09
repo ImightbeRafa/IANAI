@@ -70,3 +70,29 @@ export async function wallTablePlate(w: number, h: number, edgeY: number): Promi
 export async function overheadPlate(w: number, h: number): Promise<Buffer> {
   return sharp(svg(w, h, `<rect width="${w}" height="${h}" fill="#d9d2c5"/><rect x="0" y="0" width="${w}" height="${h}" fill="#cfc6b6" opacity="0.25"/>`)).png().toBuffer()
 }
+
+/** Navy rounded badge with white "text" (bars + dots) — the badge carries its own background. */
+export async function navyBadgePng(): Promise<Buffer> {
+  const body =
+    '<rect x="0" y="0" width="420" height="200" rx="36" fill="#14284b"/>' +
+    '<rect x="60" y="60" width="300" height="34" rx="6" fill="#ffffff"/>' +
+    '<rect x="100" y="112" width="220" height="18" rx="4" fill="#ffffff"/>' +
+    '<circle cx="110" cy="160" r="8" fill="#ffffff"/><circle cx="210" cy="160" r="8" fill="#ffffff"/><circle cx="310" cy="160" r="8" fill="#ffffff"/>'
+  return sharp(svg(420, 200, body)).png().toBuffer()
+}
+
+/**
+ * Off-white square JPEG holding a navy badge whose interior text, inner border and dots are the
+ * SAME off-white as the outer background (the report's "Prototipo / HOBBY SHOP" case).
+ */
+export async function offWhiteBadgeJpeg(): Promise<Buffer> {
+  const ow = '#f4f1ea'
+  const body =
+    `<rect width="600" height="400" fill="${ow}"/>` +
+    '<rect x="70" y="80" width="460" height="240" rx="40" fill="#14284b"/>' +
+    `<rect x="92" y="102" width="416" height="196" rx="30" fill="none" stroke="${ow}" stroke-width="6"/>` +
+    `<rect x="140" y="150" width="320" height="44" rx="6" fill="${ow}"/>` +
+    `<rect x="180" y="214" width="240" height="22" rx="4" fill="${ow}"/>` +
+    `<circle cx="200" cy="268" r="9" fill="${ow}"/><circle cx="300" cy="268" r="9" fill="${ow}"/><circle cx="400" cy="268" r="9" fill="${ow}"/>`
+  return sharp(svg(600, 400, body)).jpeg({ quality: 95 }).toBuffer()
+}

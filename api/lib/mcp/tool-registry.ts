@@ -600,7 +600,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'Default ratios 4:5 (feed) + 9:16 (story); 1:1 on request or later free via adpack_resize. locale (e.g. "es-CR") makes the register a hard rule (voseo for CR); forbiddenPhrases/forbiddenClaims are verified on image text, caption and script. ' +
       'The approval shows the exact plan {items, unitCost, total}; on retry the plan is recomputed and, if count or credits differ, the tool answers status=plan_changed (code PLAN_CHANGED, approved vs planned) and runs nothing — ask the user again. ' +
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
-      'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd = {"1": [id]} per ad. ' +
+      'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd (alias photoPerAd) = {"1": [id]} per ad; heroRequired (default true) puts the hero photo in at least one ad; every ad reports photo {productImageId, url, role, label}. ' +
       'Creative control: creativeFreedom "high" (default when you give only brand/offer) lets Advance choose angle, hook, format, layout family and scene; pass angleIds (adpack_angles / guide_bulk_angles adpackAngleId) or angles (guide_bulk_angles adpackAngle objects) to steer. variations 1–3 = ads per angle (same copy, different scene/layout; credits = ads × variations). styleDnaId (list_style_dnas) makes the layouts follow the brand\'s winning ads; layoutFamily forces one look. The response lists per ad {angleId, category, hookType, format, layoutFamily, rationale}. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
       'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
@@ -641,7 +641,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Ad Pack: regenerate one ad (mode scene = new image, copy = new text + image). Use the exact call from adpack_status failures[].retry.call for a failed ad. Costs one ad of credits: in-chat confirmation via confirm_execute, then retry with approvalRequestId (never invent it) and poll adpack_status every ~20-30 s.',
+      'Ad Pack: regenerate one ad (mode scene = new image, copy = new text + image). Use the exact call from adpack_status failures[].retry.call for a failed ad. Costs one ad of credits: in-chat confirmation via confirm_execute, then retry with approvalRequestId (never invent it) and poll adpack_status every ~20-30 s. ' +
+      'FREE variant: { packId, itemId, ratio } regenerates only a ratio listed in the ad\'s rejectedRatios (the ad was delivered in its other ratios and charged once): re-composite, else a new background for that ratio alone, fidelity re-checked; no approval.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: true,
