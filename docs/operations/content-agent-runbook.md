@@ -1,6 +1,6 @@
 # Content agent runbook — a brand from zero to 2 ads, only via MCP
 
-For an agent ("Content") connected to the Advance AI MCP (`POST https://advanceai.studio/api/mcp`, registry **0.13.0**).
+For an agent ("Content") connected to the Advance AI MCP (`POST https://advanceai.studio/api/mcp`, registry **0.14.0**).
 Everything below is a `tools/call`. All brand data (names, prices, photos, claims) comes from the owner at runtime — the values here are **placeholders**.
 
 Proven end to end (offline fakes, real renderer + real fidelity pipeline) by `test/mcp-journey-content-agent.spec.ts`, with migration 085 applied **and** pending.
@@ -26,6 +26,8 @@ Proven end to end (offline fakes, real renderer + real fidelity pipeline) by `te
 Expected: `{ status: "created", brand: { brandId }, brandKit: { brandKitId, isPrimary: true } }`.
 If the name already exists (accent/case/space-insensitive): `{ status: "exists", brand: { brandId } }` — use that id (nothing was created). `allowDuplicate: true` only if the owner really wants a second brand.
 
+Fix brand fields later (0.14): `update_brand { brandId, name?, location?, salesChannels?, doesShipping?, shippingMethod?, icpDescription? }` — a placeholder (`"country"`) is never stored (`ignoredPlaceholders`), `null` clears a field, over-long text is an error (never cut). With several offers, pick the one tools use when `offerId` is omitted: `set_default_offer { brandId, offerId }` (`list_brands` reports it as `defaultOfferId`, resolution `set_default_offer`).
+
 ## 2. Brand kit
 
 ```json
@@ -41,6 +43,10 @@ If the name already exists (accent/case/space-insensitive): `{ status: "exists",
 ```
 
 Placeholder values (`"country"`, `"todo el país"`, `"Personas 18–65"`, `"N/A"`…) are not stored and are listed in `ignoredPlaceholders`.
+
+Fonts: Space Grotesk and **Inter** are bundled (OFL), so `{ heading: "Space Grotesk", body: "Inter" }` is drawn exactly; every finished ad reports `fontsUsed { heading, body, fallbacks[] }` (a brand font that had to be mapped, or glyphs drawn with Fira Sans, show up in `fallbacks`).
+
+Style DNA (0.14): the kit's `styleDnaIds` selects which Style DNAs shape ads — `[]` = none (never an implicit `dna_1`), omitted/`null` = every kit Style DNA. `update_brand_kit` echoes `styleDnaIds` + `activeStyleDnaIds`. `detach_style_dna { brandKitId, styleDnaId }` stops one from shaping ads (kept on the kit); `delete_style_dna { brandKitId, styleDnaId, confirm: "<exact name>" }` removes it (in-chat approval). For one pack only: `create_ads { …, useStyleDna: false }`.
 
 ## 3. Logo (Drive / Dropbox / https)
 
@@ -101,6 +107,8 @@ Expected: `{ status: "imported" | "partial", imported, failed, results: [{ statu
 - `quality.warnings` (e.g. "baja resolución, se verá blanda", "foto borrosa", "fondo con ruido") → ask the owner for a better original; the sharpest photo is preferred automatically.
 - Large Drive files (virus-scan page) are handled (`driveLargeFileConfirmed: true`).
 - 085 pending: `roleStoredAs: "label"` (role kept as a `[part] …` label prefix) — roles still reach the ads.
+- Labels up to 160 characters (longer = clear error, never cut). Audit the setup any time: `list_assets { brandId, offerId }` → per photo `role`, `partName`, `tags`, `isPrimary`, `quality`, `sourceUrl`, `label` (+ `kitAssets`: logo, variants, references, winners, documents).
+- Direct uploads: `create_upload_url { brandId, offerId, kind: "product_photo", role: "hero"|"part"|…, label?, tags?, filename, contentType }` (`sizeBytes` optional, 0 = unknown) → PUT → `finalize_upload { uploadId }` returns the same `quality` report, `role`, `tags`, `isPrimary` and the label (given, else a clean name from the file). Rename later with `tag_product_image { productImageId, tags, label }`.
 
 Optional: winners as style reference — `import_image { brandId, kind: "winner_ad", url }` → returns `styleDnaId: "winners"`; pass it to `create_ads` to make layouts follow the brand's winning ads (style only, never copied).
 
@@ -122,14 +130,14 @@ Expected first answer (nothing runs yet):
   "quote": { … }, "gaps": [ … ], "notes": [ … ] }
 ```
 
-Show `userPrompt`. Mention `gaps` (missing facts are simply not mentioned in the ads). When the user says yes:
+Show `userPrompt` **and the per-ad `plan[]`** (0.14: `{ index, angleId, category, hookType, format, layoutFamily, rationale, photo: { productImageId, role, label, url }, ratios }` — the same deterministic plan the approved run follows; the photo is the planned pick, a blurry one is swapped for the next best at run time). Mention `gaps` (missing facts are simply not mentioned in the ads). The approval is valid **24 h**; calling `create_ads` again with the same arguments returns the same open approval (`reused: true`, and `approvalStatus: "approved"` once confirmed — then just retry with its `approvalRequestId`). When the user says yes:
 
 ```json
 { "name": "confirm_execute", "arguments": { "approvalRequestId": "<id>", "action": "approve" } }
 { "name": "create_ads", "arguments": { "brandId": "<brandId>", "offerId": "<offerId>", "count": 2, "ratios": ["4:5", "9:16"], "approvalRequestId": "<id>" } }
 ```
 
-Expected: `{ status: "completed", packId: "<id>", creativeFreedom: "high", plan: [{ index, angleId, category, hookType, format, layoutFamily, rationale }] }`.
+Expected (0.14): `{ status: "running", packStatus: "planned", moreWork: true, packId: "<id>", etaSeconds, pollAfterSeconds, creativeFreedom: "high", plan: [{ index, angleId, category, hookType, format, layoutFamily, rationale, photo, ratios }], statusMessage: "Advance está generando un pack de anuncios…" }` — work has begun; it is **not** finished. Never tell the user it is done until `adpack_status` says `moreWork: false`.
 With only brandId + offerId, Advance picks angle, hook, scene and layout and says why (`rationale`). To steer: `angleIds` (from `adpack_angles` / `guide_bulk_angles`), `layoutFamily`, `styleDnaId`, `variations` (1–3), `brief` (theme only, never a fact).
 
 ## 7. Poll and deliver
@@ -138,7 +146,9 @@ With only brandId + offerId, Advance picks angle, hook, scene and layout and say
 { "name": "adpack_status", "arguments": { "packId": "<id>" } }
 ```
 
-Every ~20–30 s until `moreWork: false` (or `get_execute_result { jobId: "<id>" }`, which returns the same pack status + deliverable). Relay `summary` while it runs.
+The pack advances **in the background without polling** (self-continuing slices; the minute cron also resumes a stalled pack). `adpack_status` is a cheap read (< 2 s, never runs generation inline): check again after `retryAfterSeconds` (10–30 s, from the ETA) until `moreWork: false` (or `get_execute_result { jobId: "<id>" }`, which returns the same pack status + deliverable and says `status: "running"` until the pack is terminal). Relay `summary` while it runs.
+
+A failed ad is **retried automatically up to 2 times inside the same approval** (new copy for copy failures, a new plate / light for scene or fidelity failures) before it is reported; `attempts` / `attemptLog` say how many tries it took. Only delivered ads are charged.
 
 Finished:
 
@@ -173,5 +183,8 @@ Present each ad: headline, angle + rationale, PNG/JPG links per ratio, caption. 
 | `migrationPending: "085_…"` | Structured offer/kit fields not stored yet | Pass `immutableAttributes` / `allowedProps` / `forbiddenClaims` to `create_ads`; re-run `update_offer` after 085 is applied |
 | `PLAN_CHANGED` (`status: "plan_changed"`) | The plan differs from what was approved (count or credits) — nothing ran, nothing charged | Show approved vs planned and ask again (call without `approvalRequestId`) |
 | `INSUFFICIENT_CREDITS` | Not enough credits for the quoted total | Top up, or fewer ads |
-| `failures[]` in `adpack_status` | An ad failed (e.g. product did not match, scene invented parts) — not charged | Explain `reason`; offer `failures[].retry.call` (paid, needs approval) |
+| `failures[]` in `adpack_status` | An ad failed even after 2 automatic retries (`attempts: 3`, `attemptLog`) — not charged | Explain `reason`; offer `failures[].retry.call` (paid, needs approval) |
+| `reused: true` on an approval | Same arguments as an open approval (24 h) | Do not ask twice: if `approvalStatus: "approved"`, retry with its `approvalRequestId` |
+| `BAD_INPUT` `… is N characters; the maximum is …` | Text over a limit (labels 160, props 160, technical specs 2000) — nothing was cut | Shorten it and send again |
+| `truncated: [{ field, from, to }]` (adpack_from_brand) | A saved value is longer than the ads use | Shorten the saved field if the cut part matters |
 | `forbiddenHits` non-empty | A forbidden phrase reached the copy | Do not publish; fix with `adpack_edit_text` |

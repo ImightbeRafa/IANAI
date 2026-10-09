@@ -183,7 +183,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'sync_write',
     description:
-      'Tag a product photo {productImageId, tags: hero|contenido-kit|caja|en-uso|detalle|part, role?} (role = kit part shown, e.g. "control"). "hero" photos are preferred after the primary. Free.',
+      'Tag a product photo {productImageId, tags: hero|contenido-kit|caja|en-uso|detalle|part, role?, label?} (role = kit part shown, e.g. "control"; label renames the photo, max 160). "hero" photos are preferred after the primary. Free.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -193,7 +193,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'library_sessions',
     risk: 'sync_write',
     description:
-      'Direct upload without the web app: {brandId, offerId?, kind: product_photo|logo|reference_ad|winner_ad|document, role?, filename, contentType} → signed uploadUrl. ' +
+      'Direct upload without the web app: {brandId, offerId?, kind: product_photo|logo|reference_ad|winner_ad|document, role? (product_photo: hero|part|box|contents|in_use|detail, same as import_image), variant? (logo), label?, tags?, setPrimary?, filename, contentType, sizeBytes? (optional; 0 or omitted = unknown)} → signed uploadUrl. ' +
       'PUT the raw bytes there (content-type header), then call finalize_upload {uploadId}. product_photo needs offerId. Free, no credits.',
     enabled: true,
     requiresApproval: false,
@@ -204,7 +204,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'library_sessions',
     risk: 'sync_write',
     description:
-      'Finish a create_upload_url upload {uploadId}: checks the file exists, size and type limits, then saves it (product photo → productImageId on the offer; logo / reference ad / winner ad / document → primary brand kit) and returns its stable Advance URL. Idempotent. Free.',
+      'Finish a create_upload_url upload {uploadId}: checks the file exists, its real size and type, then saves it (product photo → productImageId on the offer with role/tags/primary and the label given (else a clean name from the file); logo / reference ad / winner ad / document → primary brand kit) and returns its stable Advance URL plus the same quality report as import_image {width, height, sharpness, backgroundClean, warnings}. Idempotent. Free.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -214,7 +214,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'read',
     description:
-      'List product, context, and generated images for an owned brand/offer. Returns stored HTTPS URLs and reusable productImageId values.',
+      'List product, context, and generated images for an owned brand/offer: stored HTTPS URLs, reusable productImageId values and, per product photo, role (hero|part|box|contents|in_use|detail), partName, tags, isPrimary, quality, sourceUrl and label — audit the photo setup after importing. Without kind it also returns kitAssets (logo + variants, reference images, winners, documents).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -568,7 +568,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'START HERE to make ads for a saved brand: create_ads { brandId, offerId?, mode: pack|single|carousel|edit, count?, ratios?, brief? }. ' +
       'Routes to the right implementation with the same in-chat approval (approval { items, unitCost, total, expiresAt }) → confirm_execute → retry create_ads with the same arguments + approvalRequestId. ' +
-      'pack/single then poll adpack_status with the packId; carousel/edit poll get_execute_result with the jobId. ' +
+      'pack/single answer status "running" with packId, etaSeconds and pollAfterSeconds as soon as work begins (never "completed" before the pack is terminal); the pack advances in the background without polling — check adpack_status with the packId every pollAfterSeconds; carousel/edit poll get_execute_result with the jobId. The approval lists plan[] per ad (angle, rationale, layoutFamily, planned photo, format) and lasts 24 h; the same arguments again reuse the open approval. useStyleDna:false = no Style DNA influence. Failed ads are retried automatically (up to 2×) inside the same approval; only delivered ads are charged. ' +
       'pack/single also accept the adpack_start options: productImageIds / productImageIdsByAd (photo pool, first = hero), saveToOffer + offerPatch / saveToBrandKit + brandKitPatch (persist chat corrections first), locale / register / forbiddenPhrases / forbiddenClaims, angleIds. ' +
       CREATE_ADS_DECISION_TABLE,
     enabled: true,
@@ -627,7 +627,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'adpack_quote',
     group: 'guide_studio',
     risk: 'read',
-    description: 'Ad Pack: credit quote for a pack (size, or dna + offer for the planned size). No credits.',
+    description: 'Ad Pack: credit quote for a pack (size, or dna + offer / brandId for the planned size) with plan[] per ad: angle, rationale, layoutFamily, planned photo, format, ratios — the same deterministic plan the approved start runs. No credits.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -643,7 +643,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
       'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd = {"1": [id]} per ad. ' +
       'Creative control: creativeFreedom "high" (default when you give only brand/offer) lets Advance choose angle, hook, format, layout family and scene; pass angleIds (adpack_angles / guide_bulk_angles adpackAngleId) or angles (guide_bulk_angles adpackAngle objects) to steer. variations 1–3 = ads per angle (same copy, different scene/layout; credits = ads × variations). styleDnaId (list_style_dnas) makes the layouts follow the brand\'s winning ads; layoutFamily forces one look. The response lists per ad {angleId, category, hookType, format, layoutFamily, rationale}. ' +
-      'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
+      'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote + plan[] per ad; valid 24 h; identical arguments reuse it) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. The started answer is status "running" (packId, etaSeconds, pollAfterSeconds): the pack advances on its own; failed ads are retried automatically up to 2 times before being reported. useStyleDna:false disables any Style DNA influence. ' +
       'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
       'Guarantees: only confirmed facts are used for prices/claims; text on the image is rendered exactly (never drawn by the image model). ' +
       'productFidelity "exact" (default when the offer has a product photo): the real product photo pixels are cut out and composited into a generated scene, scored for fidelity, and an ad whose product does not match is failed (never delivered); "generated" lets the image model redraw the product. Saved offers with lockProductAppearance always run exact; ad_profile immutableAttributes / allowedProps and tagged photos (primary/hero/part/caja/contenido-kit/en-uso/detalle) are applied automatically. Relighting is included and free: exact mode always harmonizes the real product into the scene (shading, white balance + grade, shadows, reflection, grain) without redrawing it; relight "ai" adds a guarded model pass at no extra cost. Optional: allowedProps (kit objects allowed in scenes), immutableAttributes (e.g. "hélices blancas"), offer.productPhotos with roles for multi-part products. Takes ~2 min per 10 ads. ' +
@@ -658,7 +658,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     risk: 'read',
     description:
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
-      'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
+      'A cheap read (answers in < 2 s, never runs generation inline): the pack advances in the background without polling (a pack of 10 takes ~2 min). Check again after retryAfterSeconds and STOP as soon as moreWork=false. Items / deliverable ads report attempts and fontsUsed {heading, body, fallbacks}. ' +
       'When finished it returns deliverable {ads[{index, format, angleId, category, hookType, rationale, layoutFamily, variation?, headline, caption, links{4:5,9:16,…}, files[{ratio, url (full-res PNG), jpgUrl (same image as full-res JPG), width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions with the angle and why (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
       'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
     enabled: true,

@@ -1,3 +1,17 @@
+## 2026-10-09 — MCP 0.14.0: Ad Packs run without polling, plan before paying, Style DNA control
+
+**Area:** adpack, mcp, cron (code only; no migration, no wrangler change)
+**Files:** `api/lib/adpack/background.ts`, `api/lib/adpack/cron-sweep.ts`, `api/lib/adpack/service.ts`, `api/lib/adpack/pack-runner.ts`, `api/lib/mcp/adpack-tools.ts`, `api/lib/mcp/approval*.ts`, `api/lib/mcp/brand-*.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/text-limits.ts`, `api/mcp-guide-analysis.ts`, `api/lib/adpack/render/fonts/Inter-*.ttf`
+
+Real-test report items #9, #12–#16, #18–#20, #22: create_ads/adpack_start answer `running`
+(never `completed` early); self-continuing lease-safe background slices + cheap status
+(`retryAfterSeconds`) + minute-cron sweep of stale packs; per-ad plan in the quote, 24 h
+approvals, identical re-quote reuse; automatic retries (≤ 2) inside the approval; Inter bundled
+and `fontsUsed` reported; `useStyleDna:false`, `styleDnaIds: []` = none, `detach_style_dna` /
+`delete_style_dna`; upload role enum + quality report + labels; no silent truncation; richer
+`list_assets`; `update_brand`, `set_default_offer`, audience de-duplication. Docs:
+`docs/operations/content-agent-runbook.md`, `docs/operations/mcp-user-tools.md`.
+
 ## 2026-10-06 — Cloudflare Containers: round-6 container-image smoke, docs only
 
 **Area:** docs

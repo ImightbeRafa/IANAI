@@ -493,7 +493,8 @@ describe('MCP registry: adpack_from_brand + happy path descriptions', () => {
     expect(getMcpTool('adpack_status')!.description).toContain('deepLink')
     // Poll cadence, stop condition, deliverable presentation, no invented ids, price gap.
     const status = getMcpTool('adpack_status')!.description
-    expect(status).toContain('~20-30 s')
+    expect(status).toContain('retryAfterSeconds')
+    expect(status).toContain('without polling')
     expect(status).toContain('STOP as soon as moreWork=false')
     expect(status).toContain('captionsText')
     expect(status).toContain('failures[]')
