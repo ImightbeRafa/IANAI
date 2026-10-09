@@ -314,6 +314,23 @@ export interface AdPackAnglesResponse {
   angles: AdAngle[]
 }
 
+/** #15: what one ad of the pack will be — computed deterministically BEFORE approval (quote / approval). */
+export interface AdPackPlannedAd {
+  /** 1-based ad number (as in adpack_status). */
+  index: number
+  angleId: string
+  category?: AngleCategory
+  hookType: HookType
+  format: AdAngle['format']
+  layoutFamily?: LayoutFamily
+  variation?: number
+  /** Short "why this angle". */
+  rationale?: string
+  /** Planned product photo (exact mode: the real photo composited; a blurry one is swapped at run time). */
+  photo?: { productImageId?: string; role?: string; label?: string; url: string; source: 'per_ad' | 'pool' }
+  ratios: AspectRatio[]
+}
+
 export interface AdPackQuote {
   /** Ads in the pack (angles × variations). */
   size: number
@@ -327,6 +344,8 @@ export interface AdPackQuote {
   variations?: number
   /** Distinct angles (size / variations), when variations > 1. */
   angles?: number
+  /** #15: the per-ad plan (with brand/offer or dna + offer and `withPlan`). */
+  plan?: AdPackPlannedAd[]
 }
 
 export interface AdPackStartResponse {
@@ -337,8 +356,8 @@ export interface AdPackStartResponse {
   existing: boolean
   creativeFreedom?: CreativeFreedom
   variations?: number
-  /** What the planner decided per ad (angle, hook, format, layout family, why). */
-  angles?: Array<{ index: number; angleId: string; category?: AngleCategory; hookType: HookType; format: AdAngle['format']; layoutFamily?: LayoutFamily; variation?: number; rationale?: string }>
+  /** What the planner decided per ad (angle, hook, format, layout family, why, planned photo, ratios). */
+  angles?: AdPackPlannedAd[]
   styleProfile?: StyleRenderProfile
   notes?: string[]
   /** Estimated seconds until the pack finishes (default step timings × pending steps ÷ workers). */

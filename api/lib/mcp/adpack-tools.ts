@@ -23,6 +23,7 @@ import {
 } from '../adpack/service.js'
 import type { AdPackItemView, AdPackPlanSummary, AdPackStatusResponse } from '../adpack/http-types.js'
 import {
+  adPackApprovalTtlMs,
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
   denyMcpApprovalRequest,
@@ -217,6 +218,8 @@ async function approvedOrPrompt(options: {
   summaryEn: string
   appOrigin?: string
   language?: 'es' | 'en'
+  /** Extra fields on the approval payload (e.g. the per-ad plan). */
+  extra?: Record<string, unknown>
 }): Promise<{ prompt: Record<string, unknown> } | { replay: Record<string, unknown> } | { approved: AdPackPlanSummary | null }> {
   if (!options.approvalRequestId) {
     return {
@@ -232,6 +235,10 @@ async function approvedOrPrompt(options: {
         summaryEs: options.summaryEs,
         summaryEn: options.summaryEn,
         language: options.language,
+        // #15: 24 h (configurable) and an identical re-quote reuses the open approval.
+        ttlMs: adPackApprovalTtlMs(),
+        reuseIdentical: true,
+        ...(options.extra ? { extra: options.extra } : {}),
       }),
     }
   }
@@ -466,6 +473,10 @@ export async function dispatchAdPackTool(options: {
             variations: args.variations,
             productFidelity: args.productFidelity,
             relight: args.relight,
+            ratios: args.ratios,
+            creativeFreedom: args.creativeFreedom,
+            layoutFamily: args.layoutFamily,
+            withPlan: true,
           })),
         }
       case 'adpack_start': {
@@ -484,9 +495,11 @@ export async function dispatchAdPackTool(options: {
         // Same parser + resolver as start: guide angles + angleIds (catalog / planner / legacy ids) × variations.
         const render = { productFidelity: args.productFidelity, relight: args.relight }
         const selection = { angleIds: args.angleIds, angles: args.angles, variations: args.variations, brief: args.brief }
+        // #15: the quote carries the deterministic per-ad plan (angle, why, layout, photo, format) shown BEFORE approval.
+        const planInput = { ratios: args.ratios, creativeFreedom: args.creativeFreedom, layoutFamily: args.layoutFamily, withPlan: true }
         const quote = preview
-          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, ...selection, ...render })
-          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, ...selection, ...render })
+          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, ...selection, ...render, ...planInput })
+          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, ...selection, ...render, ...planInput })
         const plan = adPackPlanSummary(quote.size)
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
         const vary = quote.variations && quote.variations > 1 ? { es: ` (${quote.angles} ángulos × ${quote.variations} variaciones)`, en: ` (${quote.angles} angles × ${quote.variations} variations)` } : { es: '', en: '' }
@@ -502,11 +515,15 @@ export async function dispatchAdPackTool(options: {
           summaryEn: `${quote.size} static ${quote.size === 1 ? 'ad' : 'ads'}${vary.en}${target} · ratios ${ratios}`,
           appOrigin: options.appOrigin,
           language: args.language === 'en' ? 'en' : undefined,
+          ...(quote.plan?.length ? { extra: { plan: quote.plan } } : {}),
         })
         if ('prompt' in gate) {
           return {
             ...gate.prompt,
             quote,
+            ...(quote.plan?.length
+              ? { planNote: 'plan[] = what each ad will be (angle, why, layout family, planned photo, format, ratios). Show it with the cost; the approved run follows it. The photo is the planned pick; a blurry/unusable photo is swapped for the next best one at run time.' }
+              : {}),
             ...(preview ? { brandName: preview.dna.brandName, offerName: preview.offer.name, gaps: preview.gaps, notes: preview.notes } : {}),
             ...(saved ? { saved } : {}),
             ...(args.includeDna === true && preview ? { dna: preview.dna } : {}),

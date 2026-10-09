@@ -15,6 +15,16 @@ import { canStoreExecuteResult, matchesRunningCasExpectation } from './cas-runni
 
 export const MCP_APPROVAL_TTL_MS = 60 * 60 * 1000 // 1 hour
 
+/**
+ * #15: Ad Pack approvals live 24 h by default (owner feedback: 1 h expired mid-review).
+ * Configurable with ADPACK_APPROVAL_TTL_HOURS (1–168).
+ */
+export function adPackApprovalTtlMs(env: Record<string, string | undefined> = process.env): number {
+  const hours = Number(env.ADPACK_APPROVAL_TTL_HOURS)
+  const h = Number.isFinite(hours) && hours >= 1 ? Math.min(168, hours) : 24
+  return Math.round(h * 60 * 60 * 1000)
+}
+
 export type McpApprovalStatus =
   | 'pending'
   | 'approved'
@@ -67,6 +77,11 @@ export type McpApprovalStore = {
     result: unknown,
     atMs: number
   ) => Promise<McpApprovalRecord | null>
+  /**
+   * #15: newest pending/approved, unexpired, never-run approval of this user + tool + input hash
+   * (identical re-quote reuses it instead of a new approval round). Optional.
+   */
+  findOpenByInput?: (opts: { userId: string; toolName: string; inputHash: string; nowMs: number }) => Promise<McpApprovalRecord | null>
 }
 
 export function hashMcpApprovalToken(token: string): string {
@@ -191,6 +206,26 @@ export async function denyMcpApprovalRequest(
   const updated = await store.markDenied(row.id, nowMs)
   if (!updated) return { ok: false, reason: 'Approval could not be denied' }
   return { ok: true, record: updated }
+}
+
+/**
+ * #15: an open approval for the exact same tool + arguments (input hash) and the same quoted cost,
+ * still pending or approved, unexpired and never run. Null when none (or the store cannot look up).
+ */
+export async function findReusableMcpApproval(
+  store: McpApprovalStore,
+  options: { userId: string; toolName: string; input: unknown; quotedCreditCost: number | null; nowMs?: number }
+): Promise<McpApprovalRecord | null> {
+  if (!store.findOpenByInput) return null
+  const nowMs = options.nowMs ?? Date.now()
+  const row = await store.findOpenByInput({ userId: options.userId, toolName: options.toolName, inputHash: hashMcpToolInput(options.input), nowMs }).catch(() => null)
+  if (!row) return null
+  if (row.userId !== options.userId || row.toolName !== options.toolName) return null
+  if (row.status !== 'pending' && row.status !== 'approved') return null
+  if (nowMs > row.expiresAtMs || row.resultJson != null) return null
+  // A different price (the plan changed) needs a fresh approval.
+  if ((row.quotedCreditCost ?? null) !== (options.quotedCreditCost ?? null)) return null
+  return row
 }
 
 /**
@@ -376,6 +411,13 @@ export function createMemoryMcpApprovalStore(): McpApprovalStore {
       const next = { ...row, resultJson: result, resultStoredAtMs: atMs }
       byId.set(id, next)
       return { ...next }
+    },
+    async findOpenByInput({ userId, toolName, inputHash, nowMs }) {
+      const rows = [...byId.values()]
+        .filter((r) => r.userId === userId && r.toolName === toolName && r.inputHash === inputHash)
+        .filter((r) => (r.status === 'pending' || r.status === 'approved') && r.resultJson == null && r.expiresAtMs >= nowMs)
+        .sort((a, b) => b.createdAtMs - a.createdAtMs)
+      return rows[0] ? { ...rows[0] } : null
     },
     async compareAndSwapRunningResult(id, expectedStartedAtMs, result, atMs) {
       const row = byId.get(id)

@@ -483,6 +483,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offer: adpackOffer,
           brief: { type: 'string', maxLength: 500 },
           ...adpackSelection,
+          ratios: adpackRatios,
           productFidelity: productFidelityProps.productFidelity,
           relight: productFidelityProps.relight,
         },

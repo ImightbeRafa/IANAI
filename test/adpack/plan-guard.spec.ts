@@ -194,7 +194,11 @@ describe('F1 through the web door (parity)', () => {
     const angleIds = [board[1].id, board[7].id, board[9].id]
     const web = await callWeb(handler, USER_A, { action: 'quote', dna: serum.dna, offer: serum.offer, size: 3, angleIds })
     const mcp = await callMcp({ ...env, approvalStore: createMemoryMcpApprovalStore() }, USER_A, 'adpack_quote', { dna: serum.dna, offer: serum.offer, size: 3, angleIds })
-    expect(web.body).toEqual({ size: 3, credits: 3 * PER_AD, perAd: PER_AD, angleIds })
+    expect(web.body).toMatchObject({ size: 3, credits: 3 * PER_AD, perAd: PER_AD, angleIds })
+    // #15: the per-ad plan (angle, why, layout family, format, photo, ratios) comes with the quote.
+    const plan = (web.body as { plan: Array<Record<string, unknown>> }).plan
+    expect(plan.map((p) => p.angleId)).toEqual(angleIds)
+    for (const p of plan) expect(p).toMatchObject({ index: expect.any(Number), rationale: expect.any(String), layoutFamily: expect.any(String), format: expect.any(String), ratios: ['4:5', '9:16'] })
     expect(mcp.payload).toEqual(web.body)
   })
 })

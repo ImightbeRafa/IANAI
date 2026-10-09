@@ -35,6 +35,7 @@ import type {
   AdPackIngestDnaResponse,
   AdPackItemView,
   AdPackPlanSummary,
+  AdPackPlannedAd,
   AdPackQuote,
   AdPackRegenerateResponse,
   AdPackResizeResponse,
@@ -72,7 +73,8 @@ import { ADPACK_SLICE_BUDGET_MS, kickPackAdvance, sweepStalePacks, type Backgrou
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
 import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto, RelightMode } from './types.js'
-import { hasUsableProductPhoto, isProductPhotoRole } from './fidelity/photos.js'
+import { hasUsableProductPhoto, isProductPhotoRole, resolveProductPhotos } from './fidelity/photos.js'
+import { pickProductImage } from './fidelity/asset-quality.js'
 import type { ImageLoader } from './fidelity/pipeline.js'
 import type { DnaPart } from './dna/part.js'
 
@@ -729,6 +731,37 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * #15: per-ad plan view (quote / approval / start). Photo = the per-ad pick, else the format's
+ * preferred role from the pool (quality is measured at run time, so a blurry pick may be swapped).
+ */
+export function plannedAdsView(items: PackItem[], offer: OfferInput, exact: boolean, ratios: AspectRatio[]): AdPackPlannedAd[] {
+  return items.map((i) => {
+    const perAd = offer.productImageUrlsByAd?.[String(i.index)]?.filter(Boolean) ?? []
+    let photo: AdPackPlannedAd['photo']
+    if (perAd.length) {
+      const known = (offer.productPhotos ?? []).find((p) => p.url === perAd[0])
+      photo = { url: perAd[0], role: 'hero', ...(known?.id ? { productImageId: known.id } : {}), ...(known?.label ? { label: known.label } : {}), source: 'per_ad' }
+    } else {
+      const pool = resolveProductPhotos(offer).map((p) => ({ url: p.url, role: p.role, ...(p.id ? { id: p.id } : {}), ...(p.label ? { label: p.label } : {}) }))
+      const pick = exact ? pickProductImage(pool, { format: i.angle.format }) : pool[0] ?? null
+      if (pick) photo = { url: pick.url, ...(pick.role ? { role: pick.role } : {}), ...(pick.id ? { productImageId: pick.id } : {}), ...(pick.label ? { label: pick.label } : {}), source: 'pool' }
+    }
+    return {
+      index: i.index + 1,
+      angleId: i.angle.id,
+      ...(i.angle.category ? { category: i.angle.category } : {}),
+      hookType: i.angle.hookType,
+      format: i.angle.format,
+      ...(i.angle.layoutFamily ? { layoutFamily: i.angle.layoutFamily } : {}),
+      ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}),
+      ...(i.angle.rationale ? { rationale: i.angle.rationale } : {}),
+      ...(photo ? { photo } : {}),
+      ratios,
+    }
+  })
+}
+
 function adPackPlanSummaryFrom(approved: { items: number; total: number }): AdPackPlanSummary {
   return { items: approved.items, unitCost: approved.items ? Math.round(approved.total / approved.items) : 0, total: approved.total, currency: 'credits' }
 }
@@ -840,7 +873,7 @@ export interface AdPackService {
    * Quote for exactly the ads start would run: same resolver (guide angles + angleIds, or the
    * planner's `size`), × variations. Relighting (exact mode) is included and free.
    */
-  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; brief?: unknown; productFidelity?: unknown; relight?: unknown } & SelectionInput & SavedBrandRefInput): Promise<AdPackQuote>
+  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; brief?: unknown; productFidelity?: unknown; relight?: unknown; ratios?: unknown; withPlan?: boolean } & SelectionInput & SavedBrandRefInput): Promise<AdPackQuote>
   startPack(input: {
     userId: string
     /** dna + offer, OR brandId (+ offerId / brandKitId): the server builds them from the saved brand. */
@@ -1162,8 +1195,17 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         const ads = packAdCount(angles.length, sel.variations)
         if (ads > MAX_PACK_SIZE) throw bad(`angles × variations = ${ads} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
         // Same render resolution as start (validates productFidelity / relight; relight is free).
-        resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
-        return quoteFor(ads, { variations: sel.variations, angleIds: angles.map((a) => a.id) })
+        const render = resolveRenderOptions({ productFidelity: input.productFidelity, relight: input.relight }, offer)
+        const quoted = quoteFor(ads, { variations: sel.variations, angleIds: angles.map((a) => a.id) })
+        if (!input.withPlan) return quoted
+        // #15: the same deterministic planner start runs (angles × variations, layout families, photos).
+        const ratios = parseRatios(input.ratios)
+        try {
+          const planned = planPack({ dna, offer, size, angleIds: sel.angleIds, angles: guideAngles, variations: sel.variations, creativeFreedom: sel.creativeFreedom, layoutFamily: sel.layoutFamily, styleProfile: dna.visual?.styleProfile, ratios, userId: input.userId ?? 'quote', source: 'web', brief, render, ids: { packId: '00000000-0000-4000-8000-000000000000' } })
+          return { ...quoted, plan: plannedAdsView(planned.items, offer, render.productFidelity === 'exact', ratios) }
+        } catch (err) {
+          return planError(err)
+        }
       }
       if (sel.angleIds || sel.guideAngles.length) throw bad('angleIds / angles need dna + offer or brandId to resolve')
       parseRelight(input.relight)
@@ -1283,7 +1325,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         existing: false,
         creativeFreedom: planned.creativeFreedom,
         variations: sel.variations,
-        angles: planned.items.map((i) => ({ index: i.index + 1, angleId: i.angle.id, category: i.angle.category, hookType: i.angle.hookType, format: i.angle.format, layoutFamily: i.angle.layoutFamily, ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}), rationale: i.angle.rationale })),
+        angles: plannedAdsView(planned.items, offer, render.productFidelity === 'exact', ratios),
         ...(dna.visual?.styleProfile ? { styleProfile: dna.visual.styleProfile } : {}),
         ...(styleNote ? { notes: [styleNote] } : {}),
         etaSeconds: estimateRemainingSeconds(planned.items),
