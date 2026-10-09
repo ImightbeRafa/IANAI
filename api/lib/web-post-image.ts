@@ -13,7 +13,7 @@
 import { withProviderRetry } from './mcp/provider-retry.js'
 import type { CTAStrength } from '../data/organic-script-prompts.js'
 import { describeReferenceFailures, fetchPublicImageDetailed, type ReferenceImageFailure } from './fetch-image-data-url.js'
-import { safeZoneMargins } from './mcp/safe-zones.js'
+import { freeBands, safeZoneMargins } from './mcp/safe-zones.js'
 import {
   estimateGrokImageCostUsd,
   GROK_IMAGE_DEFAULT_QUALITY,
@@ -168,8 +168,9 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
   const cta = (rules.ctaText || '').trim().slice(0, 120)
   if (rules.compositeLayers) {
     // The logo and the CTA are composited in code afterwards: Grok paints the scene, the product and the headline / price / facts only.
-    const freeTop = pct(m.top > 0.1 ? m.top + 0.02 : 0.1)
-    const freeBot = pct(m.top > 0.1 ? m.bottom + 0.02 : 0.12)
+    const bands = freeBands(rules.requestedRatio || '4:5')
+    const freeTop = pct(bands.top)
+    const freeBot = pct(bands.bottom)
     lines.push(es
       ? `REGLA 1 — FRANJAS LIBRES (Instagram tapa su UI): el ${freeTop} superior y el ${freeBot} inferior de la imagen quedan VACÍOS: sin texto, sin logo, sin botón, sin sellos; solo fondo/escena que continúa hasta el borde. El titular y la línea de precio van en la franja del medio, a ${pct(m.side)} de los costados. Nada toca ni se corta en el borde.`
       : `RULE 1 — FREE BANDS (Instagram covers its UI): the top ${freeTop} and the bottom ${freeBot} of the picture stay EMPTY: no text, no logo, no button, no badges; only the background/scene running to the edge. The headline and the price line go in the middle band, ${pct(m.side)} from the sides. Nothing touches or is cut by an edge.`)

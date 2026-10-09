@@ -217,6 +217,9 @@ function retryHintComposite(qa: McpImageQa, language: 'es' | 'en'): string {
   return bits.join('; ')
 }
 
+const productBoxOf = (f: FidelityCheckResult): { x0: number; y0: number; x1: number; y1: number } | undefined =>
+  f.status === 'ok' || f.status === 'unverified' ? f.details.productBox : f.status === 'warning' ? f.warning.details.productBox : undefined
+
 export async function generateWebStyleImage(input: WebStyleImageInput): Promise<WebStyleImageOutput> {
   const { ctx } = input
   const offer = ctx.offers.find((o) => o.id === input.offerId)
@@ -391,6 +394,18 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     }
   }
 
+  // Free local fidelity post-check — warning only, on the image we keep.
+  const fidelityCheck = grok.lockApplied
+    ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: preFixImageDataUrl })
+    : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
+  // Free local props check (colour novelty vs every reference sent): warning only.
+  let propsCheck: ExtraObjectsFinding | undefined
+  try {
+    const imgBytes = Buffer.from(preFixImageDataUrl.slice(preFixImageDataUrl.indexOf(',') + 1), 'base64')
+    const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map((u) => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'))
+    const box = fidelityCheck.status === 'ok' || fidelityCheck.status === 'unverified' ? fidelityCheck.details.productBox : fidelityCheck.status === 'warning' ? fidelityCheck.warning.details.productBox : undefined
+    if (preFixImageDataUrl.startsWith('data:') && refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: box ?? null, allowedCount: (input.lock?.allowedProps || []).length })
+  } catch { /* heuristic only */ }
   if (composite && imageDataUrl.startsWith('data:')) {
     // LAST RESORT (never the default): headline / price text still inside the bands after the retry → scale the scene in, THEN add the logo + CTA.
     await fixBySquash(null)
@@ -405,6 +420,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
         logoNote = `logo asset not loaded: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}`
       }
     }
+    const sceneIssues = qa.safeZoneIssues
     try {
       const done = await compositeBrandLayers({
         bytes: decode(imageDataUrl),
@@ -412,6 +428,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
         logo: logoBytes,
         ...(ctaText ? { ctaText } : {}),
         palette: { primary: kit?.primaryColor, secondary: kit?.secondaryColor, accent: kit?.accentColor },
+        // Where the located product is (fractions): the CTA button is kept off it.
+        avoid: productBoxOf(fidelityCheck) ? [productBoxOf(fidelityCheck)!] : [],
       })
       layers = done.report
       if (layers.logo.status === 'unavailable' && logoNote) layers.logo.reason = logoNote
@@ -429,7 +447,18 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
         copyChanges: tidied.changes,
         logoBox: lb ? { x0: lb.x / w, y0: lb.y / h, x1: (lb.x + lb.w) / w, y1: (lb.y + lb.h) / h } : null,
       })
+      // The logo and the button are placed inside the safe zones BY CONSTRUCTION; the slab heuristic can mistake the scrim under the
+      // pill for a button touching the edge. The safe-zone verdict is therefore the one of the scene (after any last-resort fix).
+      qa.safeZoneIssues = sceneIssues
+      qa.safeZones = sceneIssues.length ? 'violation' : 'ok'
+      qa.warnings = [...qa.warnings.filter((w) => !w.startsWith('safe zone:')), ...sceneIssues.map((i) => `safe zone: ${i.detail}`)]
+      qa.status = qa.safeZones === 'violation' || qa.separatorLines.length > 0 || qa.textPresent === 'no' || qa.extraCtaRisk ? 'fail' : 'pass'
+      qa.severity = qaSeverity(qa)
       if (done.report.logo.status === 'unavailable') qa.logoUnavailable = true
+      if (done.report.cta.busy) {
+        qa.ctaBusy = true
+        qa.warnings.push('the CTA button sits on a busy area / the product: every slot of the bottom band was busy (compositeLayers.cta.busy)')
+      }
       if (!ctaText) qa.warnings.push('the copy has no CTA line: no button was drawn')
       else if (done.report.cta.fits === false) qa.warnings.push('the CTA text is long: the button text was shrunk to fit')
     } catch (err) {
@@ -441,18 +470,6 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     await fixBySquash(logoBytes)
   }
 
-  // Free local fidelity post-check — warning only, on the image we keep.
-  const fidelityCheck = grok.lockApplied
-    ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: preFixImageDataUrl })
-    : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
-  // Free local props check (colour novelty vs every reference sent): warning only.
-  let propsCheck: ExtraObjectsFinding | undefined
-  try {
-    const imgBytes = Buffer.from(preFixImageDataUrl.slice(preFixImageDataUrl.indexOf(',') + 1), 'base64')
-    const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map((u) => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'))
-    const box = fidelityCheck.status === 'ok' || fidelityCheck.status === 'unverified' ? fidelityCheck.details.productBox : fidelityCheck.status === 'warning' ? fidelityCheck.warning.details.productBox : undefined
-    if (preFixImageDataUrl.startsWith('data:') && refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: box ?? null, allowedCount: (input.lock?.allowedProps || []).length })
-  } catch { /* heuristic only */ }
   return {
     generated: {
       imageDataUrl,

@@ -13,7 +13,9 @@ import satori from 'satori'
 import sharp from 'sharp'
 import { blend, contrastRatio, ensureReadableFill, INK, luminance, parseColor, readableOn, toHex, WHITE, type Rgb } from '../adpack/render/color.js'
 import { cssFamily, measureText, resolveFonts, satoriFonts } from '../adpack/render/fonts.js'
-import { safeZoneMargins } from './safe-zones.js'
+import { freeBands, safeZoneMargins } from './safe-zones.js'
+
+export { freeBands }
 
 export type CompositeInput = {
   bytes: Buffer
@@ -23,6 +25,8 @@ export type CompositeInput = {
   /** Exact CTA text from the copy. Absent → no button. */
   ctaText?: string
   palette?: { primary?: string | null; secondary?: string | null; accent?: string | null }
+  /** Regions (fractions of the image) the CTA must not cover: the located product bbox, prop regions. */
+  avoid?: Array<{ x0: number; y0: number; x1: number; y1: number }>
   fonts?: { headingFont?: string | null; bodyFont?: string | null }
 }
 
@@ -31,7 +35,7 @@ export type CompositeReport = {
   width: number
   height: number
   logo: { status: 'drawn' | 'unavailable' | 'not_requested'; reason?: string; box?: Box; contrast?: number; glow?: boolean }
-  cta: { status: 'drawn' | 'none'; text?: string; box?: Box; fill?: string; textColor?: string; contrast?: number; fontSize?: number; fits?: boolean }
+  cta: { status: 'drawn' | 'none'; text?: string; box?: Box; fill?: string; textColor?: string; contrast?: number; fontSize?: number; fits?: boolean; slot?: 'center' | 'left' | 'right'; /** Local busyness (0–1 share of edge pixels) under the pill. */ busyness?: number; /** true when even the calmest slot is busy or overlaps the product. */ busy?: boolean }
   scrim: { color: string; maxAlpha: number } | null
   /** Band fractions the layers were placed inside. */
   zones: { top: number; bottom: number }
@@ -67,13 +71,6 @@ async function edgeMap(raw: Buffer, W: number, H: number): Promise<(box: Box) =>
   }
 }
 
-/** Free top / bottom bands the prompt asks Grok to leave empty (fractions of the height). */
-export function freeBands(ratio: string): { top: number; bottom: number } {
-  const m = safeZoneMargins(ratio)
-  const story = m.top > 0.1
-  return { top: story ? m.top + 0.02 : 0.1, bottom: story ? m.bottom + 0.02 : 0.12 }
-}
-
 export async function compositeBrandLayers(input: CompositeInput): Promise<{ bytes: Buffer; report: CompositeReport }> {
   const base = sharp(input.bytes).rotate().removeAlpha()
   const meta = await base.metadata()
@@ -84,12 +81,14 @@ export async function compositeBrandLayers(input: CompositeInput): Promise<{ byt
   const m = safeZoneMargins(input.ratio)
   const story = m.top > 0.1
   const layers: sharp.OverlayOptions[] = []
+  const busy = await edgeMap(raw, W, H)
   const report: CompositeReport = { method: 'composite', width: W, height: H, logo: { status: 'not_requested' }, cta: { status: 'none' }, scrim: null, zones: { top: m.top, bottom: m.bottom } }
 
   // ---- CTA scrim + button (bottom safe zone) --------------------------------------------------------------------------
   const cta = (input.ctaText || '').replace(/\s+/g, ' ').trim().slice(0, 120)
   if (cta) {
-    const btnH = Math.round(H * (story ? 0.04 : 0.052))
+    // Round 5c: ~20 % bigger than round 5b (0.052 / 0.04 of the height).
+    const btnH = Math.round(H * (story ? 0.048 : 0.0624))
     const bottomEdge = Math.round(H * (1 - m.bottom - 0.012))
     const zoneTop = Math.round(H * (1 - m.bottom - 0.22))
     const around = meanRegion(raw, W, H, { x: 0, y: H * (1 - m.bottom - 0.12), w: W, h: H * 0.12 + H * m.bottom })
@@ -122,14 +121,32 @@ export async function compositeBrandLayers(input: CompositeInput): Promise<{ byt
       },
     } as unknown as Parameters<typeof satori>[0], { width: btnW, height: btnH, fonts: satoriFonts([fonts.body.family]) })
     const btnPng = rasterize(svg)
-    const bx = Math.round((W - btnW) / 2)
     const by = bottomEdge - btnH
+    // Calmest spot of the bottom band: centre / left / right, scored by local edge density (+ overlap with the located product).
+    const sideX = Math.round(W * m.side)
+    const slots: Array<['center' | 'left' | 'right', number]> = [['center', Math.round((W - btnW) / 2)], ['left', sideX], ['right', W - sideX - btnW]]
+    const overlapOf = (x: number) => {
+      let o = 0
+      for (const r of input.avoid ?? []) {
+        const ix = Math.max(0, Math.min((x + btnW) / W, r.x1) - Math.max(x / W, r.x0))
+        const iy = Math.max(0, Math.min((by + btnH) / H, r.y1) - Math.max(by / H, r.y0))
+        o = Math.max(o, (ix * iy) / ((btnW / W) * (btnH / H)))
+      }
+      return o
+    }
+    let pick = { slot: slots[0][0], x: slots[0][1], busyness: 1, score: Infinity }
+    for (const [slot, x] of slots) {
+      const b = busy({ x: x - W * 0.01, y: by - H * 0.006, w: btnW + W * 0.02, h: btnH + H * 0.012 })
+      const score = b + 3 * overlapOf(x)
+      if (score < pick.score - 0.004) pick = { slot, x, busyness: b, score }
+    }
+    const bx = pick.x
     const shadow = await sharp({ create: { width: btnW, height: btnH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.35 } } })
       .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${btnW}" height="${btnH}"><rect width="${btnW}" height="${btnH}" rx="${Math.round(btnH * 0.3)}" fill="#fff"/></svg>`), blend: 'dest-in' }])
       .blur(Math.max(2, btnH * 0.1)).png().toBuffer()
     layers.push({ input: shadow, left: bx, top: by + Math.round(btnH * 0.08) })
     layers.push({ input: btnPng, left: bx, top: by })
-    report.cta = { status: 'drawn', text: cta, box: { x: bx, y: by, w: btnW, h: btnH }, fill: toHex(fill), textColor: toHex(ink), contrast: Math.round(contrastRatio(fill, ink) * 100) / 100, fontSize, fits }
+    report.cta = { status: 'drawn', text: cta, box: { x: bx, y: by, w: btnW, h: btnH }, fill: toHex(fill), textColor: toHex(ink), contrast: Math.round(contrastRatio(fill, ink) * 100) / 100, fontSize, fits, slot: pick.slot, busyness: Math.round(pick.busyness * 1000) / 1000, busy: pick.score > 0.08 }
   }
 
   // ---- real logo (top safe zone) -------------------------------------------------------------------------------------
@@ -141,9 +158,8 @@ export async function compositeBrandLayers(input: CompositeInput): Promise<{ byt
       const ly = Math.round(H * (m.top + 0.008))
       // Where the badge goes: top-right by default, but never over the model's own text / product. Try 3 heights x 3 slots on a
       // downscaled edge map and take the first clear one (else the least busy): the picture is never shrunk or padded for it.
-      const busy = await edgeMap(raw, W, H)
-      const heights = (story ? [0.055, 0.047, 0.04] : [0.06, 0.052, 0.045]).map((f) => Math.round(H * f))
-      const maxW = Math.round(W * 0.28)
+      const heights = (story ? [0.07, 0.064, 0.058] : [0.078, 0.074, 0.07]).map((f) => Math.round(H * f))
+      const maxW = Math.round(W * 0.34)
       let best: { x: number; w: number; h: number; score: number } | null = null
       search: for (const hh of heights) {
         let lh = hh

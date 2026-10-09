@@ -489,6 +489,8 @@ export type McpImageQa = {
   severity: number
   /** true when the brand kit has no usable logo asset: nothing was drawn in its place (never a text chip). */
   logoUnavailable?: boolean
+  /** true when the code-composited CTA button could not find a calm spot in the bottom band (see compositeLayers.cta.busy). */
+  ctaBusy?: boolean
   warnings: string[]
 }
 
