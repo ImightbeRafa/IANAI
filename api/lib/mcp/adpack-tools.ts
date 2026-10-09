@@ -91,6 +91,7 @@ function compactItem(item: AdPackItemView) {
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}), width: r.width, height: r.height, format: 'png' as const })),
     charged: item.charged,
     ...(item.autoRetries ? { autoRetries: item.autoRetries } : {}),
+    ...(item.fontsUsed ? { fontsUsed: item.fontsUsed } : {}),
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
     ...(item.fidelity ? { fidelity: item.fidelity } : {}),

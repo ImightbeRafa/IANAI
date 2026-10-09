@@ -1138,7 +1138,7 @@ async function renderAllRatios(args: {
     })
     const scored = exact ? await scoreRender(r, ratio, false) : null
     const jpgUrl = await uploadJpgTwin(storage, pack, item, ratio, r.png)
-    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(scored ? { fidelity: scored.fidelity } : {}) })
+    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(scored ? { fidelity: scored.fidelity } : {}), ...(r.fontsUsed ? { fontsUsed: r.fontsUsed } : {}) })
     outputs.push({ ratio, r })
   }
   if (!exact) {

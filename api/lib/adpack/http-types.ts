@@ -27,6 +27,7 @@ import type {
   PackItemStatus,
   PackStatus,
   RenderedAd,
+  FontsUsed,
 } from './types.js'
 import type { AdPackDeliverable, AdPackFailureView } from './status-summary.js'
 
@@ -385,6 +386,8 @@ export interface AdPackItemView {
   sceneUrl?: string
   renders: RenderedAd[]
   attempts: number
+  /** #9: fonts actually drawn (first render; every ratio uses the same faces). */
+  fontsUsed?: FontsUsed
   /** #16: automatic retries used inside the approval (0–2) and why each earlier attempt failed. */
   autoRetries?: number
   attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>

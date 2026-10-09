@@ -6,7 +6,7 @@
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
 import { findForbiddenHits } from './check-copy.js'
-import type { AdLanguage, AngleCategory, AspectRatio, BrandDna, FidelityMethod, FidelityResult, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AngleCategory, AspectRatio, BrandDna, FidelityMethod, FidelityResult, FontsUsed, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -110,6 +110,8 @@ export interface AdPackDeliverableAd {
   forbiddenHits: Array<{ phrase: string; field: string }>
   /** #16: attempts it took inside the approval (1 = first try; credits are charged once). */
   attempts: number
+  /** #9: fonts actually drawn (heading, body, fallbacks). */
+  fontsUsed?: FontsUsed
   /** Product fidelity (A4), worst ratio of the ad. */
   fidelity?: AdPackFidelitySummary
 }
@@ -271,6 +273,7 @@ export function buildStatusExtras(input: {
         })),
         forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
         attempts: 1 + (i.angle.retry?.count ?? 0),
+        ...(i.renders[0]?.fontsUsed ? { fontsUsed: i.renders[0].fontsUsed } : {}),
         ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
       }))
     const label = es ? 'Anuncio' : 'Ad'

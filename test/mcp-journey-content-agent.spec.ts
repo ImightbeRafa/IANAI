@@ -445,6 +445,9 @@ describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, app
     const confirmedNumbers = new Set(['14.900', '26.000', '2', '8'])
     for (const ad of ads) {
       expect(ad).toMatchObject({ angleId: expect.any(String), rationale: expect.any(String), layoutFamily: expect.any(String), category: expect.any(String) })
+      // #9: the kit fonts are bundled and reported as actually drawn (no silent Fira Sans swap).
+      expect(ad.fontsUsed).toMatchObject({ heading: expect.stringMatching(/^Space Grotesk /), body: expect.stringMatching(/^Inter /) })
+      expect(ad.fontsUsed.fallbacks.filter((f: { reason: string }) => !f.reason.startsWith('glyphs'))).toEqual([])
       expect(ad.files.map((f: { ratio: string }) => f.ratio)).toEqual(['4:5', '9:16'])
       for (const f of ad.files) {
         expect(f.url).toMatch(new RegExp(`^${STORAGE_PUBLIC}.*\\.png$`))

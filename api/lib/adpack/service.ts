@@ -649,6 +649,7 @@ export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrase
     ...(item.copy ? { headline: item.copy.headline, copy: item.copy } : {}),
     ...(item.scene ? { sceneUrl: item.scene.imageUrl } : {}),
     renders: item.renders ?? [],
+    ...(item.renders?.[0]?.fontsUsed ? { fontsUsed: item.renders[0].fontsUsed } : {}),
     attempts: item.attempts,
     ...(item.angle.retry?.count ? { autoRetries: item.angle.retry.count, attemptLog: item.angle.retry.history } : {}),
     charged: Boolean(item.chargedAt),

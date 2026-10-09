@@ -470,6 +470,17 @@ export interface RenderedAd {
   height: number
   /** Product fidelity of this render (exact: detail SSIM, silhouette IoU, identity color vs the cut-out). */
   fidelity?: FidelityResult
+  /** #9: fonts actually drawn in this render (stored in the renders jsonb, no migration). */
+  fontsUsed?: FontsUsed
+}
+
+/** #9: the families a render actually drew, and every fallback taken (brand font missing, glyphs). */
+export interface FontsUsed {
+  /** e.g. "Space Grotesk 700". */
+  heading: string
+  /** e.g. "Inter 400/700". */
+  body: string
+  fallbacks: Array<{ role: 'heading' | 'body'; requested?: string; family: string; reason: string }>
 }
 
 // ---------------------------------------------------------------------------

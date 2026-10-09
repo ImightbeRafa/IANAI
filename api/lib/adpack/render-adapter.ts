@@ -4,6 +4,7 @@
  */
 import { renderAd, type FetchLike } from './render/index.js'
 import type { Renderer, RenderInput, RenderOutput } from './runner-types.js'
+import type { FontsUsed } from './types.js'
 
 function toBufferOrString(v: Uint8Array | string | undefined): Buffer | string | undefined {
   if (v === undefined || typeof v === 'string') return v
@@ -51,9 +52,28 @@ export function createDefaultRenderer(): Renderer {
         ...(out.layoutReport.textOverProduct ? { textOverProduct: true } : {}),
         layoutFamily: out.layoutReport.layoutFamily,
         placement: out.layoutReport.placement,
+        fontsUsed: fontsUsedFrom(out.layoutReport.fonts),
       }
     },
   }
+}
+
+type RoleResolution = { requested?: string; family: string; source: string; missingGlyphs: string[]; note?: string }
+
+/** #9: the families the render drew + every fallback (brand font not available, glyphs drawn with Fira Sans). */
+export function fontsUsedFrom(report: { heading: string; body: string; resolution?: { heading: RoleResolution; body: RoleResolution } }): FontsUsed {
+  const fallbacks: FontsUsed['fallbacks'] = []
+  for (const role of ['heading', 'body'] as const) {
+    const r = report.resolution?.[role]
+    if (!r) continue
+    if (r.requested && (r.source === 'mapped' || r.source === 'default')) {
+      fallbacks.push({ role, requested: r.requested, family: r.family, reason: r.note ?? `"${r.requested}" is not available; closest bundled family used` })
+    }
+    if (r.missingGlyphs?.length) {
+      fallbacks.push({ role, family: 'Fira Sans', reason: `glyphs missing in ${r.family}: ${r.missingGlyphs.join('')}` })
+    }
+  }
+  return { heading: report.heading, body: report.body, fallbacks }
 }
 
 function fontFetchEnabled(): boolean {

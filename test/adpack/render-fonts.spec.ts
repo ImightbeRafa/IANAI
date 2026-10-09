@@ -11,7 +11,14 @@ describe('resolveFonts', () => {
     expect(matchFamily('Oswald', 'heading')).toBe('Anton')
     expect(matchFamily('Playfair Display', 'heading')).toBe('DM Serif Display')
     expect(matchFamily('Playfair Display', 'body')).toBe('Fira Sans')
-    expect(matchFamily('Inter', 'body')).toBe('Fira Sans')
+    // #9: Inter is bundled (OFL) — the kit's Inter is drawn as Inter, never swapped for Fira Sans.
+    expect(matchFamily('Inter', 'body')).toBe('Inter')
+    expect(matchFamily('Interstate', 'body')).toBe('Fira Sans')
+    expect(resolveFonts({ headingFont: 'Space Grotesk', bodyFont: 'Inter' })).toMatchObject({
+      heading: { family: 'Space Grotesk', weight: 700 },
+      body: { family: 'Inter', weight: 400, boldWeight: 700 },
+      match: { heading: 'exact', body: 'exact' },
+    })
     expect(matchFamily('"Helvetica Neue", Arial', 'heading')).toBe('Fira Sans')
     expect(matchFamily('Archivo Black', 'heading')).toBe('Archivo Black')
     expect(matchFamily('Wingdings Fantasy XYZ', 'heading')).toBeNull()

@@ -86,18 +86,25 @@ Vendoring an OFL family into the bundle (so it works offline):
 `node scripts/adpack-vendor-fonts.mjs "Family Name"` downloads it from the google/fonts GitHub
 repo (static TTFs, or the variable font instanced locally to 400/700 with fontTools) + OFL.txt
 into `fonts/`; any extra TTF there is registered under its own family name. Space Grotesk was
-vendored this way and is listed in the `fonts.ts` manifest (a bundled system font).
+vendored this way (Inter too: `node scripts/adpack-vendor-fonts.mjs "Inter"`, multi-axis variable
+fonts get their non-weight axes pinned to the default) and both are listed in the `fonts.ts`
+manifest (bundled system fonts).
 
 ### Bundled (OFL, in `fonts/`)
 
 | Family | Weights | Used for |
 |---|---|---|
 | Poppins | 400 / 700 / 800 | default heading + body; geometric brand fonts (Montserrat, Futura, DM Sans…) |
-| Fira Sans | 400 / 700 / 800 | humanist/neo-grotesk brands (Inter, Roboto, Helvetica…) and **glyph fallback** (₡ etc.) |
+| Fira Sans | 400 / 700 / 800 | humanist/neo-grotesk brands (Roboto, Helvetica…) and **glyph fallback** (₡ etc.) |
 | Archivo Black | 400 | heavy display brands |
 | Anton | 400 | condensed display brands (Bebas, Oswald, Impact…) |
 | DM Serif Display | 400 | serif brands (Playfair, Lora, Georgia…) — headings only; body falls back to Fira Sans |
 | Space Grotesk | 400 / 700 | brands whose kit names Space Grotesk (exact match, no fetch; has its own ₡) |
+| Inter | 400 / 700 | brands whose kit names Inter (exact match, no fetch; static instances of Inter[opsz,wght], has its own ₡) |
+
+Every render reports the faces it actually drew as `fontsUsed {heading, body, fallbacks[]}` (item
+`renders[].fontsUsed`, status items and deliverable ads): a brand font that had to be mapped to a
+bundled family, or glyphs drawn with Fira Sans, appear in `fallbacks`.
 
 `resolveFonts(visual)` maps brand font names to these families (default Poppins). Licenses:
 `fonts/*-OFL.txt`. Source: github.com/google/fonts (static TTFs).
