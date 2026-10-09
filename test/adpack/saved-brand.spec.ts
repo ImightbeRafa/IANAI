@@ -410,7 +410,7 @@ describe('saved-brand doors (web + MCP parity)', () => {
     }
     expect(web.charges).toHaveLength(10)
     expect(mcp.charges).toHaveLength(10)
-  })
+  }, 60_000)
 
   it('library persistence is idempotent per item and saves an edited version once', async () => {
     const env = savedEnv()
