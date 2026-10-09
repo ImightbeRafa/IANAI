@@ -9,6 +9,8 @@ import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fide
 import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
 import type { ProductCreativeRow } from '../product-creative-rules.js'
 import { runWebPostGrokImage, type WebPostGrokImageResult } from '../web-post-image.js'
+import { capCopyBlocks } from './copy-layout.js'
+import { checkExtraObjects, type ExtraObjectsFinding } from './extra-objects.js'
 import { checkGeneratedProductFidelity, runMcpImageQa, tidyCopySeparators, type FidelityCheckResult, type FidelityWarning, type McpImageQa } from './image-postcheck.js'
 import type { McpBrandContext } from './user-tools.js'
 
@@ -104,6 +106,8 @@ export type WebStyleImageInput = {
    * keep the better image. Same job, same approval, same single credit charge — only our xAI cost doubles.
    */
   autoRetry?: boolean
+  /** Default true: condense a long copy to headline + 1 price line + 1 facts line + 1 CTA; the rest comes back as `copyOverflow` for the caption. */
+  layoutCap?: boolean
   /**
    * Default true: MCP-only prompt rules (binding scene, strict lock / no invented props, safe zones, separator hygiene).
    * false = the legacy web prompt (scene as factual context) — used by the web⇄MCP parity test to prove the shared
@@ -131,11 +135,17 @@ export type WebStyleImageOutput = {
   fidelityCheck: FidelityCheckResult
   fidelity_warning?: FidelityWarning
   qa: McpImageQa
-  autoRetry: { requested: boolean; attempted: boolean; reason?: string; kept?: 'first' | 'retry'; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
+  autoRetry: { requested: boolean; attempted: boolean; reason?: string; kept?: 'first' | 'retry'; keptReason?: string; firstSeverity?: number; retrySeverity?: number; firstQa?: { safeZones: McpImageQa['safeZones']; textPresent: McpImageQa['textPresent']; issues: string[] } }
   references: { used: WebPostGrokImageResult['referencesUsed']; warnings: WebPostGrokImageResult['referenceWarnings'] }
   /** What was allowed in the scene. Local pixel detection of invented props is not available: prevented at the prompt/reference level. */
-  propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: false }
+  propsPolicy: { forbidExtraProps: boolean; allowed: string[]; accessoryReferences: number; verifiedLocally: boolean; source: 'input' | 'none'; check?: ExtraObjectsFinding }
+  /** Warning only: colours next to the product that no reference explains (possible invented props). */
+  props_warning?: { code: 'props_warning'; reason: string; clusters: ExtraObjectsFinding['clusters'] }
   copyNormalised: string[]
+  /** Copy lines moved off the image by the layout cap (put them in the caption). */
+  copyOverflow: string[]
+  /** Transient provider failures retried inside the job (not an error, not charged). */
+  providerRetries: number
 }
 
 function cleanCopy(value: string | undefined): string {
@@ -165,14 +175,11 @@ export function buildMcpBusinessContext(input: {
 function retryHintFor(qa: McpImageQa, language: 'es' | 'en'): string {
   const es = language !== 'en'
   const bits: string[] = []
-  if (qa.safeZoneIssues.some((i) => i.kind === 'block_touches_edge')) bits.push(es ? 'el botón CTA tocaba el borde: subilo y dejalo completo con aire' : 'the CTA button touched the edge: move it up and keep it fully visible with air')
-  if (qa.safeZoneIssues.some((i) => i.kind === 'text_in_unsafe_band')) bits.push(es ? 'había texto dentro del margen de la UI de Instagram: mové todo el texto hacia dentro' : 'text sat inside the Instagram UI margin: move all text inward')
+  if (qa.safeZoneIssues.some((i) => i.kind === 'block_touches_edge')) bits.push(es ? 'el botón CTA tocaba el borde: subilo y dejalo completo con aire (≥ 11% del borde de abajo)' : 'the CTA button touched the edge: move it up and keep it fully visible with air (≥ 11% above the bottom edge)')
+  if (qa.safeZoneIssues.some((i) => i.kind === 'text_in_unsafe_band')) bits.push(es ? 'había texto dentro del margen de la UI de Instagram: mové todo el texto hacia dentro (nada en el 8% superior ni inferior)' : 'text sat inside the Instagram UI margin: move all text inward (nothing in the top or bottom 8%)')
   if (qa.textPresent === 'no') bits.push(es ? 'faltaba el texto del copy: dibujalo completo y legible' : 'the copy text was missing: draw it complete and legible')
+  if (qa.extraCtaRisk) bits.push(es ? 'había un segundo botón: dejá UN solo CTA con el texto exacto de la copy' : 'there was a second button: keep ONE CTA with the exact copy text')
   return bits.join('; ')
-}
-
-function qaIssueCount(qa: McpImageQa): number {
-  return qa.safeZoneIssues.length + (qa.textPresent === 'no' ? 1 : 0)
 }
 
 export async function generateWebStyleImage(input: WebStyleImageInput): Promise<WebStyleImageOutput> {
@@ -195,6 +202,10 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   // Orphan "·" guard: a long "a · b" line is split at the separator and stray separators are dropped.
   const tidied = tidyCopySeparators(copy)
   copy = tidied.copy
+  // Layout cap: headline + one price line + one facts line + one CTA; the overflow goes to the caption.
+  const capped = input.layoutCap === false ? null : capCopyBlocks(copy)
+  if (capped?.capped) copy = capped.onImage
+  const ctaText = capped?.cta ?? capCopyBlocks(copy).cta
   // The scene is a binding instruction (web-post-image `mcp.scene`), not a "Contexto factual (NO renderizar)" line.
   const withRules = input.mcpRules !== false
   const businessContext = buildMcpBusinessContext({
@@ -211,7 +222,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const baseOptions = {
     apiKey: input.apiKey,
     aspectRatio: ratioPlan.generateAt,
-    language,
+    language: language as 'es' | 'en',
     postStyle: input.postStyle || 'venta-directa',
     textDensity: input.textDensity || 'hard',
     ctaStrength: input.ctaStrength,
@@ -237,6 +248,8 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     strict: input.lock?.forbidExtraProps !== false,
     allowedProps: input.lock?.allowedProps,
     requestedRatio: ratioPlan.requested,
+    ...(ctaText ? { ctaText } : {}),
+    layoutCap: input.layoutCap !== false,
     accessoryLabels: accessories.map((a) => a.label),
     ...(retryHint ? { retryHint } : {}),
   })
@@ -263,7 +276,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   let qa = await qaFor(framed.imageDataUrl)
   const autoRetry: WebStyleImageOutput['autoRetry'] = { requested: input.autoRetry === true, attempted: false }
   let totalCost = grok.estimatedCostUsd
-  if (input.autoRetry === true && qaIssueCount(qa) > 0) {
+  if (input.autoRetry === true && qa.severity > 0) {
     // One corrective regeneration inside the same job: no second approval, no second charge (the caller charges once).
     autoRetry.attempted = true
     autoRetry.reason = retryHintFor(qa, language)
@@ -273,12 +286,19 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       totalCost += second.estimatedCostUsd
       const secondFramed = await reframe(second.imageDataUrl, second.aspectRatio)
       const secondQa = await qaFor(secondFramed.imageDataUrl)
-      if (qaIssueCount(secondQa) < qaIssueCount(qa)) {
+      autoRetry.firstSeverity = qa.severity
+      autoRetry.retrySeverity = secondQa.severity
+      // Keep the BETTER image by QA result (lower weighted defect score); a tie keeps the first (no change for the same price).
+      if (secondQa.severity < qa.severity) {
         grok = second
         framed = secondFramed
         qa = secondQa
         autoRetry.kept = 'retry'
-      } else autoRetry.kept = 'first'
+        autoRetry.keptReason = `retry QA severity ${secondQa.severity} < first ${autoRetry.firstSeverity}`
+      } else {
+        autoRetry.kept = 'first'
+        autoRetry.keptReason = `retry QA severity ${secondQa.severity} was not better than the first ${autoRetry.firstSeverity}`
+      }
     } catch (err) {
       autoRetry.kept = 'first'
       autoRetry.reason = `${autoRetry.reason}; retry failed: ${err instanceof Error ? err.message.slice(0, 160) : 'error'}`
@@ -290,6 +310,14 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
   const fidelityCheck = grok.lockApplied
     ? await checkGeneratedProductFidelity({ referenceDataUrls: grok.productReferenceDataUrls, generatedDataUrl: imageDataUrl })
     : ({ status: 'skipped', reason: 'no product reference attached' } as FidelityCheckResult)
+  // Free local props check (colour novelty vs every reference sent): warning only.
+  let propsCheck: ExtraObjectsFinding | undefined
+  try {
+    const imgBytes = Buffer.from(imageDataUrl.slice(imageDataUrl.indexOf(',') + 1), 'base64')
+    const refBytes = grok.allReferenceDataUrls.filter((u) => u.startsWith('data:')).map((u) => Buffer.from(u.slice(u.indexOf(',') + 1), 'base64'))
+    const box = fidelityCheck.status === 'ok' || fidelityCheck.status === 'unverified' ? fidelityCheck.details.productBox : fidelityCheck.status === 'warning' ? fidelityCheck.warning.details.productBox : undefined
+    if (imageDataUrl.startsWith('data:') && refBytes.length) propsCheck = await checkExtraObjects({ generated: imgBytes, references: refBytes, productBox: box ?? null, allowedCount: (input.lock?.allowedProps || []).length })
+  } catch { /* heuristic only */ }
   return {
     generated: {
       imageDataUrl,
@@ -315,14 +343,19 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
       forbidExtraProps: input.lock?.forbidExtraProps !== false,
       allowed: [...(input.lock?.allowedProps || [])],
       accessoryReferences: grok.referencesUsed.filter((k) => k === 'accessory').length,
-      verifiedLocally: false,
+      verifiedLocally: Boolean(propsCheck),
+      source: (input.lock?.allowedProps || []).length ? 'input' : 'none',
+      ...(propsCheck ? { check: propsCheck } : {}),
     },
+    ...(propsCheck?.suspected ? { props_warning: { code: 'props_warning' as const, reason: propsCheck.note, clusters: propsCheck.clusters } } : {}),
     copyNormalised: tidied.changes,
+    copyOverflow: capped?.overflow ?? [],
+    providerRetries: grok.providerRetries,
   }
 }
 
 /** Compact, result-safe summary of the post-check (no image bytes). */
-export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'>): Record<string, unknown> {
+export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' | 'fidelity_warning' | 'qa' | 'copySource' | 'referenceCount' | 'retriedWithClamp' | 'autoRetry' | 'references' | 'propsPolicy' | 'copyNormalised'> & Partial<Pick<WebStyleImageOutput, 'props_warning' | 'copyOverflow' | 'providerRetries'>>): Record<string, unknown> {
   return {
     ...(out.fidelity_warning ? { fidelity_warning: out.fidelity_warning } : {}),
     fidelityCheck: out.fidelityCheck.status === 'skipped'
@@ -337,6 +370,9 @@ export function postCheckSummary(out: Pick<WebStyleImageOutput, 'fidelityCheck' 
     autoRetry: out.autoRetry,
     references: out.references,
     propsPolicy: out.propsPolicy,
+    ...(out.props_warning ? { props_warning: out.props_warning } : {}),
     ...(out.copyNormalised.length ? { copyNormalised: out.copyNormalised } : {}),
+    ...(out.copyOverflow?.length ? { copyOverflow: out.copyOverflow } : {}),
+    ...(out.providerRetries ? { providerRetries: out.providerRetries } : {}),
   }
 }

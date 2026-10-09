@@ -91,8 +91,17 @@ async function main() {
 
   const entryPoints = await walkTsFiles(apiDir)
 
+  // Build commit exposed by the MCP get_server_info tool (BUILD_COMMIT env wins; 'unknown' without git).
+  let commit = (process.env.BUILD_COMMIT || '').trim()
+  if (!commit) {
+    try {
+      const { execFileSync } = await import('node:child_process')
+      commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    } catch { commit = '' }
+  }
   await build({
     entryPoints,
+    define: { __ADVANCE_BUILD_COMMIT__: JSON.stringify(commit) },
     outdir: outDir,
     outbase: apiDir,
     bundle: false,

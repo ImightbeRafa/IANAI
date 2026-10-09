@@ -51,8 +51,8 @@ describe('fidelity post-check — masked product-region comparison (free, local,
     expect(res.warning.reason).toMatch(/details differ|redrawn/)
     expect(res.warning.details.method).toBe('features')
     expect(res.warning.details.confident).toBe(true)
-    expect(res.warning.details.preserved).toBeLessThan(0.75)
-    expect(res.warning.score).toBeLessThan(0.75)
+    expect(res.warning.details.preserved).toBeLessThan(0.8)
+    expect(res.warning.score).toBeLessThan(0.8)
   })
 
   it('Round-2 ForgeCR faithful output does NOT warn (the old global-silhouette false positive is gone)', async () => {
@@ -60,6 +60,18 @@ describe('fidelity post-check — masked product-region comparison (free, local,
     expect(res.status).not.toBe('warning')
     // Dark, low-texture product: not locatable by features → honest "unverified" (colour consistent), never a false verdict.
     expect(['ok', 'unverified']).toContain(res.status)
+  })
+
+  it('Round-3 PatchHouse faithful flat pouch (scored 0.54 / warned before) passes, with neutral wording when something else warns', async () => {
+    const res = await checkGeneratedProductFidelity({ referenceDataUrls: [url(F('patch-ref.jpg'))], generatedDataUrl: url(F('patch-gen.jpg')) })
+    expect(res.status).toBe('ok')
+    if (res.status === 'ok') expect(res.details.preserved).toBeGreaterThan(0.8)
+  })
+
+  it('the warning text is neutral (no plane vocabulary: wheels / tail / folds)', async () => {
+    const res = await checkGeneratedProductFidelity({ referenceDataUrls: [url(F('proto-ref.jpg'))], generatedDataUrl: url(F('proto-gen.jpg')) })
+    expect(res.status).toBe('warning')
+    if (res.status === 'warning') expect(res.warning.reason).not.toMatch(/\b(wheels?|tail|folds?|wings?)\b/i)
   })
 
   it('a product that is intact but re-lit and placed in a new scene passes (ok)', async () => {

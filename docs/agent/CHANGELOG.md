@@ -1,3 +1,11 @@
+## 2026-10-09 — MCP 0.17.0: exact = same ad layers, allowedProps honoured, one CTA, 8 % margins, better-of-two retry, capacity backoff, get_server_info
+
+**Area:** api (mcp, web-post-image, adpack render/fidelity), docs — no migration, no new env/secret/binding/route/cron
+**Files:** `api/lib/mcp/{exact-flow,extra-objects,copy-layout,provider-retry,server-info,web-image,image-postcheck,feature-match,safe-zones,execute-tools,execute-job,protocol,tool-registry}.ts`, `api/lib/web-post-image.ts`, `api/lib/adpack/fidelity/{halo,pipeline}.ts`, `api/lib/adpack/render/{frame,render,types}.ts` (optional `safeMargin`, absent = unchanged), `scripts/build-api.mjs`, `vitest.config.ts`, tests
+
+- **Web request unchanged** (`test/web-mcp-parity.spec.ts` green): everything new is behind the MCP rules object; the only web-visible code change is that the shared `runWebPostGrokImage` retries transient provider errors (the web route does not call it).
+- `exact` renders copy / one CTA / logo / QA and flags halo; `allowedProps` input honoured (default none); 8 % margin rule first in the prompt; one CTA; layout cap with `copyOverflow`; `autoRetry` keeps the better image; capacity/5xx backoff (uncharged); fidelity checker recalibrated on the Round 3 images; `get_server_info` + `serverVersion`.
+
 ## 2026-10-09 — MCP 0.16.0: product lock without invented props, binding `scene`, safe zones + QA auto-retry, rehosted photos
 
 **Area:** api (mcp, web-post-image, fetch), docs — no migration, no new env/secret/binding/route/cron

@@ -88,14 +88,10 @@ import { resolveBrandKitForBusiness } from '../brand-kit-resolve.js'
 import { isAdPackMcpTool } from './adpack-tool-names.js'
 import type { AdPackService } from '../adpack/service.js'
 
+import { MCP_SERVER_INFO, buildServerInfo } from './server-info.js'
+
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
-export const MCP_SERVER_INFO = {
-  name: 'advance-ai',
-  version: '0.16.0',
-  title: 'Advance AI',
-  websiteUrl: 'https://advanceai.studio',
-  icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
-}
+export { MCP_SERVER_INFO }
 
 /** Prefer Error.message; also accept PostgREST-style `{ message, code }` objects. */
 export function formatMcpToolErrorMessage(err: unknown): string {
@@ -755,6 +751,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'list_offers':
     case 'guide_brand_pack':
       return { type: 'object', properties: brand, required: ['brandId'], additionalProperties: false }
+    case 'get_server_info':
+      return { type: 'object', properties: {}, additionalProperties: false }
     case 'list_brands':
       return {
         type: 'object',
@@ -1009,14 +1007,16 @@ function toolInputSchema(name: string): Record<string, unknown> {
           productFidelity: {
             type: 'string',
             enum: ['exact', 'generated'],
-            description: 'generated (DEFAULT, the web-app path) = the same Grok /images/edits product-lock flow as the web chat: rich prompt (copy, price, CTA, brand voice/palette, logo as reference, offer silhouette/lock), the image model draws the scene and the text. The result carries a free local fidelity check: fidelity_warning {reason, score} when the located product no longer matches the photo structurally (folds, wheels, tail, parts) or its colour changed; status "unverified" when the product cannot be located (dark/low-texture photos) — warning only, never blocks or charges more. exact (opt-in) = real product pixels cut out and composited, no text/logo.',
+            description: 'generated (DEFAULT, the web-app path) = the same Grok /images/edits product-lock flow as the web chat: rich prompt (copy, price, CTA, brand voice/palette, logo as reference, offer silhouette/lock), the image model draws the scene and the text. The result carries a free local fidelity check: fidelity_warning {reason, score} when the located product no longer matches the photo structurally (shapes, parts, printed details) or its colour changed; status "unverified" when the product cannot be located (dark/low-texture photos) — warning only, never blocks or charges more. exact (opt-in) = the REAL product pixels composited on a generated scene, then the same copy (headline + ONE price line + ONE facts line + ONE CTA), kit logo, 8 % safe margins and QA as the generated flow; a visible halo / leftover backdrop around the cut-out is flagged as halo_warning (never a redrawn product). Real box/controller photos are not composited in exact mode.',
           },
+          allowedProps: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Objects allowed next to the product besides what the attached reference photos show (e.g. ["hoja de papel blanca"]). DEFAULT = NO props at all: the offer ad_profile list no longer widens it. The result reports propsPolicy {allowed, source} and props_warning (colours no reference explains; heuristic, warning only).' },
+          layoutCap: { type: 'boolean', description: 'Default true: at most headline + ONE price line + ONE facts line + ONE CTA (+ logo) on the image; extra copy lines come back as copyOverflow for the caption. false = send the copy as written.' },
           lockProductAppearance: { type: 'boolean', description: 'Force the product-lock rules for this image (defaults to the offer ad_profile).' },
           copy: { type: 'string', maxLength: 1200, description: 'PLAIN STRING (not an object; use \\n between lines): on-image copy / guion — headline, price line, CTA. The image model writes it verbatim like the web chat. Long "a · b" lines are split at the separator so no orphan "·" is drawn (qa.copyNormalised). Without it the offer name + price is used (copySource reports which).' },
           textDensity: { type: 'string', enum: ['hard', 'medium', 'standard'], description: 'Exactly one of "hard" (default: 1 headline + 1-2 points + 1 CTA), "medium" (1 headline + 2-3 points + 1 CTA) or "standard" (up to 5 points).' },
           postStyle: { type: 'string', enum: ['venta-directa', 'anuncio-conversion'], description: 'Exactly "venta-directa" (default) or "anuncio-conversion" — hyphens, never underscores.' },
           ctaStrength: { type: 'string', enum: ['none', 'soft', 'brand_mention', 'sales'], description: 'Exactly one of "none", "soft", "brand_mention" or "sales" (default "sales"; underscore in brand_mention).' },
-          autoRetry: { type: 'boolean', description: 'Opt-in (default false). If the free safety-net QA fails (CTA/text inside the Instagram UI margins, or the copy text is missing) regenerate ONCE with a corrective hint and keep the better image. Same job and approval: the credits are charged once (only our model cost doubles). The result reports autoRetry {attempted, kept, reason}.' },
+          autoRetry: { type: 'boolean', description: 'Opt-in (default false). If the free safety-net QA fails (CTA/text inside the 8 % Instagram margins, missing copy text, a second CTA button, orphan separators) regenerate ONCE with a corrective hint and KEEP THE BETTER image by QA severity (a tie keeps the first). Same job and approval: the credits are charged once (only our model cost doubles). The result reports autoRetry {attempted, kept, keptReason, firstSeverity, retrySeverity, reason}. Transient provider errors ("temporarily at capacity", 429, 5xx) are retried automatically with backoff in every case and are never charged.' },
           productImageId: { type: 'string' },
           referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4, description: 'Confirmed product photos (2+ allowed). The real box / contents / part photos (e.g. the controller) are attached as extra references (hero first, then the best accessory, then the logo; max 3 refs) and the brand kit reference photos are auto-appended as product refs and the kit logo is attached as a style ref, like the web chat (referenceMode "none" skips the kit photos).' },
           referenceMode: { type: 'string', enum: ['use', 'none'] },
@@ -1585,6 +1585,8 @@ async function dispatchEnabledTool(options: {
   const brandKitId = typeof options.args.brandKitId === 'string' ? options.args.brandKitId : undefined
 
   switch (options.name) {
+    case 'get_server_info':
+      return buildServerInfo()
     case 'list_brands': {
       const listed = await mcpListBrandsWithDuplicates(options.db, options.user, {
         includeIncomplete: options.args.includeIncomplete === true,

@@ -239,8 +239,10 @@ describe('round 3: safe zones, QA auto-retry (single charge), scene, props, acce
     expect(prompt).not.toContain('mesada / estante de uso real') // generic niche recipe replaced
     expect(prompt).toMatch(/NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues/)
     expect(prompt).toMatch(/PROHIBIDO añadir objetos que no estén en las fotos de referencia/)
-    expect(prompt).toMatch(/ZONAS SEGURAS/)
-    expect(prompt).toMatch(/12% del borde inferior|11% del borde inferior/)
+    // Round 4: the 8 % margin rule opens the prompt (the clamp trims the tail, never the opening instructions).
+    expect(prompt.startsWith('REGLA 1 — MÁRGENES')).toBe(true)
+    expect(prompt).toMatch(/FUERA del 8% superior.*FUERA del 8% inferior/s)
+    expect(prompt).toMatch(/≥ 11% del borde de abajo/)
   })
 
   it('the copy is normalised so no orphan "·" can be drawn, and the change is reported in qa', async () => {
@@ -252,3 +254,111 @@ describe('round 3: safe zones, QA auto-retry (single charge), scene, props, acce
   })
 })
 
+describe('round 4: allowedProps, one CTA, layout cap, better-of-two retry, capacity backoff', () => {
+  async function ad(buttonBottomGap: number, headlineY = 250): Promise<Buffer> {
+    const noise = Buffer.alloc(800 * 1000 * 3)
+    for (let i = 0; i < noise.length; i++) noise[i] = 90 + ((i * 2654435761) >>> 28) * 3
+    const label = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect x="250" y="${1000 - buttonBottomGap - 90}" width="300" height="90" rx="14" fill="#2ec4b6"/><text x="400" y="${1000 - buttonBottomGap - 32}" font-size="38" font-family="sans-serif" text-anchor="middle" fill="#0b1a2a">Escribinos por DM</text><text x="60" y="${headlineY}" font-size="64" font-family="sans-serif" fill="#ffffff">Un regalo que armas</text></svg>`)
+    return sharp(noise, { raw: { width: 800, height: 1000, channels: 3 } }).blur(14).composite([{ input: label }]).jpeg({ quality: 90 }).toBuffer()
+  }
+  function sequence(images: Array<Buffer | { status: number; text: string }>) {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      xai.push({ url, body: JSON.parse(init.body) })
+      const item = images[Math.min(n++, images.length - 1)]
+      if (!Buffer.isBuffer(item)) return new Response(item.text, { status: item.status })
+      return new Response(JSON.stringify({ data: [{ b64_json: item.toString('base64') }] }), { status: 200 })
+    }))
+  }
+
+  it('allowedProps input is honoured; the offer ad_profile list no longer widens it (default = no props)', async () => {
+    sequence([await ad(190)])
+    const offerStore = { getOffer: vi.fn(async () => ({ id: 'o1', ad_profile: { lockProductAppearance: true, allowedProps: ['Cable USB', 'Destornillador'] } })) }
+    const first = await runJob({ copy: 'Hola', allowedProps: ['Hoja de papel blanca'] }, offerStore)
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toContain('Únicos extras permitidos: Hoja de papel blanca')
+    expect(prompt).not.toContain('Cable USB')
+    expect(prompt).not.toContain('Destornillador')
+    expect((first.status.propsPolicy as { allowed: string[]; source: string })).toMatchObject({ allowed: ['Hoja de papel blanca'], source: 'input' })
+    xai = []
+    sequence([await ad(190)])
+    const second = await runJob({ copy: 'Hola' }, offerStore)
+    expect(String(xai[0].body.prompt)).toContain('No hay extras permitidos')
+    expect(String(xai[0].body.prompt)).not.toContain('Cable USB')
+    expect((second.status.propsPolicy as { allowed: string[]; source: string })).toMatchObject({ allowed: [], source: 'none' })
+  })
+
+  it('ONE CTA: the prompt pins the exact copy CTA and forbids extra buttons; layout cap is in the prompt', async () => {
+    sequence([await ad(190)])
+    await runJob({ copy: 'Un regalo que armás\n₡14.900\nEscribinos por DM' })
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toMatch(/UN SOLO CTA: el único botón\/llamado a la acción dice EXACTAMENTE «Escribinos por DM»/)
+    expect(prompt).toMatch(/PROHIBIDO un segundo botón/)
+    expect(prompt).toMatch(/COMPOSICIÓN LIMPIA: como máximo estos bloques/)
+  })
+
+  it('layout cap: a long copy keeps headline + 1 price + 1 facts + 1 CTA on the image; the rest comes back as copyOverflow (caption)', async () => {
+    sequence([await ad(190)])
+    const copy = ['Un regalo que armás con papel', 'Kit HM939 con control 2.4GHz', '₡14.900', '2 kits por ₡29.800', 'Envío gratis llevando 2 kits o más', 'Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto', 'Escribinos por DM'].join('\n')
+    const { status } = await runJob({ copy })
+    const prompt = String(xai[0].body.prompt)
+    expect(prompt).toContain('Un regalo que armás con papel')
+    expect(prompt).toContain('₡14.900')
+    expect(prompt).toContain('Escribinos por DM')
+    expect(prompt).not.toContain('Envío gratis llevando 2 kits o más')
+    expect(status.copyOverflow).toEqual(expect.arrayContaining(['2 kits por ₡29.800', 'Envío gratis llevando 2 kits o más', 'Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto']))
+    // opt-out
+    xai = []
+    sequence([await ad(190)])
+    await runJob({ copy, layoutCap: false })
+    expect(String(xai[0].body.prompt)).toContain('Envío gratis llevando 2 kits o más')
+  })
+
+  it('autoRetry KEEPS THE BETTER image by QA severity (not the first): the retry with fewer defects wins; single charge', async () => {
+    // first: CTA touching the bottom edge AND headline in the top band; retry: only a milder defect
+    sequence([await ad(6, 40), await ad(190, 40)])
+    vi.mocked(incrementUsage).mockClear()
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    const ar = status.autoRetry as { kept: string; firstSeverity: number; retrySeverity: number; keptReason: string }
+    expect(ar.kept).toBe('retry')
+    expect(ar.retrySeverity).toBeLessThan(ar.firstSeverity)
+    expect(ar.keptReason).toMatch(/not|<|severity/)
+    expect(status.chargedCredits).toBe(6)
+    expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
+  })
+
+  it('autoRetry keeps the first when the retry is WORSE (never delivers the worse image)', async () => {
+    sequence([await ad(190, 40), await ad(6, 40)]) // first only has the headline in the band; retry adds a CTA touching the edge
+    const { status } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    const ar = status.autoRetry as { kept: string; firstSeverity: number; retrySeverity: number }
+    expect(ar.kept).toBe('first')
+    expect(ar.retrySeverity).toBeGreaterThan(ar.firstSeverity)
+  })
+
+  it('"temporarily at capacity" / 5xx are retried with backoff inside the job: not surfaced, charged ONCE', async () => {
+    const ok = await ad(190)
+    sequence([{ status: 503, text: JSON.stringify({ error: 'The service is temporarily at capacity. Please retry your request shortly.' }) }, { status: 500, text: 'upstream error' }, ok])
+    vi.mocked(incrementUsage).mockClear()
+    const { status } = await runJob({ copy: 'Hola' })
+    expect(xai).toHaveLength(3)
+    expect(status.status).toBe('completed')
+    expect(status.chargedCredits).toBe(6)
+    expect(status.providerRetries).toBe(2)
+    expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
+  })
+
+  it('a non-transient provider error is NOT retried; a permanent capacity outage fails the job with no charge', async () => {
+    sequence([{ status: 400, text: JSON.stringify({ error: 'invalid image' }) }])
+    vi.mocked(incrementUsage).mockClear()
+    const bad = await runJob({ copy: 'Hola' })
+    expect(xai).toHaveLength(1)
+    expect(bad.status.status).toBe('failed')
+    expect(vi.mocked(incrementUsage)).not.toHaveBeenCalled()
+    xai = []
+    sequence([{ status: 503, text: JSON.stringify({ error: 'The service is temporarily at capacity.' }) }])
+    const down = await runJob({ copy: 'Hola' })
+    expect(xai).toHaveLength(4) // 1 + 3 retries, then the job fails
+    expect(down.status.status).toBe('failed')
+    expect(vi.mocked(incrementUsage)).not.toHaveBeenCalled()
+  })
+})

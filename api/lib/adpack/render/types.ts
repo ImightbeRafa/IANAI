@@ -48,6 +48,8 @@ export interface RenderAdInput {
    * nothing collides. Exact mode ignores it — the composite's placement is the product box.
    */
   productBox?: NormalizedBox
+  /** Optional wider top / bottom text margins (fractions of the height; never narrower than the default). Absent = unchanged. */
+  safeMargin?: { top?: number; bottom?: number }
   /** Brand font loading (network fetch, disk cache). Omitted → bundled/registered fonts only. */
   fonts?: FontResolverOptions
   /** QA/test only: also return the composited background (everything except the top text/UI layer). */

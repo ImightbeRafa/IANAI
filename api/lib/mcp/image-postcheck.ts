@@ -16,7 +16,7 @@
 import sharp from 'sharp'
 import { components, deltaE3, erode, labImage } from '../adpack/fidelity/pixels.js'
 import { floodBackground } from '../adpack/fidelity/segment.js'
-import { compareLocatedRegion, locateProduct } from './feature-match.js'
+import { GEN_WIDTH as FEATURE_GEN_WIDTH, compareLocatedRegion, locateProduct } from './feature-match.js'
 import { safeZoneMargins } from './safe-zones.js'
 
 export { safeZoneMargins }
@@ -54,6 +54,8 @@ export type FidelityWarning = {
     cells?: number
     scale?: number
     colourDeltaE?: number
+    /** Located product box as fractions of the generated image (feature match only). */
+    productBox?: { x0: number; y0: number; x1: number; y1: number }
   }
   /** Possible invented objects next to the product (heuristic, low confidence). */
   props?: PropsFinding
@@ -219,6 +221,7 @@ function matchTemplate(genLab: Float32Array, gw: number, gh: number, resizedFor:
   return best
 }
 
+
 async function compareOne(tpl: RefTemplate, generated: Buffer, referenceIndex: number): Promise<{ score: number; details: LegacyColourDetails }> {
   const gen = await sharp(generated).rotate().flatten({ background: '#ffffff' }).resize({ width: GEN_WIDTH }).removeAlpha().raw().toBuffer({ resolveWithObject: true })
   const gw = gen.info.width
@@ -305,7 +308,7 @@ async function compareOne(tpl: RefTemplate, generated: Buffer, referenceIndex: n
 /** Minimum RANSAC inliers to trust the feature location (below this the product is "not located"). */
 export const MIN_LOCATED_INLIERS = 15
 /** Warn when less than this share of the product's textured regions still matches the reference. */
-export const PRESERVED_MIN = 0.75
+export const PRESERVED_MIN = 0.8
 /** A comparison over fewer textured cells than this is not trusted. */
 export const MIN_COMPARED_CELLS = 40
 
@@ -326,7 +329,7 @@ export async function checkGeneratedProductFidelity(input: {
     const generated = dataUrlBytes(input.generatedDataUrl)
     if (!generated) return { status: 'skipped', reason: 'generated image is not inline' }
     const refs = input.referenceDataUrls.slice(0, 3)
-    let best: { index: number; inliers: number; preserved: number; cells: number; scale: number; bbox: { x0: number; y0: number; x1: number; y1: number } } | null = null
+    let best: { index: number; inliers: number; preserved: number; cells: number; scale: number; genH: number; bbox: { x0: number; y0: number; x1: number; y1: number } } | null = null
     let colour: { score: number; details: LegacyColourDetails } | null = null
     const skips: string[] = []
     for (let i = 0; i < refs.length; i++) {
@@ -337,7 +340,7 @@ export async function checkGeneratedProductFidelity(input: {
         if (found.located && found.located.inliers >= MIN_LOCATED_INLIERS) {
           const cmp = compareLocatedRegion(found.ref, found.gen, found.refKps, found.located.transform)
           if (cmp && cmp.cells >= MIN_COMPARED_CELLS && (!best || found.located.inliers > best.inliers)) {
-            best = { index: i, inliers: found.located.inliers, preserved: cmp.preserved, cells: cmp.cells, scale: found.located.scale, bbox: cmp.bbox }
+            best = { index: i, inliers: found.located.inliers, preserved: cmp.preserved, cells: cmp.cells, scale: found.located.scale, genH: found.gen.h, bbox: cmp.bbox }
           }
         }
       } catch (err) {
@@ -356,14 +359,14 @@ export async function checkGeneratedProductFidelity(input: {
     const colourBad = typeof colourDeltaE === 'number' && colourDeltaE > POSTCHECK_THRESHOLD.colourDeltaE
     const reasons: string[] = []
     if (best && best.preserved < PRESERVED_MIN) {
-      reasons.push(`product details differ from the reference photo (only ${Math.round(best.preserved * 100)}% of its textured regions match at the located position, < ${Math.round(PRESERVED_MIN * 100)}%): folds, wheels, tail or parts may have been redrawn`)
+      reasons.push(`the product's shapes, parts or printed details differ from the reference photo (only ${Math.round(best.preserved * 100)}% of its textured regions match at the located position, < ${Math.round(PRESERVED_MIN * 100)}%): it may have been redrawn`)
     }
     if (colourBad) reasons.push(`product colour differs from the reference (ΔE ${colourDeltaE} > ${POSTCHECK_THRESHOLD.colourDeltaE})`)
     const details: FidelityWarning['details'] = {
       method: best ? 'features' : 'colour',
       referenceIndex: best ? best.index : (colour?.details.referenceIndex ?? 0),
       confident: Boolean(best),
-      ...(best ? { inliers: best.inliers, preserved: Math.round(best.preserved * 100) / 100, cells: best.cells, scale: Math.round(best.scale * 100) / 100 } : {}),
+      ...(best ? { inliers: best.inliers, preserved: Math.round(best.preserved * 100) / 100, cells: best.cells, scale: Math.round(best.scale * 100) / 100, productBox: { x0: Math.max(0, best.bbox.x0 / FEATURE_GEN_WIDTH), y0: Math.max(0, best.bbox.y0 / best.genH), x1: Math.min(1, best.bbox.x1 / FEATURE_GEN_WIDTH), y1: Math.min(1, best.bbox.y1 / best.genH) } } : {}),
       ...(typeof colourDeltaE === 'number' ? { colourDeltaE } : {}),
     }
     const colourScore = colour ? Math.max(0, 1 - (colour.details.colourDeltaE) / (POSTCHECK_THRESHOLD.colourDeltaE * 2)) : 1
@@ -373,7 +376,7 @@ export async function checkGeneratedProductFidelity(input: {
     }
     if (best) return { status: 'ok', score, details }
     if (colour) {
-      return { status: 'unverified', reason: 'product not located by feature match (dark, low-texture or heavily changed): colour is consistent, shape not verified', details }
+      return { status: 'unverified', reason: 'product not located by feature match (dark, low-texture or heavily changed): only colour was compared, shape/details not verified — check it by eye', details }
     }
     return { status: 'skipped', reason: skips[0] || 'no product reference to compare' }
   } catch (err) {
@@ -385,7 +388,7 @@ export async function checkGeneratedProductFidelity(input: {
 // Safety-net QA (heuristic, warning only)
 // ---------------------------------------------------------------------------
 
-export type SafeZoneIssue = { edge: 'top' | 'bottom' | 'left' | 'right'; kind: 'block_touches_edge' | 'text_in_unsafe_band'; detail: string }
+export type SafeZoneIssue = { edge: 'top' | 'bottom' | 'left' | 'right'; kind: 'block_touches_edge' | 'text_in_unsafe_band'; detail: string; /** Text-like edge density inside the band (how deep the violation is); 1 for a block touching the edge. */ amount?: number }
 
 export type McpImageQa = {
   ratioOk: boolean
@@ -398,8 +401,14 @@ export type McpImageQa = {
   separatorLines: Array<{ line: number; text: string; where: 'start' | 'end' }>
   /** Separator fixes applied to the copy before drawing it (e.g. a long "a · b" line split at the "·"). */
   copyNormalised: string[]
-  /** 'pass' | 'fail' — fail = a retryable defect (safe zones, orphan separators, missing text). */
+  /** Button-like flat blocks (rounded rectangles) detected; the copy asks for exactly ONE CTA. */
+  ctaButtons: number
+  /** true when 2+ button-like blocks were found: an invented second CTA is likely (heuristic; a text-only CTA is not detectable). */
+  extraCtaRisk: boolean
+  /** 'pass' | 'fail' — fail = a retryable defect (safe zones, orphan separators, missing text, extra CTA risk). */
   status: 'pass' | 'fail'
+  /** Weighted defect score used to keep the better image after an auto-retry (0 = clean). */
+  severity: number
   warnings: string[]
 }
 
@@ -506,7 +515,7 @@ export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<Safe
       const next = y + dir * (t + 1)
       const sharpEdge = next >= 0 && next < h && dist(px(col, next), ref) > 60
       if (t >= Math.round(h * 0.02) && t <= Math.round(h * 0.14) && sharpEdge) {
-        issues.push({ edge, kind: 'block_touches_edge', detail: `a flat block (~${Math.round(span * 100)}% of the width, e.g. the CTA button) touches the ${edge} edge` })
+        issues.push({ edge, kind: 'block_touches_edge', detail: `a flat block (~${Math.round(span * 100)}% of the width, e.g. the CTA button) touches the ${edge} edge`, amount: 1 })
         return
       }
     }
@@ -528,10 +537,61 @@ export async function checkSafeZones(bytes: Buffer, ratio: string): Promise<Safe
     return n ? edges / n : 0
   }
   const bottomBand = textBand(Math.floor(h * (1 - m.bottom)), h)
-  if (bottomBand > 0.035 && !issues.some((i) => i.edge === 'bottom')) issues.push({ edge: 'bottom', kind: 'text_in_unsafe_band', detail: `text-like content inside the bottom ${Math.round(m.bottom * 100)}% (Instagram UI zone)` })
+  if (bottomBand > 0.035 && !issues.some((i) => i.edge === 'bottom')) issues.push({ edge: 'bottom', kind: 'text_in_unsafe_band', detail: `text-like content inside the bottom ${Math.round(m.bottom * 100)}% (Instagram UI zone)`, amount: Math.round(bottomBand * 1000) / 1000 })
   const topBand = textBand(0, Math.floor(h * m.top))
-  if (topBand > 0.035 && !issues.some((i) => i.edge === 'top')) issues.push({ edge: 'top', kind: 'text_in_unsafe_band', detail: `text-like content inside the top ${Math.round(m.top * 100)}% (Instagram UI zone)` })
+  if (topBand > 0.035 && !issues.some((i) => i.edge === 'top')) issues.push({ edge: 'top', kind: 'text_in_unsafe_band', detail: `text-like content inside the top ${Math.round(m.top * 100)}% (Instagram UI zone)`, amount: Math.round(topBand * 1000) / 1000 })
   return issues
+}
+
+
+/**
+ * Count button-like flat blocks (CTA buttons): connected regions of one quantised colour whose bounding box is a wide, short
+ * rounded-rectangle (aspect 2.2–9, 14–65 % of the width, 2.5–12 % of the height) and mostly filled (text leaves holes).
+ * Heuristic: a CTA drawn as plain text is not detectable; a textured scene rarely forms such a block.
+ */
+export async function countCtaButtons(bytes: Buffer): Promise<number> {
+  const { data, info } = await sharp(bytes).rotate().removeAlpha().resize({ width: 200 }).blur(0.8).raw().toBuffer({ resolveWithObject: true })
+  const w = info.width
+  const h = info.height
+  const n = w * h
+  const keyOf = new Int32Array(n)
+  const counts = new Map<number, number>()
+  for (let i = 0; i < n; i++) {
+    const k = ((data[i * 3] >> 5) << 6) | ((data[i * 3 + 1] >> 5) << 3) | (data[i * 3 + 2] >> 5)
+    keyOf[i] = k
+    counts.set(k, (counts.get(k) || 0) + 1)
+  }
+  let buttons = 0
+  const boxes: Array<{ x0: number; y0: number; x1: number; y1: number }> = []
+  for (const [k, c] of counts) {
+    if (c / n < 0.004 || c / n > 0.14) continue
+    const mask = new Uint8Array(n)
+    for (let i = 0; i < n; i++) mask[i] = keyOf[i] === k ? 1 : 0
+    const { list } = components(mask, w, h)
+    for (const comp of list) {
+      if (comp.area / n < 0.004) break
+      const bw = comp.x1 - comp.x0 + 1
+      const bh = comp.y1 - comp.y0 + 1
+      const aspect = bw / bh
+      if (aspect < 2.2 || aspect > 9 || bw / w < 0.14 || bw / w > 0.65 || bh / h < 0.025 || bh / h > 0.12) continue
+      if (comp.area / (bw * bh) < 0.55) continue
+      const dup = boxes.some((b) => Math.abs(b.x0 - comp.x0) < 8 && Math.abs(b.y0 - comp.y0) < 8)
+      if (dup) continue
+      boxes.push({ x0: comp.x0, y0: comp.y0, x1: comp.x1, y1: comp.y1 })
+      buttons++
+    }
+  }
+  return buttons
+}
+
+/** Weighted defect score (0 = clean). Used to keep the BETTER image after the single auto-retry. */
+export function qaSeverity(qa: Pick<McpImageQa, 'safeZoneIssues' | 'textPresent' | 'separatorLines' | 'ctaButtons'>): number {
+  let v = 0
+  for (const i of qa.safeZoneIssues) v += i.kind === 'block_touches_edge' ? 3 + Math.min(1, i.amount ?? 0) : 2 + Math.min(2, (i.amount ?? 0) * 20)
+  if (qa.textPresent === 'no') v += 4
+  v += qa.separatorLines.length
+  if (qa.ctaButtons > 1) v += 2 * (qa.ctaButtons - 1)
+  return Math.round(v * 100) / 100
 }
 
 export async function runMcpImageQa(input: {
@@ -550,6 +610,7 @@ export async function runMcpImageQa(input: {
   let textPresent: McpImageQa['textPresent'] = input.copyRequested ? 'yes' : 'not_requested'
   let safeZones: McpImageQa['safeZones'] = 'not_checked'
   let safeZoneIssues: SafeZoneIssue[] = []
+  let ctaButtons = 0
   const bytes = dataUrlBytes(input.generatedDataUrl)
   if (bytes) {
     try {
@@ -576,11 +637,17 @@ export async function runMcpImageQa(input: {
     } catch {
       safeZones = 'not_checked'
     }
+    try {
+      ctaButtons = await countCtaButtons(bytes)
+    } catch { /* heuristic only */ }
   }
   const separatorLines = input.copy ? findSeparatorLines(input.copy) : []
   for (const l of separatorLines) warnings.push(`copy line ${l.line} ${l.where === 'end' ? 'ends' : 'starts'} with a separator ("${l.text.slice(0, 60)}")`)
   const logo: McpImageQa['logo'] = input.logoAttached ? 'attached' : input.logoExpected ? 'none' : 'not_requested'
   if (logo === 'none') warnings.push('the brand kit has no logo to stamp')
-  const status: McpImageQa['status'] = safeZones === 'violation' || separatorLines.length > 0 || textPresent === 'no' ? 'fail' : 'pass'
-  return { ratioOk, textPresent, logo, safeZones, safeZoneIssues, separatorLines, copyNormalised: input.copyChanges ?? [], status, warnings }
+  const extraCtaRisk = ctaButtons > 1
+  if (extraCtaRisk) warnings.push(`${ctaButtons} button-like blocks found: the copy has exactly one CTA, a second button may have been invented (heuristic)`)
+  const status: McpImageQa['status'] = safeZones === 'violation' || separatorLines.length > 0 || textPresent === 'no' || extraCtaRisk ? 'fail' : 'pass'
+  const severity = qaSeverity({ safeZoneIssues, textPresent, separatorLines, ctaButtons })
+  return { ratioOk, textPresent, logo, safeZones, safeZoneIssues, separatorLines, copyNormalised: input.copyChanges ?? [], ctaButtons, extraCtaRisk, status, severity, warnings }
 }

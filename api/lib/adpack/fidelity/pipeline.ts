@@ -8,6 +8,8 @@
  *   (plate → props check → composite + deterministic relight stage → optional AI relight →
  *   fidelity), used by MCP execute_image_generate, bulk posts and the campaign pack image step.
  */
+import { measureHalo, type HaloReport } from './halo.js'
+import type { Box } from '../render/types.js'
 import sharp from 'sharp'
 import { isSupportedImageRatio, RATIO_OUTPUT_SIZE, ratioValue, reframeToRatio } from '../../image-ratios.js'
 import { loadImageBytes } from '../render/image.js'
@@ -282,6 +284,12 @@ export type ExactImageResult =
       plateModel: string
       cutout: StoredCutout
       warnings: string[]
+      /** Where the real product sits in `png` (px). */
+      productBox: Box
+      /** Cut-out as placed (RGBA PNG, box size) — edge-roughness input. */
+      placed: Buffer
+      /** Halo / leftover-backdrop measurement of the composite (free, local). */
+      halo: HaloReport
     }
   | { ok: false; error: string; costUsd: number; warnings: string[] }
 
@@ -375,6 +383,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   const p0 = comp.placements[0]
   const score = await scoreFidelity({ image: png, box: p0.box, reference: p0.placed, ...(p0.background ? { background: p0.background } : {}), method, diff: true })
   if (!score.passed) return { ok: false, error: `fidelity_failed: ${fidelityFailReason(score)}`, costUsd, warnings }
+  const halo = await measureHalo({ composite: png, box: p0.box, placed: p0.placed, ...(p0.background ? { background: p0.background } : { background: p0.placed }), ...(typeof cutouts.hero.stored.backgroundLeak === 'number' ? { leak: cutouts.hero.stored.backgroundLeak } : {}) }).catch((): HaloReport => ({ leak: null, haze: 0, ringPixels: 0, flagged: false, reasons: [] }))
   return {
     ok: true,
     png,
@@ -386,6 +395,9 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
     plateModel,
     cutout: cutouts.hero.stored,
     warnings,
+    productBox: p0.box,
+    placed: p0.placed,
+    halo,
   }
 }
 

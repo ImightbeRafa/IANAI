@@ -10,6 +10,7 @@
  * prompt-too-long clamp retry. The web route calls the pure builders below with the same
  * inputs it always used, so its request is unchanged; the MCP calls `runWebPostGrokImage`.
  */
+import { withProviderRetry } from './mcp/provider-retry.js'
 import type { CTAStrength } from '../data/organic-script-prompts.js'
 import { describeReferenceFailures, fetchPublicImageDetailed, type ReferenceImageFailure } from './fetch-image-data-url.js'
 import { safeZoneMargins } from './mcp/safe-zones.js'
@@ -116,6 +117,10 @@ export type WebPostMcpRules = {
   accessoryLabels?: string[]
   /** Corrective instruction for the single QA retry. */
   retryHint?: string
+  /** The one CTA line of the copy (exact text). Any other button / CTA text is forbidden. */
+  ctaText?: string
+  /** Cap the layout to: headline, one price line, one facts line, one CTA, logo. */
+  layoutCap?: boolean
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -153,6 +158,21 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
   const es = language !== 'en'
   const m = safeZoneMargins(rules.requestedRatio || '4:5')
   const lines: string[] = []
+  // RULE 1 — margins first: the prompt clamp trims the tail, never the opening instructions.
+  const topPct = pct(Math.max(0.08, m.top))
+  const botPct = pct(Math.max(0.08, m.bottom))
+  lines.push(es
+    ? `REGLA 1 — MÁRGENES (Instagram recorta la UI): el titular y el logo quedan FUERA del ${topPct} superior; el botón CTA y todo texto quedan FUERA del ${botPct} inferior (el CTA termina a ≥ ${pct(Math.max(0.08, m.bottom) + 0.03)} del borde de abajo) y a ${pct(m.side)} de los costados. Nada toca ni se corta en el borde.`
+    : `RULE 1 — MARGINS (Instagram crops its UI): the headline and logo stay OUT of the top ${topPct}; the CTA button and all text stay OUT of the bottom ${botPct} (the CTA ends ≥ ${pct(Math.max(0.08, m.bottom) + 0.03)} above the bottom edge) and ${pct(m.side)} from the sides. Nothing touches or is cut by an edge.`)
+  const cta = (rules.ctaText || '').trim().slice(0, 120)
+  lines.push(es
+    ? `UN SOLO CTA${cta ? `: el único botón/llamado a la acción dice EXACTAMENTE «${cta}»` : ': el único botón/llamado a la acción es el de la copy'}. PROHIBIDO un segundo botón, banner o texto de acción distinto (nada de "Pedí acá", "Comprá ya", flechas ni sellos extra).`
+    : `ONE CTA ONLY${cta ? `: the only button / call to action says EXACTLY "${cta}"` : ': the only button / call to action is the one in the copy'}. FORBIDDEN: a second button, banner or different action text (no "Order here", "Buy now", arrows or extra badges).`)
+  if (rules.layoutCap !== false) {
+    lines.push(es
+      ? 'COMPOSICIÓN LIMPIA: como máximo estos bloques de texto — un titular, UNA línea de precio, UNA línea de datos, UN CTA — más el logo y el producto grande. Ningún otro texto, sello, viñeta ni bloque; aire entre bloques.'
+      : 'CLEAN LAYOUT: at most these text blocks — one headline, ONE price line, ONE facts line, ONE CTA — plus the logo and a large product. No other text, badges, bullets or blocks; air between blocks.')
+  }
   if (rules.strict && ctx.hasProductRefs) {
     const allowed = (rules.allowedProps || []).map((a) => a.trim()).filter(Boolean).slice(0, 8)
     const accessories = (rules.accessoryLabels || []).map((a) => a.trim()).filter(Boolean).slice(0, 3)
@@ -160,17 +180,14 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
       ? 'PRODUCTO BLOQUEADO (reforzado): NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues, cables, hélices, proporciones ni colores. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
       : 'PRODUCT LOCK (reinforced): do NOT alter shape, parts, wheels, landing gear, tail, folds, wires, propellers, proportions or colours. It is the SAME physical object as the photo; only the environment and light change.')
     lines.push(es
-      ? `PROPS: PROHIBIDO añadir objetos que no estén en las fotos de referencia adjuntas ni nombrados en la escena: ninguna caja, empaque, control/gamepad, logo, accesorio ni texto impreso inventado.${allowed.length ? ` Permitido: ${allowed.join('; ')}.` : ''}`
-      : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: no box, packaging, controller/gamepad, logo, accessory or invented printed text.${allowed.length ? ` Allowed: ${allowed.join('; ')}.` : ''}`)
+      ? `PROPS: PROHIBIDO añadir objetos que no estén en las fotos de referencia adjuntas ni nombrados en la escena: ninguna caja, empaque, control/gamepad, cable, herramienta, repuesto, hoja con dibujo, logo, accesorio ni texto impreso inventado. Solo el producto${accessories.length ? ', los accesorios de las fotos adjuntas' : ''} y la superficie/ambiente.${allowed.length ? ` Únicos extras permitidos: ${allowed.join('; ')}.` : ' No hay extras permitidos.'}`
+      : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: no box, packaging, controller/gamepad, cable, tool, spare part, drawn sheet, logo, accessory or invented printed text. Only the product${accessories.length ? ', the accessories in the attached photos' : ''} and the surface/ambience.${allowed.length ? ` Only extras allowed: ${allowed.join('; ')}.` : ' No extras allowed.'}`)
     if (accessories.length) {
       lines.push(es
         ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente (misma impresión y forma); no son el producto principal y no los inventes distintos.`
         : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully (same print and shape); they are not the main product and must not be reinvented.`)
     }
   }
-  lines.push(es
-    ? `ZONAS SEGURAS (UI de Instagram): dejá libre ${pct(m.top)} arriba, ${pct(m.bottom)} abajo y ${pct(m.side)} a cada lado: ningún texto, logo ni botón dentro de esos márgenes. El botón CTA se ve COMPLETO, a ≥ ${pct(m.bottom + 0.03)} del borde inferior, sin tocar ni cortarse en el borde.`
-    : `SAFE ZONES (Instagram UI): keep ${pct(m.top)} free at the top, ${pct(m.bottom)} at the bottom and ${pct(m.side)} on each side: no text, logo or button inside those margins. The CTA button is fully visible, ≥ ${pct(m.bottom + 0.03)} above the bottom edge, never touching or cut by the edge.`)
   lines.push(es
     ? 'SEPARADORES: nunca dejes "·", "|" o "—" sueltos al inicio o al final de una línea; si una línea se parte, el separador desaparece.'
     : 'SEPARATORS: never leave "·", "|" or "—" dangling at the start or end of a line; if a line wraps, the separator disappears.')
@@ -397,6 +414,10 @@ export type WebPostGrokImageResult = {
   referencesUsed: Array<'product' | 'accessory' | 'kit' | 'logo' | 'scene'>
   /** Optional references (kit / accessory / scene) that could not be loaded: url + HTTP status or reason. */
   referenceWarnings: ReferenceImageFailure[]
+  /** Transient provider failures retried inside the job (capacity / 5xx); 0 normally. Not an error, not charged. */
+  providerRetries: number
+  /** Every reference actually sent (product, accessories, kit, logo, scene), as data URLs. */
+  allReferenceDataUrls: string[]
   /** The request exactly as POSTed (images omitted → lengths only) — for parity evidence. */
   request: Record<string, unknown>
   prompt: string
@@ -544,21 +565,27 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
 
   const api = resolveWebGrokApi(productData.length, referenceUrls.length)
   const buildRequest = (prompt: string) => buildWebGrokRequest({ prompt, aspectRatio, referenceUrls, logoDataUrl, api })
-  const { response, errorText, prepared, retried } = await postWebGrokWithClampRetry({
-    endpoint: api.endpoint,
-    apiKey: options.apiKey,
-    sourcePrompt,
-    preferTail: userCopy,
-    buildRequest,
+  // Transient provider failures ("temporarily at capacity", 429, 5xx) are retried with backoff inside the job: not
+  // surfaced to the user and not charged (the caller charges once, after success).
+  const { value: posted, trace: providerTrace } = await withProviderRetry(async () => {
+    const attempt = await postWebGrokWithClampRetry({
+      endpoint: api.endpoint,
+      apiKey: options.apiKey,
+      sourcePrompt,
+      preferTail: userCopy,
+      buildRequest,
+    })
+    if (!attempt.response.ok) {
+      let message = attempt.errorText
+      try {
+        const parsed = JSON.parse(attempt.errorText) as { error?: { message?: string } | string }
+        message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message || attempt.errorText
+      } catch { /* keep raw */ }
+      throw Object.assign(new Error(message || `Grok image generate failed (${attempt.response.status})`), { status: attempt.response.status })
+    }
+    return attempt
   })
-  if (!response.ok) {
-    let message = errorText
-    try {
-      const parsed = JSON.parse(errorText) as { error?: { message?: string } | string }
-      message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message || errorText
-    } catch { /* keep raw */ }
-    throw new Error(message || `Grok image generate failed (${response.status})`)
-  }
+  const { response, prepared, retried } = posted
   const json = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> }
   const b64 = json.data?.[0]?.b64_json
   const url = json.data?.[0]?.url
@@ -581,5 +608,7 @@ export async function runWebPostGrokImage(options: WebPostGrokImageOptions): Pro
     referenceWarnings,
     request: buildRequest(prepared.prompt),
     prompt: prepared.prompt,
+    providerRetries: providerTrace.retries.length,
+    allReferenceDataUrls: referenceUrls,
   }
 }

@@ -37,6 +37,18 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.17.0 — exact with text/logo/QA, `allowedProps` honoured, one CTA, 8 % margins, better-of-two retry, capacity backoff, `get_server_info`
+
+Registry / server version **0.17.0**. **No migration**, no new env/secret/binding/route/cron (build commit for `get_server_info` comes from `BUILD_COMMIT` / `git` at `build:api`; `unknown` otherwise). Proofs: `test/round4-mcp.spec.ts`, `test/mcp-web-image-flow.spec.ts` (round 4 block), `test/mcp-image-postcheck.spec.ts` (Round-3 real images), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- **`exact` runs the same layers** (`api/lib/mcp/exact-flow.ts`): real product pixels on the plate → the ad renderer draws headline + ONE price line + ONE facts line + ONE CTA + the kit logo inside 9 % top/bottom margins → same `qa` block. `halo_warning {leak, haze, edgeRoughness}` when the cut-out keeps backdrop (> 1.5 % leftover) / a pale fringe / jagged edges — warning only. Box/controller photos are not composited in exact mode.
+- **`allowedProps`** (execute_image_generate input) is honoured and **defaults to none**: the offer `ad_profile.allowedProps` list no longer widens it. Result `propsPolicy {allowed, source: input|none, check}` and `props_warning` (a saturated colour covering ≥ 0.5 % of the scene that no reference photo explains; heuristic, grey/white props are not detected).
+- **Prompt:** `REGLA 1 — MÁRGENES` opens the prompt (headline + logo out of the top 8 %, CTA + text out of the bottom 8 %); `UN SOLO CTA` = the exact CTA line of `copy`, no second button; `COMPOSICIÓN LIMPIA` = headline, one price line, one facts line, one CTA, logo. `layoutCap` (default true) condenses a longer copy and returns the rest as `copyOverflow` for the caption.
+- **`autoRetry` keeps the better image** by `qa.severity` (edge-touching CTA 3–4, text in an unsafe band 2–4, missing text 4, each orphan separator 1, each extra button 2); a tie keeps the first. Reported as `autoRetry {kept, keptReason, firstSeverity, retrySeverity}`. Single charge. New qa fields: `ctaButtons`, `extraCtaRisk`, `severity`.
+- **Provider errors:** "temporarily at capacity", 429 and 5xx are retried inside the job (2 s, 4 s, 8 s) — never surfaced, never charged (credits are charged once, after success); `providerRetries` counts them.
+- **Fidelity check:** affine-refined feature location, 10 px cells at ±1 px (the flat pouch scored 0.54, now 0.89; the Prototipo redraw 0.77 < 0.8 warns); neutral wording for every product type; `unverified` stays when the product cannot be located (dark / low-texture) — never a false verdict.
+- **Server identity:** new read-only `get_server_info` → `{name, version, commit, features[]}`; every execute result (and failed job) carries `serverVersion`.
+
 ### 0.16.0 — no invented props, binding `scene`, safe zones, QA auto-retry, rehosted photos
 
 Registry / server version **0.16.0**. **No migration**, no new env/secret/binding/route/cron. Proofs: `test/round3-mcp-web-post.spec.ts`, `test/mcp-image-postcheck.spec.ts` (Round-2 real images as fixtures), `test/mcp-web-image-flow.spec.ts`, `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -197,7 +209,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.16.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.17.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

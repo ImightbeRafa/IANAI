@@ -18,11 +18,13 @@ import { usageTimingMetadata } from '../usage-timings.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
+import type { AspectRatio } from '../adpack/types.js'
+import { generateExactWebStyleAd } from './exact-flow.js'
 import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary } from './web-image.js'
 import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
-import { exactResultDataUrl, generateExactProductImage, parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
+import { parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
 import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
 import {
@@ -280,6 +282,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   immutableAttributes?: string[]
   lockProductAppearance?: boolean
   autoRetry?: boolean
+  layoutCap?: boolean
 } {
   const out: ReturnType<typeof parseWebPostArgs> = {}
   const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
@@ -302,6 +305,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   }
   if (args.lockProductAppearance === true) out.lockProductAppearance = true
   if (args.autoRetry === true) out.autoRetry = true
+  if (args.layoutCap === false) out.layoutCap = false
   return out
 }
 
@@ -805,6 +809,7 @@ async function runImageGenerateBody(options: {
   immutableAttributes?: string[]
   lockProductAppearance?: boolean
   autoRetry?: boolean
+  layoutCap?: boolean
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -846,32 +851,53 @@ async function runImageGenerateBody(options: {
   let postCheck: Record<string, unknown> | null = null
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
   if (fidelityMode === 'exact') {
-    // Real product pixels on a generated plate (A1); the job fails rather than deliver a redrawn product.
+    // Real product pixels on a generated plate (A1), then the SAME ad layers as the web-style flow: copy / one CTA / logo /
+    // safe zones / QA / halo flags (api/lib/mcp/exact-flow.ts). Never a redrawn product; flags are warnings only.
     const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
-    const exact = await generateExactProductImage({
-      gateway: createModelGateway(),
-      photos: photosFromUrls(productUrls),
-      ratio: appliedAspectRatio,
-      brandName: options.ctxPreview.brand.name,
-      offerName,
+    const exactAd = await generateExactWebStyleAd({
+      exact: {
+        gateway: createModelGateway(),
+        photos: photosFromUrls(productUrls),
+        ratio: appliedAspectRatio,
+        brandName: options.ctxPreview.brand.name,
+        offerName,
+        language: 'es',
+        sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
+        styleNotes: kit?.visualStyleNotes || undefined,
+        palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
+        allowedProps: options.allowedProps,
+        ...(options.immutableAttributes?.length ? { immutableAttributes: options.immutableAttributes } : {}),
+        ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
+      },
+      ctx: options.ctxPreview,
+      offerId: options.offerId,
+      copy: options.copy,
+      guidePrompt: options.guidePrompt,
+      ratio: appliedAspectRatio as AspectRatio,
       language: 'es',
-      sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
-      styleNotes: kit?.visualStyleNotes || undefined,
-      palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
-      allowedProps: options.allowedProps,
-      ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
+      layoutCap: options.layoutCap,
     })
-    if (!exact.ok) throw new Error(exact.error)
-    fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift }
+    fidelity = exactAd.fidelity
     generated = {
-      imageDataUrl: exactResultDataUrl(exact),
-      providerModel: exact.plateModel || 'grok-imagine',
-      estimatedCostUsd: exact.costUsd,
-      resolution: `${exact.width}x${exact.height}`,
+      imageDataUrl: exactAd.imageDataUrl,
+      providerModel: exactAd.plateModel || 'grok-imagine',
+      estimatedCostUsd: exactAd.costUsd,
+      resolution: `${exactAd.width}x${exactAd.height}`,
       quality: 'medium',
       aspectRatio: appliedAspectRatio,
       mode: 'exact_composite',
       lockApplied: true,
+    }
+    postCheck = {
+      qa: exactAd.qa,
+      halo: exactAd.halo,
+      ...(exactAd.halo_warning ? { halo_warning: exactAd.halo_warning } : {}),
+      copyOnImage: exactAd.copyOnImage,
+      ...(exactAd.copyOverflow.length ? { copyOverflow: exactAd.copyOverflow } : {}),
+      exactLayout: exactAd.layout,
+      ...(exactAd.warnings.length ? { exactWarnings: exactAd.warnings } : {}),
+      ...(exactAd.providerRetries ? { providerRetries: exactAd.providerRetries } : {}),
+      accessories: 'not composited in exact mode (real box / controller photos are only used by productFidelity "generated")',
     }
   } else {
     // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).
@@ -882,7 +908,8 @@ async function runImageGenerateBody(options: {
     const lock = {
       lockProductAppearance: options.lockProductAppearance ?? rowLock.lockProductAppearance,
       immutableAttributes: options.immutableAttributes?.length ? options.immutableAttributes : rowLock.immutableAttributes,
-      allowedProps: rowLock.allowedProps,
+      // The tool input decides: default = NO props except the ones the caller lists (the offer's ad_profile list no longer widens it).
+      allowedProps: options.allowedProps?.length ? options.allowedProps : [],
       forbidExtraProps: rowLock.forbidExtraProps,
     }
     // Real box / controller / contents photos of the offer ride along as extra references (hero first, logo kept).
@@ -914,6 +941,7 @@ async function runImageGenerateBody(options: {
       lock,
       accessories,
       autoRetry: options.autoRetry,
+      layoutCap: options.layoutCap,
     })
     generated = web.generated
     promptUsed = web.prompt

@@ -423,6 +423,8 @@ function textTree(texts: TextNode[], colorOf: (t: TextNode) => Rgb, frame: Frame
 export interface PlanLayoutInput {
   format: AdFormat
   ratio: AspectRatio
+  /** Optional safe-margin override (MCP exact flow); absent = frame defaults. */
+  safeMargin?: RenderAdInput['safeMargin']
   copy: RenderAdInput['copy']
   visual?: RenderAdInput['visual']
   language: RenderAdInput['language']
@@ -474,7 +476,7 @@ function productBoxesFor(layout: TemplateLayout, input: PlanLayoutInput): { boxe
  * nothing over its product box wins, else the least-overlapping one.
  */
 export function planLayout(input: PlanLayoutInput): PlannedLayout {
-  const frame = makeFrame(input.ratio)
+  const frame = makeFrame(input.ratio, input.safeMargin)
   let fonts = input.fonts ?? resolveFonts(input.visual)
   const palette = makePalette(parseColor(input.visual?.primaryColor), parseColor(input.visual?.secondaryColor), parseColor(input.visual?.accentColor))
   // Style DNA render profile (winners): CTA color emphasis and headline weight.
@@ -671,7 +673,7 @@ async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<R
 
   // Generated mode: the scene product's bbox (vision check) mapped through the cover crop.
   // Exact mode never uses it — the composite's placement is the product box.
-  const frame0 = makeFrame(input.ratio)
+  const frame0 = makeFrame(input.ratio, input.safeMargin)
   const sceneBox = toNormalizedBox(input.productBox ?? input.productAvoid)
   const avoidBox = !exact && sceneBox && assets.sceneSize ? mapSceneBox(sceneBox, assets.sceneSize, frame0.W, frame0.H) : null
 

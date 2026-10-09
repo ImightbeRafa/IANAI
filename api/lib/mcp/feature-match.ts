@@ -152,9 +152,9 @@ function hamming(a: Uint32Array, b: Uint32Array): number {
   return s
 }
 
-export type Similarity = { a: number; b: number; mrx: number; mry: number; mgx: number; mgy: number }
-const applyX = (t: Similarity, x: number, y: number) => t.a * (x - t.mrx) - t.b * (y - t.mry) + t.mgx
-const applyY = (t: Similarity, x: number, y: number) => t.b * (x - t.mrx) + t.a * (y - t.mry) + t.mgy
+export type Similarity = { a: number; b: number; mrx: number; mry: number; mgx: number; mgy: number; /** Least-squares affine refinement on the inliers [A00, A01, A10, A11] (tilted / perspective-ish flat products). */ aff?: [number, number, number, number] }
+const applyX = (t: Similarity, x: number, y: number) => (t.aff ? t.aff[0] * (x - t.mrx) + t.aff[1] * (y - t.mry) : t.a * (x - t.mrx) - t.b * (y - t.mry)) + t.mgx
+const applyY = (t: Similarity, x: number, y: number) => (t.aff ? t.aff[2] * (x - t.mrx) + t.aff[3] * (y - t.mry) : t.b * (x - t.mrx) + t.a * (y - t.mry)) + t.mgy
 
 export type Located = {
   /** RANSAC inliers (reference keypoint ↔ generated image). */
@@ -228,6 +228,24 @@ export async function locateProduct(refBytes: Buffer, genBytes: Buffer): Promise
   }
   if (den < 1) return { located: null, ref, gen, refKps }
   const t: Similarity = { a: num1 / den, b: num2 / den, mrx, mry, mgx, mgy }
+  // Affine refinement: absorbs the tilt / slight perspective of a flat product (a pouch) that a pure similarity
+  // turns into a systematic drift. Kept only when it stays close to the similarity (no degenerate fits).
+  let sxx = 0, sxy = 0, syy = 0, gxx = 0, gxy = 0, gyx = 0, gyy = 0
+  for (const m of best) {
+    const rx = m.rx - mrx, ry = m.ry - mry, gx = m.gx - mgx, gy = m.gy - mgy
+    sxx += rx * rx; sxy += rx * ry; syy += ry * ry
+    gxx += gx * rx; gxy += gx * ry; gyx += gy * rx; gyy += gy * ry
+  }
+  const det = sxx * syy - sxy * sxy
+  if (det > 1e-3 * sxx * syy && n >= 12) {
+    const A00 = (gxx * syy - gxy * sxy) / det
+    const A01 = (gxy * sxx - gxx * sxy) / det
+    const A10 = (gyx * syy - gyy * sxy) / det
+    const A11 = (gyy * sxx - gyx * sxy) / det
+    const sc = Math.hypot(t.a, t.b)
+    const dev = Math.max(Math.abs(A00 - t.a), Math.abs(A01 + t.b), Math.abs(A10 - t.b), Math.abs(A11 - t.a)) / Math.max(sc, 1e-6)
+    if (dev < 0.25) t.aff = [A00, A01, A10, A11]
+  }
   return {
     located: { inliers: n, scale: Math.hypot(t.a, t.b), transform: t, refKeypoints: refKps.length, matches: matches.length },
     ref,
@@ -245,9 +263,11 @@ export type RegionComparison = {
   bbox: { x0: number; y0: number; x1: number; y1: number }
 }
 
-const CELL = 10
-const CELL_STD_MIN = 12
-const CELL_NCC_MIN = 0.6
+// Calibrated on the Round 2/3 real pairs (flat pouch faithful 0.89, plane redraw 0.77, synthetic intact ≥ 0.8): affine-refined location, 10 px cells, ±1 px tolerance.
+const CELL_DEFAULT = 10
+const STD_DEFAULT = 12
+const NCC_DEFAULT = 0.6
+const SHIFT_DEFAULT = 1
 
 function bilinear(g: Gray, x: number, y: number): number {
   const xi = Math.floor(x)
@@ -261,10 +281,14 @@ function bilinear(g: Gray, x: number, y: number): number {
 }
 
 /** Warp the reference onto the generated image and correlate cell by cell (±2 px shift tolerance). */
-export function compareLocatedRegion(ref: Gray, gen: Gray, refKps: Keypoint[], t: Similarity): RegionComparison | null {
+export function compareLocatedRegion(ref: Gray, gen: Gray, refKps: Keypoint[], t: Similarity, opts: { cell?: number; stdMin?: number; nccMin?: number; shift?: number } = {}): RegionComparison | null {
+  const CELL_STD_MIN = opts.stdMin ?? STD_DEFAULT
+  const CELL_NCC_MIN = opts.nccMin ?? NCC_DEFAULT
   let kx0 = 1e9, ky0 = 1e9, kx1 = -1, ky1 = -1
   for (const k of refKps) { kx0 = Math.min(kx0, k.x); ky0 = Math.min(ky0, k.y); kx1 = Math.max(kx1, k.x); ky1 = Math.max(ky1, k.y) }
   if (kx1 <= kx0 || ky1 <= ky0) return null
+  // Cell size follows the product size (small products need fine cells, large flat ones coarse cells).
+  const CELL = opts.cell ?? Math.max(10, Math.min(CELL_DEFAULT, Math.round(Math.min(kx1 - kx0, ky1 - ky0) / 8)))
   let cells = 0
   let kept = 0
   const rv = new Float32Array(CELL * CELL)
@@ -281,8 +305,9 @@ export function compareLocatedRegion(ref: Gray, gen: Gray, refKps: Keypoint[], t
       if (Math.sqrt(sr / rv.length) < CELL_STD_MIN) continue
       let bestNcc = -1
       let ok = false
-      for (let sy = -1; sy <= 1; sy++) {
-        for (let sx = -1; sx <= 1; sx++) {
+      const SH = opts.shift ?? SHIFT_DEFAULT
+      for (let sy = -SH; sy <= SH; sy++) {
+        for (let sx = -SH; sx <= SH; sx++) {
           let bad = false
           let mg = 0
           for (let y = 0; y < CELL && !bad; y++) {
