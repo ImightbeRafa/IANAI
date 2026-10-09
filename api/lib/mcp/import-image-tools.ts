@@ -201,7 +201,9 @@ export async function mcpImportImage(deps: ImportDeps & { args: Row }): Promise<
   if (kind === 'logo') {
     try {
       const { prepareLogo } = await import('../adpack/render/logo.js')
-      const prepared = await prepareLogo(bytes)
+      // P0 #1: background removal is an edge-connected flood from the borders only — interior
+      // pixels (text, inner borders, dots of the background's color) are never touched.
+      const prepared = await prepareLogo(bytes, { badge: variant === 'badge' })
       const cleanPath = uploadPath(user.id, `${stem}-clean.png`, newId())
       const cleanUrl = await store.uploadBytes({ path: cleanPath, bytes: new Uint8Array(prepared.onLight.png), contentType: 'image/png' })
       kitUrl = cleanUrl
@@ -210,17 +212,23 @@ export async function mcpImportImage(deps: ImportDeps & { args: Row }): Promise<
         originalUrl: storedUrl,
         method: prepared.method,
         backgroundRemoved: prepared.backgroundRemoved,
+        removedPct: Math.round(prepared.removedPct * 1000) / 10,
         transparent: prepared.method !== 'as_is',
+        selfContained: prepared.selfContained,
         darkVariant: Boolean(prepared.onDark),
         width: prepared.onLight.width,
         height: prepared.onLight.height,
+        ...(prepared.warnings.length ? { warnings: prepared.warnings } : {}),
         note: prepared.backgroundRemoved
-          ? 'The solid background was removed: ads place the transparent logo (no box around it).'
+          ? `Only the background connected to the image border was removed (${Math.round(prepared.removedPct * 100)}% of the pixels); everything inside the logo is untouched.${prepared.selfContained ? ' Self-contained badge: ads place it as-is or on a light/dark chip, never recolored.' : ''}`
           : prepared.method === 'as_is'
-            ? 'Could not separate the logo from its background: upload a PNG with transparency for a clean logo.'
+            ? prepared.selfContained
+              ? 'Logo kept as uploaded (self-contained: ads place it as-is or on a chip, never recolored).'
+              : 'Could not separate the logo from its background: upload a PNG with transparency for a clean logo.'
             : 'Logo already transparent.',
       }
-      if (prepared.method === 'as_is') warnings.push('logo background could not be removed (busy background): upload a transparent PNG')
+      warnings.push(...prepared.warnings)
+      if (prepared.method === 'as_is' && !prepared.warnings.length && !prepared.selfContained) warnings.push('logo background could not be removed (busy background): upload a transparent PNG')
     } catch (err) {
       warnings.push(`logo cleanup failed (${err instanceof Error ? err.message : String(err)}): the original file is used`.slice(0, 200))
     }
@@ -263,7 +271,7 @@ export async function mcpImportImage(deps: ImportDeps & { args: Row }): Promise<
     target: 'brand_kit',
     brandKitId: kitSaved.brandKitId,
     ...(variant ? { variant } : {}),
-    ...(kind === 'logo' ? { logoUrlSet: kitSaved.logoUrlSet } : {}),
+    ...(kind === 'logo' ? { logoUrlSet: kitSaved.logoUrlSet, ...(kitSaved.logoUrlNote ? { logoUrlNote: kitSaved.logoUrlNote } : {}) } : {}),
     ...(logo ? { logo } : {}),
     ...(warnings.length ? { warnings } : {}),
     creditsNote: 'Free — no Advance credits.',

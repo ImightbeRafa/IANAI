@@ -34,6 +34,8 @@ export interface RenderInput {
   light?: LightDirection
   /** Plate surface (glossy → reflection). */
   surface?: PlateSurface
+  /** Overhead plate + flat-lay product (P1 #6): top-down drop shadows, no perspective grounding. */
+  topDown?: boolean
   /** Logo override (already background-removed bytes); falls back to visual.logoUrl. */
   logo?: Uint8Array | string
   /** Optional AI relight hook (relight 'ai') on the harmonized text-free composite (exact mode). Returns null to keep it. */

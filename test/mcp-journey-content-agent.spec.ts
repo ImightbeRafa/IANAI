@@ -177,7 +177,8 @@ function journeyGateway(plate: Uint8Array) {
         data: {
           headline: HEADLINES[i],
           subline: SUBLINES[i],
-          bullets: facts.slice(0, 2),
+          // how_to_steps needs ≥ 2 steps (exact mode plans no hand-held format without an in-use photo).
+          bullets: facts.length >= 2 ? facts.slice(0, 2) : [...facts, 'Llevalo al parque', 'Volalo en familia'].slice(0, 2),
           cta: 'Pedí el tuyo',
           caption,
           script: { hook: 'Mirá cómo vuela este avión de papel.', development: 'Lo llevás al parque y lo hacés volar con el control.', cta: 'Escribinos y pedí el tuyo.' },
@@ -338,7 +339,7 @@ describe.each(MODES)('Content agent journey via MCP only ($label)', ({ caps, app
     const logo = await rpc('import_image', { brandId, kind: 'logo', url: SHARE.logo })
     expect(logo.isError, JSON.stringify(logo.payload).slice(0, 1500)).toBe(false)
     expect(logo.payload).toMatchObject({ status: 'imported', kind: 'logo', provider: 'google_drive', sourceUrl: SHARE.logo, target: 'brand_kit', logoUrlSet: true })
-    expect(logo.payload.logo).toMatchObject({ backgroundRemoved: true, method: 'color_key', transparent: true })
+    expect(logo.payload.logo).toMatchObject({ backgroundRemoved: true, method: 'edge_flood', transparent: true })
     const kitRow = w.world.db.kits.find((k) => k.id === kitId)!
     expect(String(kitRow.logo_url)).toBe(logo.payload.logo.cleanedUrl)
     expect(String(kitRow.logo_url)).toMatch(new RegExp(`^${STORAGE_PUBLIC}${USER}/uploads/`))

@@ -228,13 +228,46 @@ describe('import_image (logo)', () => {
     const { w, rpc } = await world({}, { LOGO1: logo })
     const res = await rpc('import_image', { brandId: BIZ_A, kind: 'logo', url: 'https://drive.google.com/file/d/LOGO1/view?usp=drive_link' })
     expect(res.isError).toBe(false)
-    expect(res.payload.logo).toMatchObject({ backgroundRemoved: true, method: 'color_key', transparent: true })
+    expect(res.payload.logo).toMatchObject({ backgroundRemoved: true, method: 'edge_flood', transparent: true })
     const kit = w.db.kits.find((k) => k.id === res.payload.brandKitId)!
     expect(kit.logo_url).toBe(res.payload.logo.cleanedUrl)
     expect((kit.brand_profile as { logoVariants: Array<Record<string, string>> }).logoVariants).toEqual([{ url: res.payload.logo.cleanedUrl, variant: 'primary', sourceUrl: 'https://drive.google.com/file/d/LOGO1/view?usp=drive_link' }])
     const stored = w.offerStore.objects.get(String(res.payload.logo.cleanedUrl).slice(STORAGE_PUBLIC.length))!
     const raw = await sharp(Buffer.from(stored.bytes!)).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
     expect(raw.data[3]).toBe(0) // corner is transparent
+  })
+
+  it('P0 #1: variant badge sets the kit logo (even when one exists); interior off-white text survives; removedPct + warning reported', async () => {
+    const ow = '#f4f1ea'
+    const badge = new Uint8Array(await sharp(Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="${ow}"/><rect x="70" y="80" width="460" height="240" rx="40" fill="#14284b"/><rect x="140" y="150" width="320" height="44" fill="${ow}"/><circle cx="300" cy="268" r="9" fill="${ow}"/></svg>`,
+    )).jpeg({ quality: 95 }).toBuffer())
+    const { w, rpc } = await world({}, { BADGE1: badge })
+    const before = w.db.kits.find((k) => k.business_id === BIZ_A && k.logo_url)
+    expect(before?.logo_url).toBeTruthy() // the kit already has a logo
+    const res = await rpc('import_image', { brandId: BIZ_A, kind: 'logo', variant: 'badge', url: 'https://drive.google.com/file/d/BADGE1/view' })
+    expect(res.isError).toBe(false)
+    expect(res.payload.logoUrlSet).toBe(true)
+    expect(res.payload.logo).toMatchObject({ method: 'edge_flood', backgroundRemoved: true, selfContained: true })
+    expect(res.payload.logo.removedPct).toBeGreaterThan(30)
+    expect(res.payload.warnings.join(' ')).toMatch(/se removió el \d+% de los píxeles/)
+    const kit = w.db.kits.find((k) => k.id === res.payload.brandKitId)!
+    expect(kit.logo_url).toBe(res.payload.logo.cleanedUrl)
+    const stored = w.offerStore.objects.get(String(res.payload.logo.cleanedUrl).slice(STORAGE_PUBLIC.length))!
+    const raw = await sharp(Buffer.from(stored.bytes!)).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    // The off-white bar inside the badge (trimmed canvas: badge starts at ~70,80) stays opaque.
+    const i = ((172 - 80 + 2) * raw.info.width + (300 - 70 + 2)) * 4
+    expect(raw.data[i + 3]).toBe(255)
+    expect(raw.data[i]).toBeGreaterThan(220)
+  })
+
+  it('P0 #1: a non-primary variant on a kit with a primary variant reports why the main logo was kept', async () => {
+    const logo = new Uint8Array(await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="#ffffff"/><circle cx="200" cy="200" r="120" fill="#dc2626"/></svg>')).jpeg().toBuffer())
+    const { rpc } = await world({}, { P1: logo, D1: logo })
+    await rpc('import_image', { brandId: BIZ_A, kind: 'logo', url: 'https://drive.google.com/file/d/P1/view' })
+    const dark = await rpc('import_image', { brandId: BIZ_A, kind: 'logo', variant: 'dark', url: 'https://drive.google.com/file/d/D1/view' })
+    expect(dark.payload.logoUrlSet).toBe(false)
+    expect(dark.payload.logoUrlNote).toMatch(/variant/)
   })
 })
 

@@ -30,6 +30,7 @@ import { briefForPrompt } from './copy-shared.js'
 import { confirmedKeys, extractNumericClaims, getConfirmed, mergeFacts, numbersInFacts } from './facts.js'
 import { ALL_ARCHETYPES, ALL_FORMATS, ALL_HOOKS, FORMAT_PATTERNS, getCategoryPattern, preferenceRank } from './patterns.js'
 import { cleanString, mulberry32, normalizeText, stableHash } from './util.js'
+import { hasUsableProductPhoto, resolveProductPhotos } from './fidelity/photos.js'
 
 export const DEFAULT_PACK_SIZE = 10
 export const MAX_PACK_SIZE = 20
@@ -50,6 +51,29 @@ export interface PlanAnglesInput {
    * plan size never shrinks).
    */
   avoidAngleIds?: string[]
+  /**
+   * Product fidelity of the pack (default: 'exact' when the offer has a usable product photo or a
+   * product lock — the same default as the render options). Exact mode never plans a hand-held /
+   * person format without a real in-use photo (P1 #7).
+   */
+  productFidelity?: 'exact' | 'generated'
+}
+
+/** Formats that need a real person / hand holding the product. */
+export const PERSON_FORMATS: ReadonlySet<AdFormat> = new Set<AdFormat>(['handheld_overlay', 'ugc_person'])
+/** What a person format becomes when it cannot be fulfilled (first one available wins). */
+const PERSON_FORMAT_SUBSTITUTES: AdFormat[] = ['offer_graphic', 'before_after', 'explainer', 'how_to_steps']
+
+/**
+ * P1 #7: in exact mode a hand-held / person format is only planned when a REAL in-hand / in-use
+ * photo exists (role 'in_use'); a composited product never gets fake hands.
+ */
+export function personFormatsAllowed(input: Pick<PlanAnglesInput, 'offer' | 'productFidelity'>): boolean {
+  const offer = input.offer
+  const locked = offer.lockProductAppearance === true || offer.productLock?.lockProductAppearance === true
+  const exact = input.productFidelity ? input.productFidelity === 'exact' || locked : locked || hasUsableProductPhoto(offer)
+  if (!exact) return true
+  return resolveProductPhotos(offer).some((p) => p.role === 'in_use')
 }
 
 interface Ctx {
@@ -61,6 +85,8 @@ interface Ctx {
   objections: string[]
   phrases: string[]
   audience: string[]
+  /** Exact mode without a real in-use photo: no hand-held / person formats (P1 #7). */
+  noPersonFormats?: boolean
 }
 
 const has = (ctx: Ctx, ...keys: FactKey[]) => keys.some((k) => ctx.keys.has(k))
@@ -113,6 +139,7 @@ function archetypeAvailable(archetype: IanArchetype, ctx: Ctx, category: BrandDn
 
 function formatAvailable(format: AdFormat, ctx: Ctx, category: BrandDna['category'], relaxed: boolean): boolean {
   if (!isFormatAllowed(category, format)) return false
+  if (ctx.noPersonFormats && PERSON_FORMATS.has(format)) return false
   switch (format) {
     case 'variant_card':
       return has(ctx, 'variants')
@@ -319,6 +346,7 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     objections: list(dna.objections),
     phrases: list(dna.customerPhrases),
     audience: list(dna.audience),
+    noPersonFormats: !personFormatsAllowed(input),
   }
   const offerName = cleanString(offer.name) || cleanString(dna.brandName)
   const fallbackTarget = cleanString(dna.oneLiner) || offerName
@@ -587,7 +615,7 @@ export function resolvePackAngles(input: PlanAnglesInput & { angleIds?: string[]
     seen.add(a.id)
     out.push(a)
   }
-  if (!ids) return out
+  if (!ids) return substitutePersonFormats(out, input)
   // Ids resolve against the stable board (cross-pack diversity only steers the planner's own picks).
   const board = new Map(planAngles({ ...input, avoidAngleIds: undefined, size: MAX_PACK_SIZE }).map((a) => [a.id, a]))
   const rejected: Array<{ id: string; reason: string }> = []
@@ -616,7 +644,35 @@ export function resolvePackAngles(input: PlanAnglesInput & { angleIds?: string[]
       { unknownAngleIds: rejected.map((r) => r.id), rejectedAngles: rejected },
     )
   }
-  return out
+  return substitutePersonFormats(out, input)
+}
+
+/**
+ * P1 #7: selected angles with a hand-held / person format that exact mode cannot fulfil (no real
+ * in-use photo) keep their category, hook and wording but get an allowed format instead — same
+ * count, so quote == approval == execution still holds.
+ */
+function substitutePersonFormats(angles: AdAngle[], input: PlanAnglesInput): AdAngle[] {
+  if (!angles.some((a) => PERSON_FORMATS.has(a.format)) || personFormatsAllowed(input)) return angles
+  const language: AdLanguage = input.language ?? input.dna.language ?? 'es'
+  const used = new Set(angles.map((a) => a.id))
+  return angles.map((a) => {
+    if (!PERSON_FORMATS.has(a.format)) return a
+    const parsed = parseAngleId(a.id)
+    const category = a.category ?? parsed?.category
+    const note = language === 'es' ? 'formato en mano reemplazado: no hay foto real del producto en uso' : 'hand-held format replaced: no real in-use photo of the product'
+    if (category) {
+      for (const format of PERSON_FORMAT_SUBSTITUTES) {
+        const id = angleId(category, a.hookType, format)
+        if (used.has(id)) continue
+        const built = angleFromId({ id, dna: input.dna, offer: input.offer, language, brief: input.brief, ...(a.hook ? { hook: a.hook } : {}), ...(a.message ? { message: a.message } : {}), ...(a.target ? { target: a.target } : {}), ...(a.source ? { source: a.source } : {}) })
+        if (!built.ok) continue
+        used.add(id)
+        return { ...built.angle, rationale: `${built.angle.rationale ?? ''}${built.angle.rationale ? ' · ' : ''}${note}`.slice(0, 300) }
+      }
+    }
+    return { ...a, format: 'offer_graphic' as AdFormat, rationale: `${a.rationale ?? ''}${a.rationale ? ' · ' : ''}${note}`.slice(0, 300) }
+  })
 }
 
 // ---------------------------------------------------------------------------

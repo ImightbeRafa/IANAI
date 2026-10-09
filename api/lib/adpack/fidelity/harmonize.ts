@@ -685,6 +685,48 @@ export interface GroundLayer {
 export interface GroundOptions {
   shadow?: boolean
   reflection?: boolean
+  /**
+   * Overhead plate + flat-lay product (P1 #6): the pieces LIE on the surface, seen from above — a
+   * soft drop shadow + tight ambient occlusion directly under every component, no cast shadow
+   * (no perspective ground plane) and no reflection.
+   */
+  topDown?: boolean
+}
+
+/** Contact-shadow strengths (P1 #7: stronger grounding so a product never looks pasted on). */
+export const GROUND_STRENGTH = { contact: 0.9, ao: 0.46 } as const
+
+/** Top-down drop shadow + AO under every opaque component of each layer (in place). */
+function applyTopDownShadows(base: Buffer, W: number, H: number, layers: GroundLayer[], model: LightModel, tintK: Rgb3): void {
+  for (const L of layers) {
+    const m = maskInfo(L.rgba, L.w, L.h)
+    if (m.x1 < m.x0 || m.y1 < m.y0) continue
+    const small = Math.max(8, Math.min(m.x1 - m.x0 + 1, m.y1 - m.y0 + 1))
+    const sigma = Math.max(2, 0.022 * small)
+    const pad = Math.ceil(sigma * 3) + 4
+    // Light from the side tilts the drop shadow a little away from it; overhead light → straight under.
+    const dx = Math.round((model.direction === 'left' ? 1 : model.direction === 'right' ? -1 : 0) * 0.35 * sigma)
+    const dy = Math.round(0.45 * sigma)
+    const rw = L.w + pad * 2
+    const rh = L.h + pad * 2
+    const acc = new Float32Array(rw * rh)
+    for (let y = 0; y < L.h; y++) for (let x = 0; x < L.w; x++) acc[(y + pad + dy) * rw + x + pad + dx] = m.alpha[y * L.w + x] ?? 0
+    const soft = blurPlane(acc, rw, rh, sigma)
+    const tight = blurPlane(acc, rw, rh, Math.max(1, sigma * 0.3))
+    for (let y = 0; y < rh; y++) {
+      const ty = L.box.y + y - pad
+      if (ty < 0 || ty >= H) continue
+      for (let x = 0; x < rw; x++) {
+        const tx = L.box.x + x - pad
+        if (tx < 0 || tx >= W) continue
+        const j = y * rw + x
+        const A = 1 - (1 - 0.42 * Math.min(1, soft[j])) * (1 - 0.3 * Math.min(1, tight[j]))
+        if (A < 2e-3) continue
+        const o = (ty * W + tx) * 3
+        for (let c = 0; c < 3; c++) base[o + c] = Math.round(linearToSrgb(srgbToLinear(base[o + c]) * (1 - A * (1 - tintK[c]))))
+      }
+    }
+  }
 }
 
 /** Draw reflection + shadows for each product directly into raw RGB `base` (W×H), in place. */
@@ -692,6 +734,10 @@ export function applyGroundEffects(base: Buffer, W: number, H: number, layers: G
   const ambMax = Math.max(1, ...model.ambient)
   // Shadow color: the ambient bounce, never pure black.
   const tintK = model.ambient.map((c) => clamp(0.2 * srgbToLinear((c / ambMax) * 255) + 0.04, 0.04, 0.3)) as Rgb3
+  if (opts.topDown) {
+    if (opts.shadow !== false) applyTopDownShadows(base, W, H, layers, model, tintK)
+    return
+  }
   for (const L of layers) {
     const m = maskInfo(L.rgba, L.w, L.h)
     if (m.x1 < m.x0 || m.y1 < m.y0) continue
@@ -849,8 +895,8 @@ export function applyGroundEffects(base: Buffer, W: number, H: number, layers: G
     for (let y = ry0; y < ry1; y++) {
       for (let x = rx0; x < rx1; x++) {
         const j = idx(x, y)
-        const contact = 0.78 * contactB[j]
-        const ao = aoMax > 0 ? 0.38 * Math.min(1, aoB[j] / aoMax) : 0
+        const contact = GROUND_STRENGTH.contact * contactB[j]
+        const ao = aoMax > 0 ? GROUND_STRENGTH.ao * Math.min(1, aoB[j] / aoMax) : 0
         const A = 1 - (1 - contact) * (1 - ao) * (1 - cast[j])
         if (A < 2e-3) continue
         const o = (y * W + x) * 3

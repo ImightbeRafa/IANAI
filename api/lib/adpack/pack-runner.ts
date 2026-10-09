@@ -10,8 +10,13 @@
  *   the relight stage INCLUDED (deterministic harmonization: shading, white balance + grade,
  *   light wrap, shadows, reflection, grain — no model call, no extra credits; `relight: 'ai'` adds
  *   a free, fidelity-guarded image-edit pass) and scores fidelity (detail SSIM + silhouette IoU +
- *   identity color after removing the light gradient). A failed cut-out → cutout_failed; a low
- *   score → fidelity_failed. A model-redrawn product is never delivered in exact mode.
+ *   identity color after removing the light gradient). A failed cut-out → cutout_failed; a
+ *   cut-out that dropped product pieces (recall < 95%) → cutout_incomplete. Fidelity is judged
+ *   PER RATIO: passing ratios ship (one charge), failing ones are listed in `rejectedRatios`
+ *   (reason + full-res diff) and can be regenerated alone for free (`regenerateRatio`); an AI
+ *   relight that broke a ratio is retried with 'auto' first; no passing ratio → fidelity_failed.
+ *   Flat-lay / kit-contents heroes get an overhead plate (top-down shadows, never perspective).
+ *   A model-redrawn product is never delivered in exact mode.
  * - 'generated': the image model draws the product from the reference (legacy); the vision check
  *   also rejects invented parts/accessories and returns the product bbox the text avoids.
  *
@@ -70,6 +75,8 @@ import type {
   ProductPhoto,
   ProductPhotoRole,
   RenderedAd,
+  RejectedRatio,
+  AdPhotoRef,
   SceneCheckResult,
 } from './types.js'
 
@@ -125,6 +132,27 @@ export interface PlanPackInput {
   render?: PackRenderOptions
   /** Angle ids of the latest packs of this offer: the planner prefers others (P1 #10). Planner picks only. */
   avoidAngleIds?: string[]
+  /** P1 #8: the hero / primary photo appears in at least one ad (default true; false = no guarantee). */
+  heroRequired?: boolean
+}
+
+/**
+ * P1 #8: make sure the offer's hero (role 'hero', else the primary photo) is the photo of at least
+ * one ad — the first ad without a per-ad pick — unless the owner turned it off (heroRequired false)
+ * or a per-ad pick already uses it. Deterministic, decided at plan time (before any credit).
+ */
+export function ensureHeroUsage(offer: OfferInput, adCount: number, heroRequired = true): OfferInput {
+  if (!heroRequired || adCount < 1) return offer
+  const photos = resolveProductPhotos(offer)
+  const hero = photos.find((p) => p.role === 'hero') ?? photos.find((p) => p.primary)
+  if (!hero) return offer
+  const byAd = offer.productImageUrlsByAd ?? {}
+  if (Object.values(byAd).some((urls) => urls?.[0] === hero.url)) return offer
+  for (let i = 0; i < adCount; i++) {
+    if (byAd[String(i)]?.length) continue
+    return { ...offer, productImageUrlsByAd: { ...byAd, [String(i)]: [hero.url] } }
+  }
+  return offer
 }
 
 /** Formats that may place real parts next to the hero (H3). */
@@ -144,7 +172,7 @@ export interface PlannedAngles {
  * (plan-angles `resolvePackAngles`) serves quote, approval and start: same inputs → same list,
  * unusable ids throw AnglePlanError (BAD_INPUT `rejectedAngles` at the doors).
  */
-export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' | 'size' | 'angleIds' | 'angles' | 'creativeFreedom' | 'seed' | 'brief' | 'styleProfile' | 'avoidAngleIds'>): PlannedAngles {
+export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' | 'size' | 'angleIds' | 'angles' | 'creativeFreedom' | 'seed' | 'brief' | 'styleProfile' | 'avoidAngleIds' | 'render'>): PlannedAngles {
   const selected = Boolean(input.angleIds?.length || input.angles?.length)
   const creativeFreedom: CreativeFreedom = input.creativeFreedom ?? (selected ? 'guided' : 'high')
   const angles = resolvePackAngles({
@@ -158,6 +186,8 @@ export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' 
     angleIds: input.angleIds,
     angles: input.angles,
     ...(!selected && creativeFreedom === 'high' && input.avoidAngleIds?.length ? { avoidAngleIds: input.avoidAngleIds } : {}),
+    // Legacy packs without render options are generated mode (person formats stay available).
+    productFidelity: input.render?.productFidelity ?? 'generated',
   })
   return { angles, creativeFreedom }
 }
@@ -189,7 +219,8 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[];
     userId: input.userId,
     businessId: input.businessId,
     brandKitId: input.brandKitId,
-    offer: input.offer,
+    // Exact mode (real product photos): the hero photo is guaranteed in at least one ad (P1 #8).
+    offer: input.render?.productFidelity === 'exact' ? ensureHeroUsage(input.offer, angles.length, input.heroRequired ?? input.offer.heroRequired ?? true) : input.offer,
     dna: input.dna,
     status: 'planned',
     size: angles.length,
@@ -617,6 +648,13 @@ export function offerForItem(offer: OfferInput, index: number): OfferInput {
   return next
 }
 
+/** The offer photo behind a URL, as reported per ad (P1 #8): product_images id, role and label when known. */
+export function photoRefFor(offer: Pick<OfferInput, 'productPhotos' | 'photoIdsByUrl'>, url: string): AdPhotoRef {
+  const p = offer.productPhotos?.find((x) => x.url === url)
+  const id = p?.id ?? offer.photoIdsByUrl?.[url]
+  return { url, ...(id ? { productImageId: id } : {}), ...(p?.role ? { role: p.role } : {}), ...(p?.label ? { label: p.label } : {}) }
+}
+
 /** True when the ad's photos were picked per ad (the first one is the hero, whatever the format prefers). */
 function hasPerAdPhotos(offer: OfferInput, index: number): boolean {
   return Boolean(offer.productImageUrlsByAd?.[String(index)]?.filter(Boolean).length)
@@ -749,6 +787,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
       model: best.scene.model,
       costUsd: candidates.reduce((s, c) => s + c.scene.costUsd, 0),
       productLocked: best.scene.productLocked,
+      ...(productRef ? { sourcePhoto: photoRefFor(offer, productRef) } : {}),
     },
     sceneCheck,
     costUsd,
@@ -769,33 +808,39 @@ const PLATE_SIZE = RATIO_SIZE['9:16']
  * Union of the product boxes of every pack ratio, mapped back into the 9:16 plate through the
  * renderer's centered cover crop → where the plate must leave an empty surface.
  */
-export function plateRegionFor(input: { pack: Pick<Pack, 'ratios' | 'dna'>; format: PackItem['angle']['format']; copy: AdCopy; product: { width: number; height: number }; layoutFamily?: LayoutFamily }): PlateRegion {
+export function plateRegionFor(input: { pack: Pick<Pack, 'ratios' | 'dna'>; format: PackItem['angle']['format']; copy: AdCopy; product: { width: number; height: number }; layoutFamily?: LayoutFamily; ratios?: AspectRatio[]; plateRatio?: AspectRatio }): PlateRegion {
+  const ratios = input.ratios ?? input.pack.ratios
   const boxes = planProductBoxes({
     format: input.format,
     ...(input.layoutFamily ? { layoutFamily: input.layoutFamily } : {}),
-    ratios: input.pack.ratios,
+    ratios,
     copy: input.copy,
     visual: input.pack.dna.visual,
     language: input.pack.dna.language,
     product: input.product,
   })
+  // The plate is 9:16 by default (cover-fit to every ratio); a ratio regenerated alone gets its own plate.
+  const plate = input.plateRatio ? RATIO_SIZE[input.plateRatio] : PLATE_SIZE
   let x0 = 1
   let y0 = 1
   let x1 = 0
   let y1 = 0
+  // Highest product base over the ratios (P1 #7: the surface must already be there).
+  let baseY = 1
   for (const [ratio, b] of Object.entries(boxes) as Array<[AspectRatio, { x: number; y: number; w: number; h: number }]>) {
     const { width: W, height: H } = RATIO_SIZE[ratio]
-    const s = Math.max(W / PLATE_SIZE.width, H / PLATE_SIZE.height)
-    const ox = (PLATE_SIZE.width * s - W) / 2
-    const oy = (PLATE_SIZE.height * s - H) / 2
-    x0 = Math.min(x0, (b.x + ox) / s / PLATE_SIZE.width)
-    y0 = Math.min(y0, (b.y + oy) / s / PLATE_SIZE.height)
-    x1 = Math.max(x1, (b.x + b.w + ox) / s / PLATE_SIZE.width)
-    y1 = Math.max(y1, (b.y + b.h + oy) / s / PLATE_SIZE.height)
+    const s = Math.max(W / plate.width, H / plate.height)
+    const ox = (plate.width * s - W) / 2
+    const oy = (plate.height * s - H) / 2
+    x0 = Math.min(x0, (b.x + ox) / s / plate.width)
+    y0 = Math.min(y0, (b.y + oy) / s / plate.height)
+    x1 = Math.max(x1, (b.x + b.w + ox) / s / plate.width)
+    y1 = Math.max(y1, (b.y + b.h + oy) / s / plate.height)
+    baseY = Math.min(baseY, (b.y + b.h + oy) / s / plate.height)
   }
-  if (x1 <= x0 || y1 <= y0) return { x0: 0.25, y0: 0.4, x1: 0.75, y1: 0.8 }
+  if (x1 <= x0 || y1 <= y0) return { x0: 0.25, y0: 0.4, x1: 0.75, y1: 0.8, baseY: 0.8 }
   const c = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000
-  return { x0: c(x0), y0: c(y0), x1: c(x1), y1: c(y1) }
+  return { x0: c(x0), y0: c(y0), x1: c(x1), y1: c(y1), baseY: c(baseY) }
 }
 
 function cutoutCacheFor(ctx: RunCtx): BlobCache | null {
@@ -813,7 +858,8 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   if (!copy) return save(ctx, item, { status: 'planned' })
   const t0 = Date.now()
   const format = item.angle.format
-  const photos = resolveProductPhotos(offer)
+  // product_images ids travel with the photos so each ad reports which photo it used (P1 #8).
+  const photos = resolveProductPhotos(offer).map((p) => (p.id || !offer.photoIdsByUrl?.[p.url] ? p : { ...p, id: offer.photoIdsByUrl[p.url] }))
   const cut = await prepareProductCutouts({
     photos,
     // A per-ad pick is the hero whatever the format would prefer (hero role ranks first by default).
@@ -826,12 +872,19 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     memo: ctx.photoMemo,
   })
   if (!cut.ok) {
-    return fail(ctx, item, cut.error.startsWith('cutout_failed') ? cut.error : `cutout_failed: ${cut.error}`, { timings: { ...item.timings, sceneMs: Date.now() - t0 } })
+    const known = cut.error.startsWith('cutout_failed') || cut.error.startsWith('cutout_incomplete')
+    return fail(ctx, item, known ? cut.error : `cutout_failed: ${cut.error}`, { timings: { ...item.timings, sceneMs: Date.now() - t0 } })
   }
-  const cutouts: LoadedCutout[] = [cut.hero, ...cut.parts]
+  // P1 #6: a flat lay (kit contents shot from above) is never placed into a perspective scene:
+  // overhead plate + top-down shadows. Parts shot in perspective are not mixed into a flat lay,
+  // and flat-lay parts are not stood up next to a perspective hero.
+  const overhead = Boolean(cut.hero.stored.flatLay)
+  const keptParts = overhead ? [] : cut.parts.filter((p) => !p.stored.flatLay)
+  if (keptParts.length < cut.parts.length) cut.warnings.push(`${cut.parts.length - keptParts.length} part photo(s) skipped: ${overhead ? 'a flat lay already shows the kit' : 'top-down part photos are not placed in a perspective scene'}`)
+  const cutouts: LoadedCutout[] = [cut.hero, ...keptParts]
   const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length
-  const light = plateLight(item.index)
-  const surface = plateSurface(format, variation)
+  const light: LightDirection = overhead ? 'top' : plateLight(item.index)
+  const surface = overhead ? 'matte' : plateSurface(format, variation)
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
   const immutableAttributes = ctx.pack.render?.immutableAttributes ?? offer.immutableAttributes
@@ -851,7 +904,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     attempts++
     let plate
     try {
-      plate = await generatePlate({ gateway, format, dna, offer, placement, light, surface, variation, allowedProps, immutableAttributes, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint })
+      plate = await generatePlate({ gateway, format, dna, offer, placement, light, surface, variation, allowedProps, immutableAttributes, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint, ...(overhead ? { view: 'overhead' as const } : {}) })
     } catch (error) {
       lastError = errorMessage(error)
       continue
@@ -860,7 +913,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     const c0 = Date.now()
     let check: PlateCheckResult | null
     try {
-      check = await checkPlate({ gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: dna.language, immutableAttributes })
+      check = await checkPlate({ gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: dna.language, immutableAttributes, ...(overhead ? { view: 'overhead' as const } : {}) })
       cost += check.costUsd
     } catch (error) {
       check = null
@@ -908,6 +961,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
       light,
       surface,
       cutouts: cutouts.map((c) => c.stored),
+      view: overhead ? 'overhead' : 'perspective',
     },
     sceneCheck: {
       ok: true,
@@ -929,11 +983,13 @@ interface ExactRenderInputs {
   cutouts: Uint8Array[]
   light?: LightDirection
   surface?: PlateSurface
+  /** Overhead plate + flat lay (P1 #6). */
+  topDown?: boolean
 }
 
 /** Cut-out bytes for an item (this call's memory, else the stored cut-out URLs). */
 async function exactInputsFromScene(item: PackItem, load: ImageLoader, memory?: Uint8Array[]): Promise<ExactRenderInputs> {
-  const extra = { light: item.scene?.light, ...(item.scene?.surface ? { surface: item.scene.surface } : {}) }
+  const extra = { light: item.scene?.light, ...(item.scene?.surface ? { surface: item.scene.surface } : {}), ...(item.scene?.view === 'overhead' ? { topDown: true } : {}) }
   if (memory?.length) return { cutouts: memory, ...extra }
   const stored = item.scene?.cutouts ?? []
   if (!stored.length) throw new Error('cutout_missing: no stored cut-out for this ad')
@@ -993,6 +1049,21 @@ async function uploadJpgTwin(storage: AdPackStorage, pack: Pack, item: PackItem,
   }
 }
 
+export interface RenderAllRatiosResult {
+  /** Delivered renders (exact mode: only ratios whose product passed fidelity). */
+  renders: RenderedAd[]
+  /** Item-level fidelity: worst DELIVERED ratio + cut-out recall (exact); vision verdict (generated). */
+  fidelity?: FidelityResult
+  /** Exact mode: ratios not delivered (fidelity failed), with the reason and a full-res diff (P0 #3). */
+  rejected: RejectedRatio[]
+}
+
+/** Lowest cut-out recall of an item's cut-outs (hero + parts), when measured. */
+function cutoutRecallOf(item: Pick<PackItem, 'scene'>): number | undefined {
+  const values = (item.scene?.cutouts ?? []).map((c) => c.recall).filter((v): v is number => typeof v === 'number')
+  return values.length ? Math.min(...values) : undefined
+}
+
 async function renderAllRatios(args: {
   renderer: Renderer
   storage: AdPackStorage
@@ -1006,15 +1077,17 @@ async function renderAllRatios(args: {
   exact?: ExactRenderInputs | null
   gateway?: ModelGateway
   logo?: Uint8Array | null
-}): Promise<{ renders: RenderedAd[]; fidelity?: FidelityResult }> {
+  /** Force the deterministic relight only (ratio regeneration / fallback). */
+  relightAuto?: boolean
+}): Promise<RenderAllRatiosResult> {
   const { renderer, storage, pack, item, copy, sceneImage, exact } = args
   const out: RenderedAd[] = []
-  const outputs: Array<{ ratio: AspectRatio; r: RenderOutput }> = []
+  const rejected: RejectedRatio[] = []
   // relight 'auto' (default) = the renderer's deterministic stage; 'ai' adds the free, guarded model pass.
-  const relightOn = Boolean(exact && packRelightMode(pack) === 'ai' && args.gateway?.edit)
+  const relightOn = Boolean(exact && !args.relightAuto && packRelightMode(pack) === 'ai' && args.gateway?.edit)
   const gateway = args.gateway
-  for (const ratio of args.ratios ?? pack.ratios) {
-    const r = await renderer.render({
+  const renderRatio = (ratio: AspectRatio, withAi: boolean) =>
+    renderer.render({
       format: item.angle.format,
       ratio,
       sceneImage,
@@ -1031,7 +1104,8 @@ async function renderAllRatios(args: {
             ...(exact.cutouts.length > 1 ? { productParts: exact.cutouts.slice(1) } : {}),
             ...(exact.light ? { light: exact.light } : {}),
             ...(exact.surface ? { surface: exact.surface } : {}),
-            ...(relightOn && gateway
+            ...(exact.topDown ? { topDown: true } : {}),
+            ...(withAi && gateway
               ? {
                   relight: async (composite: Uint8Array, placements: NonNullable<RenderOutput['productPlacements']>, rr: AspectRatio) => {
                     const res = await relightComposite({
@@ -1052,6 +1126,40 @@ async function renderAllRatios(args: {
             ...(sceneProductBox(item) ? { productBox: sceneProductBox(item) } : {}),
           }),
     })
+  const recall = exact ? cutoutRecallOf(item) : undefined
+  const outputs = new Map<AspectRatio, RenderOutput>()
+  for (const ratio of args.ratios ?? pack.ratios) {
+    let r = await renderRatio(ratio, relightOn)
+    let scored = exact ? await scoreRender(r, ratio, false) : null
+    let fallback = false
+    // P0 #3: the AI relight changed the product on this ratio → retry it with 'auto' before rejecting.
+    if (exact && r.relit && scored && !scored.fidelity.passed) {
+      const again = await renderRatio(ratio, false)
+      const againScored = await scoreRender(again, ratio, false)
+      if (againScored && (againScored.fidelity.passed || againScored.fidelity.score >= scored.fidelity.score)) {
+        r = again
+        scored = againScored
+        fallback = true
+      }
+    }
+    const fidelity: FidelityResult | undefined = scored
+      ? { ...scored.fidelity, ...(recall !== undefined ? { recall } : {}), ...(fallback ? { relightFallback: 'auto' as const } : {}) }
+      : undefined
+    if (exact && (!fidelity || !fidelity.passed)) {
+      // Never deliver an altered product: this ratio is listed, not uploaded as a render.
+      const f: FidelityResult = fidelity ?? { score: 0, ssim: null, deltaE: null, passed: false, method: 'composite', ratio }
+      let diffImageUrl: string | undefined
+      try {
+        const again = await scoreRender(r, ratio, true)
+        if (again?.diffPng) {
+          diffImageUrl = (await storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: `fidelity-${ratio.replace(':', 'x')}`, bytes: new Uint8Array(again.diffPng), contentType: 'image/png' })).url
+        }
+      } catch {
+        diffImageUrl = undefined
+      }
+      rejected.push({ ratio, reason: fidelity ? fidelityFailReason(fidelity) : 'product placement missing in render', fidelity: { ...f, ...(diffImageUrl ? { diffImageUrl } : {}) } })
+      continue
+    }
     const { url } = await storage.upload({
       userId: pack.userId,
       packId: pack.id,
@@ -1060,34 +1168,38 @@ async function renderAllRatios(args: {
       bytes: r.png,
       contentType: 'image/png',
     })
-    const scored = exact ? await scoreRender(r, ratio, false) : null
     const jpgUrl = await uploadJpgTwin(storage, pack, item, ratio, r.png)
-    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(scored ? { fidelity: scored.fidelity } : {}) })
-    outputs.push({ ratio, r })
+    out.push({ ratio, imageUrl: url, ...(jpgUrl ? { jpgUrl } : {}), width: r.width, height: r.height, ...(fidelity ? { fidelity } : {}) })
+    outputs.set(ratio, r)
   }
   if (!exact) {
     // Generated mode: no pixel alignment — fidelity is the vision verdict on the scene.
     const sc = item.sceneCheck
-    if (!sc || sc.productMatches === null || sc.productMatches === undefined) return { renders: out }
+    if (!sc || sc.productMatches === null || sc.productMatches === undefined) return { renders: out, rejected }
     const fidelity: FidelityResult = { score: Math.round(sc.score * 1000) / 1000, ssim: null, deltaE: null, passed: sc.productMatches !== false, method: 'generated' }
-    return { renders: out, fidelity }
+    return { renders: out, fidelity, rejected }
   }
   const worst = worstFidelity(out)
-  if (!worst) return { renders: out }
-  // Heatmap of the worst ratio (A4), best-effort.
+  if (!worst) return { renders: out, rejected, ...(rejected.length ? { fidelity: worstRejected(rejected) } : {}) }
+  // Heatmap of the worst delivered ratio (A4), at placement resolution, best-effort.
   let diffImageUrl: string | undefined
-  const w = outputs.find((o) => o.ratio === worst.ratio)
-  if (w) {
+  const w = worst.ratio ? outputs.get(worst.ratio) : undefined
+  if (w && worst.ratio) {
     try {
-      const again = await scoreRender(w.r, w.ratio, true)
+      const again = await scoreRender(w, worst.ratio, true)
       if (again?.diffPng) {
-        diffImageUrl = (await storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: `fidelity-${w.ratio.replace(':', 'x')}`, bytes: new Uint8Array(again.diffPng), contentType: 'image/png' })).url
+        diffImageUrl = (await storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: `fidelity-${worst.ratio.replace(':', 'x')}`, bytes: new Uint8Array(again.diffPng), contentType: 'image/png' })).url
       }
     } catch {
       diffImageUrl = undefined
     }
   }
-  return { renders: out, fidelity: { ...worst, ...(diffImageUrl ? { diffImageUrl } : {}) } }
+  return { renders: out, fidelity: { ...worst, ...(diffImageUrl ? { diffImageUrl } : {}) }, rejected }
+}
+
+/** The worst rejected ratio's fidelity (item-level value when nothing was delivered). */
+function worstRejected(rejected: RejectedRatio[]): FidelityResult {
+  return rejected.map((r) => r.fidelity).reduce((w, f) => (f.score < w.score ? f : w))
 }
 
 /** Background-removed logo for this pack, cached by hash in storage (prod storage only). */
@@ -1143,13 +1255,26 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     }
     const timings = { ...item.timings, renderMs: Date.now() - t0 }
     const fidelity = rendered.fidelity
-    const sceneCheck = fidelity ? { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity } : item.sceneCheck
-    if (exactMode && fidelity && !fidelity.passed) {
-      // Never deliver an altered product: the renders are not kept.
-      return fail(ctx, item, `fidelity_failed: ${fidelityFailReason(fidelity)} (${fidelity.ratio ?? 'render'})`, { fidelity, sceneCheck, renders: [], timings })
+    const rejectedRatios = rendered.rejected
+    const sceneCheck = fidelity
+      ? { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity, ...(rejectedRatios.length ? { rejectedRatios } : { rejectedRatios: undefined }) }
+      : item.sceneCheck
+    if (exactMode && !rendered.renders.length) {
+      // P0 #3: no ratio kept the real product → the ad fails (no charge); every ratio is listed.
+      const worst = rejectedRatios[0] ? rejectedRatios.reduce((w, r) => (r.fidelity.score < w.fidelity.score ? r : w)) : null
+      if (!worst) return fail(ctx, item, 'fidelity_failed: product placement missing in render', { renders: [], timings })
+      return fail(ctx, item, `fidelity_failed: ${worst.reason} (${rejectedRatios.map((r) => r.ratio).join(', ')})`, { fidelity: worst.fidelity, sceneCheck, renders: [], rejectedRatios, timings })
     }
-    if (exactMode && !fidelity) return fail(ctx, item, 'fidelity_failed: product placement missing in render', { renders: [], timings })
-    return save(ctx, item, { status: 'rendered', renders: rendered.renders, ...(fidelity ? { fidelity, sceneCheck } : {}), timings, error: undefined })
+    // Partial delivery: the passing ratios ship (charged once as one ad); rejected ones are listed
+    // and can be regenerated alone (adpack_regenerate { ratio }).
+    return save(ctx, item, {
+      status: 'rendered',
+      renders: rendered.renders,
+      ...(fidelity ? { fidelity, sceneCheck } : {}),
+      rejectedRatios: rejectedRatios.length ? rejectedRatios : undefined,
+      timings,
+      error: undefined,
+    })
   }
   return fail(ctx, item, `render_failed: ${lastError}`, { timings: { ...item.timings, renderMs: Date.now() - t0 } })
 }
@@ -1223,6 +1348,9 @@ export async function editItemText(input: EditItemTextInput): Promise<EditItemTe
   const t0 = Date.now()
   // Keep every ratio the ad has (pack ratios + any added by a free resize).
   const ratios = [...new Set([...pack.ratios, ...(item.renders ?? []).map((r) => r.ratio)])]
+  const exactInputs = packMode(pack) === 'exact' ? await exactInputsFromScene(item, input.loadImage ?? defaultImageLoader) : null
+  // A ratio regenerated alone has its own plate (render.plateUrl): re-render it on that plate.
+  const ownPlate = new Map((item.renders ?? []).filter((r) => r.plateUrl).map((r) => [r.ratio, r.plateUrl as string]))
   const rendered = await renderAllRatios({
     renderer: input.renderer,
     storage: input.storage,
@@ -1230,18 +1358,28 @@ export async function editItemText(input: EditItemTextInput): Promise<EditItemTe
     item,
     copy,
     sceneImage: item.scene.imageUrl,
-    ratios,
-    exact: packMode(pack) === 'exact' ? await exactInputsFromScene(item, input.loadImage ?? defaultImageLoader) : null,
+    ratios: ratios.filter((r) => !ownPlate.has(r)),
+    exact: exactInputs,
   })
-  // Same scene and cut-out: fidelity is re-measured on the new renders.
+  for (const [ratio, plateUrl] of ownPlate) {
+    const one = await renderAllRatios({ renderer: input.renderer, storage: input.storage, pack, item, copy, sceneImage: plateUrl, ratios: [ratio], exact: exactInputs, relightAuto: true })
+    rendered.renders.push(...one.renders.map((r) => ({ ...r, plateUrl })))
+    rendered.rejected.push(...one.rejected)
+  }
+  rendered.renders.sort((a, b) => ratios.indexOf(a.ratio) - ratios.indexOf(b.ratio))
+  if (ownPlate.size && exactInputs) rendered.fidelity = worstFidelity(rendered.renders) ?? rendered.fidelity
+  // Same scene and cut-out: fidelity is re-measured on the new renders. A ratio that no longer
+  // passes is listed in rejectedRatios (never shipped); ratios regenerated alone keep their plate.
   const renders = rendered.renders
   const fidelity = rendered.fidelity ?? item.fidelity
+  const rejectedRatios = [...(item.rejectedRatios ?? []).filter((r) => !renders.some((x) => x.ratio === r.ratio) && !rendered.rejected.some((x) => x.ratio === r.ratio)), ...rendered.rejected]
   const next: Partial<PackItem> = {
     copy,
     copyCheck: check,
     renders,
     timings: { ...item.timings, renderMs: Date.now() - t0 },
-    ...(fidelity ? { fidelity, sceneCheck: { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity } } : {}),
+    rejectedRatios: rejectedRatios.length ? rejectedRatios : undefined,
+    ...(fidelity ? { fidelity, sceneCheck: { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity, rejectedRatios: rejectedRatios.length ? rejectedRatios : undefined } } : {}),
   }
   await input.store.updateItem(item.id, next)
   return { ok: true, item: { ...item, ...next, updatedAt: nowIso() } }
@@ -1272,7 +1410,7 @@ export type ResizeItemResult =
       /** How the new ratios were made: 'composite' (stored plate + cut-outs) or 'scene' (stored final scene). */
       method?: 'composite' | 'scene'
       /** New ratios not delivered because the real product did not survive the re-composite. */
-      rejected?: Array<{ ratio: AspectRatio; fidelity: FidelityResult }>
+      rejected?: RejectedRatio[]
     }
   | { ok: false; error: 'pack_not_found' | 'item_not_found' | 'item_not_rendered' | 'cutout_missing' }
 
@@ -1312,15 +1450,9 @@ export async function resizeItem(input: ResizeItemInput): Promise<ResizeItemResu
   }
   const rendered = await renderAllRatios({ renderer: input.renderer, storage: input.storage, pack, item, copy: item.copy, sceneImage: item.scene.imageUrl, ratios: missing, exact })
   let fresh = rendered.renders
-  const rejected: Array<{ ratio: AspectRatio; fidelity: FidelityResult }> = []
-  if (exact) {
-    // Never deliver an altered product: a new ratio without a passing fidelity is dropped.
-    fresh = fresh.filter((r) => {
-      if (r.fidelity?.passed) return true
-      rejected.push({ ratio: r.ratio, fidelity: r.fidelity ?? { score: 0, ssim: null, deltaE: null, passed: false, method: 'composite', ratio: r.ratio } })
-      return false
-    })
-  } else {
+  // Exact mode: a new ratio without a passing fidelity was not delivered (renderAllRatios lists it).
+  const rejected: RejectedRatio[] = exact ? rendered.rejected : []
+  if (!exact) {
     const sc = item.sceneCheck
     const verdict: FidelityResult = {
       score: Math.round((sc?.score ?? 0.5) * 1000) / 1000,
@@ -1333,6 +1465,12 @@ export async function resizeItem(input: ResizeItemInput): Promise<ResizeItemResu
   }
   const renders = [...(item.renders ?? []), ...fresh]
   const next: Partial<PackItem> = { renders, timings: { ...item.timings, renderMs: Date.now() - t0 } }
+  if (exact && (rejected.length || item.rejectedRatios?.length)) {
+    // Keep the item's rejected list in sync: delivered ratios leave it, newly failed ones join it.
+    const list = [...(item.rejectedRatios ?? []).filter((r) => !renders.some((x) => x.ratio === r.ratio) && !rejected.some((x) => x.ratio === r.ratio)), ...rejected]
+    next.rejectedRatios = list.length ? list : undefined
+    next.sceneCheck = { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), rejectedRatios: list.length ? list : undefined }
+  }
   await input.store.updateItem(item.id, next)
   return {
     ok: true,
@@ -1394,10 +1532,151 @@ export async function regenerateItem(input: RegenerateItemInput): Promise<Regene
     sceneAttempts: undefined,
     timings: undefined,
     fidelity: undefined,
+    rejectedRatios: undefined,
   }
   await input.store.updateItem(item.id, patch)
   if (loaded.pack.status !== 'running') await input.store.updatePack(loaded.pack.id, { status: 'running' })
   const next = { ...item, ...patch, updatedAt: nowIso() }
   for (const [k, v] of Object.entries(patch)) if (v === undefined) delete (next as unknown as Record<string, unknown>)[k]
   return { ok: true, item: next }
+}
+
+// ---------------------------------------------------------------------------
+// Regenerate ONE ratio of a delivered ad (P0 #3): free, the ad was charged once
+// ---------------------------------------------------------------------------
+
+export interface RegenerateRatioInput {
+  store: PackStore
+  gateway: ModelGateway
+  renderer: Renderer
+  storage: AdPackStorage
+  packId: string
+  itemId: string
+  userId: string
+  ratio: AspectRatio
+  /** Exact mode: loads the stored cut-outs (tests inject). */
+  loadImage?: ImageLoader
+  /** Plate retries for the new plate (default 1). */
+  maxPlateRetries?: number
+}
+
+export type RegenerateRatioResult =
+  | {
+      ok: true
+      item: PackItem
+      ratio: AspectRatio
+      delivered: boolean
+      /** recomposite = same plate, deterministic relight; replate = a new background plate for this ratio only. */
+      method: 'recomposite' | 'replate'
+      /** Present when the ratio still did not keep the real product. */
+      rejected?: RejectedRatio
+      costUsd: number
+    }
+  | { ok: false; error: 'pack_not_found' | 'item_not_found' | 'item_not_rendered' | 'not_exact' | 'cutout_missing' | 'ratio_not_in_pack' | 'item_busy' }
+
+/**
+ * Regenerate only one ratio of an exact-mode ad that was delivered in other ratios (P0 #3). No
+ * credits (the ad was charged once when delivered). First the stored plate is re-composited with
+ * the deterministic relight; when the product still does not survive, a NEW plate is generated for
+ * that ratio alone (one model call + props check), composited and fidelity-checked. The other
+ * ratios are never touched. A ratio that still fails stays in `rejectedRatios` (not delivered).
+ */
+export async function regenerateRatio(input: RegenerateRatioInput): Promise<RegenerateRatioResult> {
+  const loaded = await input.store.getPack(input.packId, input.userId)
+  if (!loaded) return { ok: false, error: 'pack_not_found' }
+  const { pack, items } = loaded
+  const item = items.find((i) => i.id === input.itemId)
+  if (!item) return { ok: false, error: 'item_not_found' }
+  if (item.leaseUntil && Date.parse(item.leaseUntil) > Date.now() && !TERMINAL.has(item.status)) return { ok: false, error: 'item_busy' }
+  if (!item.copy || !item.scene || (item.status !== 'rendered' && item.status !== 'done') || !item.renders.length) return { ok: false, error: 'item_not_rendered' }
+  if (packMode(pack) !== 'exact' || item.scene.kind !== 'plate') return { ok: false, error: 'not_exact' }
+  const ratio = input.ratio
+  if (!pack.ratios.includes(ratio) && !(item.rejectedRatios ?? []).some((r) => r.ratio === ratio) && !item.renders.some((r) => r.ratio === ratio)) {
+    return { ok: false, error: 'ratio_not_in_pack' }
+  }
+  let exact: ExactRenderInputs
+  try {
+    exact = await exactInputsFromScene(item, input.loadImage ?? defaultImageLoader)
+  } catch {
+    return { ok: false, error: 'cutout_missing' }
+  }
+  const t0 = Date.now()
+  let costUsd = 0
+  const copy = item.copy
+  const base = { renderer: input.renderer, storage: input.storage, pack, item, copy, ratios: [ratio], exact, relightAuto: true }
+  // 1) Same plate, deterministic relight only (cheap, no model call).
+  let method: 'recomposite' | 'replate' = 'recomposite'
+  let res = await renderAllRatios({ ...base, sceneImage: item.scene.imageUrl })
+  let plateUrl: string | undefined
+  // 2) A new plate for this ratio alone.
+  if (!res.renders.length) {
+    method = 'replate'
+    const hero = await sharp(Buffer.from(exact.cutouts[0])).metadata()
+    const placement = plateRegionFor({ pack, format: item.angle.format, copy, product: { width: hero.width ?? 1, height: hero.height ?? 1 }, layoutFamily: item.angle.layoutFamily, ratios: [ratio], plateRatio: ratio })
+    const offer = offerForItem(pack.offer, item.index)
+    const view = item.scene.view === 'overhead' ? ('overhead' as const) : undefined
+    const refs: PropsReference[] = (item.scene.cutouts ?? []).slice(0, 3).map((c) => ({ image: c.sourceUrl, role: c.role, ...(c.label ? { label: c.label } : {}) }))
+    const allowedProps = pack.render?.allowedProps ?? offer.allowedProps
+    const immutableAttributes = pack.render?.immutableAttributes ?? offer.immutableAttributes
+    let hint: string | undefined
+    for (let a = 0; a <= Math.max(0, input.maxPlateRetries ?? 1); a++) {
+      let plate
+      try {
+        plate = await generatePlate({
+          gateway: input.gateway,
+          format: item.angle.format,
+          dna: pack.dna,
+          offer,
+          placement,
+          light: exact.light ?? 'left',
+          surface: exact.surface ?? 'matte',
+          variation: item.attempts + a + 1,
+          allowedProps,
+          immutableAttributes,
+          sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy),
+          draft: true,
+          ratio,
+          promptSuffix: hint,
+          ...(view ? { view } : {}),
+        })
+      } catch {
+        continue
+      }
+      costUsd += plate.costUsd
+      let check: PlateCheckResult | null = null
+      try {
+        check = await checkPlate({ gateway: input.gateway, plateImage: toDataUrl(plate.bytes, plate.mimeType), refs, allowedProps, placement, language: pack.dna.language, immutableAttributes, ...(view ? { view } : {}) })
+        costUsd += check.costUsd
+      } catch {
+        check = null
+      }
+      if (check && !check.ok) {
+        hint = check.extraObjects.length ? PLATE_RETRY_HINT_PROPS : PLATE_RETRY_HINT_PLACEMENT
+        continue
+      }
+      const contentType = plate.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png'
+      plateUrl = (await input.storage.upload({ userId: pack.userId, packId: pack.id, itemIndex: item.index, kind: 'plate', bytes: plate.bytes, contentType })).url
+      res = await renderAllRatios({ ...base, sceneImage: plate.bytes })
+      if (res.renders.length) break
+    }
+  }
+  const delivered = res.renders[0]
+  const renders = delivered
+    ? [...item.renders.filter((r) => r.ratio !== ratio), { ...delivered, ...(plateUrl ? { plateUrl } : {}) }].sort((a, b) => pack.ratios.indexOf(a.ratio) - pack.ratios.indexOf(b.ratio))
+    : item.renders
+  const failedNow = res.rejected[0]
+  const list = [...(item.rejectedRatios ?? []).filter((r) => r.ratio !== ratio), ...(delivered ? [] : failedNow ? [failedNow] : [])]
+  const fidelity = worstFidelity(renders) ?? item.fidelity
+  const next: Partial<PackItem> = {
+    renders,
+    rejectedRatios: list.length ? list : undefined,
+    costUsd: (item.costUsd ?? 0) + costUsd,
+    timings: { ...item.timings, renderMs: Date.now() - t0 },
+    ...(fidelity ? { fidelity } : {}),
+    sceneCheck: { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), ...(fidelity ? { fidelity } : {}), rejectedRatios: list.length ? list : undefined },
+  }
+  await input.store.updateItem(item.id, next)
+  const fresh = { ...item, ...next, updatedAt: nowIso() }
+  for (const [k, v] of Object.entries(next)) if (v === undefined) delete (fresh as unknown as Record<string, unknown>)[k]
+  return { ok: true, item: fresh, ratio, delivered: Boolean(delivered), method, ...(delivered ? {} : failedNow ? { rejected: failedNow } : {}), costUsd }
 }

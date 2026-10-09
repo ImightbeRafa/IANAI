@@ -2,8 +2,8 @@
  * Ad Pack render engine — deterministic text-on-image ads (satori → resvg → sharp).
  * See ./README.md.
  */
-export { renderAd, renderAdAllRatios, planLayout, planProductBoxes, mapSceneBox, placeProductAndAvoidText } from './render.js'
-export { prepareLogo, pickLogoVariant, cachedLogo, type LogoVariants } from './logo.js'
+export { renderAd, renderAdAllRatios, planLayout, planProductBoxes, mapSceneBox, placeProductAndAvoidText, findSurfaceLine } from './render.js'
+export { prepareLogo, pickLogoVariant, chooseKitLogo, edgeFloodBackground, cachedLogo, type LogoVariants } from './logo.js'
 export {
   resolveFonts,
   matchFamily,

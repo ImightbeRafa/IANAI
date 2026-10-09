@@ -98,6 +98,8 @@ export interface RunnerGatewayOptions {
   vision?: (callIndex: number, images: string[]) => Record<string, unknown>
   /** Copy JSON per text call (default: serumCopyFor). */
   json?: (input: { system: string; user: string }, callIndex: number) => unknown
+  /** Expose an image-edit model (enables the relight 'ai' hook in exact mode). */
+  edit?: boolean
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -131,6 +133,13 @@ export function runnerGateway(options: RunnerGatewayOptions = {}): RunnerGateway
       if (options.sceneFails?.(input.prompt)) throw new Error('fake scene failure')
       return { bytes: PNG_1X1, mimeType: 'image/png', costUsd: 0.02, model: 'fake-image', productLocked: input.refs.length > 0 }
     },
+    ...(options.edit
+      ? {
+          async edit(input: { image: string }) {
+            return { bytes: new Uint8Array(Buffer.from(input.image.slice(input.image.indexOf(',') + 1), 'base64')), mimeType: 'image/png', costUsd: 0, model: 'fake-edit' }
+          },
+        }
+      : {}),
   }
   return gw
 }
@@ -178,7 +187,11 @@ async function toBytes(v: Uint8Array | string): Promise<Buffer> {
  * Fake renderer. Exact mode: pastes the cut-out unchanged on a small gray canvas and reports the
  * placement (so the runner's fidelity score is real); `alter` corrupts the product pixels.
  */
-export function fakeRenderer(options: { alter?: boolean } = {}): Renderer & { calls: RenderInput[] } {
+export function fakeRenderer(options: {
+  alter?: boolean | ((input: RenderInput, call: number) => boolean)
+  /** When the relight hook is passed (relight 'ai'), the "AI" result changes the product (and is reported as relit). */
+  relitAlters?: boolean
+} = {}): Renderer & { calls: RenderInput[] } {
   const calls: RenderInput[] = []
   return {
     calls,
@@ -193,12 +206,14 @@ export function fakeRenderer(options: { alter?: boolean } = {}): Renderer & { ca
       const box = fitBox({ width: meta.width ?? 1, height: meta.height ?? 1 }, { x: Math.round(W * 0.5), y: Math.round(H * 0.3), w: Math.round(W * 0.42), h: Math.round(H * 0.6) }, 'bottom')
       const placed = await sharp(cut).ensureAlpha().resize(box.w, box.h, { fit: 'fill' }).png().toBuffer()
       let layer = placed
-      if (options.alter) layer = await sharp(placed).modulate({ hue: 160, saturation: 2 }).negate({ alpha: false }).png().toBuffer()
+      const relit = Boolean(options.relitAlters && input.relight)
+      const alter = typeof options.alter === 'function' ? options.alter(input, calls.length - 1) : Boolean(options.alter)
+      if (alter || relit) layer = await sharp(placed).modulate({ hue: 160, saturation: 2 }).negate({ alpha: false }).png().toBuffer()
       const png = await sharp({ create: { width: W, height: H, channels: 3, background: '#d6d3d1' } })
         .composite([{ input: layer, left: box.x, top: box.y }])
         .png()
         .toBuffer()
-      return { png: new Uint8Array(png), width, height, productPlacements: [{ box, placed: new Uint8Array(placed), role: 'hero' }] }
+      return { png: new Uint8Array(png), width, height, productPlacements: [{ box, placed: new Uint8Array(placed), role: 'hero' }], ...(relit ? { relit: true, harmonized: true } : {}) }
     },
   }
 }

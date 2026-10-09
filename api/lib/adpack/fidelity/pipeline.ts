@@ -20,6 +20,7 @@ import { relightComposite } from './relight.js'
 import { fidelityFailReason, scoreFidelity, toFidelityResult, type FidelityScore } from './score.js'
 import { segmentProduct, sha256Hex, type CutoutMethod } from './segment.js'
 import { resolveProductPhotos } from './photos.js'
+import { alphaIsFlatLay } from './recall.js'
 import { upscaleProductPhoto, upscaleTarget, type UpscaleResult } from './upscale.js'
 
 export type ImageLoader = (url: string) => Promise<Uint8Array>
@@ -55,7 +56,7 @@ async function sourceBytes(url: string, ctx: CutoutContext): Promise<Uint8Array>
 
 /** In-process LRU of cut-outs / photo quality by source hash (warm instances skip re-segmentation). */
 const MEMO_MAX = 24
-const cutoutMemo = new Map<string, { png: Uint8Array; width: number; height: number; method: CutoutMethod }>()
+const cutoutMemo = new Map<string, { png: Uint8Array; width: number; height: number; method: CutoutMethod; recall?: number; flatLay?: boolean }>()
 const qualityMemo = new Map<string, AssetQuality>()
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   if (map.size >= MEMO_MAX) map.delete(map.keys().next().value as string)
@@ -101,18 +102,45 @@ export async function cutoutForPhoto(photo: ProductPhoto, ctx: CutoutContext, op
   return cutoutFromBytes(photo, bytes, hash, ctx)
 }
 
+/** Flat lay of a cut-out (role 'contents' or ≥ 3 separated opaque pieces) — also for cached cut-outs. */
+async function cutoutIsFlatLay(png: Uint8Array, role: ProductPhoto['role']): Promise<boolean> {
+  if (role === 'contents') return true
+  try {
+    const { data, info } = await sharp(png).ensureAlpha().resize(512, 512, { fit: 'inside' }).raw().toBuffer({ resolveWithObject: true })
+    return alphaIsFlatLay(data, info.width, info.height)
+  } catch {
+    return false
+  }
+}
+
+function storedCutout(photo: ProductPhoto, url: string, method: StoredCutout['method'], hash: string, extra: { recall?: number; flatLay?: boolean }): StoredCutout {
+  return {
+    url,
+    role: photo.role,
+    ...(photo.label ? { label: photo.label } : {}),
+    method,
+    sourceHash: hash,
+    sourceUrl: photo.url,
+    ...(photo.id ? { productImageId: photo.id } : {}),
+    ...(typeof extra.recall === 'number' ? { recall: extra.recall } : {}),
+    ...(extra.flatLay ? { flatLay: true } : {}),
+  }
+}
+
 async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: string, ctx: CutoutContext): Promise<LoadedCutout | { error: string }> {
   const local = cutoutMemo.get(hash)
   if (local && ctx.cache) {
     // Still make sure the storage copy exists (URL for the item) — cheap when it does.
     const hit = await ctx.cache.get(hash).catch(() => null)
-    if (hit) return { stored: { url: hit.url, role: photo.role, ...(photo.label ? { label: photo.label } : {}), method: 'cache', sourceHash: hash, sourceUrl: photo.url }, bytes: hit.bytes, width: local.width, height: local.height }
+    if (hit) {
+      return { stored: storedCutout(photo, hit.url, 'cache', hash, { recall: local.recall, flatLay: local.flatLay || photo.role === 'contents' }), bytes: hit.bytes, width: local.width, height: local.height }
+    }
   }
   const cached = ctx.cache ? await ctx.cache.get(hash).catch(() => null) : null
   if (cached) {
     const m = await sharp(cached.bytes).metadata()
     return {
-      stored: { url: cached.url, role: photo.role, ...(photo.label ? { label: photo.label } : {}), method: 'cache', sourceHash: hash, sourceUrl: photo.url },
+      stored: storedCutout(photo, cached.url, 'cache', hash, { flatLay: await cutoutIsFlatLay(cached.bytes, photo.role) }),
       bytes: cached.bytes,
       width: m.width ?? 0,
       height: m.height ?? 0,
@@ -121,8 +149,9 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
   let made = local
   if (!made) {
     const res = await segmentProduct({ bytes, role: photo.role, label: photo.label, gateway: ctx.gateway })
-    if (!res.ok) return { error: `cutout_failed: ${res.detail}` }
-    made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method }
+    // cutout_incomplete: a mask was found but it dropped product pieces — never delivered (P0 #4).
+    if (!res.ok) return { error: `${res.reason}: ${res.detail}` }
+    made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method, ...(res.recall ? { recall: res.recall.recall } : {}), ...(res.flatLay ? { flatLay: true } : {}) }
     remember(cutoutMemo, hash, made)
   }
   const png = made.png
@@ -135,7 +164,7 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
     }
   }
   return {
-    stored: { url, role: photo.role, ...(photo.label ? { label: photo.label } : {}), method: made.method, sourceHash: hash, sourceUrl: photo.url },
+    stored: storedCutout(photo, url, made.method, hash, { recall: made.recall, flatLay: made.flatLay || photo.role === 'contents' }),
     bytes: png,
     width: made.width,
     height: made.height,
@@ -165,7 +194,7 @@ export async function prepareProductCutouts(input: { photos: ProductPhoto[]; for
     } catch {
       quality = undefined
     }
-    pool.push({ url: p.url, role: p.role, label: p.label, quality })
+    pool.push({ url: p.url, role: p.role, label: p.label, quality, ...(p.primary ? { primary: true } : {}) })
   }
   if (!pool.length) return { ok: false, error: 'cutout_failed: no product photo', warnings }
   const tried: string[] = []
@@ -185,7 +214,10 @@ export async function prepareProductCutouts(input: { photos: ProductPhoto[]; for
       heroQuality = pick.quality && res.upscale ? { ...pick.quality, upscaled: true, from: res.upscale.from, to: res.upscale.to } : pick.quality
     }
   }
-  if (!hero) return { ok: false, error: errors[0]?.startsWith('cutout_failed') ? errors.join(' | ').slice(0, 480) : `cutout_failed: ${errors.join(' | ')}`.slice(0, 480), warnings }
+  if (!hero) {
+    const known = errors[0]?.startsWith('cutout_failed') || errors[0]?.startsWith('cutout_incomplete')
+    return { ok: false, error: known ? errors.join(' | ').slice(0, 480) : `cutout_failed: ${errors.join(' | ')}`.slice(0, 480), warnings }
+  }
   if (heroQuality?.warnings.length) warnings.push(...heroQuality.warnings)
   const parts: LoadedCutout[] = []
   if (input.withParts !== false) {

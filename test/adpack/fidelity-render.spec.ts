@@ -102,7 +102,7 @@ describe('text never over the product (H4) — every format × ratio × product 
 describe('logo cleanup + variants (C5/H5)', () => {
   it('white-square JPEG logo → transparent background, trimmed, no box around it', async () => {
     const v = await prepareLogo(await whiteSquareLogoJpeg())
-    expect(v.method).toBe('color_key')
+    expect(v.method).toBe('edge_flood')
     expect(v.backgroundRemoved).toBe(true)
     // Trimmed to the drawn shapes (circle 130–270 wide area, bars 90–310): no 400×400 square left.
     expect(v.onLight.width).toBeLessThan(250)

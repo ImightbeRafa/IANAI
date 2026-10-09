@@ -192,7 +192,7 @@ function mergeLists(parts: Array<DnaPart | null | undefined>, pick: (p: DnaPart)
 
 function mergeVisual(parts: Array<DnaPart | null | undefined>): DnaVisual {
   const visual: DnaVisual = {}
-  const fields: Array<Exclude<keyof DnaVisual, 'formatsSeen' | 'styleProfile'>> = ['primaryColor', 'secondaryColor', 'accentColor', 'headingFont', 'bodyFont', 'headingFontUrl', 'bodyFontUrl', 'logoUrl', 'styleNotes']
+  const fields: Array<Exclude<keyof DnaVisual, 'formatsSeen' | 'styleProfile' | 'logoVariants'>> = ['primaryColor', 'secondaryColor', 'accentColor', 'headingFont', 'bodyFont', 'headingFontUrl', 'bodyFontUrl', 'logoUrl', 'styleNotes']
   for (const field of fields) {
     for (const part of parts) {
       const value = part?.visual?.[field]
@@ -204,6 +204,8 @@ function mergeVisual(parts: Array<DnaPart | null | undefined>): DnaVisual {
   }
   const formats = [...new Set(parts.flatMap((part) => part?.visual?.formatsSeen || []))]
   if (formats.length) visual.formatsSeen = formats
+  const logoVariants = parts.find((part) => part?.visual?.logoVariants?.length)?.visual?.logoVariants
+  if (logoVariants?.length) visual.logoVariants = logoVariants.map((v) => ({ ...v }))
   return visual
 }
 

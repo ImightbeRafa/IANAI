@@ -117,6 +117,11 @@ export interface DnaVisual {
   headingFontUrl?: string
   bodyFontUrl?: string
   logoUrl?: string
+  /**
+   * Kit logo variants (brand_profile.logoVariants, https): the renderer picks the one that reads on
+   * the ad region (P0 #1). 'badge' = self-contained (own background shape): never recolored.
+   */
+  logoVariants?: Array<{ url: string; variant: 'primary' | 'light' | 'dark' | 'badge' }>
   /** e.g. "clean white studio, bright fruit splashes, bold sans headlines". */
   styleNotes?: string
   /** Formats the brand already uses (from Instagram analysis). */
@@ -190,6 +195,13 @@ export interface OfferInput {
   productLock?: { lockProductAppearance: boolean; immutableAttributes: string[]; allowedProps: string[] }
   /** C3: per-ad product photos (ad index as string → https URLs, first = hero). Falls back to productImageUrls. */
   productImageUrlsByAd?: Record<string, string[]>
+  /** product_images.id per photo URL (reporting which photo each ad used, P1 #8). */
+  photoIdsByUrl?: Record<string, string>
+  /**
+   * P1 #8: the hero / primary photo appears in at least one ad of the pack (the first ad by default).
+   * Default true when a hero photo exists; false = no guarantee (the planner picks per format).
+   */
+  heroRequired?: boolean
   /**
    * Real product photos with their role (multi-part products: hero, the controller, the box,
    * kit contents…). One cut-out per photo in exact mode; parts are never synthesized.
@@ -224,6 +236,8 @@ export interface ProductPhoto {
   label?: string
   /** product_images.id when known. */
   id?: string
+  /** The owner's primary photo (product_images.is_primary). */
+  primary?: boolean
 }
 
 /**
@@ -280,10 +294,31 @@ export interface FidelityResult {
   chromaRatio?: number | null
   passed: boolean
   method: FidelityMethod
-  /** Heatmap PNG of the per-pixel difference (exact mode, worst ratio). */
+  /** Heatmap PNG of the per-pixel difference (exact mode, worst ratio), at placement resolution. */
   diffImageUrl?: string
   /** Ratio the item-level value was taken from (the worst one). */
   ratio?: AspectRatio
+  /** Cut-out recall vs the source photo (0–1, P0 #4): pieces the cut-out kept / pieces in the photo. */
+  recall?: number | null
+  /** The AI relight pass failed fidelity on this ratio and the deterministic ('auto') render was kept. */
+  relightFallback?: 'auto'
+}
+
+/** A ratio of an ad that was not delivered because the real product did not survive it (P0 #3). */
+export interface RejectedRatio {
+  ratio: AspectRatio
+  /** One-line reason (e.g. "detail ssim 0.84 < 0.88"). */
+  reason: string
+  fidelity: FidelityResult
+}
+
+/** The real product photo an ad used (P1 #8). */
+export interface AdPhotoRef {
+  /** product_images.id when known. */
+  productImageId?: string
+  url: string
+  role?: ProductPhotoRole
+  label?: string
 }
 
 /** Light direction of a background plate (drives the composite's contact shadow). */
@@ -298,6 +333,12 @@ export interface StoredCutout {
   /** sha256 of the source photo bytes (cache key). */
   sourceHash: string
   sourceUrl: string
+  /** product_images.id of the source photo, when known (per-ad photo reporting). */
+  productImageId?: string
+  /** Cut-out recall vs the source photo's foreground (0–1), when measured (P0 #4). */
+  recall?: number
+  /** Top-down kit layout (flat lay): composited on an overhead plate, never in perspective (P1 #6). */
+  flatLay?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +517,10 @@ export interface SceneResult {
   surface?: PlateSurface
   /** Real-product cut-outs composited onto the plate (exact mode). First = hero. */
   cutouts?: StoredCutout[]
+  /** Camera of the plate: 'overhead' for flat-lay / kit-contents photos (P1 #6), else perspective. */
+  view?: 'perspective' | 'overhead'
+  /** Generated mode: the product photo the scene was locked to (P1 #8 reporting). */
+  sourcePhoto?: AdPhotoRef
   /**
    * Where the product sits in this scene, fractions (0–1) of the scene's width/height. Filled by
    * product detection (another step); the renderer never places copy over it.
@@ -498,6 +543,8 @@ export interface SceneCheckResult {
   productBox?: [number, number, number, number]
   /** Persisted copy of PackItem.fidelity (stored in the scene_check jsonb; no extra column). */
   fidelity?: FidelityResult
+  /** Persisted copy of PackItem.rejectedRatios (scene_check jsonb; no extra column). */
+  rejectedRatios?: RejectedRatio[]
 }
 
 export interface RenderedAd {
@@ -510,6 +557,8 @@ export interface RenderedAd {
   height: number
   /** Product fidelity of this render (exact: detail SSIM, silhouette IoU, identity color vs the cut-out). */
   fidelity?: FidelityResult
+  /** Set when this ratio was re-plated alone (adpack_regenerate {ratio}): its own background plate. */
+  plateUrl?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -553,8 +602,10 @@ export interface PackItem {
   chargedAt?: string
   /** Renders saved to the offer library (`product_images`, kind 'generated'). One entry per saved render URL. */
   libraryImages?: LibraryImage[]
-  /** Item-level product fidelity (worst ratio). Persisted inside scene_check.fidelity. */
+  /** Item-level product fidelity (worst DELIVERED ratio). Persisted inside scene_check.fidelity. */
   fidelity?: FidelityResult
+  /** Ratios not delivered (fidelity failed) while others were (P0 #3). Persisted in scene_check. */
+  rejectedRatios?: RejectedRatio[]
 }
 
 export interface LibraryImage {

@@ -138,7 +138,8 @@ describe('exact product mode — pack runner (A1/A3/A4/H3)', () => {
 
   it('multi-part product (H3): offer_graphic / explainer get the real part cut-out, other formats only the hero', async () => {
     const t = await setup({
-      size: 10,
+      // Exact mode without an in-use photo plans no hand-held / person formats (P1 #7): 9 angles.
+      size: 9,
       offer: { productImageUrls: [HERO, PART], productPhotos: [{ url: HERO, role: 'hero' }, { url: PART, role: 'part', label: 'control tipo gamepad' }] },
     })
     await t.advance()

@@ -21,6 +21,22 @@ export interface PlateRegion {
   y0: number
   x1: number
   y1: number
+  /**
+   * Highest product base over the pack ratios (0–1 of the plate height): the surface the product
+   * stands on must already be there — its back edge (where it meets the wall) above this line (P1 #7).
+   */
+  baseY?: number
+}
+
+/** Plate camera: perspective (product standing on a surface) or overhead (flat lay seen from above). */
+export type PlateView = 'perspective' | 'overhead'
+
+/** Overhead (top-down) setting: a flat surface texture filling the frame, no horizon (P1 #6). */
+export function overheadSetting(variation = 0): string {
+  return [
+    'Top-down flat-lay photo shot straight from above (camera at 90 degrees to the surface): a single flat surface (linen, light wood, paper or matte stone) fills the whole frame edge to edge.',
+    'Overhead view straight down onto a flat matte surface (fabric, kraft paper or smooth stone) filling the entire frame, soft even daylight.',
+  ][Math.abs(Math.floor(variation)) % 2]
 }
 
 const LIGHTS: LightDirection[] = ['left', 'right']
@@ -94,6 +110,8 @@ export interface BuildPlatePromptInput {
   ratio?: AspectRatio
   /** Product appearance facts that never change (default: offer.immutableAttributes). */
   immutableAttributes?: string[]
+  /** 'overhead' for flat-lay / kit-contents photos: top-down surface, no horizon (P1 #6). */
+  view?: PlateView
 }
 
 export { cleanAttributes }
@@ -126,13 +144,21 @@ export function buildPlatePrompt(input: BuildPlatePromptInput): string {
   const ambient = [...AMBIENT_PROPS, ...props]
   const mood = plateBrief(input.sceneBrief)
   const attrs = cleanAttributes(input.immutableAttributes ?? input.offer.immutableAttributes)
+  const overhead = input.view === 'overhead'
+  const pct = (v: number) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`
+  const base = input.placement.baseY
   return [
     `Text-free advertising background photo, ${input.ratio ?? SCENE_RATIO} ${(input.ratio ?? SCENE_RATIO) === '16:9' ? 'landscape' : (input.ratio ?? SCENE_RATIO) === '1:1' ? 'square' : 'vertical'}, for ${input.offer.name ? `a product called "${input.offer.name.slice(0, 80)}"` : 'a product'} that will be placed into it afterwards.`,
-    `Setting: ${plateSetting(input.format, input.variation ?? 0)}`,
+    overhead ? `Setting: ${overheadSetting(input.variation ?? 0)}` : `Setting: ${plateSetting(input.format, input.variation ?? 0)}`,
     mood ? `Mood: ${mood}` : '',
-    `Leave a clear, empty, flat placement area ${describeRegion(input.placement)}: a visible surface (tabletop, floor or pedestal) in perspective, in focus, with nothing on it, where the product will stand.`,
-    `Surface: ${surfacePhrase(input.surface ?? 'matte')}.`,
-    `Lighting: ${lightPhrase(input.light)}; consistent shadows on the surface.`,
+    overhead
+      ? `Camera: straight top-down (bird's-eye), NO horizon, no walls, no perspective, no vanishing lines. Leave a clear, empty, evenly lit area of the flat surface ${describeRegion(input.placement)} where several objects will be laid flat; only the surface texture there.`
+      : `Leave a clear, empty, flat placement area ${describeRegion(input.placement)}: a visible surface (tabletop, floor or pedestal) in perspective, in focus, with nothing on it, where the product will stand.`,
+    !overhead && typeof base === 'number'
+      ? `Surface line: the product's base will sit at ${pct(base)} of the image height, so the tabletop / floor must already be visible there and continue down to the bottom edge; its back edge (where the surface meets the wall or background) must be ABOVE ${pct(base - 0.06)} of the height — never at or below the product's base.`
+      : '',
+    `Surface: ${surfacePhrase(overhead ? 'matte' : input.surface ?? 'matte')}.`,
+    overhead ? 'Lighting: soft, even light from above; no strong directional shadows on the surface.' : `Lighting: ${lightPhrase(input.light)}; consistent shadows on the surface.`,
     'STRICT: the image must contain NO product, no devices, no electronics, no parts, no accessories, no cables, no remotes or controllers, no packaging or boxes, no bottles, no tools, no text and no logos. No people and no hands.',
     `Only these ambient props are allowed, sparingly and away from the placement area: ${ambient.join(', ')}.`,
     attrs.length
@@ -205,7 +231,7 @@ export function partsLine(refs: PropsReference[]): string {
   return refs.map((r, i) => `Reference ${i + 2}: ${r.label ? `"${r.label.slice(0, 60)}"` : 'product'} (${r.role})`).join('; ')
 }
 
-export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; placement?: PlateRegion; language: AdLanguage; immutableAttributes?: string[] }): { system: string; user: string } {
+export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedProps?: string[]; placement?: PlateRegion; language: AdLanguage; immutableAttributes?: string[]; view?: PlateView }): { system: string; user: string } {
   const allowed = [...AMBIENT_PROPS, ...cleanProps(input.allowedProps)]
   const attrs = cleanAttributes(input.immutableAttributes)
   return {
@@ -220,7 +246,8 @@ export function buildPlateCheckPrompt(input: { refs: PropsReference[]; allowedPr
       `extraObjects: list every device, electronic item, product, product part, accessory, cable, remote/controller, propeller, wheel, tool, bottle, box or packaging visible in image 1 (short names). Allowed ambient props that are NOT errors: ${allowed.join(', ')}. Empty list when there are none.`,
       'strayText: true if there is any text, letters, numbers, logo or watermark.',
       'borders: true if the photo does not fill the frame (bars, frames, letterboxing, collage panels).',
-      input.placement ? `placementClear: true if the area ${describeRegion(input.placement)} is an empty surface where an object could stand.` : 'placementClear: true if there is an empty surface where an object could stand.',
+      input.placement ? `placementClear: true if the area ${describeRegion(input.placement)} is an empty surface where an object could ${input.view === 'overhead' ? 'lie flat' : 'stand'}.` : 'placementClear: true if there is an empty surface where an object could stand.',
+      input.view === 'overhead' ? 'The photo must be shot straight from above (top-down, no horizon, no walls, no perspective): if it shows a horizon, a wall or a perspective floor, placementClear is false.' : '',
       'score: overall quality as an ad background (0-1).',
       `notes: one short sentence in ${input.language === 'es' ? 'Spanish' : 'English'} with the main problem, or empty.`,
     ]
@@ -238,9 +265,10 @@ export async function checkPlate(input: {
   language: AdLanguage
   model?: string
   immutableAttributes?: string[]
+  view?: PlateView
 }): Promise<PlateCheckResult> {
   const refs = input.refs.slice(0, 3)
-  const prompt = buildPlateCheckPrompt({ refs, allowedProps: input.allowedProps, placement: input.placement, language: input.language, immutableAttributes: input.immutableAttributes })
+  const prompt = buildPlateCheckPrompt({ refs, allowedProps: input.allowedProps, placement: input.placement, language: input.language, immutableAttributes: input.immutableAttributes, ...(input.view ? { view: input.view } : {}) })
   const res = await input.gateway.visionJson<Record<string, unknown>>({ ...prompt, images: [input.plateImage, ...refs.map((r) => r.image)], model: input.model })
   const raw = (res.data ?? {}) as Record<string, unknown>
   const extraObjects = asObjectList(raw.extraObjects)

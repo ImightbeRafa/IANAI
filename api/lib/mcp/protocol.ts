@@ -419,6 +419,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
     brandKitId: { type: 'string', description: 'Optional linked brand kit id (default = primary kit).' },
     productImageIds: productImageIdsProp,
     productImageIdsByAd: productImageIdsByAdProp,
+    photoPerAd: { ...productImageIdsByAdProp, description: 'Alias of productImageIdsByAd: { "1": ["<productImageId>"] } — which real photo each ad uses (send one of the two).' },
+    heroRequired: { type: 'boolean', description: 'Default true: the hero / primary photo appears in at least one ad (the first ad unless a per-ad photo already uses it). false = the planner picks photos per format.' },
   }
   const correctionProps = {
     saveToOffer: { type: 'boolean', description: 'Persist offerPatch into the saved offer (same as update_offer) before building the pack.' },
@@ -633,6 +635,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ...adpackLanguageRules,
           productImageIds: productImageIdsProp,
           productImageIdsByAd: productImageIdsByAdProp,
+          photoPerAd: { ...productImageIdsByAdProp, description: 'Alias of productImageIdsByAd.' },
+          heroRequired: { type: 'boolean', description: 'Default true: the hero photo is used in at least one ad.' },
           ...correctionProps,
           ...productFidelityProps,
           mustAppear: mustAppearProp,
@@ -667,6 +671,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           packId: adpackPackId,
           itemId: { type: 'string' },
           mode: { type: 'string', enum: ['copy', 'scene'], description: 'copy = new copy + image; scene = keep text, new image (default)' },
+          ratio: { type: 'string', enum: ['1:1', '4:5', '9:16', '16:9'], description: 'FREE: regenerate only this ratio of a delivered ad (from item.rejectedRatios): re-composite, else a new background for this ratio only; the other ratios are untouched. No approval needed.' },
           approvalRequestId: { type: 'string', description: 'After in-chat confirm_execute approve. Do not invent.' },
         },
         required: ['packId', 'itemId'],

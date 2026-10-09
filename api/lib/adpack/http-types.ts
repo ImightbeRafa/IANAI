@@ -7,6 +7,7 @@
  */
 import type {
   AdAngle,
+  AdPhotoRef,
   AdCopy,
   AngleCategory,
   CreativeFreedom,
@@ -426,6 +427,12 @@ export interface AdPackItemView {
   forbiddenHits?: Array<{ phrase: string; field: string }>
   /** Product fidelity (A4): exact = detail SSIM + silhouette IoU + hue shift vs the real cut-out (light may change, the product may not); generated = vision verdict. */
   fidelity?: AdPackFidelityView
+  /** Ratios not delivered while others were (P0 #3); regenerate one with adpack_regenerate { ratio } (free). */
+  rejectedRatios?: AdPackRejectedRatioView[]
+  /** The real product photo this ad used (P1 #8). */
+  photo?: AdPhotoRef
+  /** Real part photos composited next to it. */
+  parts?: AdPhotoRef[]
   error?: string
 }
 
@@ -443,6 +450,10 @@ export interface AdPackFidelityView {
   hueShift?: number
   chromaRatio?: number
   diffImageUrl?: string
+  /** Cut-out recall vs the source photo (0–1): no product piece was dropped (P0 #4). */
+  recall?: number
+  /** The AI relight failed on this ratio; the deterministic render was kept. */
+  relightFallback?: 'auto'
 }
 
 export interface AdPackProgressView {
@@ -498,6 +509,21 @@ export interface AdPackEditTextResponse {
 export interface AdPackRegenerateResponse {
   item: AdPackItemView
   quote: AdPackQuote
+  /** Ratio-only regeneration (P0 #3): free, synchronous; the other ratios are untouched. */
+  ratio?: {
+    ratio: AspectRatio
+    delivered: boolean
+    method: 'recomposite' | 'replate'
+    rejected?: AdPackRejectedRatioView
+  }
+}
+
+/** A ratio of an ad not delivered because the real product did not survive it (P0 #3). */
+export interface AdPackRejectedRatioView {
+  ratio: AspectRatio
+  /** One-line reason, e.g. "detail ssim 0.84 < 0.88". */
+  reason: string
+  fidelity: AdPackFidelityView
 }
 
 export interface AdPackCancelResponse {
