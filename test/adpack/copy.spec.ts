@@ -5,7 +5,7 @@ import { confirmedFacts, mergeFacts, unconfirmedFacts } from '../../api/lib/adpa
 import { planAngles } from '../../api/lib/adpack/plan-angles'
 import { BENCHMARK_OFFERS } from '../fixtures/adpack/benchmark-offers'
 import { fakeGateway, type JsonCall } from './fake-gateway'
-import { caseById, goodSerumCopy } from './helpers'
+import { caseById, angleIndexFromPrompt, goodSerumCopy } from './helpers'
 
 const serum = caseById('beauty-serum')
 const serumAngles = planAngles({ dna: serum.dna, offer: serum.offer })
@@ -49,8 +49,7 @@ const SUBLINES = [
 ]
 
 function angleIndex(call: JsonCall): number {
-  const m = call.user.match(/\(a(\d{2})-/)
-  return m ? Number(m[1]) - 1 : 0
+  return angleIndexFromPrompt(call.user)
 }
 
 function goodHandler(call: JsonCall) {

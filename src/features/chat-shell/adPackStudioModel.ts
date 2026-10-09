@@ -381,6 +381,7 @@ const ISSUE_LABELS: Record<CopyCheckIssue['code'], { es: string; en: string }> =
   duplicate_message: { es: 'Mensaje repetido', en: 'Duplicate message' },
   placeholder: { es: 'Tiene un texto de relleno', en: 'Contains a placeholder' },
   register: { es: 'Mezcla el trato (vos/tú/usted)', en: 'Wrong form of address' },
+  cliche: { es: 'Frase hecha genérica', en: 'Generic stock phrase' },
 }
 
 const FIELD_LABELS: Record<string, { es: string; en: string }> = {

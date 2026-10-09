@@ -62,6 +62,12 @@ function compactItem(item: AdPackItemView) {
     status: item.status,
     format: item.format,
     headline: item.headline ?? null,
+    angleId: item.angleId ?? null,
+    category: item.category ?? null,
+    hookType: item.hookType,
+    rationale: item.rationale ?? null,
+    layoutFamily: item.layoutFamily ?? null,
+    ...(item.variation !== undefined ? { variation: item.variation } : {}),
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl })),
     charged: item.charged,
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
@@ -104,8 +110,8 @@ function statusPayload(status: AdPackStatusResponse) {
       : finished
         ? {
           instructionsForGrok: es
-            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + links (4:5 feed, 9:16 historias, 1:1 cuadrado) + su caption. Ofrecé deliverable.captionsText para copiar todo junto.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}`
-            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + links (4:5 feed, 9:16 stories, 1:1 square) + its caption. Offer deliverable.captionsText to copy all captions at once.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}`,
+            ? `Pack terminado. Presentá deliverable.ads como lista: por cada anuncio "N. titular" + ángulo (category, hookType) y por qué (rationale) + links (4:5 feed, 9:16 historias, 1:1 cuadrado) + su caption. Ofrecé deliverable.captionsText para copiar todo junto.${status.deepLink ? ` Todo quedó guardado en la carpeta de la marca: ${status.deepLink}` : ''} No vuelvas a llamar adpack_status.${failedHint}`
+            : `Pack finished. Present deliverable.ads as a list: for each ad "N. headline" + angle (category, hookType) and why (rationale) + links (4:5 feed, 9:16 stories, 1:1 square) + its caption. Offer deliverable.captionsText to copy all captions at once.${status.deepLink ? ` Everything is saved in the brand folder: ${status.deepLink}` : ''} Do not poll adpack_status again.${failedHint}`,
         }
         : { instructionsForGrok: es ? 'No hay más trabajo en este pack. No vuelvas a llamar adpack_status.' : 'No more work on this pack. Do not poll adpack_status again.' }),
   }
@@ -175,7 +181,7 @@ async function finalize(options: {
 
 function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
-  for (const key of ['size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds'] as const) {
+  for (const key of ['size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds', 'angles', 'variations', 'creativeFreedom', 'layoutFamily', 'styleDnaId'] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
   return bound
@@ -238,10 +244,29 @@ export async function dispatchAdPackTool(options: {
       }
       case 'adpack_dna_confirm':
         return { ...(await service.confirmDna({ userId, dna: args.dna, edits: args.edits })) }
-      case 'adpack_angles':
-        return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })) }
+      case 'adpack_angles': {
+        const res = await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brief: args.brief, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })
+        return {
+          ...res,
+          nextStep: 'Each angle has id (stable catalog id <category>-<hookType>-<format>), category, hookType, format and rationale. Pass the ids you want as adpack_start {angleIds}; ids from guide_bulk_angles (adpackAngleId) work too.',
+        }
+      }
       case 'adpack_quote':
-        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })) }
+        return {
+          ...(await service.quote({
+            userId,
+            size: args.size,
+            dna: args.dna,
+            offer: args.offer,
+            brief: args.brief,
+            brandId: args.brandId,
+            offerId: args.offerId,
+            brandKitId: args.brandKitId,
+            angleIds: args.angleIds,
+            angles: args.angles,
+            variations: args.variations,
+          })),
+        }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input = startBoundInput(args)
@@ -250,10 +275,13 @@ export async function dispatchAdPackTool(options: {
         const preview = usesSavedBrand(args)
           ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })
           : null
+        // Same parser and planner as start: the approved count/credits are exactly what will run (F1).
+        const selection = { angleIds: args.angleIds, angles: args.angles, variations: args.variations, brief: args.brief }
         const quote = preview
-          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer })
-          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer })
+          ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, ...selection })
+          : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, ...selection })
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
+        const vary = quote.variations && quote.variations > 1 ? { es: ` (${quote.angles} ángulos × ${quote.variations} variaciones)`, en: ` (${quote.angles} angles × ${quote.variations} variations)` } : { es: '', en: '' }
         const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,
@@ -262,8 +290,8 @@ export async function dispatchAdPackTool(options: {
           input,
           approvalRequestId,
           quotedCreditCost: quote.credits,
-          summaryEs: `Pack de ${quote.size} anuncios estáticos${target} (${quote.perAd} créditos por anuncio)`,
-          summaryEn: `Pack of ${quote.size} static ads${target} (${quote.perAd} credits per ad)`,
+          summaryEs: `Pack de ${quote.size} anuncios estáticos${vary.es}${target} (${quote.perAd} créditos por anuncio)`,
+          summaryEn: `Pack of ${quote.size} static ads${vary.en}${target} (${quote.perAd} credits per ad)`,
           appOrigin: options.appOrigin,
         })
         if ('prompt' in gate) {
@@ -287,11 +315,18 @@ export async function dispatchAdPackTool(options: {
           brief: args.brief,
           size: args.size,
           angleIds: args.angleIds,
+          angles: args.angles,
+          variations: args.variations,
+          creativeFreedom: args.creativeFreedom,
+          layoutFamily: args.layoutFamily,
+          styleDnaId: args.styleDnaId,
           ratios: args.ratios,
           businessId: args.businessId,
           brandKitId: args.brandKitId,
           source: 'mcp',
           packId: approvalRequestId,
+          // F1: the service refuses (before creating anything) when the plan differs from what was approved.
+          expectedAds: quote.size,
         })
         const result = withStatusMessage({
           status: 'completed',
@@ -301,6 +336,10 @@ export async function dispatchAdPackTool(options: {
           packStatus: started.status,
           quote: started.quote,
           quotedCreditCost: started.quote.credits,
+          ...(started.creativeFreedom ? { creativeFreedom: started.creativeFreedom } : {}),
+          ...(started.angles ? { plan: started.angles } : {}),
+          ...(started.styleProfile ? { styleProfile: started.styleProfile } : {}),
+          ...(started.notes?.length ? { notes: started.notes } : {}),
           // Credits are charged per finished ad while the pack runs.
           chargedCredits: 0,
           nextTool: 'adpack_status',

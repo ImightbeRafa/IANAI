@@ -14,10 +14,10 @@ import { Resvg } from '@resvg/resvg-js'
 import satori from 'satori'
 import sharp, { type OverlayOptions } from 'sharp'
 import type { AdFormat, AspectRatio } from '../types.js'
-import { blend, contrastFromLuminance, contrastRatio, INK, luminance, parseColor, readableOn, toHex, WHITE, type Rgb } from './color.js'
+import { blend, contrastFromLuminance, contrastRatio, ensureReadableFill, INK, luminance, parseColor, readableOn, toHex, WHITE, type Rgb } from './color.js'
 import { composeFamily, FAMILY_SPECS, type LayoutFamily } from './families.js'
 import { ensureBrandFonts, type FontResolution } from './font-resolver.js'
-import { cssFamily, satoriFonts } from './fonts.js'
+import { cssFamily, familyFonts, satoriFonts } from './fonts.js'
 import { ALL_RATIOS, inside, makeFrame, overlaps, union, type Frame } from './frame.js'
 import {
   decodeLayer,
@@ -354,8 +354,17 @@ function textTree(texts: TextNode[], colorOf: (t: TextNode) => Rgb, frame: Frame
 
 async function renderWithAssets(input: RenderAdInput, assets: Assets): Promise<RenderAdResult> {
   const frame = makeFrame(input.ratio)
-  const fonts = assets.fonts.fonts
+  let fonts = assets.fonts.fonts
   const palette = makePalette(parseColor(input.visual?.primaryColor), parseColor(input.visual?.secondaryColor), parseColor(input.visual?.accentColor))
+  // Style DNA render profile (winners): CTA color emphasis and headline weight.
+  const style = input.visual?.styleProfile
+  if (style?.paletteEmphasis === 'accent' || style?.paletteEmphasis === 'neutral') {
+    palette.cta = style.paletteEmphasis === 'accent' ? ensureReadableFill(palette.accent) : INK
+    palette.ctaText = readableOn(palette.cta)
+  }
+  if (style?.typeWeight === 'regular' && fonts.heading.weight > 700 && familyFonts(fonts.heading.family).some((f) => f.weight === 700)) {
+    fonts = { ...fonts, heading: { ...fonts.heading, weight: 700 } }
+  }
   const copy = normalizeCopy(input.copy)
   const warnings = [...assets.warnings]
   if (!copy.headline) warnings.push('empty headline')

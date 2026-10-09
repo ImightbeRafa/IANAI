@@ -5,7 +5,7 @@
  * `toStatusView` in service.ts, so the fields are identical everywhere.
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
-import type { AdLanguage, AspectRatio, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AngleCategory, AspectRatio, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -54,6 +54,14 @@ export interface AdPackDeliverableAd {
   /** 1-based ad number. */
   index: number
   format: string
+  /** Shared catalog angle id, category, hook type and the short "why this angle" (H1). */
+  angleId: string
+  category?: AngleCategory
+  hookType: HookType
+  rationale?: string
+  layoutFamily?: LayoutFamily
+  /** 0-based variation of the same angle (variations > 1). */
+  variation?: number
   headline: string
   caption: string
   links: Partial<Record<AspectRatio, string>>
@@ -165,6 +173,12 @@ export function buildStatusExtras(input: {
         itemId: i.id,
         index: i.index + 1,
         format: i.angle.format,
+        angleId: i.angle.id,
+        ...(i.angle.category ? { category: i.angle.category } : {}),
+        hookType: i.angle.hookType,
+        ...(i.angle.rationale ? { rationale: clip(i.angle.rationale, 240) } : {}),
+        ...(i.angle.layoutFamily ? { layoutFamily: i.angle.layoutFamily } : {}),
+        ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}),
         headline: clip(i.copy?.headline ?? '', 200),
         caption: clip(i.copy?.caption ?? '', DELIVERABLE_CAPTION_MAX),
         links: Object.fromEntries(i.renders.map((r) => [r.ratio, r.imageUrl])) as Partial<Record<AspectRatio, string>>,

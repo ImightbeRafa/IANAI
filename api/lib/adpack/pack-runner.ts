@@ -20,13 +20,18 @@ import { deterministicGenerationUuid, generationUuidFromApproval } from '../cred
 import { checkAdCopy, repairAdCopy } from './check-copy.js'
 import { checkScene, type CheckSceneOutput } from './check-scene.js'
 import { generateAdCopy } from './copy.js'
-import { planAngles } from './plan-angles.js'
+import { assignLayoutFamilies } from './layout-plan.js'
+import { angleFromId, planAngles } from './plan-angles.js'
 import { generateScene, type GeneratedScene } from './scene.js'
 import { errorMessage } from './util.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import type {
+  AdAngle,
   AdCopy,
   AspectRatio,
+  CreativeFreedom,
+  LayoutFamily,
+  StyleRenderProfile,
   BrandDna,
   CopyCheckIssue,
   CopyCheckResult,
@@ -66,12 +71,28 @@ const nowIso = () => new Date().toISOString()
 // Plan + quote
 // ---------------------------------------------------------------------------
 
+export const MAX_VARIATIONS = 3
+
 export interface PlanPackInput {
   dna: BrandDna
   offer: OfferInput
   size?: number
-  /** Keep only these planned angle ids (angle-board selection). Ids are deterministic for the same dna/offer/size/seed. */
+  /**
+   * Angle selection: planner ids from adpack_angles OR any catalog id (`<category>-<hook>-<format>`,
+   * e.g. from guide_bulk_angles' adpackAngleId). Ids the plan does not contain are built from the
+   * catalog with the same honesty rules; an id that cannot be honored is an error (never silently dropped).
+   */
   angleIds?: string[]
+  /** Full angles from guide_bulk_angles (`adpackAngle`), validated by the caller. Kept in order, before angleIds. */
+  angles?: AdAngle[]
+  /** Ads per angle (1–3): same angle and copy, different scene / composition / layout family. */
+  variations?: number
+  /** high (default without a selection) = planner decides angle, hook, format, layout and scene; guided = keep the agent's picks. */
+  creativeFreedom?: CreativeFreedom
+  /** Force one layout family (agent / brand setting). Variations still differ. */
+  layoutFamily?: LayoutFamily
+  /** Style DNA render profile (families, copy density, preferred hook). */
+  styleProfile?: StyleRenderProfile
   ratios?: AspectRatio[]
   userId: string
   source: Pack['source']
@@ -88,11 +109,80 @@ export function itemGenerationId(packId: string, index: number, attempt = 0): st
   return generationUuidFromApproval(packId, attempt > 0 ? `adpack:${index}:r${attempt}` : `adpack:${index}`)
 }
 
-export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] } {
+export class PlanPackError extends Error {
+  readonly details: Record<string, unknown>
+  constructor(message: string, details: Record<string, unknown>) {
+    super(message)
+    this.name = 'PlanPackError'
+    this.details = details
+  }
+}
+
+export interface PlannedAngles {
+  angles: AdAngle[]
+  creativeFreedom: CreativeFreedom
+}
+
+/**
+ * Angles for a pack: the agent's selection (guide angles, then angleIds resolved against the
+ * plan or the catalog) or the planner's spread. Throws PlanPackError listing every id that
+ * cannot be honored — the count is never silently reduced.
+ */
+export function resolvePackAngles(input: Pick<PlanPackInput, 'dna' | 'offer' | 'size' | 'angleIds' | 'angles' | 'creativeFreedom' | 'seed' | 'brief' | 'styleProfile'>): PlannedAngles {
+  const language = input.dna.language
+  const planned = planAngles({ dna: input.dna, offer: input.offer, size: input.size, language, seed: input.seed, brief: input.brief, preferHook: input.styleProfile?.hookType })
+  const selected = Boolean(input.angleIds?.length || input.angles?.length)
+  const creativeFreedom: CreativeFreedom = input.creativeFreedom ?? (selected ? 'guided' : 'high')
+  if (!selected) return { angles: planned, creativeFreedom }
+  const out: AdAngle[] = []
+  const rejected: Array<{ id: string; reason: string }> = []
+  const seen = new Set<string>()
+  for (const a of input.angles ?? []) {
+    if (seen.has(a.id)) continue
+    seen.add(a.id)
+    out.push(a)
+  }
+  if (input.angleIds?.length) {
+    // Planner ids of a bigger plan are accepted too (same seed → same ids).
+    const pool = new Map(planAngles({ dna: input.dna, offer: input.offer, size: 20, language, seed: input.seed, brief: input.brief, preferHook: input.styleProfile?.hookType }).map((a) => [a.id, a]))
+    for (const a of planned) pool.set(a.id, a)
+    for (const id of input.angleIds) {
+      if (seen.has(id)) continue
+      const hit = pool.get(id)
+      if (hit) {
+        out.push(hit)
+        seen.add(id)
+        continue
+      }
+      const built = angleFromId({ id, dna: input.dna, offer: input.offer, language, brief: input.brief, source: 'agent' })
+      if (!built.ok) {
+        rejected.push({ id, reason: built.reason })
+        continue
+      }
+      if (seen.has(built.angle.id)) continue
+      out.push(built.angle)
+      seen.add(id)
+      seen.add(built.angle.id)
+    }
+  }
+  if (rejected.length) throw new PlanPackError(`Some angles cannot be used for this offer: ${rejected.map((r) => `${r.id} (${r.reason})`).join('; ')}`, { rejectedAngles: rejected })
+  return { angles: out, creativeFreedom }
+}
+
+export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[]; creativeFreedom: CreativeFreedom } {
   const packId = input.ids?.packId ?? randomUUID()
-  const planned = planAngles({ dna: input.dna, offer: input.offer, size: input.size, language: input.dna.language, seed: input.seed })
-  const keep = input.angleIds?.length ? new Set(input.angleIds) : null
-  const angles = keep ? planned.filter((a) => keep.has(a.id)) : planned
+  const { angles: baseAngles, creativeFreedom } = resolvePackAngles(input)
+  const variations = Math.max(1, Math.min(MAX_VARIATIONS, Math.floor(input.variations ?? 1) || 1))
+  const expanded: AdAngle[] = []
+  for (const a of baseAngles) for (let v = 0; v < variations; v++) expanded.push(variations > 1 ? { ...a, variation: v } : { ...a })
+  const families = assignLayoutFamilies({
+    slots: expanded.map((a) => ({ format: a.format, angleId: a.id })),
+    // Same inputs → same families through both doors (parity), whatever the packId.
+    seed: input.seed ?? `${input.dna.brandName}|${input.offer.name}|families`,
+    profile: input.styleProfile,
+    family: input.layoutFamily,
+  })
+  const angles = expanded.map((a, i) => ({ ...a, layoutFamily: families[i] }))
   const ratios = input.ratios?.length ? [...new Set(input.ratios)] : [...DEFAULT_RATIOS]
   const ts = nowIso()
   const pack: Pack = {
@@ -123,7 +213,7 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[] 
     updatedAt: ts,
     costUsd: 0,
   }))
-  return { pack, items }
+  return { pack, items, creativeFreedom }
 }
 
 /** Credits for a pack: one `image_standard` per ad (copy included). */
@@ -225,6 +315,8 @@ interface RunCtx {
   sceneBytes: Map<string, { bytes: Uint8Array; mimeType: string }>
   anchorWait: Promise<void> | null
   advanced: Set<string>
+  /** Base items (variation 0) whose copy is being written in this call. */
+  copyWaits: Map<string, Promise<void>>
 }
 
 class DeferredSignal {
@@ -257,6 +349,7 @@ export async function advancePack(input: AdvancePackInput): Promise<PackProgress
     sceneBytes: new Map(),
     anchorWait: null,
     advanced: new Set(),
+    copyWaits: new Map(),
   }
   const deferred = new Set<string>()
   let stoppedForBudget = false
@@ -335,9 +428,27 @@ async function runItem(ctx: RunCtx, leased: PackItem, onAnchorSettled: () => voi
       return 'budget'
     }
     switch (item.status) {
-      case 'planned':
-        item = await stepCopy(ctx, item)
+      case 'planned': {
+        let signal: DeferredSignal | null = null
+        if (!item.angle.variation && item.angle.variation !== undefined) {
+          signal = new DeferredSignal()
+          ctx.copyWaits.set(item.id, signal.promise)
+        }
+        try {
+          const next = await stepCopy(ctx, item)
+          if (next === 'defer') {
+            await release(ctx, item)
+            return 'deferred'
+          }
+          item = next
+        } finally {
+          if (signal) {
+            signal.resolve()
+            ctx.copyWaits.delete(item.id)
+          }
+        }
         break
+      }
       case 'copy_ready': {
         const gate = await waitForAnchor(ctx, item)
         if (gate === 'defer') {
@@ -371,10 +482,45 @@ function blockingIssues(check: CopyCheckResult, codes: ReadonlySet<CopyCheckIssu
   return check.issues.filter((i) => codes.has(i.code))
 }
 
-async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem> {
+/** Base item (variation 0) of a variation item, from this call's view. */
+function variationBase(ctx: RunCtx, item: PackItem): PackItem | undefined {
+  if (!item.angle.variation) return undefined
+  return [...ctx.known.values()].find((i) => i.angle.id === item.angle.id && !i.angle.variation && i.id !== item.id)
+}
+
+/**
+ * Variations share the angle's copy (only scene / composition / layout family change): reuse the
+ * base item's copy once it exists. Returns 'defer' while the base copy is still being written.
+ */
+async function variationCopy(ctx: RunCtx, item: PackItem): Promise<{ copy: AdCopy; copyCheck?: CopyCheckResult } | 'defer' | null> {
+  if (!item.angle.variation) return null
+  let base = variationBase(ctx, item)
+  const wait = base ? ctx.copyWaits.get(base.id) : undefined
+  if (wait) {
+    await wait
+    base = variationBase(ctx, item)
+  }
+  if (!base?.copy && base?.status !== 'failed') {
+    // Another caller may have written it: refresh the base from the store.
+    const fresh = await ctx.input.store.getPack(ctx.pack.id, ctx.input.userId)
+    const b = fresh?.items.find((i) => i.angle.id === item.angle.id && !i.angle.variation && i.id !== item.id)
+    if (b) {
+      ctx.known.set(b.id, b)
+      base = b
+    }
+  }
+  if (!base || base.status === 'failed') return null
+  if (base.copy && base.status !== 'planned') return { copy: base.copy, ...(base.copyCheck ? { copyCheck: base.copyCheck } : {}) }
+  return 'defer'
+}
+
+async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem | 'defer'> {
   const { gateway } = ctx.input
   const { dna, offer } = ctx.pack
   const language = dna.language
+  const shared = await variationCopy(ctx, item)
+  if (shared === 'defer') return 'defer'
+  if (shared) return save(ctx, item, { status: 'copy_ready', copy: shared.copy, copyCheck: shared.copyCheck, timings: { ...item.timings, copyMs: 0 }, error: undefined })
   const t0 = Date.now()
   let cost = 0
   let gen: Awaited<ReturnType<typeof generateAdCopy>> | null = null
@@ -556,6 +702,8 @@ async function renderAllRatios(args: {
       visual: pack.dna.visual ?? {},
       productCutout: pack.offer.productCutoutUrl,
       language: pack.dna.language,
+      ...(item.angle.layoutFamily ? { layoutFamily: item.angle.layoutFamily } : {}),
+      ...(item.scene?.productBox ? { productBox: item.scene.productBox } : {}),
     })
     const { url } = await storage.upload({
       userId: pack.userId,

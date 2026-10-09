@@ -8,6 +8,11 @@
 import type {
   AdAngle,
   AdCopy,
+  AngleCategory,
+  CreativeFreedom,
+  HookType,
+  LayoutFamily,
+  StyleRenderProfile,
   AdLanguage,
   AspectRatio,
   BrandDna,
@@ -126,6 +131,8 @@ export interface AdPackFromBrandResponse {
   offerId?: string
   brandKitId?: string
   websiteUrl?: string
+  /** Style DNAs on the brand kit (pass one as styleDnaId to adpack_start). */
+  styleDnas?: Array<{ id: string; name: string; kind: string; references: number; analyzed: boolean }>
   /** Quote for the default pack size. */
   quote: AdPackQuote
 }
@@ -142,11 +149,36 @@ export interface AdPackStartRequest {
   /** Owner's campaign context ("Black Friday, focus on bundles"), ≤ 500 chars. Direction only, never facts. */
   brief?: string
   size?: number
-  /** Angle-board selection (ids from `angles` with the same `size`). */
+  /**
+   * Angle selection: ids from `angles` (planner) or any shared catalog id
+   * `<category>-<hookType>-<format>` (e.g. guide_bulk_angles' adpackAngleId). Unusable ids are an error.
+   */
   angleIds?: string[]
+  /** adpackAngle objects from guide_bulk_angles (full hooks), rebuilt against the offer's confirmed facts. */
+  angles?: AdPackAngleInput[]
+  /** Ads per angle, 1–3 (same angle/copy, different scene, composition and layout family). Quote = ads × variations. */
+  variations?: number
+  /** high (default without a selection) = Advance picks angle, hook, format, layout and scene; guided = keep the agent's picks. */
+  creativeFreedom?: CreativeFreedom
+  /** Force one layout family (else Style DNA, else rotation ≤ 2 per family per 10 ads). */
+  layoutFamily?: LayoutFamily
+  /** Brand kit Style DNA (winners) to follow: layout family, copy density, type weight. Needs brandId. */
+  styleDnaId?: string
   ratios?: AspectRatio[]
   businessId?: string
   brandKitId?: string
+}
+
+/** Angle object accepted by start (shape returned by guide_bulk_angles as `adpackAngle`). */
+export interface AdPackAngleInput {
+  id: string
+  category?: AngleCategory
+  hookType?: HookType
+  format?: AdAngle['format']
+  message?: string
+  target?: string
+  hook?: string
+  rationale?: string
 }
 
 export interface AdPackStatusRequest {
@@ -204,12 +236,16 @@ export interface AdPackAnglesResponse {
 }
 
 export interface AdPackQuote {
-  /** Ads in the pack. */
+  /** Ads in the pack (angles × variations). */
   size: number
   /** Total credits for the pack. */
   credits: number
   /** Credits per ad (one `image_standard`, copy included). */
   perAd: number
+  /** Present when variations > 1. */
+  variations?: number
+  /** Distinct angles (size / variations), when variations > 1. */
+  angles?: number
 }
 
 export interface AdPackStartResponse {
@@ -218,6 +254,12 @@ export interface AdPackStartResponse {
   quote: AdPackQuote
   /** True when this call returned an already-created pack (idempotent retry). */
   existing: boolean
+  creativeFreedom?: CreativeFreedom
+  variations?: number
+  /** What the planner decided per ad (angle, hook, format, layout family, why). */
+  angles?: Array<{ index: number; angleId: string; category?: AngleCategory; hookType: HookType; format: AdAngle['format']; layoutFamily?: LayoutFamily; variation?: number; rationale?: string }>
+  styleProfile?: StyleRenderProfile
+  notes?: string[]
 }
 
 export interface AdPackItemView {
@@ -228,6 +270,14 @@ export interface AdPackItemView {
   archetype: AdAngle['archetype']
   hookType: AdAngle['hookType']
   message: string
+  /** Shared catalog id `<category>-<hookType>-<format>`. */
+  angleId?: string
+  category?: AngleCategory
+  /** Short "why this angle" (ES/EN). */
+  rationale?: string
+  layoutFamily?: LayoutFamily
+  /** 0-based variation of the same angle (variations > 1). */
+  variation?: number
   headline?: string
   copy?: AdCopy
   sceneUrl?: string

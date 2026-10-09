@@ -1,7 +1,7 @@
 import type { AdPackStorage, ChargeFn, Renderer, RenderInput, UploadInput } from '../../api/lib/adpack/runner-types'
 import { adpackAssetPath } from '../../api/lib/adpack/storage'
 import type { AspectRatio, ModelGateway } from '../../api/lib/adpack/types'
-import { goodSerumCopy } from './helpers'
+import { angleIndexFromPrompt, goodSerumCopy } from './helpers'
 
 /** 1×1 PNG. */
 export const PNG_1X1 = Uint8Array.from(
@@ -52,9 +52,9 @@ export function propFor(index: number): string {
   return PROPS[index % PROPS.length]
 }
 
+/** Plan position of the angle in a copy prompt (catalog ids are `<category>-<hook>-<format>`). */
 function angleIndex(user: string): number {
-  const m = user.match(/\(a(\d{2})-/)
-  return m ? Number(m[1]) - 1 : 0
+  return angleIndexFromPrompt(user)
 }
 
 /** Serum copy, distinct per angle; passes the deterministic checker. */

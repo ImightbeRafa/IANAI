@@ -42,20 +42,29 @@ import {
   advancePack,
   DEFAULT_RATIOS,
   editItemText,
+  MAX_VARIATIONS,
+  PlanPackError,
   planPack,
   quotePack,
   regenerateItem,
+  resolvePackAngles,
   summarizePack,
   type PackProgress,
 } from './pack-runner.js'
-import { DEFAULT_PACK_SIZE, MAX_PACK_SIZE, planAngles } from './plan-angles.js'
+import { angleId, HOOK_DEFAULT_CATEGORY } from './angle-catalog.js'
+import { parseAdpackAngleInputs, type AdpackAngleInput } from './guide-angles.js'
+import { angleFromId, DEFAULT_PACK_SIZE, MAX_PACK_SIZE, planAngles } from './plan-angles.js'
+import { isLayoutFamily } from './render/families.js'
+import { resolveStyleProfile } from './style-profile.js'
+import { saveStyleDnaForBrand } from '../bulk/store.js'
+import type { StyleDna } from '../bulk/types.js'
 import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
 import { buildStatusExtras } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
-import type { AdLanguage, AspectRatio, BrandDna, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
+import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
 import type { DnaPart } from './dna/part.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
@@ -159,6 +168,8 @@ export interface AdPackDeps {
   library?: AdPackLibrary
   /** Web-app origin for deep links (default https://advanceai.studio). */
   appOrigin?: string
+  /** Persist a fresh Style DNA analysis on the brand kit's `style_dnas` jsonb entry. Omitted → not persisted. */
+  saveStyleDnaAnalysis?: (input: { userId: string; brandId: string; styleDna: StyleDna }) => Promise<void>
 }
 
 /** Lazily create on first use so a missing env var fails the call that needs it, not module load. */
@@ -184,6 +195,9 @@ export function createDefaultAdPackDeps(): AdPackDeps {
     savedBrandDb: lazy(() => createSupabaseSavedBrandDb()),
     library: lazy(() => createSupabaseAdPackLibrary()),
     refreshWebsite: (url, language) => ingestWebsite({ url, gateway, language }),
+    async saveStyleDnaAnalysis({ userId, brandId, styleDna }) {
+      await saveStyleDnaForBrand({ userId, brandId, dna: styleDna })
+    },
     appOrigin: process.env.APP_ORIGIN || process.env.VITE_APP_ORIGIN || undefined,
     // Same path as every other grok-imagine image: image → image_standard, idempotent by generationId.
     async charge({ userId, generationId }) {
@@ -326,6 +340,32 @@ export function parseOffer(raw: unknown): OfferInput {
   return offer
 }
 
+/** Ads per angle (1–3). Out of range is an error, never clamped (approval = what runs). */
+export function parseVariations(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === '') return 1
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > MAX_VARIATIONS) throw bad(`variations must be an integer from 1 to ${MAX_VARIATIONS}`)
+  return n
+}
+
+function parseCreativeFreedom(raw: unknown): CreativeFreedom | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined
+  if (raw !== 'high' && raw !== 'guided') throw bad('creativeFreedom must be high or guided')
+  return raw
+}
+
+function parseLayoutFamily(raw: unknown): LayoutFamily | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined
+  if (!isLayoutFamily(raw)) throw bad('layoutFamily must be one of bold_pill, editorial_minimal, split_panel, full_bleed_type, badge_corner, framed_card, ugc_native')
+  return raw
+}
+
+function parseStyleDnaId(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined
+  if (typeof raw !== 'string' || raw.length > 120) throw bad('styleDnaId must be a style DNA id from list_style_dnas')
+  return raw.trim()
+}
+
 function parseOptionalUuid(raw: unknown, label: string): string | undefined {
   if (raw === undefined || raw === null || raw === '') return undefined
   const id = str(raw, 64)
@@ -425,6 +465,11 @@ export function toItemView(item: PackItem): AdPackItemView {
     archetype: item.angle.archetype,
     hookType: item.angle.hookType,
     message: item.angle.message,
+    angleId: item.angle.id,
+    ...(item.angle.category ? { category: item.angle.category } : {}),
+    ...(item.angle.rationale ? { rationale: item.angle.rationale } : {}),
+    ...(item.angle.layoutFamily ? { layoutFamily: item.angle.layoutFamily } : {}),
+    ...(item.angle.variation !== undefined ? { variation: item.angle.variation } : {}),
     ...(item.copy ? { headline: item.copy.headline, copy: item.copy } : {}),
     ...(item.scene ? { sceneUrl: item.scene.imageUrl } : {}),
     renders: item.renders ?? [],
@@ -489,6 +534,60 @@ function parseAngleIds(value: unknown): string[] | undefined {
   return value.length ? [...new Set(value as string[])] : undefined
 }
 
+/**
+ * Guide angles (adpackAngle objects from guide_bulk_angles) rebuilt against this offer's
+ * confirmed facts. A category the facts cannot back (e.g. no price for valor_precio) is
+ * adapted to an honest neighbour with the same format — the count never changes.
+ */
+function guideAnglesFor(inputs: AdpackAngleInput[], dna: BrandDna, offer: OfferInput, brief?: string): AdAngle[] {
+  const out: AdAngle[] = []
+  const used = new Set<string>()
+  for (const g of inputs) {
+    const chain = [g.id, angleId(HOOK_DEFAULT_CATEGORY[g.hookType], g.hookType, g.format), angleId('uso_real', 'desire', g.format), angleId('problema_solucion', 'pain', g.format), angleId('uso_real', 'desire', 'handheld_overlay'), angleId('uso_real', 'routine', 'ugc_person')]
+    let built: AdAngle | null = null
+    for (const id of chain) {
+      if (used.has(id)) continue
+      const r = angleFromId({ id, dna, offer, language: dna.language, brief, hook: g.hook, message: g.message, target: g.target, source: 'guide' })
+      if (r.ok) {
+        built = id === g.id ? r.angle : { ...r.angle, rationale: `${r.angle.rationale}${dna.language === 'es' ? ' (adaptado a los datos confirmados)' : ' (adapted to the confirmed facts)'}` }
+        break
+      }
+    }
+    if (!built) throw new AdPackError('BAD_INPUT', `Angle ${g.id} cannot be used for this offer`, { rejectedAngles: [{ id: g.id, reason: 'no honest category for these facts' }] })
+    if (g.rationale && built.source === 'guide' && built.id === g.id) built.rationale = g.rationale.slice(0, 300)
+    used.add(built.id)
+    out.push(built)
+  }
+  return out
+}
+
+/** Selection fields shared by quote and start (same parser → approval quote = what runs). */
+function parseSelection(input: { angleIds?: unknown; angles?: unknown; variations?: unknown; creativeFreedom?: unknown; layoutFamily?: unknown }) {
+  const guide = parseAdpackAngleInputs(input.angles, MAX_PACK_SIZE)
+  if (!guide.ok) throw bad(guide.error)
+  return {
+    angleIds: parseAngleIds(input.angleIds),
+    guideAngles: guide.angles,
+    variations: parseVariations(input.variations),
+    creativeFreedom: parseCreativeFreedom(input.creativeFreedom),
+    layoutFamily: parseLayoutFamily(input.layoutFamily),
+  }
+}
+
+function planError(err: unknown): never {
+  if (err instanceof PlanPackError) throw new AdPackError('BAD_INPUT', err.message, err.details)
+  throw err
+}
+
+/** Angle selection + variations (raw, validated by the service). */
+export interface SelectionInput {
+  angleIds?: unknown
+  angles?: unknown
+  variations?: unknown
+  creativeFreedom?: unknown
+  layoutFamily?: unknown
+}
+
 /** Saved-brand alternative to dna + offer (raw, validated by the service). */
 export interface SavedBrandRefInput {
   brandId?: unknown
@@ -501,8 +600,8 @@ export interface AdPackService {
   /** DNA + offer from the owner's saved brand / kit / offer (no URLs, no credits). */
   dnaFromBrand(input: { userId: string; source?: AdPackSource; refresh?: unknown } & SavedBrandRefInput): Promise<AdPackFromBrandResponse>
   confirmDna(input: { userId: string; dna: unknown; edits: unknown }): Promise<AdPackConfirmDnaResponse>
-  planAngles(input: { userId: string; dna?: unknown; offer?: unknown; size?: unknown } & SavedBrandRefInput): Promise<AdPackAnglesResponse>
-  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown } & SavedBrandRefInput): Promise<AdPackQuote>
+  planAngles(input: { userId: string; dna?: unknown; offer?: unknown; size?: unknown; brief?: unknown } & SavedBrandRefInput): Promise<AdPackAnglesResponse>
+  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; brief?: unknown } & SelectionInput & SavedBrandRefInput): Promise<AdPackQuote>
   startPack(input: {
     userId: string
     /** dna + offer, OR brandId (+ offerId / brandKitId): the server builds them from the saved brand. */
@@ -513,14 +612,26 @@ export interface AdPackService {
     /** Owner's campaign context for prompts (≤ 500 chars, sanitized). Never facts. */
     brief?: unknown
     size?: unknown
-    /** Angle-board selection: ids from planAngles with the same size. */
+    /** Angle selection: planner ids or catalog ids (`<category>-<hook>-<format>`, e.g. guide_bulk_angles' adpackAngleId). */
     angleIds?: unknown
+    /** adpackAngle objects from guide_bulk_angles (full hooks), rebuilt against the offer's facts. */
+    angles?: unknown
+    /** Ads per angle (1–3): same angle/copy, different scene, composition and layout family. */
+    variations?: unknown
+    /** high (default) = Advance picks angle, hook, format, layout and scene; guided = keep the agent's picks. */
+    creativeFreedom?: unknown
+    /** Force one layout family for the pack (otherwise style DNA or rotation). */
+    layoutFamily?: unknown
+    /** Brand kit Style DNA id (list_style_dnas): layout family, density and weight follow its winners. */
+    styleDnaId?: unknown
     ratios?: unknown
     businessId?: unknown
     brandKitId?: unknown
     source: AdPackSource
     /** Fixed id for idempotent create (MCP: the approval id). */
     packId?: string
+    /** Approved ad count: a different planned count is refused before anything is created (never silently degraded). */
+    expectedAds?: number
   }): Promise<AdPackStartResponse>
   getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
@@ -705,9 +816,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     return toStatusView(pack, items, now(), input.appOrigin ?? deps.appOrigin, language)
   }
 
-  const quoteFor = (size: number): AdPackQuote => {
+  const quoteFor = (size: number, variations = 1): AdPackQuote => {
     const q = quotePack(size)
-    return { size, credits: q.credits, perAd: q.perAd }
+    return { size, credits: q.credits, perAd: q.perAd, ...(variations > 1 ? { variations, angles: Math.round(size / variations) } : {}) }
   }
 
   return {
@@ -749,6 +860,7 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         ...(saved.offerId ? { offerId: saved.offerId } : {}),
         ...(saved.brandKitId ? { brandKitId: saved.brandKitId } : {}),
         ...(saved.websiteUrl ? { websiteUrl: saved.websiteUrl } : {}),
+        ...(saved.styleDnas?.length ? { styleDnas: saved.styleDnas.map((d) => ({ id: d.id, name: d.name, kind: d.kind, references: d.referenceUrls.length, analyzed: Boolean(d.analysis) })) } : {}),
         quote: quoteFor(planned.length),
       }
     },
@@ -760,17 +872,27 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
 
     async planAngles(input) {
       const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
-      const angles = planAngles({ dna, offer, size: parseSize(input.size), language: dna.language })
+      const angles = planAngles({ dna, offer, size: parseSize(input.size), language: dna.language, brief: parseBrief(input.brief) })
       return { size: angles.length, angles }
     },
 
     async quote(input) {
       const size = parseSize(input.size)
+      const sel = parseSelection(input)
       if ((input.dna !== undefined && input.offer !== undefined) || (input.dna === undefined && input.offer === undefined && hasValue(input.brandId))) {
         const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
-        return quoteFor(planAngles({ dna, offer, size, language: dna.language }).length)
+        const brief = parseBrief(input.brief)
+        const guideAngles = guideAnglesFor(sel.guideAngles, dna, offer, brief)
+        let count = 0
+        try {
+          count = resolvePackAngles({ dna, offer, size, angleIds: sel.angleIds, angles: guideAngles, brief }).angles.length
+        } catch (err) {
+          planError(err)
+        }
+        return quoteFor(count * sel.variations, sel.variations)
       }
-      return quoteFor(size)
+      if (sel.angleIds || sel.guideAngles.length) return quoteFor(((sel.angleIds?.length ?? 0) + sel.guideAngles.length) * sel.variations, sel.variations)
+      return quoteFor(size * sel.variations, sel.variations)
     },
 
     async startPack(input) {
@@ -794,19 +916,66 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
         }
       }
+      let savedStyleDnas: StyleDna[] | undefined
       if (fromSaved) {
         // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
         const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId }, input.source)
         if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
+        savedStyleDnas = saved.styleDnas ?? []
         dna = saved.dna
         offer = saved.offer
         businessId = saved.brandId
         brandKitId = saved.brandKitId
       }
       if (!dna || !offer) throw bad('Provide brandId (+ offerId) or dna + offer')
-      const angleIds = parseAngleIds(input.angleIds)
-      const planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, brief, ids: { packId } })
-      if (!planned.items.length) throw bad(angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
+      const sel = parseSelection(input)
+      const styleDnaId = parseStyleDnaId(input.styleDnaId)
+      let styleNote: string | undefined
+      if (styleDnaId) {
+        if (!savedStyleDnas) throw bad('styleDnaId needs brandId (the style DNA lives on the brand kit)')
+        const t0 = now()
+        const resolved = await resolveStyleProfile({ styleDnas: savedStyleDnas, styleDnaId, gateway: deps.gateway, language: dna.language })
+        if (!resolved) throw new AdPackError('NOT_FOUND', 'Style DNA not found on this brand kit (use list_style_dnas)')
+        styleNote = resolved.note
+        if (resolved.analyzed && resolved.analysis) {
+          await log({ userId: input.userId, feature: 'brand_extraction', model: 'adpack-style-dna', costUsd: resolved.costUsd, source: input.source, durationMs: now() - t0, metadata: { feature: 'adpack_style_dna', styleDnaId } })
+          if (deps.saveStyleDnaAnalysis && businessId) {
+            await deps.saveStyleDnaAnalysis({ userId: input.userId, brandId: businessId, styleDna: resolved.styleDna }).catch((err) => {
+              console.error('[adpack] style DNA analysis not saved', err instanceof Error ? err.message : err)
+            })
+          }
+        }
+        dna = { ...dna, visual: { ...(dna.visual ?? {}), styleProfile: resolved.profile } }
+      }
+      const guideAngles = guideAnglesFor(sel.guideAngles, dna, offer, brief)
+      let planned: ReturnType<typeof planPack>
+      try {
+        planned = planPack({
+          dna,
+          offer,
+          size,
+          angleIds: sel.angleIds,
+          angles: guideAngles,
+          variations: sel.variations,
+          creativeFreedom: sel.creativeFreedom,
+          layoutFamily: sel.layoutFamily,
+          styleProfile: dna.visual?.styleProfile,
+          ratios,
+          userId: input.userId,
+          source: input.source,
+          businessId,
+          brandKitId,
+          brief,
+          ids: { packId },
+        })
+      } catch (err) {
+        planError(err)
+      }
+      if (!planned.items.length) throw bad(sel.angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
+      if (planned.items.length > MAX_PACK_SIZE) throw bad(`angles × variations = ${planned.items.length} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
+      if (input.expectedAds !== undefined && planned.items.length !== input.expectedAds) {
+        throw new AdPackError('BAD_INPUT', `The plan has ${planned.items.length} ads but ${input.expectedAds} were approved; quote and approve again`, { plannedAds: planned.items.length, approvedAds: input.expectedAds })
+      }
       await requireCredits(input.userId, planned.pack.size)
       try {
         await deps.store.createPack(planned.pack, planned.items)
@@ -816,7 +985,17 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         if (!existing) throw err
         return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
       }
-      return { packId, status: planned.pack.status, quote: quoteFor(planned.pack.size), existing: false }
+      return {
+        packId,
+        status: planned.pack.status,
+        quote: quoteFor(planned.pack.size, sel.variations),
+        existing: false,
+        creativeFreedom: planned.creativeFreedom,
+        variations: sel.variations,
+        angles: planned.items.map((i) => ({ index: i.index + 1, angleId: i.angle.id, category: i.angle.category, hookType: i.angle.hookType, format: i.angle.format, layoutFamily: i.angle.layoutFamily, ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}), rationale: i.angle.rationale })),
+        ...(dna.visual?.styleProfile ? { styleProfile: dna.visual.styleProfile } : {}),
+        ...(styleNote ? { notes: [styleNote] } : {}),
+      }
     },
 
     getStatus,

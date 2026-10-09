@@ -10,7 +10,7 @@
  *
  * `bold_pill` is the original template set (templates.ts), kept byte-for-byte.
  */
-import type { AdFormat } from '../types.js'
+import type { AdFormat, LayoutFamily } from '../types.js'
 import { contrastRatio, ensureReadableFill, INK, luminance, readableOn, readableTint, shade, WHITE, type Rgb } from './color.js'
 import { bottom, right } from './frame.js'
 import {
@@ -35,7 +35,7 @@ import {
 import { TEMPLATES } from './templates.js'
 import type { Box } from './types.js'
 
-export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native'
+export type { LayoutFamily }
 
 export const ALL_FAMILIES: LayoutFamily[] = ['bold_pill', 'editorial_minimal', 'split_panel', 'full_bleed_type', 'badge_corner', 'framed_card', 'ugc_native']
 

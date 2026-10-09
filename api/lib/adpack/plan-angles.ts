@@ -1,13 +1,17 @@
 /**
  * Ad Pack engine — deterministic angle planner (no LLM).
  *
- * Spreads `size` angles across IAN archetypes × hook types × formats using the
- * category pattern library and compliance rules. Every angle is tied to fact keys
- * that exist and are confirmed, targets come from DNA pains/desires/objections/
- * customer phrases/audience, and no two angles share (hookType, format) or message.
+ * Spreads `size` angles across the shared angle catalog (angle-catalog.ts: regalo, cómo
+ * funciona, valor/precio, qué incluye, uso real, detalle técnico, comparación, temporada,
+ * problema→solución, prueba social) × IAN archetypes × hook types × formats, using the
+ * category pattern library and compliance rules. Every angle is tied to fact keys that exist
+ * and are confirmed, targets come from DNA pains/desires/objections/customer phrases/audience,
+ * no two angles share (hookType, format) or message, and each carries a short rationale.
+ * Ids are catalog ids (`<category>-<hookType>-<format>`), stable across pack sizes.
  */
 import type {
   AdAngle,
+  AngleCategory,
   AdFormat,
   AdLanguage,
   BrandDna,
@@ -18,6 +22,8 @@ import type {
   ModelGateway,
   OfferInput,
 } from './types.js'
+import { ANGLE_CATEGORIES, ALL_ANGLE_CATEGORIES, angleId, angleRationale, archetypeFor, parseAngleId, type CategoryContext } from './angle-catalog.js'
+import { hasCliche } from './cliches.js'
 import { isFormatAllowed } from './compliance.js'
 import { briefForPrompt } from './copy-shared.js'
 import { confirmedKeys, extractNumericClaims, getConfirmed, mergeFacts, numbersInFacts } from './facts.js'
@@ -33,10 +39,15 @@ export interface PlanAnglesInput {
   size?: number
   language?: AdLanguage
   seed?: string | number
+  /** Owner campaign brief (enables the season/date category). Never a fact. */
+  brief?: string
+  /** Preferred hook type (from the brand's Style DNA winners). */
+  preferHook?: HookType
 }
 
 interface Ctx {
   keys: Set<FactKey>
+  cat: CategoryContext
   facts: DnaFact[]
   pains: string[]
   desires: string[]
@@ -200,33 +211,6 @@ function focusValue(a: IanArchetype, h: HookType, f: AdFormat, ctx: Ctx, used: M
 /** Generic facts that can anchor any angle once the hook-specific ones are used up. */
 const FOCUS_FALLBACK_KEYS: FactKey[] = ['differentiator', 'how_it_works', 'ingredients_materials', 'usage_steps', 'quantity_per_pack', 'variants']
 
-const HOOK_FRAMES: Record<AdLanguage, Record<HookType, (t: string) => string>> = {
-  es: {
-    pain: (t) => `Para quien vive "${t}":`,
-    desire: (t) => `Para quien quiere "${t}":`,
-    objection: (t) => `Desarma la duda "${t}":`,
-    social_proof: (t) => `Prueba real ("${t}"):`,
-    comparison: (t) => `Frente a la opción tradicional ("${t}"):`,
-    price_value: (t) => `Valor claro por lo que pagás ("${t}"):`,
-    urgency_scarcity: (t) => `Motivo concreto para pedir hoy ("${t}"):`,
-    curiosity: (t) => `Lo que pocos saben sobre "${t}":`,
-    routine: (t) => `Cómo entra en la rutina ("${t}"):`,
-    identity: (t) => `Hecho para ${t}:`,
-  },
-  en: {
-    pain: (t) => `For people dealing with "${t}":`,
-    desire: (t) => `For people who want "${t}":`,
-    objection: (t) => `Defuse the doubt "${t}":`,
-    social_proof: (t) => `Real proof ("${t}"):`,
-    comparison: (t) => `Versus the usual option ("${t}"):`,
-    price_value: (t) => `Clear value for the price ("${t}"):`,
-    urgency_scarcity: (t) => `A concrete reason to order today ("${t}"):`,
-    curiosity: (t) => `What few people know about "${t}":`,
-    routine: (t) => `How it fits the routine ("${t}"):`,
-    identity: (t) => `Made for ${t}:`,
-  },
-}
-
 const ARCHETYPE_FRAMES: Record<AdLanguage, Record<IanArchetype, (o: string, f?: string) => string>> = {
   es: {
     venta_directa: (o, f) => `${o} como la opción directa${f ? ` (${f})` : ''}.`,
@@ -273,10 +257,11 @@ interface Candidate {
   archetype: IanArchetype
   hookType: HookType
   format: AdFormat
+  category: AngleCategory
   base: number
 }
 
-function buildCandidates(dna: BrandDna, ctx: Ctx, relaxed: boolean, rnd: () => number): Candidate[] {
+function buildCandidates(dna: BrandDna, ctx: Ctx, relaxed: boolean, rnd: () => number, preferHook?: HookType): Candidate[] {
   const cat = getCategoryPattern(dna.category)
   const out: Candidate[] = []
   for (const archetype of ALL_ARCHETYPES) {
@@ -293,8 +278,15 @@ function buildCandidates(dna: BrandDna, ctx: Ctx, relaxed: boolean, rnd: () => n
           (2 * preferenceRank(cat.archetypes, archetype)) / cat.archetypes.length +
           (fp.hooks.includes(hookType) ? 0 : 1) +
           (relaxed ? 3 : 0) +
+          (preferHook && preferHook === hookType ? -0.6 : 0) +
           rnd() * 0.35
-        out.push({ archetype, hookType, format, base })
+        // One candidate per catalog category that can honestly carry this hook.
+        for (const category of ALL_ANGLE_CATEGORIES) {
+          const spec = ANGLE_CATEGORIES[category]
+          if (!spec.hooks.includes(hookType) || !spec.available(ctx.cat, relaxed)) continue
+          const fit = (spec.formats.includes(format) ? 0 : 0.9) + (spec.archetypes.includes(archetype) ? 0 : 0.6) + preferenceRank(spec.hooks, hookType) * 0.15
+          out.push({ archetype, hookType, format, category, base: base + fit })
+        }
       }
     }
   }
@@ -310,8 +302,10 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
   const rnd = mulberry32(seedNum)
 
   const facts = mergeFacts(dna, offer)
+  const keys = confirmedKeys(facts)
   const ctx: Ctx = {
-    keys: confirmedKeys(facts),
+    keys,
+    cat: categoryContext(dna, keys, input.brief),
     facts,
     pains: list(dna.pains),
     desires: list(dna.desires),
@@ -322,14 +316,15 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
   const offerName = cleanString(offer.name) || cleanString(dna.brandName)
   const fallbackTarget = cleanString(dna.oneLiner) || offerName
 
-  const strict = buildCandidates(dna, ctx, false, rnd)
-  const relaxed = buildCandidates(dna, ctx, true, rnd)
+  const strict = buildCandidates(dna, ctx, false, rnd, input.preferHook)
+  const relaxed = buildCandidates(dna, ctx, true, rnd, input.preferHook)
 
   const usedPairs = new Set<string>()
   const usedMessages = new Set<string>()
   const countA = new Map<IanArchetype, number>()
   const countH = new Map<HookType, number>()
   const countF = new Map<AdFormat, number>()
+  const countC = new Map<AngleCategory, number>()
   const targetUse = new Map<string, number>()
   const focusUse = new Map<string, number>()
   const angles: AdAngle[] = []
@@ -344,6 +339,9 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
         1.6 * (countA.get(c.archetype) ?? 0) +
         1.2 * (countF.get(c.format) ?? 0) +
         1.0 * (countH.get(c.hookType) ?? 0) +
+        1.5 * (countC.get(c.category) ?? 0) +
+        // A gift angle is the most-missed sale for physical products: surface it once.
+        (c.category === 'regalo' && !countC.get('regalo') && angles.length > 0 ? -1.4 : 0) +
         (angles.length === 0 && c.archetype !== 'venta_directa' ? 2 : 0)
       if (score < bestScore) {
         bestScore = score
@@ -360,6 +358,7 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     countA.set(c.archetype, (countA.get(c.archetype) ?? 0) + 1)
     countH.set(c.hookType, (countH.get(c.hookType) ?? 0) + 1)
     countF.set(c.format, (countF.get(c.format) ?? 0) + 1)
+    countC.set(c.category, (countC.get(c.category) ?? 0) + 1)
 
     const focus = focusValue(c.archetype, c.hookType, c.format, ctx, focusUse)
     if (focus) focusUse.set(focus, (focusUse.get(focus) ?? 0) + 1)
@@ -367,7 +366,7 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     // Candidate targets: least-used first, then pool order.
     // Primary pool wins; secondary pools only once primary targets are well used.
     const rank = new Map<string, number>()
-    targetPools(c.hookType, ctx).forEach((pool, poolIndex) => {
+    categoryPools(c.category, c.hookType, ctx).forEach((pool, poolIndex) => {
       for (const t of pool) if (!rank.has(t)) rank.set(t, poolIndex * 1.5)
     })
     const ordered = [...rank.keys()]
@@ -375,10 +374,12 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     const cost = (t: string) => (targetUse.get(t) ?? 0) + (rank.get(t) ?? 0)
     ordered.sort((x, y) => cost(x) - cost(y))
 
+    const frame = ANGLE_CATEGORIES[c.category].frame[language]
     let target = ordered[0]
-    let message = `${HOOK_FRAMES[language][c.hookType](target)} ${archetypeText}`
+    let message = `${frame(target)} ${archetypeText}`
     for (const t of ordered) {
-      const m = `${HOOK_FRAMES[language][c.hookType](t)} ${archetypeText}`
+      const m = `${frame(t)} ${archetypeText}`
+      if (hasCliche(m)) continue
       if (!usedMessages.has(normalizeText(m))) {
         target = t
         message = m
@@ -391,18 +392,111 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
     usedMessages.add(normalizeText(message))
     targetUse.set(target, (targetUse.get(target) ?? 0) + 1)
 
-    const index = angles.length + 1
     angles.push({
-      id: `a${String(index).padStart(2, '0')}-${c.archetype}-${c.hookType}-${c.format}`,
+      id: angleId(c.category, c.hookType, c.format),
       archetype: c.archetype,
       hookType: c.hookType,
       format: c.format,
       message,
       target,
       factKeys: factKeysFor(c.archetype, c.hookType, c.format, ctx),
+      category: c.category,
+      rationale: angleRationale(c.category, c.format, language, focus),
+      sceneDirection: ANGLE_CATEGORIES[c.category].scene,
+      source: 'planner',
     })
   }
   return angles
+}
+
+function categoryContext(dna: BrandDna, keys: Set<FactKey>, brief?: string): CategoryContext {
+  return {
+    keys,
+    category: dna.category,
+    pains: list(dna.pains).length + list(dna.customerPhrases).length,
+    desires: list(dna.desires).length,
+    objections: list(dna.objections).length,
+    hasBrief: Boolean(brief && brief.trim()),
+  }
+}
+
+/** Target pools: the category's own lists first, then the hook's. */
+function categoryPools(category: AngleCategory, hook: HookType, ctx: Ctx): string[][] {
+  const lists = { pains: ctx.pains, desires: ctx.desires, objections: ctx.objections, phrases: ctx.phrases, audience: ctx.audience }
+  return [...ANGLE_CATEGORIES[category].targetPools.map((k) => lists[k]), ...targetPools(hook, ctx)]
+}
+
+// ---------------------------------------------------------------------------
+// Angles by id (catalog ids from adpack_angles / guide_bulk_angles / an agent)
+// ---------------------------------------------------------------------------
+
+export interface AngleFromIdInput {
+  id: string
+  dna: BrandDna
+  offer: OfferInput
+  language?: AdLanguage
+  brief?: string
+  /** Wording from the angle source (guide board): kept untruncated, sanitized by the caller. */
+  hook?: string
+  message?: string
+  target?: string
+  source?: AdAngle['source']
+}
+
+export type AngleFromIdResult = { ok: true; angle: AdAngle } | { ok: false; reason: string }
+
+/**
+ * Build the angle a catalog id names for this offer, with the same honesty rules as the
+ * planner: the category must be available for the confirmed facts (prueba_social only with
+ * verified proof, valor_precio only with a price…) and the format allowed for the category.
+ */
+export function angleFromId(input: AngleFromIdInput): AngleFromIdResult {
+  const parsed = parseAngleId(input.id)
+  if (!parsed) return { ok: false, reason: 'unknown angle id' }
+  const { dna, offer } = input
+  const language: AdLanguage = input.language ?? dna.language ?? 'es'
+  const facts = mergeFacts(dna, offer)
+  const keys = confirmedKeys(facts)
+  const ctx: Ctx = {
+    keys,
+    cat: categoryContext(dna, keys, input.brief),
+    facts,
+    pains: list(dna.pains),
+    desires: list(dna.desires),
+    objections: list(dna.objections),
+    phrases: list(dna.customerPhrases),
+    audience: list(dna.audience),
+  }
+  const spec = ANGLE_CATEGORIES[parsed.category]
+  if (!spec.available(ctx.cat, true)) return { ok: false, reason: `category ${parsed.category} needs facts this offer does not have` }
+  if (parsed.hookType === 'social_proof' && !hookAvailable('social_proof', ctx, true)) return { ok: false, reason: 'social proof needs a confirmed review, number or certification' }
+  if (parsed.hookType === 'price_value' && !hookAvailable('price_value', ctx, true)) return { ok: false, reason: 'price/value needs a confirmed price or bundle' }
+  if (!isFormatAllowed(dna.category, parsed.format)) return { ok: false, reason: `format ${parsed.format} is not allowed for ${dna.category}` }
+  if (parsed.format === 'variant_card' && !keys.has('variants')) return { ok: false, reason: 'variant_card needs confirmed variants' }
+  const archetype = parsed.archetype ?? archetypeFor(parsed.category, parsed.format)
+  const offerName = cleanString(offer.name) || cleanString(dna.brandName)
+  const focus = focusValue(archetype, parsed.hookType, parsed.format, ctx, new Map())
+  const pools = categoryPools(parsed.category, parsed.hookType, ctx)
+  const target = cleanString(input.target) || pools.flat()[0] || cleanString(dna.oneLiner) || offerName
+  const message =
+    cleanString(input.message) || `${spec.frame[language](target)} ${ARCHETYPE_FRAMES[language][archetype](offerName, focus)}`
+  return {
+    ok: true,
+    angle: {
+      id: angleId(parsed.category, parsed.hookType, parsed.format),
+      archetype,
+      hookType: parsed.hookType,
+      format: parsed.format,
+      message,
+      target,
+      factKeys: factKeysFor(archetype, parsed.hookType, parsed.format, ctx),
+      category: parsed.category,
+      rationale: angleRationale(parsed.category, parsed.format, language, focus),
+      sceneDirection: spec.scene,
+      ...(input.hook ? { hook: input.hook } : {}),
+      source: input.source ?? 'agent',
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------

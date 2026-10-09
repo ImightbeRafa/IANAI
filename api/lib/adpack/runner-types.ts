@@ -4,7 +4,7 @@
  * The runner never imports the renderer, storage or credits directly so tests
  * and the benchmark inject fakes, and the web / MCP doors inject real ones.
  */
-import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual } from './types.js'
+import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LayoutFamily } from './types.js'
 
 export interface RenderInput {
   format: AdFormat
@@ -16,6 +16,10 @@ export interface RenderInput {
   /** Optional transparent product cut-out (URL / data URL / bytes). */
   productCutout?: Uint8Array | string
   language: AdLanguage
+  /** Visual layout family (default bold_pill). */
+  layoutFamily?: LayoutFamily
+  /** Product position in the scene (fractions); copy is never drawn over it. */
+  productBox?: { x: number; y: number; w: number; h: number }
 }
 
 export interface RenderOutput {

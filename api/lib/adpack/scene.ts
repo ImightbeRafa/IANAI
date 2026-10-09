@@ -9,6 +9,7 @@
 import { SCENE_NO_TEXT_CLAUSE } from './copy-shared.js'
 import { getFormatPattern } from './patterns.js'
 import { imageSize } from './image-size.js'
+import { FAMILY_SPECS, familySceneHint } from './render/families.js'
 import { copySpaceHint } from './render/frame.js'
 import { escapeRegExp } from './util.js'
 import type { AdAngle, AdCopy, AdFormat, AspectRatio, BrandDna, BusinessCategory, ModelGateway, OfferInput } from './types.js'
@@ -127,6 +128,8 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
   const hasProductRef = (offer.productImageUrls ?? []).length > 0
   const brief = stripCopyText(copy.sceneBrief ?? '', copy)
   const what = dna.oneLiner ? `${offer.name} (${dna.oneLiner})` : offer.name
+  // Non-default layout families put copy elsewhere (side panel, bottom type, inset card…).
+  const familyHint = angle.layoutFamily && angle.layoutFamily !== 'bold_pill' ? familySceneHint(angle.layoutFamily, angle.format) : ''
   const lines = [
     `Text-free advertising photo for a ${CATEGORY_LABEL[dna.category] ?? 'retail'} brand. The product is: ${what}.`,
     hasProductRef
@@ -134,9 +137,10 @@ export function buildScenePrompt(input: BuildScenePromptInput): string {
       : 'Show the product object only; do not write its name.',
     brief ? `Scene: ${brief}` : '',
     `Format intent: ${pattern.sceneIntent}`,
+    angle.sceneDirection ? `Angle direction (${angle.category ?? 'angle'}): ${angle.sceneDirection}.` : '',
     `Setting for this ad: ${sceneSetting(angle.format, input.variation)}`,
-    `Layout the overlay will use (for spacing only, never draw it): ${pattern.layout.en}`,
-    `Placement and empty space (the text overlay covers it; this wins over any placement above): ${copySpaceHint(angle.format, SCENE_SPACE_RATIO)}.`,
+    `Layout the overlay will use (for spacing only, never draw it): ${familyHint ? FAMILY_SPECS[angle.layoutFamily!].description : pattern.layout.en}`,
+    `Placement and empty space (the text overlay covers it; this wins over any placement above): ${familyHint || copySpaceHint(angle.format, SCENE_SPACE_RATIO)}.`,
     pattern.needsPerson ? 'Include a real person naturally interacting with the product; natural skin, hands and proportions.' : '',
     visualStyleLine(dna),
     input.anchor

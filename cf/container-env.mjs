@@ -45,6 +45,8 @@ export const CONTAINER_ENV_KEYS = Object.freeze([
   // normal deploys: scripts/build-api.mjs copies the fonts next to the
   // compiled render module (dist-api/lib/adpack/render/fonts/).
   'ADPACK_FONTS_DIR',
+  // '0' disables runtime brand-font loading (Google Fonts); default on, cached in os.tmpdir().
+  'ADPACK_FONT_FETCH',
 ])
 
 export function getContainerEnvVars(source) {

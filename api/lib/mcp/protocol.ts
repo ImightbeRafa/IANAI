@@ -169,6 +169,27 @@ function toolInputSchema(name: string): Record<string, unknown> {
   }
   const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10).' }
   const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
+  const adpackSelection = {
+    angleIds: {
+      type: 'array',
+      maxItems: 20,
+      items: { type: 'string' },
+      description: 'Optional angles to make: ids from adpack_angles OR shared catalog ids "<category>-<hookType>-<format>" (e.g. guide_bulk_angles adpackAngleId "regalo-desire-handheld_overlay"). An id the offer cannot honor is an error, never silently dropped.',
+    },
+    angles: {
+      type: 'array',
+      maxItems: 20,
+      items: { type: 'object' },
+      description: 'Optional adpackAngle objects copied from guide_bulk_angles (keeps the full hook). Rebuilt against the offer\'s confirmed facts.',
+    },
+    variations: { type: 'number', minimum: 1, maximum: 3, description: 'Ads per angle (1–3): same angle and copy, different scene, composition and layout family. Credits = ads × variations.' },
+    creativeFreedom: { type: 'string', enum: ['high', 'guided'], description: 'high (default when you only give brand/offer): Advance chooses angle, hook, format, layout family and scene. guided: keep your angle picks exactly.' },
+    layoutFamily: {
+      type: 'string',
+      enum: ['bold_pill', 'editorial_minimal', 'split_panel', 'full_bleed_type', 'badge_corner', 'framed_card', 'ugc_native'],
+      description: 'Optional: force one visual layout family (default: Style DNA, else a rotation of ≤ 2 ads per family per 10).',
+    },
+  }
   const adpackSavedBrand = {
     brandId: { type: 'string', description: 'Brand id from list_brands. Use INSTEAD of dna + offer: the server builds them from the saved brand, kit and offer.' },
     offerId: { type: 'string', description: 'Offer id from list_offers / get_brand_context (optional; default = the brand\'s most recent offer).' },
@@ -247,13 +268,13 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'adpack_angles':
       return {
         type: 'object',
-        properties: { ...adpackSavedBrand, dna: adpackDna, offer: adpackOffer, size: adpackSize },
+        properties: { ...adpackSavedBrand, dna: adpackDna, offer: adpackOffer, size: adpackSize, brief: { type: 'string', maxLength: 500 } },
         additionalProperties: false,
       }
     case 'adpack_quote':
       return {
         type: 'object',
-        properties: { ...adpackSavedBrand, size: adpackSize, dna: adpackDna, offer: adpackOffer },
+        properties: { ...adpackSavedBrand, size: adpackSize, dna: adpackDna, offer: adpackOffer, brief: { type: 'string', maxLength: 500 }, ...adpackSelection },
         additionalProperties: false,
       }
     case 'adpack_start':
@@ -269,7 +290,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
           dna: adpackDna,
           offer: adpackOffer,
           size: adpackSize,
-          angleIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of angle ids from adpack_angles (same size).' },
+          ...adpackSelection,
+          styleDnaId: { type: 'string', description: 'Optional Style DNA id from list_style_dnas (winner/reference ads): layout family, copy density and type weight follow it as a quality floor. Needs brandId.' },
           ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] } },
           businessId: { type: 'string', description: 'dna/offer path only: brand folder to link the pack to.' },
           approvalRequestId: {
@@ -552,6 +574,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           offerId: { type: 'string' },
           count: { type: 'number' },
           language: { type: 'string', enum: ['es', 'en'] },
+          refresh: { type: 'boolean', description: 'Skip the 1 h cache and build a fresh board.' },
         },
         required: ['brandId'],
         additionalProperties: false,
