@@ -48,7 +48,9 @@ export function describeExactFamilies(families: LayoutFamily[]) {
         }
       })
 
-      it('render: every format × ratio composites the real product, no text over it, fidelity passes', async () => {
+      // Native sharp/resvg work crashes forked vitest workers on Windows dev machines (not code-specific:
+      // the deployed de6210b crashes the same way there). Linux — CI and the Cloudflare container — runs it.
+      it.skipIf(process.platform === 'win32')('render: every format × ratio composites the real product, no text over it, fidelity passes', async () => {
         for (const format of ALL_FORMATS) {
           const results = await renderAdAllRatios(
             { format, sceneImage: plate, copy: goodSerumCopy(FULL_COPY), visual: {}, productCutout: cutout, productMode: 'exact', logo: logoSvg(), language: 'es', layoutFamily: family },
