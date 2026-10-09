@@ -14,6 +14,7 @@ import {
   ADPACK_MAX_SIZE,
   ADPACK_MAX_UPLOADS,
   ADPACK_MIN_SIZE,
+  ADPACK_DEFAULT_RATIOS,
   ADPACK_RATIOS,
   buildConfirmPayload,
   categoryLabel,
@@ -149,13 +150,13 @@ export default function ChatShellAdPackStudio({
   const [size, setSize] = useState(ADPACK_DEFAULT_SIZE)
   const [angles, setAngles] = useState<AdAngle[]>([])
   const [enabled, setEnabled] = useState<Set<string>>(new Set())
-  const [ratios, setRatios] = useState<AspectRatio[]>([...ADPACK_RATIOS])
+  const [ratios, setRatios] = useState<AspectRatio[]>([...ADPACK_DEFAULT_RATIOS])
   const [quoteState, setQuote] = useState<AdPackQuote | null>(null)
   const [planning, setPlanning] = useState(false)
   const [starting, setStarting] = useState(false)
   // Step 3
   const [packId, setPackId] = useState<string | null>(initialPackId)
-  const [packRatios, setPackRatios] = useState<AspectRatio[]>([...ADPACK_RATIOS])
+  const [packRatios, setPackRatios] = useState<AspectRatio[]>([...ADPACK_DEFAULT_RATIOS])
   const [perAd, setPerAd] = useState(0)
   // Shared
   const [error, setError] = useState<string | null>(null)

@@ -52,7 +52,7 @@ describe('planPack / quotePack', () => {
     expect(new Set(a.items.map((i) => i.generationId)).size).toBe(10)
     expect(a.items[3].generationId).toBe(itemGenerationId(PACK_ID, 3))
     expect(a.items[3].generationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(a.pack.ratios).toEqual(['1:1', '4:5', '9:16'])
+    expect(a.pack.ratios).toEqual(['4:5', '9:16'])
     expect(quotePack(10)).toEqual({ credits: 10 * CREDIT_WEIGHTS.image_standard, perAd: CREDIT_WEIGHTS.image_standard })
     expect(a.pack.quotedCredits).toBe(quotePack(10).credits)
   })
@@ -69,7 +69,7 @@ describe('advancePack', () => {
     expect(pack.status).toBe('done')
     for (const item of items) {
       expect(item.status).toBe('done')
-      expect(item.renders.map((r) => r.ratio)).toEqual(['1:1', '4:5', '9:16'])
+      expect(item.renders.map((r) => r.ratio)).toEqual(['4:5', '9:16'])
       expect(item.scene?.imageUrl).toContain(`/adpack/${PACK_ID}/${item.index}-scene-`)
       expect(item.leaseUntil).toBeUndefined()
       expect(item.chargedAt).toBeTruthy()
@@ -79,7 +79,7 @@ describe('advancePack', () => {
     }
     expect(t.gateway.sceneCalls).toHaveLength(10)
     expect(t.gateway.sceneCalls.every((c) => c.ratio === '9:16' && c.draft)).toBe(true)
-    expect(t.renderer.calls).toHaveLength(30)
+    expect(t.renderer.calls).toHaveLength(20)
     expect(t.charge.total()).toBe(10)
     expect(progress.costUsd).toBeGreaterThan(0)
   })
@@ -233,7 +233,7 @@ describe('editItemText', () => {
     expect(res.ok).toBe(true)
     expect(t.gateway.totalCalls()).toBe(calls)
     expect(t.charge.total()).toBe(2)
-    expect(t.renderer.calls.length).toBe(renders + 3)
+    expect(t.renderer.calls.length).toBe(renders + 2)
     expect(t.renderer.calls.at(-1)!.copy.headline).toBe('Tu piel, más pareja')
     const after = (await t.state()).items[1]
     expect(after.copy?.headline).toBe('Tu piel, más pareja')

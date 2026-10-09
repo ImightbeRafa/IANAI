@@ -325,7 +325,10 @@ describe('mcp 0.8 remaining tools', () => {
     expect(text).toContain('userPrompt')
     expect(text).toContain('grok_chat')
     expect(text).not.toContain('Open deepLink')
-    expect(text).toContain('optionalAdvancePage')
+    // F2: neutral approval, no web link by default; structured plan instead.
+    expect(text).not.toContain('optionalAdvancePage')
+    expect(text).not.toContain('Grok)')
+    expect(text).toContain('"approval"')
   })
 
   it('A9 list_scripts returns sections[] DTO next to content', async () => {

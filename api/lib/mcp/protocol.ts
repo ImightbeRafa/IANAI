@@ -15,7 +15,8 @@ import {
   type McpAuthUser,
   type McpDbClient,
 } from './user-tools.js'
-import { saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
+import { getMcpUrlContextStatus, saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
+import { CreateAdsInputError, routeCreateAds } from './create-ads.js'
 import {
   mcpGuideBrandPack,
   mcpGuideImage,
@@ -46,7 +47,7 @@ import {
 } from './bulk-tools.js'
 import type { McpApprovalStore } from './approval.js'
 import type { McpArtifactStore } from './artifact-store.js'
-import { getMcpExecuteResult } from './execute-job.js'
+import { getMcpExecuteResult, scheduleMcpExecuteWork } from './execute-job.js'
 import {
   mcpArchiveBrand,
   mcpDeleteAsset,
@@ -99,6 +100,19 @@ export function formatMcpToolErrorCode(err: unknown): string | undefined {
     if (typeof row.status === 'number') return String(row.status)
   }
   return undefined
+}
+
+/** Structured error details (AdPackError.details) spread into the error body; plain objects only. */
+export function formatMcpToolErrorDetails(err: unknown): Record<string, unknown> {
+  if (!err || typeof err !== 'object') return {}
+  const details = (err as { details?: unknown }).details
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return {}
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(details as Record<string, unknown>)) {
+    if (k === 'message' || k === 'code') continue
+    out[k] = v
+  }
+  return out
 }
 
 export type McpJsonRpcRequest = {
@@ -167,7 +181,23 @@ function toolInputSchema(name: string): Record<string, unknown> {
     },
     required: ['name'],
   }
-  const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10).' }
+  const adpackSize = { type: 'number', minimum: 1, maximum: 20, description: 'Ads in the pack (default 10). The approval shows exactly this many; the pack never runs fewer.' }
+  const adpackRatios = {
+    type: 'array',
+    items: { type: 'string', enum: ['1:1', '4:5', '9:16'] },
+    description: 'Default ["4:5","9:16"] (feed + story). Add "1:1" if needed, or later for free with adpack_resize.',
+  }
+  const adpackAngleIds = {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Optional: exactly these angle ids from adpack_angles (any board size). The pack runs exactly these; unknown ids are rejected before approval.',
+  }
+  const adpackLanguageRules = {
+    locale: { type: 'string', description: 'e.g. "es-CR". Makes the register a HARD rule (copy in another register is rejected/repaired). es-CR/es-AR/… default to voseo.' },
+    register: { type: 'string', enum: ['voseo', 'tuteo', 'usted'], description: 'Spanish register; with locale it is enforced, not just a tone note.' },
+    forbiddenPhrases: { type: 'array', items: { type: 'string' }, description: 'Extra phrases the ads must never contain (merged with the brand kit list). Checked on image text, caption and script.' },
+    forbiddenClaims: { type: 'array', items: { type: 'string' }, description: 'Claims the ads must never make (e.g. "armado en minutos"). Checked like forbiddenPhrases.' },
+  }
   const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
   const adpackSavedBrand = {
     brandId: { type: 'string', description: 'Brand id from list_brands. Use INSTEAD of dna + offer: the server builds them from the saved brand, kit and offer.' },
@@ -253,7 +283,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
     case 'adpack_quote':
       return {
         type: 'object',
-        properties: { ...adpackSavedBrand, size: adpackSize, dna: adpackDna, offer: adpackOffer },
+        properties: { ...adpackSavedBrand, size: adpackSize, dna: adpackDna, offer: adpackOffer, angleIds: adpackAngleIds },
         additionalProperties: false,
       }
     case 'adpack_start':
@@ -269,8 +299,9 @@ function toolInputSchema(name: string): Record<string, unknown> {
           dna: adpackDna,
           offer: adpackOffer,
           size: adpackSize,
-          angleIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of angle ids from adpack_angles (same size).' },
-          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] } },
+          angleIds: adpackAngleIds,
+          ratios: adpackRatios,
+          ...adpackLanguageRules,
           businessId: { type: 'string', description: 'dna/offer path only: brand folder to link the pack to.' },
           approvalRequestId: {
             type: 'string',
@@ -307,6 +338,53 @@ function toolInputSchema(name: string): Record<string, unknown> {
           },
         },
         required: ['packId', 'itemId', 'copy'],
+        additionalProperties: false,
+      }
+    case 'adpack_resize':
+      return {
+        type: 'object',
+        properties: {
+          packId: adpackPackId,
+          itemId: { type: 'string', description: 'itemId of a finished ad (from adpack_status / deliverable)' },
+          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16'] }, minItems: 1, description: 'Ratios to add, e.g. ["1:1"].' },
+        },
+        required: ['packId', 'itemId', 'ratios'],
+        additionalProperties: false,
+      }
+    case 'create_ads':
+      return {
+        type: 'object',
+        properties: {
+          brandId: { type: 'string', description: 'Brand id from list_brands.' },
+          offerId: { type: 'string', description: 'Offer id from list_offers (optional; default = most recent offer).' },
+          mode: { type: 'string', enum: ['pack', 'single', 'carousel', 'edit'], description: 'pack (default) = N static ads; single = 1 static ad; carousel = slides from a script; edit = change one existing image.' },
+          count: { type: 'number', minimum: 1, maximum: 20, description: 'pack: ads (default 10); carousel: slides (2-5); single/edit: 1.' },
+          ratios: { type: 'array', items: { type: 'string', enum: ['1:1', '4:5', '9:16', '3:4'] }, description: 'pack/single default ["4:5","9:16"]; carousel/edit: one ratio.' },
+          brief: { type: 'string', maxLength: 500, description: 'pack/single: campaign context (never a fact); carousel: design direction; edit: the change (if editPrompt is not given).' },
+          angleIds: adpackAngleIds,
+          brandKitId: { type: 'string' },
+          ...adpackLanguageRules,
+          scriptId: { type: 'string', description: 'carousel: script to turn into slides.' },
+          scriptContent: { type: 'string', description: 'carousel: script text (instead of scriptId).' },
+          subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },
+          editPrompt: { type: 'string', description: 'edit: what to change.' },
+          productImageId: { type: 'string', description: 'edit: image to change (from list_assets); carousel: product reference.' },
+          imageUrl: { type: 'string', description: 'edit: https URL of the image to change.' },
+          referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+          language: { type: 'string', enum: ['es', 'en'] },
+          sessionId: { type: 'string' },
+          approvalRequestId: { type: 'string', description: 'After in-chat confirm_execute approve. Do not invent. Retry with the exact same arguments.' },
+        },
+        required: ['brandId'],
+        additionalProperties: false,
+      }
+    case 'workspace_url_context_status':
+      return {
+        type: 'object',
+        properties: {
+          intakeId: { type: 'string', description: 'id / jobId returned by workspace_save_url_context' },
+        },
+        required: ['intakeId'],
         additionalProperties: false,
       }
     case 'adpack_regenerate':
@@ -622,6 +700,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         properties: {
           ...brand,
           url: { type: 'string' },
+          wait: { type: 'boolean', description: 'Default true: analyze now (up to ~25 s) and return the result, or a jobId to poll. false = only queue it.' },
         },
         required: ['brandId', 'url'],
         additionalProperties: false,
@@ -937,7 +1016,8 @@ export async function handleMcpJsonRpc(options: {
             text: JSON.stringify({
               status: 'error',
               toolName: name,
-              error: { message, code },
+              // Machine-readable details (e.g. COPY_REJECTED issues[], PLAN_CHANGED approved/planned).
+              error: { message, code, ...formatMcpToolErrorDetails(err) },
             }, null, 2),
           }],
           isError: true,
@@ -973,6 +1053,25 @@ async function dispatchEnabledTool(options: {
       args: options.args,
       store: options.adminStore,
     })
+  }
+
+  if (options.name === 'create_ads') {
+    // G1: one entry point, routed to the existing implementation (same approvals / credits).
+    let route: ReturnType<typeof routeCreateAds>
+    try {
+      route = routeCreateAds(options.args)
+    } catch (err) {
+      if (err instanceof CreateAdsInputError) {
+        const e = new Error(err.message) as Error & { code: string }
+        e.code = 'BAD_INPUT'
+        throw e
+      }
+      throw err
+    }
+    const payload = await dispatchEnabledTool({ ...options, name: route.tool, args: route.args })
+    return payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? { ...(payload as Record<string, unknown>), via: 'create_ads', mode: route.mode, routedTo: route.tool }
+      : payload
   }
 
   if (isAdPackMcpTool(options.name)) {
@@ -1143,7 +1242,27 @@ async function dispatchEnabledTool(options: {
         brandId,
         url: typeof options.args.url === 'string' ? options.args.url : '',
         appOrigin: options.appOrigin,
+        wait: options.args.wait !== false,
+        schedule: (work) => scheduleMcpExecuteWork(async () => {
+          await work()
+        }),
       })
+    }
+    case 'workspace_url_context_status': {
+      if (!options.urlIntakeStore) throw new Error('URL intake store not configured')
+      const intakeId = typeof options.args.intakeId === 'string' ? options.args.intakeId : ''
+      if (!intakeId) throw new Error('intakeId is required')
+      const status = await getMcpUrlContextStatus({
+        store: options.urlIntakeStore,
+        user: options.user,
+        intakeId,
+        appOrigin: options.appOrigin,
+        schedule: (work) => scheduleMcpExecuteWork(async () => {
+          await work()
+        }),
+      })
+      if (!status) throw new Error('URL intake not found')
+      return status
     }
     case 'workspace_ingest_file': {
       if (!options.workspaceStore) throw new Error('Workspace store not configured')
@@ -1216,15 +1335,32 @@ async function dispatchEnabledTool(options: {
           appOrigin: options.appOrigin,
         })
       }
-      return getMcpExecuteResult({
-        approvalStore: options.approvalStore,
-        userId: options.user.id,
-        jobId,
-        approvalRequestId:
-          typeof options.args.approvalRequestId === 'string'
-            ? options.args.approvalRequestId
-            : undefined,
-      })
+      try {
+        return await getMcpExecuteResult({
+          approvalStore: options.approvalStore,
+          userId: options.user.id,
+          jobId,
+          approvalRequestId:
+            typeof options.args.approvalRequestId === 'string'
+              ? options.args.approvalRequestId
+              : undefined,
+        })
+      } catch (err) {
+        // G3: a URL-intake jobId (workspace_save_url_context) resolves here too, running the work inline.
+        if (jobId && err instanceof Error && err.message === 'Job not found' && options.urlIntakeStore?.getUrlIntake) {
+          const status = await getMcpUrlContextStatus({
+            store: options.urlIntakeStore,
+            user: options.user,
+            intakeId: jobId,
+            appOrigin: options.appOrigin,
+            schedule: (work) => scheduleMcpExecuteWork(async () => {
+              await work()
+            }),
+          })
+          if (status) return { ...status, toolName: 'workspace_save_url_context' }
+        }
+        throw err
+      }
     }
     case 'execute_image_generate': {
       if (!options.approvalStore) throw new Error('Approval store not configured')

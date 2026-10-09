@@ -47,6 +47,7 @@ const ACTIONS: ReadonlySet<AdPackAction> = new Set([
   'status',
   'edit_text',
   'regenerate',
+  'resize',
   'cancel',
 ])
 
@@ -81,7 +82,7 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
     case 'angles':
       return { result: await service.planAngles({ userId, dna: body.dna, offer: body.offer, size: body.size, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId }) }
     case 'quote':
-      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId }) }
+      return { result: await service.quote({ userId, size: body.size, dna: body.dna, offer: body.offer, brandId: body.brandId, offerId: body.offerId, brandKitId: body.brandKitId, angleIds: body.angleIds }) }
     case 'start': {
       const started = await service.startPack({
         userId,
@@ -95,6 +96,11 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
         ratios: body.ratios,
         businessId: body.businessId,
         brandKitId: body.brandKitId,
+        locale: body.locale,
+        register: body.register,
+        forbiddenPhrases: body.forbiddenPhrases,
+        forbiddenClaims: body.forbiddenClaims,
+        approved: body.approved,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }
@@ -109,6 +115,9 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
       const regen = await service.regenerate({ userId, packId: body.packId, itemId: body.itemId, mode: body.mode })
       return { result: regen, backgroundPackId: String(body.packId) }
     }
+    case 'resize':
+      // Free: renderer only, no background work.
+      return { result: await service.resize({ userId, packId: body.packId, itemId: body.itemId, ratios: body.ratios }) }
     case 'cancel':
       return { result: await service.cancel({ userId, packId: body.packId }) }
   }

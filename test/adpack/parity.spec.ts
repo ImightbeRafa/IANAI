@@ -142,9 +142,9 @@ describe('ad pack parity: web handler vs MCP dispatch', () => {
     expect(mIngest.payload.dna).toEqual(wDna)
     expect(mDna2).toEqual(wDna2)
     expect(mAngles.payload.angles).toEqual((wAngles.body as { angles: unknown }).angles)
-    expect((wAngles.body as { angles: unknown[] }).angles).toHaveLength(10)
-    expect({ size: mQuote.payload.size, credits: mQuote.payload.credits, perAd: mQuote.payload.perAd }).toEqual(wQuote.body)
-    expect(wQuote.body).toEqual({ size: 10, credits: 10 * PER_AD, perAd: PER_AD })
+    expect({ size: mQuote.payload.size, credits: mQuote.payload.credits, perAd: mQuote.payload.perAd, angleIds: mQuote.payload.angleIds }).toEqual(wQuote.body)
+    expect(wQuote.body).toMatchObject({ size: 10, credits: 10 * PER_AD, perAd: PER_AD })
+    expect((wQuote.body as { angleIds: string[] }).angleIds).toHaveLength(10)
     expect((started.payload.quote as { credits: number }).credits).toBe((wStart.body as { quote: { credits: number } }).quote.credits)
 
     // Same planned structure (pack created from the same inputs).
@@ -356,7 +356,9 @@ describe('MCP adpack_* tools', () => {
     // adpack_start takes either brandId (+ offerId) or dna + offer: neither pair is schema-required.
     expect(tools.find((t) => t.name === 'adpack_start')?.inputSchema.required).toBeUndefined()
     expect(tools.find((t) => t.name === 'adpack_status')?.inputSchema.required).toEqual(['packId'])
-    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(9)
+    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(10)
+    expect(names).toContain('adpack_resize')
+    expect(names).toContain('create_ads')
   })
 
   it('adpack_start requires in-chat approval; after confirm it returns packId and is idempotent', async () => {

@@ -133,7 +133,7 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
   const compliance = complianceGuidance(dna.category, language)
   const system = [
     IAN_CORE_RULES[language],
-    registerInstruction(dna.register, language),
+    registerInstruction(dna.register, language, dna.locale),
     `${es ? 'REGLAS DE ANUNCIO ESTÁTICO' : 'STATIC AD RULES'}:\n${UNIVERSAL_AD_RULES[language].map((r) => `- ${r}`).join('\n')}`,
     `${es ? 'CUMPLIMIENTO (categoría' : 'COMPLIANCE (category'} ${dna.category}):\n${compliance.map((r) => `- ${r}`).join('\n')}`,
     COPY_CRAFT_RULES[language],
@@ -160,7 +160,7 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
       : '',
   ].filter(Boolean)
 
-  const forbidden = (dna.forbiddenPhrases ?? []).filter((p) => p.trim())
+  const forbidden = [...(dna.forbiddenPhrases ?? []), ...(dna.forbiddenClaims ?? [])].filter((p) => p.trim())
   // Brand phrases (kit must-use): wording only; a phrase with a number no confirmed fact backs is dropped.
   const mustUse = redactList(dna.mustUsePhrases, ctx, 8).filter((p) => extractNumericClaims(p).every((c) => confirmedNums.has(c.value)))
   const user = [

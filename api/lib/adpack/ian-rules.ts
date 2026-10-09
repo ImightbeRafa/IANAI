@@ -144,10 +144,28 @@ export const REGISTER_RULES: Record<SpanishRegister, string> = {
     'REGISTRO: usted. Usa "usted" y sus formas: tiene, quiere, pida, escríbanos, mire, elija. Nunca "tú" ni voseo ("tenés", "pedí").',
 }
 
-/** Register instruction for the copy prompt. English has no register switch. */
-export function registerInstruction(register: SpanishRegister | undefined, language: AdLanguage): string {
+/** Register instruction for the copy prompt. English has no register switch. With a locale the register is a hard rule. */
+export function registerInstruction(register: SpanishRegister | undefined, language: AdLanguage, locale?: string): string {
   if (language === 'en') return 'REGISTER: direct second person ("you"), plain conversational English, no slang that the brand voice does not use.'
-  return REGISTER_RULES[register ?? 'tuteo']
+  const base = REGISTER_RULES[register ?? 'tuteo']
+  if (!isHardRegister({ locale, language })) return base
+  return `${base}\nREGLA DURA (locale ${locale}): todo el anuncio —titular, subtítulo, chips, CTA, caption y guion— va en ${register ?? 'tuteo'}. Una sola forma de otro trato invalida el anuncio y se rechaza.`
+}
+
+/** Locales where Spanish copy defaults to voseo (when no register is given). */
+export const VOSEO_LOCALES: ReadonlySet<string> = new Set(['es-CR', 'es-AR', 'es-UY', 'es-PY', 'es-NI', 'es-HN', 'es-SV', 'es-GT'])
+
+/** Normalized "es-CR" form of a locale string, or undefined when it is not a valid language-region tag. */
+export function normalizeLocale(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const m = raw.trim().match(/^([a-z]{2})(?:[-_]([a-z]{2}))?$/i)
+  if (!m) return undefined
+  return m[2] ? `${m[1].toLowerCase()}-${m[2].toUpperCase()}` : m[1].toLowerCase()
+}
+
+/** A Spanish locale on the DNA makes the register a hard (blocking) rule (E3). */
+export function isHardRegister(dna: { locale?: string; language?: AdLanguage }): boolean {
+  return typeof dna.locale === 'string' && /^es(?:-|$)/i.test(dna.locale) && dna.language !== 'en'
 }
 
 /** Short register-correct CTA verbs, handy for fallbacks and tests. */
@@ -172,6 +190,21 @@ export const REGISTER_DRIFT_MARKERS: Record<SpanishRegister, RegExp> = {
   voseo: /(?<!\p{L})(tenés|querés|escribinos|mandanos|mirá|elegí|sabés|podés|vos)(?!\p{L})/iu,
   tuteo: /(?<!\p{L})(tienes|quieres|escríbenos|envíanos|tú|puedes|sabes)(?!\p{L})/iu,
   usted: /(?<!\p{L})(usted|escríbanos|envíenos)(?!\p{L})/iu,
+}
+
+/**
+ * Hard-rule markers (locale set): REGISTER_DRIFT_MARKERS plus the common verb forms and
+ * imperatives with clitics that only exist in that register ("necesitas", "pídelo",
+ * "aprovecha" is left out: it is also 3rd person). Used when a ad MUST be in one register.
+ */
+export const HARD_REGISTER_MARKERS: Record<SpanishRegister, RegExp> = {
+  voseo:
+    /(?<!\p{L})(tenés|querés|escribinos|mandanos|mirá|elegí|sabés|podés|vos|necesitás|sos|pedilo|pedila|comprá|aprovechá|descubrí|llevalo|llevala|escribí|probá|conocé|hacé)(?!\p{L})/iu,
+  // Plain imperatives ("Descubre", "Pide") are also 3rd person, so they only count at the start of a sentence.
+  tuteo:
+    /(?<!\p{L})(tienes|quieres|escríbenos|escribenos|envíanos|tú|puedes|sabes|necesitas|eres|vienes|llámanos|pídelo|pídela|cómpralo|cómprala|descúbrelo|descúbrela|llévatelo|llévatela|llévate|pruébalo|pruébala|únete|consíguelo|aprovéchalo|aprovéchala|escríbeme)(?!\p{L})|(?<=(?:^|[.!?¡¿:·])\s*)(descubre|mira|elige|aprovecha|pide|compra|prueba|escoge|disfruta|llama|escribe|haz|ven)(?!\p{L})/iu,
+  usted:
+    /(?<!\p{L})(usted|ustedes|escríbanos|envíenos|llámenos|pídalo|pídala|cómprelo|cómprela|llévese|únase|descúbralo|pruébelo)(?!\p{L})|(?<=(?:^|[.!?¡¿:·])\s*)(descubra|mire|elija|aproveche|pida|compre|pruebe|escoja|disfrute|llame|escriba|haga|venga)(?!\p{L})/iu,
 }
 
 export function archetypeBlock(archetype: IanArchetype, language: AdLanguage): string {

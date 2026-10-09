@@ -27,6 +27,7 @@ import { BULK_COUNT_DEFAULT, BULK_COUNT_MAX, type AngleBoardItem, type BulkLangu
 import {
   assertMcpApprovalReady,
   consumeMcpApprovalRequest,
+  denyMcpApprovalRequest,
   replayMcpApprovalResult,
   storeMcpApprovalResult,
   type McpApprovalStore,
@@ -159,6 +160,58 @@ export async function mcpSetStyleDna(
   }
 }
 
+/** Count + credits of a bulk plan (F1). */
+export type BulkPlan = { items: number; total: number; currency: 'credits' }
+
+/**
+ * F1 result when the plan at execution differs from the approved one. Nothing ran; the approval
+ * is retired so it can never run the other plan.
+ */
+export async function bulkPlanChanged(options: {
+  approvalStore: McpApprovalStore
+  approvalRequestId: string
+  userId: string
+  toolName: string
+  approved: BulkPlan
+  planned: BulkPlan
+  store?: boolean
+}): Promise<Record<string, unknown>> {
+  const payload = withStatusMessage({
+    status: 'failed',
+    code: 'PLAN_CHANGED',
+    jobId: options.approvalRequestId,
+    approvalRequestId: options.approvalRequestId,
+    toolName: options.toolName,
+    approved: options.approved,
+    planned: options.planned,
+    chargedCredits: 0,
+    usage: { quotedCredits: options.approved.total, chargedCredits: 0 },
+    error: `PLAN_CHANGED: approved ${options.approved.items} for ${options.approved.total} credits, planned ${options.planned.items} for ${options.planned.total} credits`,
+    message: `Nothing ran: the plan changed after approval. Show approved vs planned and call ${options.toolName} again without approvalRequestId for a fresh approval.`,
+  }, options.toolName)
+  if (options.store) await storeMcpApprovalResult(options.approvalStore, { approvalRequestId: options.approvalRequestId, result: payload })
+  await denyMcpApprovalRequest(options.approvalStore, { approvalRequestId: options.approvalRequestId, userId: options.userId }).catch(() => undefined)
+  return payload
+}
+
+/** `count` for a bulk tool: explicit count, else the number of selected angles, else the default. */
+function bulkCount(args: Record<string, unknown>): number {
+  const selected = selectedIds(args)
+  const raw = args.count ?? (selected?.length ? selected.length : BULK_COUNT_DEFAULT)
+  return assertMcpBulkCount(raw as number, BULK_COUNT_MAX)
+}
+
+/** F1: the angles that will run must be exactly `count` (and exactly the selected ones when ids were given). */
+function anglePlanMismatch(angles: AngleBoardItem[], count: number, selected?: string[]): string | null {
+  if (angles.length !== count) return `planned ${angles.length} angles, approved ${count}`
+  if (selected?.length) {
+    const ids = new Set(angles.map((a) => a.id))
+    const missing = selected.slice(0, count).filter((id) => !ids.has(id))
+    if (missing.length) return `selected angles not on the board: ${missing.slice(0, 5).join(', ')}`
+  }
+  return null
+}
+
 async function requireOrIssueApproval(options: {
   approvalStore: McpApprovalStore
   approvalRequestId: string
@@ -168,6 +221,8 @@ async function requireOrIssueApproval(options: {
   quotedCreditCost: number
   appOrigin?: string
   language?: 'es' | 'en'
+  /** Units in the plan (scripts / images); the approval shows items × unitCost = total. */
+  items?: number
 }): Promise<Record<string, unknown> | null> {
   if (!options.approvalRequestId) {
     return issueMcpChatApproval({
@@ -176,6 +231,7 @@ async function requireOrIssueApproval(options: {
       toolName: options.toolName,
       input: options.input,
       quotedCreditCost: options.quotedCreditCost,
+      items: options.items,
       appOrigin: options.appOrigin,
       language: options.language,
     })
@@ -207,6 +263,19 @@ async function requireOrIssueApproval(options: {
     input: options.input,
   })
   if (!ready.ok) throw new Error(ready.reason)
+  // F1: credits recomputed now must equal what was approved (count is bound by the input hash).
+  const approvedTotal = ready.record.quotedCreditCost
+  if (typeof approvedTotal === 'number' && approvedTotal !== options.quotedCreditCost) {
+    const items = options.items ?? 1
+    return bulkPlanChanged({
+      approvalStore: options.approvalStore,
+      approvalRequestId: options.approvalRequestId,
+      userId: options.userId,
+      toolName: options.toolName,
+      approved: { items, total: approvedTotal, currency: 'credits' },
+      planned: { items, total: options.quotedCreditCost, currency: 'credits' },
+    })
+  }
   return null
 }
 
@@ -299,7 +368,7 @@ async function loadAngles(options: {
   ctx: Awaited<ReturnType<typeof mcpGetBrandContext>>
   args: Record<string, unknown>
 }): Promise<AngleBoardItem[]> {
-  const count = assertMcpBulkCount(options.args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const count = bulkCount(options.args)
   const language = languageOf(options.args.language)
   const offer = options.ctx.offers.find((item) => item.id === options.offerId)!
   const recent = await recentSummariesFor(options.user.id, options.offerId)
@@ -326,7 +395,13 @@ async function loadAngles(options: {
         language,
         recentSummaries: recent,
       })).angles
-  return pickAngles(board, selectedIds(options.args), count)
+  const selected = selectedIds(options.args)
+  if (selected?.length) {
+    // Strict: exactly the selected angles (never silently swap in others); a shortfall is PLAN_CHANGED upstream.
+    const wanted = new Set(selected)
+    return board.filter((angle) => wanted.has(angle.id)).slice(0, count)
+  }
+  return pickAngles(board, null, count)
 }
 
 async function buildRuntime(options: {
@@ -381,7 +456,7 @@ export async function mcpExecuteBulkScripts(options: {
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
-  const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const count = bulkCount(args)
   const boundInput = {
     brandId,
     offerId,
@@ -404,6 +479,7 @@ export async function mcpExecuteBulkScripts(options: {
     quotedCreditCost: quote.totalCredits,
     appOrigin: options.appOrigin,
     language: boundInput.language,
+    items: count,
   })
   if (pending) return { ...pending, quote }
 
@@ -434,6 +510,19 @@ export async function mcpExecuteBulkScripts(options: {
         ctx,
         args,
       })
+      const mismatch = anglePlanMismatch(angles, count, boundInput.angleIds)
+      if (mismatch) {
+        await bulkPlanChanged({
+          approvalStore: options.approvalStore,
+          approvalRequestId,
+          userId: options.user.id,
+          toolName,
+          approved: { items: count, total: quote.totalCredits, currency: 'credits' },
+          planned: { items: angles.length, total: quoteBulkScripts(angles.length).totalCredits, currency: 'credits' },
+          store: true,
+        })
+        return
+      }
       const runtime = await buildRuntime({
         db: options.db,
         user: options.user,
@@ -569,7 +658,7 @@ export async function mcpExecuteBulkPosts(options: {
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
-  const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const count = bulkCount(args)
   const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
   const styleDnaId = typeof args.styleDnaId === 'string' ? args.styleDnaId : undefined
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
@@ -634,6 +723,7 @@ export async function mcpExecuteBulkPosts(options: {
     quotedCreditCost: quote.totalCredits,
     appOrigin: options.appOrigin,
     language: boundInput.language,
+    items: count,
   })
   if (pending) return { ...pending, quote }
 
@@ -664,6 +754,20 @@ export async function mcpExecuteBulkPosts(options: {
         ctx,
         args,
       })
+      const mismatch = anglePlanMismatch(angles, count, boundInput.angleIds)
+      if (mismatch) {
+        const expand = quote.totalCredits - quoteBulkPosts({ count, imageModel }).totalCredits
+        await bulkPlanChanged({
+          approvalStore: options.approvalStore,
+          approvalRequestId,
+          userId: options.user.id,
+          toolName,
+          approved: { items: count, total: quote.totalCredits, currency: 'credits' },
+          planned: { items: angles.length, total: quoteBulkPosts({ count: angles.length, imageModel }).totalCredits + expand, currency: 'credits' },
+          store: true,
+        })
+        return
+      }
       const runtime = await buildRuntime({
         db: options.db,
         user: options.user,
@@ -1124,7 +1228,7 @@ export async function mcpExecuteCampaignPack(options: {
   if (!brandId) throw new Error('brandId is required')
   const ctx = await mcpGetBrandContext(options.db, options.user, brandId)
   const offerId = resolveOfferId(ctx, typeof args.offerId === 'string' ? args.offerId : undefined)
-  const count = assertMcpBulkCount(args.count ?? BULK_COUNT_DEFAULT, BULK_COUNT_MAX)
+  const count = bulkCount(args)
   const imageModel = typeof args.imageModel === 'string' ? args.imageModel : 'grok-imagine'
   const existingRefs = await listProductRefUrls(options.user.id, offerId)
   const referenceMode = parseReferenceMode(args.referenceMode) || 'use'
@@ -1175,13 +1279,25 @@ export async function mcpExecuteCampaignPack(options: {
     productRefUrls: confirmedRefUrls.length ? confirmedRefUrls : existingRefs,
   }
   const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
-  const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language })
+  const pending = await requireOrIssueApproval({ approvalStore: options.approvalStore, approvalRequestId, userId: options.user.id, toolName: 'execute_campaign_pack', input: boundInput, quotedCreditCost: quote.totalCredits, appOrigin: options.appOrigin, language: boundInput.language, items: count })
   if (pending) return { ...pending, quote }
 
   const claim = await claimMcpExecuteJob(options.approvalStore, { approvalRequestId, toolName: 'execute_campaign_pack', quotedCreditCost: quote.totalCredits })
   if (!claim.claimed) return (asJobHandleFromStored(approvalRequestId, claim.existing, 'execute_campaign_pack') || claim.handle) as Record<string, unknown>
 
   const angles = await loadAngles({ db: options.db, user: options.user, brandId, offerId, ctx, args })
+  if (anglePlanMismatch(angles, count, boundInput.angleIds)) {
+    const expand = quote.totalCredits - quoteCampaignPack({ scriptCount: count, imageCount: count, imageModel }).totalCredits
+    return bulkPlanChanged({
+      approvalStore: options.approvalStore,
+      approvalRequestId,
+      userId: options.user.id,
+      toolName: 'execute_campaign_pack',
+      approved: { items: count, total: quote.totalCredits, currency: 'credits' },
+      planned: { items: angles.length, total: quoteCampaignPack({ scriptCount: angles.length, imageCount: angles.length, imageModel }).totalCredits + expand, currency: 'credits' },
+      store: true,
+    })
+  }
   const checkpoint = campaignRunning({ approvalRequestId, quote: quote.totalCredits, angles })
   await storeMcpApprovalResult(options.approvalStore, { approvalRequestId, result: checkpoint })
   await resumeMcpCampaignPack({ ...options, jobId: approvalRequestId })

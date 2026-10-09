@@ -31,12 +31,16 @@ describe('mcp in-chat approval (confirm_execute)', () => {
     expect(payload.status).toBe('approval_required')
     expect(payload.approvalSurface).toBe('grok_chat')
     expect(payload.nextTool).toBe('confirm_execute')
-    expect(String(payload.userPrompt)).toContain('confirmación requerida')
+    expect(String(payload.userPrompt)).toContain('Confirmación requerida')
     expect(String(payload.userPrompt)).toContain('sí')
     expect(payload).not.toHaveProperty('deepLink')
-    expect(payload.optionalAdvancePage).toContain('/mcp/approve/req-1')
+    // F2: neutral wording, no persona, no web link unless explicitly requested.
+    expect(String(payload.userPrompt)).not.toMatch(/Grok|Yo \(|I \(/)
+    expect(String(payload.userPrompt)).not.toMatch(/https?:\/\//)
+    expect(payload).not.toHaveProperty('optionalAdvancePage')
+    expect(payload).not.toHaveProperty('webFallbackUrl')
+    expect(payload.approval).toEqual({ items: 1, unitCost: 3, total: 3, currency: 'credits', expiresAt: new Date(9_000).toISOString(), summary: 'Generar un guion con Advance' })
     expect(String(payload.message)).not.toMatch(/Open deepLink/i)
-    expect(String(payload.instructionsForGrok)).toContain('Do NOT paste')
   })
 
   it('issueMcpChatApproval + confirm_execute approve/deny round-trip', async () => {
@@ -51,7 +55,7 @@ describe('mcp in-chat approval (confirm_execute)', () => {
       language: 'en',
     })
     expect(pending.status).toBe('approval_required')
-    expect(String(pending.userPrompt)).toContain('confirmation required')
+    expect(String(pending.userPrompt)).toContain('Confirmation required')
 
     const approved = await mcpConfirmExecute({
       approvalStore: store,

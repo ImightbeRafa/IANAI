@@ -5,7 +5,8 @@
  * `toStatusView` in service.ts, so the fields are identical everywhere.
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
-import type { AdLanguage, AspectRatio, PackItem, PackItemTimings, PackStatus } from './types.js'
+import { findForbiddenHits } from './check-copy.js'
+import type { AdLanguage, AspectRatio, BrandDna, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -49,6 +50,17 @@ export interface AdPackFailureView {
   retry: AdPackRetryCall
 }
 
+/** One downloadable image: stable public storage URL (never a signed/expiring link). */
+export interface AdPackDeliverableFile {
+  ratio: AspectRatio
+  url: string
+  width: number
+  height: number
+  format: 'png'
+  /** "feed" (4:5), "story" (9:16), "square" (1:1). */
+  placement: 'feed' | 'story' | 'square'
+}
+
 export interface AdPackDeliverableAd {
   itemId: string
   /** 1-based ad number. */
@@ -57,6 +69,10 @@ export interface AdPackDeliverableAd {
   headline: string
   caption: string
   links: Partial<Record<AspectRatio, string>>
+  /** Full-res files per ratio with explicit size and format (G4). */
+  files: AdPackDeliverableFile[]
+  /** Brand forbidden phrases/claims found in the copy (verified empty for a shipped ad). */
+  forbiddenHits: Array<{ phrase: string; field: string }>
 }
 
 export interface AdPackDeliverable {
@@ -77,6 +93,8 @@ export interface AdPackStatusExtras {
   deliverable?: AdPackDeliverable
 }
 
+const PLACEMENT: Record<AspectRatio, AdPackDeliverableFile['placement']> = { '4:5': 'feed', '9:16': 'story', '1:1': 'square' }
+
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s)
 
 /** Plain-language reason for a runner error code (`scene_product_mismatch after 3 attempts`, …). */
@@ -84,6 +102,8 @@ export function failureReason(error: string | undefined, language: AdLanguage): 
   const e = error ?? ''
   const es = language === 'es'
   if (e.startsWith('scene_product_mismatch')) return es ? 'producto no coincidía' : "product didn't match"
+  if (e.startsWith('copy_check_failed') && e.includes('forbidden_phrase')) return es ? 'el texto usaba una frase prohibida de la marca' : 'copy used a forbidden brand phrase'
+  if (e.startsWith('copy_check_failed') && e.includes('locale_register')) return es ? 'el texto no respetó el trato del idioma (locale)' : 'copy broke the locale register rule'
   if (e.startsWith('copy_check_failed')) return es ? 'el texto no pasó las reglas de datos' : 'copy broke the facts rules'
   if (e.startsWith('copy_failed')) return es ? 'no se pudo escribir el texto' : 'copy could not be written'
   if (e.startsWith('scene_upload_failed')) return es ? 'no se pudo guardar la imagen' : 'image could not be saved'
@@ -137,6 +157,8 @@ export function buildStatusExtras(input: {
   moreWork: boolean
   language: AdLanguage
   deepLink?: string
+  /** Brand lists for the forbidden-phrase verification of each shipped ad. */
+  dna?: Pick<BrandDna, 'forbiddenPhrases' | 'forbiddenClaims'>
 }): AdPackStatusExtras {
   const { items, language } = input
   const es = language === 'es'
@@ -168,6 +190,8 @@ export function buildStatusExtras(input: {
         headline: clip(i.copy?.headline ?? '', 200),
         caption: clip(i.copy?.caption ?? '', DELIVERABLE_CAPTION_MAX),
         links: Object.fromEntries(i.renders.map((r) => [r.ratio, r.imageUrl])) as Partial<Record<AspectRatio, string>>,
+        files: i.renders.map((r) => ({ ratio: r.ratio, url: r.imageUrl, width: r.width, height: r.height, format: 'png' as const, placement: PLACEMENT[r.ratio] })),
+        forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
       }))
     const label = es ? 'Anuncio' : 'Ad'
     const captionsText = clip(ads.map((a) => `${a.index}. ${label} ${a.index}${a.headline ? ` — ${a.headline}` : ''}\n${a.caption}`).join('\n\n'), DELIVERABLE_CAPTIONS_TEXT_MAX)

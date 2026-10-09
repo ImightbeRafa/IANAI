@@ -22,7 +22,7 @@ import type {
 } from './types.js'
 import type { AdPackDeliverable, AdPackFailureView } from './status-summary.js'
 
-export type { AdPackDeliverable, AdPackDeliverableAd, AdPackFailureView, AdPackRetryCall } from './status-summary.js'
+export type { AdPackDeliverable, AdPackDeliverableAd, AdPackDeliverableFile, AdPackFailureView, AdPackRetryCall } from './status-summary.js'
 
 export type AdPackErrorCode =
   | 'BAD_INPUT'
@@ -32,13 +32,37 @@ export type AdPackErrorCode =
   | 'BUSY'
   | 'COPY_REJECTED'
   | 'UNAVAILABLE'
+  /** The plan at execution differs from the approved one (count or credits): nothing ran, ask for a fresh approval. */
+  | 'PLAN_CHANGED'
+
+/** Count + credits a user approved / the server would run now. */
+export interface AdPackPlanSummary {
+  items: number
+  unitCost: number
+  total: number
+  currency: 'credits'
+}
+
+/**
+ * One reason an owner edit was rejected (E1): exact location, rule, and for length rules the
+ * limit vs actual value; for fact rules the offending token.
+ */
+export interface AdPackCopyRejection extends Omit<CopyCheckIssue, 'field'> {
+  /** Same as `code`. */
+  rule: CopyCheckIssue['code']
+  /** Exact location ("bullets[2]", "script.hook"); `baseField` is the copy key ("bullets"). */
+  field: string
+  baseField: CopyCheckIssue['field']
+}
 
 export interface AdPackErrorBody {
   error: string
   code: AdPackErrorCode
-  issues?: CopyCheckIssue[]
+  issues?: AdPackCopyRejection[]
   creditsRequired?: number
   remaining?: number
+  approved?: AdPackPlanSummary
+  planned?: AdPackPlanSummary
 }
 
 export type AdPackUploadKind = 'product_photo' | 'logo' | 'reference_ad' | 'review_screenshot' | 'document'
@@ -100,6 +124,8 @@ export interface AdPackQuoteRequest extends AdPackSavedBrandRef {
   size?: number
   dna?: BrandDna
   offer?: OfferInput
+  /** Same selection as start: the quote is for exactly these angles. */
+  angleIds?: string[]
 }
 
 /**
@@ -144,9 +170,35 @@ export interface AdPackStartRequest {
   size?: number
   /** Angle-board selection (ids from `angles` with the same `size`). */
   angleIds?: string[]
+  /** Default ['4:5', '9:16'] (feed + story); '1:1' on request or later via a free `resize`. */
   ratios?: AspectRatio[]
   businessId?: string
   brandKitId?: string
+  /** e.g. "es-CR": makes the register a hard rule (voseo by default for CR/AR/UY…). */
+  locale?: string
+  register?: BrandDna['register']
+  /** Extra brand phrases / claims the ads must never contain (merged with the kit's). */
+  forbiddenPhrases?: string[]
+  forbiddenClaims?: string[]
+  /**
+   * What the user approved. When the plan computed now differs (count or credits) nothing is
+   * created and the call fails with PLAN_CHANGED { approved, planned }.
+   */
+  approved?: { items: number; total: number }
+}
+
+export interface AdPackResizeRequest {
+  packId: string
+  itemId: string
+  /** Ratios to add (1:1, 4:5, 9:16). Free: re-renders the stored scene + copy, no model calls. */
+  ratios: AspectRatio[]
+}
+
+export interface AdPackResizeResponse {
+  item: AdPackItemView
+  /** Ratios rendered by this call (already present ones are skipped). */
+  added: AspectRatio[]
+  chargedCredits: 0
 }
 
 export interface AdPackStatusRequest {
@@ -182,6 +234,7 @@ export type AdPackAction =
   | 'status'
   | 'edit_text'
   | 'regenerate'
+  | 'resize'
   | 'cancel'
 
 // ---------------------------------------------------------------------------
@@ -210,6 +263,8 @@ export interface AdPackQuote {
   credits: number
   /** Credits per ad (one `image_standard`, copy included). */
   perAd: number
+  /** Angle ids the quote covers (exactly `size` of them). */
+  angleIds?: string[]
 }
 
 export interface AdPackStartResponse {
@@ -236,6 +291,8 @@ export interface AdPackItemView {
   charged: boolean
   /** product_images ids of renders saved to the offer library (kind 'generated'). */
   libraryImageIds?: string[]
+  /** Brand forbidden phrases/claims found in this ad's copy (empty when verified clean). */
+  forbiddenHits?: Array<{ phrase: string; field: string }>
   error?: string
 }
 

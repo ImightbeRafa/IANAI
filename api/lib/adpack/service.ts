@@ -27,14 +27,17 @@ import type {
   AdPackCancelResponse,
   AdPackConfirmDnaResponse,
   AdPackCopyPatch,
+  AdPackCopyRejection,
   AdPackEditTextResponse,
   AdPackErrorCode,
   AdPackFromBrandResponse,
   AdPackIngestDnaRequest,
   AdPackIngestDnaResponse,
   AdPackItemView,
+  AdPackPlanSummary,
   AdPackQuote,
   AdPackRegenerateResponse,
+  AdPackResizeResponse,
   AdPackStartResponse,
   AdPackStatusResponse,
 } from './http-types.js'
@@ -45,17 +48,20 @@ import {
   planPack,
   quotePack,
   regenerateItem,
+  resizeItem,
   summarizePack,
   type PackProgress,
 } from './pack-runner.js'
-import { DEFAULT_PACK_SIZE, MAX_PACK_SIZE, planAngles } from './plan-angles.js'
+import { AnglePlanError, DEFAULT_PACK_SIZE, MAX_PACK_SIZE, resolvePackAngles } from './plan-angles.js'
+import { findForbiddenHits } from './check-copy.js'
+import { normalizeLocale, VOSEO_LOCALES } from './ian-rules.js'
 import { createDefaultRenderer } from './render-adapter.js'
 import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
 import { buildStatusExtras } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
-import type { AdLanguage, AspectRatio, BrandDna, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
+import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, ModelGateway, OfferInput, Pack, PackItem, PackStatus, PackStore } from './types.js'
 import type { DnaPart } from './dna/part.js'
 
 export const ADPACK_IMAGE_MODEL = 'grok-imagine'
@@ -85,6 +91,7 @@ const HTTP_STATUS: Record<AdPackErrorCode, number> = {
   BUSY: 409,
   COPY_REJECTED: 422,
   UNAVAILABLE: 503,
+  PLAN_CHANGED: 409,
 }
 
 export class AdPackError extends Error {
@@ -412,11 +419,77 @@ function parseCopyPatch(raw: unknown): AdPackCopyPatch {
   return patch
 }
 
+const REGISTERS = new Set(['voseo', 'tuteo', 'usted'])
+
+function parseStringList(raw: unknown, label: string): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) throw bad(`${label} must be an array of strings`)
+  return (raw as string[]).map((v) => v.trim().slice(0, 120)).filter(Boolean).slice(0, 30)
+}
+
+/** Request-level language rules for one pack (both doors): locale, register, forbidden phrases / claims. */
+export interface DnaOverridesInput {
+  locale?: unknown
+  register?: unknown
+  forbiddenPhrases?: unknown
+  forbiddenClaims?: unknown
+}
+
+/**
+ * Apply request-level rules to the DNA the pack runs with. `locale` makes the register a hard rule
+ * (E3); without an explicit register a voseo locale (es-CR, es-AR…) means voseo. Forbidden lists
+ * are merged with the kit's (E2).
+ */
+export function applyDnaOverrides(dna: BrandDna, input: DnaOverridesInput): BrandDna {
+  const out: BrandDna = { ...dna }
+  const hasRegister = input.register !== undefined && input.register !== null && input.register !== ''
+  if (input.locale !== undefined && input.locale !== null && input.locale !== '') {
+    const locale = normalizeLocale(input.locale)
+    if (!locale) throw bad('locale must look like "es-CR"')
+    out.locale = locale
+    if (!hasRegister && VOSEO_LOCALES.has(locale)) out.register = 'voseo'
+  }
+  if (hasRegister) {
+    if (typeof input.register !== 'string' || !REGISTERS.has(input.register)) throw bad('register must be voseo, tuteo or usted')
+    out.register = input.register as BrandDna['register']
+  }
+  const phrases = parseStringList(input.forbiddenPhrases, 'forbiddenPhrases')
+  const claims = parseStringList(input.forbiddenClaims, 'forbiddenClaims')
+  if (phrases?.length) out.forbiddenPhrases = [...new Set([...(dna.forbiddenPhrases ?? []), ...phrases])]
+  if (claims?.length) out.forbiddenClaims = [...new Set([...(dna.forbiddenClaims ?? []), ...claims])]
+  return out
+}
+
+/** Plan summary for a count of ads (credits = per-ad × count). */
+export function adPackPlanSummary(items: number): AdPackPlanSummary {
+  const q = quotePack(items)
+  return { items, unitCost: q.perAd, total: q.credits, currency: 'credits' }
+}
+
+/** E1: one rejection per issue with its exact location, rule and limit / actual / token. */
+export function toCopyRejections(issues: CopyCheckIssue[]): AdPackCopyRejection[] {
+  return issues.map((i) => ({ ...i, rule: i.code, field: i.path ?? i.field, baseField: i.field }))
+}
+
+function planError(err: unknown): never {
+  if (err instanceof AnglePlanError) throw new AdPackError('BAD_INPUT', err.message, { reason: err.reason, ...err.details })
+  throw err
+}
+
+/** The exact angles a pack will run (quote, approval and start share it). */
+function resolveAngles(dna: BrandDna, offer: OfferInput, size: number, angleIds?: string[]): AdAngle[] {
+  try {
+    return resolvePackAngles({ dna, offer, size, language: dna.language, angleIds })
+  } catch (err) {
+    return planError(err)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Views
 // ---------------------------------------------------------------------------
 
-export function toItemView(item: PackItem): AdPackItemView {
+export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrases' | 'forbiddenClaims'>): AdPackItemView {
   return {
     id: item.id,
     index: item.index,
@@ -431,6 +504,7 @@ export function toItemView(item: PackItem): AdPackItemView {
     attempts: item.attempts,
     charged: Boolean(item.chargedAt),
     ...(libraryIdsFor(item).length ? { libraryImageIds: libraryIdsFor(item) } : {}),
+    ...(dna && item.copy ? { forbiddenHits: findForbiddenHits(item.copy, dna).map((h) => ({ phrase: h.phrase, field: h.field })) } : {}),
     ...(item.error ? { error: item.error } : {}),
   }
 }
@@ -456,6 +530,7 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     moreWork,
     language: language ?? (pack.dna?.language === 'en' ? 'en' : 'es'),
     deepLink,
+    dna: pack.dna,
   })
   return {
     packId: pack.id,
@@ -466,7 +541,7 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
     quotedCredits: pack.quotedCredits,
     chargedCredits,
     progress: { total: progress.total, done: progress.done, failed: progress.failed, pending: progress.pending, counts: progress.counts },
-    items: items.map(toItemView),
+    items: items.map((i) => toItemView(i, pack.dna)),
     moreWork,
     leaseActive,
     ...(pack.businessId && deepLink ? { businessId: pack.businessId, deepLink } : {}),
@@ -480,6 +555,16 @@ function toStatusView(pack: Pack, items: PackItem[], nowMs: number, appOrigin?: 
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
+
+function adPackPlanSummaryFrom(approved: { items: number; total: number }): AdPackPlanSummary {
+  return { items: approved.items, unitCost: approved.items ? Math.round(approved.total / approved.items) : 0, total: approved.total, currency: 'credits' }
+}
+
+function parseApproved(raw: unknown): { items: number; total: number } | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!isObj(raw) || !Number.isFinite(raw.items) || !Number.isFinite(raw.total)) throw bad('approved must be { items, total }')
+  return { items: Number(raw.items), total: Number(raw.total) }
+}
 
 function parseAngleIds(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined
@@ -502,7 +587,8 @@ export interface AdPackService {
   dnaFromBrand(input: { userId: string; source?: AdPackSource; refresh?: unknown } & SavedBrandRefInput): Promise<AdPackFromBrandResponse>
   confirmDna(input: { userId: string; dna: unknown; edits: unknown }): Promise<AdPackConfirmDnaResponse>
   planAngles(input: { userId: string; dna?: unknown; offer?: unknown; size?: unknown } & SavedBrandRefInput): Promise<AdPackAnglesResponse>
-  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown } & SavedBrandRefInput): Promise<AdPackQuote>
+  /** Quote for exactly the ads start would run (same resolver; `angleIds` = that selection). */
+  quote(input: { userId?: string; size?: unknown; dna?: unknown; offer?: unknown; angleIds?: unknown } & SavedBrandRefInput): Promise<AdPackQuote>
   startPack(input: {
     userId: string
     /** dna + offer, OR brandId (+ offerId / brandKitId): the server builds them from the saved brand. */
@@ -521,7 +607,9 @@ export interface AdPackService {
     source: AdPackSource
     /** Fixed id for idempotent create (MCP: the approval id). */
     packId?: string
-  }): Promise<AdPackStartResponse>
+    /** What the user approved: a different plan now → PLAN_CHANGED, nothing is created (F1). */
+    approved?: unknown
+  } & DnaOverridesInput): Promise<AdPackStartResponse>
   getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
    * getStatus, but first runs a short inline advance when work remains and no worker holds a lease,
@@ -531,6 +619,8 @@ export interface AdPackService {
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
   editText(input: { userId: string; packId: unknown; itemId: unknown; copy: unknown }): Promise<AdPackEditTextResponse>
   regenerate(input: { userId: string; packId: unknown; itemId: unknown; mode?: unknown }): Promise<AdPackRegenerateResponse>
+  /** Free: re-render a finished ad into more ratios from its stored scene + copy (no model calls, no credits). */
+  resize(input: { userId: string; packId: unknown; itemId: unknown; ratios: unknown }): Promise<AdPackResizeResponse>
   cancel(input: { userId: string; packId: unknown }): Promise<AdPackCancelResponse>
 }
 
@@ -739,7 +829,12 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
 
     async dnaFromBrand(input) {
       const saved = await fromBrand(input.userId, input, input.source ?? 'web')
-      const planned = planAngles({ dna: saved.dna, offer: saved.offer, size: DEFAULT_PACK_SIZE, language: saved.dna.language })
+      let planned: AdAngle[] = []
+      try {
+        planned = resolvePackAngles({ dna: saved.dna, offer: saved.offer, size: DEFAULT_PACK_SIZE, language: saved.dna.language })
+      } catch (err) {
+        if (!(err instanceof AnglePlanError)) throw err
+      }
       return {
         dna: saved.dna,
         offer: saved.offer,
@@ -760,16 +855,19 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
 
     async planAngles(input) {
       const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
-      const angles = planAngles({ dna, offer, size: parseSize(input.size), language: dna.language })
+      const angles = resolveAngles(dna, offer, parseSize(input.size))
       return { size: angles.length, angles }
     },
 
     async quote(input) {
       const size = parseSize(input.size)
+      const angleIds = parseAngleIds(input.angleIds)
       if ((input.dna !== undefined && input.offer !== undefined) || (input.dna === undefined && input.offer === undefined && hasValue(input.brandId))) {
         const { dna, offer } = await resolveDnaOffer(input.userId, input, 'web')
-        return quoteFor(planAngles({ dna, offer, size, language: dna.language }).length)
+        const angles = resolveAngles(dna, offer, size, angleIds)
+        return { ...quoteFor(angles.length), angleIds: angles.map((a) => a.id) }
       }
+      if (angleIds) throw bad('angleIds need dna + offer or brandId to resolve')
       return quoteFor(size)
     },
 
@@ -804,9 +902,24 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         brandKitId = saved.brandKitId
       }
       if (!dna || !offer) throw bad('Provide brandId (+ offerId) or dna + offer')
+      dna = applyDnaOverrides(dna, input)
       const angleIds = parseAngleIds(input.angleIds)
-      const planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, brief, ids: { packId } })
-      if (!planned.items.length) throw bad(angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
+      const approved = parseApproved(input.approved)
+      let planned: ReturnType<typeof planPack>
+      try {
+        planned = planPack({ dna, offer, size, angleIds, ratios, userId: input.userId, source: input.source, businessId, brandKitId, brief, ids: { packId } })
+      } catch (err) {
+        return planError(err)
+      }
+      if (!planned.items.length) throw bad('No angles could be planned for this offer')
+      // F1: never run (or silently shrink) a plan the user did not approve.
+      const current = adPackPlanSummary(planned.items.length)
+      if (approved && (approved.items !== current.items || approved.total !== current.total)) {
+        throw new AdPackError('PLAN_CHANGED', `Approved ${approved.items} ads for ${approved.total} credits, but the plan is now ${current.items} ads for ${current.total} credits. Nothing ran; ask for a fresh approval.`, {
+          approved: adPackPlanSummaryFrom(approved),
+          planned: current,
+        })
+      }
       await requireCredits(input.userId, planned.pack.size)
       try {
         await deps.store.createPack(planned.pack, planned.items)
@@ -858,7 +971,31 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       if (res.error === 'pack_not_found') throw new AdPackError('NOT_FOUND', 'Pack not found')
       if (res.error === 'item_not_found') throw new AdPackError('NOT_FOUND', 'Ad not found')
       if (res.error === 'item_not_rendered') throw new AdPackError('NOT_READY', 'This ad is not rendered yet')
-      throw new AdPackError('COPY_REJECTED', 'The edited text breaks the facts or length rules', { issues: res.issues ?? [] })
+      const issues = toCopyRejections(res.issues ?? [])
+      const first = issues[0]
+      const why = first
+        ? `${first.field}: ${first.rule}${first.limit !== undefined ? ` (limit ${first.limit}, actual ${first.actual})` : first.token ? ` ("${first.token}")` : ''}`
+        : 'facts or length rules'
+      throw new AdPackError('COPY_REJECTED', `The edited text was rejected — ${why}${issues.length > 1 ? ` and ${issues.length - 1} more` : ''}`, { issues })
+    },
+
+    async resize(input) {
+      const packId = parsePackId(input.packId)
+      const itemId = parseItemId(input.itemId)
+      const ratios = parseRatios(input.ratios)
+      const res = await resizeItem({ store: deps.store, renderer: deps.renderer, storage: deps.storage, packId, itemId, userId: input.userId, ratios })
+      if (!res.ok) {
+        if (res.error === 'pack_not_found') throw new AdPackError('NOT_FOUND', 'Pack not found')
+        if (res.error === 'item_not_found') throw new AdPackError('NOT_FOUND', 'Ad not found')
+        throw new AdPackError('NOT_READY', 'This ad is not rendered yet')
+      }
+      const loaded = await deps.store.getPack(packId, input.userId)
+      // New renders go to the offer library like any finished render (idempotent per URL).
+      if (res.added.length && (await persistLibrary(input.userId, packId))) {
+        const fresh = (await deps.store.getPack(packId, input.userId))?.items.find((i) => i.id === itemId)
+        if (fresh) return { item: toItemView(fresh, loaded?.pack.dna), added: res.added, chargedCredits: 0 }
+      }
+      return { item: toItemView(res.item, loaded?.pack.dna), added: res.added, chargedCredits: 0 }
     },
 
     async regenerate(input) {

@@ -26,6 +26,8 @@ export const ADPACK_MIN_SIZE = 4
 export const ADPACK_MAX_SIZE = 20
 export const ADPACK_DEFAULT_SIZE = 10
 export const ADPACK_RATIOS: AspectRatio[] = ['1:1', '4:5', '9:16']
+/** Feed + story preselected (same default as the server); 1:1 stays one click away. */
+export const ADPACK_DEFAULT_RATIOS: AspectRatio[] = ['4:5', '9:16']
 export const ADPACK_MAX_UPLOADS = 12
 export const ADPACK_POLL_MS = 2500
 export const ADPACK_POLL_MAX_BACKOFF_MS = 20_000
@@ -381,6 +383,7 @@ const ISSUE_LABELS: Record<CopyCheckIssue['code'], { es: string; en: string }> =
   duplicate_message: { es: 'Mensaje repetido', en: 'Duplicate message' },
   placeholder: { es: 'Tiene un texto de relleno', en: 'Contains a placeholder' },
   register: { es: 'Mezcla el trato (vos/tú/usted)', en: 'Wrong form of address' },
+  locale_register: { es: 'No usa el trato obligatorio del idioma (vos/tú/usted)', en: 'Breaks the required form of address for the locale' },
 }
 
 const FIELD_LABELS: Record<string, { es: string; en: string }> = {
@@ -398,9 +401,15 @@ export function copyFieldLabel(field: string, language: L): string {
   return FIELD_LABELS[field]?.[language] ?? field
 }
 
-export function describeCopyIssue(issue: CopyCheckIssue, language: L): string {
+/** A checker issue, or an edit rejection (E1: `field` is the exact path like "bullets[2]", `baseField` the copy key). */
+export type CopyIssueLike = Pick<CopyCheckIssue, 'code' | 'detail'> & { field: string; baseField?: string; limit?: number; actual?: number }
+
+export function describeCopyIssue(issue: CopyIssueLike, language: L): string {
   const label = ISSUE_LABELS[issue.code]?.[language] ?? issue.code
-  return `${copyFieldLabel(issue.field, language)}: ${label}${issue.detail ? ` — ${issue.detail}` : ''}`
+  const index = /\[(\d+)\]$/.exec(issue.field)
+  const where = `${copyFieldLabel(issue.baseField ?? issue.field.replace(/[[.].*$/, ''), language)}${index ? ` ${Number(index[1]) + 1}` : ''}`
+  const limit = issue.limit !== undefined && issue.actual !== undefined ? ` (${issue.actual}/${issue.limit})` : ''
+  return `${where}: ${label}${limit}${issue.detail ? ` — ${issue.detail}` : ''}`
 }
 
 export function captionsText(items: AdPackItemView[], language: L): string {

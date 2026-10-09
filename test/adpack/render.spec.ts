@@ -95,3 +95,18 @@ describe('graceful degradation', () => {
     assertReport(res.layoutReport, 'before_after', '4:5', copy as typeof SAMPLE_COPY, 'en')
   })
 })
+
+describe('owner-edit chip tolerance (E1)', () => {
+  it('a chip at the edit limit ("Kit ₡14.900 · Papel no incluido") fits in every ratio of the chip formats', async () => {
+    const { EDIT_BULLET_LIMITS } = await import('../../api/lib/adpack/check-copy')
+    const chip = 'Kit ₡14.900 · Papel no incluido'.padEnd(EDIT_BULLET_LIMITS.chars, '!')
+    const copy = { ...SAMPLE_COPY, bullets: ['01 Doblá el papel', chip] }
+    for (const format of ['offer_graphic', 'how_to_steps', 'explainer'] as AdFormat[]) {
+      for (const ratio of ['4:5', '9:16', '1:1'] as const) {
+        const res = await renderAd({ format, ratio, sceneImage: warm, copy, language: 'es' })
+        await assertPng(res, ratio)
+        assertReport(res.layoutReport, format, ratio, copy)
+      }
+    }
+  })
+})
