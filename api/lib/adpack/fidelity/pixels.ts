@@ -209,3 +209,169 @@ export function borderBackground(lab: Float32Array, w: number, h: number, tol: n
   const within = d.filter((v) => v <= tol).length
   return { lab: bg, uniformity: samples.length ? within / samples.length : 0, spread: d[Math.floor(d.length * 0.75)] ?? 0 }
 }
+
+// ---------------------------------------------------------------------------
+// Float-plane helpers (harmonization + fidelity metric)
+// ---------------------------------------------------------------------------
+
+/** sRGB 0–255 → linear 0–1 (LUT). */
+export function srgbToLinear(v: number): number {
+  return SRGB_TO_LINEAR[Math.max(0, Math.min(255, Math.round(v)))]
+}
+
+const LIN_LUT_SIZE = 16384
+const LIN_TO_SRGB = (() => {
+  const t = new Float32Array(LIN_LUT_SIZE + 1)
+  for (let i = 0; i <= LIN_LUT_SIZE; i++) {
+    const x = i / LIN_LUT_SIZE
+    t[i] = 255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.pow(x, 1 / 2.4) - 0.055)
+  }
+  return t
+})()
+
+/** Linear 0–1 → sRGB 0–255 (float; out-of-range input is clamped). LUT with linear interpolation. */
+export function linearToSrgb(v: number): number {
+  const x = (v <= 0 ? 0 : v >= 1 ? 1 : v) * LIN_LUT_SIZE
+  const i = x | 0
+  if (i >= LIN_LUT_SIZE) return 255
+  const f = x - i
+  return LIN_TO_SRGB[i] + (LIN_TO_SRGB[i + 1] - LIN_TO_SRGB[i]) * f
+}
+
+/** One horizontal + vertical box blur pass of radius r (edge-clamped), in place via `tmp`. */
+function boxPass(src: Float32Array, dst: Float32Array, tmp: Float32Array, w: number, h: number, r: number): void {
+  if (r < 1) {
+    dst.set(src)
+    return
+  }
+  const norm = 1 / (2 * r + 1)
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    let acc = 0
+    for (let k = -r; k <= r; k++) acc += src[row + Math.min(w - 1, Math.max(0, k))]
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = acc * norm
+      acc += src[row + Math.min(w - 1, x + r + 1)] - src[row + Math.max(0, x - r)]
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0
+    for (let k = -r; k <= r; k++) acc += tmp[Math.min(h - 1, Math.max(0, k)) * w + x]
+    for (let y = 0; y < h; y++) {
+      dst[y * w + x] = acc * norm
+      acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]
+    }
+  }
+}
+
+/** Gaussian-like blur (3 box passes) of a float plane; sigma in px. Returns a new plane. */
+export function blurPlane(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
+  const out = new Float32Array(src)
+  if (sigma < 0.3) return out
+  // Box radius for 3 passes ≈ sigma (variance of a box of width 2r+1 is ((2r+1)^2-1)/12).
+  const r = Math.max(1, Math.round(Math.sqrt((12 * sigma * sigma) / 3 + 1) / 2 - 0.5))
+  const tmp = new Float32Array(w * h)
+  const a = new Float32Array(w * h)
+  boxPass(out, a, tmp, w, h, r)
+  boxPass(a, out, tmp, w, h, r)
+  boxPass(out, a, tmp, w, h, r)
+  return a
+}
+
+/**
+ * Normalized convolution: blur of `src` using only pixels where `weight` > 0 (e.g. inside a mask),
+ * so values never bleed in from outside. Where no weight reaches, returns `fallback`.
+ */
+export function maskedBlur(src: Float32Array, weight: Float32Array | Uint8Array, w: number, h: number, sigma: number, fallback = 0): Float32Array {
+  const num = new Float32Array(w * h)
+  const den = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) {
+    num[i] = src[i] * weight[i]
+    den[i] = weight[i]
+  }
+  const bn = blurPlane(num, w, h, sigma)
+  const bd = blurPlane(den, w, h, sigma)
+  const out = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) out[i] = bd[i] > 1e-4 ? bn[i] / bd[i] : fallback
+  return out
+}
+
+/** maskedBlur of several planes sharing one weight (the denominator is blurred once). */
+export function maskedBlurMany(srcs: Float32Array[], weight: Float32Array | Uint8Array, w: number, h: number, sigma: number, fallback = 0): Float32Array[] {
+  const den = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) den[i] = weight[i]
+  const bd = blurPlane(den, w, h, sigma)
+  return srcs.map((src) => {
+    const num = new Float32Array(w * h)
+    for (let i = 0; i < w * h; i++) num[i] = src[i] * weight[i]
+    const bn = blurPlane(num, w, h, sigma)
+    const out = new Float32Array(w * h)
+    for (let i = 0; i < w * h; i++) out[i] = bd[i] > 1e-4 ? bn[i] / bd[i] : fallback
+    return out
+  })
+}
+
+/** Chamfer (3-4) distance in px from each inside pixel to the nearest outside pixel (0 outside). */
+export function distanceInside(mask: Uint8Array, w: number, h: number): Float32Array {
+  const INF = 1e9
+  const d = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) d[i] = mask[i] ? INF : 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      if (!d[i]) continue
+      let v = d[i]
+      // Outside the canvas counts as outside the mask.
+      if (x === 0 || y === 0) v = Math.min(v, 3)
+      if (x > 0) v = Math.min(v, d[i - 1] + 3)
+      if (y > 0) {
+        v = Math.min(v, d[i - w] + 3)
+        if (x > 0) v = Math.min(v, d[i - w - 1] + 4)
+        if (x < w - 1) v = Math.min(v, d[i - w + 1] + 4)
+      }
+      d[i] = v
+    }
+  }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const i = y * w + x
+      if (!d[i]) continue
+      let v = d[i]
+      if (x === w - 1 || y === h - 1) v = Math.min(v, 3)
+      if (x < w - 1) v = Math.min(v, d[i + 1] + 3)
+      if (y < h - 1) {
+        v = Math.min(v, d[i + w] + 3)
+        if (x < w - 1) v = Math.min(v, d[i + w + 1] + 4)
+        if (x > 0) v = Math.min(v, d[i + w - 1] + 4)
+      }
+      d[i] = v
+    }
+  }
+  for (let i = 0; i < w * h; i++) d[i] /= 3
+  return d
+}
+
+/** Deterministic PRNG (mulberry32) → standard normal samples (Box–Muller). */
+export function gaussianRng(seed: number): () => number {
+  let a = seed >>> 0
+  const uni = () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  let spare: number | null = null
+  return () => {
+    if (spare !== null) {
+      const s = spare
+      spare = null
+      return s
+    }
+    const u = Math.max(1e-12, uni())
+    const v = uni()
+    const m = Math.sqrt(-2 * Math.log(u))
+    spare = m * Math.sin(2 * Math.PI * v)
+    return m * Math.cos(2 * Math.PI * v)
+  }
+}

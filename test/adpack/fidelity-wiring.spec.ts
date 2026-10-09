@@ -4,13 +4,13 @@
  * 1. ad_profile lock / immutableAttributes / allowedProps + tagged/primary photos → pack options & productPhotos.
  * 2. adpack_resize re-composites the stored plate + cut-outs (fidelity kept), falls back to the stored scene.
  * 3. Status / deliverable carry WS4 fields AND WS1 fidelity per ad / file.
- * 4. Quote: productFidelity is free; relight (an extra image-edit call) is priced, PLAN_CHANGED stays exact.
+ * 4. Quote: productFidelity and relight (deterministic 'auto' or the AI pass) are both free; PLAN_CHANGED stays exact.
  */
 import { describe, expect, it, vi } from 'vitest'
 import * as usageLogger from '../../api/lib/usage-logger'
 import { memoryBlobCache } from '../../api/lib/adpack/fidelity/cache'
 import { roleFromImageRow } from '../../api/lib/adpack/fidelity/photos'
-import { advancePack, offerForItem, planPack, quotePack, relightGenerationId, resizeItem, type AdvancePackInput } from '../../api/lib/adpack/pack-runner'
+import { advancePack, offerForItem, planPack, quotePack, resizeItem, type AdvancePackInput } from '../../api/lib/adpack/pack-runner'
 import { buildDnaFromSavedBrand } from '../../api/lib/adpack/saved-brand'
 import { adPackPlanSummary, createAdPackService, resolveRenderOptions } from '../../api/lib/adpack/service'
 import { buildStatusExtras } from '../../api/lib/adpack/status-summary'
@@ -192,7 +192,7 @@ describe('3 · status / deliverable carry WS4 fields and WS1 fidelity', () => {
   })
 })
 
-describe('4 · quote / approval: relight is priced, productFidelity is not', () => {
+describe('4 · quote / approval: relight is included and free, productFidelity too', () => {
   const service = () => {
     const store = createMemoryPackStore()
     return {
@@ -209,37 +209,42 @@ describe('4 · quote / approval: relight is priced, productFidelity is not', () 
   }
   const offer = { ...serum.offer, productImageUrls: [HERO] }
 
-  it('quote: exact vs generated cost the same; relight adds one image unit per ad (exact only)', async () => {
+  it('quote: exact vs generated and relight auto / ai / legacy true all cost the same', async () => {
     const { svc } = service()
     const base = await svc.quote({ size: 3, dna: serum.dna, offer })
-    expect((await svc.quote({ size: 3, dna: serum.dna, offer, productFidelity: 'generated' })).credits).toBe(base.credits)
-    const relit = await svc.quote({ size: 3, dna: serum.dna, offer, relight: true })
-    expect(relit).toMatchObject({ size: 3, relight: true, credits: base.credits * 2, perAd: base.perAd * 2 })
-    // Relight is dropped in generated mode → no surcharge.
-    expect((await svc.quote({ size: 3, dna: serum.dna, offer, productFidelity: 'generated', relight: true })).credits).toBe(base.credits)
-    expect(quotePack(3, { relight: true }).credits).toBe(adPackPlanSummary(3, { relight: true }).total)
+    expect(base).toMatchObject({ size: 3, credits: quotePack(3).credits, perAd: quotePack(1).perAd })
+    for (const variant of [{ productFidelity: 'generated' as const }, { relight: 'auto' as const }, { relight: 'ai' as const }, { relight: true }, { productFidelity: 'generated' as const, relight: 'ai' as const }]) {
+      const q = await svc.quote({ size: 3, dna: serum.dna, offer, ...variant })
+      expect(q.credits, JSON.stringify(variant)).toBe(base.credits)
+      expect(q.perAd).toBe(base.perAd)
+      expect(q).not.toHaveProperty('relight')
+    }
+    expect(quotePack(3).credits).toBe(adPackPlanSummary(3).total)
+    await expect(svc.quote({ size: 3, dna: serum.dna, offer, relight: 'studio' })).rejects.toMatchObject({ code: 'BAD_INPUT' })
   })
 
-  it('PLAN_CHANGED when relight was not part of the approved price; matching approval runs', async () => {
+  it('no PLAN_CHANGED for relight: an approval without it runs with relight ai, same price', async () => {
     const { svc, store } = service()
     const plain = adPackPlanSummary(2)
-    await expect(svc.startPack({ userId: USER, source: 'web', dna: serum.dna, offer, size: 2, relight: true, approved: { items: plain.items, total: plain.total } }))
-      .rejects.toMatchObject({ code: 'PLAN_CHANGED', details: { planned: { items: 2, total: plain.total * 2 } } })
-    const relit = adPackPlanSummary(2, { relight: true })
-    const started = await svc.startPack({ userId: USER, source: 'web', dna: serum.dna, offer, size: 2, relight: true, approved: { items: relit.items, total: relit.total } })
-    expect(started.quote).toMatchObject({ credits: relit.total, relight: true })
-    expect(store.packs.get(started.packId)?.quotedCredits).toBe(relit.total)
+    const started = await svc.startPack({ userId: USER, source: 'web', dna: serum.dna, offer, size: 2, relight: 'ai', approved: { items: plain.items, total: plain.total } })
+    expect(started.quote).toMatchObject({ credits: plain.total })
+    expect(store.packs.get(started.packId)?.quotedCredits).toBe(plain.total)
     const status = await svc.getStatus({ userId: USER, packId: started.packId })
-    expect(status).toMatchObject({ productFidelity: 'exact', relight: true, quotedCredits: relit.total })
+    expect(status).toMatchObject({ productFidelity: 'exact', relight: 'ai', quotedCredits: plain.total })
+    // Default exact pack: relight reported as 'auto' (the deterministic stage is always on).
+    const auto = await svc.startPack({ userId: USER, source: 'web', dna: serum.dna, offer, size: 1, approved: { items: 1, total: adPackPlanSummary(1).total } })
+    expect(await svc.getStatus({ userId: USER, packId: auto.packId })).toMatchObject({ productFidelity: 'exact', relight: 'auto' })
   })
 
-  it('the runner charges the quoted relight unit under its own idempotent id', async () => {
-    const t = await setup({ render: { productFidelity: 'exact', relight: true } })
-    expect(t.planned.pack.quotedCredits).toBe(quotePack(1, { relight: true }).credits)
-    await t.advance()
-    const item = (await t.state()).items[0]
-    expect(item.status).toBe('done')
-    expect(t.charge.counts.get(item.generationId)).toBe(1)
-    expect(t.charge.counts.get(relightGenerationId(item.generationId))).toBe(1)
+  it('the runner charges exactly one unit per ad, relight ai or legacy relight: true included', async () => {
+    for (const relight of ['ai' as const, true as unknown as 'ai']) {
+      const t = await setup({ render: { productFidelity: 'exact', relight } })
+      expect(t.planned.pack.quotedCredits).toBe(quotePack(1).credits)
+      await t.advance()
+      const item = (await t.state()).items[0]
+      expect(item.status).toBe('done')
+      expect(t.charge.counts.get(item.generationId)).toBe(1)
+      expect([...t.charge.counts.values()].reduce((a, b) => a + b, 0)).toBe(1)
+    }
   })
 })

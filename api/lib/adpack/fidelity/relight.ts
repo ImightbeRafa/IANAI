@@ -1,10 +1,11 @@
 /**
- * Product fidelity — optional relight pass (exact mode, `relight: true`, off by default).
+ * Product fidelity — optional AI relight pass (exact mode, `relight: 'ai'`; free, off by default).
  *
- * Sends the deterministic composite (no text yet) to the image-edit model asking to
- * harmonize light only, then measures fidelity inside every product mask against the
- * pre-relight placement. The relit image is kept only when every product still passes;
- * otherwise the deterministic composite is returned unchanged.
+ * The default relight is the deterministic stage (harmonize.ts, `relight: 'auto'`). With 'ai',
+ * the harmonized composite (no text yet) is also sent to the image-edit model asking to refine
+ * light only; fidelity is then measured inside every product mask against the original cut-out
+ * (light may change, shape / identity color may not). The relit image is kept only when every
+ * product still passes; otherwise the deterministic result is returned unchanged.
  */
 import sharp from 'sharp'
 import type { ModelGateway } from '../types.js'
@@ -48,7 +49,7 @@ export async function relightComposite(input: {
     return { png: input.composite, relit: false, scores: [], costUsd, reason: `relight_failed: ${error instanceof Error ? error.message : String(error)}` }
   }
   const scores: FidelityScore[] = []
-  for (const p of input.placements) scores.push(await scoreFidelity({ image: relitPng, box: p.box, reference: p.placed, method: 'relit' }))
+  for (const p of input.placements) scores.push(await scoreFidelity({ image: relitPng, box: p.box, reference: p.placed, ...(p.background ? { background: p.background } : {}), method: 'relit' }))
   if (scores.every((s) => s.passed)) return { png: relitPng, relit: true, scores, costUsd }
   return { png: input.composite, relit: false, scores, costUsd, reason: 'relight_rejected_low_fidelity' }
 }

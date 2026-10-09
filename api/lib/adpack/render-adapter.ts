@@ -28,10 +28,11 @@ export function createDefaultRenderer(): Renderer {
         ...(input.productMode ? { productMode: input.productMode } : {}),
         ...(input.productParts?.length ? { productParts: input.productParts.map((p) => toBufferOrString(p)!) } : {}),
         ...(input.light ? { light: input.light } : {}),
+        ...(input.surface ? { surface: input.surface } : {}),
         ...(relight
           ? {
               relight: (composite, placements, ratio) =>
-                relight(u8(composite), placements.map((p) => ({ box: p.box, placed: u8(p.placed), role: p.role })), ratio),
+                relight(u8(composite), placements.map((p) => ({ box: p.box, placed: u8(p.placed), role: p.role, ...(p.background ? { background: u8(p.background) } : {}) })), ratio),
             }
           : {}),
         ...(input.layoutFamily ? { layoutFamily: input.layoutFamily } : {}),
@@ -44,7 +45,8 @@ export function createDefaultRenderer(): Renderer {
         png: new Uint8Array(out.png),
         width: out.width,
         height: out.height,
-        ...(out.productPlacements?.length ? { productPlacements: out.productPlacements.map((p) => ({ box: p.box, placed: u8(p.placed), role: p.role })) } : {}),
+        ...(out.productPlacements?.length ? { productPlacements: out.productPlacements.map((p) => ({ box: p.box, placed: u8(p.placed), role: p.role, ...(p.background ? { background: u8(p.background) } : {}) })) } : {}),
+        ...(out.harmonized ? { harmonized: true } : {}),
         ...(out.relit ? { relit: true } : {}),
         ...(out.layoutReport.textOverProduct ? { textOverProduct: true } : {}),
         layoutFamily: out.layoutReport.layoutFamily,

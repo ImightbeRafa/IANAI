@@ -57,7 +57,8 @@ export type BulkRunContext = {
    * scene (fidelity-scored); 'generated': the image model redraws the product from the refs.
    */
   productFidelity?: 'exact' | 'generated'
-  relight?: boolean
+  /** 'ai' adds the guarded AI relight pass; the deterministic relight stage always runs (free). */
+  relight?: 'ai'
   allowedProps?: string[]
   /** Test seam: model gateway for exact mode (default createModelGateway()). */
   fidelityGateway?: ModelGateway
@@ -318,11 +319,11 @@ export async function runBulkPosts(options: {
           sceneHint: [`Buyer niche: ${angle.niche}`, `Visual approach: ${approach}`, runtime.scene, runtime.guidePrompt].filter(Boolean).join('. '),
           styleNotes: runtime.ctx.brandKit?.visualStyleNotes || undefined,
           allowedProps: runtime.allowedProps,
-          relight: runtime.relight === true,
+          ...(runtime.relight === 'ai' ? { relight: 'ai' as const } : {}),
           variation: absoluteIndex,
         })
         if (!exact.ok) throw new Error(exact.error)
-        fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE }
+        fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift }
         generated = { imageDataUrl: exactResultDataUrl(exact), providerModel: exact.plateModel || imageModel, estimatedCostUsd: exact.costUsd, resolution: `${exact.width}x${exact.height}`, quality: 'medium', mode: 'exact_composite', lockApplied: true }
       } else {
         const grok = await runGrokPostFirstGen({

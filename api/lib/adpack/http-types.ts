@@ -17,6 +17,7 @@ import type {
   AspectRatio,
   FidelityMethod,
   ProductFidelityMode,
+  RelightMode,
   BrandDna,
   CopyCheckIssue,
   DnaFact,
@@ -133,9 +134,9 @@ export interface AdPackQuoteRequest extends AdPackSavedBrandRef {
   offer?: OfferInput
   /** Same selection as start: the quote is for exactly these angles. */
   angleIds?: string[]
-  /** Same render options as start (relight changes the price; productFidelity does not). */
+  /** Same render options as start (neither changes the price: relighting is included). */
   productFidelity?: ProductFidelityMode
-  relight?: boolean
+  relight?: RelightMode | boolean
 }
 
 /**
@@ -212,8 +213,12 @@ export interface AdPackStartRequest {
   approved?: { items: number; total: number }
   /** 'exact' (default when a product photo exists): real product pixels on a generated plate. 'generated': model-drawn product. */
   productFidelity?: ProductFidelityMode
-  /** Optional relight pass (exact mode); kept only when fidelity still passes. */
-  relight?: boolean
+  /**
+   * Exact mode relight, included and free: 'auto' (default) = deterministic harmonization (shading,
+   * white balance + grade, light wrap, shadows, reflection, grain); 'ai' = + an image-edit pass kept
+   * only when fidelity still passes. Booleans accepted (true → 'ai').
+   */
+  relight?: RelightMode | boolean
   /** Kit objects allowed in scenes besides the product (ambient props are always allowed). */
   allowedProps?: string[]
   /** Appearance facts that must never change, e.g. "hélices blancas". */
@@ -314,10 +319,8 @@ export interface AdPackQuote {
   size: number
   /** Total credits for the pack. */
   credits: number
-  /** Credits per ad (one `image_standard`, copy included; + one more with relight). */
+  /** Credits per ad (one `image_standard`, copy included; relighting included). */
   perAd: number
-  /** Relight requested in exact mode: its image-edit call is part of the price. */
-  relight?: true
   /** Angle ids the quote covers (exactly `size` of them). */
   angleIds?: string[]
   /** Present when variations > 1. */
@@ -366,7 +369,7 @@ export interface AdPackItemView {
   libraryImageIds?: string[]
   /** Brand forbidden phrases/claims found in this ad's copy (empty when verified clean). */
   forbiddenHits?: Array<{ phrase: string; field: string }>
-  /** Product fidelity (A4): exact = masked SSIM/ΔE vs the real cut-out; generated = vision verdict. */
+  /** Product fidelity (A4): exact = detail SSIM + silhouette IoU + hue shift vs the real cut-out (light may change, the product may not); generated = vision verdict. */
   fidelity?: AdPackFidelityView
   error?: string
 }
@@ -375,8 +378,15 @@ export interface AdPackFidelityView {
   score: number
   passed: boolean
   method: FidelityMethod
+  /** Detail SSIM (alias of ssimDetail). */
   ssim?: number
+  /** ΔE after removing the relight luminance gradient. */
   deltaE?: number
+  ssimDetail?: number
+  silhouetteIoU?: number
+  /** Degrees. */
+  hueShift?: number
+  chromaRatio?: number
   diffImageUrl?: string
 }
 
@@ -395,8 +405,8 @@ export interface AdPackStatusResponse {
   ratios: AspectRatio[]
   /** How the product reaches the images (exact = real product pixels). */
   productFidelity: ProductFidelityMode
-  /** Relight pass on (priced per ad; regenerating one ad costs the same per-ad price). */
-  relight?: true
+  /** Exact mode relight ('auto' deterministic, or 'ai' + guarded model pass). Included, free. */
+  relight?: RelightMode
   source: Pack['source']
   quotedCredits: number
   /** Credits charged so far (charged items × per-ad credits). */

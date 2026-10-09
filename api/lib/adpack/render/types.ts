@@ -1,7 +1,7 @@
 /**
  * Render-engine types (additive to ../types.ts; nothing there is changed).
  */
-import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LightDirection } from '../types.js'
+import type { AdCopy, AdFormat, AdLanguage, AspectRatio, DnaVisual, LightDirection, PlateSurface } from '../types.js'
 import type { LayoutFamily } from './families.js'
 import type { FontResolution, FontResolverOptions } from './font-resolver.js'
 
@@ -56,10 +56,18 @@ export interface RenderAdInput {
   productParts?: ImageInput[]
   /** Plate light direction (shadow side). */
   light?: LightDirection
+  /** Plate surface (glossy → reflection under the product). */
+  surface?: PlateSurface
+  /**
+   * Exact mode relight stage (default true): deterministic harmonization of the product into the
+   * plate (light model, shading, white balance + shared grade, light wrap, shadows, reflection,
+   * grain). False = plain cut-out + ground shadows (QA comparisons only).
+   */
+  harmonize?: boolean
   /** @deprecated Corner form of `productBox` (normalized 0–1); folded into `productBox`. */
   productAvoid?: { x0: number; y0: number; x1: number; y1: number }
   /** Exact mode relight hook on the text-free composite; null keeps the deterministic composite. */
-  relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part' }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
+  relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part'; background?: Buffer }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
 }
 
 export type TextRole = 'headline' | 'subline' | 'bullet' | 'offer' | 'cta' | 'label' | 'step_number'
@@ -132,8 +140,12 @@ export interface RenderAdResult {
   layoutReport: LayoutReport
   /** Only with debug.returnBase. */
   basePng?: Buffer
-  /** Real cut-outs as placed (pre-harmonization) — fidelity references. */
-  productPlacements?: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part' }>
+  /** Real cut-outs as placed (pre-harmonization) — fidelity references (+ the plate behind each box). */
+  productPlacements?: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part'; background?: Buffer }>
+  /** True when the deterministic relight stage ran (exact mode). */
+  harmonized?: boolean
+  /** Light model summary of the plate (exact mode). */
+  light?: Record<string, unknown>
   /** True when the relight hook result was kept. */
   relit?: boolean
 }

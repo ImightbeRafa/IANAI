@@ -748,7 +748,8 @@ async function runImageGenerateBody(options: {
   ctxPreview: Awaited<ReturnType<typeof mcpGetBrandContext>>
   quote: number
   productFidelity?: 'exact' | 'generated'
-  relight?: boolean
+  /** 'ai' adds the guarded AI relight pass; the deterministic relight stage always runs (free). */
+  relight?: 'ai'
   allowedProps?: string[]
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
@@ -802,10 +803,10 @@ async function runImageGenerateBody(options: {
       styleNotes: kit?.visualStyleNotes || undefined,
       palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
       allowedProps: options.allowedProps,
-      relight: options.relight === true,
+      ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
     })
     if (!exact.ok) throw new Error(exact.error)
-    fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE }
+    fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift }
     generated = {
       imageDataUrl: exactResultDataUrl(exact),
       providerModel: exact.plateModel || 'grok-imagine',

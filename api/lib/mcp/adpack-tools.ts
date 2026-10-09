@@ -452,14 +452,14 @@ export async function dispatchAdPackTool(options: {
           ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
           : null
         // The quote resolves the exact angles start will run (angleIds included): what the user approves is what runs.
-        // Relight (exact mode) adds an image-edit call per ad, so it is part of the approved price.
+        // Relighting (exact mode, 'auto' or 'ai') is included and free: it never changes the price.
         // Same parser + resolver as start: guide angles + angleIds (catalog / planner / legacy ids) × variations.
         const render = { productFidelity: args.productFidelity, relight: args.relight }
         const selection = { angleIds: args.angleIds, angles: args.angles, variations: args.variations, brief: args.brief }
         const quote = preview
           ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer, ...selection, ...render })
           : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, ...selection, ...render })
-        const plan = adPackPlanSummary(quote.size, { relight: quote.relight === true })
+        const plan = adPackPlanSummary(quote.size)
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
         const vary = quote.variations && quote.variations > 1 ? { es: ` (${quote.angles} ángulos × ${quote.variations} variaciones)`, en: ` (${quote.angles} angles × ${quote.variations} variations)` } : { es: '', en: '' }
         const ratios = Array.isArray(args.ratios) && args.ratios.length ? (args.ratios as string[]).join(' + ') : '4:5 + 9:16'
@@ -605,7 +605,8 @@ export async function dispatchAdPackTool(options: {
         if (typeof args.packId !== 'string' || typeof args.itemId !== 'string') throw new AdPackError('BAD_INPUT', 'packId and itemId are required')
         // Ownership check before issuing an approval.
         const current = await service.getStatus({ userId, packId: args.packId })
-        const plan = adPackPlanSummary(1, { relight: current.relight === true })
+        if (!current) throw new AdPackError('NOT_FOUND', 'Pack not found')
+        const plan = adPackPlanSummary(1)
         const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,

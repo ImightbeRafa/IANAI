@@ -9,7 +9,7 @@
  */
 import { SCENE_COMPOSITION_RULES, SCENE_STRICT_NO_TEXT, SCENE_RATIO, sceneSetting } from '../scene.js'
 import { imageSize } from '../image-size.js'
-import type { AdFormat, AdLanguage, AspectRatio, BrandDna, LightDirection, ModelGateway, OfferInput, ProductPhotoRole } from '../types.js'
+import type { AdFormat, AdLanguage, AspectRatio, BrandDna, LightDirection, ModelGateway, OfferInput, PlateSurface, ProductPhotoRole } from '../types.js'
 
 /** Ambient props always allowed in a plate / scene (never product parts). */
 export const AMBIENT_PROPS = ['table', 'plants', 'fabric', 'light', 'wall texture'] as const
@@ -30,6 +30,21 @@ export function plateLight(variation = 0): LightDirection {
 
 export function lightPhrase(light: LightDirection): string {
   return light === 'left' ? 'soft key light from the upper left, shadows falling to the right' : light === 'right' ? 'soft key light from the upper right, shadows falling to the left' : 'soft overhead key light, short shadows straight down'
+}
+
+/**
+ * Surface the plate is prompted with. Studio-like formats (explainer / steps) get a glossy
+ * surface on the first variation so the relight stage can add a real reflection; everything
+ * else stays matte (wood, fabric, stone…), where a reflection would look fake.
+ */
+export function plateSurface(format: AdFormat, variation = 0): PlateSurface {
+  return (format === 'explainer' || format === 'how_to_steps') && Math.abs(Math.floor(variation)) % 2 === 0 ? 'glossy' : 'matte'
+}
+
+export function surfacePhrase(surface: PlateSurface): string {
+  return surface === 'glossy'
+    ? 'a smooth glossy surface (lacquer, acrylic or polished stone) that would show a soft reflection'
+    : 'a matte surface (wood, fabric, paper or stone) with no mirror-like reflections'
 }
 
 /** Plain words for a normalized region ("the right half, from 35% to 80% of the height"). */
@@ -68,6 +83,8 @@ export interface BuildPlatePromptInput {
   /** Where the product will be placed (plate coordinates, 0–1). */
   placement: PlateRegion
   light: LightDirection
+  /** Surface type of the placement area (default matte). */
+  surface?: PlateSurface
   variation?: number
   allowedProps?: string[]
   /** Scene brief from the copy (already stripped of on-image copy by the caller). */
@@ -108,6 +125,7 @@ export function buildPlatePrompt(input: BuildPlatePromptInput): string {
     `Setting: ${plateSetting(input.format, input.variation ?? 0)}`,
     mood ? `Mood: ${mood}` : '',
     `Leave a clear, empty, flat placement area ${describeRegion(input.placement)}: a visible surface (tabletop, floor or pedestal) in perspective, in focus, with nothing on it, where the product will stand.`,
+    `Surface: ${surfacePhrase(input.surface ?? 'matte')}.`,
     `Lighting: ${lightPhrase(input.light)}; consistent shadows on the surface.`,
     'STRICT: the image must contain NO product, no devices, no electronics, no parts, no accessories, no cables, no remotes or controllers, no packaging or boxes, no bottles, no tools, no text and no logos. No people and no hands.',
     `Only these ambient props are allowed, sparingly and away from the placement area: ${ambient.join(', ')}.`,
@@ -128,6 +146,7 @@ export interface GeneratedPlate {
   costUsd: number
   prompt: string
   light: LightDirection
+  surface: PlateSurface
 }
 
 export async function generatePlate(input: BuildPlatePromptInput & { gateway: ModelGateway; draft?: boolean; promptSuffix?: string }): Promise<GeneratedPlate> {
@@ -137,7 +156,7 @@ export async function generatePlate(input: BuildPlatePromptInput & { gateway: Mo
   const res = await input.gateway.scene({ prompt, refs: [], styleRefs: [], ratio: input.ratio ?? SCENE_RATIO, draft: input.draft ?? true, language: input.dna.language })
   if (!res?.bytes?.length) throw new Error('plate_empty_image')
   const size = imageSize(res.bytes) ?? { width: 0, height: 0 }
-  return { bytes: res.bytes, mimeType: res.mimeType, width: size.width, height: size.height, model: res.model, costUsd: res.costUsd ?? 0, prompt, light: input.light }
+  return { bytes: res.bytes, mimeType: res.mimeType, width: size.width, height: size.height, model: res.model, costUsd: res.costUsd ?? 0, prompt, light: input.light, surface: input.surface ?? 'matte' }
 }
 
 // ---------------------------------------------------------------------------

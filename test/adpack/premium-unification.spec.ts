@@ -1,6 +1,6 @@
 /**
  * WS3 (creative system) × WS1 (exact fidelity) × WS2/WS4 — the unifications of the merge:
- * 2. one angle resolver: quote = ads × variations (+ relight), catalog + legacy + planner ids,
+ * 2. one angle resolver: quote = ads × variations (relight free), catalog + legacy + planner ids,
  *    unknown ids → BAD_INPUT rejectedAngles before approval, start recomputes → PLAN_CHANGED;
  * 3. status/deliverable = WS4 fields + WS1 fidelity + WS3 angle/rationale/layoutFamily per ad;
  * 4. check-copy: WS2/WS4 rules + WS3 cliché blocklist in one issue shape;
@@ -41,12 +41,12 @@ describe('2 · one angle resolver (quote = approval = start)', () => {
     }
   })
 
-  it('quote = ads × variations (+ relight per ad) and planPack runs exactly that', async () => {
+  it('quote = ads × variations (relight included, free) and planPack runs exactly that', async () => {
     const env = createDoorEnv()
-    const q = await env.service.quote({ userId: 'u1', dna: serum.dna, offer: exactOffer, size: 3, variations: 2, relight: true, productFidelity: 'exact' })
-    expect(q).toMatchObject({ size: 6, variations: 2, angles: 3, relight: true, credits: quotePack(6, { relight: true }).credits })
+    const q = await env.service.quote({ userId: 'u1', dna: serum.dna, offer: exactOffer, size: 3, variations: 2, relight: 'ai', productFidelity: 'exact' })
+    expect(q).toMatchObject({ size: 6, variations: 2, angles: 3, credits: quotePack(6).credits })
     expect(q.angleIds).toHaveLength(3)
-    const planned = planPack({ dna: serum.dna, offer: exactOffer, size: 3, variations: 2, userId: 'u1', source: 'web', render: { productFidelity: 'exact', relight: true } })
+    const planned = planPack({ dna: serum.dna, offer: exactOffer, size: 3, variations: 2, userId: 'u1', source: 'web', render: { productFidelity: 'exact', relight: 'ai' } })
     expect(planned.items).toHaveLength(6)
     expect(planned.pack.quotedCredits).toBe(q.credits)
   })
@@ -59,17 +59,16 @@ describe('2 · one angle resolver (quote = approval = start)', () => {
     })
   })
 
-  it('start recomputes the plan: any difference with the approval (variations, relight) → PLAN_CHANGED, nothing created', async () => {
+  it('start recomputes the plan: any difference with the approval (variations) → PLAN_CHANGED, nothing created; relight never changes it', async () => {
     const env = createDoorEnv()
     const q = await env.service.quote({ userId: 'u1', dna: serum.dna, offer: exactOffer, size: 2, variations: 2 })
-    // Approved 4 ads without relight; start asks for relight → price differs.
-    await expect(
-      env.service.startPack({ userId: 'u1', source: 'web', dna: serum.dna, offer: exactOffer, size: 2, variations: 2, relight: true, productFidelity: 'exact', approved: { items: q.size, total: q.credits } }),
-    ).rejects.toMatchObject({ code: 'PLAN_CHANGED' })
     await expect(env.service.startPack({ userId: 'u1', source: 'web', dna: serum.dna, offer: exactOffer, size: 2, variations: 3, approved: { items: q.size, total: q.credits } })).rejects.toMatchObject({ code: 'PLAN_CHANGED' })
     expect(env.store.packs.size).toBe(0)
     const ok = await env.service.startPack({ userId: 'u1', source: 'web', dna: serum.dna, offer: exactOffer, size: 2, variations: 2, approved: { items: q.size, total: q.credits } })
     expect(ok.quote).toMatchObject({ size: 4, credits: 4 * PER_AD, variations: 2 })
+    // The same approval runs with relight 'ai' too: relighting is included, the price is identical.
+    const relit = await env.service.startPack({ userId: 'u1', source: 'web', dna: serum.dna, offer: exactOffer, size: 2, variations: 2, relight: 'ai', productFidelity: 'exact', approved: { items: q.size, total: q.credits } })
+    expect(relit.quote).toMatchObject({ size: 4, credits: 4 * PER_AD })
   })
 
   it('MCP: catalog angleIds × variations in the approval; unknown ids rejected before approval', async () => {

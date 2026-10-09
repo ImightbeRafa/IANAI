@@ -32,6 +32,13 @@ export interface AssetQuality {
   warnings: string[]
   /** 0–1 overall usability. */
   score: number
+  /**
+   * Set when the photo was upscaled before the cut-out (low resolution only; fidelity/upscale.ts:
+   * Lanczos3 + edge-aware unsharp, ≤ 2× / 2048 px, verified not redrawn).
+   */
+  upscaled?: boolean
+  from?: { width: number; height: number }
+  to?: { width: number; height: number }
 }
 
 export function laplacianVariance(grayPx: Uint8Array | Buffer, w: number, h: number): number {

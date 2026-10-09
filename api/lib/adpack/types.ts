@@ -218,25 +218,51 @@ export interface ProductPhoto {
  */
 export type ProductFidelityMode = 'exact' | 'generated'
 
+/**
+ * Exact-mode relighting. Always included and free:
+ * - 'auto' (default): deterministic photographic harmonization (light model of the plate,
+ *   directional shading, white balance + shared grade, light wrap, contact/cast shadows,
+ *   reflection on glossy surfaces, grain/defocus match) — no model call, product pixels kept.
+ * - 'ai': the same, then an image-edit relight pass kept only when fidelity still passes.
+ */
+export type RelightMode = 'auto' | 'ai'
+
+/** Surface the plate was prompted with (glossy → reflection under the product). */
+export type PlateSurface = 'matte' | 'glossy'
+
 /** Pack-level render options (persisted with the pack). */
 export interface PackRenderOptions {
   productFidelity: ProductFidelityMode
-  /** Optional model relight pass on the composite (exact mode), kept only when fidelity holds. */
-  relight?: boolean
+  /** 'ai' adds the optional model relight pass (free, fidelity-guarded); absent = 'auto'. Legacy `true` = 'ai'. */
+  relight?: RelightMode
   allowedProps?: string[]
   immutableAttributes?: string[]
 }
 
-export type FidelityMethod = 'composite' | 'relit' | 'generated'
+/** composite = plain cut-out (no harmonization); harmonized = deterministic relight stage; relit = + AI pass; generated = model-drawn. */
+export type FidelityMethod = 'composite' | 'harmonized' | 'relit' | 'generated'
 
-/** Product fidelity of a finished image (inside the product mask vs the real cut-out). */
+/**
+ * Product fidelity of a finished image (inside the product mask vs the real cut-out).
+ * Light may change, shape and identity color may not: passed = structural (detail SSIM on
+ * high-pass log-luminance + silhouette IoU) AND identity color (hue shift, chroma ratio, ΔE —
+ * measured after removing the low-frequency luminance gradient that relighting applies).
+ */
 export interface FidelityResult {
   /** 0–1 combined score (1 = identical). */
   score: number
-  /** Masked grayscale SSIM (8×8 windows); null for generated mode (no pixel alignment). */
+  /** Detail SSIM (same value as ssimDetail; kept for older readers); null for generated mode. */
   ssim: number | null
-  /** Mean ΔE (CIE76, Lab) inside the mask; null for generated mode. */
+  /** Mean ΔE (CIE76) after removing the relight luminance gradient; null for generated mode. */
   deltaE: number | null
+  /** SSIM of the high-pass (detail) log-luminance inside the mask. */
+  ssimDetail?: number | null
+  /** IoU of the product silhouette found in the image vs the cut-out's. */
+  silhouetteIoU?: number | null
+  /** Chroma-weighted mean hue shift (degrees) after gradient removal. */
+  hueShift?: number | null
+  /** Mean chroma image / cut-out after gradient removal. */
+  chromaRatio?: number | null
   passed: boolean
   method: FidelityMethod
   /** Heatmap PNG of the per-pixel difference (exact mode, worst ratio). */
@@ -396,6 +422,8 @@ export interface SceneResult {
   kind?: 'scene' | 'plate'
   /** Plate light direction (exact mode). */
   light?: LightDirection
+  /** Surface the plate was prompted with (glossy → reflection under the product). */
+  surface?: PlateSurface
   /** Real-product cut-outs composited onto the plate (exact mode). First = hero. */
   cutouts?: StoredCutout[]
   /**
@@ -427,7 +455,7 @@ export interface RenderedAd {
   imageUrl: string
   width: number
   height: number
-  /** Product fidelity of this render (exact: masked SSIM/ΔE vs the cut-out). */
+  /** Product fidelity of this render (exact: detail SSIM, silhouette IoU, identity color vs the cut-out). */
   fidelity?: FidelityResult
 }
 

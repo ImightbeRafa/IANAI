@@ -6,9 +6,12 @@
  * Product fidelity (pack.render.productFidelity):
  * - 'exact' (default when a product photo exists): the scene step makes real-product cut-outs
  *   (fidelity/segment.ts, cached by hash) and a product-free background plate (props-checked,
- *   ≤ 2 retries → scene_props_failed); the render step composites the real pixels per ratio and
- *   scores fidelity (masked SSIM + ΔE). A failed cut-out → cutout_failed; a low score →
- *   fidelity_failed. A model-redrawn product is never delivered in exact mode.
+ *   ≤ 2 retries → scene_props_failed); the render step composites the real pixels per ratio with
+ *   the relight stage INCLUDED (deterministic harmonization: shading, white balance + grade,
+ *   light wrap, shadows, reflection, grain — no model call, no extra credits; `relight: 'ai'` adds
+ *   a free, fidelity-guarded image-edit pass) and scores fidelity (detail SSIM + silhouette IoU +
+ *   identity color after removing the light gradient). A failed cut-out → cutout_failed; a low
+ *   score → fidelity_failed. A model-redrawn product is never delivered in exact mode.
  * - 'generated': the image model draws the product from the reference (legacy); the vision check
  *   also rejects invented parts/accessories and returns the product bbox the text avoids.
  *
@@ -35,9 +38,9 @@ import { generateScene, stripCopyText, type GeneratedScene } from './scene.js'
 import { errorMessage } from './util.js'
 import { storageBlobCache, type BlobCache } from './fidelity/cache.js'
 import { prepareProductCutouts, resolveProductPhotos, defaultImageLoader, type ImageLoader, type LoadedCutout } from './fidelity/pipeline.js'
-import { checkPlate, generatePlate, plateLight, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion, type PropsReference } from './fidelity/plate.js'
+import { checkPlate, generatePlate, plateLight, plateSurface, PLATE_RETRY_HINT_PLACEMENT, PLATE_RETRY_HINT_PROPS, type PlateCheckResult, type PlateRegion, type PropsReference } from './fidelity/plate.js'
 import { relightComposite } from './fidelity/relight.js'
-import { scoreFidelity, toFidelityResult, worstFidelity } from './fidelity/score.js'
+import { fidelityFailReason, scoreFidelity, toFidelityResult, worstFidelity } from './fidelity/score.js'
 import { planProductBoxes } from './render/render.js'
 import { RATIO_SIZE } from './render/frame.js'
 import { cachedLogo } from './render/logo.js'
@@ -54,6 +57,7 @@ import type {
   CopyCheckResult,
   FidelityResult,
   LightDirection,
+  PlateSurface,
   ModelGateway,
   OfferInput,
   Pack,
@@ -197,7 +201,7 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[];
     status: 'planned',
     size: angles.length,
     ratios,
-    quotedCredits: quotePack(angles.length, { relight: input.render?.relight }).credits,
+    quotedCredits: quotePack(angles.length).credits,
     source: input.source,
     ...(input.brief ? { brief: input.brief } : {}),
     ...(input.render ? { render: input.render } : {}),
@@ -220,22 +224,19 @@ export function planPack(input: PlanPackInput): { pack: Pack; items: PackItem[];
 }
 
 /**
- * Image-tier model calls billed per ad by the optional relight pass (exact mode): relight sends
- * the composite to the image-edit model, so it is quoted (and charged) as one more
- * `image_standard` per ad. productFidelity itself never changes the price.
+ * Credits for a pack: one `image_standard` per ad (copy included). Relighting is included and
+ * free in every mode (owner decision: the deterministic stage always runs in exact mode, and the
+ * optional AI pass costs nothing extra); productFidelity never changes the price either.
  */
-export const RELIGHT_UNITS_PER_AD = 1
-
-/** Credits for a pack: one `image_standard` per ad (copy included), + relight when requested. */
-export function quotePack(size: number, opts: { relight?: boolean } = {}): { credits: number; perAd: number } {
-  const units = 1 + (opts.relight ? RELIGHT_UNITS_PER_AD : 0)
-  const perAd = quoteCredits('image_standard', units)
-  return { credits: quoteCredits('image_standard', Math.max(0, Math.floor(size)) * units), perAd }
+export function quotePack(size: number): { credits: number; perAd: number } {
+  const perAd = quoteCredits('image_standard', 1)
+  return { credits: quoteCredits('image_standard', Math.max(0, Math.floor(size))), perAd }
 }
 
-/** Charge id of an ad's relight units (idempotent per attempt, like the ad's own generationId). */
-export function relightGenerationId(generationId: string): string {
-  return generationUuidFromApproval(generationId, 'adpack:relight')
+/** The pack's relight mode ('auto' unless the AI pass was asked for; legacy `true` = 'ai'). */
+export function packRelightMode(pack: Pick<Pack, 'render'>): 'auto' | 'ai' {
+  const r = pack.render?.relight as unknown
+  return r === 'ai' || r === true ? 'ai' : 'auto'
 }
 
 // ---------------------------------------------------------------------------
@@ -852,6 +853,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const cutouts: LoadedCutout[] = [cut.hero, ...cut.parts]
   const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length
   const light = plateLight(item.index)
+  const surface = plateSurface(format, variation)
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps
   const refs: PropsReference[] = photos
@@ -870,7 +872,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     attempts++
     let plate
     try {
-      plate = await generatePlate({ gateway, format, dna, offer, placement, light, variation, allowedProps, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint })
+      plate = await generatePlate({ gateway, format, dna, offer, placement, light, surface, variation, allowedProps, sceneBrief: stripCopyText(copy.sceneBrief ?? '', copy), draft: ctx.input.draft ?? true, promptSuffix: hint })
     } catch (error) {
       lastError = errorMessage(error)
       continue
@@ -925,6 +927,7 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
       productLocked: true,
       kind: 'plate',
       light,
+      surface,
       cutouts: cutouts.map((c) => c.stored),
     },
     sceneCheck: {
@@ -946,16 +949,18 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
 interface ExactRenderInputs {
   cutouts: Uint8Array[]
   light?: LightDirection
+  surface?: PlateSurface
 }
 
 /** Cut-out bytes for an item (this call's memory, else the stored cut-out URLs). */
 async function exactInputsFromScene(item: PackItem, load: ImageLoader, memory?: Uint8Array[]): Promise<ExactRenderInputs> {
-  if (memory?.length) return { cutouts: memory, light: item.scene?.light }
+  const extra = { light: item.scene?.light, ...(item.scene?.surface ? { surface: item.scene.surface } : {}) }
+  if (memory?.length) return { cutouts: memory, ...extra }
   const stored = item.scene?.cutouts ?? []
   if (!stored.length) throw new Error('cutout_missing: no stored cut-out for this ad')
   const cutouts: Uint8Array[] = []
   for (const c of stored) cutouts.push(await load(c.url))
-  return { cutouts, light: item.scene?.light }
+  return { cutouts, ...extra }
 }
 
 /**
@@ -981,7 +986,7 @@ async function scoreRender(r: RenderOutput, ratio: AspectRatio, diff: boolean): 
   if (!r.productPlacements?.length) return null
   let worst: Awaited<ReturnType<typeof scoreFidelity>> | null = null
   for (const p of r.productPlacements) {
-    const s = await scoreFidelity({ image: r.png, box: p.box, reference: p.placed, method: r.relit ? 'relit' : 'composite', diff })
+    const s = await scoreFidelity({ image: r.png, box: p.box, reference: p.placed, ...(p.background ? { background: p.background } : {}), method: r.relit ? 'relit' : r.harmonized ? 'harmonized' : 'composite', diff })
     if (!worst || (worst.passed && !s.passed) || (worst.passed === s.passed && s.score < worst.score)) worst = s
   }
   if (!worst) return null
@@ -1005,7 +1010,8 @@ async function renderAllRatios(args: {
   const { renderer, storage, pack, item, copy, sceneImage, exact } = args
   const out: RenderedAd[] = []
   const outputs: Array<{ ratio: AspectRatio; r: RenderOutput }> = []
-  const relightOn = Boolean(exact && pack.render?.relight && args.gateway?.edit)
+  // relight 'auto' (default) = the renderer's deterministic stage; 'ai' adds the free, guarded model pass.
+  const relightOn = Boolean(exact && packRelightMode(pack) === 'ai' && args.gateway?.edit)
   const gateway = args.gateway
   for (const ratio of args.ratios ?? pack.ratios) {
     const r = await renderer.render({
@@ -1024,13 +1030,14 @@ async function renderAllRatios(args: {
             productCutout: exact.cutouts[0],
             ...(exact.cutouts.length > 1 ? { productParts: exact.cutouts.slice(1) } : {}),
             ...(exact.light ? { light: exact.light } : {}),
+            ...(exact.surface ? { surface: exact.surface } : {}),
             ...(relightOn && gateway
               ? {
                   relight: async (composite: Uint8Array, placements: NonNullable<RenderOutput['productPlacements']>, rr: AspectRatio) => {
                     const res = await relightComposite({
                       gateway,
                       composite: Buffer.from(composite),
-                      placements: placements.map((p) => ({ box: p.box, placed: Buffer.from(p.placed), role: p.role })),
+                      placements: placements.map((p) => ({ box: p.box, placed: Buffer.from(p.placed), role: p.role, ...(p.background ? { background: Buffer.from(p.background) } : {}) })),
                       ratio: rr,
                     })
                     return res.relit ? new Uint8Array(res.png) : null
@@ -1137,7 +1144,7 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     const sceneCheck = fidelity ? { ...(item.sceneCheck ?? { ok: true, productMatches: null, strayText: null, score: 0.5 }), fidelity } : item.sceneCheck
     if (exactMode && fidelity && !fidelity.passed) {
       // Never deliver an altered product: the renders are not kept.
-      return fail(ctx, item, `fidelity_failed: ssim ${fidelity.ssim} / ΔE ${fidelity.deltaE} (${fidelity.ratio ?? 'render'})`, { fidelity, sceneCheck, renders: [], timings })
+      return fail(ctx, item, `fidelity_failed: ${fidelityFailReason(fidelity)} (${fidelity.ratio ?? 'render'})`, { fidelity, sceneCheck, renders: [], timings })
     }
     if (exactMode && !fidelity) return fail(ctx, item, 'fidelity_failed: product placement missing in render', { renders: [], timings })
     return save(ctx, item, { status: 'rendered', renders: rendered.renders, ...(fidelity ? { fidelity, sceneCheck } : {}), timings, error: undefined })
@@ -1148,9 +1155,8 @@ async function stepRender(ctx: RunCtx, item: PackItem): Promise<PackItem> {
 async function stepCharge(ctx: RunCtx, item: PackItem): Promise<PackItem> {
   const t0 = Date.now()
   try {
+    // One charge per ad: relighting (deterministic or AI) is included.
     await ctx.input.charge({ userId: ctx.pack.userId, generationId: item.generationId })
-    // Relight was quoted per ad (RELIGHT_UNITS_PER_AD): charge it under its own idempotent id.
-    if (ctx.pack.render?.relight) await ctx.input.charge({ userId: ctx.pack.userId, generationId: relightGenerationId(item.generationId) })
   } catch (error) {
     return fail(ctx, item, `charge_failed: ${errorMessage(error)}`, { timings: { ...item.timings, chargeMs: Date.now() - t0 } })
   }
@@ -1275,7 +1281,8 @@ export type ResizeItemResult =
  *
  * Exact mode: the stored product-free plate + the stored real-product cut-outs are composited
  * again (same light, product box reserved so text never covers the product) and every new ratio
- * is fidelity-scored; a ratio that fails is not delivered. No relight (it would be a model call).
+ * is fidelity-scored; a ratio that fails is not delivered. The deterministic relight stage runs
+ * (no model call); the AI relight pass does not (resize stays model-free).
  * When the cut-outs are not stored (legacy / generated scene) the stored final scene is
  * re-rendered and each new file carries fidelity.method 'generated' (vision verdict, no pixels).
  * A plate whose cut-outs can no longer be loaded is refused (a plate alone has no product).

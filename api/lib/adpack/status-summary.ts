@@ -61,15 +61,23 @@ export interface AdPackDeliverableFile {
   format: 'png'
   /** "feed" (4:5), "story" (9:16), "square" (1:1), "landscape" (16:9). */
   placement: 'feed' | 'story' | 'square' | 'landscape'
-  /** Product fidelity of this file (exact mode: masked SSIM/ΔE vs the real cut-out). */
+  /** Product fidelity of this file (exact mode: detail SSIM, silhouette IoU, hue shift vs the real cut-out). */
   fidelity?: AdPackFidelitySummary
 }
 
-/** Product fidelity (A4) so an agent can reject without guessing. */
+/**
+ * Product fidelity (A4) so an agent can reject without guessing. Light may change, the product
+ * may not: ssimDetail (structure), silhouetteIoU (shape) and hueShift (identity color, after
+ * removing the relight gradient). method: harmonized (deterministic relight), relit (+ AI pass),
+ * composite (plain cut-out), generated (model-drawn; vision verdict only).
+ */
 export interface AdPackFidelitySummary {
   score: number
   passed: boolean
   method: FidelityMethod
+  ssimDetail?: number
+  silhouetteIoU?: number
+  hueShift?: number
   diffImageUrl?: string
 }
 
@@ -118,7 +126,16 @@ export interface AdPackStatusExtras {
 const PLACEMENT: Record<AspectRatio, AdPackDeliverableFile['placement']> = { '4:5': 'feed', '9:16': 'story', '1:1': 'square', '16:9': 'landscape' }
 
 function fidelitySummary(f: FidelityResult): AdPackFidelitySummary {
-  return { score: f.score, passed: f.passed, method: f.method, ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}) }
+  const ssimDetail = f.ssimDetail ?? f.ssim
+  return {
+    score: f.score,
+    passed: f.passed,
+    method: f.method,
+    ...(typeof ssimDetail === 'number' ? { ssimDetail } : {}),
+    ...(typeof f.silhouetteIoU === 'number' ? { silhouetteIoU: f.silhouetteIoU } : {}),
+    ...(typeof f.hueShift === 'number' ? { hueShift: f.hueShift } : {}),
+    ...(f.diffImageUrl ? { diffImageUrl: f.diffImageUrl } : {}),
+  }
 }
 
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s)

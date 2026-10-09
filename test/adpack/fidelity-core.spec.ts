@@ -1,6 +1,7 @@
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
-import { compositeProducts, fitBox, harmonizeGains, HARMONIZE_MAX_GAIN, layoutProductGroup } from '../../api/lib/adpack/fidelity/composite'
+import { compositeProducts, fitBox, HARMONIZE_MAX_GAIN, layoutProductGroup } from '../../api/lib/adpack/fidelity/composite'
+import { whiteBalanceGains } from '../../api/lib/adpack/fidelity/harmonize'
 import { analyzeAssetQuality, pickProductImage, type PoolImage } from '../../api/lib/adpack/fidelity/asset-quality'
 import { memoryBlobCache } from '../../api/lib/adpack/fidelity/cache'
 import { cutoutForPhoto, prepareProductCutouts, resolveProductPhotos } from '../../api/lib/adpack/fidelity/pipeline'
@@ -164,12 +165,12 @@ describe('scoreFidelity', () => {
     expect([meta.width, meta.height]).toEqual([box.w, box.h])
   })
 
-  it('a recolored product (hélices grises en vez de blancas) fails on ΔE', async () => {
+  it('a recolored product (hue rotated) fails on identity color (hue shift)', async () => {
     const { box, ref } = await placed()
     const recolored = await sharp(ref).modulate({ hue: 90 }).png().toBuffer()
     const img = await sharp(await syntheticPlate(1080, 1350)).composite([{ input: recolored, left: box.x, top: box.y }]).png().toBuffer()
     const s = await scoreFidelity({ image: img, box, reference: ref })
-    expect(s.deltaE).toBeGreaterThan(FIDELITY_THRESHOLD.deltaE)
+    expect(s.hueShift).toBeGreaterThan(FIDELITY_THRESHOLD.hueShift)
     expect(s.passed).toBe(false)
   })
 
@@ -189,7 +190,7 @@ describe('scoreFidelity', () => {
 
   it('worstFidelity picks a failing ratio over passing ones', () => {
     const worst = worstFidelity([
-      { fidelity: { score: 0.99, ssim: 0.99, deltaE: 1, passed: true, method: 'composite' as const, ratio: '1:1' as const } },
+      { fidelity: { score: 0.99, ssim: 0.99, deltaE: 1, passed: true, method: 'harmonized' as const, ratio: '1:1' as const } },
       { fidelity: { score: 0.95, ssim: 0.89, deltaE: 2, passed: false, method: 'composite' as const, ratio: '9:16' as const } },
     ])
     expect(worst?.ratio).toBe('9:16')
@@ -197,38 +198,46 @@ describe('scoreFidelity', () => {
 })
 
 describe('compositeProducts', () => {
-  it('keeps the product pixels (SSIM ≥ 0.98 with harmonization; ~1 without) and caps gains', async () => {
+  it('keeps the product (fidelity passes with the relight stage on and off) and caps the white balance', async () => {
     const cut = await segmentProduct({ bytes: await productOnWhite() })
     if (!cut.ok) throw new Error('cutout')
     const plate = await syntheticPlate(1080, 1350)
     const box = fitBox({ width: cut.width, height: cut.height }, { x: 560, y: 380, w: 420, h: 760 })
     for (const harmonize of [false, true]) {
       const comp = await compositeProducts({ base: plate, products: [{ cutout: cut.png, box }], light: 'left', harmonize })
-      const s = await scoreFidelity({ image: comp.png, box: comp.placements[0].box, reference: comp.placements[0].placed })
-      expect(s.ssim).toBeGreaterThanOrEqual(harmonize ? 0.98 : 0.999)
+      const p = comp.placements[0]
+      const s = await scoreFidelity({ image: comp.png, box: p.box, reference: p.placed, background: p.background })
+      expect(s.ssimDetail).toBeGreaterThanOrEqual(harmonize ? 0.9 : 0.999)
+      expect(s.silhouetteIoU).toBeGreaterThanOrEqual(0.98)
       expect(s.passed).toBe(true)
+      expect(comp.harmonized).toBe(harmonize)
       for (const g of comp.gains) expect(Math.abs(g - 1)).toBeLessThanOrEqual(HARMONIZE_MAX_GAIN + 1e-9)
     }
   })
 
-  it('draws a contact shadow under the product (darker than the bare plate) on the side away from the light', async () => {
+  it('draws a contact shadow under the product (darker than the bare plate) and a cast shadow away from the light', async () => {
     const cut = await segmentProduct({ bytes: await productOnWhite() })
     if (!cut.ok) throw new Error('cutout')
     const plate = await sharp({ create: { width: 800, height: 1000, channels: 3, background: '#d9d4cc' } }).png().toBuffer()
     const box = fitBox({ width: cut.width, height: cut.height }, { x: 250, y: 200, w: 300, h: 600 })
-    const comp = await compositeProducts({ base: plate, products: [{ cutout: cut.png, box }], light: 'left' })
-    const under = await regionMean(comp.png, { left: box.x + Math.round(box.w * 0.3), top: box.y + box.h - 2, width: Math.round(box.w * 0.4), height: 6 })
-    expect(under).toBeLessThan(200) // plate is 217
-    const right = await regionMean(comp.png, { left: box.x + box.w + 2, top: box.y + Math.round(box.h * 0.5), width: 8, height: 40 })
-    const left = await regionMean(comp.png, { left: box.x - 10, top: box.y + Math.round(box.h * 0.5), width: 8, height: 40 })
-    expect(right).toBeLessThan(left) // cast shadow falls right with light from the left
-    expect(await regionMean(comp.png, { left: 10, top: 10, width: 40, height: 40 })).toBeCloseTo(217, 0) // far away: untouched plate
+    for (const harmonize of [false, true]) {
+      const comp = await compositeProducts({ base: plate, products: [{ cutout: cut.png, box }], light: 'left', harmonize })
+      const bare = await regionMean(comp.png, { left: 10, top: 10, width: 40, height: 40 })
+      const under = await regionMean(comp.png, { left: box.x + Math.round(box.w * 0.3), top: box.y + box.h - 1, width: Math.round(box.w * 0.4), height: 4 })
+      expect(under).toBeLessThan(bare - 20)
+      // Light from the left → the shadow falls to the right of the product, on the ground.
+      const right = await regionMean(comp.png, { left: box.x + box.w + 4, top: box.y + box.h - 30, width: 30, height: 24 })
+      const left = await regionMean(comp.png, { left: box.x - 34, top: box.y + box.h - 30, width: 30, height: 24 })
+      expect(right).toBeLessThan(left - 4)
+      if (!harmonize) expect(bare).toBeCloseTo(217, 0) // far away: untouched plate
+    }
   })
 
-  it('harmonizeGains is luminance-neutral and capped', () => {
-    const g = harmonizeGains([20, 40, 200])
+  it('whiteBalanceGains is luminance-neutral and capped', () => {
+    const g = whiteBalanceGains({ whiteBalance: [1.5, 1, 0.5] })
     expect(Math.max(...g.map((v) => Math.abs(v - 1)))).toBeLessThanOrEqual(HARMONIZE_MAX_GAIN + 1e-9)
-    for (const v of harmonizeGains([128, 128, 128])) expect(v).toBeCloseTo(1, 9)
+    expect(0.2126 * g[0] + 0.7152 * g[1] + 0.0722 * g[2]).toBeCloseTo(1, 2)
+    for (const v of whiteBalanceGains({ whiteBalance: [1, 1, 1] })) expect(v).toBeCloseTo(1, 9)
   })
 
   it('layoutProductGroup: hero on top, real parts in a row underneath, inside the box, aspect kept', () => {
