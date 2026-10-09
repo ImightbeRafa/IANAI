@@ -151,8 +151,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'Create an offer (product) for an owned brand — same record as the web offer form. Free sync write, no credits. ' +
       'Pass the REAL product name plus the form fields (description, differentiation, keyObjection, guarantee…) and the structured ad facts: ' +
       'price {amount, currency CRC|USD}, compareAtPrice, bundles [{qty, price, label}] (e.g. 2 kits = 29800), shipping {text, freeFromQty?, freeFromAmount?}, includes[], excludes[] ("Papel no incluido"), ' +
-      'allowedClaims[], forbiddenClaims[], verifiedClaims [{claim, source}], cta {text, channels: web|whatsapp|dm}, ageMin, immutableAttributes[], lockProductAppearance, allowedProps[], locale. ' +
-      'Numbers are validated strictly; placeholder values are not stored. Ads then use these exact strings as confirmed facts (e.g. "Envío gratis desde 2 kits", "Edad 8+").',
+      'allowedClaims[], forbiddenClaims[], verifiedClaims [{claim, source}], cta {text, channels: web|whatsapp|dm}, ageMin / ageRule {min, supervision} ("Desde 8 años, con supervisión de un adulto"), contact {whatsapp, phone, url, instagram} (→ contact CTA "Escribinos al WhatsApp …"), paymentMethods[] (e.g. SINPE Móvil, tarjeta, efectivo), mustAppear[] (facts every ad must carry; default price, bundle, shipping, age, not_included, contact), immutableAttributes[], lockProductAppearance, allowedProps[], locale. ' +
+      'Numbers, phones and URLs are validated strictly; placeholder values are not stored. Ads then use these exact strings as confirmed facts (e.g. "Envío gratis desde 2 kits"); verifiedClaims make claims strict (paraphrase allowed, numbers/units must match a fact).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -612,6 +612,18 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     consumesAdvanceCredits: true,
   },
   {
+    name: 'adpack_preview',
+    group: 'execute_studio',
+    risk: 'read',
+    description:
+      'Ad Pack: FREE copy dry run before paying — adpack_preview {brandId, offerId, count, ratios?, angleIds?, brief?, …the same arguments as create_ads / adpack_start}. Runs planning + copy + fact checks (model text only: no images, no credits, no approval; max 10 per hour). ' +
+      'Returns previewId and per ad {index, angleId, category, hookType, rationale, layoutFamily, photo (planned product photo), headline, subline, bullets, offerLine, cta, caption, check {ok, repairRounds, issues[{field, sentence, offendingTokens, nearestFactKey, nearestFact, rule}]}}. ' +
+      'Show it to the user; create_ads / adpack_start with the SAME arguments (+ previewId) deliver exactly this copy (a changed request or offer answers plan_changed, nothing runs).',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
     name: 'adpack_status',
     group: 'execute_studio',
     risk: 'read',
@@ -619,7 +631,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
       'Ad Pack: progress of a pack by packId (from adpack_start; never invent one). Returns summary (one human line with ready/failed counts and ~time left — relay it), etaSeconds and, while running, compact per-ad rows. ' +
       'Poll every ~20-30 s (work continues in the background between polls; a pack of 10 takes ~2 min) and STOP as soon as moreWork=false. ' +
       'When finished it returns deliverable {ads[{index, format, angleId, category, hookType, rationale, layoutFamily, variation?, headline, caption, links{4:5,9:16,…}, files[{ratio, url (full-res PNG), jpgUrl (same image as full-res JPG), width, height, format:"png", placement, fidelity?}], forbiddenHits[], fidelity{score, passed, method, diffImageUrl?}}], captionsText, deepLink}: present it as a numbered list of full-res files + captions with the angle and why (urls are stable public storage links, not expiring), offer captionsText to copy all captions, and share the deepLink. Any forbiddenHits → do not publish that ad before fixing it. fidelity.passed=false never ships (the ad fails instead). ' +
-      'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation).',
+      'failures[] explains failed ads in plain language with the exact adpack_regenerate call to retry (paid, needs confirmation); copy failures carry issues[{field, sentence, offendingTokens, nearestFactKey, nearestFact, rule, limit?, actual?}] (copy is repaired up to 2 free rounds before an ad fails).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,

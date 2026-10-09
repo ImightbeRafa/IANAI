@@ -6,7 +6,7 @@
  * Pure (no I/O); sizes are capped so a status payload stays compact.
  */
 import { findForbiddenHits } from './check-copy.js'
-import type { AdLanguage, AngleCategory, AspectRatio, BrandDna, FidelityMethod, FidelityResult, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
+import type { AdLanguage, AngleCategory, AspectRatio, BrandDna, CopyCheckIssue, FactKey, FidelityMethod, FidelityResult, HookType, LayoutFamily, PackItem, PackItemTimings, PackStatus } from './types.js'
 
 /** Per-ad caption cap in the deliverable (chars). */
 export const DELIVERABLE_CAPTION_MAX = 1_200
@@ -40,6 +40,44 @@ export interface AdPackRetryCall {
   call: string
 }
 
+/**
+ * One copy-check problem, exactly located (P0 #2c): field ("caption", "bullets[2]"), the sentence,
+ * the tokens that broke the rule, the nearest confirmed fact and the rule (+ limit / actual).
+ */
+export interface AdPackIssueView {
+  field: string
+  rule: CopyCheckIssue['code']
+  sentence?: string
+  offendingTokens: string[]
+  nearestFactKey?: FactKey
+  nearestFact?: string
+  limit?: number
+  actual?: number
+  detail: string
+}
+
+export function issueView(i: CopyCheckIssue): AdPackIssueView {
+  return {
+    field: i.path ?? i.field,
+    rule: i.code,
+    ...(i.sentence ? { sentence: i.sentence } : {}),
+    offendingTokens: i.offendingTokens?.length ? i.offendingTokens : i.token ? [i.token] : [],
+    ...(i.nearestFactKey ? { nearestFactKey: i.nearestFactKey } : {}),
+    ...(i.nearestFact ? { nearestFact: i.nearestFact } : {}),
+    ...(i.limit !== undefined ? { limit: i.limit } : {}),
+    ...(i.actual !== undefined ? { actual: i.actual } : {}),
+    detail: i.detail.slice(0, 300),
+  }
+}
+
+/** The blocking copy issues of a failed item: the ones its `copy_check_failed: code(path)…` error names. */
+export function failureIssues(item: Pick<PackItem, 'error' | 'copyCheck'>): AdPackIssueView[] {
+  const e = item.error ?? ''
+  if (!e.startsWith('copy_check_failed') || !item.copyCheck) return []
+  const named = new Set([...e.matchAll(/([a-z_]+)\(([^)]*)\)/g)].map((m) => `${m[1]}|${m[2]}`))
+  return item.copyCheck.issues.filter((i) => named.has(`${i.code}|${i.path ?? i.field}`)).slice(0, 12).map(issueView)
+}
+
 export interface AdPackFailureView {
   itemId: string
   /** 1-based ad number (matches the deliverable / captionsText numbering). */
@@ -50,6 +88,8 @@ export interface AdPackFailureView {
   retry: AdPackRetryCall
   /** Measured product fidelity when the ad failed on it (fidelity_failed). */
   fidelity?: AdPackFidelitySummary
+  /** Copy failures: every blocking issue with field, sentence, offending tokens and the nearest fact. */
+  issues?: AdPackIssueView[]
 }
 
 /** One downloadable image: stable public storage URL (never a signed/expiring link). */
@@ -150,6 +190,9 @@ export function failureReason(error: string | undefined, language: AdLanguage): 
   if (e.startsWith('scene_product_mismatch')) return es ? 'producto no coincidía' : "product didn't match"
   if (e.startsWith('copy_check_failed') && e.includes('forbidden_phrase')) return es ? 'el texto usaba una frase prohibida de la marca' : 'copy used a forbidden brand phrase'
   if (e.startsWith('copy_check_failed') && e.includes('locale_register')) return es ? 'el texto no respetó el trato del idioma (locale)' : 'copy broke the locale register rule'
+  if (e.startsWith('copy_check_failed') && e.includes('missing_fact')) return es ? 'faltaba un dato obligatorio de la oferta (ver issues)' : 'a required offer fact was missing (see issues)'
+  if (e.startsWith('copy_check_failed') && e.includes('unconfirmed_fact')) return es ? 'una frase no coincide con los datos confirmados (ver issues: frase y dato más cercano)' : 'a sentence did not match the confirmed facts (see issues: sentence and nearest fact)'
+  if (e.startsWith('copy_check_failed') && e.includes('urgency')) return es ? 'el texto metía presión/urgencia que la marca no usa' : 'copy used urgency the brand does not allow'
   if (e.startsWith('cutout_failed')) return es ? 'no se pudo recortar el producto de la foto (subí una foto con fondo limpio)' : 'the product could not be cut out of the photo (upload one on a clean background)'
   if (e.startsWith('fidelity_failed')) return es ? 'el producto no quedó idéntico a la foto' : 'the product did not stay identical to the photo'
   if (e.startsWith('scene_props_failed')) return es ? 'la escena inventaba piezas u objetos del producto' : 'the scene invented product parts or objects'
@@ -221,6 +264,7 @@ export function buildStatusExtras(input: {
       reason: failureReason(i.error, language),
       retry: retryCall(input.packId, i),
       ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
+      ...(failureIssues(i).length ? { issues: failureIssues(i) } : {}),
     }))
   const total = sorted.length
 

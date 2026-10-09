@@ -13,6 +13,7 @@ export const ADPACK_MCP_TOOLS = [
   'adpack_edit_text',
   'adpack_regenerate',
   'adpack_resize',
+  'adpack_preview',
 ] as const
 
 export type AdPackMcpToolName = typeof ADPACK_MCP_TOOLS[number]

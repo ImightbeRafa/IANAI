@@ -11,7 +11,7 @@
  * limiter; partial success, never throws on a single failure.
  */
 import type { AdAngle, AdCopy, AdLanguage, BrandDna, CopyCheckResult, ModelGateway, OfferInput } from './types.js'
-import { checkAdCopy, repairAdCopy } from './check-copy.js'
+import { checkAdCopy, hasVerifiedComparison, repairAdCopy } from './check-copy.js'
 import { ANGLE_CATEGORIES } from './angle-catalog.js'
 import { clicheExamples } from './cliches.js'
 import { complianceGuidance, getRequiredDisclaimer } from './compliance.js'
@@ -36,7 +36,7 @@ export { buildOfferLine }
 
 /** Deterministic offer line for an offer + DNA (confirmed price/bundle/shipping only). */
 export function offerLineFor(dna: BrandDna, offer: OfferInput, language: AdLanguage): string | undefined {
-  return buildOfferLine(mergeFacts(dna, offer), language)
+  return buildOfferLine(mergeFacts(dna, offer), language, offer.mustAppear ? { mustAppear: offer.mustAppear } : {})
 }
 
 /**
@@ -49,7 +49,7 @@ export const COPY_CRAFT_RULES: Record<AdLanguage, string> = {
 - Titular (se lee en 3 s) = la situación o el dolor concreto del comprador + algo específico (el tipo de producto, un dato confirmado o un momento/lugar preciso), dicho como lo diría él. Nada genérico ("Tu rutina ideal", "Calidad que se nota"), nunca una etiqueta de catálogo ni el nombre del producto solo.
 - Dolores, deseos y frases de clientes describen al COMPRADOR, no son resultados del producto: no afirmes que el producto quita un dolor o logra un deseo ("no se estira", "sin dolor", "dura más", "menos azúcar", "para cocina y baño"…) salvo que lo diga un hecho confirmado. Lo que el producto ES y HACE sale solo de los hechos confirmados; "Qué es" es contexto, no una fuente de afirmaciones.
 - CERO repetición: cada dato aparece UNA sola vez entre titular, subtítulo, chips y caption. Subtítulo = la razón para creer (un dato distinto al del titular). Chips = datos concretos nuevos (ingrediente con %, cantidad, tiempo, paso real); nada de adjetivos sueltos ("Calidad", "Natural").
-- Caption (va debajo de la imagen; quien lo lee ya vio titular, chips y precio): NO repite titular, chips ni oferta. Aporta lo que la imagen no dice: responde la objeción principal o explica el cómo/por qué con un hecho confirmado y cierra con el CTA. 2–4 frases cortas.
+- Caption (va debajo de la imagen; quien lo lee ya vio titular y chips): NO repite titular ni chips. Aporta lo que la imagen no dice: responde la objeción principal o explica el cómo/por qué con un hecho confirmado; después los datos de compra que existan (precio, paquete, envío, lo que no incluye, edad, con sus marcadores [[Fn]]) y cierra con el CTA. Frases completas y naturales.
 - Variá la estructura del titular dentro del pack (situación, pregunta, dato, cita); "No compres…" como mucho en un anuncio del pack.
 - PROHIBIDO usar frases hechas genéricas (se rechazan por código): ${clicheExamples().slice(0, 15).join(' · ')}.`,
   en: `CRAFT (what separates an ad that sells from a generic one):
@@ -57,9 +57,59 @@ export const COPY_CRAFT_RULES: Record<AdLanguage, string> = {
 - Headline (read in 3 s) = the buyer's concrete situation or pain + something specific (the product type, a confirmed fact or a precise moment/place), said the way they would say it. Nothing generic ("Your ideal routine", "Quality you can feel"), never a catalog label or the bare product name.
 - Pains, desires and customer phrases describe the BUYER, they are not product results: never claim the product removes a pain or delivers a desire ("won't stretch", "pain-free", "lasts longer", "less sugar"…) unless a confirmed fact says so. What the product IS and DOES comes only from confirmed facts; "What it is" is context, not a source of claims.
 - ZERO repetition: each fact appears ONCE across headline, subline, chips and caption. Subline = the reason to believe (a different fact than the headline). Chips = new concrete data (ingredient with %, quantity, time, real step); no lone adjectives ("Quality", "Natural").
-- Caption (sits below the image; the reader already saw headline, chips and price): does NOT repeat the headline, chips or offer. It adds what the image does not say: answer the main objection or explain how/why with a confirmed fact, then the CTA. 2–4 short sentences.
+- Caption (sits below the image; the reader already saw the headline and chips): does NOT repeat the headline or chips. It adds what the image does not say: answer the main objection or explain how/why with a confirmed fact; then the buying facts that exist (price, bundle, shipping, what is not included, age, with their [[Fn]] markers) and the CTA. Full natural sentences.
 - Vary the headline structure across the pack (situation, question, data point, quote); "Don't buy…" at most once per pack.
 - NEVER use generic stock phrases (rejected by code): ${clicheExamples().slice(15).join(' · ')}.`,
+}
+
+/**
+ * es-CR / Spanish style rules (owner feedback P1 #11): full natural sentences, grammatical
+ * headlines, correct voseo, no pressure phrases unless the kit allows urgency, complete captions.
+ */
+export function spanishStyleBlock(dna: Pick<BrandDna, 'register' | 'locale' | 'allowUrgency'>, language: AdLanguage): string {
+  if (language !== 'es') {
+    return dna.allowUrgency
+      ? ''
+      : 'TONE: no pressure or urgency phrases ("order now", "last units", "today only", "limited time"): sell with the fact, not the clock.'
+  }
+  const voseo = (dna.register ?? 'tuteo') === 'voseo'
+  return [
+    `ESTILO ESPAÑOL${dna.locale ? ` (${dna.locale})` : ''} — se revisa por código:`,
+    '- Caption y script: oraciones completas y naturales, con artículos y preposiciones ("desde los 8 años, con supervisión de un adulto", nunca "con supervisión de adulto").',
+    '- Titular corto pero gramatical: no se comen artículos ("Regalá un avión RC que vuela de verdad", nunca "Regalá avión RC…"; "Volá con el control incluido", nunca "Volá con control").',
+    voseo
+      ? '- Voseo correcto: tenés, querés, podés, pedí, escribinos, mirá, elegí, llevalo; nunca tienes/quieres/escríbenos ni usted.'
+      : '',
+    dna.allowUrgency
+      ? ''
+      : '- CERO presión ni urgencia: prohibido "Pedilo ya", "ya mismo", "últimas unidades", "quedan pocas", "solo hoy", "por tiempo limitado", "no te lo pierdas". Si el ángulo es de urgencia, vendé el valor concreto (paquete, envío), no el reloj.',
+    '- Caption completo: 1) gancho, 2) beneficio concreto, 3) precio + paquete + regla de envío con sus marcadores, 4) lo que NO incluye, 5) edad recomendada, 6) CTA con el contacto confirmado (cuando esos hechos existen).',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** Comparison hooks need a verified comparison fact; otherwise the writer is told not to attack alternatives. */
+function comparisonBlock(ctx: CopyContext): string {
+  if (hasVerifiedComparison(ctx.confirmed)) return ''
+  if (ctx.angle.archetype !== 'desvalidar_alternativas' && ctx.angle.hookType !== 'comparison') return ''
+  return ctx.language === 'es'
+    ? 'COMPARACIÓN SIN DATO VERIFICADO: no hay una comparación confirmada. Nada de "No compres X de plástico", "mejor que…", "a diferencia de…" ni ataques a materiales u otras opciones: mostrá qué es y qué hace el producto con un hecho confirmado (el detalle técnico como prueba).'
+    : 'NO VERIFIED COMPARISON: there is no confirmed comparison. No "Don\'t buy plastic X", "better than…", "unlike…" or attacks on materials or alternatives: show what the product is and does with a confirmed fact (the technical detail as proof).'
+}
+
+/** After a copy rejection (regenerate / repair round 2): avoid the rejected hook, use another hook type (P1 #10). */
+function retryBlock(angle: AdAngle, language: AdLanguage): string {
+  const r = angle.retry
+  if (!r || (!r.avoidHeadlines.length && !r.hookType)) return ''
+  const es = language === 'es'
+  return [
+    es ? `NUEVO INTENTO #${r.attempt}: el anterior fue rechazado.` : `NEW ATTEMPT #${r.attempt}: the previous one was rejected.`,
+    r.avoidHeadlines.length ? `${es ? 'NO repitas estos titulares ni su estructura' : 'Do NOT repeat these headlines or their structure'}: ${r.avoidHeadlines.map((h) => `"${h}"`).join(' | ')}` : '',
+    r.hookType ? `${es ? 'Usá otro tipo de gancho' : 'Use another hook type'}: ${r.hookType}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 /** Headlines/sublines already used in the pack, so parallel ads don't converge on one line. */
@@ -96,7 +146,8 @@ function outputContract(ctx: CopyContext): string {
   const lines = es
     ? [
         'DEVUELVE SOLO JSON con esta forma exacta:',
-        '{"headline":"","subline":"","bullets":[""],"cta":"","caption":"","script":{"hook":"","development":"","cta":""},"sceneBrief":"","usedFactKeys":[""]}',
+        '{"headline":"","subline":"","bullets":[""],"cta":"","caption":"","script":{"hook":"","development":"","cta":""},"sceneBrief":"","usedFactKeys":[""],"claims":[{"field":"caption","sentenceIndex":0,"factIds":["F1"]}]}',
+        '- claims: por cada frase con un dato o promesa, qué ids de HECHOS CONFIRMADOS la respaldan (field = "caption", "subline", "bullets[1]", "script.development"…; sentenceIndex desde 0). Los marcadores [[Fn]] cuentan como cita.',
         'LÍMITES DUROS (se verifican por código; si te pasás, el anuncio se descarta):',
         `- headline: el GANCHO, ≤ ${hMax} palabras y ≤ ${L.headlineChars} caracteres. Filtra y segmenta.`,
         `- subline: opcional, ≤ ${L.sublineWords} palabras; desarrolla, no repite el headline.`,
@@ -110,7 +161,8 @@ function outputContract(ctx: CopyContext): string {
       ]
     : [
         'RETURN JSON ONLY with this exact shape:',
-        '{"headline":"","subline":"","bullets":[""],"cta":"","caption":"","script":{"hook":"","development":"","cta":""},"sceneBrief":"","usedFactKeys":[""]}',
+        '{"headline":"","subline":"","bullets":[""],"cta":"","caption":"","script":{"hook":"","development":"","cta":""},"sceneBrief":"","usedFactKeys":[""],"claims":[{"field":"caption","sentenceIndex":0,"factIds":["F1"]}]}',
+        '- claims: for each sentence with data or a promise, the CONFIRMED FACT ids that back it (field = "caption", "subline", "bullets[1]", "script.development"…; sentenceIndex from 0). [[Fn]] markers count as citations.',
         'HARD LIMITS (checked by code; exceeding them discards the ad):',
         `- headline: the HOOK, ≤ ${hMax} words and ≤ ${L.headlineChars} characters. Filters and segments.`,
         `- subline: optional, ≤ ${L.sublineWords} words; develops, never repeats the headline.`,
@@ -141,8 +193,9 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
     `${es ? 'REGLAS DE ANUNCIO ESTÁTICO' : 'STATIC AD RULES'}:\n${UNIVERSAL_AD_RULES[language].map((r) => `- ${r}`).join('\n')}`,
     `${es ? 'CUMPLIMIENTO (categoría' : 'COMPLIANCE (category'} ${dna.category}):\n${compliance.map((r) => `- ${r}`).join('\n')}`,
     COPY_CRAFT_RULES[language],
+    spanishStyleBlock(dna, language),
     outputContract(ctx),
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 
   const disclaimer = getRequiredDisclaimer(dna.category, angle.format, language)
   // A quote with a number that no confirmed fact backs ("me dura casi dos meses") would fail the
@@ -173,7 +226,7 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
       `${es ? 'ÁNGULO DE ESTE ANUNCIO' : 'THIS AD\'S ANGLE'} (${angle.id}):`,
       `- ${es ? 'Mensaje único' : 'Single message'}: ${redactUnconfirmed(angle.message, ctx)}`,
       `- ${es ? 'Apunta a' : 'Targets'}: ${redactUnconfirmed(angle.target, ctx)}`,
-      `- ${es ? 'Tipo de gancho' : 'Hook type'}: ${angle.hookType}`,
+      `- ${es ? 'Tipo de gancho' : 'Hook type'}: ${angle.retry?.hookType ?? angle.hookType}`,
       ...(angle.category ? [`- ${es ? 'Categoría de ángulo' : 'Angle category'}: ${ANGLE_CATEGORIES[angle.category].label[language]}`] : []),
       // A hook line from the angle board is direction for the headline, not text to copy verbatim.
       ...(angle.hook
@@ -182,6 +235,8 @@ function buildCopyPromptFromContext(ctx: CopyContext & { otherCopies?: AdCopy[];
     ].join('\n'),
     densityBlock(dna.visual?.styleProfile?.copyDensity, language),
     archetypeBlock(angle.archetype, language),
+    comparisonBlock(ctx),
+    retryBlock(angle, language),
     formatGuidance(angle.format, language),
     factsAllowlistBlock(ctx),
     packDiversityBlock(ctx.otherCopies, language),
@@ -251,8 +306,9 @@ export async function generateAdCopy(input: GenerateAdCopyInput): Promise<Genera
     system: prompt.system,
     user: prompt.user,
     model: input.model ?? ADPACK_COPY_MODEL,
-    temperature: input.temperature ?? 0.7,
-    maxTokens: 1200,
+    // A retry after a rejection explores further (seed/variation per retry, P1 #10).
+    temperature: input.temperature ?? (input.angle.retry ? 0.9 : 0.7),
+    maxTokens: 1400,
   })
   if (!res || typeof res.data !== 'object' || res.data === null) throw new Error('copy_model_returned_no_json')
   const copy = normalizeModelCopy(res.data, ctx, defaultSceneFallback(ctx, FORMAT_PATTERNS[input.angle.format].sceneIntent))

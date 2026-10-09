@@ -385,6 +385,10 @@ const ISSUE_LABELS: Record<CopyCheckIssue['code'], { es: string; en: string }> =
   register: { es: 'Mezcla el trato (vos/tú/usted)', en: 'Wrong form of address' },
   locale_register: { es: 'No usa el trato obligatorio del idioma (vos/tú/usted)', en: 'Breaks the required form of address for the locale' },
   cliche: { es: 'Frase hecha genérica', en: 'Generic stock phrase' },
+  missing_fact: { es: 'Falta un dato obligatorio de la oferta', en: 'A required offer fact is missing' },
+  urgency: { es: 'Mete presión o urgencia que la marca no usa', en: 'Uses urgency the brand does not allow' },
+  grammar: { es: 'Le falta un artículo (texto telegráfico)', en: 'Telegraphic text (missing article)' },
+  unverified_comparison: { es: 'Comparación sin dato verificado', en: 'Comparison without a verified fact' },
 }
 
 const FIELD_LABELS: Record<string, { es: string; en: string }> = {

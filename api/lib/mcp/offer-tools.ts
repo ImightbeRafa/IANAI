@@ -14,6 +14,7 @@ import { MigrationPendingError, isMissingColumnError, MIGRATION_085 } from '../d
 import { isPlaceholderValue, type IgnoredPlaceholder } from '../placeholder-guard.js'
 import { PRODUCT_IMAGE_TAGS, type ProductImageTag } from '../product-image-order.js'
 import {
+  DEFAULT_MUST_APPEAR,
   OfferProfileError,
   formatMoney,
   offerProfileFacts,
@@ -90,6 +91,7 @@ export const OFFER_TEXT_FIELDS: Array<[string, string]> = [
 export const OFFER_PROFILE_KEYS = [
   'price', 'compareAtPrice', 'bundles', 'shipping', 'includes', 'excludes', 'allowedClaims', 'forbiddenClaims',
   'verifiedClaims', 'cta', 'ageMin', 'immutableAttributes', 'lockProductAppearance', 'allowedProps', 'locale',
+  'ageRule', 'contact', 'paymentMethods', 'mustAppear',
 ] as const
 
 const TEXT_MAX = 2_000
@@ -184,6 +186,8 @@ export function offerView(row: Row, adProfile?: OfferAdProfile | null): Row {
     adProfile: profile ?? null,
     /** Exactly how ads will state these facts (confirmed). */
     confirmedFacts: facts.map((f) => ({ key: f.key, value: f.value })),
+    /** Fact groups every ad must carry (offer setting, else the defaults). */
+    mustAppear: profile?.mustAppear ?? [...DEFAULT_MUST_APPEAR],
   }
 }
 

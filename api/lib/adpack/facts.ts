@@ -5,7 +5,7 @@
  * (₡/$, dots/commas, ranges, "mil", spelled time numbers) and build the
  * deterministic offer line. Pure, no I/O.
  */
-import type { AdLanguage, BrandDna, DnaFact, FactKey, OfferInput } from './types.js'
+import type { AdLanguage, BrandDna, DnaFact, FactKey, MustAppearKey, OfferInput } from './types.js'
 import { normalizeText } from './util.js'
 
 /**
@@ -135,10 +135,11 @@ const FREE_SHIPPING_RE = /\b(?:gratis|gratuit[oa]s?|free)\b/
  * Parts are dropped, least persuasive first, until the line fits the badge budget:
  * plain shipping → compare-at → free shipping → bundle. The price always stays.
  */
-export function buildOfferLine(facts: DnaFact[], language: AdLanguage): string | undefined {
+export function buildOfferLine(facts: DnaFact[], language: AdLanguage, opts: { mustAppear?: readonly MustAppearKey[] } = {}): string | undefined {
   const price = getConfirmed(facts, 'price')?.value.trim()
   const bundle = getConfirmed(facts, 'bundle')?.value.trim()
   if (!price && !bundle) return undefined
+  if (opts.mustAppear) return buildRequiredOfferLine(facts, language, new Set(opts.mustAppear), price, bundle)
   const compare = getConfirmed(facts, 'compare_at_price')?.value.trim()
   const shipping = getConfirmed(facts, 'shipping')?.value.trim()
   const freeShipping = Boolean(shipping && FREE_SHIPPING_RE.test(normalizeText(shipping)))
@@ -151,6 +152,35 @@ export function buildOfferLine(facts: DnaFact[], language: AdLanguage): string |
   if (shipping) parts.push({ text: shipping, drop: freeShipping && shipping.length <= 24 ? 3 : 1 })
   const join = () => parts.map((p) => p.text).join(' · ')
   while (join().length > OFFER_BADGE_TARGET_CHARS && parts.length > 1) {
+    const victim = parts.reduce((min, p) => (p.drop < min.drop ? p : min))
+    if (victim.drop >= KEEP) break
+    parts.splice(parts.indexOf(victim), 1)
+  }
+  const line = join()
+  return line.length > OFFER_LINE_MAX_CHARS ? parts[0].text.slice(0, OFFER_LINE_MAX_CHARS) : line
+}
+
+/**
+ * Offer line when the offer has required facts (P0 #5): price + bundle + the free-shipping rule
+ * share the badge, which may wrap to two lines at a smaller size (the renderer's offer pill /
+ * sticker fit two lines) instead of dropping the free-shipping rule. Budget = OFFER_LINE_MAX_CHARS.
+ * Long plain logistics ("Envíos a todo el país por Correos") go to the caption, never the badge.
+ * Whatever does not fit is carried by the caption (captionWithRequiredFacts).
+ */
+function buildRequiredOfferLine(facts: DnaFact[], language: AdLanguage, must: Set<MustAppearKey>, price?: string, bundle?: string): string {
+  const compare = getConfirmed(facts, 'compare_at_price')?.value.trim()
+  const shipping = getConfirmed(facts, 'shipping')?.value.trim()
+  const shipIsFree = Boolean(shipping && FREE_SHIPPING_RE.test(normalizeText(shipping)))
+  const freeRule = shipIsFree ? shipping : getConfirmed(facts, 'custom:free_shipping_rule')?.value.trim()
+  const KEEP = 99
+  const parts: Array<{ text: string; drop: number }> = []
+  if (price) parts.push({ text: price, drop: KEEP })
+  if (compare && price) parts.push({ text: `${language === 'es' ? 'Antes' : 'Was'} ${compare}`, drop: must.has('compare_at_price') ? 5 : 2 })
+  if (bundle && normalizeText(bundle) !== normalizeText(price ?? '')) parts.push({ text: bundle, drop: price ? (must.has('bundle') ? 6 : 4) : KEEP })
+  if (freeRule) parts.push({ text: freeRule, drop: must.has('shipping') ? 8 : 3 })
+  if (shipping && !shipIsFree && shipping.length <= 24) parts.push({ text: shipping, drop: 1 })
+  const join = () => parts.map((p) => p.text).join(' · ')
+  while (join().length > OFFER_LINE_MAX_CHARS && parts.length > 1) {
     const victim = parts.reduce((min, p) => (p.drop < min.drop ? p : min))
     if (victim.drop >= KEEP) break
     parts.splice(parts.indexOf(victim), 1)

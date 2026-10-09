@@ -49,7 +49,40 @@ const ACTIONS: ReadonlySet<AdPackAction> = new Set([
   'regenerate',
   'resize',
   'cancel',
+  'preview',
 ])
+
+/** Start-shaped fields shared by `start` and the free `preview` (same args → same plan + copy). */
+function startArgs(body: Record<string, unknown>) {
+  return {
+    dna: body.dna,
+    offer: body.offer,
+    brandId: body.brandId,
+    offerId: body.offerId,
+    brief: body.brief,
+    size: body.size,
+    angleIds: body.angleIds,
+    angles: body.angles,
+    variations: body.variations,
+    creativeFreedom: body.creativeFreedom,
+    layoutFamily: body.layoutFamily,
+    styleDnaId: body.styleDnaId,
+    ratios: body.ratios,
+    businessId: body.businessId,
+    brandKitId: body.brandKitId,
+    productImageIds: body.productImageIds,
+    productImageIdsByAd: body.productImageIdsByAd,
+    locale: body.locale,
+    register: body.register,
+    forbiddenPhrases: body.forbiddenPhrases,
+    forbiddenClaims: body.forbiddenClaims,
+    productFidelity: body.productFidelity,
+    relight: body.relight,
+    allowedProps: body.allowedProps,
+    immutableAttributes: body.immutableAttributes,
+    mustAppear: body.mustAppear,
+  }
+}
 
 async function run(service: AdPackService, action: AdPackAction, userId: string, body: Record<string, unknown>): Promise<{ result: unknown; backgroundPackId?: string }> {
   switch (action) {
@@ -88,27 +121,9 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
     case 'start': {
       const started = await service.startPack({
         userId,
-        dna: body.dna,
-        offer: body.offer,
-        brandId: body.brandId,
-        offerId: body.offerId,
-        brief: body.brief,
-        size: body.size,
-        angleIds: body.angleIds,
-        ratios: body.ratios,
-        businessId: body.businessId,
-        brandKitId: body.brandKitId,
-        productImageIds: body.productImageIds,
-        productImageIdsByAd: body.productImageIdsByAd,
-        locale: body.locale,
-        register: body.register,
-        forbiddenPhrases: body.forbiddenPhrases,
-        forbiddenClaims: body.forbiddenClaims,
+        ...startArgs(body),
         approved: body.approved,
-        productFidelity: body.productFidelity,
-        relight: body.relight,
-        allowedProps: body.allowedProps,
-        immutableAttributes: body.immutableAttributes,
+        previewId: body.previewId,
         source: 'web',
       })
       return { result: started, backgroundPackId: started.packId }
@@ -128,6 +143,9 @@ async function run(service: AdPackService, action: AdPackAction, userId: string,
       return { result: await service.resize({ userId, packId: body.packId, itemId: body.itemId, ratios: body.ratios }) }
     case 'cancel':
       return { result: await service.cancel({ userId, packId: body.packId }) }
+    case 'preview':
+      // Free dry run: planning + copy + checks (model text only, no images, no credits); start reuses it.
+      return { result: await service.previewPack({ userId, ...startArgs(body), source: 'web' }) }
   }
 }
 

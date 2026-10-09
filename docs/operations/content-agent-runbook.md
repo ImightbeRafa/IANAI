@@ -8,7 +8,7 @@ Proven end to end (offline fakes, real renderer + real fidelity pipeline) by `te
 ## 0. Rules of the road
 
 - Never invent ids. Use the `brandId` / `kitId` / `offerId` / `productImageId` / `approvalRequestId` that tools return.
-- Free tools (no credits, no approval): everything except `create_ads` / `adpack_start` / `adpack_regenerate` and the other `execute_*` tools.
+- Free tools (no credits, no approval): everything except `create_ads` / `adpack_start` / `adpack_regenerate` and the other `execute_*` tools. `adpack_preview` (copy dry run) is free too (model text only, max 10 per hour).
 - Paid tools answer first with `status: "approval_required"`. Show `userPrompt` to the user **as written** (neutral, no links). Only after the user says yes: `confirm_execute`, then repeat the same call with `approvalRequestId`.
 - Drive links must be shared as **"Cualquier persona con el enlace" (lector)**. Files are copied into Advance storage; the Drive link is kept only as `sourceUrl`, so later permission changes never break the ads.
 
@@ -36,11 +36,13 @@ If the name already exists (accent/case/space-insensitive): `{ status: "exists",
   "locale": "es-CR", "register": "voseo",
   "brandVoice": "cercana, clara, sin exageraciones",
   "forbiddenPhrases": ["armado en minutos"],
+  "toneRules": { "allowUrgency": false },
   "audiences": [{ "label": "Familias con niños que juegan al aire libre", "ageMin": 30, "ageMax": 45, "geo": "Costa Rica" }]
 } }
 ```
 
 Placeholder values (`"country"`, `"todo el país"`, `"Personas 18–65"`, `"N/A"`…) are not stored and are listed in `ignoredPlaceholders`.
+`locale: "es-CR"` makes voseo a hard rule and turns on the es-CR style rules (full sentences with articles, grammatical headlines). `toneRules.allowUrgency` (default `false`): without it, pressure phrases ("Pedilo ya", "últimas unidades", "solo hoy", "por tiempo limitado") are rejected and repaired.
 
 ## 3. Logo (Drive / Dropbox / https)
 
@@ -68,7 +70,10 @@ A logo on a solid (e.g. white) background is cleaned automatically (`backgroundR
   "excludes": ["Papel no incluido"],
   "verifiedClaims": [{ "claim": "Envío gratis desde 2 kits", "source": "política de envíos" }],
   "forbiddenClaims": ["armado en minutos"],
-  "ageMin": 8,
+  "ageRule": { "min": 8, "supervision": true },
+  "contact": { "whatsapp": "7000-0000", "url": "tienda-demo.example", "instagram": "@tienda.demo" },
+  "paymentMethods": ["SINPE Móvil", "tarjeta", "efectivo"],
+  "mustAppear": ["price", "bundle", "shipping", "age", "not_included", "contact"],
   "immutableAttributes": ["alas blancas", "chasis negro", "hélice blanca"],
   "allowedProps": ["caja del kit"],
   "lockProductAppearance": true,
@@ -76,8 +81,15 @@ A logo on a solid (e.g. white) background is cleaned automatically (`backgroundR
 } }
 ```
 
-Expected: `{ status: "created", offer: { offerId, confirmedFacts: [...] }, adProfileSaved: true }` — `confirmedFacts` are the exact strings ads will use (`₡14.900`, `2 kits por ₡26.000`, `Envío gratis desde 2 kits`, `Edad 8+`).
+Expected: `{ status: "created", offer: { offerId, confirmedFacts: [...], mustAppear: [...] }, adProfileSaved: true }` — `confirmedFacts` are the exact strings ads will use (`₡14.900`, `2 kits por ₡26.000`, `Envío gratis desde 2 kits`, `Desde 8 años, con supervisión de un adulto`, `WhatsApp 7000-0000`, the contact CTA `Escribinos al WhatsApp 7000-0000` in the kit register, `Aceptamos SINPE Móvil, tarjeta y efectivo`).
 Fix anything later with `update_offer { brandId, offerId, …only the fields to change }` (null clears a structured field).
+
+### Fact setup (how the copy uses the facts)
+
+- **A closed list with ids.** The writer sees `F1 · price: "₡14.900"`, `F2 · bundle: "2 kits por ₡29.800"`… and cites them (`[[F2]]` markers are replaced by the exact fact text). Phones (`whatsapp`, `phone`: 7–15 digits), `url` (a real domain) and `instagram` (`@handle`) are validated; `paymentMethods` also closes the `payment_methods` gap.
+- **verifiedClaims = strict mode — never remove them to get output.** Every claim sentence (price, shipping, contents, age, assembly, results, comparisons) must map to a confirmed fact: paraphrase is fine, numbers, units and claim words must match ("Con dos kits el envío sale gratis" passes for "Envío gratis desde 2 kits"; "Gratis con dos kits" fails — the free thing is the shipping; "Envío gratis desde 3 kits" fails). Comparison hooks ("No compres X de plástico", "mejor que…") need a fact that states the comparison.
+- **Free repair before failing.** Copy that breaks a rule gets up to 2 free repair rounds (model tokens, never credits) fed with the exact issue; round 2 rewrites with another hook type when the hook itself was rejected. Only then the ad fails, with `failures[].issues[{ field, sentence, offendingTokens, nearestFactKey, nearestFact, rule, limit?, actual? }]`.
+- **mustAppear (required facts).** Default for saved offers: price, bundle, shipping rule (incl. the free-shipping threshold), age rule, not-included items, contact CTA (a group without a fact is skipped; `[]` = none; `payment_methods` / `compare_at_price` can be added). Price + bundle + free-shipping rule go on the image offer line (a two-line badge when needed — the free-shipping rule is never dropped), and every required fact the caption does not already say is appended to it as exact text (price · bundle · shipping, not-included, age; the contact CTA closes it). Override per run with `create_ads { mustAppear: [...] }`. An owner edit (`adpack_edit_text`) that drops a required fact is rejected (`rule: "missing_fact"`).
 
 **Migration 085 pending:** the answer has `adProfileSaved: false` + `migrationPending`. Name, description, price (→ `re_price`) and shipping text (→ `shipping_info`) are saved; the structured profile is not. Until 085 is applied, pass `immutableAttributes`, `allowedProps`, `forbiddenClaims` directly to `create_ads` (step 6).
 
@@ -104,12 +116,23 @@ Expected: `{ status: "imported" | "partial", imported, failed, results: [{ statu
 
 Optional: winners as style reference — `import_image { brandId, kind: "winner_ad", url }` → returns `styleDnaId: "winners"`; pass it to `create_ads` to make layouts follow the brand's winning ads (style only, never copied).
 
-## 6. Make 2 ads, feed + story
+## 6. Preview the copy (free), then make 2 ads, feed + story
+
+```json
+{ "name": "adpack_preview", "arguments": {
+  "brandId": "<brandId>", "offerId": "<offerId>",
+  "count": 2, "ratios": ["4:5", "9:16"]
+} }
+```
+
+Expected (no images, no credits, no approval; more than 10 previews per hour → `RATE_LIMITED`):
+`{ status: "preview", previewId, quote, ads: [{ index, angleId, category, hookType, rationale, layoutFamily, photo: { url, role }, headline, subline, bullets, offerLine, cta, caption, check: { ok, repairRounds, issues[], warnings[] } }], costUsd, chargedCredits: 0, expiresAt }`.
+Show it to the owner. Ads with `check.ok: false` say exactly what failed (sentence, offending tokens, nearest fact): fix the offer with `update_offer` and preview again. When the owner approves the copy, call `create_ads` with **the same arguments plus `previewId`**: the approval is bound to that preview and the previewed copy is exactly what ships (a changed request or changed offer facts answers `plan_changed`; nothing runs). Without `previewId`, an identical request still reuses the newest preview (24 h).
 
 ```json
 { "name": "create_ads", "arguments": {
   "brandId": "<brandId>", "offerId": "<offerId>",
-  "count": 2, "ratios": ["4:5", "9:16"]
+  "count": 2, "ratios": ["4:5", "9:16"], "previewId": "<previewId>"
 } }
 ```
 
@@ -126,11 +149,11 @@ Show `userPrompt`. Mention `gaps` (missing facts are simply not mentioned in the
 
 ```json
 { "name": "confirm_execute", "arguments": { "approvalRequestId": "<id>", "action": "approve" } }
-{ "name": "create_ads", "arguments": { "brandId": "<brandId>", "offerId": "<offerId>", "count": 2, "ratios": ["4:5", "9:16"], "approvalRequestId": "<id>" } }
+{ "name": "create_ads", "arguments": { "brandId": "<brandId>", "offerId": "<offerId>", "count": 2, "ratios": ["4:5", "9:16"], "previewId": "<previewId>", "approvalRequestId": "<id>" } }
 ```
 
-Expected: `{ status: "completed", packId: "<id>", creativeFreedom: "high", plan: [{ index, angleId, category, hookType, format, layoutFamily, rationale }] }`.
-With only brandId + offerId, Advance picks angle, hook, scene and layout and says why (`rationale`). To steer: `angleIds` (from `adpack_angles` / `guide_bulk_angles`), `layoutFamily`, `styleDnaId`, `variations` (1–3), `brief` (theme only, never a fact).
+Expected: `{ status: "completed", packId: "<id>", creativeFreedom: "high", plan: [{ index, angleId, category, hookType, format, layoutFamily, rationale }], previewId, previewAds: [1, 2] }`.
+With only brandId + offerId, Advance picks angle, hook, scene and layout and says why (`rationale`); with `creativeFreedom: "high"` and no `angleIds` the ads use different archetypes/categories, and the next pack for the same offer avoids the angles of its last two packs. A retried ad after a copy rejection never repeats the rejected headline and switches hook type. To steer: `angleIds` (from `adpack_angles` / `guide_bulk_angles`), `layoutFamily`, `styleDnaId`, `variations` (1–3), `brief` (theme only, never a fact).
 
 ## 7. Poll and deliver
 
@@ -174,4 +197,7 @@ Present each ad: headline, angle + rationale, PNG/JPG links per ratio, caption. 
 | `PLAN_CHANGED` (`status: "plan_changed"`) | The plan differs from what was approved (count or credits) — nothing ran, nothing charged | Show approved vs planned and ask again (call without `approvalRequestId`) |
 | `INSUFFICIENT_CREDITS` | Not enough credits for the quoted total | Top up, or fewer ads |
 | `failures[]` in `adpack_status` | An ad failed (e.g. product did not match, scene invented parts) — not charged | Explain `reason`; offer `failures[].retry.call` (paid, needs approval) |
+| `failures[].issues[]` (copy) | The copy still broke a rule after 2 free repair rounds: `{ field, sentence, offendingTokens, nearestFactKey, nearestFact, rule }` | Show the sentence + nearest fact; fix the offer (`update_offer`) or preview again (`adpack_preview`) |
+| `plan_changed` with `reason: "preview_changed" / "preview_expired" / "preview_not_found"` | The previewed copy no longer matches (request or offer facts changed, or older than 24 h) | Run `adpack_preview` again, then ask for a fresh approval |
+| `RATE_LIMITED` (`adpack_preview`) | More than 10 previews in the last hour | Wait, or start the pack directly |
 | `forbiddenHits` non-empty | A forbidden phrase reached the copy | Do not publish; fix with `adpack_edit_text` |

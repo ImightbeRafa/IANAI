@@ -7,6 +7,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { CREDIT_WEIGHTS } from '../../api/lib/credits/catalog'
 import { createAdPackService, type AdPackChargeInput, type AdPackDeps, type AdPackService, type AdPackUsageEntry } from '../../api/lib/adpack/service'
 import { createMemoryPackStore, type MemoryPackStore } from '../../api/lib/adpack/store-memory'
+import { createMemoryPreviewStore } from '../../api/lib/adpack/preview-store'
 import type { IngestBrandDnaInput } from '../../api/lib/adpack/dna/ingest'
 import type { AdPackLibrary } from '../../api/lib/adpack/library'
 import type { SavedBrandDb } from '../../api/lib/adpack/saved-brand'
@@ -32,6 +33,7 @@ export interface DoorEnv {
   ingestCalls: IngestBrandDnaInput[]
   credits: { remaining: number }
   service: AdPackService
+  previews: ReturnType<typeof createMemoryPreviewStore>
 }
 
 export function createDoorEnv(
@@ -43,10 +45,13 @@ export function createDoorEnv(
     /** Vision verdicts (scene checks and the style-DNA analysis). */
     vision?: RunnerGatewayOptions['vision']
     saveStyleDnaAnalysis?: AdPackDeps['saveStyleDnaAnalysis']
+    /** Copy JSON per text call (default: the serum fake copy). */
+    json?: RunnerGatewayOptions['json']
   } = {},
 ): DoorEnv {
   const store = createMemoryPackStore()
-  const gateway = runnerGateway(options.vision ? { vision: options.vision } : {})
+  const gateway = runnerGateway({ ...(options.vision ? { vision: options.vision } : {}), ...(options.json ? { json: options.json } : {}) })
+  const previews = createMemoryPreviewStore()
   const renderer = fakeRenderer()
   const storage = fakeStorage()
   const charges: AdPackChargeInput[] = []
@@ -85,8 +90,9 @@ export function createDoorEnv(
     // Exact mode (default with a product photo) loads photos: synthetic, no network.
     loadImage: fakeImageLoader(),
     ...(options.saveStyleDnaAnalysis ? { saveStyleDnaAnalysis: options.saveStyleDnaAnalysis } : {}),
+    previews,
   })
-  return { store, gateway, renderer, storage, charges, logs, ingestCalls, credits, service }
+  return { store, gateway, renderer, storage, charges, logs, ingestCalls, credits, service, previews }
 }
 
 // ---------------------------------------------------------------------------

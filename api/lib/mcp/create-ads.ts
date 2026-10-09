@@ -38,6 +38,7 @@ export const PACK_PASSTHROUGH = [
   'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
   'includeDna', 'language',
   'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
+  'mustAppear', 'previewId',
 ] as const
 const CAROUSEL_RATIOS = new Set(['1:1', '4:5', '9:16', '3:4'])
 
@@ -121,5 +122,6 @@ export const CREATE_ADS_DECISION_TABLE =
   'mode edit → execute_image_edit: change an existing image (productImageId or imageUrl), one ratio; 18 credits. ' +
   'Other tools (still available): execute_image_generate = one free-form image (no exact text; 4:5 needs aspectRatioFallback→3:4); execute_bulk_posts / execute_campaign_pack = angle-board posts/scripts with styleDnaId (Style DNA), 6 or 24 credits per image. ' +
   'Every paid mode: one in-chat approval {items, unitCost, total}; if the plan changes before running the tool answers PLAN_CHANGED and nothing is charged. ' +
+  'Before a pack (free, no approval, no credits): adpack_preview {brandId, offerId, count, …same args} shows per ad the angle, rationale, layout family, planned photo and the exact copy + check; create_ads with the same args (or previewId) delivers that copy. ' +
   'Before making ads (free, no approval): create_brand if the brand does not exist yet; fix offer facts with create_offer / update_offer (price, bundles, shipping, includes/excludes, verified claims, immutableAttributes, allowedProps), the kit with update_brand_kit / set_primary_brand_kit, and photos with import_image / import_images (Google Drive, Dropbox or https link → copied into Advance storage, role hero|part|box|contents|in_use|detail; logo background removed) or create_upload_url → finalize_upload, set_primary_product_image / tag_product_image. ' +
   'With only brandId + offerId, Advance chooses angle, hook, scene and layout (creativeFreedom "high") and returns the rationale per ad; finished ads have a stable full-res PNG url + jpgUrl per ratio.'

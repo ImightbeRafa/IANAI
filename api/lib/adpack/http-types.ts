@@ -22,6 +22,7 @@ import type {
   CopyCheckIssue,
   DnaFact,
   FactKey,
+  MustAppearKey,
   OfferInput,
   Pack,
   PackItemStatus,
@@ -30,7 +31,8 @@ import type {
 } from './types.js'
 import type { AdPackDeliverable, AdPackFailureView } from './status-summary.js'
 
-export type { AdPackDeliverable, AdPackDeliverableAd, AdPackDeliverableFile, AdPackFailureView, AdPackRetryCall } from './status-summary.js'
+export type { AdPackDeliverable, AdPackDeliverableAd, AdPackDeliverableFile, AdPackFailureView, AdPackIssueView, AdPackRetryCall } from './status-summary.js'
+import type { AdPackIssueView } from './status-summary.js'
 
 export type AdPackErrorCode =
   | 'BAD_INPUT'
@@ -42,6 +44,8 @@ export type AdPackErrorCode =
   | 'UNAVAILABLE'
   /** The plan at execution differs from the approved one (count or credits): nothing ran, ask for a fresh approval. */
   | 'PLAN_CHANGED'
+  /** Too many free copy previews in the last hour (they spend model tokens). */
+  | 'RATE_LIMITED'
 
 /** Count + credits a user approved / the server would run now. */
 export interface AdPackPlanSummary {
@@ -223,6 +227,52 @@ export interface AdPackStartRequest {
   allowedProps?: string[]
   /** Appearance facts that must never change, e.g. "hélices blancas". */
   immutableAttributes?: string[]
+  /** Required offer facts for this run (overrides the offer's mustAppear; [] = none). */
+  mustAppear?: MustAppearKey[]
+  /**
+   * A copy preview (adpack_preview / web `preview`) whose copy must be delivered. Its arguments
+   * must equal this call's; a different / stale preview → PLAN_CHANGED, nothing runs. Without it,
+   * the newest unexpired preview with identical arguments is reused automatically.
+   */
+  previewId?: string
+}
+
+/** Free copy dry run: the same arguments as start (no approval, no credits, no images). */
+export type AdPackPreviewRequest = Omit<AdPackStartRequest, 'approved' | 'previewId'>
+
+export interface AdPackPreviewAd {
+  /** 1-based ad number (as in status / the deliverable). */
+  index: number
+  angleId: string
+  category?: AngleCategory
+  hookType: HookType
+  format: AdAngle['format']
+  rationale?: string
+  layoutFamily?: LayoutFamily
+  variation?: number
+  /** Product photo the ad is planned with (hero pick by role/format; quality is checked at run time). */
+  photo?: { url: string; role: string; label?: string }
+  headline?: string
+  subline?: string
+  bullets?: string[]
+  offerLine?: string
+  cta?: string
+  caption?: string
+  /** ok = passes every blocking rule (delivered as is by start); issues = blocking problems left. */
+  check: { ok: boolean; repairRounds: number; issues: AdPackIssueView[]; warnings: AdPackIssueView[] }
+}
+
+export interface AdPackPreviewResponse {
+  previewId: string
+  /** Same plan the quote / approval will show. */
+  quote: AdPackQuote
+  ads: AdPackPreviewAd[]
+  /** Model text cost of the preview (USD) — never credits. */
+  costUsd: number
+  chargedCredits: 0
+  expiresAt: string
+  /** Previews left this hour. */
+  remainingThisHour: number
 }
 
 export interface AdPackResizeRequest {
@@ -294,6 +344,7 @@ export type AdPackAction =
   | 'regenerate'
   | 'resize'
   | 'cancel'
+  | 'preview'
 
 // ---------------------------------------------------------------------------
 // Responses
@@ -341,6 +392,10 @@ export interface AdPackStartResponse {
   angles?: Array<{ index: number; angleId: string; category?: AngleCategory; hookType: HookType; format: AdAngle['format']; layoutFamily?: LayoutFamily; variation?: number; rationale?: string }>
   styleProfile?: StyleRenderProfile
   notes?: string[]
+  /** Copy reused from this preview (approved copy = delivered copy). */
+  previewId?: string
+  /** Ads whose copy came from the preview (1-based). */
+  previewAds?: number[]
 }
 
 export interface AdPackItemView {

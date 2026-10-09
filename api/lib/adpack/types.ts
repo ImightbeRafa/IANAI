@@ -150,6 +150,11 @@ export interface BrandDna {
   forbiddenClaims?: string[]
   /** Brand phrases the owner wants used when they fit (brand kit). Wording, never facts. */
   mustUsePhrases?: string[]
+  /**
+   * Kit tone rule: pressure/urgency phrases ("Pedilo ya", "últimas unidades", "solo hoy") are
+   * allowed only when true. Default false (deterministic urgency blocklist in check-copy).
+   */
+  allowUrgency?: boolean
   facts: DnaFact[]
   visual: DnaVisual
   /** Missing facts that would materially improve ads, e.g. ["price", "delivery_time"]. */
@@ -197,7 +202,17 @@ export interface OfferInput {
   immutableAttributes?: string[]
   /** Brand/offer-level product lock: image tools must keep the real product pixels (exact mode). */
   lockProductAppearance?: boolean
+  /**
+   * Offer facts every ad must carry (P0 #5), by group. Allocation: price / bundle / shipping on
+   * the image offer line when it fits, else in the caption; not-included, age and contact CTA in
+   * the caption at minimum. Absent = nothing enforced (saved offers get the defaults from their
+   * ad_profile, see offer-profile.ts `DEFAULT_MUST_APPEAR`).
+   */
+  mustAppear?: MustAppearKey[]
 }
+
+/** Groups of offer facts that can be required on every ad. */
+export type MustAppearKey = 'price' | 'bundle' | 'shipping' | 'age' | 'not_included' | 'contact' | 'payment_methods' | 'compare_at_price'
 
 /** What a real product photo shows. */
 export type ProductPhotoRole = 'hero' | 'part' | 'contents' | 'box' | 'in_use' | 'detail'
@@ -346,6 +361,11 @@ export interface AdAngle {
   variation?: number
   /** Where the angle came from. */
   source?: 'planner' | 'guide' | 'agent'
+  /**
+   * Set after a copy rejection (regenerate mode copy / copy repair round 2): the rejected
+   * headlines to avoid and the alternative hook type the next attempt must use (P1 #10).
+   */
+  retry?: { attempt: number; avoidHeadlines: string[]; hookType?: HookType }
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +391,20 @@ export interface AdCopy {
   sceneBrief: string
   /** Fact keys actually used, for verification. */
   usedFactKeys: FactKey[]
+  /**
+   * Fact citations (P0 #2a): which confirmed fact ids (F1, F2… from the writer's closed list)
+   * back each claim sentence. From the writer's `claims` and its inline [[Fn]] markers (replaced
+   * by the canonical fact text). The strict checker validates every claim sentence against them.
+   */
+  claims?: CopyClaim[]
+}
+
+export interface CopyClaim {
+  /** "caption", "bullets[1]", "script.development"… */
+  field: string
+  /** 0-based sentence index inside the field (claimSentences). */
+  sentenceIndex: number
+  factIds: string[]
 }
 
 export interface CopyCheckIssue {
@@ -389,6 +423,14 @@ export interface CopyCheckIssue {
     | 'locale_register'
     /** Generic hook/cliché from the deterministic blocklist (cliches.ts). Repairable, not blocking. */
     | 'cliche'
+    /** A mustAppear offer fact (price, bundle, shipping rule, age, not-included, contact) is missing. */
+    | 'missing_fact'
+    /** Pressure/urgency phrase ("Pedilo ya", "últimas unidades") while the kit does not allow urgency. */
+    | 'urgency'
+    /** Telegraphic Spanish (dropped article after a verb / before a person noun). Repairable. */
+    | 'grammar'
+    /** Comparison hook ("No compres X de plástico") without a verified comparison fact. */
+    | 'unverified_comparison'
   field: keyof AdCopy | 'script'
   detail: string
   /** Exact location, e.g. "bullets[2]" or "script.hook" (defaults to `field`). */
@@ -398,6 +440,14 @@ export interface CopyCheckIssue {
   actual?: number
   /** The offending token (number, phrase, verb form). */
   token?: string
+  /** The sentence the issue is about (claims, grammar, urgency…). */
+  sentence?: string
+  /** Tokens that broke the rule (numbers / units / nouns no fact backs, the urgency phrase…). */
+  offendingTokens?: string[]
+  /** Closest confirmed fact (key + canonical text + writer id) — what the sentence should say. */
+  nearestFactKey?: FactKey
+  nearestFact?: string
+  nearestFactId?: string
 }
 
 export interface CopyCheckResult {
@@ -559,6 +609,11 @@ export interface PackStore {
   leaseItems(packId: string, limit: number, leaseMs: number, opts?: { excludeIds?: string[] }): Promise<PackItem[]>
   /** Patch an item. A present-but-undefined `leaseUntil` clears the lease. */
   updateItem(itemId: string, patch: Partial<PackItem>): Promise<void>
+  /**
+   * Optional: angle ids of the user's latest `packs` packs for one offer (newest first), for
+   * cross-pack angle diversity (P1 #10). Cancelled packs are ignored.
+   */
+  recentAngleIds?(userId: string, productId: string, packs: number): Promise<string[]>
 }
 
 /** Model-call abstraction so tests and the benchmark can inject fakes / record cost. */

@@ -19,6 +19,7 @@ import {
   type CopyContext,
   type RawModelCopy,
 } from './copy-shared.js'
+import { claimSentenceSpans, matchClaim, missingMustAppear, nearestFact } from './claims.js'
 import { extractNumericClaims, numbersInFacts } from './facts.js'
 import { HARD_REGISTER_MARKERS, IAN_CORE_RULES, isHardRegister, REGISTER_DRIFT_MARKERS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, headlineMaxWords } from './patterns.js'
@@ -56,6 +57,11 @@ interface IssueExtra {
   limit?: number
   actual?: number
   token?: string
+  sentence?: string
+  offendingTokens?: string[]
+  nearestFactKey?: FactKey
+  nearestFact?: string
+  nearestFactId?: string
 }
 
 type Push = (code: CopyCheckIssue['code'], field: Field, detail: string, extra?: IssueExtra) => void
@@ -165,6 +171,11 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
       ...(extra.limit !== undefined ? { limit: extra.limit } : {}),
       ...(extra.actual !== undefined ? { actual: extra.actual } : {}),
       ...(extra.token !== undefined ? { token: extra.token } : {}),
+      ...(extra.sentence !== undefined ? { sentence: extra.sentence } : {}),
+      ...(extra.offendingTokens?.length ? { offendingTokens: extra.offendingTokens } : {}),
+      ...(extra.nearestFactKey ? { nearestFactKey: extra.nearestFactKey } : {}),
+      ...(extra.nearestFact ? { nearestFact: extra.nearestFact } : {}),
+      ...(extra.nearestFactId ? { nearestFactId: extra.nearestFactId } : {}),
     })
   }
 
@@ -222,6 +233,49 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
     }
   }
 
+  // P1 #11: pressure/urgency phrases (kit toneRules.allowUrgency, default false) and telegraphic
+  // Spanish (dropped articles). Customer quotes are the customer's words and are not checked.
+  for (const { field, path, text } of fields) {
+    if (field === 'offerLine') continue
+    const unquoted = text.replace(/["“”«»][^"“”«»]*["“”«»]/g, ' ')
+    if (options.dna.allowUrgency !== true) {
+      for (const hit of findUrgency(unquoted)) {
+        push('urgency', field, `Pressure phrase "${hit}": this brand does not use urgency (kit toneRules.allowUrgency); sell with the fact, not the clock`, { path, token: hit, sentence: sentenceWith(text, hit), offendingTokens: [hit] })
+      }
+    }
+    if (options.language === 'es') {
+      for (const g of findTelegraphicSpanish(unquoted)) {
+        push('grammar', field, `Telegraphic Spanish "${g.match}": ${g.fix}`, { path, token: g.match, sentence: sentenceWith(text, g.match), offendingTokens: [g.match] })
+      }
+    }
+  }
+
+  // P1 #10: comparison hooks ("No compres X de plástico", "mejor que…") need a verified comparison fact.
+  if (!hasVerifiedComparison(ctx.confirmed)) {
+    for (const { field, path, text } of fields) {
+      if (field === 'offerLine' || field === 'cta') continue
+      for (const sentence of claimSentenceSpans(text).map((s) => s.text)) {
+        const m = normalizeText(sentence).match(COMPARISON_RE)
+        if (!m) continue
+        push('unverified_comparison', field, `Comparison "${m[0]}" without a verified comparison fact: say what the product is/does instead of attacking an alternative`, { path, token: m[0], sentence, offendingTokens: [m[0]] })
+      }
+    }
+  }
+
+  // P0 #5: required offer facts (price, bundle, shipping rule, age, not-included, contact CTA).
+  if (ctx.mustAppear.length) {
+    for (const miss of missingMustAppear(copy, ctx.mustAppear)) {
+      const id = ctx.idFacts.find((f) => normalizeText(f.value) === normalizeText(miss.fact.value))
+      push('missing_fact', 'caption', `mustAppear ${miss.group}: "${miss.fact.value}" must appear ${miss.where === 'caption' ? 'in the caption' : 'on the image offer line or in the caption'}`, {
+        path: miss.where === 'caption' ? 'caption' : 'offerLine|caption',
+        token: miss.fact.value,
+        nearestFactKey: miss.fact.key,
+        nearestFact: miss.fact.value,
+        ...(id ? { nearestFactId: id.id } : {}),
+      })
+    }
+  }
+
   // Forbidden phrases + forbidden claims (brand lists) on every on-image field, caption, script and scene brief.
   for (const hit of findForbiddenHits(copy, options.dna)) {
     push('forbidden_phrase', hit.baseField, `Forbidden ${hit.kind} "${hit.phrase}"`, { path: hit.field, token: hit.phrase })
@@ -245,9 +299,11 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
   // Repetition inside the ad: the caption sits under the image, so restating a chip or the
   // subline word for word adds nothing (judge's lowest criterion in the live benchmark).
   const cap = normalizeText(copy.caption ?? '')
+  // A canonical fact repeated in the caption (required facts are appended there) is not repetition.
+  const factTexts = new Set(ctx.confirmed.map((f) => normalizeText(f.value).replace(/[.!?¡¿]+$/g, '').trim()))
   for (const piece of [...(copy.bullets ?? []), copy.subline ?? '']) {
     const p = normalizeText(piece).replace(/[.!?¡¿]+$/g, '').trim()
-    if (p && contentWordCount(piece) >= 2 && cap.includes(p)) push('duplicate_message', 'caption', `Caption repeats "${piece}" from the image`)
+    if (p && !factTexts.has(p) && contentWordCount(piece) >= 2 && cap.includes(p)) push('duplicate_message', 'caption', `Caption repeats "${piece}" from the image`)
   }
 
   // Near-duplicates vs other copies in the pack
@@ -374,7 +430,7 @@ function checkFacts(copy: AdCopy, ctx: CopyContext, fields: TextField[], push: P
   }
 
   checkNotIncluded(ctx, fields, push)
-  if (ctx.offer.strictClaims) checkTraceableClaims(ctx, fields, push, statedExclusion)
+  if (ctx.offer.strictClaims) checkTraceableClaims(ctx, copy, fields, push, statedExclusion, Boolean(FORMAT_PATTERNS[options.angle.format].bulletsAreSteps))
 
   // Offer line: the deterministic one, or (owner edit) a line whose every part is a confirmed fact / stated exclusion.
   const line = copy.offerLine ?? ''
@@ -400,12 +456,8 @@ const INCLUSION_RE = /\b(?:incluye|incluyen|incluido|incluida|incluidos|incluida
 const NEGATION_NEAR_RE = /\b(?:no|sin|not|without|excluye|excluded|aparte|separately|separado)\b/
 
 /** Sentence-ish chunks of a field (claims are judged per sentence). */
-export function claimSentences(text: string): string[] {
-  return String(text ?? '')
-    .split(/(?<=[.!?¡¿;:])\s+|\n+|\s+[·•|]\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
+export { claimSentences } from './claims.js'
+import { claimSentences } from './claims.js'
 
 /** "Papel no incluido" on the offer → copy may never say paper is included. */
 function checkNotIncluded(ctx: CopyContext, fields: TextField[], push: Push): void {
@@ -454,23 +506,130 @@ function tracingValues(ctx: CopyContext): string[] {
 }
 
 /**
- * Verified-claims bank: every claim-like sentence must contain (verbatim, accent- and
- * case-insensitive) a confirmed fact or verified claim — "gratis con dos kits" fails
- * when the fact is "Envío gratis desde 2 kits".
+ * Verified-claims bank (P0 #2a): every claim-like sentence must map to ≥ 1 confirmed fact or
+ * verified claim — the facts it cites ([[F3]] markers / `claims`), else the nearest facts — and
+ * its numbers, units and claim markers must equal the fact's (normalized tokens: accents, case and
+ * stopwords ignored). Non-numeric wording may be paraphrased ("Trae control y batería" is backed
+ * by "Incluye control tipo gamepad y batería"); "gratis con 3 kits" is not backed by "Envío gratis
+ * desde 2 kits". A verbatim fact still passes directly.
  */
-function checkTraceableClaims(ctx: CopyContext, fields: TextField[], push: Push, statedExclusion: (s: string) => boolean): void {
+function checkTraceableClaims(ctx: CopyContext, copy: AdCopy, fields: TextField[], push: Push, statedExclusion: (s: string) => boolean, stepsFormat: boolean): void {
   const values = tracingValues(ctx)
+  const nameTokens = ctx.confirmed.filter((f) => f.key === 'brand_name' || f.key === 'offer_name').map((f) => f.value)
   for (const { field, path, text } of fields) {
     if (field === 'offerLine' || field === 'cta') continue
-    for (const sentence of claimSentences(text)) {
+    const bulletIndex = field === 'bullets' ? Number(path.slice(8, -1)) : -1
+    claimSentenceSpans(text).forEach((span, sentenceIndex) => {
+      const sentence = span.text
       // A stated exclusion ("Papel no incluido") limits, never promises.
-      if (statedExclusion(sentence)) continue
+      if (statedExclusion(sentence)) return
       const n = normalizeText(sentence)
-      if (!CLAIM_MARKER_RE.test(n)) continue
-      if (values.some((v) => n.includes(v))) continue
-      push('unconfirmed_fact', field, `untraceable_claim: "${sentence.slice(0, 90)}" is not one of the confirmed facts or verified claims (copy them exactly)`, { path, token: sentence.slice(0, 90) })
-    }
+      if (!CLAIM_MARKER_RE.test(n)) return
+      if (values.some((v) => n.includes(v))) return
+      const cited = (copy.claims ?? []).filter((c) => c.field === path && c.sentenceIndex === sentenceIndex).flatMap((c) => c.factIds)
+      const masked = maskStructural(sentence, bulletIndex, stepsFormat)
+      const verdict = matchClaim(masked, ctx.idFacts, { cited, nameTokens })
+      if (verdict.ok) return
+      const near = verdict.nearest ?? nearestFact(sentence, ctx.idFacts)
+      push('unconfirmed_fact', field, `untraceable_claim: "${sentence.slice(0, 90)}" — ${verdict.reason ?? 'no confirmed fact says this'}${near ? `; nearest fact ${near.id} "${near.value}"` : ''}`, {
+        path,
+        token: sentence.slice(0, 90),
+        sentence,
+        offendingTokens: verdict.offendingTokens,
+        ...(near ? { nearestFactKey: near.key, nearestFact: near.value, nearestFactId: near.id } : {}),
+      })
+    })
   }
+}
+
+// ---------------------------------------------------------------------------
+// es-CR copy quality: urgency blocklist, telegraphic Spanish, comparisons (P1 #10 / #11)
+// ---------------------------------------------------------------------------
+
+const URGENCY_PATTERNS: RegExp[] = [
+  /\b(?:pedilo|pedila|pidelo|pidela|pidalo|pedi|pide|pida|compralo|comprala|compra|compra|compre|aprovecha|aprovecha|aprovechalo|escribinos|escribenos|reserva|llevalo|llevatelo)\s+(?:ya|ya mismo|ahora mismo|hoy mismo)\b/,
+  /\b(?:ya mismo|ahora mismo|hoy mismo)\b/,
+  /\bultimas? unidades\b/,
+  /\bquedan (?:pocas|pocos|muy pocas|muy pocos|solo)\b/,
+  /\bpocas unidades\b/,
+  /\bsolo (?:por )?hoy\b|\bhoy solamente\b|\bunicamente hoy\b/,
+  /\b(?:por|oferta por) tiempo limitado\b|\boferta limitada\b|\bhasta agotar (?:existencias|stock)\b/,
+  /\bno te (?:lo|la|los|las) pierdas\b|\bno te quedes sin\b|\bno se lo pierda\b/,
+  /\bantes de que se (?:acabe|acaben|agote|agoten)\b|\bse (?:agota|agotan) rapido\b/,
+  /\b(?:apurate|apurese|date prisa|corre ya|corre por)\b/,
+  /\b(?:hurry|last chance|only today|today only|limited time|while supplies last|act now|order now|don'?t miss out|selling out|almost gone)\b/,
+]
+
+/** Pressure phrases in a text (normalized matches). */
+export function findUrgency(text: string): string[] {
+  const n = normalizeText(text)
+  const out: string[] = []
+  for (const re of URGENCY_PATTERNS) {
+    const m = n.match(re)
+    if (m && !out.some((o) => o.includes(m[0]) || m[0].includes(o))) out.push(m[0])
+  }
+  return out
+}
+
+/** Words that may follow a verb without an article (determiners, pronouns, prepositions, adverbs…). */
+const AFTER_VERB_OK = new Set([
+  'un', 'una', 'unos', 'unas', 'el', 'la', 'los', 'las', 'lo', 'le', 'les', 'me', 'te', 'nos', 'se', 'tu', 'tus', 'su', 'sus', 'mi', 'mis',
+  'este', 'esta', 'estos', 'estas', 'esto', 'ese', 'esa', 'esos', 'esas', 'eso', 'aquel', 'aquella', 'nuestro', 'nuestra', 'nuestros',
+  'nuestras', 'al', 'del', 'otro', 'otra', 'otros', 'otras', 'cada', 'todo', 'toda', 'todos', 'todas', 'mas', 'menos', 'ya', 'hoy', 'ahora',
+  'aqui', 'aca', 'alla', 'bien', 'mejor', 'tambien', 'solo', 'sin', 'con', 'de', 'en', 'por', 'para', 'a', 'y', 'o', 'que', 'como',
+  'cuando', 'donde', 'hasta', 'desde', 'si', 'no', 'vos', 'ya', 'mismo', 'misma', 'juntos', 'juntas', 'gratis', 'facil', 'rapido',
+  'diversion', 'tiempo', 'calidad', 'energia', 'color', 'vida', 'paz', 'estilo', 'ritmo', 'magia', 'aventura', 'confianza', 'seguridad',
+  'valor', 'amor', 'alegria', 'felicidad', 'ingenio', 'creatividad', 'tranquilidad', 'comodidad', 'sabor', 'salud', 'descanso',
+])
+
+/** Words with a stressed final vowel that are not voseo imperatives. */
+const NOT_IMPERATIVE = new Set(['está', 'será', 'aquí', 'ahí', 'allí', 'así', 'acá', 'allá', 'quizá', 'papá', 'mamá', 'bebé', 'café', 'sofá', 'menú', 'champú', 'colibrí', 'maní', 'ají', 'jabalí', 'rubí', 'aún', 'también', 'según', 'después', 'detrás', 'jamás', 'demás'])
+
+/** Voseo imperative (stressed final vowel: regalá, llevá, elegí, pedí…), ≥ 4 letters. */
+const VOSEO_IMPERATIVE_RE = /^[a-zñ]{3,}[áéí]$/
+
+/** A person noun right after "de/con/para" without its article ("supervisión de adulto"). */
+const BARE_PERSON_RE = /\b(?:de|con|para|a)\s+(adulto|adulta|nino|nina|hijo|hija|papa|mama|abuelo|abuela|persona|amigo|amiga|companero|companera|experto|experta)\b/
+
+/**
+ * Telegraphic Spanish heuristics (repairable): a voseo imperative followed by a bare singular
+ * count noun ("Regalá avión RC…" → "Regalá un avión RC…") and a person noun without its article
+ * after a preposition ("supervisión de adulto" → "de un adulto").
+ */
+export function findTelegraphicSpanish(text: string): Array<{ match: string; fix: string }> {
+  const out: Array<{ match: string; fix: string }> = []
+  const raw = String(text ?? '')
+  const words = raw.split(/\s+/)
+  for (let i = 0; i < words.length - 1; i++) {
+    const w = words[i].replace(/^[¡¿"“(]+|[,;:.!?"”)]+$/g, '')
+    if (/[,;:.!?]$/.test(words[i])) continue
+    const lw = w.toLowerCase()
+    if (!VOSEO_IMPERATIVE_RE.test(lw) || NOT_IMPERATIVE.has(lw) || (lw.length >= 6 && /(?:ar|er|ir)[áé]$/.test(lw))) continue
+    const nextRaw = words[i + 1].replace(/^[¡¿"“(]+|[,;:.!?"”)]+$/g, '')
+    if (!nextRaw || /^[\d₡$]/.test(nextRaw) || /^\p{Lu}/u.test(nextRaw)) continue
+    const next = normalizeText(nextRaw)
+    if (AFTER_VERB_OK.has(next) || next.endsWith('s') || next.endsWith('mente') || /^(?:lo|la|le|me|te|nos|se)$/.test(next)) continue
+    if (/(?:ar|er|ir)$/.test(next)) continue
+    out.push({ match: `${w} ${nextRaw}`, fix: `add the article ("${w} un/el ${nextRaw}…"); headlines can be short but must be grammatical` })
+  }
+  const n = normalizeText(raw)
+  const m = n.match(BARE_PERSON_RE)
+  if (m) out.push({ match: m[0], fix: `add the article ("${m[0].split(' ')[0]} un ${m[1]}")` })
+  return out
+}
+
+/** Comparison hooks that attack an alternative ("No compres X…", "mejor que", "a diferencia de"). */
+const COMPARISON_RE = /^no compres\b|\bno compres (?:mas|otro|otra|un|una|el|la)\b|\b(?:olvidate|olvidese) de\b|\ba diferencia de\b|\bmejor que\b|\bno como (?:los|las|el|la)\b|\bstop buying\b|\bdon'?t buy\b|\bbetter than\b|\bunlike\b/
+
+/** A confirmed fact / verified claim that itself states a comparison. */
+export function hasVerifiedComparison(confirmed: Array<{ key: string; value: string }>): boolean {
+  return confirmed.some((f) => f.key === 'custom:comparison' || /\b(?:que|vs\.?|versus|diferencia|comparad\w*|than|unlike|instead|en vez)\b/.test(normalizeText(f.value)) && /\b(?:mas|menos|mejor|peor|vs\.?|versus|diferencia|comparad\w*|than|unlike|instead|en vez)\b/.test(normalizeText(f.value)))
+}
+
+/** The sentence of `text` that contains `needle` (normalized match), else the text head. */
+function sentenceWith(text: string, needle: string): string {
+  const n = normalizeText(needle)
+  return claimSentenceSpans(text).map((s) => s.text).find((s) => normalizeText(s).includes(n)) ?? text.slice(0, 120)
 }
 
 /** First part of an owner-written offer line that no confirmed fact backs, or null when every part is backed. */
@@ -518,6 +677,8 @@ export interface RepairAdCopyInput {
   language: AdLanguage
   otherCopies?: AdCopy[]
   model?: string
+  /** 1-based repair round (round 2 asks for a from-scratch rewrite of the failing sentences). */
+  round?: number
 }
 
 export interface RepairAdCopyResult {
@@ -555,22 +716,43 @@ export async function repairAdCopy(input: RepairAdCopyInput): Promise<RepairAdCo
     forbiddenList(dna).length ? `${language === 'es' ? 'Frases y claims prohibidos' : 'Forbidden phrases and claims'}: ${forbiddenList(dna).join(' | ')}` : '',
     `${language === 'es' ? 'Mensaje del anuncio' : 'Ad message'}: ${angle.message}`,
     `${language === 'es' ? 'Campos a corregir' : 'Fields to fix'}: ${failing.join(', ')}`,
-    `${language === 'es' ? 'Problemas' : 'Issues'}:\n${issues.map((i) => `- [${i.field}] ${i.code}: ${i.detail}`).join('\n')}`,
+    `${language === 'es' ? 'Problemas' : 'Issues'}:\n${issues.map((i) => issueLine(i, language)).join('\n')}`,
+    input.round && input.round > 1
+      ? language === 'es'
+        ? `RONDA ${input.round}: la corrección anterior no alcanzó. Reescribí esas frases desde cero citando el hecho más cercano con su marcador [[Fn]] (o quitá la frase); no repitas la misma estructura.`
+        : `ROUND ${input.round}: the previous fix was not enough. Rewrite those sentences from scratch citing the nearest fact with its [[Fn]] marker (or drop the sentence); do not repeat the same structure.`
+      : '',
     `${language === 'es' ? 'Copy actual' : 'Current copy'}: ${JSON.stringify(pickFields(copy, failing))}`,
+    language === 'es'
+      ? 'Devolvé SOLO JSON con los campos corregidos y, si citás hechos, "claims":[{"field":"caption","sentenceIndex":0,"factIds":["F2"]}].'
+      : 'Return JSON with only the fixed fields and, when you cite facts, "claims":[{"field":"caption","sentenceIndex":0,"factIds":["F2"]}].',
   ]
     .filter(Boolean)
     .join('\n\n')
 
   try {
-    const res = await gateway.json<RawModelCopy>({ system, user, model: input.model ?? ADPACK_COPY_MODEL, temperature: 0.3, maxTokens: 900 })
+    const res = await gateway.json<RawModelCopy>({ system, user, model: input.model ?? ADPACK_COPY_MODEL, temperature: input.round && input.round > 1 ? 0.5 : 0.3, maxTokens: 900 })
     const patch = (res.data ?? {}) as Record<string, unknown>
-    const merged: RawModelCopy = { ...copy }
+    // Citations of the rewritten fields are replaced by the repair's own.
+    const keptClaims = (copy.claims ?? []).filter((c) => !failing.includes(c.field.replace(/\[\d+\]$/, '').replace(/\..*$/, '') as keyof AdCopy))
+    const merged: RawModelCopy = { ...copy, claims: [...keptClaims, ...(Array.isArray(patch.claims) ? patch.claims : [])] }
     for (const f of failing) if (patch[f] !== undefined) (merged as Record<string, unknown>)[f] = patch[f]
     const next = normalizeModelCopy(merged, ctx, defaultSceneFallback(ctx, FORMAT_PATTERNS[angle.format].sceneIntent))
     return { copy: next, check: recheck(next), costUsd: res.costUsd, repaired: true }
   } catch (error) {
     return { copy, check: recheck(copy), costUsd: 0, repaired: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/** One repair-prompt line per issue: where, rule, the sentence, offending tokens and the nearest fact (P0 #2b). */
+export function issueLine(i: CopyCheckIssue, language: AdLanguage): string {
+  const es = language === 'es'
+  const parts = [`- [${i.path ?? i.field}] ${i.code}: ${i.detail}`]
+  if (i.sentence) parts.push(`${es ? 'frase' : 'sentence'}: "${i.sentence.slice(0, 160)}"`)
+  if (i.offendingTokens?.length) parts.push(`${es ? 'tokens que fallan' : 'offending tokens'}: ${i.offendingTokens.slice(0, 6).join(', ')}`)
+  if (i.nearestFact) parts.push(`${es ? 'hecho más cercano' : 'nearest fact'}${i.nearestFactId ? ` ${i.nearestFactId}` : ''} (${i.nearestFactKey}): "${i.nearestFact}"${i.nearestFactId ? ` → ${es ? 'usá' : 'use'} [[${i.nearestFactId}]]` : ''}`)
+  if (i.limit !== undefined) parts.push(`${es ? 'límite' : 'limit'} ${i.limit}, ${es ? 'actual' : 'actual'} ${i.actual}`)
+  return parts.join(' · ')
 }
 
 function pickFields(copy: AdCopy, fields: Array<keyof AdCopy>): Partial<AdCopy> {

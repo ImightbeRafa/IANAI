@@ -30,9 +30,9 @@ import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { quoteCredits } from '../credits/catalog.js'
 import { deterministicGenerationUuid, generationUuidFromApproval } from '../credits/generation-id.js'
-import { checkAdCopy, repairAdCopy } from './check-copy.js'
+import { checkAdCopy } from './check-copy.js'
 import { checkScene, type CheckSceneOutput } from './check-scene.js'
-import { generateAdCopy } from './copy.js'
+import { alternateHook, blockingIssuesFor, EDIT_BLOCKING_COPY_CODES, writeAdCopy } from './copy-stage.js'
 import { assignLayoutFamilies } from './layout-plan.js'
 import { resolvePackAngles } from './plan-angles.js'
 import { generateScene, stripCopyText, type GeneratedScene } from './scene.js'
@@ -78,18 +78,7 @@ export const DEFAULT_RATIOS: AspectRatio[] = ['4:5', '9:16']
 export const ANCHOR_INDEX = 0
 export const MAX_SCENE_RETRIES = 2
 
-/** Copy issues that block shipping after the one repair (facts, compliance, broken text). */
-export const BLOCKING_COPY_CODES: ReadonlySet<CopyCheckIssue['code']> = new Set([
-  'unconfirmed_fact',
-  'number_mismatch',
-  'compliance',
-  'forbidden_phrase',
-  'placeholder',
-  'empty_field',
-  'locale_register',
-])
-/** User text edits are also rejected when they break length limits. */
-export const EDIT_BLOCKING_COPY_CODES: ReadonlySet<CopyCheckIssue['code']> = new Set([...BLOCKING_COPY_CODES, 'too_long'])
+export { BLOCKING_COPY_CODES, EDIT_BLOCKING_COPY_CODES, MAX_COPY_REPAIR_ROUNDS } from './copy-stage.js'
 
 const TERMINAL: ReadonlySet<PackItemStatus> = new Set(['done', 'failed'])
 const ANCHOR_SETTLED: ReadonlySet<PackItemStatus> = new Set(['scene_ready', 'rendered', 'done', 'failed'])
@@ -134,6 +123,8 @@ export interface PlanPackInput {
   brief?: string
   /** Product fidelity options. Omitted → legacy generated mode (callers decide the default). */
   render?: PackRenderOptions
+  /** Angle ids of the latest packs of this offer: the planner prefers others (P1 #10). Planner picks only. */
+  avoidAngleIds?: string[]
 }
 
 /** Formats that may place real parts next to the hero (H3). */
@@ -153,7 +144,7 @@ export interface PlannedAngles {
  * (plan-angles `resolvePackAngles`) serves quote, approval and start: same inputs → same list,
  * unusable ids throw AnglePlanError (BAD_INPUT `rejectedAngles` at the doors).
  */
-export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' | 'size' | 'angleIds' | 'angles' | 'creativeFreedom' | 'seed' | 'brief' | 'styleProfile'>): PlannedAngles {
+export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' | 'size' | 'angleIds' | 'angles' | 'creativeFreedom' | 'seed' | 'brief' | 'styleProfile' | 'avoidAngleIds'>): PlannedAngles {
   const selected = Boolean(input.angleIds?.length || input.angles?.length)
   const creativeFreedom: CreativeFreedom = input.creativeFreedom ?? (selected ? 'guided' : 'high')
   const angles = resolvePackAngles({
@@ -166,6 +157,7 @@ export function resolvePlannedAngles(input: Pick<PlanPackInput, 'dna' | 'offer' 
     preferHook: input.styleProfile?.hookType,
     angleIds: input.angleIds,
     angles: input.angles,
+    ...(!selected && creativeFreedom === 'high' && input.avoidAngleIds?.length ? { avoidAngleIds: input.avoidAngleIds } : {}),
   })
   return { angles, creativeFreedom }
 }
@@ -509,8 +501,9 @@ function otherCopies(ctx: RunCtx, item: PackItem): AdCopy[] {
     .map((i) => i.copy as AdCopy)
 }
 
-function blockingIssues(check: CopyCheckResult, codes: ReadonlySet<CopyCheckIssue['code']>): CopyCheckIssue[] {
-  return check.issues.filter((i) => codes.has(i.code))
+/** "copy_check_failed: unconfirmed_fact(caption), missing_fact(caption)" — the full issues live on item.copyCheck. */
+export function copyFailureError(blocking: CopyCheckIssue[]): string {
+  return `copy_check_failed: ${blocking.map((i) => `${i.code}(${i.path ?? i.field})`).join(', ')}`
 }
 
 /** Base item (variation 0) of a variation item, from this call's view. */
@@ -553,33 +546,16 @@ async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem | 'defer'
   if (shared === 'defer') return 'defer'
   if (shared) return save(ctx, item, { status: 'copy_ready', copy: shared.copy, copyCheck: shared.copyCheck, timings: { ...item.timings, copyMs: 0 }, error: undefined })
   const t0 = Date.now()
-  let cost = 0
-  let gen: Awaited<ReturnType<typeof generateAdCopy>> | null = null
-  let lastError = ''
-  for (let attempt = 0; attempt < 2 && !gen; attempt++) {
-    try {
-      gen = await generateAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief })
-    } catch (error) {
-      lastError = errorMessage(error)
-    }
-  }
-  if (!gen) return fail(ctx, item, `copy_failed: ${lastError}`, { timings: { ...item.timings, copyMs: Date.now() - t0 } })
-  cost += gen.costUsd
-  let copy = gen.copy
-  let check = gen.check
-  if (!check.ok) {
-    const rep = await repairAdCopy({ gateway, copy, issues: check.issues, dna, offer, angle: item.angle, language, otherCopies: otherCopies(ctx, item), model: ctx.input.copyModel })
-    cost += rep.costUsd
-    copy = rep.copy
-    check = rep.check
-  }
-  const costUsd = (item.costUsd ?? 0) + cost
+  // Generation + up to 2 free repair rounds fed with the checker's detailed issues (P0 #2b).
+  const res = await writeAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief })
+  const costUsd = (item.costUsd ?? 0) + res.costUsd
   const timings = { ...item.timings, copyMs: Date.now() - t0 }
-  const blocking = blockingIssues(check, BLOCKING_COPY_CODES)
-  if (blocking.length) {
-    return fail(ctx, item, `copy_check_failed: ${blocking.map((i) => `${i.code}(${i.path ?? i.field})`).join(', ')}`, { copy, copyCheck: check, costUsd, timings })
+  if (!res.copy || !res.check) return fail(ctx, item, res.error ?? 'copy_failed', { costUsd, timings })
+  const angle = res.retryAngle ? { angle: res.retryAngle } : {}
+  if (!res.ok) {
+    return fail(ctx, item, copyFailureError(res.blocking), { copy: res.copy, copyCheck: res.check, costUsd, timings, ...angle })
   }
-  return save(ctx, item, { status: 'copy_ready', copy, copyCheck: check, costUsd, timings, error: undefined })
+  return save(ctx, item, { status: 'copy_ready', copy: res.copy, copyCheck: res.check, costUsd, timings, error: undefined, ...angle })
 }
 
 async function waitForAnchor(ctx: RunCtx, item: PackItem): Promise<{ anchorUrl?: string } | 'defer'> {
@@ -1241,7 +1217,7 @@ export async function editItemText(input: EditItemTextInput): Promise<EditItemTe
     otherCopies: items.filter((i) => i.id !== item.id && i.copy && i.status !== 'failed').map((i) => i.copy as AdCopy),
     userEdit: true,
   })
-  const blocking = blockingIssues(check, EDIT_BLOCKING_COPY_CODES)
+  const blocking = blockingIssuesFor(check, pack.offer, EDIT_BLOCKING_COPY_CODES)
   if (blocking.length) return { ok: false, error: 'copy_rejected', issues: blocking }
 
   const t0 = Date.now()
@@ -1388,9 +1364,24 @@ export async function regenerateItem(input: RegenerateItemInput): Promise<Regene
 
   const attempts = item.attempts + 1
   const keepCopy = input.mode === 'scene' && Boolean(item.copy)
+  // P1 #10: new copy never repeats the previous headline; after a copy rejection it also switches hook type.
+  const rejected = item.status === 'failed' && (item.error ?? '').startsWith('copy')
+  const retryAngle: AdAngle | undefined = !keepCopy && (item.copy?.headline || rejected)
+    ? {
+        ...item.angle,
+        retry: {
+          attempt: (item.angle.retry?.attempt ?? 0) + 1,
+          avoidHeadlines: [...new Set([...(item.angle.retry?.avoidHeadlines ?? []), item.copy?.headline ?? ''].filter(Boolean))].slice(-4),
+          ...(rejected
+            ? { hookType: alternateHook(item.angle, loaded.pack.dna, loaded.pack.offer, (item.angle.retry?.attempt ?? 0) + 1) }
+            : item.angle.retry?.hookType ? { hookType: item.angle.retry.hookType } : {}),
+        },
+      }
+    : undefined
   const patch: Partial<PackItem> = {
     status: keepCopy ? 'copy_ready' : 'planned',
     attempts,
+    ...(retryAngle ? { angle: retryAngle } : {}),
     generationId: itemGenerationId(loaded.pack.id, item.index, attempts),
     copy: keepCopy ? item.copy : undefined,
     copyCheck: keepCopy ? item.copyCheck : undefined,

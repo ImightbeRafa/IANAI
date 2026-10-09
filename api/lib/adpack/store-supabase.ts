@@ -198,5 +198,28 @@ export function createSupabasePackStore(client?: SupabaseClient | null): PackSto
       const { error } = await db.from('ad_pack_items').update(patchToRow<PackItem>(patch, ITEM_PATCH_COLUMNS)).eq('id', itemId)
       if (error) throw new Error(`adpack_update_item_failed: ${error.message}`)
     },
+
+    async recentAngleIds(userId, productId, n) {
+      // Read-only, best-effort (diversity hint): existing tables only, offer jsonb ->> productId.
+      const { data: packRows, error } = await db
+        .from('ad_packs')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('offer->>productId', productId)
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: false })
+        .limit(Math.max(1, n))
+      if (error || !packRows?.length) return []
+      const ids = packRows.map((r) => String((r as Row).id))
+      const { data: itemRows, error: itemsError } = await db.from('ad_pack_items').select('pack_id, item_index, angle').in('pack_id', ids)
+      if (itemsError || !itemRows) return []
+      const order = new Map(ids.map((id, i) => [id, i]))
+      const out: string[] = []
+      for (const r of [...itemRows as Row[]].sort((a, b) => (order.get(String(a.pack_id)) ?? 0) - (order.get(String(b.pack_id)) ?? 0) || Number(a.item_index) - Number(b.item_index))) {
+        const id = (r.angle as { id?: unknown } | null)?.id
+        if (typeof id === 'string' && !out.includes(id)) out.push(id)
+      }
+      return out
+    },
   }
 }

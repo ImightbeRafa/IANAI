@@ -96,6 +96,8 @@ export interface RunnerGatewayOptions {
   sceneFails?: (prompt: string) => boolean
   /** Vision verdict per call (default: matches, no text). */
   vision?: (callIndex: number, images: string[]) => Record<string, unknown>
+  /** Copy JSON per text call (default: serumCopyFor). */
+  json?: (input: { system: string; user: string }, callIndex: number) => unknown
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -108,9 +110,11 @@ export function runnerGateway(options: RunnerGatewayOptions = {}): RunnerGateway
     sceneCalls: [],
     totalCalls: () => gw.jsonCalls.length + gw.visionCalls.length + gw.sceneCalls.length,
     async json<T>(input: { system: string; user: string; model?: string }) {
+      const index = gw.jsonCalls.length
       gw.jsonCalls.push({ system: input.system, user: input.user })
       if (delay) await sleep(delay)
-      return { data: serumCopyFor(input.user) as T, costUsd: 0.001, model: 'fake-text' }
+      const data = options.json ? options.json(input, index) : serumCopyFor(input.user)
+      return { data: data as T, costUsd: 0.001, model: 'fake-text' }
     },
     async visionJson<T>(input: { images: string[] }) {
       const index = gw.visionCalls.length

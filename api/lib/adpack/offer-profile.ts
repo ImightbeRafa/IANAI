@@ -10,7 +10,7 @@
  * OfferProfileError with the offending field.
  */
 import { isPlaceholderValue, type IgnoredPlaceholder } from '../placeholder-guard.js'
-import type { AdLanguage, DnaFact, FactKey } from './types.js'
+import type { AdLanguage, BrandDna, DnaFact, FactKey, MustAppearKey } from './types.js'
 
 export type OfferCurrency = 'CRC' | 'USD'
 export type OfferCtaChannel = 'web' | 'whatsapp' | 'dm'
@@ -41,6 +41,30 @@ export interface OfferVerifiedClaim {
   source: string
 }
 
+/** How buyers reach the shop (P3 #21). Become confirmed facts + the contact CTA. */
+export interface OfferContact {
+  /** WhatsApp number as the owner writes it, e.g. "7000-0000" or "+506 7000 0000". */
+  whatsapp?: string
+  phone?: string
+  /** Shop URL, stored as https://host/path; shown without the scheme ("tienda.example"). */
+  url?: string
+  /** "@handle". */
+  instagram?: string
+}
+
+/** Recommended age (+ adult supervision) → "Desde 8 años, con supervisión de un adulto". */
+export interface OfferAgeRule {
+  min: number
+  supervision?: boolean
+  /** Exact owner sentence (wins over the generated one). */
+  text?: string
+}
+
+/** Fact groups that can be required on every ad (owner feedback P0 #5). */
+export const MUST_APPEAR_KEYS: readonly MustAppearKey[] = ['price', 'bundle', 'shipping', 'age', 'not_included', 'contact', 'payment_methods', 'compare_at_price']
+/** Saved offers require these by default (a group the offer has no fact for is skipped). */
+export const DEFAULT_MUST_APPEAR: readonly MustAppearKey[] = ['price', 'bundle', 'shipping', 'age', 'not_included', 'contact']
+
 export interface OfferAdProfile {
   price?: OfferMoney
   compareAtPrice?: OfferMoney
@@ -53,6 +77,13 @@ export interface OfferAdProfile {
   verifiedClaims?: OfferVerifiedClaim[]
   cta?: { text?: string; channels?: OfferCtaChannel[] }
   ageMin?: number
+  /** Age rule with adult supervision; wins over `ageMin`. */
+  ageRule?: OfferAgeRule
+  contact?: OfferContact
+  /** e.g. ["SINPE Móvil", "tarjeta", "efectivo"] → fact "Aceptamos SINPE Móvil, tarjeta y efectivo". */
+  paymentMethods?: string[]
+  /** Fact groups required on every ad. Absent → DEFAULT_MUST_APPEAR; [] → none. */
+  mustAppear?: MustAppearKey[]
   /** A2: attributes the image tools must never change (e.g. "ala de papel blanca"). */
   immutableAttributes?: string[]
   /** A2: never redraw the product; image tools must respect it. */
@@ -150,6 +181,49 @@ function int(field: string, raw: unknown, min: number, max: number): number | un
   if (typeof raw !== 'number' || !Number.isInteger(raw)) throw new OfferProfileError(field, 'must be a whole number')
   if (raw < min || raw > max) throw new OfferProfileError(field, `must be between ${min} and ${max}`)
   return raw
+}
+
+const PHONE_CHARS_RE = /^\+?[\d\s().-]+$/
+
+/** "7000-0000" / "+506 7000 0000": digits, spaces, dashes, dots, parentheses and a leading +; 7–15 digits. */
+function phoneNumber(field: string, raw: unknown, ignored: IgnoredPlaceholder[]): string | undefined {
+  const v = text(field, raw, 30, ignored)
+  if (!v) return undefined
+  if (!PHONE_CHARS_RE.test(v)) throw new OfferProfileError(field, 'must be a phone number like "7000-0000" or "+506 7000 0000"')
+  const digits = v.replace(/\D/g, '').length
+  if (digits < 7 || digits > 15) throw new OfferProfileError(field, `must have 7 to 15 digits (got ${digits})`)
+  return v
+}
+
+/** "tienda.example" or "https://tienda.example/kits" → "https://tienda.example/kits" (http(s), a real host). */
+function shopUrl(field: string, raw: unknown, ignored: IgnoredPlaceholder[]): string | undefined {
+  const v = text(field, raw, 200, ignored)
+  if (!v) return undefined
+  if (/\s/.test(v)) throw new OfferProfileError(field, 'must be a URL without spaces')
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(v) ? v : `https://${v}`
+  let u: URL
+  try {
+    u = new URL(withScheme)
+  } catch {
+    throw new OfferProfileError(field, 'is not a valid URL')
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new OfferProfileError(field, 'must be an http(s) URL')
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(u.hostname)) throw new OfferProfileError(field, 'must have a real domain (e.g. tienda.example)')
+  return `https://${u.hostname.toLowerCase()}${u.pathname === '/' ? '' : u.pathname.replace(/\/$/, '')}${u.search}`
+}
+
+/** Display form of a stored shop URL: no scheme, no "www.". */
+export function displayUrl(url: string): string {
+  return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '')
+}
+
+/** "@handle", "handle" or an instagram.com/handle URL → "@handle". */
+function instagramHandle(field: string, raw: unknown, ignored: IgnoredPlaceholder[]): string | undefined {
+  const v = text(field, raw, 120, ignored)
+  if (!v) return undefined
+  const m = v.match(/^(?:https?:\/\/)?(?:www\.)?instagram\.com\/([A-Za-z0-9._]+)\/?$/i) ?? v.match(/^@?([A-Za-z0-9._]+)$/)
+  if (!m || m[1].length > 30) throw new OfferProfileError(field, 'must be an Instagram handle like "@tienda" (letters, digits, . and _)')
+  return `@${m[1]}`
 }
 
 /**
@@ -258,6 +332,50 @@ export function parseOfferAdProfile(
     }
   }
   if (has('ageMin')) set('ageMin', int('ageMin', raw.ageMin, 0, 99))
+  if (has('ageRule')) {
+    if (raw.ageRule === null) set('ageRule', undefined)
+    else {
+      if (!isObj(raw.ageRule)) throw new OfferProfileError('ageRule', 'must be { min, supervision?, text? }')
+      const min = int('ageRule.min', raw.ageRule.min, 0, 99)
+      if (min === undefined) throw new OfferProfileError('ageRule.min', 'is required (whole number of years)')
+      const sup = raw.ageRule.supervision
+      if (sup !== undefined && sup !== null && typeof sup !== 'boolean') throw new OfferProfileError('ageRule.supervision', 'must be a boolean')
+      const t = text('ageRule.text', raw.ageRule.text, L.textChars, ignored)
+      set('ageRule', { min, ...(sup === true ? { supervision: true } : {}), ...(t ? { text: t } : {}) })
+    }
+  }
+  if (has('contact')) {
+    if (raw.contact === null) set('contact', undefined)
+    else {
+      if (!isObj(raw.contact)) throw new OfferProfileError('contact', 'must be { whatsapp?, phone?, url?, instagram? }')
+      const c = raw.contact
+      const contact: OfferContact = {}
+      const wa = phoneNumber('contact.whatsapp', c.whatsapp, ignored)
+      if (wa) contact.whatsapp = wa
+      const ph = phoneNumber('contact.phone', c.phone, ignored)
+      if (ph) contact.phone = ph
+      const url = shopUrl('contact.url', c.url, ignored)
+      if (url) contact.url = url
+      const ig = instagramHandle('contact.instagram', c.instagram, ignored)
+      if (ig) contact.instagram = ig
+      set('contact', Object.keys(contact).length ? contact : undefined)
+    }
+  }
+  if (has('paymentMethods')) set('paymentMethods', list('paymentMethods', raw.paymentMethods, 60, ignored))
+  if (has('mustAppear')) {
+    if (raw.mustAppear === null) set('mustAppear', undefined)
+    else {
+      if (!Array.isArray(raw.mustAppear)) throw new OfferProfileError('mustAppear', `must be an array of: ${MUST_APPEAR_KEYS.join(', ')}`)
+      const keys: MustAppearKey[] = []
+      for (const k of raw.mustAppear) {
+        if (typeof k !== 'string' || !(MUST_APPEAR_KEYS as readonly string[]).includes(k)) throw new OfferProfileError('mustAppear', `unknown key ${JSON.stringify(k)} (use ${MUST_APPEAR_KEYS.join(', ')})`)
+        if (!keys.includes(k as MustAppearKey)) keys.push(k as MustAppearKey)
+      }
+      // An explicit [] is kept: "no required facts" is not the same as "defaults".
+      changed.push('mustAppear')
+      next.mustAppear = keys
+    }
+  }
   if (has('lockProductAppearance')) {
     if (raw.lockProductAppearance !== null && typeof raw.lockProductAppearance !== 'boolean') throw new OfferProfileError('lockProductAppearance', 'must be a boolean')
     set('lockProductAppearance', raw.lockProductAppearance === true ? true : undefined)
@@ -322,6 +440,8 @@ export function excludedItem(value: string): string {
 
 export interface OfferProfileFacts {
   facts: DnaFact[]
+  /** Fact groups every ad must carry (profile.mustAppear ?? DEFAULT_MUST_APPEAR). */
+  mustAppear: MustAppearKey[]
   /** forbiddenClaims → brand forbidden phrases for the copy checker. */
   forbiddenPhrases: string[]
   /** Items the offer does NOT include ("Papel"); copy may never say they are included. */
@@ -332,8 +452,8 @@ export interface OfferProfileFacts {
 }
 
 /** Ad profile → confirmed offer facts with the owner's exact strings. */
-export function offerProfileFacts(profile: OfferAdProfile | null | undefined, language: AdLanguage): OfferProfileFacts {
-  const out: OfferProfileFacts = { facts: [], forbiddenPhrases: [], notIncluded: [], strictClaims: false }
+export function offerProfileFacts(profile: OfferAdProfile | null | undefined, language: AdLanguage, register?: BrandDna['register']): OfferProfileFacts {
+  const out: OfferProfileFacts = { facts: [], mustAppear: [...DEFAULT_MUST_APPEAR], forbiddenPhrases: [], notIncluded: [], strictClaims: false }
   if (!profile) return out
   const es = language === 'es'
   const add = (key: FactKey, value: string, evidence: string) => {
@@ -369,7 +489,17 @@ export function offerProfileFacts(profile: OfferAdProfile | null | undefined, la
   }
   if (profile.cta?.text) add('custom:cta', profile.cta.text, 'offer.adProfile.cta.text')
   for (const ch of profile.cta?.channels ?? []) add('contact_channel', CHANNEL_LABEL[ch][language], 'offer.adProfile.cta.channels')
-  if (typeof profile.ageMin === 'number' && profile.ageMin > 0) add('custom:age', es ? `Edad ${profile.ageMin}+` : `Ages ${profile.ageMin}+`, 'offer.adProfile.ageMin')
+  if (profile.ageRule) add('custom:age', ageRuleText(profile.ageRule, language), 'offer.adProfile.ageRule')
+  else if (typeof profile.ageMin === 'number' && profile.ageMin > 0) add('custom:age', es ? `Edad ${profile.ageMin}+` : `Ages ${profile.ageMin}+`, 'offer.adProfile.ageMin')
+  const contact = profile.contact
+  if (contact?.whatsapp) add('custom:whatsapp', `WhatsApp ${contact.whatsapp}`, 'offer.adProfile.contact.whatsapp')
+  if (contact?.phone) add('custom:phone', `${es ? 'Tel.' : 'Phone'} ${contact.phone}`, 'offer.adProfile.contact.phone')
+  if (contact?.instagram) add('custom:instagram', contact.instagram, 'offer.adProfile.contact.instagram')
+  if (contact?.url) add('custom:url', displayUrl(contact.url), 'offer.adProfile.contact.url')
+  const contactCta = contactCtaText(contact, language, register)
+  if (contactCta) add('custom:contact_cta', contactCta, 'offer.adProfile.contact')
+  if (profile.paymentMethods?.length) add('payment_methods', paymentMethodsText(profile.paymentMethods, language), 'offer.adProfile.paymentMethods')
+  if (profile.mustAppear) out.mustAppear = [...profile.mustAppear]
   out.forbiddenPhrases = [...(profile.forbiddenClaims ?? [])]
   out.strictClaims = (profile.verifiedClaims?.length ?? 0) > 0
   if (profile.lockProductAppearance || profile.immutableAttributes?.length || profile.allowedProps?.length) {
@@ -380,6 +510,44 @@ export function offerProfileFacts(profile: OfferAdProfile | null | undefined, la
     }
   }
   return out
+}
+
+/** "Desde 8 años, con supervisión de un adulto" (the owner's text wins). */
+export function ageRuleText(rule: OfferAgeRule, language: AdLanguage): string {
+  if (rule.text) return rule.text
+  if (language === 'en') return `Ages ${rule.min}+${rule.supervision ? ', with adult supervision' : ''}`
+  return `Desde ${rule.min} años${rule.supervision ? ', con supervisión de un adulto' : ''}`
+}
+
+/** "Aceptamos SINPE Móvil, tarjeta y efectivo" (register-neutral). */
+export function paymentMethodsText(methods: string[], language: AdLanguage): string {
+  const and = language === 'en' ? 'and' : 'y'
+  const joined = methods.length > 1 ? `${methods.slice(0, -1).join(', ')} ${and} ${methods[methods.length - 1]}` : methods[0]
+  return language === 'en' ? `We accept ${joined}` : `Aceptamos ${joined}`
+}
+
+const CONTACT_VERBS: Record<BrandDna['register'], { write: string; call: string; order: string }> = {
+  voseo: { write: 'Escribinos', call: 'Llamanos', order: 'Pedilo' },
+  tuteo: { write: 'Escríbenos', call: 'Llámanos', order: 'Pídelo' },
+  usted: { write: 'Escríbanos', call: 'Llámenos', order: 'Pídalo' },
+}
+
+/** Contact CTA from the confirmed channels: WhatsApp > phone > Instagram > shop URL. */
+export function contactCtaText(contact: OfferContact | undefined, language: AdLanguage, register: BrandDna['register'] = 'tuteo'): string | undefined {
+  if (!contact) return undefined
+  if (language === 'en') {
+    if (contact.whatsapp) return `Message us on WhatsApp ${contact.whatsapp}`
+    if (contact.phone) return `Call us at ${contact.phone}`
+    if (contact.instagram) return `DM us on Instagram ${contact.instagram}`
+    if (contact.url) return `Order at ${displayUrl(contact.url)}`
+    return undefined
+  }
+  const v = CONTACT_VERBS[register] ?? CONTACT_VERBS.tuteo
+  if (contact.whatsapp) return `${v.write} al WhatsApp ${contact.whatsapp}`
+  if (contact.phone) return `${v.call} al ${contact.phone}`
+  if (contact.instagram) return `${v.write} por Instagram a ${contact.instagram}`
+  if (contact.url) return `${v.order} en ${displayUrl(contact.url)}`
+  return undefined
 }
 
 /** Language hint from a locale ("es-CR" → es). */

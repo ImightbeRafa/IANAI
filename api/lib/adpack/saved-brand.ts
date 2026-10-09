@@ -31,7 +31,7 @@ import type { AdLanguage, BrandDna, BusinessCategory, DnaFact, DnaVisual, FactKe
 import { isPlaceholderValue, stripPlaceholderParts } from '../placeholder-guard.js'
 import { audienceLines, readBrandProfile, type BrandProfile } from '../brand-profile.js'
 import { orderProductImages } from '../product-image-order.js'
-import { languageFromLocale, offerProfileFacts, readOfferAdProfile, type OfferProfileFacts } from './offer-profile.js'
+import { contactCtaText, languageFromLocale, offerProfileFacts, readOfferAdProfile, type OfferProfileFacts } from './offer-profile.js'
 
 type Row = Record<string, unknown>
 
@@ -420,6 +420,14 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   })
   const mustUse = strings(kit?.must_use_phrases, 120, 12)
   if (mustUse.length) dna.mustUsePhrases = mustUse
+  if (brandProfile?.toneRules?.allowUrgency === true) dna.allowUrgency = true
+  // The kit locale (e.g. "es-CR") makes the register a hard rule and drives the es-CR style rules.
+  if (brandProfile?.locale && /^es(?:-|$)/i.test(brandProfile.locale) && language === 'es') dna.locale = brandProfile.locale
+  // The contact CTA is register-aware ("Escribinos" in voseo): rebuilt once the DNA register is known.
+  const cta = adProfile?.contact ? contactCtaText(adProfile.contact, language, dna.register) : undefined
+  if (cta) {
+    for (const list of [facts, dna.facts]) for (const f of list) if (f.key === 'custom:contact_cta') f.value = cta
+  }
   // Gaps from what the owner confirmed; inferred website values do not close a gap.
   dna.gaps = computeGaps({ ...dna, facts: dna.facts.filter((f) => f.confirmed) })
   dna.notes = uniqStrings([...(dna.notes || []), ...notes], 30)
@@ -433,6 +441,8 @@ export function mapSavedBrand(input: MapSavedBrandInput): { dna: BrandDna; offer
   if (productId) offer.productId = productId
   if (profileFacts?.notIncluded.length) offer.notIncluded = profileFacts.notIncluded
   if (profileFacts?.strictClaims) offer.strictClaims = true
+  // P0 #5: saved offers carry their required facts (defaults unless the owner changed them).
+  if (profileFacts) offer.mustAppear = [...profileFacts.mustAppear]
   if (profileFacts?.productLock) {
     // WS2 ad_profile → WS1 fidelity options: lock forces exact mode (resolveRenderOptions).
     const lock = profileFacts.productLock

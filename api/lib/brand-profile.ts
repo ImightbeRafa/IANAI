@@ -41,6 +41,8 @@ export interface BrandProfile {
   styleDnaIds?: string[]
   winnerAdUrls?: string[]
   documents?: BrandDocument[]
+  /** Kit tone rules for generated copy. allowUrgency (default false): pressure phrases like "Pedilo ya" / "últimas unidades". */
+  toneRules?: { allowUrgency?: boolean }
   updatedAt?: string
 }
 
@@ -100,7 +102,7 @@ export interface ParseBrandProfileOptions {
 }
 
 /** Keys of BrandProfile accepted in a patch (top-level replace semantics; null clears). */
-export const BRAND_PROFILE_PATCH_KEYS = ['audiences', 'locale', 'register', 'do', 'dont', 'logoVariants', 'styleDnaIds', 'winnerAdUrls', 'documents'] as const
+export const BRAND_PROFILE_PATCH_KEYS = ['audiences', 'locale', 'register', 'do', 'dont', 'logoVariants', 'styleDnaIds', 'winnerAdUrls', 'documents', 'toneRules'] as const
 
 export function parseBrandProfilePatch(
   patch: Record<string, unknown>,
@@ -189,6 +191,15 @@ export function parseBrandProfilePatch(
       if (!isObj(d) || typeof d.url !== 'string') throw new BrandProfileError(`documents[${i}]`, 'must be { url, filename? }')
       return { url: options.assertUrl(d.url, `documents[${i}].url`), ...(typeof d.filename === 'string' && d.filename.trim() ? { filename: d.filename.trim().slice(0, 120) } : {}) }
     }))
+  }
+  if (has('toneRules')) {
+    const raw = patch.toneRules
+    if (raw === null) set('toneRules', undefined)
+    else {
+      if (!isObj(raw)) throw new BrandProfileError('toneRules', 'must be { allowUrgency?: boolean }')
+      if (raw.allowUrgency !== undefined && raw.allowUrgency !== null && typeof raw.allowUrgency !== 'boolean') throw new BrandProfileError('toneRules.allowUrgency', 'must be a boolean')
+      set('toneRules', raw.allowUrgency === true ? { allowUrgency: true } : { allowUrgency: false })
+    }
   }
   if (changed.length) next.updatedAt = (options.now ?? (() => new Date()))().toISOString()
   return { profile: next, ignoredPlaceholders: ignored, changedKeys: changed }

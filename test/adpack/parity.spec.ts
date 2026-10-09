@@ -356,8 +356,11 @@ describe('MCP adpack_* tools', () => {
     // adpack_start takes either brandId (+ offerId) or dna + offer: neither pair is schema-required.
     expect(tools.find((t) => t.name === 'adpack_start')?.inputSchema.required).toBeUndefined()
     expect(tools.find((t) => t.name === 'adpack_status')?.inputSchema.required).toEqual(['packId'])
-    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(10)
+    expect(listEnabledMcpTools().filter((t) => t.name.startsWith('adpack_'))).toHaveLength(11)
     expect(names).toContain('adpack_resize')
+    // P0 #2d: the free copy dry run (no approval, no credits).
+    expect(names).toContain('adpack_preview')
+    expect(getMcpTool('adpack_preview')).toMatchObject({ risk: 'read', requiresApproval: false, consumesAdvanceCredits: false })
     expect(names).toContain('create_ads')
     // Product fidelity options on every image door (A1/A2/F3), create_ads included.
     for (const name of ['adpack_start', 'create_ads', 'execute_image_generate', 'execute_bulk_posts', 'execute_campaign_pack']) {

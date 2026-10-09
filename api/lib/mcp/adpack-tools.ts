@@ -108,6 +108,8 @@ async function planChanged(options: {
   approved: AdPackPlanSummary
   planned: AdPackPlanSummary
   language?: 'es' | 'en'
+  /** Why (e.g. preview_changed / preview_expired when the previewed copy no longer matches). */
+  reason?: string
 }): Promise<Record<string, unknown>> {
   await denyMcpApprovalRequest(options.approvalStore, { approvalRequestId: options.approvalRequestId, userId: options.user.id }).catch(() => undefined)
   const { approved, planned } = options
@@ -119,6 +121,7 @@ async function planChanged(options: {
     approvalRequestId: options.approvalRequestId,
     approved,
     planned,
+    ...(options.reason ? { reason: options.reason } : {}),
     chargedCredits: 0,
     message: es
       ? `No se ejecutó nada: se aprobaron ${approved.items} por ${approved.total} créditos y el plan actual es ${planned.items} por ${planned.total} créditos. Hace falta una aprobación nueva.`
@@ -253,6 +256,8 @@ function startBoundInput(args: Args): Record<string, unknown> {
     'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
     'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims',
     'productFidelity', 'relight', 'allowedProps', 'immutableAttributes',
+    // P0 #2d / #5: the approval is bound to the previewed copy and the required-facts override.
+    'mustAppear', 'previewId',
   ] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
@@ -446,6 +451,9 @@ export async function dispatchAdPackTool(options: {
         // Validate + quote before asking for approval (same parser as the web door).
         // Saved-brand path: build DNA + offer from the owner's saved data (owner-scoped → NOT_FOUND otherwise).
         const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
+        if (!approvalRequestId && args.previewId !== undefined && !(await service.getPreview({ userId, previewId: args.previewId }))) {
+          throw new AdPackError('BAD_INPUT', 'previewId not found or expired (previews last 24 h): run adpack_preview again with the same arguments')
+        }
         // B2: corrections are written once, on the first call (the approved retry repeats the same arguments).
         const saved = approvalRequestId ? undefined : await persist()
         const preview = usesSavedBrand(args)
@@ -521,6 +529,8 @@ export async function dispatchAdPackTool(options: {
             relight: args.relight,
             allowedProps: args.allowedProps,
             immutableAttributes: args.immutableAttributes,
+            mustAppear: args.mustAppear,
+            previewId: args.previewId,
             source: 'mcp',
             packId: approvalRequestId,
             // F1: the service recomputes the plan and refuses (PLAN_CHANGED, nothing created) on any difference.
@@ -529,7 +539,8 @@ export async function dispatchAdPackTool(options: {
           })
         } catch (err) {
           if (isAdPackError(err) && err.code === 'PLAN_CHANGED' && gate.approved) {
-            return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: (err.details?.planned as AdPackPlanSummary) ?? plan })
+            const reason = typeof err.details?.reason === 'string' ? err.details.reason : undefined
+            return planChanged({ approvalStore: options.approvalStore, user, toolName: 'adpack_start', approvalRequestId, approved: gate.approved, planned: (err.details?.planned as AdPackPlanSummary) ?? plan, ...(reason ? { reason } : {}) })
           }
           throw err
         }
@@ -545,6 +556,7 @@ export async function dispatchAdPackTool(options: {
           ...(started.angles ? { plan: started.angles } : {}),
           ...(started.styleProfile ? { styleProfile: started.styleProfile } : {}),
           ...(started.notes?.length ? { notes: started.notes } : {}),
+          ...(started.previewId ? { previewId: started.previewId, previewAds: started.previewAds } : {}),
           // Credits are charged per finished ad while the pack runs.
           chargedCredits: 0,
           nextTool: 'adpack_status',
@@ -579,6 +591,52 @@ export async function dispatchAdPackTool(options: {
             }
           }
           throw err
+        }
+      }
+      case 'adpack_preview': {
+        // FREE dry run (P0 #2d): same arguments as create_ads / adpack_start; model text only, no images, no credits.
+        const saved = await persist()
+        const size = args.size !== undefined ? args.size : args.count
+        const res = await service.previewPack({
+          userId,
+          dna: args.dna,
+          offer: args.offer,
+          brandId: args.brandId,
+          offerId: args.offerId,
+          brief: args.brief,
+          size,
+          angleIds: args.angleIds,
+          angles: args.angles,
+          variations: args.variations,
+          creativeFreedom: args.creativeFreedom,
+          layoutFamily: args.layoutFamily,
+          styleDnaId: args.styleDnaId,
+          ratios: args.ratios,
+          businessId: args.businessId,
+          brandKitId: args.brandKitId,
+          productImageIds: args.productImageIds,
+          productImageIdsByAd: args.productImageIdsByAd,
+          locale: args.locale,
+          register: args.register,
+          forbiddenPhrases: args.forbiddenPhrases,
+          forbiddenClaims: args.forbiddenClaims,
+          productFidelity: args.productFidelity,
+          relight: args.relight,
+          allowedProps: args.allowedProps,
+          immutableAttributes: args.immutableAttributes,
+          mustAppear: args.mustAppear,
+          source: 'mcp',
+        })
+        const es = args.language !== 'en'
+        const failing = res.ads.filter((a) => !a.check.ok).map((a) => a.index)
+        return {
+          status: 'preview',
+          ...res,
+          ...(saved ? { saved } : {}),
+          nextTool: 'create_ads',
+          instructionsForGrok: es
+            ? `Mostrá al usuario cada anuncio: ángulo + por qué (rationale), layout, foto planeada y el texto (headline, subline, bullets, offerLine, cta, caption).${failing.length ? ` Los anuncios ${failing.join(', ')} no pasan las reglas (check.issues: frase, tokens y dato más cercano); corregí la oferta (update_offer) o volvé a previsualizar.` : ''} Si lo aprueba, llamá create_ads (o adpack_start) con LOS MISMOS argumentos y previewId "${res.previewId}": ese texto es el que se entrega. Gratis, sin créditos.`
+            : `Show the user each ad: angle + why (rationale), layout, planned photo and the copy (headline, subline, bullets, offerLine, cta, caption).${failing.length ? ` Ads ${failing.join(', ')} do not pass the rules (check.issues: sentence, tokens and nearest fact); fix the offer (update_offer) or preview again.` : ''} If they approve, call create_ads (or adpack_start) with THE SAME arguments plus previewId "${res.previewId}": that copy is what ships. Free, no credits.`,
         }
       }
       case 'adpack_resize': {

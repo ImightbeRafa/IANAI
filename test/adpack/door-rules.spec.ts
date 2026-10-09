@@ -136,7 +136,7 @@ describe('E1: edit rejections explain field, rule, limit, actual (web = MCP)', (
 })
 
 describe('E2: forbidden phrases verified per ad', () => {
-  it('generation repairs once; an ad that still contains the phrase fails with a plain reason and is not charged', async () => {
+  it('generation runs two free repair rounds; an ad that still contains the phrase fails with a plain reason and is not charged', async () => {
     const e = env()
     // The fake copy model always writes "pedí el tuyo" in the caption.
     const { status } = await finishedPack(e, { forbiddenPhrases: ['pedí el tuyo'] })
@@ -144,8 +144,8 @@ describe('E2: forbidden phrases verified per ad', () => {
     const failures = status.payload.failures as Array<{ reason: string }>
     expect(failures).toHaveLength(2)
     expect(failures[0].reason).toBe('el texto usaba una frase prohibida de la marca')
-    // generate + one repair per ad, then no scene / no charge.
-    expect(e.gateway.jsonCalls.length).toBe(4)
+    // generate + two free repair rounds per ad (P0 #2b), then no scene / no charge.
+    expect(e.gateway.jsonCalls.length).toBe(6)
     expect(e.gateway.sceneCalls).toHaveLength(0)
     expect(e.charges).toHaveLength(0)
   })

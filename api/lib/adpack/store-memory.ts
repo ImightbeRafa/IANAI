@@ -64,6 +64,22 @@ export function createMemoryPackStore(options: { now?: () => number } = {}): Mem
       for (const [k, v] of Object.entries(patch)) if (v === undefined) delete (next as unknown as Record<string, unknown>)[k]
       items.set(itemId, next)
     },
+
+    async recentAngleIds(userId, productId, n) {
+      // Newest first; ties (same ms) keep the latest insertion first.
+      const recent = [...packs.values()]
+        .reverse()
+        .filter((p) => p.userId === userId && p.offer?.productId === productId && p.status !== 'cancelled')
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+        .slice(0, Math.max(0, n))
+      const ids: string[] = []
+      for (const p of recent) {
+        for (const i of [...items.values()].filter((x) => x.packId === p.id).sort((a, b) => a.index - b.index)) {
+          if (!ids.includes(i.angle.id)) ids.push(i.angle.id)
+        }
+      }
+      return ids
+    },
   }
   return store
 }

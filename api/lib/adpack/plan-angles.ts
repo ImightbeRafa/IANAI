@@ -23,6 +23,7 @@ import type {
   OfferInput,
 } from './types.js'
 import { ANGLE_CATEGORIES, ALL_ANGLE_CATEGORIES, angleId, angleRationale, archetypeFor, parseAngleId, type CategoryContext } from './angle-catalog.js'
+
 import { hasCliche } from './cliches.js'
 import { isFormatAllowed } from './compliance.js'
 import { briefForPrompt } from './copy-shared.js'
@@ -43,6 +44,12 @@ export interface PlanAnglesInput {
   brief?: string
   /** Preferred hook type (from the brand's Style DNA winners). */
   preferHook?: HookType
+  /**
+   * Angle ids used by the latest packs of this offer (P1 #10): the planner prefers other ids and
+   * other categories/archetypes, so consecutive packs differ. A penalty, never an exclusion (the
+   * plan size never shrinks).
+   */
+  avoidAngleIds?: string[]
 }
 
 interface Ctx {
@@ -331,6 +338,17 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
 
   const usedTriples = new Set<string>()
   const usedIds = new Set<string>()
+  // Cross-pack diversity: ids / categories / archetypes of the latest packs of this offer.
+  const recentIds = new Set(input.avoidAngleIds ?? [])
+  const recentCategories = new Map<AngleCategory, number>()
+  const recentArchetypes = new Map<IanArchetype, number>()
+  for (const id of recentIds) {
+    const p = parseAngleId(id)
+    if (!p) continue
+    recentCategories.set(p.category, (recentCategories.get(p.category) ?? 0) + 1)
+    const arch = p.archetype ?? archetypeFor(p.category, p.format)
+    recentArchetypes.set(arch, (recentArchetypes.get(arch) ?? 0) + 1)
+  }
   /**
    * `fill` = every distinct (hookType, format) pair is used up (narrow category / few facts):
    * reuse a pair with a different archetype so the plan still has exactly `size` angles
@@ -352,8 +370,11 @@ export function planAngles(input: PlanAnglesInput): AdAngle[] {
         1.5 * (countC.get(c.category) ?? 0) +
         // A gift angle is the most-missed sale for physical products: surface it once.
         (c.category === 'regalo' && !countC.get('regalo') && angles.length > 0 ? -1.4 : 0) +
-        (angles.length === 0 && c.archetype !== 'venta_directa' ? 2 : 0) +
-        (fill && usedPairs.has(`${c.hookType}|${c.format}`) ? 4 : 0)
+        (angles.length === 0 && c.archetype !== 'venta_directa' && !recentIds.size ? 2 : 0) +
+        (fill && usedPairs.has(`${c.hookType}|${c.format}`) ? 4 : 0) +
+        (recentIds.has(angleId(c.category, c.hookType, c.format)) ? 3 : 0) +
+        0.9 * Math.min(2, recentCategories.get(c.category) ?? 0) +
+        0.5 * Math.min(2, recentArchetypes.get(c.archetype) ?? 0)
       if (score < bestScore) {
         bestScore = score
         best = c
@@ -567,7 +588,8 @@ export function resolvePackAngles(input: PlanAnglesInput & { angleIds?: string[]
     out.push(a)
   }
   if (!ids) return out
-  const board = new Map(planAngles({ ...input, size: MAX_PACK_SIZE }).map((a) => [a.id, a]))
+  // Ids resolve against the stable board (cross-pack diversity only steers the planner's own picks).
+  const board = new Map(planAngles({ ...input, avoidAngleIds: undefined, size: MAX_PACK_SIZE }).map((a) => [a.id, a]))
   const rejected: Array<{ id: string; reason: string }> = []
   for (const id of ids) {
     if (seen.has(id)) continue

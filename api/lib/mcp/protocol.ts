@@ -217,6 +217,12 @@ function toolInputSchema(name: string): Record<string, unknown> {
       },
     },
     styleDnaIds: { type: 'array', items: { type: 'string' }, description: 'Style DNA ids (list_style_dnas) this brand uses by default.' },
+    toneRules: {
+      type: 'object',
+      description: 'Tone rules for ad copy. allowUrgency (default false): only when true may ads use pressure phrases ("Pedilo ya", "últimas unidades", "solo hoy").',
+      properties: { allowUrgency: { type: 'boolean' } },
+      additionalProperties: false,
+    },
   }
   const money = {
     type: 'object',
@@ -285,7 +291,26 @@ function toolInputSchema(name: string): Record<string, unknown> {
       properties: { text: { type: 'string' }, channels: { type: 'array', items: { type: 'string', enum: ['web', 'whatsapp', 'dm'] } } },
       additionalProperties: false,
     },
-    ageMin: { type: 'integer', minimum: 0, maximum: 99, description: 'Recommended minimum age → fact "Edad 8+".' },
+    ageMin: { type: 'integer', minimum: 0, maximum: 99, description: 'Recommended minimum age → fact "Edad 8+" (prefer ageRule).' },
+    ageRule: {
+      type: 'object',
+      description: 'Age rule → fact "Desde 8 años, con supervisión de un adulto" ({ min: 8, supervision: true }); text = exact owner sentence. Wins over ageMin.',
+      properties: { min: { type: 'integer', minimum: 0, maximum: 99 }, supervision: { type: 'boolean' }, text: { type: 'string' } },
+      required: ['min'],
+      additionalProperties: false,
+    },
+    contact: {
+      type: 'object',
+      description: 'How buyers reach the shop → confirmed facts + the contact CTA ("Escribinos al WhatsApp 7000-0000"). whatsapp/phone: 7–15 digits ("7000-0000", "+506 7000 0000"); url: shop domain or https URL; instagram: "@handle".',
+      properties: { whatsapp: { type: 'string' }, phone: { type: 'string' }, url: { type: 'string' }, instagram: { type: 'string' } },
+      additionalProperties: false,
+    },
+    paymentMethods: strList('Payment methods, e.g. ["SINPE Móvil", "tarjeta", "efectivo"] → fact "Aceptamos SINPE Móvil, tarjeta y efectivo".'),
+    mustAppear: {
+      type: 'array',
+      items: { type: 'string', enum: ['price', 'bundle', 'shipping', 'age', 'not_included', 'contact', 'payment_methods', 'compare_at_price'] },
+      description: 'Facts every ad must carry (default: price, bundle, shipping, age, not_included, contact; [] = none). Price/bundle/shipping go on the image offer line when they fit (else the caption); age, not-included and contact always in the caption.',
+    },
     immutableAttributes: strList('Product attributes image tools must never change (e.g. "hélices blancas").'),
     lockProductAppearance: { type: 'boolean', description: 'Never redraw the product (respected by image tools).' },
     allowedProps: strList('Kit parts/props allowed in scenes besides the reference photo.'),
@@ -361,6 +386,12 @@ function toolInputSchema(name: string): Record<string, unknown> {
     immutableAttributes: { type: 'array', items: { type: 'string' }, maxItems: 12, description: 'Product appearance facts that must never change, used in prompts and checks. Defaults to the offer ad_profile.' },
   }
   const adpackPackId = { type: 'string', description: 'packId returned by adpack_start' }
+  const mustAppearProp = {
+    type: 'array',
+    items: { type: 'string', enum: ['price', 'bundle', 'shipping', 'age', 'not_included', 'contact', 'payment_methods', 'compare_at_price'] },
+    description: 'Override the offer\'s required facts for this run ([] = none). Default: the offer setting (price, bundle, shipping, age, not_included, contact).',
+  }
+  const previewIdProp = { type: 'string', description: 'previewId from adpack_preview: deliver exactly that previewed copy (same arguments required; otherwise plan_changed and nothing runs).' }
   const adpackSelection = {
     angleIds: {
       type: 'array',
@@ -508,12 +539,36 @@ function toolInputSchema(name: string): Record<string, unknown> {
           ...adpackLanguageRules,
           businessId: { type: 'string', description: 'dna/offer path only: brand folder to link the pack to.' },
           ...productFidelityProps,
+          mustAppear: mustAppearProp,
+          previewId: previewIdProp,
           approvalRequestId: {
             type: 'string',
             description: 'After in-chat confirm_execute approve. Do not invent. Retry with the exact same arguments.',
           },
         },
         // Either brandId (+ offerId) or dna + offer; the service validates which one was sent.
+        additionalProperties: false,
+      }
+    case 'adpack_preview':
+      return {
+        type: 'object',
+        properties: {
+          ...adpackSavedBrand,
+          ...correctionProps,
+          count: { type: 'number', minimum: 1, maximum: 20, description: 'Ads to preview (same as create_ads count / adpack_start size).' },
+          size: adpackSize,
+          brief: { type: 'string', maxLength: 500 },
+          dna: adpackDna,
+          offer: adpackOffer,
+          ...adpackSelection,
+          styleDnaId: { type: 'string' },
+          ratios: adpackRatios,
+          ...adpackLanguageRules,
+          businessId: { type: 'string' },
+          ...productFidelityProps,
+          mustAppear: mustAppearProp,
+          language: { type: 'string', enum: ['es', 'en'] },
+        },
         additionalProperties: false,
       }
     case 'adpack_status':
@@ -580,6 +635,8 @@ function toolInputSchema(name: string): Record<string, unknown> {
           productImageIdsByAd: productImageIdsByAdProp,
           ...correctionProps,
           ...productFidelityProps,
+          mustAppear: mustAppearProp,
+          previewId: previewIdProp,
           scriptId: { type: 'string', description: 'carousel: script to turn into slides.' },
           scriptContent: { type: 'string', description: 'carousel: script text (instead of scriptId).' },
           subtype: { type: 'string', enum: ['educational-list', 'how-to-steps', 'before-after', 'myth-vs-fact'] },

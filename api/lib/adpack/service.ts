@@ -9,7 +9,7 @@
  * `store.getPack(packId, userId)` so another user's packId is NOT_FOUND.
  * Dependencies are injected so tests run with memory store + fakes.
  */
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { checkUsageLimit, incrementUsage } from '../auth.js'
 import { logApiUsage, type FeatureType } from '../usage-logger.js'
 import { usageTimingMetadata } from '../usage-timings.js'
@@ -35,6 +35,7 @@ import type {
   AdPackIngestDnaResponse,
   AdPackItemView,
   AdPackPlanSummary,
+  AdPackPreviewResponse,
   AdPackQuote,
   AdPackRegenerateResponse,
   AdPackResizeResponse,
@@ -69,8 +70,16 @@ import type { AdPackStorage, ChargeFn, Renderer } from './runner-types.js'
 import { createSupabaseAdPackStorage } from './storage.js'
 import { buildStatusExtras } from './status-summary.js'
 import { createSupabasePackStore } from './store-supabase.js'
+import { writeAdCopy } from './copy-stage.js'
+import { offerForItem } from './pack-runner.js'
+import { MUST_APPEAR_KEYS } from './offer-profile.js'
+import { createSupabasePreviewStore, PREVIEW_RATE_LIMIT_PER_HOUR, PREVIEW_TTL_MS, type PreviewStore, type StoredPreview, type StoredPreviewAd } from './preview-store.js'
+import { issueView } from './status-summary.js'
+import { mapWithConcurrency } from './util.js'
+import { pickProductImage } from './fidelity/asset-quality.js'
+import { resolveProductPhotos } from './fidelity/photos.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
-import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto, RelightMode } from './types.js'
+import type { AdAngle, AdLanguage, AspectRatio, BrandDna, CopyCheckIssue, CreativeFreedom, LayoutFamily, ModelGateway, MustAppearKey, OfferInput, Pack, PackItem, PackRenderOptions, PackStatus, PackStore, ProductPhoto, RelightMode } from './types.js'
 import { hasUsableProductPhoto, isProductPhotoRole } from './fidelity/photos.js'
 import type { ImageLoader } from './fidelity/pipeline.js'
 import type { DnaPart } from './dna/part.js'
@@ -103,6 +112,7 @@ const HTTP_STATUS: Record<AdPackErrorCode, number> = {
   COPY_REJECTED: 422,
   UNAVAILABLE: 503,
   PLAN_CHANGED: 409,
+  RATE_LIMITED: 429,
 }
 
 export class AdPackError extends Error {
@@ -181,6 +191,8 @@ export interface AdPackDeps {
   loadImage?: ImageLoader
   /** Persist a fresh Style DNA analysis on the brand kit's `style_dnas` jsonb entry. Omitted → not persisted. */
   saveStyleDnaAnalysis?: (input: { userId: string; brandId: string; styleDna: StyleDna }) => Promise<void>
+  /** Copy previews (free dry run, reused by start). Omitted → preview unavailable. */
+  previews?: PreviewStore
 }
 
 /** Lazily create on first use so a missing env var fails the call that needs it, not module load. */
@@ -205,6 +217,7 @@ export function createDefaultAdPackDeps(): AdPackDeps {
     storage: lazy(() => createSupabaseAdPackStorage()),
     savedBrandDb: lazy(() => createSupabaseSavedBrandDb()),
     library: lazy(() => createSupabaseAdPackLibrary()),
+    previews: lazy(() => createSupabasePreviewStore()),
     refreshWebsite: (url, language) => ingestWebsite({ url, gateway, language }),
     async saveStyleDnaAnalysis({ userId, brandId, styleDna }) {
       await saveStyleDnaForBrand({ userId, brandId, dna: styleDna })
@@ -604,7 +617,8 @@ export function adPackPlanSummary(items: number): AdPackPlanSummary {
 
 /** E1: one rejection per issue with its exact location, rule and limit / actual / token. */
 export function toCopyRejections(issues: CopyCheckIssue[]): AdPackCopyRejection[] {
-  return issues.map((i) => ({ ...i, rule: i.code, field: i.path ?? i.field, baseField: i.field }))
+  // P0 #2c: same shape as status failures[].issues — field, sentence, offendingTokens, nearestFactKey, rule, limit?, actual?
+  return issues.map((i) => ({ ...i, rule: i.code, field: i.path ?? i.field, baseField: i.field, offendingTokens: i.offendingTokens?.length ? i.offendingTokens : i.token ? [i.token] : [] }))
 }
 
 function planError(err: unknown): never {
@@ -875,7 +889,19 @@ export interface AdPackService {
     allowedProps?: unknown
     /** Appearance facts that must never change (prompts + vision checks). */
     immutableAttributes?: unknown
+    /** Required offer facts for this run (overrides the offer's mustAppear). */
+    mustAppear?: unknown
+    /** Deliver the copy of this preview (must match the args; else PLAN_CHANGED). */
+    previewId?: unknown
   } & DnaOverridesInput): Promise<AdPackStartResponse>
+  /**
+   * FREE copy dry run (P0 #2d): planning + copy + checks with the same arguments as start — model
+   * text calls only, no images, no credits. Cached; start with identical args delivers this copy.
+   * Rate-limited (PREVIEW_RATE_LIMIT_PER_HOUR per user).
+   */
+  previewPack(input: StartLikeInput): Promise<AdPackPreviewResponse>
+  /** A stored, unexpired preview of this user (null otherwise). */
+  getPreview(input: { userId: string; previewId: unknown }): Promise<StoredPreview | null>
   getStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown }): Promise<AdPackStatusResponse>
   /**
    * getStatus, but first runs a short inline advance when work remains and no worker holds a lease,
@@ -889,6 +915,9 @@ export interface AdPackService {
   resize(input: { userId: string; packId: unknown; itemId: unknown; ratios: unknown }): Promise<AdPackResizeResponse>
   cancel(input: { userId: string; packId: unknown }): Promise<AdPackCancelResponse>
 }
+
+/** Start-shaped input shared by start and the free preview. */
+export type StartLikeInput = Omit<Parameters<AdPackService['startPack']>[0], 'packId' | 'approved' | 'expectedAds' | 'previewId'> & { previewId?: unknown }
 
 export function createAdPackService(deps: AdPackDeps): AdPackService {
   const now = deps.now ?? (() => Date.now())
@@ -1078,6 +1107,136 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     }
   }
 
+  /** Angle ids of the latest packs of this offer (cross-pack diversity, planner picks only). */
+  const recentAnglesFor = async (userId: string, offer: OfferInput, sel: { angleIds?: string[]; guideAngles: unknown[]; creativeFreedom?: CreativeFreedom }): Promise<string[] | undefined> => {
+    if (sel.angleIds?.length || sel.guideAngles.length || sel.creativeFreedom === 'guided') return undefined
+    if (!offer.productId || !deps.store.recentAngleIds) return undefined
+    try {
+      const ids = await deps.store.recentAngleIds(userId, offer.productId, RECENT_PACKS_FOR_DIVERSITY)
+      return ids.length ? ids : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * Everything start and the free preview share: DNA + offer (saved brand or payload), request
+   * rules (locale, register, forbidden lists, mustAppear), selection, render options, Style DNA,
+   * cross-pack angle diversity and the exact plan (planPack).
+   */
+  const prepareRun = async (input: StartLikeInput, packId: string) => {
+    const fromSaved = input.dna === undefined && input.offer === undefined && hasValue(input.brandId)
+    let dna = fromSaved ? undefined : parseDna(input.dna)
+    let offer = fromSaved ? undefined : parseOffer(input.offer)
+    const size = parseSize(input.size)
+    const ratios = parseRatios(input.ratios)
+    const brief = parseBrief(input.brief)
+    let businessId = parseOptionalUuid(input.businessId ?? (fromSaved ? undefined : input.brandId), 'businessId')
+    let brandKitId = parseOptionalUuid(input.brandKitId, 'brandKitId')
+    if (!fromSaved && (businessId || brandKitId)) {
+      const owned = deps.verifyLinks ? await deps.verifyLinks({ userId: input.userId, businessId, brandKitId }) : false
+      if (!owned) throw new AdPackError('NOT_FOUND', 'Brand or brand kit not found')
+    }
+    let savedStyleDnas: StyleDna[] | undefined
+    if (fromSaved) {
+      // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
+      const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd }, input.source)
+      if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
+      savedStyleDnas = saved.styleDnas ?? []
+      dna = saved.dna
+      offer = saved.offer
+      businessId = saved.brandId
+      brandKitId = saved.brandKitId
+    }
+    if (!dna || !offer) throw bad('Provide brandId (+ offerId) or dna + offer')
+    dna = applyDnaOverrides(dna, input)
+    const mustAppear = parseMustAppear(input.mustAppear)
+    if (mustAppear) offer = { ...offer, mustAppear }
+    const sel = parseSelection(input)
+    const render = resolveRenderOptions(input, offer)
+    const styleDnaId = parseStyleDnaId(input.styleDnaId)
+    let styleNote: string | undefined
+    if (styleDnaId) {
+      if (!savedStyleDnas) throw bad('styleDnaId needs brandId (the style DNA lives on the brand kit)')
+      const t0 = now()
+      const resolved = await resolveStyleProfile({ styleDnas: savedStyleDnas, styleDnaId, gateway: deps.gateway, language: dna.language })
+      if (!resolved) throw new AdPackError('NOT_FOUND', 'Style DNA not found on this brand kit (use list_style_dnas)')
+      styleNote = resolved.note
+      if (resolved.analyzed && resolved.analysis) {
+        await log({ userId: input.userId, feature: 'brand_extraction', model: 'adpack-style-dna', costUsd: resolved.costUsd, source: input.source, durationMs: now() - t0, metadata: { feature: 'adpack_style_dna', styleDnaId } })
+        if (deps.saveStyleDnaAnalysis && businessId) {
+          await deps.saveStyleDnaAnalysis({ userId: input.userId, brandId: businessId, styleDna: resolved.styleDna }).catch((err) => {
+            console.error('[adpack] style DNA analysis not saved', err instanceof Error ? err.message : err)
+          })
+        }
+      }
+      dna = { ...dna, visual: { ...(dna.visual ?? {}), styleProfile: resolved.profile } }
+    }
+    const guideAngles = guideAnglesFor(sel.guideAngles, dna, offer, brief)
+    const avoidAngleIds = await recentAnglesFor(input.userId, offer, sel)
+    let planned: ReturnType<typeof planPack>
+    try {
+      planned = planPack({
+        dna,
+        offer,
+        size,
+        angleIds: sel.angleIds,
+        angles: guideAngles,
+        variations: sel.variations,
+        creativeFreedom: sel.creativeFreedom,
+        layoutFamily: sel.layoutFamily,
+        styleProfile: dna.visual?.styleProfile,
+        ratios,
+        userId: input.userId,
+        source: input.source,
+        businessId,
+        brandKitId,
+        brief,
+        render,
+        ...(avoidAngleIds ? { avoidAngleIds } : {}),
+        ids: { packId },
+      })
+    } catch (err) {
+      return planError(err)
+    }
+    if (!planned.items.length) throw bad(sel.angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
+    if (planned.items.length > MAX_PACK_SIZE) throw bad(`angles × variations = ${planned.items.length} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
+    return { dna, offer, businessId, brandKitId, sel, brief, ratios, render, styleNote, planned }
+  }
+
+  /**
+   * The preview whose copy this start delivers: the explicit `previewId` (must match the args,
+   * the facts and the planned angles, else PLAN_CHANGED — nothing runs), or the newest unexpired
+   * preview with identical arguments (silently skipped when stale).
+   */
+  const previewForStart = async (input: StartLikeInput & { previewId?: unknown }, run: Awaited<ReturnType<typeof prepareRun>>, current: AdPackPlanSummary): Promise<StoredPreview | null> => {
+    if (!deps.previews) {
+      if (hasValue(input.previewId)) throw new AdPackError('PLAN_CHANGED', 'Copy previews are not available in this runtime; start without previewId.', { reason: 'preview_unavailable', planned: current })
+      return null
+    }
+    const argsHash = previewArgsHash(input)
+    const factsHash = previewFactsHash(run.dna, run.offer)
+    const plannedIds = run.planned.items.filter((i) => !i.angle.variation).map((i) => i.angle.id)
+    const matches = (p: StoredPreview) => p.argsHash === argsHash && p.factsHash === factsHash && p.ads.map((a) => a.angle.id).join('|') === plannedIds.join('|')
+    if (hasValue(input.previewId)) {
+      const id = str(input.previewId, 64)
+      const p = id && UUID_RE.test(id) ? await deps.previews.get(id, input.userId) : null
+      const why = !p ? 'preview_not_found' : Date.parse(p.expiresAt) <= now() ? 'preview_expired' : !matches(p) ? 'preview_changed' : null
+      if (why) {
+        throw new AdPackError('PLAN_CHANGED', why === 'preview_changed'
+          ? 'The previewed copy no longer matches this request (arguments, offer facts or planned angles changed). Nothing ran; preview again and ask for a fresh approval.'
+          : 'The copy preview was not found or expired. Nothing ran; preview again (adpack_preview) and ask for a fresh approval.', { reason: why, previewId: id, planned: current })
+      }
+      return p
+    }
+    try {
+      const p = await deps.previews.findLatest(input.userId, argsHash, now())
+      return p && matches(p) ? p : null
+    } catch {
+      return null
+    }
+  }
+
   return {
     async ingestDna(input) {
       const websiteUrl = parseHttpsUrl(input.websiteUrl, 'websiteUrl')
@@ -1162,16 +1321,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     async startPack(input) {
       const fromSaved = input.dna === undefined && input.offer === undefined && hasValue(input.brandId)
       // dna path: validate the payload first (cheap, no I/O), as before.
-      let dna = fromSaved ? undefined : parseDna(input.dna)
-      let offer = fromSaved ? undefined : parseOffer(input.offer)
-      const size = parseSize(input.size)
-      const ratios = parseRatios(input.ratios)
-      const brief = parseBrief(input.brief)
-      let businessId = parseOptionalUuid(input.businessId ?? (fromSaved ? undefined : input.brandId), 'businessId')
-      let brandKitId = parseOptionalUuid(input.brandKitId, 'brandKitId')
-      if (!fromSaved && (businessId || brandKitId)) {
-        const owned = deps.verifyLinks ? await deps.verifyLinks({ userId: input.userId, businessId, brandKitId }) : false
-        if (!owned) throw new AdPackError('NOT_FOUND', 'Brand or brand kit not found')
+      if (!fromSaved) {
+        parseDna(input.dna)
+        parseOffer(input.offer)
       }
       const packId = input.packId ? parsePackId(input.packId) : randomUUID()
       if (input.packId) {
@@ -1180,67 +1332,9 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
         }
       }
-      let savedStyleDnas: StyleDna[] | undefined
-      if (fromSaved) {
-        // Owner-scoped load: another user's brandId / offerId / kit → NOT_FOUND.
-        const saved = await fromBrand(input.userId, { brandId: input.brandId, offerId: input.offerId, brandKitId: input.brandKitId, productImageIds: input.productImageIds, productImageIdsByAd: input.productImageIdsByAd }, input.source)
-        if (businessId && businessId !== saved.brandId) throw bad('businessId must match brandId')
-        savedStyleDnas = saved.styleDnas ?? []
-        dna = saved.dna
-        offer = saved.offer
-        businessId = saved.brandId
-        brandKitId = saved.brandKitId
-      }
-      if (!dna || !offer) throw bad('Provide brandId (+ offerId) or dna + offer')
-      dna = applyDnaOverrides(dna, input)
-      const sel = parseSelection(input)
+      const run = await prepareRun(input, packId)
+      const { planned, dna, sel, styleNote } = run
       const approved = parseApproved(input.approved)
-      const render = resolveRenderOptions(input, offer)
-      const styleDnaId = parseStyleDnaId(input.styleDnaId)
-      let styleNote: string | undefined
-      if (styleDnaId) {
-        if (!savedStyleDnas) throw bad('styleDnaId needs brandId (the style DNA lives on the brand kit)')
-        const t0 = now()
-        const resolved = await resolveStyleProfile({ styleDnas: savedStyleDnas, styleDnaId, gateway: deps.gateway, language: dna.language })
-        if (!resolved) throw new AdPackError('NOT_FOUND', 'Style DNA not found on this brand kit (use list_style_dnas)')
-        styleNote = resolved.note
-        if (resolved.analyzed && resolved.analysis) {
-          await log({ userId: input.userId, feature: 'brand_extraction', model: 'adpack-style-dna', costUsd: resolved.costUsd, source: input.source, durationMs: now() - t0, metadata: { feature: 'adpack_style_dna', styleDnaId } })
-          if (deps.saveStyleDnaAnalysis && businessId) {
-            await deps.saveStyleDnaAnalysis({ userId: input.userId, brandId: businessId, styleDna: resolved.styleDna }).catch((err) => {
-              console.error('[adpack] style DNA analysis not saved', err instanceof Error ? err.message : err)
-            })
-          }
-        }
-        dna = { ...dna, visual: { ...(dna.visual ?? {}), styleProfile: resolved.profile } }
-      }
-      const guideAngles = guideAnglesFor(sel.guideAngles, dna, offer, brief)
-      let planned: ReturnType<typeof planPack>
-      try {
-        planned = planPack({
-          dna,
-          offer,
-          size,
-          angleIds: sel.angleIds,
-          angles: guideAngles,
-          variations: sel.variations,
-          creativeFreedom: sel.creativeFreedom,
-          layoutFamily: sel.layoutFamily,
-          styleProfile: dna.visual?.styleProfile,
-          ratios,
-          userId: input.userId,
-          source: input.source,
-          businessId,
-          brandKitId,
-          brief,
-          render,
-          ids: { packId },
-        })
-      } catch (err) {
-        return planError(err)
-      }
-      if (!planned.items.length) throw bad(sel.angleIds ? 'None of the selected angles match this offer; re-plan angles' : 'No angles could be planned for this offer')
-      if (planned.items.length > MAX_PACK_SIZE) throw bad(`angles × variations = ${planned.items.length} ads; the maximum per pack is ${MAX_PACK_SIZE}`)
       // F1: never run (or silently shrink) a plan the user did not approve. The plan is recomputed
       // here with the quote's resolver (ads × variations; relighting is included and free).
       const current = adPackPlanSummary(planned.items.length)
@@ -1254,15 +1348,18 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
           approvedAds: was.items,
         })
       }
+      // P0 #2d: the copy the user previewed is the copy that ships (same args, same facts, same angles).
+      const reused = await previewForStart(input, run, current)
       await requireCredits(input.userId, planned.pack.size)
       try {
-        await deps.store.createPack(planned.pack, planned.items)
+        await deps.store.createPack(planned.pack, reused ? applyPreview(planned.items, reused) : planned.items)
       } catch (err) {
         // Concurrent retry with the same fixed id won the insert: return that pack.
         const existing = input.packId ? await deps.store.getPack(packId, input.userId).catch(() => null) : null
         if (!existing) throw err
         return { packId, status: existing.pack.status, quote: quoteFor(existing.pack.size), existing: true }
       }
+      const previewAds = reused ? reused.ads.filter((a) => a.ok && a.copy).map((a) => a.index + 1) : []
       return {
         packId,
         status: planned.pack.status,
@@ -1273,7 +1370,78 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
         angles: planned.items.map((i) => ({ index: i.index + 1, angleId: i.angle.id, category: i.angle.category, hookType: i.angle.hookType, format: i.angle.format, layoutFamily: i.angle.layoutFamily, ...(i.angle.variation !== undefined ? { variation: i.angle.variation } : {}), rationale: i.angle.rationale })),
         ...(dna.visual?.styleProfile ? { styleProfile: dna.visual.styleProfile } : {}),
         ...(styleNote ? { notes: [styleNote] } : {}),
+        ...(reused ? { previewId: reused.previewId, previewAds } : {}),
       }
+    },
+
+    async previewPack(input) {
+      if (!deps.previews) throw new AdPackError('UNAVAILABLE', 'Copy previews are not available in this runtime')
+      const nowMs = now()
+      const used = await deps.previews.countSince(input.userId, new Date(nowMs - 60 * 60 * 1000).toISOString())
+      if (used >= PREVIEW_RATE_LIMIT_PER_HOUR) {
+        throw new AdPackError('RATE_LIMITED', `At most ${PREVIEW_RATE_LIMIT_PER_HOUR} copy previews per hour (they use model tokens). Try again later or start the pack.`, { limit: PREVIEW_RATE_LIMIT_PER_HOUR, retryAfterSeconds: 3600 })
+      }
+      const previewId = randomUUID()
+      const run = await prepareRun(input, previewId)
+      const { dna, offer, planned, brief } = run
+      const language = dna.language
+      const t0 = now()
+      // Planning + copy + checks only: no scene, no image, no credits. Variations share their base copy.
+      const bases = planned.items.filter((i) => !i.angle.variation)
+      const done = new Map<number, StoredPreviewAd>()
+      await mapWithConcurrency(bases, deps.concurrency ?? 4, async (item) => {
+        const others = [...done.values()].map((a) => a.copy).filter((c): c is NonNullable<typeof c> => Boolean(c))
+        const res = await writeAdCopy({ gateway: deps.gateway, dna, offer, angle: item.angle, language, otherCopies: others, brief })
+        done.set(item.index, {
+          index: item.index,
+          angle: res.retryAngle ?? item.angle,
+          ...(res.copy ? { copy: res.copy } : {}),
+          ...(res.check ? { copyCheck: res.check } : {}),
+          ok: res.ok,
+          ...(res.blocking.length ? { blocking: res.blocking } : {}),
+          costUsd: res.costUsd,
+          repairRounds: res.repairRounds,
+        })
+      })
+      const ads = bases.map((i) => done.get(i.index) ?? { index: i.index, angle: i.angle, ok: false, costUsd: 0, repairRounds: 0 })
+      const costUsd = Number(ads.reduce((s, a) => s + a.costUsd, 0).toFixed(6))
+      const stored: StoredPreview = {
+        previewId,
+        userId: input.userId,
+        ...(run.businessId ? { businessId: run.businessId } : {}),
+        argsHash: previewArgsHash(input),
+        factsHash: previewFactsHash(dna, offer),
+        createdAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + PREVIEW_TTL_MS).toISOString(),
+        ads,
+        costUsd,
+      }
+      await deps.previews.save(stored)
+      if (costUsd > 0) {
+        await log({ userId: input.userId, feature: 'script', model: 'adpack-copy-preview', costUsd, source: input.source, durationMs: now() - t0, metadata: { feature: 'adpack_preview', previewId, ads: ads.length } })
+      }
+      const byIndex = new Map(ads.map((a) => [a.index, a]))
+      const views = planned.items.map((item) => {
+        const base = item.angle.variation ? ads.find((a) => a.angle.id === item.angle.id) : byIndex.get(item.index)
+        return previewAdView(item, base, offerForItem(offer, item.index), Boolean(offer.productImageUrlsByAd?.[String(item.index)]?.length))
+      })
+      return {
+        previewId,
+        quote: quoteFor(planned.items.length, { variations: run.sel.variations, angleIds: [...new Set(planned.items.map((i) => i.angle.id))] }),
+        ads: views,
+        costUsd,
+        chargedCredits: 0 as const,
+        expiresAt: stored.expiresAt,
+        remainingThisHour: Math.max(0, PREVIEW_RATE_LIMIT_PER_HOUR - used - 1),
+      }
+    },
+
+    async getPreview(input) {
+      if (!deps.previews) return null
+      const id = str(input.previewId, 64)
+      if (!id || !UUID_RE.test(id)) return null
+      const p = await deps.previews.get(id, input.userId)
+      return p && Date.parse(p.expiresAt) > now() ? p : null
     },
 
     getStatus,
@@ -1370,6 +1538,116 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
       await deps.store.updatePack(packId, { status: 'cancelled' })
       return { packId, status: 'cancelled' }
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Copy preview (P0 #2d) + required facts + cross-pack diversity helpers
+// ---------------------------------------------------------------------------
+
+/** Latest packs of the same offer whose angles the planner avoids (P1 #10). */
+export const RECENT_PACKS_FOR_DIVERSITY = 2
+
+/** Request override of the offer's required facts (create_ads / adpack_start `mustAppear`). */
+export function parseMustAppear(raw: unknown): MustAppearKey[] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw)) throw bad(`mustAppear must be an array of: ${MUST_APPEAR_KEYS.join(', ')}`)
+  const out: MustAppearKey[] = []
+  for (const k of raw) {
+    if (typeof k !== 'string' || !(MUST_APPEAR_KEYS as readonly string[]).includes(k)) throw bad(`mustAppear: unknown key ${JSON.stringify(k)} (use ${MUST_APPEAR_KEYS.join(', ')})`)
+    if (!out.includes(k as MustAppearKey)) out.push(k as MustAppearKey)
+  }
+  return out
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'null'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  const obj = value as Record<string, unknown>
+  return `{${Object.keys(obj).filter((k) => obj[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(',')}}`
+}
+
+const sha = (v: unknown) => createHash('sha256').update(canonicalJson(v)).digest('hex')
+
+/** Arguments that change the copy (ratios / render options do not): preview ↔ start identity. */
+export const PREVIEW_ARG_KEYS = [
+  'brandId', 'offerId', 'brandKitId', 'dna', 'offer', 'size', 'angleIds', 'angles', 'variations', 'creativeFreedom', 'layoutFamily',
+  'styleDnaId', 'brief', 'locale', 'register', 'forbiddenPhrases', 'forbiddenClaims', 'productImageIds', 'productImageIdsByAd', 'mustAppear',
+] as const
+
+export function previewArgsHash(input: Record<string, unknown>): string {
+  const picked: Record<string, unknown> = {}
+  for (const k of PREVIEW_ARG_KEYS) if (input[k] !== undefined && input[k] !== null && input[k] !== '') picked[k] = input[k]
+  if (picked.size !== undefined) picked.size = parseSize(picked.size)
+  return sha(picked)
+}
+
+/** The facts + language rules the copy was written from (a preview is stale once they change). */
+export function previewFactsHash(dna: BrandDna, offer: OfferInput): string {
+  return sha({
+    brand: dna.brandName,
+    language: dna.language,
+    register: dna.register,
+    locale: dna.locale,
+    allowUrgency: dna.allowUrgency === true,
+    forbidden: [...(dna.forbiddenPhrases ?? []), ...(dna.forbiddenClaims ?? [])],
+    facts: dna.facts.filter((f) => f.confirmed).map((f) => [f.key, f.value]),
+    offer: offer.name,
+    offerFacts: offer.facts.map((f) => [f.key, f.value, f.confirmed]),
+    notIncluded: offer.notIncluded ?? [],
+    strictClaims: offer.strictClaims === true,
+    mustAppear: offer.mustAppear ?? null,
+  })
+}
+
+/** Planned items with the previewed copy (passing ads start at copy_ready; the rest are written at run time). */
+export function applyPreview(items: PackItem[], preview: StoredPreview): PackItem[] {
+  const byIndex = new Map(preview.ads.map((a) => [a.index, a]))
+  return items.map((item) => {
+    if (item.angle.variation) return item
+    const ad = byIndex.get(item.index)
+    if (!ad || !ad.ok || !ad.copy || ad.angle.id !== item.angle.id) return item
+    return {
+      ...item,
+      status: 'copy_ready' as const,
+      angle: { ...item.angle, ...(ad.angle.retry ? { retry: ad.angle.retry } : {}) },
+      copy: ad.copy,
+      ...(ad.copyCheck ? { copyCheck: ad.copyCheck } : {}),
+      timings: { copyMs: 0 },
+    }
+  })
+}
+
+/** One preview row: angle, rationale, layout family, planned photo, the copy fields and its check. */
+export function previewAdView(item: PackItem, ad: StoredPreviewAd | undefined, offer: OfferInput, perAd: boolean): AdPackPreviewResponse['ads'][number] {
+  const photos = resolveProductPhotos(offer)
+  const pick = photos.length ? pickProductImage(photos.map((p) => ({ url: p.url, role: p.role, label: p.label })), perAd ? {} : { format: item.angle.format }) : null
+  const photo = perAd && photos[0] ? photos[0] : pick ? photos.find((p) => p.url === pick.url) : undefined
+  const copy = ad?.copy
+  const issues = ad?.blocking ?? []
+  const warnings = (ad?.copyCheck?.issues ?? []).filter((i) => !issues.includes(i))
+  return {
+    index: item.index + 1,
+    angleId: item.angle.id,
+    ...(item.angle.category ? { category: item.angle.category } : {}),
+    hookType: ad?.angle.retry?.hookType ?? item.angle.hookType,
+    format: item.angle.format,
+    ...(item.angle.rationale ? { rationale: item.angle.rationale } : {}),
+    ...(item.angle.layoutFamily ? { layoutFamily: item.angle.layoutFamily } : {}),
+    ...(item.angle.variation !== undefined ? { variation: item.angle.variation } : {}),
+    ...(photo ? { photo: { url: photo.url, role: photo.role, ...(photo.label ? { label: photo.label } : {}) } } : {}),
+    ...(copy
+      ? {
+          headline: copy.headline,
+          ...(copy.subline ? { subline: copy.subline } : {}),
+          bullets: copy.bullets,
+          ...(copy.offerLine ? { offerLine: copy.offerLine } : {}),
+          cta: copy.cta,
+          caption: copy.caption,
+        }
+      : {}),
+    check: { ok: Boolean(ad?.ok), repairRounds: ad?.repairRounds ?? 0, issues: issues.map(issueView), warnings: warnings.slice(0, 8).map(issueView) },
   }
 }
 
