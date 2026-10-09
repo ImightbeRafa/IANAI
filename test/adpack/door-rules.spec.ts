@@ -141,8 +141,11 @@ describe('E2: forbidden phrases verified per ad', () => {
     const failures = status.payload.failures as Array<{ reason: string }>
     expect(failures).toHaveLength(2)
     expect(failures[0].reason).toBe('el texto usaba una frase prohibida de la marca')
-    // generate + one repair per ad, then no scene / no charge.
-    expect(e.gateway.jsonCalls.length).toBe(4)
+    // generate + one repair per ad, × (1 + 2 automatic retries, #16); then no scene / no charge.
+    expect(e.gateway.jsonCalls.length).toBe(12)
+    expect(failures[0]).toMatchObject({ attempts: 3, attemptLog: [{ attempt: 1, mode: 'copy' }, { attempt: 2, mode: 'copy' }] })
+    // The retry tells the writer why the last version was rejected.
+    expect(e.gateway.jsonCalls.some((c) => /REINTENTO 1/.test(c.user))).toBe(true)
     expect(e.gateway.sceneCalls).toHaveLength(0)
     expect(e.charges).toHaveLength(0)
   })

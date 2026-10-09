@@ -48,6 +48,10 @@ export interface AdPackFailureView {
   reason: string
   /** Paid (one ad of credits, needs in-chat approval) retry of just this ad. */
   retry: AdPackRetryCall
+  /** #16: attempts made inside the approval (1 + automatic retries) before reporting the failure. */
+  attempts: number
+  /** Why each automatic retry was needed (earlier attempts), oldest first. */
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
   /** Measured product fidelity when the ad failed on it (fidelity_failed). */
   fidelity?: AdPackFidelitySummary
 }
@@ -104,6 +108,8 @@ export interface AdPackDeliverableAd {
   files: AdPackDeliverableFile[]
   /** Brand forbidden phrases/claims found in the copy (verified empty for a shipped ad). */
   forbiddenHits: Array<{ phrase: string; field: string }>
+  /** #16: attempts it took inside the approval (1 = first try; credits are charged once). */
+  attempts: number
   /** Product fidelity (A4), worst ratio of the ad. */
   fidelity?: AdPackFidelitySummary
 }
@@ -220,6 +226,8 @@ export function buildStatusExtras(input: {
       index: i.index + 1,
       reason: failureReason(i.error, language),
       retry: retryCall(input.packId, i),
+      attempts: 1 + (i.angle.retry?.count ?? 0),
+      ...(i.angle.retry?.history.length ? { attemptLog: i.angle.retry.history } : {}),
       ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
     }))
   const total = sorted.length
@@ -262,6 +270,7 @@ export function buildStatusExtras(input: {
           ...(r.fidelity ? { fidelity: fidelitySummary(r.fidelity) } : {}),
         })),
         forbiddenHits: input.dna ? findForbiddenHits(i.copy, input.dna).map((h) => ({ phrase: h.phrase, field: h.field })) : [],
+        attempts: 1 + (i.angle.retry?.count ?? 0),
         ...(i.fidelity ? { fidelity: fidelitySummary(i.fidelity) } : {}),
       }))
     const label = es ? 'Anuncio' : 'Ad'

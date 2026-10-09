@@ -323,6 +323,8 @@ export interface AdvancePackInput {
   cutoutCache?: BlobCache | null
   /** Fetch product photos / cut-outs (default: data URL or https fetch). Tests inject fakes. */
   loadImage?: ImageLoader
+  /** #16: automatic retries per failed ad (default MAX_AUTO_RETRIES = 2; 0 disables). */
+  maxAutoRetries?: number
 }
 
 type StepOutcome = 'finished' | 'deferred' | 'budget'
@@ -443,8 +445,55 @@ async function release(ctx: RunCtx, item: PackItem): Promise<void> {
   ctx.known.set(item.id, { ...item, leaseUntil: undefined })
 }
 
+/** #16: automatic retries per ad inside the same approval before it is reported failed. */
+export const MAX_AUTO_RETRIES = 2
+
+/**
+ * Which failures are retried automatically, and how: copy failures write new copy (different
+ * hook/wording, the checker's issues fed back); scene / fidelity / render failures keep the copy
+ * and re-plate with another setting + light. A failed cut-out (same photo, same cut-out) and
+ * charge problems are not retried.
+ */
+export function autoRetryMode(error: string): 'copy' | 'scene' | null {
+  if (/^copy_(check_)?failed/.test(error)) return 'copy'
+  if (/^(fidelity_failed|scene_props_failed|scene_failed|scene_product_mismatch|scene_upload_failed|render_failed)/.test(error)) return 'scene'
+  return null
+}
+
 async function fail(ctx: RunCtx, item: PackItem, error: string, patch: Partial<PackItem> = {}): Promise<PackItem> {
+  const mode = autoRetryMode(error)
+  const used = item.angle.retry?.count ?? 0
+  const max = Math.max(0, ctx.input.maxAutoRetries ?? MAX_AUTO_RETRIES)
+  if (mode && used < max && !item.chargedAt) {
+    // Same approval, same credits: nothing is charged for a failed attempt (only delivered ads are).
+    const retry = { count: used + 1, history: [...(item.angle.retry?.history ?? []), { attempt: used + 1, mode, error: error.slice(0, 240) }] }
+    const keepCopy = mode === 'scene' && Boolean(patch.copy ?? item.copy)
+    console.warn('[adpack] auto-retry', item.id, `${retry.count}/${max}`, mode, error.slice(0, 160))
+    return save(ctx, item, {
+      ...(patch.costUsd !== undefined ? { costUsd: patch.costUsd } : {}),
+      ...(patch.timings ? { timings: patch.timings } : {}),
+      angle: { ...item.angle, retry },
+      status: keepCopy ? 'copy_ready' : 'planned',
+      copy: keepCopy ? (patch.copy ?? item.copy) : undefined,
+      copyCheck: keepCopy ? (patch.copyCheck ?? item.copyCheck) : undefined,
+      scene: undefined,
+      sceneCheck: undefined,
+      renders: [],
+      fidelity: undefined,
+      sceneAttempts: undefined,
+      error: undefined,
+    })
+  }
   return save(ctx, item, { ...patch, status: 'failed', error: error.slice(0, 500), leaseUntil: undefined })
+}
+
+/** Copy-prompt hint for an automatic copy retry: what the checker rejected, and "write it differently". */
+export function copyRetryHint(retry: PackItem['angle']['retry'], language: 'es' | 'en'): string | undefined {
+  const last = retry?.history.filter((h) => h.mode === 'copy').at(-1)
+  if (!retry || !last) return undefined
+  return language === 'es'
+    ? `REINTENTO ${retry.count}: la versión anterior fue rechazada (${last.error.slice(0, 180)}). Escribí un gancho y un titular distintos; cada dato concreto (precio, envío, contenido, edad, cantidades) copialo tal cual de los datos confirmados o no lo menciones; nada de urgencia ni frases prohibidas.`
+    : `RETRY ${retry.count}: the previous version was rejected (${last.error.slice(0, 180)}). Write a different hook and headline; copy every concrete fact (price, shipping, contents, age, quantities) verbatim from the confirmed facts or leave it out; no urgency, no forbidden phrases.`
 }
 
 async function runItem(ctx: RunCtx, leased: PackItem, onAnchorSettled: () => void): Promise<StepOutcome> {
@@ -556,9 +605,10 @@ async function stepCopy(ctx: RunCtx, item: PackItem): Promise<PackItem | 'defer'
   let cost = 0
   let gen: Awaited<ReturnType<typeof generateAdCopy>> | null = null
   let lastError = ''
+  const retryHint = copyRetryHint(item.angle.retry, language)
   for (let attempt = 0; attempt < 2 && !gen; attempt++) {
     try {
-      gen = await generateAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief })
+      gen = await generateAdCopy({ gateway, dna, offer, angle: item.angle, language, model: ctx.input.copyModel, otherCopies: otherCopies(ctx, item), brief: ctx.pack.brief, ...(retryHint ? { retryHint, temperature: 0.9 } : {}) })
     } catch (error) {
       lastError = errorMessage(error)
     }
@@ -672,7 +722,7 @@ async function stepScene(ctx: RunCtx, item: PackItem, anchorUrl?: string): Promi
   const maxAttempts = 1 + Math.max(0, ctx.input.maxSceneRetries ?? MAX_SCENE_RETRIES)
   const productRef = offer.productImageUrls?.[0]
   // Nth ad of this format in the pack → Nth setting variant (no two same-format ads share a backdrop).
-  const variation = [...ctx.known.values()].filter((i) => i.angle.format === item.angle.format && i.index < item.index).length
+  const variation = [...ctx.known.values()].filter((i) => i.angle.format === item.angle.format && i.index < item.index).length + (item.angle.retry?.count ?? 0)
   const t0 = Date.now()
   let checkMs = 0
   let cost = 0
@@ -853,8 +903,10 @@ async function stepPlate(ctx: RunCtx, item: PackItem): Promise<PackItem> {
     return fail(ctx, item, cut.error.startsWith('cutout_failed') ? cut.error : `cutout_failed: ${cut.error}`, { timings: { ...item.timings, sceneMs: Date.now() - t0 } })
   }
   const cutouts: LoadedCutout[] = [cut.hero, ...cut.parts]
-  const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length
-  const light = plateLight(item.index)
+  // #16: an automatic re-plate uses another setting and light (a fresh seed, not the same plate again).
+  const retries = item.angle.retry?.count ?? 0
+  const variation = [...ctx.known.values()].filter((i) => i.angle.format === format && i.index < item.index).length + retries
+  const light = plateLight(item.index + retries)
   const surface = plateSurface(format, variation)
   const placement = plateRegionFor({ pack: ctx.pack, format, copy, product: { width: cut.hero.width, height: cut.hero.height }, layoutFamily: item.angle.layoutFamily })
   const allowedProps = ctx.pack.render?.allowedProps ?? offer.allowedProps

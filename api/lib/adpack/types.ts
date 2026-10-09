@@ -346,6 +346,16 @@ export interface AdAngle {
   variation?: number
   /** Where the angle came from. */
   source?: 'planner' | 'guide' | 'agent'
+  /**
+   * #16: automatic retries inside the same approval (pack runner): count used so far and why each
+   * earlier attempt failed. Rides on the angle jsonb (no migration).
+   */
+  retry?: AdAutoRetry
+}
+
+export interface AdAutoRetry {
+  count: number
+  history: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
 }
 
 // ---------------------------------------------------------------------------

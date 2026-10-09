@@ -650,6 +650,7 @@ export function toItemView(item: PackItem, dna?: Pick<BrandDna, 'forbiddenPhrase
     ...(item.scene ? { sceneUrl: item.scene.imageUrl } : {}),
     renders: item.renders ?? [],
     attempts: item.attempts,
+    ...(item.angle.retry?.count ? { autoRetries: item.angle.retry.count, attemptLog: item.angle.retry.history } : {}),
     charged: Boolean(item.chargedAt),
     ...(libraryIdsFor(item).length ? { libraryImageIds: libraryIdsFor(item) } : {}),
     ...(dna && item.copy ? { forbiddenHits: findForbiddenHits(item.copy, dna).map((h) => ({ phrase: h.phrase, field: h.field })) } : {}),

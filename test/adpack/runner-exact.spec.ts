@@ -121,7 +121,9 @@ describe('exact product mode — pack runner (A1/A3/A4/H3)', () => {
     expect(items[0].status).toBe('failed')
     expect(items[0].error).toMatch(/^scene_props_failed: radiocontrol con antena \(after 3 attempts\)/)
     expect(items[0].sceneCheck?.extraObjects).toEqual(['radiocontrol con antena'])
-    expect(t.gateway.sceneCalls).toHaveLength(3)
+    // 3 plate attempts × (1 + 2 automatic re-plates inside the approval, #16).
+    expect(t.gateway.sceneCalls).toHaveLength(9)
+    expect(items[0].angle.retry?.count).toBe(2)
     expect(t.charge.total()).toBe(0)
   })
 

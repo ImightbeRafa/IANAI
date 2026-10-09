@@ -90,6 +90,7 @@ function compactItem(item: AdPackItemView) {
     // Stable public storage URLs (never signed / expiring) with explicit size + format (G4).
     renders: item.renders.map((r) => ({ ratio: r.ratio, imageUrl: r.imageUrl, ...(r.jpgUrl ? { jpgUrl: r.jpgUrl } : {}), width: r.width, height: r.height, format: 'png' as const })),
     charged: item.charged,
+    ...(item.autoRetries ? { autoRetries: item.autoRetries } : {}),
     savedToLibrary: Boolean(item.libraryImageIds?.length) && (item.libraryImageIds?.length ?? 0) >= item.renders.length,
     ...(item.forbiddenHits?.length ? { forbiddenHits: item.forbiddenHits } : {}),
     ...(item.fidelity ? { fidelity: item.fidelity } : {}),
@@ -143,8 +144,8 @@ function statusPayload(status: AdPackStatusResponse) {
   const finished = Boolean(status.deliverable)
   const failedHint = status.failures?.length
     ? es
-      ? ' Para los que fallaron, explicá el motivo y ofrecé reintentar con la llamada exacta de failures[].retry.call (cuesta 1 anuncio de créditos, requiere confirmación).'
-      : ' For failed ads, explain the reason and offer to retry with the exact failures[].retry.call (costs one ad of credits, needs confirmation).'
+      ? ' Para los que fallaron: Advance ya los reintentó solo dentro de esta aprobación (failures[].attempts, sin cobrar). Explicá el motivo y ofrecé reintentar con la llamada exacta de failures[].retry.call (cuesta 1 anuncio de créditos, requiere confirmación).'
+      : ' For failed ads: Advance already retried them inside this approval (failures[].attempts, not charged). Explain the reason and offer to retry with the exact failures[].retry.call (costs one ad of credits, needs confirmation).'
     : ''
   const forbidden = (status.deliverable?.ads ?? []).filter((a) => a.forbiddenHits.length)
   const forbiddenHint = forbidden.length

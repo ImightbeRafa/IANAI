@@ -385,6 +385,9 @@ export interface AdPackItemView {
   sceneUrl?: string
   renders: RenderedAd[]
   attempts: number
+  /** #16: automatic retries used inside the approval (0–2) and why each earlier attempt failed. */
+  autoRetries?: number
+  attemptLog?: Array<{ attempt: number; mode: 'copy' | 'scene'; error: string }>
   charged: boolean
   /** product_images ids of renders saved to the offer library (kind 'generated'). */
   libraryImageIds?: string[]
