@@ -27,7 +27,7 @@ export type McpToolDefinition = {
   consumesAdvanceCredits: boolean
 }
 
-export const MCP_REGISTRY_VERSION = '0.10.0'
+export const MCP_REGISTRY_VERSION = '0.11.0'
 
 export const MCP_TOOL_GROUPS: Record<McpToolGroupId, {
   title: string
@@ -80,7 +80,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'read',
     description:
-      'List brands owned by the signed-in user (or team-visible). To make a batch of ads for one of them: adpack_start {brandId, offerId (defaultOfferId), size, brief?} (optionally adpack_from_brand first to review gaps).',
+      'List brands owned by the signed-in user (or team-visible). Archived brands are hidden (includeArchived:true to see them). Returns possibleDuplicates: groups of brands whose names match after normalizing — show them to the user and offer archive_brand for the extras (never merge automatically). ' +
+      'To make a batch of ads for one of them: adpack_start {brandId, offerId (defaultOfferId), size, brief?} (optionally adpack_from_brand first to review gaps).',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -100,6 +101,72 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'read',
     description: 'List offers for an owned brand.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'create_offer',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Create an offer (product) for an owned brand — same record as the web offer form. Free sync write, no credits. ' +
+      'Pass the REAL product name plus the form fields (description, differentiation, keyObjection, guarantee…) and the structured ad facts: ' +
+      'price {amount, currency CRC|USD}, compareAtPrice, bundles [{qty, price, label}] (e.g. 2 kits = 29800), shipping {text, freeFromQty?, freeFromAmount?}, includes[], excludes[] ("Papel no incluido"), ' +
+      'allowedClaims[], forbiddenClaims[], verifiedClaims [{claim, source}], cta {text, channels: web|whatsapp|dm}, ageMin, immutableAttributes[], lockProductAppearance, allowedProps[], locale. ' +
+      'Numbers are validated strictly; placeholder values are not stored. Ads then use these exact strings as confirmed facts (e.g. "Envío gratis desde 2 kits", "Edad 8+").',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'update_offer',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Update an owned offer {brandId, offerId, …any create_offer field}. Only the fields you pass change; null clears a structured field. Free sync write. ' +
+      'Use it to fix a wrong name, add the price/bundle/shipping rule, mark what is not included, or remove false claims (forbiddenClaims). Returns confirmedFacts = exactly how ads will state them.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'set_primary_product_image',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Make one real product photo the hero of an offer {offerId, productImageId}. Packs and bulk posts use the primary photo first (instead of the newest upload). Free.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'tag_product_image',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Tag a product photo {productImageId, tags: hero|contenido-kit|caja|en-uso|detalle|part, role?} (role = kit part shown, e.g. "control"). "hero" photos are preferred after the primary. Free.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'create_upload_url',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description:
+      'Direct upload without the web app: {brandId, offerId?, kind: product_photo|logo|reference_ad|winner_ad|document, role?, filename, contentType} → signed uploadUrl. ' +
+      'PUT the raw bytes there (content-type header), then call finalize_upload {uploadId}. product_photo needs offerId. Free, no credits.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'finalize_upload',
+    group: 'library_sessions',
+    risk: 'sync_write',
+    description:
+      'Finish a create_upload_url upload {uploadId}: checks the file exists, size and type limits, then saves it (product photo → productImageId on the offer; logo / reference ad / winner ad / document → primary brand kit) and returns its stable Advance URL. Idempotent. Free.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -147,7 +214,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'brand_workspace',
     risk: 'sync_write',
     description:
-      'Create a brand kit linked to a brand (business_id). Free sync write — no Advance credits.',
+      'Create a brand kit linked to a brand (business_id). Accepts the same fields as update_brand_kit. Free sync write — no Advance credits.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -156,7 +223,20 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'update_brand_kit',
     group: 'brand_workspace',
     risk: 'sync_write',
-    description: 'Update brand kit fields (colors, voice, refs). Free sync write.',
+    description:
+      'Update ANY brand kit field (free sync write): name, tagline, industry, brandVoice, toneKeywords, colors {primary, secondary, accent} (or primaryColor…), fonts {heading, body}, logoUrl, logoVariants [{url, variant}], referenceImageUrls, ' +
+      'mustUsePhrases, forbiddenPhrases, visualStyleNotes, targetAudience, audiences [{label, ageMin, ageMax, geo}], locale ("es-CR"), register (voseo|tuteo|usted — a HARD rule), do[], dont[], styleDnaIds. ' +
+      'Placeholder values ("country", "todo el país", "Personas 18–65", "N/A", "[…]") are never stored (reported in ignoredPlaceholders; a placeholder clears the field). External image links are copied into Advance storage.',
+    enabled: true,
+    requiresApproval: false,
+    consumesAdvanceCredits: false,
+  },
+  {
+    name: 'set_primary_brand_kit',
+    group: 'brand_workspace',
+    risk: 'sync_write',
+    description:
+      'Make one kit the primary kit of a brand {brandId, brandKitId} (packs, GUIDE and EXECUTE use it by default). Links an unlinked kit; never moves a kit from another brand. Free.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -269,7 +349,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     name: 'workspace_save_artifact',
     group: 'library_sessions',
     risk: 'sync_write',
-    description: 'Save a GUIDE/external script or image into the Advance library, including product/context refs from an https URL (no credits; no base64).',
+    description: 'Save a GUIDE/external script or image into the Advance library, including product/context refs from an https URL (no credits; no base64). External links (Drive, etc.) are copied into Advance storage; the original is kept as sourceUrl. For files without a public link use create_upload_url.',
     enabled: true,
     requiresApproval: false,
     consumesAdvanceCredits: false,
@@ -337,7 +417,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'execute_studio',
     risk: 'execute',
     description:
-      'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute). ' +
+      'Generate varied posts for selected angles (6 or 24 credits each; may expand product refs; one in-chat approval via confirm_execute). productImageIds = product photo pool (first = hero). ' +
       'After approve, returns jobId + statusMessage; poll get_execute_result until completed.',
     enabled: true,
     requiresApproval: true,
@@ -396,7 +476,8 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack for an EXISTING brand (happy path): list_brands → adpack_from_brand {brandId, offerId?} (optional, to review gaps) → adpack_start {brandId, offerId, size, brief?} → the user confirms in chat (confirm_execute) → poll adpack_status until moreWork=false → share the image links, captions and the brand-folder deepLink. ' +
       'This tool builds the Brand DNA + offer from what the owner already saved (brand, brand kit voice/colors/logo/forbidden phrases, offer form, real product photos, stored site analysis) — no URLs or uploads needed, no credits. ' +
-      'Returns {dna, offer, gaps, notes, quote, missingPrice}. Only facts the owner typed are confirmed and only confirmed facts are used for prices/claims (a price appears only if the offer has a concrete price). ' +
+      'Returns {dnaSummary, offer, gaps, notes, quote, missingPrice} (full dna only with includeDna:true — never re-send the profile: pass brandId/offerId). Only facts the owner typed are confirmed and only confirmed facts are used for prices/claims (a price appears only if the offer has a concrete price). ' +
+      'If the user corrects facts in chat, persist them: saveToOffer:true + offerPatch {…update_offer fields} and/or saveToBrandKit:true + brandKitPatch {…update_brand_kit fields}. Optional productImageIds (photo pool, first = hero) / productImageIdsByAd. ' +
       'Before adpack_start, show the user the gaps; if missingPrice=true say clearly that no ad will show a price and ask whether to add it first or continue. ' +
       'Never invent brandId/offerId: use ids returned by list_brands / list_offers / this tool.',
     enabled: true,
@@ -450,6 +531,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     description:
       'Ad Pack: start a pack of sell-ready static ads (credits per finished ad). For an existing brand pass {brandId, offerId, size, brief?} INSTEAD of dna/offer — the server builds them from the saved brand (no adpack_from_brand call required). ' +
       'brief = optional campaign context from the user (e.g. "Black Friday, focus on bundles"); it steers theme only and is never used as a fact. ' +
+      'Corrected facts become permanent with saveToOffer:true + offerPatch / saveToBrandKit:true + brandKitPatch (written on the first call, reported in saved). productImageIds = photo pool (first = hero); productImageIdsByAd = {"1": [id]} per ad. ' +
       'Without approvalRequestId returns an in-chat confirmation (userPrompt + quote) — call confirm_execute after the user says yes, then retry with the same arguments plus approvalRequestId. ' +
       'Never invent brandId, offerId or approvalRequestId: use only ids returned by list_brands / list_offers / adpack_from_brand and the approvalRequestId returned by this tool. If adpack_from_brand reported missingPrice, tell the user before starting. ' +
       'Guarantees: only confirmed facts are used for prices/claims; images keep the real product photo; text on the image is rendered exactly (never drawn by the image model). Takes ~2 min per 10 ads. ' +
@@ -498,7 +580,7 @@ export const MCP_TOOL_REGISTRY: McpToolDefinition[] = [
     group: 'deletes',
     risk: 'delete',
     description:
-      'Archive a brand/folder (recoverable; hidden from default MCP lists). Requires typed confirm + in-chat confirm_execute.',
+      'Archive a brand/folder, e.g. a duplicate from list_brands.possibleDuplicates (soft flag, recoverable; hidden from list_brands unless includeArchived). Requires the exact brand name as confirm + in-chat confirm_execute. Never merges or deletes data.',
     enabled: true,
     requiresApproval: true,
     consumesAdvanceCredits: false,

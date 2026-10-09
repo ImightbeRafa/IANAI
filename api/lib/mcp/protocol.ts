@@ -11,10 +11,20 @@ import {
 } from './admin-tools.js'
 import {
   mcpGetBrandContext,
-  mcpListBrands,
+  mcpListBrandsWithDuplicates,
   type McpAuthUser,
   type McpDbClient,
 } from './user-tools.js'
+import {
+  mcpCreateOffer,
+  mcpSetPrimaryProductImage,
+  mcpTagProductImage,
+  mcpUpdateOffer,
+  type McpOfferStore,
+} from './offer-tools.js'
+import { mcpCreateUploadUrl, mcpFinalizeUpload, UPLOAD_KINDS } from './upload-tools.js'
+import { createRehoster, type RehostFn } from './asset-rehost.js'
+import { PRODUCT_IMAGE_TAGS } from '../product-image-order.js'
 import { saveMcpUrlContext, type McpUrlIntakeStore } from './url-intake.js'
 import {
   mcpGuideBrandPack,
@@ -61,6 +71,7 @@ import {
   mcpGetBrandKit,
   mcpLinkBrandKit,
   mcpListBrandKits,
+  mcpSetPrimaryBrandKit,
   mcpUpdateBrandKit,
   type McpBrandKitStore,
 } from './brand-kit-tools.js'
@@ -71,7 +82,7 @@ import type { AdPackService } from '../adpack/service.js'
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
-  version: '0.10.0',
+  version: '0.11.0',
   title: 'Advance AI',
   websiteUrl: 'https://advanceai.studio',
   icons: [{ src: 'https://advanceai.studio/brand/advance-mark.png', mimeType: 'image/png', sizes: ['74x73'] }],
@@ -150,6 +161,129 @@ function toolInputSchema(name: string): Record<string, unknown> {
     isActive: { type: 'boolean' },
     isDefault: { type: 'boolean' },
     setAsPrimary: { type: 'boolean' },
+    fonts: {
+      type: 'object',
+      description: 'Alias of fontPrimary/fontSecondary: { heading, body } (e.g. { heading: "Space Grotesk", body: "Inter" }).',
+      properties: { heading: { type: 'string' }, body: { type: 'string' } },
+      additionalProperties: false,
+    },
+    colors: {
+      type: 'object',
+      description: 'Alias of primaryColor/secondaryColor/accentColor; hex values like #1F6F5C.',
+      properties: { primary: { type: 'string' }, secondary: { type: 'string' }, accent: { type: 'string' } },
+      additionalProperties: false,
+    },
+    audiences: {
+      type: 'array',
+      maxItems: 8,
+      description: 'Real audience segments. Placeholders like "country", "todo el país", "Personas 18–65" are rejected.',
+      items: {
+        type: 'object',
+        properties: { label: { type: 'string' }, ageMin: { type: 'integer' }, ageMax: { type: 'integer' }, geo: { type: 'string' } },
+        required: ['label'],
+        additionalProperties: false,
+      },
+    },
+    locale: { type: 'string', description: 'e.g. "es-CR". Sets the ad language.' },
+    register: { type: 'string', enum: ['voseo', 'tuteo', 'usted'], description: 'HARD rule for Spanish copy (not just a tone note).' },
+    do: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Style/voice rules to follow.' },
+    dont: { type: 'array', items: { type: 'string' }, maxItems: 20, description: 'Things the brand never says/does (become forbidden phrases).' },
+    logoVariants: {
+      type: 'array',
+      maxItems: 8,
+      description: 'https logo files per variant; external links are copied into Advance storage.',
+      items: {
+        type: 'object',
+        properties: { url: { type: 'string' }, variant: { type: 'string', enum: ['primary', 'light', 'dark', 'badge', 'wordmark', 'icon'] } },
+        required: ['url', 'variant'],
+        additionalProperties: false,
+      },
+    },
+    styleDnaIds: { type: 'array', items: { type: 'string' }, description: 'Style DNA ids (list_style_dnas) this brand uses by default.' },
+  }
+  const money = {
+    type: 'object',
+    description: 'Exact amount as a number + currency, e.g. { amount: 14900, currency: "CRC" } → "₡14.900".',
+    properties: { amount: { type: 'number' }, currency: { type: 'string', enum: ['CRC', 'USD'] } },
+    required: ['amount', 'currency'],
+    additionalProperties: false,
+  }
+  const strList = (description: string) => ({ type: 'array', items: { type: 'string' }, maxItems: 20, description })
+  const offerFields: Record<string, unknown> = {
+    name: { type: 'string', description: 'Real product name (not the brand name).' },
+    type: { type: 'string', enum: ['product', 'service', 'restaurant', 'real_estate', 'indumentaria'] },
+    description: { type: 'string' },
+    differentiation: { type: 'string' },
+    keyObjection: { type: 'string' },
+    guarantee: { type: 'string' },
+    mainProblem: { type: 'string' },
+    realPain: { type: 'string' },
+    expectedResult: { type: 'string' },
+    result: { type: 'string' },
+    bestCustomers: { type: 'string' },
+    targetAudience: { type: 'string' },
+    purchaseReason: { type: 'string' },
+    shippingInfo: { type: 'string' },
+    technicalSpecs: { type: 'string' },
+    utility: { type: 'string' },
+    offerText: { type: 'string' },
+    callToAction: { type: 'string' },
+    productCategory: { type: 'string' },
+    price: money,
+    compareAtPrice: { ...money, description: '"Before" price (must be higher than price).' },
+    bundles: {
+      type: 'array',
+      maxItems: 6,
+      description: 'Bundle prices, e.g. [{ qty: 2, price: 29800, label: "2 kits" }] → "2 kits por ₡29.800".',
+      items: {
+        type: 'object',
+        properties: { qty: { type: 'integer', minimum: 2 }, price: { type: 'number' }, label: { type: 'string' } },
+        required: ['qty', 'price'],
+        additionalProperties: false,
+      },
+    },
+    shipping: {
+      type: 'object',
+      description: 'Exact shipping sentence + rule, e.g. { text: "Envío gratis desde 2 kits", freeFromQty: 2 }.',
+      properties: { text: { type: 'string' }, freeFromQty: { type: 'integer' }, freeFromAmount: { type: 'number' } },
+      additionalProperties: false,
+    },
+    includes: strList('What the offer includes (exact).'),
+    excludes: strList('What is NOT included, e.g. "Papel no incluido". Copy may never say it is included.'),
+    allowedClaims: strList('Claims the owner allows (used verbatim).'),
+    forbiddenClaims: strList('Claims that must never appear (e.g. "armado en minutos").'),
+    verifiedClaims: {
+      type: 'array',
+      maxItems: 20,
+      description: 'Verified claims bank: when present, only claims traceable to a confirmed fact or one of these ship.',
+      items: {
+        type: 'object',
+        properties: { claim: { type: 'string' }, source: { type: 'string' } },
+        required: ['claim', 'source'],
+        additionalProperties: false,
+      },
+    },
+    cta: {
+      type: 'object',
+      properties: { text: { type: 'string' }, channels: { type: 'array', items: { type: 'string', enum: ['web', 'whatsapp', 'dm'] } } },
+      additionalProperties: false,
+    },
+    ageMin: { type: 'integer', minimum: 0, maximum: 99, description: 'Recommended minimum age → fact "Edad 8+".' },
+    immutableAttributes: strList('Product attributes image tools must never change (e.g. "hélices blancas").'),
+    lockProductAppearance: { type: 'boolean', description: 'Never redraw the product (respected by image tools).' },
+    allowedProps: strList('Kit parts/props allowed in scenes besides the reference photo.'),
+    locale: { type: 'string', description: 'e.g. "es-CR".' },
+  }
+  const productImageIdsProp = {
+    type: 'array',
+    items: { type: 'string' },
+    maxItems: 8,
+    description: 'productImageId values (list_assets) to use as the product photo pool, in order (first = hero). Default: primary → hero tag → sharpest → newest.',
+  }
+  const productImageIdsByAdProp = {
+    type: 'object',
+    description: 'Per-ad photos: { "1": ["<productImageId>"], "3": [...] } (ad numbers as in adpack_status).',
+    additionalProperties: { type: 'array', items: { type: 'string' }, maxItems: 4 },
   }
   const adpackDna = {
     type: 'object',
@@ -173,6 +307,15 @@ function toolInputSchema(name: string): Record<string, unknown> {
     brandId: { type: 'string', description: 'Brand id from list_brands. Use INSTEAD of dna + offer: the server builds them from the saved brand, kit and offer.' },
     offerId: { type: 'string', description: 'Offer id from list_offers / get_brand_context (optional; default = the brand\'s most recent offer).' },
     brandKitId: { type: 'string', description: 'Optional linked brand kit id (default = primary kit).' },
+    productImageIds: productImageIdsProp,
+    productImageIdsByAd: productImageIdsByAdProp,
+  }
+  const correctionProps = {
+    saveToOffer: { type: 'boolean', description: 'Persist offerPatch into the saved offer (same as update_offer) before building the pack.' },
+    offerPatch: { type: 'object', description: 'Corrected offer fields (same as update_offer, e.g. { price: { amount: 14900, currency: "CRC" }, excludes: ["Papel no incluido"] }).', properties: offerFields, additionalProperties: false },
+    saveToBrandKit: { type: 'boolean', description: 'Persist brandKitPatch into the primary (or brandKitId) kit (same as update_brand_kit).' },
+    brandKitPatch: { type: 'object', description: 'Corrected kit fields (same as update_brand_kit).', properties: kitWritable, additionalProperties: false },
+    includeDna: { type: 'boolean', description: 'Echo the full Brand DNA (default false: compact dnaSummary).' },
   }
   switch (name) {
     case 'adpack_from_brand':
@@ -180,6 +323,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         type: 'object',
         properties: {
           ...adpackSavedBrand,
+          ...correctionProps,
           refresh: { type: 'boolean', description: 'Re-read the stored website live (slower). Default false: use saved data only.' },
         },
         required: ['brandId'],
@@ -261,6 +405,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
         type: 'object',
         properties: {
           ...adpackSavedBrand,
+          ...correctionProps,
           brief: {
             type: 'string',
             maxLength: 500,
@@ -345,7 +490,78 @@ function toolInputSchema(name: string): Record<string, unknown> {
             type: 'boolean',
             description: 'When true, include brands without a ready brand kit. Default false.',
           },
+          includeArchived: {
+            type: 'boolean',
+            description: 'When true, also list archived brands (archived: true). Default false.',
+          },
         },
+        additionalProperties: false,
+      }
+    case 'create_offer':
+      return {
+        type: 'object',
+        properties: { ...brand, ...offerFields },
+        required: ['brandId', 'name'],
+        additionalProperties: false,
+      }
+    case 'update_offer':
+      return {
+        type: 'object',
+        properties: { ...brand, offerId: { type: 'string' }, ...offerFields },
+        required: ['brandId', 'offerId'],
+        additionalProperties: false,
+      }
+    case 'set_primary_brand_kit':
+      return {
+        type: 'object',
+        properties: { ...brand, brandKitId: { type: 'string', description: 'Kit id from list_brand_kits.' } },
+        required: ['brandId', 'brandKitId'],
+        additionalProperties: false,
+      }
+    case 'set_primary_product_image':
+      return {
+        type: 'object',
+        properties: {
+          offerId: { type: 'string' },
+          productImageId: { type: 'string', description: 'productImageId from list_assets (kind product).' },
+          brandId: { type: 'string' },
+        },
+        required: ['offerId', 'productImageId'],
+        additionalProperties: false,
+      }
+    case 'tag_product_image':
+      return {
+        type: 'object',
+        properties: {
+          productImageId: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string', enum: [...PRODUCT_IMAGE_TAGS] }, maxItems: PRODUCT_IMAGE_TAGS.length },
+          role: { type: 'string', description: 'Kit part shown, e.g. "control", "caja" (max 60 chars).' },
+          offerId: { type: 'string' },
+          brandId: { type: 'string' },
+        },
+        required: ['productImageId', 'tags'],
+        additionalProperties: false,
+      }
+    case 'create_upload_url':
+      return {
+        type: 'object',
+        properties: {
+          ...brand,
+          offerId: { type: 'string', description: 'Required for product_photo.' },
+          kind: { type: 'string', enum: [...UPLOAD_KINDS] },
+          role: { type: 'string', description: 'product_photo: kit part ("control", "caja"); logo: variant (primary|light|dark|badge|wordmark|icon).' },
+          filename: { type: 'string' },
+          contentType: { type: 'string', description: 'image/png | image/jpeg | image/webp (logo also image/svg+xml; document application/pdf).' },
+          sizeBytes: { type: 'number' },
+        },
+        required: ['brandId', 'kind', 'filename', 'contentType'],
+        additionalProperties: false,
+      }
+    case 'finalize_upload':
+      return {
+        type: 'object',
+        properties: { uploadId: { type: 'string', description: 'uploadId from create_upload_url.' } },
+        required: ['uploadId'],
         additionalProperties: false,
       }
     case 'list_assets':
@@ -610,6 +826,7 @@ function toolInputSchema(name: string): Record<string, unknown> {
           scene: { type: 'string' },
           guidePrompt: { type: 'string' },
           productImageId: { type: 'string' },
+          productImageIds: { ...productImageIdsProp, maxItems: 5, description: 'Product photo pool (first = hero, rest = extra refs). Alias of productImageId + referenceImageIds.' },
           referenceImageIds: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           referenceMode: { type: 'string', enum: ['use', 'none'] },
         },
@@ -845,6 +1062,10 @@ export async function handleMcpJsonRpc(options: {
   adminStore?: McpAdminStore | null
   deleteStore?: McpDeleteStore | null
   brandKitStore?: McpBrandKitStore | null
+  /** Offers, product photo metadata, uploads (085). */
+  offerStore?: McpOfferStore | null
+  /** C2 rehost of external image URLs (defaults to one built on offerStore storage). */
+  rehost?: RehostFn | null
   /** Ad Pack service (defaults to the shared Supabase-backed service). */
   adPackService?: AdPackService | null
   isAdmin?: boolean
@@ -901,6 +1122,12 @@ export async function handleMcpJsonRpc(options: {
           adminStore: options.adminStore,
           deleteStore: options.deleteStore,
           brandKitStore: options.brandKitStore,
+          offerStore: options.offerStore,
+          rehost: options.rehost !== undefined
+            ? options.rehost
+            : options.offerStore
+              ? createRehoster({ upload: (o) => options.offerStore!.uploadBytes(o) })
+              : null,
           adPackService: options.adPackService,
           isAdmin,
           appOrigin: options.appOrigin,
@@ -961,6 +1188,8 @@ async function dispatchEnabledTool(options: {
   adminStore?: McpAdminStore | null
   deleteStore?: McpDeleteStore | null
   brandKitStore?: McpBrandKitStore | null
+  offerStore?: McpOfferStore | null
+  rehost?: RehostFn | null
   adPackService?: AdPackService | null
   isAdmin?: boolean
   appOrigin?: string
@@ -986,6 +1215,10 @@ async function dispatchEnabledTool(options: {
       service,
       approvalStore: options.approvalStore,
       appOrigin: options.appOrigin,
+      db: options.db,
+      offerStore: options.offerStore,
+      brandKitStore: options.brandKitStore,
+      rehost: options.rehost,
     })
   }
 
@@ -993,14 +1226,46 @@ async function dispatchEnabledTool(options: {
   const brandKitId = typeof options.args.brandKitId === 'string' ? options.args.brandKitId : undefined
 
   switch (options.name) {
-    case 'list_brands':
+    case 'list_brands': {
+      const listed = await mcpListBrandsWithDuplicates(options.db, options.user, {
+        includeIncomplete: options.args.includeIncomplete === true,
+        includeArchived: options.args.includeArchived === true,
+      })
       return {
-        brands: await mcpListBrands(options.db, options.user, {
-          includeIncomplete: options.args.includeIncomplete === true,
-        }),
+        brands: listed.brands,
+        possibleDuplicates: listed.possibleDuplicates,
         defaultOfferPolicy:
-          'Always select by brandId (never by name). Default list hides kitReady:false; pass includeIncomplete:true for the full list. Duplicate names are never merged or deleted.',
+          'Always select by brandId (never by name). Default list hides kitReady:false (includeIncomplete:true for all) and archived brands (includeArchived:true). Duplicates are never merged automatically: show possibleDuplicates to the user and archive extras with archive_brand only after they confirm.',
       }
+    }
+    case 'create_offer': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      return mcpCreateOffer({ db: options.db, store: options.offerStore, user: options.user, args: options.args })
+    }
+    case 'update_offer': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      return mcpUpdateOffer({ db: options.db, store: options.offerStore, user: options.user, args: options.args })
+    }
+    case 'set_primary_brand_kit': {
+      if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+      return mcpSetPrimaryBrandKit({ store: options.brandKitStore, user: options.user, args: options.args })
+    }
+    case 'set_primary_product_image': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      return mcpSetPrimaryProductImage({ store: options.offerStore, user: options.user, args: options.args })
+    }
+    case 'tag_product_image': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      return mcpTagProductImage({ store: options.offerStore, user: options.user, args: options.args })
+    }
+    case 'create_upload_url': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      return mcpCreateUploadUrl({ db: options.db, store: options.offerStore, user: options.user, args: options.args })
+    }
+    case 'finalize_upload': {
+      if (!options.offerStore) throw new Error('Offer store not configured')
+      return mcpFinalizeUpload({ store: options.offerStore, brandKitStore: options.brandKitStore, user: options.user, args: options.args })
+    }
     case 'list_offers': {
       if (!brandId) throw new Error('brandId is required')
       const brand = await options.db.getBusinessForUser(options.user.id, brandId)
@@ -1089,6 +1354,7 @@ async function dispatchEnabledTool(options: {
         db: options.db,
         user: options.user,
         args: options.args,
+        rehost: options.rehost,
       })
     }
     case 'update_brand_kit': {
@@ -1097,6 +1363,7 @@ async function dispatchEnabledTool(options: {
         store: options.brandKitStore,
         user: options.user,
         args: options.args,
+        rehost: options.rehost,
       })
     }
     case 'link_brand_kit': {
@@ -1324,6 +1591,7 @@ async function dispatchEnabledTool(options: {
         user: options.user,
         args: options.args,
         appOrigin: options.appOrigin,
+        rehost: options.rehost,
       })
     }
     case 'archive_brand': {

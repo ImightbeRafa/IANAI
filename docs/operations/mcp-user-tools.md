@@ -31,7 +31,28 @@ Enabled tools now:
 
 **Reads:** `list_brands` (default hides `kitReady:false`; `includeIncomplete:true` for full list — always select by `brandId`), `get_brand_context` (optional `brandKitId`), `list_offers`, `list_assets`, **`list_scripts`** (full `content`), `list_brand_kits`, `get_brand_kit` (`kitId` **or** `brandId` → primary kit)
 
-**Brand kits (sync write, no credits):** `create_brand_kit`, `update_brand_kit`, `link_brand_kit` (PatchHouse / explicit `business_id`; no cross-brand moves). `delete_brand_kit` requires typed name + in-chat `confirm_execute`.
+**Brand kits (sync write, no credits):** `create_brand_kit`, `update_brand_kit` (every kit field — see 0.11 below), `set_primary_brand_kit`, `link_brand_kit` (PatchHouse / explicit `business_id`; no cross-brand moves). `delete_brand_kit` requires typed name + in-chat `confirm_execute`.
+
+**Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
+
+### 0.11.0 — premium round (owner feedback 2026-10-08: B1–B5, C1–C3, A2 data model, H7, G2)
+
+Registry / server version **0.11.0**. Migration **`085_offer_profile_brand_profile_images.sql`** (additive, re-runnable; applied by the operator). Every tool works before 085 is applied and says what is pending.
+
+| Tool / change | Inputs | Notes |
+|---|---|---|
+| `create_offer` / `update_offer` (B1) | `brandId`, (`offerId`), `name`, `type`, form fields (`description`, `differentiation`, `keyObjection`, `guarantee`, `mainProblem`, `realPain`, `expectedResult`, `result`, `bestCustomers`, `targetAudience`, `purchaseReason`, `shippingInfo`, `technicalSpecs`, `utility`, `offerText`, `callToAction`, `productCategory`) + structured `price {amount, currency CRC\|USD}`, `compareAtPrice`, `bundles [{qty, price, label}]`, `shipping {text, freeFromQty?, freeFromAmount?}`, `includes[]`, `excludes[]`, `allowedClaims[]`, `forbiddenClaims[]`, `verifiedClaims [{claim, source}]`, `cta {text, channels web\|whatsapp\|dm}`, `ageMin`, `immutableAttributes[]`, `lockProductAppearance`, `allowedProps[]`, `locale` | `products` row + `products.ad_profile`. Strict validation (numbers only, CRC whole colones, USD ≤ 2 decimals, lengths). Price mirrored into `re_price` and shipping text into `shipping_info` (web form + pre-085). Returns `confirmedFacts` = exact strings ads will use. Before 085: classic fields saved, `adProfileSaved:false`, `migrationPending`. |
+| `update_brand_kit` / `create_brand_kit` (B3) | classic fields + `fonts {heading, body}`, `colors {primary, secondary, accent}` (hex), `audiences [{label, ageMin, ageMax, geo}]`, `locale`, `register` (voseo\|tuteo\|usted, hard rule), `do[]`, `dont[]`, `logoVariants [{url, variant}]`, `styleDnaIds[]` | New fields in `brand_kits.brand_profile`. **Placeholder guard** (`api/lib/placeholder-guard.ts`): "country", "todo el país", "Personas 18–65", "N/A", "TBD", "[…]", lorem, single generic words are never stored (scalar → cleared to null; list item → dropped) and reported in `ignoredPlaceholders`. The DNA builder ignores them on read too (so "Hecho para country" cannot reach an ad). |
+| `set_primary_brand_kit` (B4) | `brandId`, `brandKitId` | Clears other primaries, links an unlinked kit, never moves a kit across brands. |
+| `list_brands` (B4) | `includeIncomplete?`, `includeArchived?` | Adds `possibleDuplicates` (normalized-name groups + which one to keep). Never merges. Archived brands hidden by default. |
+| `archive_brand` (B4) | unchanged (typed name + `confirm_execute`) | Sets `businesses.archived_at` (085) and keeps the `mcp_workspace_notes` marker (pre-085 fallback + backfill source). |
+| `create_upload_url` / `finalize_upload` (C1) | `brandId`, `offerId?`, `kind` product_photo\|logo\|reference_ad\|winner_ad\|document, `role?`, `filename`, `contentType`, `sizeBytes?` → `uploadId` | Signed PUT URL in `post-images` at `<userId>/uploads/<uuid>-<safe-filename>` (2 h). Finalize checks existence, size (15 MB images, 5 MB logos, 20 MB PDF) and type, then creates a `product_images` row (product photo, `role`) or a kit asset (logo/variant, reference ad, winner ad, document). Idempotent. Upload intent = `mcp_workspace_notes` kind `mcp_upload` (no migration needed). |
+| Rehost (C2) | — | `workspace_save_artifact` (product/context/image) and kit `logoUrl` / `referenceImageUrls` / `logoVariants` copy external links (Drive share links converted) into Advance storage via `assertPublicHttpUrl` + DNS check, 15 MB / 15 s caps, PNG/JPEG/WebP magic bytes. Original kept as `sourceUrl` (`product_images.source_url` after 085). On failure the original link is kept with a warning. |
+| `set_primary_product_image` / `tag_product_image` (C3) | `offerId`, `productImageId` / `productImageId`, `tags` hero\|contenido-kit\|caja\|en-uso\|detalle\|part, `role?` | `product_images.is_primary/tags/role` (085; before it: `MIGRATION_PENDING`). Photo order everywhere (packs, bulk refs): primary → hero tag → sharper (`quality.sharpness`, filled by the quality workstream) → newest. |
+| Ad Pack (C3, G2, B2) | `productImageIds` (pool, first = hero), `productImageIdsByAd {"1": [id]}`, `includeDna`, `saveToOffer` + `offerPatch`, `saveToBrandKit` + `brandKitPatch` | All adpack tools take `brandId/offerId`; `adpack_from_brand` returns `dnaSummary` unless `includeDna:true`. Corrections are written with the same owner-scoped writers as `update_offer` / `update_brand_kit` (on the first `adpack_start` call; bound to the approval) and reported in `saved`. Bulk/campaign accept `productImageIds` as alias of `productImageId` + `referenceImageIds`. |
+| Verified claims (B5, H7) | offer `verifiedClaims`, `excludes`, `forbiddenClaims`, `ageMin`, price/bundles/shipping | Confirmed facts with exact strings (`₡14.900`, `2 kits por ₡29.800`, `Envío gratis desde 2 kits`, `Edad 8+`). `forbiddenClaims` → forbidden phrases; `excludes` → negative facts (copy saying "incluye papel" is rejected). With a verified-claims bank, every claim-like sentence must contain a confirmed fact verbatim (`untraceable_claim`); without one, previous behaviour. |
+
+Web parity: `POST /api/ad-pack` (`angles`, `quote`, `dna_from_brand`, `start`) accepts the same `productImageIds` / `productImageIdsByAd`. Offer/kit CRUD and uploads are MCP-only (the studio keeps using the web forms, which write the same rows).
 
 **GUIDE (no Advance credits):** `guide_script`, `guide_image` (clarify board for product/scene refs — do not quote EXECUTE until confirmed), `guide_brand_pack`, `guide_bulk_angles`
 
@@ -83,7 +104,8 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.9.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.11.0)
+- Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`
 - Approval: `api/lib/mcp/approval.ts`, `api/lib/mcp/approval-store.ts`, `api/mcp-approve.ts`, `src/pages/McpApprove.tsx` + migrations `070`, `073`

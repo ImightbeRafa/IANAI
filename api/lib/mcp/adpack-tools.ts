@@ -27,8 +27,12 @@ import {
 } from './approval.js'
 import { issueMcpChatApproval } from './approval-prompt.js'
 import { scheduleMcpExecuteWork, withStatusMessage } from './execute-job.js'
-import type { McpAuthUser } from './user-tools.js'
+import type { McpAuthUser, McpDbClient } from './user-tools.js'
 import { isAdPackMcpTool, type AdPackMcpToolName } from './adpack-tool-names.js'
+import type { BrandDna } from '../adpack/types.js'
+import { mcpUpdateOffer, type McpOfferStore } from './offer-tools.js'
+import { mcpUpdateBrandKit, resolveMcpBrandKit, type McpBrandKitStore } from './brand-kit-tools.js'
+import type { RehostFn } from './asset-rehost.js'
 
 export { ADPACK_MCP_TOOLS, isAdPackMcpTool, type AdPackMcpToolName } from './adpack-tool-names.js'
 
@@ -175,7 +179,10 @@ async function finalize(options: {
 
 function startBoundInput(args: Args): Record<string, unknown> {
   const bound: Record<string, unknown> = { dna: args.dna, offer: args.offer }
-  for (const key of ['size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds'] as const) {
+  for (const key of [
+    'size', 'ratios', 'businessId', 'brandKitId', 'brandId', 'offerId', 'brief', 'angleIds',
+    'productImageIds', 'productImageIdsByAd', 'saveToOffer', 'offerPatch', 'saveToBrandKit', 'brandKitPatch',
+  ] as const) {
     if (args[key] !== undefined) bound[key] = args[key]
   }
   return bound
@@ -186,6 +193,91 @@ const linkedBrandId = (args: Args): string | undefined =>
 
 const usesSavedBrand = (args: Args) => args.dna === undefined && args.offer === undefined && typeof args.brandId === 'string' && args.brandId !== ''
 
+const isObj = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+
+/** G2: compact DNA view (the full DNA is only echoed with includeDna: true). */
+export function dnaSummary(dna: BrandDna): Record<string, unknown> {
+  return {
+    brandName: dna.brandName,
+    category: dna.category,
+    language: dna.language,
+    register: dna.register,
+    ...(dna.oneLiner ? { oneLiner: dna.oneLiner } : {}),
+    ...(dna.voice ? { voice: dna.voice } : {}),
+    audience: dna.audience ?? [],
+    confirmedFacts: dna.facts.filter((f) => f.confirmed).map((f) => ({ key: f.key, value: f.value })),
+    unconfirmedFactCount: dna.facts.filter((f) => !f.confirmed).length,
+    forbiddenPhraseCount: dna.forbiddenPhrases?.length ?? 0,
+    productPhotoCount: dna.productImageUrls?.length ?? 0,
+    visual: dna.visual,
+  }
+}
+
+function badInput(message: string): Error {
+  return Object.assign(new Error(message), { code: 'BAD_INPUT' })
+}
+
+/**
+ * B2: persist corrections typed during a pack conversation into the saved offer / brand kit
+ * (same owner-scoped writers as update_offer / update_brand_kit), BEFORE the DNA is rebuilt.
+ */
+async function persistCorrections(options: {
+  args: Args
+  user: McpAuthUser
+  db?: McpDbClient | null
+  offerStore?: McpOfferStore | null
+  brandKitStore?: McpBrandKitStore | null
+  rehost?: RehostFn | null
+}): Promise<Record<string, unknown> | undefined> {
+  const { args, user } = options
+  const wantsOffer = args.saveToOffer === true
+  const wantsKit = args.saveToBrandKit === true
+  if (args.offerPatch !== undefined && !wantsOffer) throw badInput('offerPatch is only applied with saveToOffer: true (packs are built from the saved offer)')
+  if (args.brandKitPatch !== undefined && !wantsKit) throw badInput('brandKitPatch is only applied with saveToBrandKit: true (packs are built from the saved brand kit)')
+  if (!wantsOffer && !wantsKit) return undefined
+  const brandId = typeof args.brandId === 'string' ? args.brandId : ''
+  if (!brandId || !usesSavedBrand(args)) throw badInput('saveToOffer / saveToBrandKit need the saved-brand path: brandId (+ offerId), not dna/offer')
+  const saved: Record<string, unknown> = {}
+  if (wantsOffer) {
+    if (!isObj(args.offerPatch) || !Object.keys(args.offerPatch).length) throw badInput('saveToOffer needs offerPatch { …fields as in update_offer }')
+    const offerId = typeof args.offerId === 'string' ? args.offerId : ''
+    if (!offerId) throw badInput('saveToOffer needs offerId (create the offer first with create_offer)')
+    if (!options.offerStore || !options.db) throw new Error('Offer store not configured')
+    const { brandId: _b, offerId: _o, ...patch } = args.offerPatch
+    void _b
+    void _o
+    const res = await mcpUpdateOffer({ db: options.db, store: options.offerStore, user, args: { ...patch, brandId, offerId } })
+    saved.offer = {
+      status: res.status,
+      offerId,
+      adProfileSaved: res.adProfileSaved,
+      ...(res.ignoredPlaceholders ? { ignoredPlaceholders: res.ignoredPlaceholders } : {}),
+      ...(res.warnings ? { warnings: res.warnings } : {}),
+    }
+  }
+  if (wantsKit) {
+    if (!isObj(args.brandKitPatch) || !Object.keys(args.brandKitPatch).length) throw badInput('saveToBrandKit needs brandKitPatch { …fields as in update_brand_kit }')
+    if (!options.brandKitStore) throw new Error('Brand kit store not configured')
+    let kitId = typeof args.brandKitId === 'string' ? args.brandKitId : ''
+    if (!kitId) {
+      const resolved = await resolveMcpBrandKit({ store: options.brandKitStore, userId: user.id, brandId })
+      kitId = resolved.brandKit?.id ?? ''
+    }
+    if (!kitId) throw badInput('This brand has no primary brand kit: create_brand_kit first')
+    const { brandId: _b, kitId: _k, ...patch } = args.brandKitPatch
+    void _b
+    void _k
+    const res = await mcpUpdateBrandKit({ store: options.brandKitStore, user, args: { ...patch, brandId, kitId }, rehost: options.rehost })
+    saved.brandKit = {
+      status: res.status,
+      brandKitId: kitId,
+      ...(res.ignoredPlaceholders ? { ignoredPlaceholders: res.ignoredPlaceholders } : {}),
+      ...(res.warnings ? { warnings: res.warnings } : {}),
+    }
+  }
+  return saved
+}
+
 export async function dispatchAdPackTool(options: {
   name: AdPackMcpToolName
   args: Args
@@ -193,8 +285,14 @@ export async function dispatchAdPackTool(options: {
   service: AdPackService
   approvalStore?: McpApprovalStore | null
   appOrigin?: string
+  /** B2 saveToOffer / saveToBrandKit writers (owner-scoped). */
+  db?: McpDbClient | null
+  offerStore?: McpOfferStore | null
+  brandKitStore?: McpBrandKitStore | null
+  rehost?: RehostFn | null
 }): Promise<Record<string, unknown>> {
   const { name, args, user, service } = options
+  const persist = () => persistCorrections({ args, user, db: options.db, offerStore: options.offerStore, brandKitStore: options.brandKitStore, rehost: options.rehost })
   const userId = user.id
   try {
     switch (name) {
@@ -215,14 +313,20 @@ export async function dispatchAdPackTool(options: {
         }
       }
       case 'adpack_from_brand': {
-        const res = await service.dnaFromBrand({
+        const saved = await persist()
+        const full = await service.dnaFromBrand({
           userId,
           source: 'mcp',
           brandId: args.brandId,
           offerId: args.offerId,
           brandKitId: args.brandKitId,
+          productImageIds: args.productImageIds,
+          productImageIdsByAd: args.productImageIdsByAd,
           refresh: args.refresh,
         })
+        // G2: the server resolves the profile by id; the full DNA (~3 KB) is only echoed on request.
+        const { dna, ...rest } = full
+        const res = { ...rest, ...(args.includeDna === true ? { dna } : { dnaSummary: dnaSummary(dna) }), ...(saved ? { saved } : {}) }
         const missingPrice = res.gaps.includes('price')
         const startCall = `adpack_start { brandId: "${res.brandId}"${res.offerId ? `, offerId: "${res.offerId}"` : ''}, size, brief? }`
         return {
@@ -239,22 +343,24 @@ export async function dispatchAdPackTool(options: {
       case 'adpack_dna_confirm':
         return { ...(await service.confirmDna({ userId, dna: args.dna, edits: args.edits })) }
       case 'adpack_angles':
-        return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })) }
+        return { ...(await service.planAngles({ userId, dna: args.dna, offer: args.offer, size: args.size, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })) }
       case 'adpack_quote':
-        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })) }
+        return { ...(await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer, brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })) }
       case 'adpack_start': {
         if (!options.approvalStore) throw new Error('Approval store not configured')
         const input = startBoundInput(args)
         // Validate + quote before asking for approval (same parser as the web door).
         // Saved-brand path: build DNA + offer from the owner's saved data (owner-scoped → NOT_FOUND otherwise).
+        const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
+        // B2: corrections are written once, on the first call (the approved retry repeats the same arguments).
+        const saved = approvalRequestId ? undefined : await persist()
         const preview = usesSavedBrand(args)
-          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId })
+          ? await service.dnaFromBrand({ userId, source: 'mcp', brandId: args.brandId, offerId: args.offerId, brandKitId: args.brandKitId, productImageIds: args.productImageIds, productImageIdsByAd: args.productImageIdsByAd })
           : null
         const quote = preview
           ? await service.quote({ userId, size: args.size, dna: preview.dna, offer: preview.offer })
           : await service.quote({ userId, size: args.size, dna: args.dna, offer: args.offer })
         const target = preview ? ` — ${preview.offer.name} (${preview.dna.brandName})` : ''
-        const approvalRequestId = typeof args.approvalRequestId === 'string' ? args.approvalRequestId : ''
         const gate = await approvedOrPrompt({
           approvalStore: options.approvalStore,
           user,
@@ -271,6 +377,8 @@ export async function dispatchAdPackTool(options: {
             ...gate.prompt,
             quote,
             ...(preview ? { brandName: preview.dna.brandName, offerName: preview.offer.name, gaps: preview.gaps, notes: preview.notes } : {}),
+            ...(saved ? { saved } : {}),
+            ...(args.includeDna === true && preview ? { dna: preview.dna } : {}),
           }
         }
         if ('replay' in gate) {
@@ -290,6 +398,8 @@ export async function dispatchAdPackTool(options: {
           ratios: args.ratios,
           businessId: args.businessId,
           brandKitId: args.brandKitId,
+          productImageIds: args.productImageIds,
+          productImageIdsByAd: args.productImageIdsByAd,
           source: 'mcp',
           packId: approvalRequestId,
         })

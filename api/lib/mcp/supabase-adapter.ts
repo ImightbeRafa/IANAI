@@ -21,6 +21,46 @@ import {
   type BrandKitRowLike,
 } from '../brand-kit-resolve.js'
 import type { McpBrandKitStore } from './brand-kit-tools.js'
+import type { McpOfferStore, McpStoreCapabilities } from './offer-tools.js'
+import { isMissingColumnError } from '../db-missing-column.js'
+import { readBrandProfile } from '../brand-profile.js'
+import { UPLOAD_BUCKET } from './asset-rehost.js'
+import { UPLOAD_NOTE_KIND } from './upload-tools.js'
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+// ---------------------------------------------------------------------------
+// Migration 085 feature detection (cached; re-probed every 5 min so applying the
+// migration is picked up without a deploy).
+// ---------------------------------------------------------------------------
+
+const CAPABILITY_TTL_MS = 5 * 60 * 1000
+const capabilityCache = new Map<string, { value: boolean; at: number }>()
+
+export async function hasColumn(db: SupabaseClient, table: string, column: string): Promise<boolean> {
+  const key = `${table}.${column}`
+  const hit = capabilityCache.get(key)
+  if (hit && Date.now() - hit.at < CAPABILITY_TTL_MS) return hit.value
+  const { error } = await db.from(table).select(column).limit(1)
+  if (error && !isMissingColumnError(error)) return false // transient: do not cache, degrade this call
+  const value = !error
+  capabilityCache.set(key, { value, at: Date.now() })
+  return value
+}
+
+/** Tests / after applying a migration. */
+export function resetMcpCapabilityCache(): void {
+  capabilityCache.clear()
+}
+
+export async function probeMcpCapabilities(db: SupabaseClient): Promise<McpStoreCapabilities> {
+  const [adProfile, imageMeta, archive, brandProfile] = await Promise.all([
+    hasColumn(db, 'products', 'ad_profile'),
+    hasColumn(db, 'product_images', 'is_primary'),
+    hasColumn(db, 'businesses', 'archived_at'),
+    hasColumn(db, 'brand_kits', 'brand_profile'),
+  ])
+  return { adProfile, imageMeta, archive, brandProfile }
+}
 
 function mapBrandKitRow(data: Record<string, unknown>): McpBrandKitContext {
   return {
@@ -40,6 +80,7 @@ function mapBrandKitRow(data: Record<string, unknown>): McpBrandKitContext {
     forbiddenPhrases: Array.isArray(data.forbidden_phrases) ? data.forbidden_phrases as string[] : [],
     mustUsePhrases: Array.isArray(data.must_use_phrases) ? data.must_use_phrases as string[] : [],
     styleDnas: parseStyleDnas(data.style_dnas),
+    brandProfile: readBrandProfile(data.brand_profile),
     isPrimaryForBusiness: data.is_primary_for_business === true,
     isDefault: data.is_default === true,
     businessId: (data.business_id as string | null) ?? null,
@@ -65,15 +106,19 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
     if (!userId || !brandId) {
       return { brandKit: null, brandKits: [], brandKitResolution: 'missing' as const }
     }
-    let { data, error } = await db
+    // Typed as string: the 085 column is feature-detected at runtime.
+    const kitSelect: string = (await hasColumn(db!, 'brand_kits', 'brand_profile')) ? `${BRAND_KIT_SELECT}, brand_profile` : BRAND_KIT_SELECT
+    const first = await db!
       .from('brand_kits')
-      .select(BRAND_KIT_SELECT)
+      .select(kitSelect)
       .eq('business_id', brandId)
       .eq('user_id', userId)
       .order('is_primary_for_business', { ascending: false })
       .order('created_at', { ascending: true })
+    let data = first.data as unknown as Array<Record<string, unknown>> | null
+    let error = first.error
     if (error && /is_primary_for_business|style_dnas/i.test(error.message || '')) {
-      const retry = await db
+      const retry = await db!
         .from('brand_kits')
         .select('id, name, business_id, is_default, is_active, primary_color, secondary_color, accent_color, logo_url, tagline, brand_voice, tone_keywords, must_use_phrases, forbidden_phrases, target_audience, visual_style_notes, font_primary, font_secondary, industry, reference_images, created_at')
         .eq('business_id', brandId)
@@ -84,7 +129,7 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
       error = retry.error
     }
     if (error) throw error
-    const linked = (data || []) as BrandKitRowLike[]
+    const linked = (data || []) as unknown as BrandKitRowLike[]
     const resolved = resolveBrandKitForBusiness({ linkedKits: linked, brandKitId })
     return {
       brandKit: resolved.kit ? mapBrandKitRow(resolved.kit as unknown as Record<string, unknown>) : null,
@@ -102,11 +147,13 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
   }
 
   return {
-    async listBusinessesForUser(userId: string): Promise<McpBrandSummary[]> {
+    async listBusinessesForUser(userId: string, opts?: { includeArchived?: boolean }): Promise<McpBrandSummary[]> {
       if (!userId) return []
+      // 085 businesses.archived_at; the pre-085 mcp_workspace_notes marker keeps working too.
+      const archiveColumn = await hasColumn(db, 'businesses', 'archived_at')
       const { data, error } = await db
         .from('businesses')
-        .select('id, name')
+        .select(archiveColumn ? 'id, name, archived_at' : 'id, name')
         .eq('owner_id', userId)
         .order('created_at', { ascending: false })
       if (error) throw error
@@ -115,14 +162,16 @@ export function createMcpSupabaseAdapter(): McpDbClient | null {
         .select('business_id')
         .eq('user_id', userId)
         .eq('kind', MCP_BRAND_ARCHIVED_NOTE_KIND)
-      const hidden = new Set((archived || []).map((row) => row.business_id as string))
-      return (data || [])
-        .filter((row) => !hidden.has(row.id as string))
+      const noted = new Set((archived || []).map((row) => row.business_id as string))
+      const rows = (data || []) as unknown as Array<{ id: string; name: string; archived_at?: string | null }>
+      return rows
         .map((row) => ({
-          id: row.id as string,
-          name: row.name as string,
+          id: row.id,
+          name: row.name,
           type: null,
+          archived: Boolean(row.archived_at) || noted.has(row.id),
         }))
+        .filter((row) => opts?.includeArchived || !row.archived)
     },
 
     async getBusinessForUser(userId: string, brandId: string) {
@@ -518,6 +567,14 @@ export function createMcpDeleteStore(): McpDeleteStore | null {
           .in('id', ids)
         if (archErr) throw archErr
       }
+      if (await hasColumn(db, 'businesses', 'archived_at')) {
+        const { error: flagErr } = await db
+          .from('businesses')
+          .update({ archived_at: new Date().toISOString() })
+          .eq('id', brandId)
+          .eq('owner_id', userId)
+        if (flagErr && !isMissingColumnError(flagErr)) throw flagErr
+      }
       const { data: note, error: noteErr } = await db
         .from('mcp_workspace_notes')
         .insert({
@@ -668,29 +725,30 @@ export function createMcpDeleteStore(): McpDeleteStore | null {
 export function createMcpBrandKitStore(): McpBrandKitStore | null {
   const db = getSupabaseAdmin()
   if (!db) return null
+  const kitSelect = async (): Promise<string> => ((await hasColumn(db, 'brand_kits', 'brand_profile')) ? `${BRAND_KIT_SELECT}, brand_profile` : BRAND_KIT_SELECT)
 
   async function fetchKit(userId: string, kitId: string): Promise<BrandKitRowLike | null> {
     const { data, error } = await db
       .from('brand_kits')
-      .select(BRAND_KIT_SELECT)
+      .select(await kitSelect())
       .eq('id', kitId)
       .eq('user_id', userId)
       .maybeSingle()
     if (error) throw error
-    return (data as BrandKitRowLike | null) || null
+    return (data as unknown as BrandKitRowLike | null) || null
   }
 
   return {
     async listKits({ userId, brandId, includeInactive }) {
       if (!userId) return []
-      let q = db.from('brand_kits').select(BRAND_KIT_SELECT).eq('user_id', userId)
+      let q = db.from('brand_kits').select(await kitSelect()).eq('user_id', userId)
       if (brandId) q = q.eq('business_id', brandId)
       if (!includeInactive) q = q.neq('is_active', false)
       const { data, error } = await q
         .order('is_primary_for_business', { ascending: false })
         .order('created_at', { ascending: true })
       if (error) throw error
-      return (data || []) as BrandKitRowLike[]
+      return (data || []) as unknown as BrandKitRowLike[]
     },
 
     async getKit({ userId, kitId }) {
@@ -710,10 +768,10 @@ export function createMcpBrandKitStore(): McpBrandKitStore | null {
       const { data, error } = await db
         .from('brand_kits')
         .insert({ ...row, user_id: userId })
-        .select(BRAND_KIT_SELECT)
+        .select(await kitSelect())
         .single()
       if (error) throw error
-      return data as BrandKitRowLike
+      return data as unknown as BrandKitRowLike
     },
 
     async updateKit({ userId, kitId, patch }) {
@@ -722,11 +780,11 @@ export function createMcpBrandKitStore(): McpBrandKitStore | null {
         .update(patch)
         .eq('id', kitId)
         .eq('user_id', userId)
-        .select(BRAND_KIT_SELECT)
+        .select(await kitSelect())
         .maybeSingle()
       if (error) throw error
       if (!data) throw new Error('Brand kit not found')
-      return data as BrandKitRowLike
+      return data as unknown as BrandKitRowLike
     },
 
     async clearPrimaryForBusiness({ userId, businessId, exceptKitId }) {
@@ -761,6 +819,169 @@ export function createMcpBrandKitStore(): McpBrandKitStore | null {
         .maybeSingle()
       if (error) throw error
       return Boolean(data)
+    },
+
+    async hasBrandProfile() {
+      return hasColumn(db, 'brand_kits', 'brand_profile')
+    },
+  }
+}
+
+/**
+ * Offers (products + 085 ad_profile), product photo metadata, uploads (signed URLs in
+ * post-images) and upload records (mcp_workspace_notes kind mcp_upload). Service role;
+ * explicit owner filter on every query.
+ */
+export function createMcpOfferStore(): McpOfferStore | null {
+  const db = getSupabaseAdmin()
+  if (!db) return null
+  const IMAGE_BASE = 'id, product_id, user_id, image_url, kind, label, message_id, created_at'
+  const imageSelect = async () => ((await hasColumn(db, 'product_images', 'is_primary')) ? `${IMAGE_BASE}, is_primary, tags, role, quality, source_url` : IMAGE_BASE)
+  const asRow = (data: unknown) => data as unknown as Record<string, unknown>
+
+  return {
+    capabilities: () => probeMcpCapabilities(db),
+
+    async getOffer({ userId, brandId, offerId }) {
+      const { data, error } = await db.from('products').select('*').eq('id', offerId).eq('business_id', brandId).eq('owner_id', userId).maybeSingle()
+      if (error) throw error
+      return data ? asRow(data) : null
+    },
+
+    async getOfferById({ userId, offerId }) {
+      const { data, error } = await db.from('products').select('*').eq('id', offerId).eq('owner_id', userId).maybeSingle()
+      if (error) throw error
+      return data ? asRow(data) : null
+    },
+
+    async insertOffer({ userId, brandId, row }) {
+      const { data, error } = await db
+        .from('products')
+        .insert({ ...row, owner_id: userId, business_id: brandId })
+        .select('*')
+        .single()
+      if (error) throw error
+      return asRow(data)
+    },
+
+    async updateOffer({ userId, brandId, offerId, patch }) {
+      const { data, error } = await db
+        .from('products')
+        .update(patch)
+        .eq('id', offerId)
+        .eq('business_id', brandId)
+        .eq('owner_id', userId)
+        .select('*')
+        .maybeSingle()
+      if (error) throw error
+      if (!data) throw new Error('Offer not found for this brand')
+      return asRow(data)
+    },
+
+    async getProductImage({ userId, imageId }) {
+      const { data, error } = await db.from('product_images').select(await imageSelect()).eq('id', imageId).eq('user_id', userId).maybeSingle()
+      if (error) throw error
+      return data ? asRow(data) : null
+    },
+
+    async updateProductImage({ userId, imageId, patch }) {
+      const { data, error } = await db
+        .from('product_images')
+        .update(patch)
+        .eq('id', imageId)
+        .eq('user_id', userId)
+        .select(await imageSelect())
+        .maybeSingle()
+      if (error) throw error
+      if (!data) throw new Error('Product image not found')
+      return asRow(data)
+    },
+
+    async clearPrimaryImages({ userId, offerId, exceptImageId }) {
+      let q = db.from('product_images').update({ is_primary: false }).eq('product_id', offerId).eq('user_id', userId).eq('is_primary', true)
+      if (exceptImageId) q = q.neq('id', exceptImageId)
+      const { error } = await q
+      if (error) throw error
+    },
+
+    async insertProductImage({ userId, offerId, row }) {
+      const { data: product, error: productErr } = await db.from('products').select('id').eq('id', offerId).eq('owner_id', userId).maybeSingle()
+      if (productErr) throw productErr
+      if (!product) throw new Error('Offer not found')
+      const { data, error } = await db
+        .from('product_images')
+        .insert({ ...row, product_id: offerId, user_id: userId })
+        .select(await imageSelect())
+        .single()
+      if (error) throw error
+      return asRow(data)
+    },
+
+    async createSignedUpload({ path }) {
+      const { data, error } = await db.storage.from(UPLOAD_BUCKET).createSignedUploadUrl(path)
+      if (error) throw error
+      return { signedUrl: data.signedUrl, token: data.token, path: data.path }
+    },
+
+    async statObject({ path }) {
+      const slash = path.lastIndexOf('/')
+      const folder = path.slice(0, slash)
+      const name = path.slice(slash + 1)
+      const { data, error } = await db.storage.from(UPLOAD_BUCKET).list(folder, { search: name, limit: 5 })
+      if (error) throw error
+      const hit = (data || []).find((f) => f.name === name)
+      if (!hit) return null
+      const meta = (hit.metadata || {}) as { size?: number; mimetype?: string; contentLength?: number }
+      return { size: Number(meta.size ?? meta.contentLength ?? 0), contentType: meta.mimetype ?? null }
+    },
+
+    async removeObject({ path }) {
+      const { error } = await db.storage.from(UPLOAD_BUCKET).remove([path])
+      if (error && !/not found/i.test(error.message || '')) throw error
+    },
+
+    publicUrl(path) {
+      return db.storage.from(UPLOAD_BUCKET).getPublicUrl(path).data.publicUrl
+    },
+
+    async uploadBytes({ path, bytes, contentType }) {
+      const { error } = await db.storage.from(UPLOAD_BUCKET).upload(path, bytes, { contentType, upsert: false })
+      if (error) throw error
+      return db.storage.from(UPLOAD_BUCKET).getPublicUrl(path).data.publicUrl
+    },
+
+    async insertUploadRecord({ userId, brandId, metadata }) {
+      const { data, error } = await db
+        .from('mcp_workspace_notes')
+        .insert({ user_id: userId, business_id: brandId, kind: UPLOAD_NOTE_KIND, note: String(metadata.filename || 'upload'), metadata })
+        .select('id')
+        .single()
+      if (error) throw error
+      return { id: data.id as string }
+    },
+
+    async getUploadRecord({ userId, uploadId }) {
+      if (!/^[0-9a-f-]{36}$/i.test(uploadId)) return null
+      const { data, error } = await db
+        .from('mcp_workspace_notes')
+        .select('id, business_id, metadata')
+        .eq('id', uploadId)
+        .eq('user_id', userId)
+        .eq('kind', UPLOAD_NOTE_KIND)
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return null
+      return { id: data.id as string, brandId: data.business_id as string, metadata: (data.metadata || {}) as Record<string, unknown> }
+    },
+
+    async updateUploadRecord({ userId, uploadId, metadata }) {
+      const { error } = await db
+        .from('mcp_workspace_notes')
+        .update({ metadata })
+        .eq('id', uploadId)
+        .eq('user_id', userId)
+        .eq('kind', UPLOAD_NOTE_KIND)
+      if (error) throw error
     },
   }
 }

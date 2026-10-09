@@ -7,6 +7,7 @@ import { validateMcpGuideIntake } from './guide-intake.js'
 import { randomUUID } from 'node:crypto'
 import { assertPublicHttpUrl } from '../url-safety.js'
 import type { McpArtifactStore } from './artifact-store.js'
+import type { RehostFn, RehostResult } from './asset-rehost.js'
 
 export const MCP_SAVE_ARTIFACT_MAX_SCRIPT_CHARS = 80_000
 
@@ -141,12 +142,26 @@ function resolveOfferIdForSave(
   return offers[0].id
 }
 
+/** C2: copy an external image into Advance storage (keeps the original as sourceUrl). */
+async function ownedCopy(rehost: RehostFn | null | undefined, userId: string, url: string, label?: string): Promise<RehostResult> {
+  if (!rehost) return { url, rehosted: false }
+  return rehost({ userId, url, label })
+}
+
+function rehostFields(r: RehostResult): Record<string, unknown> {
+  return {
+    ...(r.rehosted ? { rehosted: true, sourceUrl: r.sourceUrl } : {}),
+    ...(r.warning ? { warnings: [r.warning] } : {}),
+  }
+}
+
 export async function mcpWorkspaceSaveArtifact(options: {
   db: McpDbClient
   artifactStore: McpArtifactStore
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
+  rehost?: RehostFn | null
 }): Promise<Record<string, unknown>> {
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
@@ -205,13 +220,15 @@ export async function mcpWorkspaceSaveArtifact(options: {
     if (!imageUrl) throw new Error(`${kind} imports require an https imageUrl`)
     const parsed = assertPublicHttpUrl(imageUrl)
     if (parsed.protocol !== 'https:') throw new Error('Only https imageUrl is allowed')
+    const copy = await ownedCopy(options.rehost, options.user.id, parsed.toString(), title)
     const saved = await options.artifactStore.saveReferenceImageFromPublicUrl({
       userId: options.user.id,
       brandId,
       offerId,
-      imageUrl: parsed.toString(),
+      imageUrl: copy.url,
       kind,
       label: title || `MCP ${kind} reference`,
+      ...(copy.rehosted && copy.sourceUrl ? { sourceUrl: copy.sourceUrl } : {}),
     })
     return {
       status: 'saved',
@@ -220,7 +237,10 @@ export async function mcpWorkspaceSaveArtifact(options: {
       brandId,
       offerId,
       ...saved,
-      message: `Saved as a ${kind} image in the Advance library.`,
+      ...rehostFields(copy),
+      message: copy.rehosted
+        ? `Copied into Advance storage and saved as a ${kind} image in the library (original link kept as sourceUrl).`
+        : `Saved as a ${kind} image in the Advance library.`,
     }
   }
 
@@ -255,14 +275,15 @@ export async function mcpWorkspaceSaveArtifact(options: {
     }
     const parsed = assertPublicHttpUrl(imageUrl!)
     if (parsed.protocol !== 'https:') throw new Error('Only https imageUrl is allowed')
+    const copy = await ownedCopy(options.rehost, options.user.id, parsed.toString(), title)
     const saved = await options.artifactStore.saveImageFromPublicUrl({
       userId: options.user.id,
       brandId,
       offerId,
       sessionId,
-      imageUrl: parsed.toString(),
+      imageUrl: copy.url,
       label: title || 'MCP saved image',
-      metadata: { sourceUrl: parsed.toString() },
+      metadata: { sourceUrl: parsed.toString(), rehosted: copy.rehosted },
     })
     return {
       status: 'saved',
@@ -272,6 +293,7 @@ export async function mcpWorkspaceSaveArtifact(options: {
       offerId,
       sessionId,
       ...saved,
+      ...rehostFields(copy),
       deepLink: `${origin}/chat?brand=${encodeURIComponent(brandId)}&session=${encodeURIComponent(sessionId)}`,
     }
   }

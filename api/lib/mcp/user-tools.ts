@@ -19,6 +19,16 @@ export type McpBrandSummary = {
   defaultOfferResolution?: 'first_offer_with_brand_kit' | 'first_offer' | 'none'
   nameCollisionWarning?: string | null
   siblingBrandIds?: string[]
+  /** Soft-archived (archive_brand). Only listed with includeArchived. */
+  archived?: boolean
+}
+
+/** B4: brands whose names normalize to the same key (no merge is ever done automatically). */
+export type McpPossibleDuplicateGroup = {
+  normalizedName: string
+  brandIds: string[]
+  brands: Array<{ id: string; name: string; kitReady: boolean; offerCount: number; hasPrimaryKit: boolean; archived: boolean }>
+  suggestion: string
 }
 
 export type McpBrandKitContext = {
@@ -44,6 +54,8 @@ export type McpBrandKitContext = {
     referenceUrls: string[]
     notes: string
   }>
+  /** 085 structured kit profile (audiences, locale, register, do/dont, logo variants…). */
+  brandProfile?: import('../brand-profile.js').BrandProfile | null
   isPrimaryForBusiness?: boolean
   isDefault?: boolean
   businessId?: string | null
@@ -97,7 +109,7 @@ export type McpBrandContext = {
 }
 
 export type McpDbClient = {
-  listBusinessesForUser: (userId: string) => Promise<McpBrandSummary[]>
+  listBusinessesForUser: (userId: string, opts?: { includeArchived?: boolean }) => Promise<McpBrandSummary[]>
   getBusinessForUser: (
     userId: string,
     brandId: string
@@ -161,15 +173,64 @@ export type McpDbClient = {
   ) => Promise<string[]>
 }
 
-/** list_brands — personal brands only. Default hides kitReady:false unless includeIncomplete. */
+/** Accent/case/punctuation/whitespace-insensitive brand name key ("Forge CR" ≈ "forge-cr" ≈ "ForgeCR"). */
+export function normalizeBrandName(name: string): string {
+  return (name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+/** B4: group brands with the same normalized name (2+ per group). Never merges anything. */
+export function groupPossibleDuplicates(brands: McpBrandSummary[]): McpPossibleDuplicateGroup[] {
+  const groups = new Map<string, McpBrandSummary[]>()
+  for (const brand of brands) {
+    const key = normalizeBrandName(brand.name)
+    if (!key) continue
+    groups.set(key, [...(groups.get(key) || []), brand])
+  }
+  return [...groups.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([key, list]) => {
+      const ranked = [...list].sort((a, b) =>
+        Number(b.kitReady === true) - Number(a.kitReady === true)
+        || (b.offerCount ?? 0) - (a.offerCount ?? 0))
+      const keep = ranked[0]
+      return {
+        normalizedName: key,
+        brandIds: list.map((b) => b.id),
+        brands: list.map((b) => ({
+          id: b.id,
+          name: b.name,
+          kitReady: b.kitReady === true,
+          offerCount: b.offerCount ?? 0,
+          hasPrimaryKit: b.hasPrimaryKit === true,
+          archived: b.archived === true,
+        })),
+        suggestion: `Possible duplicates. Keep "${keep.name}" (${keep.id}: ${keep.kitReady ? 'kit ready' : 'no kit'}, ${keep.offerCount ?? 0} offers) and archive the others with archive_brand (recoverable, needs the user's confirmation). Nothing is merged automatically.`,
+      }
+    })
+}
+
+/** list_brands — personal brands only. Default hides kitReady:false unless includeIncomplete; archived unless includeArchived. */
 export async function mcpListBrands(
   db: McpDbClient,
   user: McpAuthUser,
-  args?: { includeIncomplete?: boolean }
+  args?: { includeIncomplete?: boolean; includeArchived?: boolean }
 ): Promise<McpBrandSummary[]> {
+  return (await mcpListBrandsWithDuplicates(db, user, args)).brands
+}
+
+/** list_brands payload: brands + possibleDuplicates computed over every non-archived brand. */
+export async function mcpListBrandsWithDuplicates(
+  db: McpDbClient,
+  user: McpAuthUser,
+  args?: { includeIncomplete?: boolean; includeArchived?: boolean }
+): Promise<{ brands: McpBrandSummary[]; possibleDuplicates: McpPossibleDuplicateGroup[] }> {
   if (!user?.id) throw new Error('Authentication required')
   const includeIncomplete = args?.includeIncomplete === true
-  const brands = await db.listBusinessesForUser(user.id)
+  const brands = await db.listBusinessesForUser(user.id, { includeArchived: args?.includeArchived === true })
   const enriched = await Promise.all(brands.map(async (brand) => {
     const [offers, kitBundle] = await Promise.all([
       db.listOffersForBrand(user.id, brand.id),
@@ -219,8 +280,11 @@ export async function mcpListBrands(
         : null,
     }
   })
-  if (includeIncomplete) return withWarnings
-  return withWarnings.filter((brand) => brand.kitReady !== false)
+  const possibleDuplicates = groupPossibleDuplicates(withWarnings.filter((b) => b.archived !== true))
+  return {
+    brands: includeIncomplete ? withWarnings : withWarnings.filter((brand) => brand.kitReady !== false),
+    possibleDuplicates,
+  }
 }
 
 /** get_brand_context — brand + offers + kit owned by the same user. */

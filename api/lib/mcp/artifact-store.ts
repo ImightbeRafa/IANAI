@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import { encodeGeneratedImageJpeg } from '../generated-image-jpeg.js'
 import { getSupabaseAdmin } from '../supabase-admin.js'
+import { isMissingColumnError } from '../db-missing-column.js'
 
 export type McpOwnedImage = {
   id: string
@@ -69,6 +70,8 @@ export type McpArtifactStore = {
     imageUrl: string
     kind: 'product' | 'context'
     label?: string
+    /** Original external URL when imageUrl is an Advance-storage copy (085 product_images.source_url). */
+    sourceUrl?: string
   }) => Promise<{ productImageId: string; imageUrl: string }>
   linkExistingProductImage: (options: {
     userId: string
@@ -320,18 +323,24 @@ export function createMcpArtifactStore(): McpArtifactStore | null {
       if (productErr) throw productErr
       if (!product) throw new Error('Offer not found for this brand/user')
 
-      const { data, error } = await db
+      const row = {
+        product_id: options.offerId,
+        user_id: options.userId,
+        image_url: options.imageUrl,
+        label: options.label || `MCP ${options.kind} reference`,
+        kind: options.kind,
+      }
+      let { data, error } = await db
         .from('product_images')
-        .insert({
-          product_id: options.offerId,
-          user_id: options.userId,
-          image_url: options.imageUrl,
-          label: options.label || `MCP ${options.kind} reference`,
-          kind: options.kind,
-        })
+        .insert(options.sourceUrl ? { ...row, source_url: options.sourceUrl } : row)
         .select('id')
         .single()
+      // 085 source_url not applied yet: save without it (the image itself is already an owned copy).
+      if (error && options.sourceUrl && isMissingColumnError(error, 'source_url')) {
+        ;({ data, error } = await db.from('product_images').insert(row).select('id').single())
+      }
       if (error) throw error
+      if (!data) throw new Error('Product image was not saved')
       return {
         productImageId: data.id as string,
         imageUrl: options.imageUrl,

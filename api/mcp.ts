@@ -13,7 +13,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { waitUntil } from '@vercel/functions'
 import { isAdminUser, requireAuth } from './lib/auth.js'
 import { checkRateLimit } from './lib/rate-limit.js'
-import { createMcpAdminStore, createMcpSupabaseAdapter, createMcpUrlIntakeStore, createMcpWorkspaceStore, createMcpDeleteStore, createMcpBrandKitStore } from './lib/mcp/supabase-adapter.js'
+import { createMcpAdminStore, createMcpSupabaseAdapter, createMcpUrlIntakeStore, createMcpWorkspaceStore, createMcpDeleteStore, createMcpBrandKitStore, createMcpOfferStore } from './lib/mcp/supabase-adapter.js'
 import { createMcpApprovalStore } from './lib/mcp/approval-store.js'
 import { createMcpArtifactStore } from './lib/mcp/artifact-store.js'
 import { setMcpExecuteScheduler } from './lib/mcp/execute-job.js'
@@ -115,6 +115,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     adminStore: isAdmin ? createMcpAdminStore() : null,
     deleteStore: createMcpDeleteStore(),
     brandKitStore: createMcpBrandKitStore(),
+    offerStore: createMcpOfferStore(),
     isAdmin,
     appOrigin: 'https://advanceai.studio',
   })

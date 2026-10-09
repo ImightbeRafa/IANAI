@@ -271,7 +271,34 @@ async function resolveConfirmedProductRefUrls(options: {
   return urls
 }
 
+/**
+ * C3: `productImageIds` (pool, first = hero) is an alias of productImageId + referenceImageIds,
+ * so agents can pass the same photo pool to bulk/campaign tools as to adpack_start.
+ */
+export function withProductImageIdsAlias(args: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(args.productImageIds)) return args
+  const ids = args.productImageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+  const { productImageIds: _drop, ...rest } = args
+  void _drop
+  if (!ids.length) return rest
+  const explicitRefs = Array.isArray(args.referenceImageIds)
+    ? args.referenceImageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    : []
+  const productImageId = typeof args.productImageId === 'string' && args.productImageId ? args.productImageId : ids[0]
+  const refs = [...new Set([...ids.filter((id) => id !== productImageId), ...explicitRefs])].slice(0, 4)
+  return { ...rest, productImageId, referenceImageIds: refs }
+}
+
 async function hydrateBulkApprovalArgs(options: {
+  approvalStore: McpApprovalStore
+  userId: string
+  toolName: string
+  args: Record<string, unknown>
+}): Promise<Record<string, unknown>> {
+  return withProductImageIdsAlias(await hydrateBulkApprovalArgsRaw(options))
+}
+
+async function hydrateBulkApprovalArgsRaw(options: {
   approvalStore: McpApprovalStore
   userId: string
   toolName: string
