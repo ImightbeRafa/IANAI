@@ -28,7 +28,16 @@ export interface Frame {
  * Safe area per ratio. 9:16 follows Meta Stories/Reels guidance: keep text out of
  * the top ~14% and bottom ~20%; feed ratios use a uniform ~5.5% margin.
  */
-export function makeFrame(ratio: AspectRatio): Frame {
+export function makeFrame(ratio: AspectRatio, extra?: { top?: number; bottom?: number }): Frame {
+  const frame = baseFrame(ratio)
+  if (!extra || (extra.top === undefined && extra.bottom === undefined)) return frame
+  // Optional wider margins (fractions of the height), e.g. the MCP exact flow's 8 % top / bottom rule. Never narrower than the default.
+  const top = Math.max(frame.safe.y, Math.round(frame.H * (extra.top ?? 0)))
+  const bottom = Math.max(frame.H - (frame.safe.y + frame.safe.h), Math.round(frame.H * (extra.bottom ?? 0)))
+  return { ...frame, safe: { ...frame.safe, y: top, h: frame.H - top - bottom } }
+}
+
+function baseFrame(ratio: AspectRatio): Frame {
   const { width: W, height: H } = RATIO_SIZE[ratio]
   if (ratio === '9:16') {
     const top = Math.round(H * 0.14)

@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { checkUsageLimit, incrementUsage } from '../auth.js'
 import { generationUuidFromApproval } from '../credits/generation-id.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { runGrokPostFirstGen } from '../grok-image-generate.js'
-import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
+import { generateWebStyleImage, postCheckSummary } from '../mcp/web-image.js'
+import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
 import { exactResultDataUrl, generateExactProductImage, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import type { ModelGateway } from '../adpack/types.js'
@@ -306,6 +306,7 @@ export async function runBulkPosts(options: {
       ].filter(Boolean).join('. ')
       let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; mode: string; lockApplied: boolean }
       let fidelity: BulkPostItem['fidelity']
+      let postCheck: Record<string, unknown> | null = null
       if (fidelityMode === 'exact') {
         // Real product pixels (A1): the plate model never sees the product; no redrawn SKU is delivered.
         fidelityGateway ??= createModelGateway()
@@ -326,19 +327,28 @@ export async function runBulkPosts(options: {
         fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift }
         generated = { imageDataUrl: exactResultDataUrl(exact), providerModel: exact.plateModel || imageModel, estimatedCostUsd: exact.costUsd, resolution: `${exact.width}x${exact.height}`, quality: 'medium', mode: 'exact_composite', lockApplied: true }
       } else {
-        const grok = await runGrokPostFirstGen({
+        // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).
+        const web = await generateWebStyleImage({
           apiKey: xaiKey(),
-          prompt,
-          aspectRatio: ratioPlan.generateAt,
-          productReferenceUrls: rotatedProduct.slice(0, 3),
-          supportReferenceUrls: supportRefs.slice(0, 3),
-          language: runtime.language,
+          ctx: runtime.ctx,
+          offerId: runtime.offerId,
+          aspectRatio: ratioPlan.requested,
+          language: runtime.language === 'en' ? 'en' : 'es',
+          copy: script?.content ? script.content.slice(0, 600) : '',
+          scene: runtime.scene,
+          guidePrompt: runtime.guidePrompt,
+          extraContext: [
+            `Buyer niche: ${angle.niche}. ${angle.whyItBuys}`,
+            `Visual approach: ${approach}`,
+            `Hook style: ${angle.hookStyle}`,
+            dna ? `Style DNA (${dna.kind}): ${dna.notes || dna.name}` : '',
+          ],
+          productUrls: rotatedProduct.slice(0, 3),
+          supportUrls: supportRefs.slice(0, 3),
         })
-        generated = { ...grok }
-        if (ratioPlan.needsReframe && grok.imageDataUrl.startsWith('data:')) {
-          const framed = await reframeToRatio(Buffer.from(grok.imageDataUrl.slice(grok.imageDataUrl.indexOf(',') + 1), 'base64'), ratioPlan.requested, { mode: 'cover', format: 'jpeg' })
-          generated.imageDataUrl = `data:image/jpeg;base64,${framed.bytes.toString('base64')}`
-        }
+        generated = web.generated
+        postCheck = postCheckSummary(web)
+        void prompt
       }
       const saved = await runtime.artifactStore.saveImageArtifact({
         userId: runtime.user.id,
@@ -359,6 +369,7 @@ export async function runBulkPosts(options: {
           lockApplied: generated.lockApplied,
           productFidelity: fidelityMode,
           ...(fidelity ? { fidelity } : {}),
+          ...(postCheck?.fidelity_warning ? { fidelity_warning: postCheck.fidelity_warning } : {}),
         },
       })
       await logApiUsage({
@@ -397,6 +408,7 @@ export async function runBulkPosts(options: {
           generationId,
           approach,
           ...(fidelity ? { fidelity } : {}),
+          ...(postCheck || {}),
         })
       } catch (chargeErr) {
         items.push({

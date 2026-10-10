@@ -24,7 +24,7 @@ export type AngleCategory =
   | 'prueba_social'
 
 /** Visual layout families (see render/families.ts). */
-export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native'
+export type LayoutFamily = 'bold_pill' | 'editorial_minimal' | 'split_panel' | 'full_bleed_type' | 'badge_corner' | 'framed_card' | 'ugc_native' | 'studio_hero' | 'studio_top' | 'studio_navy_top' | 'studio_navy_bottom'
 
 /** How much the planner decides on its own: high = angle, hook, format, layout and scene; guided = the agent's picks are kept. */
 export type CreativeFreedom = 'high' | 'guided'
@@ -266,6 +266,15 @@ export interface PackRenderOptions {
   relight?: RelightMode
   allowedProps?: string[]
   immutableAttributes?: string[]
+  /**
+   * Round 1b/1c: 'auto' (default) bleeds studio-shot photos into a procedural canvas and, when the
+   * chosen hero is not a studio shot, falls back to another studio-shot photo of the offer;
+   * 'required' rejects the ad (`qa_gate_failed: studio_required`) when no studio-shot photo exists
+   * (never cut-out + plate, never generative relight); 'off' = always cut-out + plate.
+   */
+  studioBleed?: 'auto' | 'off' | 'required'
+  /** Round 1b: QA gate on exact renders ('on' default; 'off' only for QA comparisons). */
+  qaGate?: 'on' | 'off'
 }
 
 /** composite = plain cut-out (no harmonization); harmonized = deterministic relight stage; relit = + AI pass; generated = model-drawn. */
@@ -300,6 +309,8 @@ export interface FidelityResult {
   ratio?: AspectRatio
   /** Cut-out recall vs the source photo (0–1, P0 #4): pieces the cut-out kept / pieces in the photo. */
   recall?: number | null
+  /** Share of the cut-out that is the source photo's backdrop / its shadow (round 1, P2); > 4% fails. */
+  backgroundLeak?: number | null
   /** The AI relight pass failed fidelity on this ratio and the deterministic ('auto') render was kept. */
   relightFallback?: 'auto'
 }
@@ -310,6 +321,8 @@ export interface RejectedRatio {
   /** One-line reason (e.g. "detail ssim 0.84 < 0.88"). */
   reason: string
   fidelity: FidelityResult
+  /** Round 1b: QA gate scores when the ratio failed the gate (after the alternate layouts). */
+  qa?: QaGateSummary
 }
 
 /** The real product photo an ad used (P1 #8). */
@@ -319,6 +332,8 @@ export interface AdPhotoRef {
   url: string
   role?: ProductPhotoRole
   label?: string
+  /** Round-1 P4: the pinned photo (id or url) whose cut-out failed, so this one was used instead. */
+  fallbackFrom?: string
 }
 
 /** Light direction of a background plate (drives the composite's contact shadow). */
@@ -339,6 +354,10 @@ export interface StoredCutout {
   recall?: number
   /** Top-down kit layout (flat lay): composited on an overhead plate, never in perspective (P1 #6). */
   flatLay?: boolean
+  /** Share of the cut-out still showing the source photo's backdrop / shadow (round 1, P2). */
+  backgroundLeak?: number
+  /** Round-1 P4: pinned photo (id or url) that failed to cut out; this cut-out is its replacement. */
+  fallbackFrom?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +502,8 @@ export interface CopyCheckIssue {
     | 'grammar'
     /** Comparison hook ("No compres X de plástico") without a verified comparison fact. */
     | 'unverified_comparison'
+    /** Lossy squeeze of a confirmed claim that drops its object ("Redoblás si se gasta"). Blocking after repair. */
+    | 'ambiguous_claim'
   field: keyof AdCopy | 'script'
   detail: string
   /** Exact location, e.g. "bullets[2]" or "script.hook" (defaults to `field`). */
@@ -537,6 +558,35 @@ export interface SceneResult {
    * product detection (another step); the renderer never places copy over it.
    */
   productBox?: { x: number; y: number; w: number; h: number }
+  /**
+   * Round 1b studio bleed (exact mode): the hero photo is a studio shot, so its own backdrop,
+   * contact shadows and light are kept — the layer is faded into a procedural canvas (`imageUrl`,
+   * model 'studio-canvas', no paid plate). Absent = cut-out + generated plate.
+   */
+  bleed?: StudioBleedRef
+}
+
+/** Round 1b: stored studio-bleed layer of an ad (fidelity/bleed.ts). */
+export interface StudioBleedRef {
+  url: string
+  productBox: { x: number; y: number; w: number; h: number }
+  backdrop: { r: number; g: number; b: number }
+  edgesTouched: string[]
+  sourceUrl: string
+  /** Resampling already applied to the source before the bleed (low-res photos: de6210b upscale); the gate counts it. */
+  preScale?: number
+}
+
+/** Round 1b QA gate summary of one delivered / rejected render (qa-gate.ts). */
+export interface QaGateSummary {
+  passed: boolean
+  score: number
+  failed: string[]
+  metrics: Array<{ id: string; value: number | null; threshold: string; passed: boolean; detail?: string }>
+  /** Render attempts used for this ratio (1 = first layout passed). */
+  attempts: number
+  /** Layout family that passed (or the last tried). */
+  layoutFamily?: LayoutFamily
 }
 
 export interface SceneCheckResult {
@@ -574,6 +624,8 @@ export interface RenderedAd {
   plateUrl?: string
   /** #9: fonts actually drawn in this render (stored in the renders jsonb, no migration). */
   fontsUsed?: FontsUsed
+  /** Round 1b QA gate scores of this render (stored in the renders jsonb, no migration). */
+  qa?: QaGateSummary
 }
 
 /** #9: the families a render actually drew, and every fallback taken (brand font missing, glyphs). */

@@ -308,9 +308,11 @@ describe('exact single image (execute_image_generate / bulk / campaign pack)', (
   })
 
   it('productFidelity defaults for the single-image tools', () => {
-    expect(resolveToolProductFidelity(undefined, true)).toBe('exact')
+    // Round 2: the classic tools default to the web path ('generated'); 'exact' is opt-in.
+    expect(resolveToolProductFidelity(undefined, true)).toBe('generated')
     expect(resolveToolProductFidelity(undefined, false)).toBe('generated')
     expect(resolveToolProductFidelity('generated', true)).toBe('generated')
+    expect(resolveToolProductFidelity('exact', true)).toBe('exact')
     expect(() => resolveToolProductFidelity('exact', false)).toThrow(/needs a product photo/)
   })
 

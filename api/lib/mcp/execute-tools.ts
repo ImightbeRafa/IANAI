@@ -18,10 +18,14 @@ import { usageTimingMetadata } from '../usage-timings.js'
 import { runGuionesStructuredPipeline } from '../guiones/script-pipeline.js'
 import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
-import { runGrokPostFirstGen } from '../grok-image-generate.js'
-import { reframeToRatio, resolveImageRatio } from '../image-ratios.js'
+import type { AspectRatio } from '../adpack/types.js'
+import { generateExactWebStyleAd } from './exact-flow.js'
+import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fidelity/photos.js'
+import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary } from './web-image.js'
+import type { McpOfferStore } from './offer-tools.js'
+import { resolveImageRatio } from '../image-ratios.js'
 import { createModelGateway } from '../adpack/gateway.js'
-import { exactResultDataUrl, generateExactProductImage, parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
+import { parseImageFidelityArgs, photosFromUrls, resolveToolProductFidelity } from '../adpack/fidelity/pipeline.js'
 import { normalizeImageReferenceRole } from '../image-prompt-context.js'
 import { buildImageEditSystemPrompt, resolveGrokAspectRatio, runGrokImageEdit } from '../grok-image-edit.js'
 import {
@@ -167,6 +171,25 @@ async function resolveOwnedReferenceUrls(options: {
 }
 
 /**
+ * Owned refs whose role is a real accessory (box / contents / part) are lifted out of the product refs — except when that
+ * would leave no product photo at all (then they stay as they were). The explicit SKU photo is never lifted.
+ */
+export function splitAccessoryRefs(images: McpOwnedImage[], productImageId?: string): { rest: McpOwnedImage[]; accessories: Array<{ id: string; imageUrl: string; label: string }> } {
+  const skuId = productImageId?.trim() || ''
+  const accessories: Array<{ id: string; imageUrl: string; label: string }> = []
+  const rest: McpOwnedImage[] = []
+  for (const image of images) {
+    const role = image.id === skuId ? undefined : (roleFromImageRow({ tags: image.tags, is_primary: image.isPrimary }) ?? roleFromLabel(image.label))
+    if (image.kind !== 'context' && image.kind !== 'generated' && (role === 'box' || role === 'contents' || role === 'part')) {
+      accessories.push({ id: image.id, imageUrl: image.imageUrl, label: [stripRolePrefix(image.label), image.role].filter(Boolean).join(' ').trim() || role })
+    } else rest.push(image)
+  }
+  const hasProduct = rest.some((i) => i.kind !== 'context' && i.kind !== 'generated')
+  if (!hasProduct) return { rest: images, accessories: [] }
+  return { rest, accessories }
+}
+
+/**
  * Split owned refs into product vs support URLs for Grok first-gen.
  * When `productImageId` is set, that SKU URL is always `productUrls[0]`
  * (edits API base) even if a kind=generated/unknown ref appears first.
@@ -265,6 +288,54 @@ async function finalizeMcpApproval(options: {
     input: options.input,
   })
   if (!consumed.ok) throw new Error(consumed.reason)
+}
+
+const WEB_POST_STYLES = new Set(['venta-directa', 'anuncio-conversion'])
+const WEB_TEXT_DENSITIES = new Set(['hard', 'medium', 'standard'])
+
+/** Web-flow inputs for execute_image_generate: guion copy, density, post style, CTA strength, offer lock overrides. */
+export function parseWebPostArgs(args: Record<string, unknown>): {
+  copy?: string
+  textDensity?: string
+  postStyle?: string
+  ctaStrength?: string
+  immutableAttributes?: string[]
+  lockProductAppearance?: boolean
+  autoRetry?: boolean
+  layoutCap?: boolean
+  enforceSafeZones?: boolean
+  compositeLayers?: boolean
+  productNotes?: string
+} {
+  const out: ReturnType<typeof parseWebPostArgs> = {}
+  const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
+  if (copy) out.copy = copy
+  if (args.textDensity !== undefined) {
+    if (typeof args.textDensity !== 'string' || !WEB_TEXT_DENSITIES.has(args.textDensity)) throw new Error('textDensity must be "hard", "medium" or "standard"')
+    out.textDensity = args.textDensity
+  }
+  if (args.postStyle !== undefined) {
+    if (typeof args.postStyle !== 'string' || !WEB_POST_STYLES.has(args.postStyle)) throw new Error('postStyle must be "venta-directa" or "anuncio-conversion"')
+    out.postStyle = args.postStyle
+  }
+  if (args.ctaStrength !== undefined) {
+    if (typeof args.ctaStrength !== 'string' || !CTA_STRENGTHS.includes(args.ctaStrength as CTAStrength)) throw new Error('ctaStrength must be none, soft, brand_mention or sales')
+    out.ctaStrength = args.ctaStrength
+  }
+  if (Array.isArray(args.immutableAttributes)) {
+    const attrs = args.immutableAttributes.filter((a): a is string => typeof a === 'string').map((a) => a.trim().slice(0, 160)).filter(Boolean).slice(0, 12)
+    if (attrs.length) out.immutableAttributes = attrs
+  }
+  if (args.lockProductAppearance === true) out.lockProductAppearance = true
+  const productNotes = optionalTrimmedString(args.productNotes, 400)
+  if (productNotes) out.productNotes = productNotes
+  // Always echoed (boundInput / executeArguments) so the caller sees the value that is actually applied, defaults included.
+  out.autoRetry = args.autoRetry === true
+  out.layoutCap = args.layoutCap !== false
+  out.compositeLayers = args.compositeLayers !== false
+  // Composite flow (default): the layout puts everything inside the safe zones, so the scale-in is OFF unless explicitly requested. Legacy flow keeps it ON.
+  out.enforceSafeZones = out.compositeLayers ? args.enforceSafeZones === true : args.enforceSafeZones !== false
+  return out
 }
 
 function xaiKey(): string {
@@ -568,6 +639,8 @@ export async function mcpExecuteImageGenerate(options: {
   user: McpAuthUser
   args: Record<string, unknown>
   appOrigin?: string
+  /** Optional: reads the offer's ad_profile (lockProductAppearance / immutableAttributes). */
+  offerStore?: McpOfferStore | null
 }): Promise<Record<string, unknown>> {
   const brandId = typeof options.args.brandId === 'string' ? options.args.brandId : ''
   if (!brandId) throw new Error('brandId is required')
@@ -588,6 +661,7 @@ export async function mcpExecuteImageGenerate(options: {
   const referenceMode = parseReferenceMode(options.args.referenceMode) || 'use'
   const aspectRatioFallback = options.args.aspectRatioFallback === true
   const fidelityArgs = parseImageFidelityArgs(options.args)
+  const webArgs = parseWebPostArgs(options.args)
   const boundInput = {
     brandId,
     offerId: typeof options.args.offerId === 'string' ? options.args.offerId : undefined,
@@ -601,6 +675,10 @@ export async function mcpExecuteImageGenerate(options: {
     guidePrompt,
     sessionId: sessionIdArg,
     ...fidelityArgs,
+    ...webArgs,
+    // Effective values echoed in boundInput / executeArguments (the defaults the job will actually use).
+    productFidelity: fidelityArgs.productFidelity ?? ('generated' as const),
+    allowedProps: fidelityArgs.allowedProps ?? [],
   }
 
   const ctxPreview = await mcpGetBrandContext(options.db, options.user, brandId)
@@ -702,7 +780,10 @@ export async function mcpExecuteImageGenerate(options: {
         appOrigin: options.appOrigin,
         ctxPreview,
         quote,
+        referenceMode,
+        offerStore: options.offerStore,
         ...fidelityArgs,
+        ...webArgs,
       })
       await finalizeMcpApproval({
         approvalStore: options.approvalStore,
@@ -751,6 +832,19 @@ async function runImageGenerateBody(options: {
   /** 'ai' adds the guarded AI relight pass; the deterministic relight stage always runs (free). */
   relight?: 'ai'
   allowedProps?: string[]
+  referenceMode?: 'use' | 'none'
+  offerStore?: McpOfferStore | null
+  copy?: string
+  textDensity?: string
+  postStyle?: string
+  ctaStrength?: string
+  immutableAttributes?: string[]
+  lockProductAppearance?: boolean
+  autoRetry?: boolean
+  layoutCap?: boolean
+  enforceSafeZones?: boolean
+  compositeLayers?: boolean
+  productNotes?: string
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -781,57 +875,135 @@ async function runImageGenerateBody(options: {
     offerId: options.offerId,
     imageIds: options.referenceImageIds,
   })
+  // Selected refs that are real accessory photos (box / controller / contents) are attached as accessories, not as a second
+  // "product": they keep their own slot and the prompt copies them faithfully instead of treating them as the SKU.
+  const accessoryRefs = splitAccessoryRefs(ownedRefs, options.productImageId)
   const { productUrls, supportUrls } = partitionOwnedImageRefs({
-    images: ownedRefs,
+    images: accessoryRefs.rest,
     productImageId: options.productImageId,
   })
+  const selectedAccessories = accessoryRefs.accessories
+  // exact mode composites real pixels of every selected photo, so it keeps the unsplit product list.
+  const exactProductUrls = partitionOwnedImageRefs({ images: ownedRefs, productImageId: options.productImageId }).productUrls
 
   const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0)
   let fidelity: Record<string, unknown> | null = null
+  let promptUsed = prompt
+  let postCheck: Record<string, unknown> | null = null
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
   if (fidelityMode === 'exact') {
-    // Real product pixels on a generated plate (A1); the job fails rather than deliver a redrawn product.
+    // Real product pixels on a generated plate (A1), then the SAME ad layers as the web-style flow: copy / one CTA / logo /
+    // safe zones / QA / halo flags (api/lib/mcp/exact-flow.ts). Never a redrawn product; flags are warnings only.
     const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
-    const exact = await generateExactProductImage({
-      gateway: createModelGateway(),
-      photos: photosFromUrls(productUrls),
-      ratio: appliedAspectRatio,
-      brandName: options.ctxPreview.brand.name,
-      offerName,
+    const exactAd = await generateExactWebStyleAd({
+      exact: {
+        gateway: createModelGateway(),
+        photos: photosFromUrls(exactProductUrls),
+        ratio: appliedAspectRatio,
+        brandName: options.ctxPreview.brand.name,
+        offerName,
+        language: 'es',
+        sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
+        styleNotes: kit?.visualStyleNotes || undefined,
+        palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
+        allowedProps: options.allowedProps,
+        ...(options.immutableAttributes?.length || options.productNotes ? { immutableAttributes: [...(options.immutableAttributes ?? []), ...(options.productNotes ? [options.productNotes] : [])] } : {}),
+        ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
+      },
+      ctx: options.ctxPreview,
+      offerId: options.offerId,
+      copy: options.copy,
+      guidePrompt: options.guidePrompt,
+      ratio: appliedAspectRatio as AspectRatio,
       language: 'es',
-      sceneHint: [options.scene, options.guidePrompt].filter(Boolean).join('. '),
-      styleNotes: kit?.visualStyleNotes || undefined,
-      palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
-      allowedProps: options.allowedProps,
-      ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
+      layoutCap: options.layoutCap,
     })
-    if (!exact.ok) throw new Error(exact.error)
-    fidelity = { score: exact.fidelity.score, passed: exact.fidelity.passed, method: exact.fidelity.method, ssim: exact.fidelity.ssim, deltaE: exact.fidelity.deltaE, silhouetteIoU: exact.score.silhouetteIoU, hueShift: exact.score.hueShift }
+    fidelity = exactAd.fidelity
     generated = {
-      imageDataUrl: exactResultDataUrl(exact),
-      providerModel: exact.plateModel || 'grok-imagine',
-      estimatedCostUsd: exact.costUsd,
-      resolution: `${exact.width}x${exact.height}`,
+      imageDataUrl: exactAd.imageDataUrl,
+      providerModel: exactAd.plateModel || 'grok-imagine',
+      estimatedCostUsd: exactAd.costUsd,
+      resolution: `${exactAd.width}x${exactAd.height}`,
       quality: 'medium',
       aspectRatio: appliedAspectRatio,
       mode: 'exact_composite',
       lockApplied: true,
     }
-  } else {
-    const grok = await runGrokPostFirstGen({
-      apiKey: xaiKey(),
-      prompt,
-      aspectRatio: ratioPlan.generateAt,
-      productReferenceUrls: productUrls,
-      supportReferenceUrls: supportUrls,
-      language: 'es',
-    })
-    generated = { ...grok }
-    if (ratioPlan.needsReframe && grok.imageDataUrl.startsWith('data:')) {
-      const bytes = Buffer.from(grok.imageDataUrl.slice(grok.imageDataUrl.indexOf(',') + 1), 'base64')
-      const framed = await reframeToRatio(bytes, appliedAspectRatio, { mode: 'cover', format: 'jpeg' })
-      generated = { ...grok, imageDataUrl: `data:image/jpeg;base64,${framed.bytes.toString('base64')}`, aspectRatio: appliedAspectRatio }
+    postCheck = {
+      qa: exactAd.qa,
+      halo: exactAd.halo,
+      ...(exactAd.halo_warning ? { halo_warning: exactAd.halo_warning } : {}),
+      copyOnImage: exactAd.copyOnImage,
+      ...(exactAd.copyOverflow.length ? { copyOverflow: exactAd.copyOverflow } : {}),
+      exactLayout: exactAd.layout,
+      compositeLayers: exactAd.compositeLayers,
+      ...(exactAd.warnings.length ? { exactWarnings: exactAd.warnings } : {}),
+      ...(exactAd.providerRetries ? { providerRetries: exactAd.providerRetries } : {}),
+      accessories: 'not composited in exact mode (real box / controller photos are only used by productFidelity "generated")',
     }
+  } else {
+    // Web path: same prompt/refs/logo/lock/clamp-retry as /api/generate-image (api/lib/web-post-image.ts).
+    const offerRow = options.offerStore
+      ? await options.offerStore.getOffer({ userId: options.user.id, brandId: options.brandId, offerId: options.offerId }).catch(() => null)
+      : null
+    const rowLock = offerLockFromRow(offerRow as Record<string, unknown> | null)
+    const lock = {
+      lockProductAppearance: options.lockProductAppearance ?? rowLock.lockProductAppearance,
+      immutableAttributes: options.immutableAttributes?.length ? options.immutableAttributes : rowLock.immutableAttributes,
+      // The tool input decides: default = NO props except the ones the caller lists (the offer's ad_profile list no longer widens it).
+      allowedProps: options.allowedProps?.length ? options.allowedProps : [],
+      forbidExtraProps: rowLock.forbidExtraProps,
+    }
+    // Real box / controller / contents photos of the offer ride along as extra references (hero first, logo kept).
+    const allProductAssets = await options.artifactStore.listOwnedAssets({
+      userId: options.user.id,
+      brandId: options.brandId,
+      offerId: options.offerId,
+      kind: 'product',
+    }).catch(() => [])
+    // Accessory photos (box / controller / contents): the ones the caller selected explicitly, plus the offer's photos that
+    // match an `allowedProps` entry. Never attached when not allowed (default = no props), so they win reference slots
+    // (budget up to 5 on the MCP path: hero + 2nd product photo + accessories + logo).
+    const accessoryRows = [...selectedAccessories, ...pickAccessoryPhotos(allProductAssets, {
+      excludeIds: [...options.referenceImageIds, ...selectedAccessories.map((a) => a.id)],
+      lockText: (lock.allowedProps || []).join(' '),
+      onlyMatching: true,
+      max: Math.max(0, 2 - selectedAccessories.length),
+    })].slice(0, 2)
+    const accessories = accessoryRows.map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
+    // The offer's OTHER real box / contents / part photos (not attached): used only to flag them when they show up in the scene without being allowed.
+    const libraryPhotos = pickAccessoryPhotos(allProductAssets, {
+      excludeIds: [...options.referenceImageIds, ...accessoryRows.map((a) => a.id)],
+      lockText: '',
+      max: 3,
+    }).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
+    const web = await generateWebStyleImage({
+      apiKey: xaiKey(),
+      ctx: options.ctxPreview,
+      offerId: options.offerId,
+      aspectRatio: options.aspectRatio,
+      language: 'es',
+      copy: options.copy,
+      scene: options.scene,
+      guidePrompt: options.guidePrompt,
+      postStyle: options.postStyle,
+      textDensity: options.textDensity,
+      ctaStrength: options.ctaStrength,
+      productUrls,
+      supportUrls,
+      referenceMode: options.referenceMode,
+      lock,
+      accessories,
+      libraryPhotos,
+      autoRetry: options.autoRetry,
+      layoutCap: options.layoutCap,
+      enforceSafeZones: options.enforceSafeZones,
+      compositeLayers: options.compositeLayers,
+      ...(options.productNotes ? { productNotes: options.productNotes } : {}),
+    })
+    generated = web.generated
+    promptUsed = web.prompt
+    postCheck = postCheckSummary(web)
   }
 
   const persistStarted = Date.now()
@@ -857,6 +1029,7 @@ async function runImageGenerateBody(options: {
       aspectRatio: generated.aspectRatio,
       grokMode: generated.mode,
       lockApplied: generated.lockApplied,
+      ...(postCheck?.fidelity_warning ? { fidelity_warning: postCheck.fidelity_warning } : {}),
     },
   })
 
@@ -920,7 +1093,8 @@ async function runImageGenerateBody(options: {
     estimatedCostUsd: generated.estimatedCostUsd,
     productFidelity: fidelityMode,
     ...(fidelity ? { fidelity } : {}),
-    prompt,
+    ...(postCheck || {}),
+    prompt: promptUsed,
     deepLink: `${origin}/chat?brand=${encodeURIComponent(options.brandId)}&session=${encodeURIComponent(sessionId)}`,
     note: 'Image saved to Advance library as high-quality JPEG (HTTPS URL only — no blob in job result). Open deepLink to view in chat.',
   }, charged, options.quote, 'execute_image_generate')

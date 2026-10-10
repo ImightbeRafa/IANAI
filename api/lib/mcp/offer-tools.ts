@@ -192,6 +192,9 @@ export function offerView(row: Row, adProfile?: OfferAdProfile | null): Row {
     confirmedFacts: facts.map((f) => ({ key: f.key, value: f.value })),
     /** Fact groups every ad must carry (offer setting, else the defaults). */
     mustAppear: profile?.mustAppear ?? [...DEFAULT_MUST_APPEAR],
+    /** Round-1 P7: with a verified-claims bank only traceable claims ship (unverified claims block the ad). */
+    strictClaims: (profile?.verifiedClaims?.length ?? 0) > 0,
+    verifiedClaims: profile?.verifiedClaims?.length ?? 0,
   }
 }
 

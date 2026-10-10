@@ -64,26 +64,19 @@ describe('P0 #4 cut-out recall', () => {
     expect(r.components.kept).toBeLessThan(r.components.source)
   })
 
-  it('a single product whose white cap is dropped: model retry when available, else cutout_incomplete (never delivered)', async () => {
+  it('a single product whose white cap the default flood drops: the strict flood retry keeps it (round 1), else model / cutout_incomplete', async () => {
     const src = await productWithWhiteCap()
+    // Round 1: the default flood (tol 10) eats the near-white cap → recall fails → the strict flood
+    // (tol 5, local 3.5) keeps it. Delivered with recall 1, no model call.
     const none = await segmentProduct({ bytes: src })
-    expect(none.ok).toBe(false)
-    if (none.ok) return
-    expect(none.reason).toBe('cutout_incomplete')
-    expect(none.recall?.recall).toBeLessThan(0.95)
-    // A model that also misses the cap → still incomplete.
-    const bodyOnly = segmentGateway([[227, 333, 773, 622]])
-    const still = await segmentProduct({ bytes: src, gateway: bodyOnly })
-    expect(bodyOnly.calls).toBe(1)
-    expect(still.ok).toBe(false)
-    expect(!still.ok && still.reason).toBe('cutout_incomplete')
-    // A model that returns body + cap → delivered with the model mask, recall reported.
-    const both = segmentGateway([[227, 333, 773, 622], [618, 650, 782, 850]])
-    const ok = await segmentProduct({ bytes: src, gateway: both })
-    expect(ok.ok).toBe(true)
-    if (!ok.ok) return
-    expect(ok.method).toBe('model')
-    expect(ok.recall?.recall).toBeGreaterThanOrEqual(0.95)
+    expect(none.ok).toBe(true)
+    if (!none.ok) return
+    expect(none.rejected.some((r) => /^flood: recall/.test(r))).toBe(true)
+    expect(none.recall?.recall).toBeGreaterThanOrEqual(0.95)
+    const viaModel = segmentGateway([[227, 333, 773, 622]])
+    const strict = await segmentProduct({ bytes: src, gateway: viaModel })
+    expect(strict.ok && strict.method).toBe('flood')
+    expect(viaModel.calls).toBe(0)
   })
 
   it('owner-provided transparent cut-outs (role contents / part) are used as-is', async () => {

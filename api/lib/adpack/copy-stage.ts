@@ -32,6 +32,7 @@ export const BLOCKING_COPY_CODES: ReadonlySet<CopyCheckIssue['code']> = new Set(
   'locale_register',
   'missing_fact',
   'urgency',
+  'ambiguous_claim',
 ])
 
 /**

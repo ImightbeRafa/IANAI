@@ -26,7 +26,7 @@
 import sharp from 'sharp'
 import type { Box } from '../render/types.js'
 import type { FidelityMethod, FidelityResult } from '../types.js'
-import { dilate, erode, gray, linearToSrgb, maskedBlurMany, rgbToLab, srgbToLinear } from './pixels.js'
+import { deltaE as deltaELab, dilate, erode, gray, linearToSrgb, maskedBlurMany, rgbToLab, srgbToLinear } from './pixels.js'
 
 export const FIDELITY_THRESHOLD = {
   /** Detail SSIM floor (alias `ssim` for older callers). */
@@ -108,6 +108,41 @@ export function passesFidelity(m: { ssimDetail: number; silhouetteIoU: number; h
     m.chromaRatio <= T.chromaRatio[1] &&
     m.deltaE <= T.deltaE
   )
+}
+
+// ---------------------------------------------------------------------------
+// Background left in the cut-out (round 1, P2)
+// ---------------------------------------------------------------------------
+
+/** Max share of a cut-out's core pixels that may still look like the source photo's backdrop. */
+export const BACKGROUND_LEAK_MAX = 0.04
+/** Backdrop chroma (Lab) from which hue is a reliable "is this the backdrop / its shadow" signal. */
+const LEAK_TINTED_CHROMA = 3
+
+/**
+ * Share (0–1) of the cut-out's core pixels (mask eroded by 2 px: the feathered edge never counts)
+ * that are the SOURCE photo's backdrop or its soft shadow:
+ *  - tinted backdrop (chroma ≥ 3, e.g. the off-white #EEE9E1 studio wall): backdrop hue
+ *    (|Δa| ≤ 2.5, |Δb| ≤ 1.8) at the backdrop's lightness or darker (shadow), down to −50 L;
+ *  - neutral backdrop: within ΔE 4 of it (hue can't separate a grey product from a grey shadow).
+ * The fidelity score compares the render with the cut-out, so backdrop baked INTO the cut-out
+ * ("halo") scored 0.95 in round 1; this measures it against the source photo instead.
+ */
+export function backgroundLeakShare(lab: Float32Array, mask: Uint8Array, w: number, h: number, backdrop: [number, number, number]): number {
+  const core = erode(mask, w, h, 2)
+  const [L0, A0, B0] = backdrop
+  const tinted = Math.hypot(A0, B0) >= LEAK_TINTED_CHROMA
+  let total = 0
+  let leak = 0
+  for (let i = 0; i < core.length; i++) {
+    if (!core[i]) continue
+    total++
+    const L = lab[i * 3]
+    if (tinted) {
+      if (L <= L0 + 3 && L >= L0 - 50 && Math.abs(lab[i * 3 + 1] - A0) <= 2.5 && Math.abs(lab[i * 3 + 2] - B0) <= 1.8) leak++
+    } else if (deltaELab(lab, i, L0, A0, B0) <= 4) leak++
+  }
+  return total ? Math.round((leak / total) * 1000) / 1000 : 0
 }
 
 /** Distance from `f` to the closest luminance-scaled copy k·x (k in [kmin, kmax]), sRGB units. */
@@ -535,7 +570,7 @@ export function toFidelityResult(s: FidelityScore, extra: Partial<FidelityResult
 }
 
 /** One-line reason for a failed score (error strings / logs). */
-export function fidelityFailReason(f: Pick<FidelityResult, 'ssimDetail' | 'ssim' | 'silhouetteIoU' | 'hueShift' | 'chromaRatio' | 'deltaE'>): string {
+export function fidelityFailReason(f: Pick<FidelityResult, 'ssimDetail' | 'ssim' | 'silhouetteIoU' | 'hueShift' | 'chromaRatio' | 'deltaE'> & Pick<Partial<FidelityResult>, 'backgroundLeak'>): string {
   const T = FIDELITY_THRESHOLD
   const parts: string[] = []
   const ssim = f.ssimDetail ?? f.ssim
@@ -544,5 +579,6 @@ export function fidelityFailReason(f: Pick<FidelityResult, 'ssimDetail' | 'ssim'
   if (f.hueShift !== null && f.hueShift !== undefined && f.hueShift > T.hueShift) parts.push(`hue shift ${f.hueShift}° > ${T.hueShift}°`)
   if (f.chromaRatio !== null && f.chromaRatio !== undefined && (f.chromaRatio < T.chromaRatio[0] || f.chromaRatio > T.chromaRatio[1])) parts.push(`chroma ratio ${f.chromaRatio}`)
   if (f.deltaE !== null && f.deltaE !== undefined && f.deltaE > T.deltaE) parts.push(`ΔE ${f.deltaE} > ${T.deltaE}`)
+  if (typeof f.backgroundLeak === 'number' && f.backgroundLeak > BACKGROUND_LEAK_MAX) parts.push(`background left in cutout ${Math.round(f.backgroundLeak * 1000) / 10}% > ${BACKGROUND_LEAK_MAX * 100}%`)
   return parts.join(', ') || `ssim ${ssim} / ΔE ${f.deltaE}`
 }

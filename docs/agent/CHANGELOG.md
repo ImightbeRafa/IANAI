@@ -1,3 +1,60 @@
+## 2026-10-09 — MCP 0.20.0: natural full-bleed scene (no letterbox strips), text never over the product, severity factors, exact with code layers, productNotes
+
+**Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file
+**Files:** `api/lib/mcp/{scene-prep,compose-scene}.ts` (new), `api/lib/mcp/{layout-ad,composite-ad,exact-flow,extra-objects,image-postcheck,web-image,execute-tools,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (MCP rules only), `test/round7.spec.ts`
+
+- Prompt asks for a natural full-bleed scene, calm continuous top, product in the lower 60–65 %, no bars / strips; seam detector + code blend (`qa.seams`); make-room shift so text never lands on the product; text < 80 % is always a warning.
+- `qa.severityFactors` (seam, textOverProduct, text scale, fidelity < 0.75, props, CTA seam) drive `autoRetry` (keeps the lower severity, single charge, max one retry); `suggestedFallback: exact` when fidelity stays < 0.75; exact uses the same layers.
+- CTA avoids seams / busy slots, lighter scrims on light scenes; window glow no longer a prop; optional `productNotes`.
+- Web request unchanged (`test/web-mcp-parity.spec.ts` green).
+
+## 2026-10-09 — MCP 0.19.0: scene-only generation, all ad text composited in code, no scale-in by default, props check, qa.status tiers
+
+**Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file
+**Files:** `api/lib/mcp/{layout-ad,composite-ad,copy-layout,extra-objects,image-postcheck,safe-zones,web-image,execute-tools,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (MCP rules object only; web request unchanged), tests `test/round6-layout.spec.ts`, `test/mcp-web-image-flow.spec.ts`, fixtures `test/fixtures/round6/*`
+
+- Model asked for the scene only; headline / price / facts / CTA / logo laid out in code from the real text boxes (no overlaps, ≥ 1.5 % H gaps, fits, contrast ≥ 4.5, safe zones, same pixel size). Scale-in is opt-in only and always a `fail`.
+- `qa.status` pass | warning | fail; `ctaButtons` from the compositor; props check flags the blue USB cable and the unlisted TOPGT box on the round-5c images; autoRetry keeps the lower-severity image (regression-tested); accessory prompt strengthened.
+
+## 2026-10-09 — MCP 0.18.0: safe zones enforced in code, accessory ref slots, caption, palette fidelity fallback, build commit file
+
+**Area:** api (mcp, web-post-image), scripts, docs — no migration, no new env/secret/binding/route/cron
+**Files:** `api/lib/mcp/{safe-zone-fix,image-postcheck,web-image,execute-tools,copy-layout,feature-match,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (optional `mcp.refBudget`; web request unchanged), `scripts/build-api.mjs`, `.gitignore`, tests, fixtures `test/fixtures/round5/`
+
+- `enforceSafeZones` (default on): logo/CTA/text inside the 8 % (9:16: 14 %/20 %) bands are fixed by a uniform scale-in with edge-matched padding on the same pixel size; clipped top logo replaced by the real one. Free, one model call, one charge.
+- Up to 5 refs for box/controller photos (selected or listed in `allowedProps`); plane lock "no agregues ni quites alas, aletas, flaps ni piezas"; ctaButtons false positive fixed (table edge); echoed `layoutCap`/`autoRetry`/`enforceSafeZones`/`allowedProps`/`productFidelity`; `caption`; palette fidelity fallback; `.build-commit` for `get_server_info.commit`.
+
+## 2026-10-09 — MCP 0.17.0: exact = same ad layers, allowedProps honoured, one CTA, 8 % margins, better-of-two retry, capacity backoff, get_server_info
+
+**Area:** api (mcp, web-post-image, adpack render/fidelity), docs — no migration, no new env/secret/binding/route/cron
+**Files:** `api/lib/mcp/{exact-flow,extra-objects,copy-layout,provider-retry,server-info,web-image,image-postcheck,feature-match,safe-zones,execute-tools,execute-job,protocol,tool-registry}.ts`, `api/lib/web-post-image.ts`, `api/lib/adpack/fidelity/{halo,pipeline}.ts`, `api/lib/adpack/render/{frame,render,types}.ts` (optional `safeMargin`, absent = unchanged), `scripts/build-api.mjs`, `vitest.config.ts`, tests
+
+- **Web request unchanged** (`test/web-mcp-parity.spec.ts` green): everything new is behind the MCP rules object; the only web-visible code change is that the shared `runWebPostGrokImage` retries transient provider errors (the web route does not call it).
+- `exact` renders copy / one CTA / logo / QA and flags halo; `allowedProps` input honoured (default none); 8 % margin rule first in the prompt; one CTA; layout cap with `copyOverflow`; `autoRetry` keeps the better image; capacity/5xx backoff (uncharged); fidelity checker recalibrated on the Round 3 images; `get_server_info` + `serverVersion`.
+
+## 2026-10-09 — MCP 0.16.0: product lock without invented props, binding `scene`, safe zones + QA auto-retry, rehosted photos
+
+**Area:** api (mcp, web-post-image, fetch), docs — no migration, no new env/secret/binding/route/cron
+**Files:** `api/lib/web-post-image.ts`, `api/lib/mcp/{web-image,image-postcheck,feature-match,safe-zones,rehost-references,execute-tools,url-analysis-worker,protocol,tool-registry}.ts`, `api/lib/fetch-image-data-url.ts`, tests, `docs/operations/mcp-user-tools.md`
+
+- **Web request unchanged:** every stronger rule is behind an `mcp` options object in the shared lib (web never passes it); `test/web-mcp-parity.spec.ts` + the legacy-reconstruction cases in `test/web-post-image.spec.ts` stay green.
+- **Product lock / props (MCP only):** "do not alter shape, parts, wheels, landing gear, tail, folds"; no object that is not in the lock or the reference photos (no invented box, controller, packaging, logo). The offer's real box / contents / part photos are attached as extra references (hero first, best accessory next, logo keeps its style slot, max 3).
+- **`scene` is binding** ("ESCENA OBLIGATORIA DEL PEDIDO") and replaces the generic niche recipe.
+- **Safe zones** (4:5 and 9:16 IG UI margins) in the prompt and checked after the render (`qa.safeZones`, `qa.safeZoneIssues`, `qa.status`). New opt-in `autoRetry: true` regenerates once with a corrective hint, keeps the better image, one charge.
+- **Fidelity post-check** is now a local feature match (FAST/BRIEF + RANSAC) on the located product region, with NCC on textured cells; the global silhouette test is gone. Status `ok` / `warning` / `unverified`; still warning-only.
+- **Dead photos:** the error names the URL and HTTP status; site analysis copies `reference_images` into `post-images` storage.
+- **Text QA:** `qa.separatorLines` + `qa.copyNormalised` (orphan `·`); the copy sent to Grok is normalised.
+- Tool schema publishes the exact enums (`postStyle`, `ctaStrength`, `textDensity`), `copy` as a plain string, `autoRetry`.
+
+## 2026-10-09 — MCP 0.15.0: classic image tools use the web app's Grok flow
+
+**Area:** api (generate-image, mcp, bulk), docs — no migration
+**Files:** `api/lib/web-post-image.ts` (new), `api/generate-image.ts`, `api/lib/mcp/{web-image,image-postcheck,execute-tools,protocol,tool-registry,create-ads}.ts`, `api/lib/bulk/run-bulk.ts`, `api/lib/adpack/fidelity/pipeline.ts`, tests, `docs/operations/mcp-user-tools.md`
+
+- **Shared builder:** the web route's Grok post branch (prompt, refs/budget, logo, request, clamp retry) moved to `api/lib/web-post-image.ts`; web request unchanged (real-handler before/after dumps identical); MCP `execute_image_generate` / bulk / campaign pack call the same functions.
+- **Default `productFidelity: generated`** for those tools (`exact` opt-in). New inputs `copy`, `textDensity`, `postStyle`, `ctaStrength`, `lockProductAppearance`.
+- **Warning-only post-check:** `fidelity_warning` (colour/shape/part count vs the reference) + `qa` on results and `get_execute_result`; never blocks or charges.
+
 ## 2026-10-09 — Ad Pack v3 + MCP 0.14 merged: one plan, composed retries, background ratio regenerate
 
 **Area:** api (adpack, mcp), docs — no migration

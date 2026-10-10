@@ -30,6 +30,8 @@ export interface RenderAdInput {
   sceneImage: ImageInput
   copy: Pick<AdCopy, 'headline' | 'subline' | 'bullets' | 'offerLine' | 'cta'>
   visual?: DnaVisual
+  /** Brand name: rendered as a text wordmark by the studio families when there is no logo asset. */
+  brandName?: string
   /** Transparent product cut-out (PNG). Used by offer_graphic, variant_card and explainer. */
   productCutout?: ImageInput
   /** Logo bytes; overrides `visual.logoUrl` (avoids a fetch). */
@@ -46,6 +48,8 @@ export interface RenderAdInput {
    * nothing collides. Exact mode ignores it — the composite's placement is the product box.
    */
   productBox?: NormalizedBox
+  /** Optional wider top / bottom text margins (fractions of the height; never narrower than the default). Absent = unchanged. */
+  safeMargin?: { top?: number; bottom?: number }
   /** Brand font loading (network fetch, disk cache). Omitted → bundled/registered fonts only. */
   fonts?: FontResolverOptions
   /** QA/test only: also return the composited background (everything except the top text/UI layer). */
@@ -72,6 +76,12 @@ export interface RenderAdInput {
   /** @deprecated Corner form of `productBox` (normalized 0–1); folded into `productBox`. */
   productAvoid?: { x0: number; y0: number; x1: number; y1: number }
   /** Exact mode relight hook on the text-free composite; null keeps the deterministic composite. */
+  /**
+   * Round 1b studio bleed (exact mode): the real photo's own backdrop, shadows and light are kept —
+   * the layer (fidelity/bleed.ts) is faded into a procedural studio canvas (`sceneImage`) instead of
+   * cutting the product out. No synthetic shadow / relight is added (the photo's are real).
+   */
+  studioBleed?: { layer: ImageInput; productBox: Box; backdrop: { r: number; g: number; b: number }; edgesTouched?: string[]; preScale?: number }
   relight?: (composite: Buffer, placements: Array<{ box: Box; placed: Buffer; role: 'hero' | 'part'; background?: Buffer }>, ratio: AspectRatio) => Promise<Buffer | Uint8Array | null>
 }
 
@@ -120,6 +130,8 @@ export interface LayoutReport {
    * base rests on the surface instead of against the wall.
    */
   grounding?: { surfaceLineY: number | null; baseY: number; snappedPx: number }
+  /** Round 1b studio bleed: backdrop gain, resample scale (>1 = enlarged, Lanczos-3, not super-res). */
+  bleed?: { gain: [number, number, number]; scale: number; upscaled: boolean; edgesTouched: string[] }
   /** 'overhead' when a flat lay was composited on a top-down plate (P1 #6). */
   view?: 'overhead'
   /** Boxes of every text, pill, card and icon drawn over the scene. */

@@ -23,9 +23,12 @@ import { claimSentenceSpans, matchClaim, missingMustAppear, nearestFact } from '
 import { extractNumericClaims, numbersInFacts } from './facts.js'
 import { HARD_REGISTER_MARKERS, IAN_CORE_RULES, isHardRegister, REGISTER_DRIFT_MARKERS, registerInstruction } from './ian-rules.js'
 import { COPY_LIMITS, FORMAT_PATTERNS, headlineMaxWords } from './patterns.js'
+import { checkOneIdeaHeadline } from './headline-rules.js'
 import { contentWordCount, normalizeText, textSimilarity, wordCount } from './util.js'
 
 export interface CheckAdCopyOptions {
+  /** Round 1c: studio ads — the headline must be one short idea (headline-rules.ts). */
+  oneIdeaHeadline?: boolean
   dna: BrandDna
   offer: OfferInput
   angle: AdAngle
@@ -248,6 +251,32 @@ export function checkAdCopy(copy: AdCopy, options: CheckAdCopyOptions): CopyChec
         push('grammar', field, `Telegraphic Spanish "${g.match}": ${g.fix}`, { path, token: g.match, sentence: sentenceWith(text, g.match), offendingTokens: [g.match] })
       }
     }
+  }
+
+  // Round-1 P5: shortened confirmed claims that lose their object, and article-less headlines.
+  const claimBank = ctx.confirmed.filter((f) => CLAIM_BANK_KEYS.has(f.key)).map((f) => f.value)
+  for (const { field, path, text } of fields) {
+    if (field === 'offerLine' || field === 'cta') continue
+    const unquoted = text.replace(/["“”«»][^"“”«»]*["“”«»]/g, ' ')
+    for (const sentence of field === 'caption' || field === 'script' ? claimSentenceSpans(unquoted).map((s) => s.text) : [unquoted]) {
+      const hit = findLossyClaim(sentence, claimBank)
+      if (hit) {
+        push('ambiguous_claim', field, `"${sentence.trim()}" squeezes the confirmed claim "${hit.claim}" and drops ${hit.dropped.map((d) => `"${d}"`).join(', ')}: say what it refers to or use the claim as written`, {
+          path,
+          token: sentence.trim(),
+          sentence: sentence.trim(),
+          offendingTokens: [sentence.trim()],
+          nearestFact: hit.claim,
+        })
+      }
+    }
+  }
+  if (options.language === 'es' && copy.headline) {
+    const bare = findBareNounHeadline(copy.headline)
+    if (bare) push('grammar', 'headline', `Headline opens with a bare noun ("${bare.match}…"): ${bare.fix}`, { path: 'headline', token: bare.match, sentence: copy.headline, offendingTokens: [bare.match] })
+  }
+  if (options.oneIdeaHeadline && copy.headline) {
+    for (const i of checkOneIdeaHeadline(copy.headline).filter((x) => x.code !== 'bare_noun' && x.code !== 'ambiguous_claim')) push('grammar', 'headline', `Studio headline must be one short concrete idea: ${i.detail}`, { path: 'headline', token: i.code, sentence: copy.headline, offendingTokens: [copy.headline] })
   }
 
   // P1 #10: comparison hooks ("No compres X de plástico", "mejor que…") need a verified comparison fact.
@@ -616,6 +645,63 @@ export function findTelegraphicSpanish(text: string): Array<{ match: string; fix
   const m = n.match(BARE_PERSON_RE)
   if (m) out.push({ match: m[0], fix: `add the article ("${m[0].split(' ')[0]} un ${m[1]}")` })
   return out
+}
+
+/** Confirmed facts that are claim sentences the copy may quote or shorten. */
+const CLAIM_BANK_KEYS: ReadonlySet<string> = new Set(['custom:allowed_claim', 'custom:verified_claim', 'differentiator', 'result_claim'])
+
+const CLAUSE_MARKER_RE = /^(?:si|cuando|aunque|porque|mientras|if|when|once)$/
+const LOSSY_STOP = new Set(['para', 'como', 'with', 'from', 'that', 'this', 'esto', 'esta', 'este', 'otro', 'otra', 'cada', 'todo', 'toda', 'tambien', 'solo', 'muy', 'mas', 'menos', 'con', 'sin', 'por', 'una', 'uno', 'unos', 'unas', 'los', 'las', 'del', 'que', 'the', 'and', 'your', 'you'])
+
+function lossyTokens(text: string): string[] {
+  return normalizeText(text).split(/[^a-z0-9ñ]+/).filter((t) => t.length >= 4 && !LOSSY_STOP.has(t))
+}
+
+/** Voseo/tuteo/infinitive verb forms (normalized, accents stripped): doblas, montas, volar… */
+function looksLikeVerb(t: string): boolean {
+  return /(?:as|es|is|ar|er|ir)$/.test(t) && !/(?:ones|ores|ales|ples|bles|ises)$/.test(t)
+}
+
+/**
+ * Round-1 P5: a line that is built only from words of ONE confirmed claim, is a conditional /
+ * subordinate clause ("si se gasta"), and drops the claim's nouns ("papel", "avión") reads as a
+ * riddle: "Redoblás si se gasta" — what gets folded again, what runs out? Returns the claim and the
+ * dropped nouns, or null. Noun-phrase chips ("Control 2.4GHz") are not clauses and pass.
+ */
+export function findLossyClaim(line: string, claims: string[]): { claim: string; dropped: string[] } | null {
+  const words = normalizeText(line).split(/[^a-z0-9ñ]+/).filter(Boolean)
+  if (!words.some((w) => CLAUSE_MARKER_RE.test(w))) return null
+  const lt = lossyTokens(line)
+  if (!lt.length || lt.length > 4) return null
+  for (const claim of claims) {
+    const ct = lossyTokens(claim)
+    if (ct.length < 3) continue
+    const nClaim = normalizeText(claim)
+    if (nClaim.includes(normalizeText(line).replace(/[.!?¡¿]+/g, '').trim())) continue
+    const matches = (a: string, b: string) => a === b || (b.length >= 5 && a.endsWith(b)) || (a.length >= 5 && b.endsWith(a))
+    if (!lt.every((t) => ct.some((c) => matches(t, c)))) continue
+    const dropped = ct.filter((c) => !lt.some((t) => matches(t, c)) && !looksLikeVerb(c) && c.length >= 5)
+    if (dropped.length) return { claim, dropped }
+  }
+  return null
+}
+
+const HEADLINE_OPENERS_OK = new Set([
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'este', 'esta', 'ese', 'esa', 'tu', 'su', 'mi', 'nuestro', 'nuestra', 'lo', 'algo', 'todo', 'nada', 'esto', 'eso', 'hoy', 'asi', 'ahora', 'mas', 'menos', 'tan', 'mucho', 'poco', 'ojo', 'ya', 'hay', 'es', 'fue', 'para', 'por', 'con', 'sin', 'desde', 'hasta', 'cada', 'otro', 'otra', 'quien', 'quienes', 'cuando', 'donde', 'aqui', 'aca', 'alla', 'solo', 'justo', 'claro', 'mira', 'sabias', 'dicen', 'imaginate', 'listo', 'lista', 'hecho', 'hecha', 'gente', 'cosas',
+])
+
+/**
+ * Round-1 P5: "Regalo que armás con papel" — a singular count noun opening a relative clause reads
+ * telegraphic; "Un regalo que armás con papel" is the Spanish headline. Plural nouns ("Aviones que
+ * vuelan…"), verbs, adverbs and determiners pass.
+ */
+export function findBareNounHeadline(headline: string): { match: string; fix: string } | null {
+  const m = String(headline ?? '').trim().replace(/^[¡¿"“(]+/, '').match(/^(\p{Lu}[\p{Ll}]{3,})\s+que\b/u)
+  if (!m) return null
+  const w = normalizeText(m[1])
+  if (HEADLINE_OPENERS_OK.has(w) || w.endsWith('s') || w.endsWith('mente') || /[áéí]$/.test(m[1].toLowerCase())) return null
+  const art = /(?:a|ion|dad|tud|umbre)$/.test(w) ? 'Una' : 'Un'
+  return { match: `${m[1]} que`, fix: `add the article ("${art} ${m[1].toLowerCase()} que…")` }
 }
 
 /** Comparison hooks that attack an alternative ("No compres X…", "mejor que", "a diferencia de"). */

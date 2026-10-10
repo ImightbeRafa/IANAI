@@ -1014,6 +1014,8 @@ export interface AdPackService {
    * offer-library save of a completed pack; it returns immediately either way.
    */
   pollStatus(input: { userId: string; packId: unknown; appOrigin?: string; language?: unknown; schedule?: BackgroundSchedule }): Promise<AdPackStatusResponse>
+  /** Round-1 P7: the owner's spendable credit balance (read-only check), null when unknown. Optional for fakes. */
+  creditsRemaining?(userId: string): Promise<number | null>
   advance(input: { userId: string; packId: unknown; budgetMs?: number }): Promise<PackProgress>
   /** Kick the self-continuing background loop for a pack (no-op when this process already runs one). */
   kickAdvance(input: { userId: string; packId: string; schedule: BackgroundSchedule }): boolean
@@ -1605,6 +1607,15 @@ export function createAdPackService(deps: AdPackDeps): AdPackService {
     },
 
     getStatus,
+
+    async creditsRemaining(userId) {
+      try {
+        const check = await deps.checkCredits({ userId, ads: 1 })
+        return typeof check.remaining === 'number' && Number.isFinite(check.remaining) ? check.remaining : null
+      } catch {
+        return null
+      }
+    },
 
     async pollStatus(input) {
       // #14: a cheap read. Never advances inline (a model step can run far past any inline budget and

@@ -91,8 +91,23 @@ async function main() {
 
   const entryPoints = await walkTsFiles(apiDir)
 
+  // Build commit exposed by the MCP get_server_info tool (BUILD_COMMIT env wins; 'unknown' without git).
+  let commit = (process.env.BUILD_COMMIT || '').trim()
+  if (!commit) {
+    try {
+      const { execFileSync } = await import('node:child_process')
+      commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    } catch { commit = '' }
+  }
+  // Docker builds have no .git (dockerignored): the deploy step writes the SHA to a git-ignored `.build-commit` file that COPY . . brings in.
+  if (!commit) {
+    try {
+      commit = (await readFile(join(ROOT, '.build-commit'), 'utf8')).trim().slice(0, 40)
+    } catch { commit = '' }
+  }
   await build({
     entryPoints,
+    define: { __ADVANCE_BUILD_COMMIT__: JSON.stringify(commit) },
     outdir: outDir,
     outbase: apiDir,
     bundle: false,
