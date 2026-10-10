@@ -497,6 +497,12 @@ export type McpImageQa = {
   sceneText?: 'clean' | 'text_in_bands'
   /** true when the deterministic scale-in fallback shrank the picture (opt-in last resort): always a defect, never 'pass'. */
   scaleInUsed?: boolean
+  /** Round 7: flat top / bottom strips Grok painted (letterbox look) found in the scene, and whether the code blended them away. */
+  seams?: { found: number; blended: boolean; remaining: number; details: Array<{ edge: 'top' | 'bottom'; share: number; step: number }> }
+  /** Round 7: type scale the layout had to use (1 = nominal) — below 0.8 is always warned, below 0.75 raises the severity. */
+  textScale?: number
+  /** Round 7: the factors that make up `severity` beyond the base QA (seam, text over product, text scale, fidelity < 0.75, props, CTA on a seam). */
+  severityFactors?: Record<string, number>
   warnings: string[]
 }
 

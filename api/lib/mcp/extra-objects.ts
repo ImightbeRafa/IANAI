@@ -17,7 +17,9 @@ export type ExtraObjectsFinding = {
   count: number
   /** Clusters explained by the `allowedProps` the caller listed. */
   budget: number
-  clusters: Array<{ hue: string; share: number }>
+  clusters: Array<{ hue: string; share: number; /** Where those pixels sit (fractions of the picture) — the layout keeps the CTA / text off it. */ box?: NormalizedProductBox }>
+  /** Soft light regions ignored as lighting (a window's sun glow), not props. */
+  ignoredGlows?: string[]
   note: string
 }
 
@@ -38,13 +40,28 @@ function hueBin(a: number, b: number): number {
   return Math.floor((((deg % 360) + 360) % 360) / (360 / BINS)) % BINS
 }
 
-async function hueShares(bytes: Buffer, minChroma: number, skip?: (x: number, y: number, w: number, h: number) => boolean): Promise<{ shares: Float64Array; chroma: Float64Array; total: number }> {
+type Shares = { shares: Float64Array; chroma: Float64Array; total: number; /** Share of the pixels of each bin that sit within 3 px of a HARD edge (a glow is soft: ≈ 0). */ edgy: Float64Array; boxes: Array<{ x0: number; y0: number; x1: number; y1: number } | null> }
+
+async function hueShares(bytes: Buffer, minChroma: number, skip?: (x: number, y: number, w: number, h: number) => boolean): Promise<Shares> {
   const { data, info } = await sharp(bytes).rotate().flatten({ background: '#ffffff' }).removeAlpha().resize({ width: W }).raw().toBuffer({ resolveWithObject: true })
   const w = info.width
   const h = info.height
   const lab = labImage(data, 3, w * h)
   const counts = new Float64Array(BINS * LCLASS)
   const chromaSum = new Float64Array(BINS * LCLASS)
+  const edgyCount = new Float64Array(BINS * LCLASS)
+  const boxes: Shares['boxes'] = Array.from({ length: BINS * LCLASS }, () => null)
+  // hard-edge map: |dL| over 2 px > 8, dilated by 3 px
+  const hard = new Uint8Array(w * h)
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x
+    if (Math.abs(lab[(i + 1) * 3] - lab[(i - 1) * 3]) + Math.abs(lab[(i + w) * 3] - lab[(i - w) * 3]) > 8) hard[i] = 1
+  }
+  const near = new Uint8Array(w * h)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!hard[y * w + x]) continue
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < h && xx >= 0 && xx < w) near[yy * w + xx] = 1 }
+  }
   let total = 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -58,9 +75,13 @@ async function hueShares(bytes: Buffer, minChroma: number, skip?: (x: number, y:
       const k = hueBin(a, b) * LCLASS + lClass(L)
       counts[k]++
       chromaSum[k] += Math.hypot(a, b)
+      if (near[i]) edgyCount[k]++
+      const bx = boxes[k]
+      if (!bx) boxes[k] = { x0: x / w, y0: y / h, x1: (x + 1) / w, y1: (y + 1) / h }
+      else { bx.x0 = Math.min(bx.x0, x / w); bx.y0 = Math.min(bx.y0, y / h); bx.x1 = Math.max(bx.x1, (x + 1) / w); bx.y1 = Math.max(bx.y1, (y + 1) / h) }
     }
   }
-  return { shares: counts.map((c) => (total ? c / total : 0)), chroma: chromaSum.map((c, i) => (counts[i] ? c / counts[i] : 0)), total }
+  return { shares: counts.map((c) => (total ? c / total : 0)), chroma: chromaSum.map((c, i) => (counts[i] ? c / counts[i] : 0)), total, edgy: edgyCount.map((c, i) => (counts[i] ? c / counts[i] : 0)), boxes }
 }
 
 export async function checkExtraObjects(input: {
@@ -91,7 +112,7 @@ export async function checkExtraObjects(input: {
   // The brand palette explains hues too, but only the SMALL ones it names that a wall/table does not already cover;
   // palette colours are therefore not treated as "known" (a navy brand wall would otherwise hide a blue cable).
   const box = input.productBox
-  const { shares, chroma } = await hueShares(input.generated, floor, (x, y, w, h) => {
+  const { shares, chroma, edgy, boxes } = await hueShares(input.generated, floor, (x, y, w, h) => {
     const fy = y / h
     if (fy < 0.12 || fy > 0.88) return true // header / footer
     return Boolean(box && x / w >= box.x0 - 0.12 && x / w <= box.x1 + 0.12 && fy >= box.y0 - 0.12 && fy <= box.y1 + 0.12)
@@ -99,6 +120,7 @@ export async function checkExtraObjects(input: {
   // The surface (wall / table) is judged on the WHOLE picture (less the header / footer), not only outside the product box.
   const whole = await hueShares(input.generated, floor, (_x, y, _w, h) => y / h < 0.12 || y / h > 0.88)
   const clusters: ExtraObjectsFinding['clusters'] = []
+  const glows: string[] = []
   // A hue FAMILY (the bin and its neighbours, any lightness) that covers > 10 % of the picture — in the scanned area or in the whole picture — is a surface
   // (wall / table / floor). Its highlights and shadows (other lightness classes) are shading, not objects; only a colour clearly MORE saturated than the
   // surface of its family (a bright blue cable on a navy wall: ~1.5x) can still be an object.
@@ -117,12 +139,23 @@ export async function checkExtraObjects(input: {
     const surfaceShare = Math.max(fr.share, fw.share)
     const surfaceChroma = fw.share >= fr.share ? fw.chroma : fr.chroma
     if (surfaceShare > 0.1 && chroma[idx] < surfaceChroma * 1.3) continue
-    clusters.push({ hue: HUE_NAMES[bin], share: Math.round(share * 1000) / 10 })
+    // Lighting, not a prop: a LIGHT region whose pixels are almost never near a hard edge is a soft glow (window sun, lamp halo, bloom).
+    // …or a LIGHT region in the upper half that runs into the left / right frame edge: the window / lamp light of the set (a prop sits on the table, lower down).
+    const bb = boxes[idx]
+    // (also a small plant / lit curtain hugging a side edge in the upper half: set dressing, never a loose prop; a long thin cable spans the picture so its box is large and does not qualify)
+    const edgeSet = Boolean(bb && (bb.y0 + bb.y1) / 2 <= 0.45 && (bb.x1 - bb.x0) * (bb.y1 - bb.y0) <= 0.12 && (bb.x0 < 0.03 || bb.x1 > 0.97))
+    const edgeLight = Boolean(bb && idx % LCLASS === 2 && (bb.y0 + bb.y1) / 2 <= 0.42 && (bb.x0 < 0.03 || bb.x1 > 0.97)) || edgeSet
+    if ((idx % LCLASS === 2 && edgy[idx] < 0.12) || edgeLight) { glows.push(`${HUE_NAMES[bin]} (${Math.round(share * 1000) / 10}%)`); continue }
+    clusters.push({ hue: HUE_NAMES[bin], share: Math.round(share * 1000) / 10, ...(boxes[idx] ? { box: boxes[idx]! } : {}) })
   }
   // merge neighbouring bins that name the same colour (and lightness classes of the same hue)
-  const byHue = new Map<string, number>()
-  for (const c of clusters) byHue.set(c.hue, Math.round(((byHue.get(c.hue) ?? 0) + c.share) * 10) / 10)
-  const merged = [...byHue.entries()].map(([hue, share]) => ({ hue, share }))
+  const byHue = new Map<string, { share: number; box?: NormalizedProductBox }>()
+  for (const c of clusters) {
+    const cur = byHue.get(c.hue)
+    const box = cur?.box && c.box ? { x0: Math.min(cur.box.x0, c.box.x0), y0: Math.min(cur.box.y0, c.box.y0), x1: Math.max(cur.box.x1, c.box.x1), y1: Math.max(cur.box.y1, c.box.y1) } : cur?.box ?? c.box
+    byHue.set(c.hue, { share: Math.round(((cur?.share ?? 0) + c.share) * 10) / 10, ...(box ? { box } : {}) })
+  }
+  const merged = [...byHue.entries()].map(([hue, v]) => ({ hue, share: v.share, ...(v.box ? { box: v.box } : {}) }))
   const budget = input.allowedCount
   const suspected = merged.length > budget
   return {
@@ -130,6 +163,7 @@ export async function checkExtraObjects(input: {
     count: merged.length,
     budget,
     clusters: merged,
+    ...(glows.length ? { ignoredGlows: glows } : {}),
     note: suspected
       ? `colour(s) ${merged.map((c) => `${c.hue} (${c.share}%)`).join(', ')} appear next to the product but in no reference photo, logo or brand palette: a prop may have been invented (heuristic; grey/white objects are not detected)`
       : 'no unexplained colours next to the product (heuristic)',

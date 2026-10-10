@@ -173,10 +173,11 @@ describe('round 5b: logo + CTA composited in code over the scene Grok draws (rou
 describe('round 5b: the MCP prompt tells Grok NOT to draw the logo or any button, and to keep the bands free', () => {
   it('compositeLayers rules: free top 10% / bottom 12%, no logo / no button, no CTA block in the layout cap; the legacy rules are unchanged without the flag', () => {
     const on = buildMcpPromptRules('es', { requestedRatio: '4:5', ctaText: CTA, layoutCap: true, compositeLayers: true }, { hasProductRefs: true })
-    expect(on).toContain('el 18% superior y el 16% inferior')
+    expect(on).toContain('SIN FRANJAS')
+    expect(on).toContain('el 18% superior ni en el 16% inferior')
     expect(on).toContain('SOLO ESCENA')
     expect(on).toContain('NINGÚN logo')
-    expect(on).toContain('LIBRES')
+    expect(on).toContain('CALMO')
     expect(on).not.toContain('UN CTA')
     expect(on).not.toContain('UN SOLO CTA')
     expect(on).not.toContain(CTA) // the CTA text is not given to the image model at all

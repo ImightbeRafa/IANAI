@@ -37,6 +37,19 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.20.0 — natural full-bleed scene (no strips), text never over the product, severity factors, `exact` with the same layers, `productNotes`
+
+Registry / server version **0.20.0**. **No migration**, no new env/secret/binding/route/cron, no new dependency, no new font file. Proofs: `test/round7.spec.ts` (seam detect/blend on the round-6 raw scenes, make-room, CTA slot, scrim, glow, severity factors + autoRetry selection, productNotes), `test/round4-mcp.spec.ts` (exact), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- **Prompt (MCP path only):** "SIN FRANJAS": a natural full-bleed scene, calm continuous background where the headline goes, product and objects in the lower 60–65 %, FORBIDDEN bars / strips / flat bands / letterbox. The old "keep the top and bottom bands empty" wording (which made Grok paint flat navy / cream blocks) is gone.
+- **Seams (`api/lib/mcp/scene-prep.ts`):** `detectSeams` finds flat uniform strips at the top / bottom (flat, ≥ 3 % and ≤ 28 % of the height, colour step across the boundary); `blendSeams` continues the scene into them (column-averaged continuation + progressive blur + grain + cross-fade, no mirror, no flat block). Result in `qa.seams` and `scenePrep.seams`; a strip that survives is a `fail`.
+- **Text never over the product (`api/lib/mcp/compose-scene.ts`):** when the text would sit on the product or shrink below 80 %, the picture is moved down by extending the background above it (`shiftSceneDown`, edge-matched blur-extension, ≤ 20 % of the height, never into the bottom edge). If that is not feasible, `qa.textOverProduct` / `qa.textScale` say so (never silent) and they count in the retry severity.
+- **Severity factors** (`qa.severityFactors`): seam 3 per strip that survives the blend (a strip blended away costs nothing), textOverProduct 4, text scale < 75 % 3 (< 80 % 1.5), fidelity < 0.75 → 4, props 2 + 1 per unlisted object, CTA on a seam 1. `autoRetry` regenerates once with a corrective hint when severity > 0 and keeps the lower-severity image (tie → first); single charge.
+- **Fidelity:** a hero-product score < 0.75 raises severity and triggers the one retry. If it survives, the result carries `suggestedFallback: { productFidelity: "exact" }` (it is **not** run automatically: it is a second paid generation). `productFidelity:"exact"` now runs the same `prepareAndLayout` layers (code headline / price / facts / CTA / logo, seams, make-room) over the real-pixel product.
+- **Lock text:** exact wing shape, no extra flaps / tabs, "colour and material of every part as in the reference photo" (generic, nothing hardcoded per product); optional `productNotes` (≤ 400 chars) appended to the lock and echoed in the args.
+- **CTA slot / scrim:** the slot avoids hard horizontal edges (`cta.seam`), prefers the fewest object pixels, avoids located props; scrims start at alpha 0.08 and only grow as far as the contrast need (≥ 4.5:1) requires (light scenes get a light veil).
+- **Props:** the soft yellow window glow and plants hugging a side edge are lighting / set dressing (`ignoredGlows`); the round-5c blue USB cable and the unlisted TOPGT box are still flagged.
+
 ### 0.19.0 — scene-only generation + ALL text composited in code, no scale-in by default, props check, `qa.status` tiers
 
 Registry / server version **0.19.0**. **No migration**, no new env/secret/binding/route/cron, no new dependency, **no new font files** (the layout reuses the adpack fonts already copied to `dist-api/lib/adpack/render/fonts`). Proofs: `test/round6-layout.spec.ts`, `test/mcp-web-image-flow.spec.ts` (round 5b/6 blocks), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -232,7 +245,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.19.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.20.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

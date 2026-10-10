@@ -1,3 +1,13 @@
+## 2026-10-09 — MCP 0.20.0: natural full-bleed scene (no letterbox strips), text never over the product, severity factors, exact with code layers, productNotes
+
+**Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file
+**Files:** `api/lib/mcp/{scene-prep,compose-scene}.ts` (new), `api/lib/mcp/{layout-ad,composite-ad,exact-flow,extra-objects,image-postcheck,web-image,execute-tools,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (MCP rules only), `test/round7.spec.ts`
+
+- Prompt asks for a natural full-bleed scene, calm continuous top, product in the lower 60–65 %, no bars / strips; seam detector + code blend (`qa.seams`); make-room shift so text never lands on the product; text < 80 % is always a warning.
+- `qa.severityFactors` (seam, textOverProduct, text scale, fidelity < 0.75, props, CTA seam) drive `autoRetry` (keeps the lower severity, single charge, max one retry); `suggestedFallback: exact` when fidelity stays < 0.75; exact uses the same layers.
+- CTA avoids seams / busy slots, lighter scrims on light scenes; window glow no longer a prop; optional `productNotes`.
+- Web request unchanged (`test/web-mcp-parity.spec.ts` green).
+
 ## 2026-10-09 — MCP 0.19.0: scene-only generation, all ad text composited in code, no scale-in by default, props check, qa.status tiers
 
 **Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file

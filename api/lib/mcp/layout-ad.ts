@@ -12,7 +12,7 @@
  */
 import sharp from 'sharp'
 import satori from 'satori'
-import { blend, contrastFromLuminance, INK, luminance, parseColor, toHex, WHITE, type Rgb } from '../adpack/render/color.js'
+import { blend, contrastFromLuminance, contrastRatio, ensureReadableFill, INK, luminance, parseColor, toHex, WHITE, type Rgb } from '../adpack/render/color.js'
 import { cssFamily, resolveFonts, satoriFonts } from '../adpack/render/fonts.js'
 import { fitText } from '../adpack/render/text.js'
 import { edgeMap, rasterize, renderCtaPill, type Box, type CompositeInput, type CompositeReport } from './composite-ad.js'
@@ -48,6 +48,12 @@ export type AdLayoutReport = CompositeReport & {
     productSource: 'located' | 'edge_density' | 'located+edge_density' | 'none'
     scrim: { tone: string; alpha: number; box: Box } | null
     lowContrast: boolean
+    /** Where the objects start / end (fractions of the height) and the height the text stack needs at nominal size: lets the caller make room instead of shrinking. */
+    objects?: { top: number | null; bottom: number | null }
+    nominalStackPx?: number
+    /** Height of the text stack at 88 % of the nominal size (what `make room` aims for). */
+    okStackPx?: number
+    textTopPx?: number
   }
   layout: {
     elements: LayoutElement[]
@@ -165,7 +171,19 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
 
   // ---- 2. where the objects are: located product box + edge-density rows (props, boxes, packaging) ------------------------
   const objBoxes: Array<{ y0: number; y1: number }> = []
-  const located = (input.avoid ?? []).map((r) => ({ y0: Math.round(r.y0 * H), y1: Math.round(r.y1 * H) }))
+  // A located box projected from a reference photo often overshoots (white margins of the photo, perspective): trim each side inward while the strip
+  // along it is calm (no edges) so the text corridor is judged on where the object really is. Never trims below 12 % of the picture's height.
+  const tighten = (r: NBox): NBox => {
+    const t = { ...r }
+    const strip = (y0: number, y1: number) => busy({ x: t.x0 * W, y: y0 * H, w: Math.max(1, (t.x1 - t.x0) * W), h: Math.max(1, (y1 - y0) * H) })
+    const stepH = 0.01
+    const calm = (v: number) => v < 0.045
+    for (let n = 0; n < 60 && t.y1 - t.y0 > 0.12; n++) { if (calm(strip(t.y0, t.y0 + stepH)) && calm(strip(t.y0 + stepH, t.y0 + 2 * stepH))) t.y0 += stepH; else break }
+    for (let n = 0; n < 60 && t.y1 - t.y0 > 0.12; n++) { if (calm(strip(t.y1 - stepH, t.y1)) && calm(strip(t.y1 - 2 * stepH, t.y1 - stepH))) t.y1 -= stepH; else break }
+    return t
+  }
+  const avoidBoxes: NBox[] = (input.avoid ?? []).map(tighten)
+  const located = avoidBoxes.map((r) => ({ y0: Math.round(r.y0 * H), y1: Math.round(r.y1 * H) }))
   objBoxes.push(...located)
   const rowsN = 100
   const rows: number[] = []
@@ -202,6 +220,11 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
     const total = out.reduce((a, f) => a + f.h, 0) + Math.max(0, out.length - 1) * gap
     return { fits: out, total, ok }
   }
+  const nominal = specs.length ? fitAll(1) : null
+  report.text.nominalStackPx = nominal ? Math.round(nominal.total) : 0
+  report.text.okStackPx = specs.length ? Math.round(fitAll(0.88).total) : 0
+  report.text.textTopPx = textTop
+  report.text.objects = { top: objTop != null ? Math.round((objTop / H) * 1000) / 1000 : null, bottom: objBottom != null ? Math.round((objBottom / H) * 1000) / 1000 : null }
   const SCALES = [1, 0.94, 0.88, 0.82, 0.76, 0.7, 0.64, 0.58]
   const pick = (avail: number) => {
     for (const s of SCALES) { const r = fitAll(s); if (r.ok && r.total <= avail) return { ...r, scale: s } }
@@ -248,8 +271,9 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
       const tone = useWhite ? blend({ r: 0, g: 0, b: 0 }, 0.7, st.mean) : blend(WHITE, 0.78, st.mean)
       const textRgb = useWhite ? WHITE : INK
       const lt = luminance(tone)
-      let alpha = 0.3
-      for (; alpha <= 0.86; alpha += 0.06) {
+      // Round 7: the scrim is only as strong as the contrast needs (a light scene gets a light veil), never a fixed 0.3 floor
+      let alpha = 0.08
+      for (; alpha <= 0.86; alpha += 0.04) {
         // blended luminance ≈ linear mix of the scrim tone and the picture (reported contrast keeps a 0.1 margin over 4.5)
         const lo2 = lt * alpha + st.lo * (1 - alpha), hi2 = lt * alpha + st.hi * (1 - alpha)
         if (worstContrast(luminance(textRgb), lo2, hi2) >= 4.6) break
@@ -287,6 +311,7 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
     report.text = {
       drawn: true, corridor: placed.corridor, scale: placed.scale, fits: tightBoxes.every((e) => e.fits !== false), textOverProduct: placed.corridor === 'over_product',
       productSource: report.text.productSource, scrim, lowContrast: tightBoxes.some((e) => (e.contrast ?? 0) < 4.5),
+      objects: report.text.objects, nominalStackPx: report.text.nominalStackPx, okStackPx: report.text.okStackPx, textTopPx: report.text.textTopPx,
     }
   }
 
@@ -295,40 +320,70 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
   if (cta) {
     const around = lumaStats(raw, W, H, { x: 0, y: H * (1 - m.bottom - 0.12), w: W, h: H * 0.12 + H * m.bottom })
     const dark = blend({ r: 0, g: 0, b: 0 }, 0.62, around.mean)
-    const maxAlpha = luminance(around.mean) > 0.55 ? 0.42 : 0.6
+    // Round 7: scrim strength follows the need. A pill already stands off the picture through its own fill; the scrim only has to give it ≥ 1.8:1 against what is
+    // behind it, so a light scene gets a light veil (≈ 0.1) and a dark one a stronger one. Never a fixed 0.42 / 0.6.
+    const lightScene = luminance(around.mean) > 0.55
+    const alphaCap = lightScene ? 0.3 : 0.6
+    const palFill = [input.palette?.accent, input.palette?.primary, input.palette?.secondary].map((c) => parseColor(c)).filter((c): c is Rgb => Boolean(c)).map((c) => ensureReadableFill(c))
+    const fillOptions = [...palFill, WHITE, INK]
+    let maxAlpha = alphaCap
+    for (let a = 0.08; a <= alphaCap + 1e-9; a += 0.04) {
+      const mean = blend(dark, a, around.mean)
+      if (fillOptions.some((c) => contrastRatio(c, mean) >= 1.8)) { maxAlpha = Math.round(a * 100) / 100; break }
+    }
     const zoneTop = Math.round(H * (1 - m.bottom - 0.22))
     const scrimSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${toHex(dark)}" stop-opacity="0"/><stop offset="0.45" stop-color="${toHex(dark)}" stop-opacity="${maxAlpha * 0.8}"/><stop offset="1" stop-color="${toHex(dark)}" stop-opacity="${maxAlpha}"/></linearGradient></defs><rect x="0" y="${zoneTop}" width="${W}" height="${H - zoneTop}" fill="url(#s)"/></svg>`
     layers.push({ input: rasterize(scrimSvg), left: 0, top: 0 })
     report.scrim = { color: toHex(dark), maxAlpha }
     const scrimMean = blend(dark, maxAlpha, around.mean)
     const pill = await renderCtaPill({ text: cta, btnH, W, scrimMean, palette: input.palette, fonts: input.fonts })
-    const by = ctaTop
     const btnW = pill.btnW
+    const textBottom = elements.length ? Math.max(...elements.map((e) => e.box.y + e.box.h)) : 0
+    // candidate rows: the usual one and two steps up (still inside the safe zone and ≥ gap under the text)
+    const rowsY = [ctaTop, ctaTop - Math.round(H * 0.025), ctaTop - Math.round(H * 0.05)].filter((y) => y >= textBottom + gap)
+    if (!rowsY.length) rowsY.push(ctaTop)
     const slots: Array<['center' | 'left' | 'right', number]> = [['center', Math.round((W - btnW) / 2)], ['left', sideX], ['right', W - sideX - btnW]]
-    const overlapOf = (x: number) => {
+    const overlapOf = (x: number, by: number) => {
       let o = 0
-      for (const r of input.avoid ?? []) {
+      for (const r of avoidBoxes) {
         const ix = Math.max(0, Math.min((x + btnW) / W, r.x1) - Math.max(x / W, r.x0))
         const iy = Math.max(0, Math.min((by + btnH) / H, r.y1) - Math.max(by / H, r.y0))
         o = Math.max(o, (ix * iy) / ((btnW / W) * (btnH / H)))
       }
       return o
     }
-    let sel = { slot: slots[0][0], x: slots[0][1], busyness: 1, score: Infinity }
-    const bandBg = medianColor(raw, W, H, by - btnH * 0.5, by + btnH * 1.6)
-    for (const [slot, x] of slots) {
-      const b = busy({ x: x - W * 0.01, y: by - H * 0.006, w: btnW + W * 0.02, h: btnH + H * 0.012 })
-      const dev = deviation(raw, W, H, { x: x - W * 0.01, y: by - H * 0.006, w: btnW + W * 0.02, h: btnH + H * 0.012 }, bandBg)
-      const score = b + 1.2 * dev + 3 * overlapOf(x)
-      if (score < sel.score - 0.004) sel = { slot, x, busyness: b, score }
+    // a hard full-width-ish horizontal step under the pill (table edge, band seam) makes it "straddle" two backgrounds
+    const lumaAt = (x: number, y: number) => { const i = (Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))) * 3; return 0.299 * raw[i] + 0.587 * raw[i + 1] + 0.114 * raw[i + 2] }
+    const seamUnder = (x: number, by: number): boolean => {
+      const stepY = Math.max(2, Math.round(H * 0.004))
+      for (let y = by - Math.round(btnH * 0.4); y <= by + btnH * 1.4; y += 2) {
+        let hits = 0, tot = 0
+        for (let xx = x; xx < x + btnW; xx += 6) { tot++; if (Math.abs(lumaAt(xx, y + stepY) - lumaAt(xx, y)) > 16) hits++ }
+        if (tot && hits / tot > 0.55) return true
+      }
+      return false
     }
+    let sel = { slot: slots[0][0], x: slots[0][1], by: rowsY[0], busyness: 1, score: Infinity, seam: false }
+    for (const by of rowsY) {
+      const bandBg = medianColor(raw, W, H, by - btnH * 0.5, by + btnH * 1.6)
+      for (const [slot, x] of slots) {
+        const win = { x: x - W * 0.01, y: by - H * 0.006, w: btnW + W * 0.02, h: btnH + H * 0.012 }
+        const b = busy(win)
+        // fewest object pixels: share of pixels far from the band's background colour (flat black objects, cables, props the edge map misses)
+        const dev = deviation(raw, W, H, win, bandBg)
+        const seam = seamUnder(x, by)
+        const score = b + 2 * dev + 3 * overlapOf(x, by) + (seam ? 1.5 : 0) + (by === ctaTop ? 0 : 0.01)
+        if (score < sel.score - 0.004) sel = { slot, x, by, busyness: b, score, seam }
+      }
+    }
+    const by = sel.by
     ctaBox = { x: sel.x, y: by, w: btnW, h: btnH }
     const shadow = await sharp({ create: { width: btnW, height: btnH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.35 } } })
       .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${btnW}" height="${btnH}"><rect width="${btnW}" height="${btnH}" rx="${Math.round(btnH * 0.3)}" fill="#fff"/></svg>`), blend: 'dest-in' }])
       .blur(Math.max(2, btnH * 0.1)).png().toBuffer()
     layers.push({ input: shadow, left: sel.x, top: by + Math.round(btnH * 0.08) })
     layers.push({ input: pill.png, left: sel.x, top: by })
-    report.cta = { status: 'drawn', text: cta, box: ctaBox, fill: toHex(pill.fill), textColor: toHex(pill.ink), contrast: Math.round(contrastFromLuminance(luminance(pill.fill), luminance(pill.ink)) * 100) / 100, fontSize: pill.fontSize, fits: pill.fits, slot: sel.slot, busyness: Math.round(sel.busyness * 1000) / 1000, busy: sel.score > 0.08 }
+    report.cta = { status: 'drawn', text: cta, box: ctaBox, fill: toHex(pill.fill), textColor: toHex(pill.ink), contrast: Math.round(contrastFromLuminance(luminance(pill.fill), luminance(pill.ink)) * 100) / 100, fontSize: pill.fontSize, fits: pill.fits, slot: sel.slot, busyness: Math.round(sel.busyness * 1000) / 1000, busy: sel.score > 0.08, ...(sel.seam ? { seam: true } : {}) }
     elements.push({ id: 'cta', role: 'cta', box: ctaBox, text: cta, fontSize: pill.fontSize, color: toHex(pill.ink), contrast: report.cta.contrast, fits: pill.fits })
   }
 

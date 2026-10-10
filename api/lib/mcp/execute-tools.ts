@@ -305,6 +305,7 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   layoutCap?: boolean
   enforceSafeZones?: boolean
   compositeLayers?: boolean
+  productNotes?: string
 } {
   const out: ReturnType<typeof parseWebPostArgs> = {}
   const copy = optionalTrimmedString(args.copy ?? args.scriptText, 1200)
@@ -326,6 +327,8 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
     if (attrs.length) out.immutableAttributes = attrs
   }
   if (args.lockProductAppearance === true) out.lockProductAppearance = true
+  const productNotes = optionalTrimmedString(args.productNotes, 400)
+  if (productNotes) out.productNotes = productNotes
   // Always echoed (boundInput / executeArguments) so the caller sees the value that is actually applied, defaults included.
   out.autoRetry = args.autoRetry === true
   out.layoutCap = args.layoutCap !== false
@@ -841,6 +844,7 @@ async function runImageGenerateBody(options: {
   layoutCap?: boolean
   enforceSafeZones?: boolean
   compositeLayers?: boolean
+  productNotes?: string
 }): Promise<Record<string, unknown>> {
   const imageStarted = Date.now()
   const imageGenerationId = generationIdFromApproval(options.approvalRequestId, 'image')
@@ -903,7 +907,7 @@ async function runImageGenerateBody(options: {
         styleNotes: kit?.visualStyleNotes || undefined,
         palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
         allowedProps: options.allowedProps,
-        ...(options.immutableAttributes?.length ? { immutableAttributes: options.immutableAttributes } : {}),
+        ...(options.immutableAttributes?.length || options.productNotes ? { immutableAttributes: [...(options.immutableAttributes ?? []), ...(options.productNotes ? [options.productNotes] : [])] } : {}),
         ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
       },
       ctx: options.ctxPreview,
@@ -932,6 +936,7 @@ async function runImageGenerateBody(options: {
       copyOnImage: exactAd.copyOnImage,
       ...(exactAd.copyOverflow.length ? { copyOverflow: exactAd.copyOverflow } : {}),
       exactLayout: exactAd.layout,
+      compositeLayers: exactAd.compositeLayers,
       ...(exactAd.warnings.length ? { exactWarnings: exactAd.warnings } : {}),
       ...(exactAd.providerRetries ? { providerRetries: exactAd.providerRetries } : {}),
       accessories: 'not composited in exact mode (real box / controller photos are only used by productFidelity "generated")',
@@ -994,6 +999,7 @@ async function runImageGenerateBody(options: {
       layoutCap: options.layoutCap,
       enforceSafeZones: options.enforceSafeZones,
       compositeLayers: options.compositeLayers,
+      ...(options.productNotes ? { productNotes: options.productNotes } : {}),
     })
     generated = web.generated
     promptUsed = web.prompt

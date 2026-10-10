@@ -465,7 +465,8 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     const prompt = String(xai[0].body.prompt)
     expect(prompt).toContain('SOLO ESCENA')
     expect(prompt).toContain('NINGÚN logo')
-    expect(prompt).toContain('el 18% superior y el 16% inferior')
+    expect(prompt).toContain('SIN FRANJAS')
+    expect(prompt).toContain('el 18% superior ni en el 16% inferior')
     expect(prompt).not.toContain('Escribinos por DM') // the CTA text is for the compositor only
     expect(prompt).not.toContain('El plan de sábado') // round 6: the headline is not given to the image model either
     // references: hero + accessory + kit ref (the logo is not sent: the model would redraw it)

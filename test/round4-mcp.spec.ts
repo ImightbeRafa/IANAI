@@ -171,7 +171,7 @@ describe('exact mode renders the SAME ad layers (copy, one CTA, logo) + QA + hal
 
   it('draws the copy with ONE CTA over the real-pixel composite, runs QA, moves overflow to the caption; fails nothing', async () => {
     const out = await generateExactWebStyleAd({ exact: {} as never, ctx, offerId: 'o1', copy, ratio: '4:5', language: 'es', exactRunner: async () => fakeExact(0) })
-    expect(out.imageDataUrl.startsWith('data:image/png;base64,')).toBe(true)
+    expect(out.imageDataUrl.startsWith('data:image/jpeg;base64,')).toBe(true)
     expect(out.copyOnImage).toMatchObject({ headline: 'Un regalo que armás con papel', offerLine: '₡14.900', cta: 'Escribinos por DM' })
     expect(out.copyOverflow).toEqual(['Envío gratis llevando 2 kits o más'])
     expect(out.qa.textPresent).toBe('yes')
@@ -182,8 +182,8 @@ describe('exact mode renders the SAME ad layers (copy, one CTA, logo) + QA + hal
     expect(out.fidelity).toMatchObject({ score: 0.965 })
     // the text layer really changed the image (not the bare plate+product)
     const bare = await (await fakeExact(0) as Extract<ExactImageResult, { ok: true }>).png
-    const a = await sharp(bare).resize(120, 150).raw().toBuffer()
-    const b = await sharp(Buffer.from(out.imageDataUrl.split(',')[1], 'base64')).resize(120, 150).raw().toBuffer()
+    const a = await sharp(bare).removeAlpha().resize(120, 150).raw().toBuffer()
+    const b = await sharp(Buffer.from(out.imageDataUrl.split(',')[1], 'base64')).removeAlpha().resize(120, 150).raw().toBuffer()
     let diff = 0
     for (let i = 0; i < a.length; i++) diff += Math.abs(a[i] - b[i])
     expect(diff / a.length).toBeGreaterThan(1)
@@ -215,7 +215,7 @@ describe('server info (version visible in a tool response)', () => {
   it('reports the MCP version, build commit when known, and the feature list', () => {
     const info = buildServerInfo({ commit: 'abc1234' })
     expect(info.version).toBe(MCP_VERSION)
-    expect(info.version).toBe('0.19.0')
+    expect(info.version).toBe('0.20.0')
     expect(info.commit).toBe('abc1234')
     expect(info.features).toEqual(expect.arrayContaining(['generated_web_flow', 'exact_with_text_logo_qa', 'auto_retry_keep_better', 'provider_retry_backoff']))
     expect(MCP_SERVER_INFO.name).toBeTruthy()

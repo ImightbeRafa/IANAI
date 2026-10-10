@@ -35,7 +35,7 @@ export type CompositeReport = {
   width: number
   height: number
   logo: { status: 'drawn' | 'unavailable' | 'not_requested'; reason?: string; box?: Box; contrast?: number; glow?: boolean }
-  cta: { status: 'drawn' | 'none'; text?: string; box?: Box; fill?: string; textColor?: string; contrast?: number; fontSize?: number; fits?: boolean; slot?: 'center' | 'left' | 'right'; /** Local busyness (0–1 share of edge pixels) under the pill. */ busyness?: number; /** true when even the calmest slot is busy or overlaps the product. */ busy?: boolean }
+  cta: { status: 'drawn' | 'none'; text?: string; box?: Box; fill?: string; textColor?: string; contrast?: number; fontSize?: number; fits?: boolean; slot?: 'center' | 'left' | 'right'; /** Local busyness (0–1 share of edge pixels) under the pill. */ busyness?: number; /** true when even the calmest slot is busy or overlaps the product. */ busy?: boolean; /** true when even the best slot straddles a hard horizontal edge (table edge / band seam). */ seam?: boolean }
   scrim: { color: string; maxAlpha: number } | null
   /** Band fractions the layers were placed inside. */
   zones: { top: number; bottom: number }

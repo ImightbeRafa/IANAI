@@ -366,9 +366,9 @@ describe('POST /api/ad-pack', () => {
 })
 
 describe('MCP adpack_* tools', () => {
-  it('registers the new tools at 0.19.0 and keeps existing ones', async () => {
-    expect(MCP_REGISTRY_VERSION).toBe('0.19.0')
-    expect(MCP_SERVER_INFO.version).toBe('0.19.0')
+  it('registers the new tools at 0.20.0 and keeps existing ones', async () => {
+    expect(MCP_REGISTRY_VERSION).toBe('0.20.0')
+    expect(MCP_SERVER_INFO.version).toBe('0.20.0')
     expect(getMcpTool('adpack_start')).toMatchObject({ risk: 'execute', requiresApproval: true, consumesAdvanceCredits: true })
     expect(getMcpTool('adpack_regenerate')).toMatchObject({ risk: 'execute', requiresApproval: true, consumesAdvanceCredits: true })
     expect(getMcpTool('adpack_dna_ingest')).toMatchObject({ risk: 'guide', requiresApproval: false, consumesAdvanceCredits: false })
