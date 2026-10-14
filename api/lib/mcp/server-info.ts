@@ -3,7 +3,7 @@
  * `get_server_info` tool and the `serverVersion` field of every execute result expose the same data inside a tool
  * response (free, read-only, no side effects) so a client can tell which build answered.
  */
-export const MCP_VERSION = '0.20.0'
+export const MCP_VERSION = '0.21.0'
 
 export const MCP_SERVER_INFO = {
   name: 'advance-ai',
@@ -40,6 +40,18 @@ export const MCP_FEATURES = [
   'severity_factors_retry',
   'product_notes_input',
   'exact_uses_code_layout',
+  'scale_in_never_with_composite',
+  'seam_blend_refuses_detailed_content',
+  'generic_product_lock',
+  'claims_filter_removed_claims',
+  'logo_icon_warning',
+  'strips_crop_and_zoom',
+  'cta_never_over_product_room_below',
+  'cta_count_from_compositor_only',
+  'scene_edges_not_fail_triggers',
+  'fidelity_view_change_tolerant_for_box_photos',
+  'logo_scrim_below_4_5',
+  'shipping_line_kept_when_room',
 ] as const
 
 declare const __ADVANCE_BUILD_COMMIT__: string | undefined

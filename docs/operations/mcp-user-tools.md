@@ -37,6 +37,17 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.21.0 — scale-in never with `compositeLayers`, seam blend refusal, generic product lock, forbidden-claims filter, favicon-logo warning
+
+Registry / server version **0.21.0**. **No migration**, no new env/secret/binding/route/cron, no new dependency, no new font file. Proofs: `test/round8.spec.ts` (Sleeping Patches scene reconstructed from Content's post, round-7 scenes A/B, mock xAI), `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- `enforceSafeZones`: default false everywhere; **ignored** with `compositeLayers` (no scale-in, no frame, a warning in `qa.warnings`); only `compositeLayers:false` + explicit `true` scales a picture in. A flat dark block (nightstand, drawer front, floor) is not a CTA block.
+- `qa.seamBlendSkipped`: a flat strip next to detailed content (art, objects touching it) is left as it is and flagged (regenerate); calm strips are blended with the surface texture carried over.
+- Text over product: a flat dark product on a dark wall is now located (the located box is only trimmed where it matches the background); the make-room shift never pushes the objects onto the CTA.
+- Product lock: plane wording only for plane-like products (name / type / description / specs / `productNotes`); otherwise the generic lock.
+- `qa.removedClaims` / `removedClaims`: kit `forbiddenPhrases` + built-in regulated claims are dropped from the offer text, guide prompt and the copy before the prompt and the compositor see them.
+- `qa.logoLooksLikeIcon`: nearly square (0.85–1.15) and < 256 px, or a favicon / app-icon URL: warning, still placed.
+
 ### 0.20.0 — natural full-bleed scene (no strips), text never over the product, severity factors, `exact` with the same layers, `productNotes`
 
 Registry / server version **0.20.0**. **No migration**, no new env/secret/binding/route/cron, no new dependency, no new font file. Proofs: `test/round7.spec.ts` (seam detect/blend on the round-6 raw scenes, make-room, CTA slot, scrim, glow, severity factors + autoRetry selection, productNotes), `test/round4-mcp.spec.ts` (exact), `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -245,7 +256,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.20.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.21.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`
@@ -272,3 +283,6 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 - `get_brand_context` returns richer kit + `latestGuideIntake`
 - Deep link: `/chat?brand=<id>&intake=<id>`
 - No Advance credits
+
+#### 0.21.0 round 8b additions
+Strips are cropped-and-zoomed when possible; the CTA is never drawn over the product or an accessory (narrower pill → picture moved up → CTA omitted + `qa.ctaBlocked`); `qa.ctaButtons` counts the compositor pill only; scene-derived band findings are warnings; logo scrim below 4.5:1; box/contents photos tolerate view changes in the fidelity check; shipping line preferred on the image.

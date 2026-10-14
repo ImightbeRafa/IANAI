@@ -112,10 +112,10 @@ describe('accessory references (MCP only) and the plane lock', () => {
     expect(pickAccessoryPhotos(assets, { excludeIds: [], lockText: 'caja TOPGT real; control gamepad', onlyMatching: true }).map((a) => a.id)).toEqual(['b', 'c'])
   })
   it('the prompt says: do not add or remove wings, fins, flaps or parts; accessories keep their relative size', () => {
-    const es = buildMcpPromptRules('es', { strict: true, requestedRatio: '4:5', accessoryLabels: ['caja', 'control'] }, { hasProductRefs: true })
+    const es = buildMcpPromptRules('es', { strict: true, requestedRatio: '4:5', accessoryLabels: ['caja', 'control'], productKind: 'plane' }, { hasProductRefs: true })
     expect(es).toMatch(/No agregues ni quites alas, aletas, solapas, pestañas ni piezas/)
     expect(es).toMatch(/tamaño relativo/)
-    const en = buildMcpPromptRules('en', { strict: true, requestedRatio: '4:5' }, { hasProductRefs: true })
+    const en = buildMcpPromptRules('en', { strict: true, requestedRatio: '4:5', productKind: 'plane' }, { hasProductRefs: true })
     expect(en).toMatch(/Do not add or remove wings, fins, flaps, tabs or parts/)
   })
 })

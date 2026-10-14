@@ -22,6 +22,9 @@ import { safeZoneMargins } from './safe-zones.js'
 export type AdBlocks = { headline?: string; price?: string; facts?: string[]; cta?: string }
 
 /** Split the capped copy into the blocks the layout knows: headline, ONE price line, facts lines, the CTA (exact text). */
+/** Round 8: share of the pixels under the pill that differ strongly from the band background above which the pill would sit ON an object (an unlocated controller, a cable): wood grain / foliage stay under ~0.05, a dark controller on a light table is ~0.9. */
+export const OBJECT_UNDER_PILL = 0.12
+
 export function splitCopyBlocks(copy: string, ctaText?: string): AdBlocks {
   const lines = copy.split(/\r?\n/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean)
   const cta = ctaText?.replace(/\s+/g, ' ').trim()
@@ -176,10 +179,16 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
   const tighten = (r: NBox): NBox => {
     const t = { ...r }
     const strip = (y0: number, y1: number) => busy({ x: t.x0 * W, y: y0 * H, w: Math.max(1, (t.x1 - t.x0) * W), h: Math.max(1, (y1 - y0) * H) })
+    // Round 8: only PADDING is trimmed: a calm strip that also looks like the background right outside the box (colour within 30). A calm strip of a different colour
+    // is the product itself (the flat navy top of the Sleeping Patches pouch on a dark wall was trimmed away and the headline landed on it).
+    const colourOf = (y0: number, y1: number) => lumaStats(raw, W, H, { x: t.x0 * W, y: y0 * H, w: Math.max(1, (t.x1 - t.x0) * W), h: Math.max(2, (y1 - y0) * H) }).mean
+    const far = (a: Rgb, b: Rgb) => Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b) > 30
     const stepH = 0.01
     const calm = (v: number) => v < 0.045
-    for (let n = 0; n < 60 && t.y1 - t.y0 > 0.12; n++) { if (calm(strip(t.y0, t.y0 + stepH)) && calm(strip(t.y0 + stepH, t.y0 + 2 * stepH))) t.y0 += stepH; else break }
-    for (let n = 0; n < 60 && t.y1 - t.y0 > 0.12; n++) { if (calm(strip(t.y1 - stepH, t.y1)) && calm(strip(t.y1 - 2 * stepH, t.y1 - stepH))) t.y1 -= stepH; else break }
+    const bgAbove = colourOf(Math.max(0, t.y0 - 0.04), Math.max(0.005, t.y0))
+    const bgBelow = colourOf(Math.min(1 - 0.005, t.y1), Math.min(1, t.y1 + 0.04))
+    for (let n = 0; n < 60 && t.y1 - t.y0 > 0.12; n++) { if (calm(strip(t.y0, t.y0 + stepH)) && calm(strip(t.y0 + stepH, t.y0 + 2 * stepH)) && !far(colourOf(t.y0, t.y0 + stepH), bgAbove)) t.y0 += stepH; else break }
+    for (let n = 0; n < 60 && t.y1 - t.y0 > 0.12; n++) { if (calm(strip(t.y1 - stepH, t.y1)) && calm(strip(t.y1 - 2 * stepH, t.y1 - stepH)) && !far(colourOf(t.y1 - stepH, t.y1), bgBelow)) t.y1 -= stepH; else break }
     return t
   }
   const avoidBoxes: NBox[] = (input.avoid ?? []).map(tighten)
@@ -336,54 +345,75 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
     layers.push({ input: rasterize(scrimSvg), left: 0, top: 0 })
     report.scrim = { color: toHex(dark), maxAlpha }
     const scrimMean = blend(dark, maxAlpha, around.mean)
-    const pill = await renderCtaPill({ text: cta, btnH, W, scrimMean, palette: input.palette, fonts: input.fonts })
-    const btnW = pill.btnW
+    // Round 8: the pill is rendered at 100 %, 86 % and 74 % of its height: when every slot of the full-size pill covers the located product / an accessory (the controller
+    // on the table), a narrower pill may still fit beside it. Smaller steps carry a small penalty so the full size wins whenever it is free.
+    const pills: Array<{ pill: Awaited<ReturnType<typeof renderCtaPill>>; btnW: number; btnH: number; step: number }> = []
+    for (const [k, f] of [[0, 1], [1, 0.86], [2, 0.74]] as Array<[number, number]>) {
+      const h = Math.round(btnH * f)
+      const pl = await renderCtaPill({ text: cta, btnH: h, W, scrimMean, palette: input.palette, fonts: input.fonts })
+      pills.push({ pill: pl, btnW: pl.btnW, btnH: h, step: k })
+    }
     const textBottom = elements.length ? Math.max(...elements.map((e) => e.box.y + e.box.h)) : 0
     // candidate rows: the usual one and two steps up (still inside the safe zone and ≥ gap under the text)
     const rowsY = [ctaTop, ctaTop - Math.round(H * 0.025), ctaTop - Math.round(H * 0.05)].filter((y) => y >= textBottom + gap)
     if (!rowsY.length) rowsY.push(ctaTop)
-    const slots: Array<['center' | 'left' | 'right', number]> = [['center', Math.round((W - btnW) / 2)], ['left', sideX], ['right', W - sideX - btnW]]
-    const overlapOf = (x: number, by: number) => {
+    const overlapOf = (x: number, by: number, bw: number, bh: number) => {
       let o = 0
       for (const r of avoidBoxes) {
-        const ix = Math.max(0, Math.min((x + btnW) / W, r.x1) - Math.max(x / W, r.x0))
-        const iy = Math.max(0, Math.min((by + btnH) / H, r.y1) - Math.max(by / H, r.y0))
-        o = Math.max(o, (ix * iy) / ((btnW / W) * (btnH / H)))
+        // the located box grows by 0.8 % of the height all round: the pill keeps a hair of air from the product
+        const pad = 0.008 * (H / W)
+        const ix = Math.max(0, Math.min((x + bw) / W, r.x1 + pad) - Math.max(x / W, r.x0 - pad))
+        const iy = Math.max(0, Math.min((by + bh) / H, r.y1 + 0.008) - Math.max(by / H, r.y0 - 0.008))
+        o = Math.max(o, (ix * iy) / ((bw / W) * (bh / H)))
       }
       return o
     }
     // a hard full-width-ish horizontal step under the pill (table edge, band seam) makes it "straddle" two backgrounds
     const lumaAt = (x: number, y: number) => { const i = (Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))) * 3; return 0.299 * raw[i] + 0.587 * raw[i + 1] + 0.114 * raw[i + 2] }
-    const seamUnder = (x: number, by: number): boolean => {
+    const seamUnder = (x: number, by: number, bw: number, bh: number): boolean => {
       const stepY = Math.max(2, Math.round(H * 0.004))
-      for (let y = by - Math.round(btnH * 0.4); y <= by + btnH * 1.4; y += 2) {
+      for (let y = by - Math.round(bh * 0.4); y <= by + bh * 1.4; y += 2) {
         let hits = 0, tot = 0
-        for (let xx = x; xx < x + btnW; xx += 6) { tot++; if (Math.abs(lumaAt(xx, y + stepY) - lumaAt(xx, y)) > 16) hits++ }
+        for (let xx = x; xx < x + bw; xx += 6) { tot++; if (Math.abs(lumaAt(xx, y + stepY) - lumaAt(xx, y)) > 16) hits++ }
         if (tot && hits / tot > 0.55) return true
       }
       return false
     }
-    let sel = { slot: slots[0][0], x: slots[0][1], by: rowsY[0], busyness: 1, score: Infinity, seam: false }
-    for (const by of rowsY) {
-      const bandBg = medianColor(raw, W, H, by - btnH * 0.5, by + btnH * 1.6)
-      for (const [slot, x] of slots) {
-        const win = { x: x - W * 0.01, y: by - H * 0.006, w: btnW + W * 0.02, h: btnH + H * 0.012 }
-        const b = busy(win)
-        // fewest object pixels: share of pixels far from the band's background colour (flat black objects, cables, props the edge map misses)
-        const dev = deviation(raw, W, H, win, bandBg)
-        const seam = seamUnder(x, by)
-        const score = b + 2 * dev + 3 * overlapOf(x, by) + (seam ? 1.5 : 0) + (by === ctaTop ? 0 : 0.01)
-        if (score < sel.score - 0.004) sel = { slot, x, by, busyness: b, score, seam }
+    type Slot = 'center' | 'left' | 'right' | 'mid-left' | 'mid-right'
+    let sel = { slot: 'center' as Slot, x: Math.round((W - pills[0].btnW) / 2), by: rowsY[0], busyness: 1, score: Infinity, seam: false, overlap: 0, dev: 0, pc: pills[0] }
+    for (const pc of pills) {
+      const bw = pc.btnW, bh = pc.btnH
+      const slotMax = W - sideX - bw
+      if (slotMax < sideX) continue
+      const slots = ([['center', Math.round((W - bw) / 2)], ['left', sideX], ['right', slotMax], ['mid-left', Math.round(sideX + (slotMax - sideX) * 0.25)], ['mid-right', Math.round(sideX + (slotMax - sideX) * 0.75)]] as Array<[Slot, number]>).filter(([, x]) => x >= sideX && x <= slotMax)
+      for (const row of rowsY) {
+        const by = row + (btnH - bh) // the smaller pill stays on the bottom line of the zone
+        if (by < textBottom + gap) continue
+        const bandBg = medianColor(raw, W, H, by - bh * 0.5, by + bh * 1.6)
+        for (const [slot, x] of slots) {
+          const win = { x: x - W * 0.01, y: by - H * 0.006, w: bw + W * 0.02, h: bh + H * 0.012 }
+          const b = busy(win)
+          // fewest object pixels: share of pixels far from the band's background colour (flat black objects, cables, props the edge map misses)
+          const dev = deviation(raw, W, H, win, bandBg)
+          const seam = seamUnder(x, by, bw, bh)
+          const ov = overlapOf(x, by, bw, bh)
+          // Round 8: a slot that covers the located product / an accessory (the controller) is not a candidate at all (> 2 % of the pill): +100 keeps it as the last resort
+          const score = b + 2 * dev + 3 * ov + (ov > 0.02 || dev > OBJECT_UNDER_PILL ? 100 : 0) + (seam ? 1.5 : 0) + (row === ctaTop ? 0 : 0.01) + 0.02 * pc.step
+          if (score < sel.score - 0.004) sel = { slot, x, by, busyness: b, score, seam, overlap: ov, dev, pc }
+        }
       }
     }
+    const pill = sel.pc.pill
+    const btnW = sel.pc.btnW
+    const btnHs = sel.pc.btnH
     const by = sel.by
-    ctaBox = { x: sel.x, y: by, w: btnW, h: btnH }
-    const shadow = await sharp({ create: { width: btnW, height: btnH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.35 } } })
-      .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${btnW}" height="${btnH}"><rect width="${btnW}" height="${btnH}" rx="${Math.round(btnH * 0.3)}" fill="#fff"/></svg>`), blend: 'dest-in' }])
-      .blur(Math.max(2, btnH * 0.1)).png().toBuffer()
-    layers.push({ input: shadow, left: sel.x, top: by + Math.round(btnH * 0.08) })
+    ctaBox = { x: sel.x, y: by, w: btnW, h: btnHs }
+    const shadow = await sharp({ create: { width: btnW, height: btnHs, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0.35 } } })
+      .composite([{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${btnW}" height="${btnHs}"><rect width="${btnW}" height="${btnHs}" rx="${Math.round(btnHs * 0.3)}" fill="#fff"/></svg>`), blend: 'dest-in' }])
+      .blur(Math.max(2, btnHs * 0.1)).png().toBuffer()
+    layers.push({ input: shadow, left: sel.x, top: by + Math.round(btnHs * 0.08) })
     layers.push({ input: pill.png, left: sel.x, top: by })
-    report.cta = { status: 'drawn', text: cta, box: ctaBox, fill: toHex(pill.fill), textColor: toHex(pill.ink), contrast: Math.round(contrastFromLuminance(luminance(pill.fill), luminance(pill.ink)) * 100) / 100, fontSize: pill.fontSize, fits: pill.fits, slot: sel.slot, busyness: Math.round(sel.busyness * 1000) / 1000, busy: sel.score > 0.08, ...(sel.seam ? { seam: true } : {}) }
+    report.cta = { status: 'drawn', text: cta, box: ctaBox, fill: toHex(pill.fill), textColor: toHex(pill.ink), contrast: Math.round(contrastFromLuminance(luminance(pill.fill), luminance(pill.ink)) * 100) / 100, fontSize: pill.fontSize, fits: pill.fits, slot: sel.slot, busyness: Math.round(sel.busyness * 1000) / 1000, busy: sel.score > 0.08, objectShare: Math.round(sel.dev * 1000) / 1000, ...(sel.overlap > 0.02 || sel.dev > OBJECT_UNDER_PILL ? { blocked: true } : {}), ...(sel.seam ? { seam: true } : {}) }
     elements.push({ id: 'cta', role: 'cta', box: ctaBox, text: cta, fontSize: pill.fontSize, color: toHex(pill.ink), contrast: report.cta.contrast, fits: pill.fits })
   }
 
@@ -420,10 +450,29 @@ export async function layoutAdLayers(input: LayoutInput): Promise<{ bytes: Buffe
         layers.push({ input: rasterize(gl), left: 0, top: 0 })
         glow = true
       }
+      // Round 8: below 4.5:1 over the picture (bright foliage under a dark badge …) the logo gets a soft scrim in the tone that restores it; the report keeps both numbers
+      let scrim: { tone: string; alpha: number } | undefined
+      let contrastFinal = contrast
+      if (contrast < 4.5 && !glow) {
+        const tone = luminance(logoMean) > 0.5 ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
+        let alpha = 0.2
+        for (; alpha <= 0.7; alpha += 0.1) {
+          const eff = blend(tone, alpha * 0.85, under.mean) // the blurred plate is a little weaker than its nominal alpha
+          if (contrastFromLuminance(luminance(logoMean), luminance(eff)) >= 4.6) break
+        }
+        alpha = Math.min(alpha, 0.7)
+        const eff = blend(tone, alpha * 0.85, under.mean)
+        contrastFinal = Math.round(contrastFromLuminance(luminance(logoMean), luminance(eff)) * 100) / 100
+        const padx = Math.round(lw * 0.14), pady = Math.round(lh * 0.14)
+        const sg = Math.max(3, Math.round(lh * 0.1))
+        const plate = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><defs><filter id="p" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${sg}"/></filter></defs><rect x="${lx - padx}" y="${ly - pady}" width="${lw + 2 * padx}" height="${lh + 2 * pady}" rx="${Math.round(lh * 0.28)}" fill="${toHex(tone)}" fill-opacity="${alpha}" filter="url(#p)"/></svg>`
+        layers.push({ input: rasterize(plate), left: 0, top: 0 })
+        scrim = { tone: toHex(tone), alpha: Math.round(alpha * 100) / 100 }
+      }
       layers.push({ input: logoPng, left: lx, top: ly })
       const box = { x: lx, y: ly, w: lw, h: lh }
-      report.logo = { status: 'drawn', box, contrast, glow }
-      elements.push({ id: 'logo', role: 'logo', box, contrast, fits: true })
+      report.logo = { status: 'drawn', box, contrast: contrastFinal, glow, ...(scrim ? { scrim, contrastBefore: contrast } : {}) }
+      elements.push({ id: 'logo', role: 'logo', box, contrast: contrastFinal, fits: true })
     } catch (err) {
       report.logo = { status: 'unavailable', reason: `logo asset could not be drawn: ${err instanceof Error ? err.message.slice(0, 120) : 'error'}` }
     }

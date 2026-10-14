@@ -7,6 +7,8 @@
  * same free QA (safe zones, text, separators, extra-CTA risk) + halo / edge-roughness flags. Warning only: nothing here
  * blocks a delivered image, retries a paid call or changes credits.
  */
+import { scrubCopy, uniqueClaims } from './claims-filter.js'
+import { logoIconCheck } from './logo-check.js'
 import { edgeRoughness, QA_THRESHOLDS } from '../adpack/qa-gate.js'
 import { generateExactProductImage, type ExactImageInput, type ExactImageResult } from '../adpack/fidelity/pipeline.js'
 import { measureHalo, type HaloReport } from '../adpack/fidelity/halo.js'
@@ -81,6 +83,10 @@ export async function generateExactWebStyleAd(input: {
   const offer = input.ctx.offers.find((o) => o.id === input.offerId)
   const kit = input.ctx.brandKit
   let copy = (input.copy || '').trim() || (input.guidePrompt || '').trim() || [offer?.name, offer?.price].filter(Boolean).join('\n')
+  // Round 8: banned wording (kit forbiddenPhrases + built-in regulated claims) never reaches the code-rendered copy
+  const scrubbed = scrubCopy(copy, kit?.forbiddenPhrases ?? [])
+  if (scrubbed.removed.length) copy = scrubbed.text || [offer?.name, offer?.price].filter(Boolean).join('\n')
+  const removedClaims = uniqueClaims(scrubbed.removed)
   copy = tidyCopySeparators(copy).copy
   const capped = input.layoutCap === false ? null : capCopyBlocks(copy)
   if (capped?.capped) copy = capped.onImage
@@ -127,16 +133,25 @@ export async function generateExactWebStyleAd(input: {
     textLayers: 'code',
     textPresent: wantsText ? (report.text.drawn ? 'yes' : 'no') : 'not_requested',
     logo: report.logo.status === 'drawn' ? 'attached' : 'none',
-    ctaButtons: (report.cta.status === 'drawn' ? 1 : 0) + sceneQa.ctaButtons,
-    extraCtaRisk: sceneQa.ctaButtons > 0,
-    safeZones: sceneQa.safeZoneIssues.length || !report.layout.insideSafeZones ? 'violation' : 'ok',
+    // Round 8: counted from the compositor's own report only; scene heuristics are informational
+    ctaButtons: report.cta.status === 'drawn' ? 1 : 0,
+    extraCtaRisk: false,
+    sceneButtonLike: sceneQa.ctaButtons,
+    safeZones: report.layout.insideSafeZones ? 'ok' : 'violation',
     textScale: report.text.drawn ? report.text.scale : undefined,
     seams: { found: seamsFound.found.length, blended: seamsFound.found.length > 0 && seamsRemaining === 0, remaining: seamsRemaining, details: seamsFound.found.map((x) => ({ edge: x.edge, share: x.stripShare, step: x.step })) },
     warnings: [...sceneQa.warnings.filter((w) => !w.startsWith('the brand kit has no logo')), ...(report.layout.overlaps.length ? [`layout overlap: ${report.layout.overlaps.join(', ')}`] : []), ...(report.text.textOverProduct ? ['text over the product: the scene left no calm corridor for the text'] : []), ...(report.text.drawn && report.text.scale < 0.8 ? [`text scaled to ${Math.round(report.text.scale * 100)}% of its nominal size`] : []), ...(roomNote ? [`scene prep: ${roomNote}`] : [])],
   }
   if (report.logo.status === 'unavailable') qa.logoUnavailable = true
+  if (removedClaims.length) { qa.removedClaims = removedClaims; qa.warnings.push(`removed claim(s) the brand kit / platform forbids from the copy (never drawn): ${removedClaims.map((c) => `"${c}"`).join(', ')}`) }
+  if (logo) {
+    const icon = await logoIconCheck(Buffer.from(logo.slice(logo.indexOf(',') + 1), 'base64'), kit?.logoUrl)
+    if (icon.looksLikeIcon) { qa.logoLooksLikeIcon = true; qa.warnings.push(`the kit logo looks like a favicon / app icon, not the wordmark (${icon.reason}): placed as it is — upload the real wordmark logo (qa.logoLooksLikeIcon)`) }
+  }
+  if (seamsFound.skipped?.length) { qa.seamBlendSkipped = true; qa.warnings.push(`seam blend skipped: ${seamsFound.skipped.map((k) => `${k.edge} strip next to detailed content`).join(', ')} — left as it is`) }
   if (report.cta.busy) { qa.ctaBusy = true; qa.warnings.push('the CTA button sits on a busy area / the product (compositeLayers.cta.busy)') }
-  qa.status = qa.safeZones === 'violation' || qa.textPresent === 'no' || qa.extraCtaRisk || layoutBad || report.text.textOverProduct || seamsRemaining > 0 ? 'fail' : qa.ctaBusy || report.text.scale < 0.8 ? 'warning' : 'pass'
+  qa.status = qa.safeZones === 'violation' || qa.textPresent === 'no' || qa.extraCtaRisk || Boolean(done.scenePrep.ctaOmitted) || layoutBad || report.text.textOverProduct || seamsRemaining > 0 ? 'fail' : qa.ctaBusy || report.text.scale < 0.8 ? 'warning' : 'pass'
+  if (qa.status === 'pass' && qa.logoLooksLikeIcon) qa.status = 'warning'
   qa.severity = Math.round((qaSeverity({ ...qa, ctaButtons: Math.max(0, qa.ctaButtons - (report.cta.status === 'drawn' ? 1 : 0) + (qa.ctaButtons > 1 ? 1 : 0)) }) + (report.text.textOverProduct ? 4 : 0) + (seamsRemaining ? 3 * seamsRemaining : 0)) * 100) / 100
   const rough = await edgeRoughness(exact.placed).catch(() => null)
   const halo: ExactAdOutput['halo'] = { ...exact.halo, edgeRoughness: rough }

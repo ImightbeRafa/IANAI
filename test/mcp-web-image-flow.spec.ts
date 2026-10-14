@@ -312,13 +312,14 @@ describe('round 4: allowedProps, one CTA, layout cap, better-of-two retry, capac
     expect(prompt).toContain('Un regalo que armás con papel')
     expect(prompt).toContain('₡14.900')
     expect(prompt).toContain('Escribinos por DM')
-    expect(prompt).not.toContain('Envío gratis llevando 2 kits o más')
-    expect(status.copyOverflow).toEqual(expect.arrayContaining(['2 kits por ₡29.800', 'Envío gratis llevando 2 kits o más', 'Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto']))
+    expect(prompt).toContain('Envío gratis llevando 2 kits o más') // round 8: the shipping line is the facts line kept
+    expect(prompt).not.toContain('Kit HM939 con control 2.4GHz')
+    expect(status.copyOverflow).toEqual(expect.arrayContaining(['2 kits por ₡29.800', 'Kit HM939 con control 2.4GHz', 'Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto']))
     // opt-out
     xai = []
     sequence([await ad(190)])
     await runJob({ copy, layoutCap: false })
-    expect(String(xai[0].body.prompt)).toContain('Envío gratis llevando 2 kits o más')
+    expect(String(xai[0].body.prompt)).toContain('Kit HM939 con control 2.4GHz')
   })
 
   it('autoRetry KEEPS THE BETTER image by QA severity (not the first): the retry with fewer defects wins; single charge', async () => {
@@ -389,7 +390,7 @@ describe('round 5: deterministic safe zones, echoed args, caption, accessory ref
   it('a CTA touching the bottom edge + a headline in the top band are FIXED in code: qa.safeZones ok, same pixel size, single call, single charge', async () => {
     sequence([await ad(6, 40)])
     vi.mocked(incrementUsage).mockClear()
-    const { status, saved } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true })
+    const { status, saved } = await runJob({ copy: 'Un regalo que armás\nEscribinos por DM', autoRetry: true, enforceSafeZones: true }) // round 8: legacy scale-in is explicit opt-in only
     expect(xai).toHaveLength(1) // the safe-zone defect is fixed locally: no second paid generation even with autoRetry
     const qa = status.qa as { safeZones: string; status: string }
     expect(qa.safeZones).toBe('ok')
@@ -519,29 +520,31 @@ describe('round 5b: logo + CTA composited in code (default); the model draws nei
     expect(vi.mocked(incrementUsage)).toHaveBeenCalledTimes(1)
   })
 
-  it('round 6: NEVER scales in by default — text left in the bands is reported as a defect (qa fail), the picture keeps its full-bleed size; scale-in is explicit opt-in and is a defect too', async () => {
+  it('round 6: NEVER scales in by default — text left in the bands is reported (round 8: warning, not a fail trigger), the picture keeps its full-bleed size; scale-in is explicit opt-in and is a defect too', async () => {
     logoOverride = KIT_LOGO_URL
     sequence([await scene(40), await scene(40)])
     const { status, saved } = await runC({ copy: COPY, autoRetry: true })
     expect(xai).toHaveLength(2)
     expect(status.safeZoneFix).toBeUndefined() // no shrink, no frame, no padding
     const qa = status.qa as { safeZones: string; status: string; scaleInUsed?: boolean }
-    expect(qa.safeZones).toBe('violation')
-    expect(qa.status).toBe('fail')
+    expect(qa.safeZones).toBe('ok') // round 8: scene text in the bands comes from the scene, not from the code layers
+    expect(qa.status).toBe('warning')
+    expect((status.qa as { sceneText?: string }).sceneText).toBe('text_in_bands')
     const layers = status.compositeLayers as { logo: { status: string }; cta: { status: string }; width: number; height: number }
     expect(layers.logo.status).toBe('drawn')
     expect(layers.cta.status).toBe('drawn')
     const meta = await sharp(Buffer.from(String(saved[0].imageDataUrl).split(',')[1], 'base64')).metadata()
     expect([meta.width, meta.height]).toEqual([layers.width, layers.height])
-    // explicit opt-in: the old scale-in runs, but qa never says 'pass' and flags scaleInUsed
+    // round 8: even the explicit enforceSafeZones:true is IGNORED with compositeLayers (Sleeping Patches: a dark nightstand shrank the picture to 91 %)
     xai = []
     sequence([await scene(40)])
     const optIn = await runC({ copy: COPY, enforceSafeZones: true })
-    expect((optIn.status.safeZoneFix as { method: string; applied: boolean }).method).toBe('scale_in_fallback')
+    expect(optIn.status.safeZoneFix).toBeUndefined()
     const q2 = optIn.status.qa as { status: string; scaleInUsed?: boolean; severity: number; warnings: string[] }
-    expect(q2.scaleInUsed).toBe(true)
-    expect(q2.status).toBe('fail')
-    expect(q2.warnings.join(' ')).toMatch(/scale-in fallback used/)
+    expect(q2.scaleInUsed).toBeUndefined()
+    expect(q2.status).toBe('warning') // the text left in the bands is still reported (not a fail trigger)
+    expect(q2.warnings.join(' ')).toMatch(/enforceSafeZones ignored/)
+    expect(q2.warnings.join(' ')).not.toMatch(/scale-in fallback used/)
   })
 
   it('round 6: an invented prop (saturated magenta cable the references do not have) → props_warning AND qa.status "warning"; the CTA count comes from the compositor (1)', async () => {

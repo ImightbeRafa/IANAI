@@ -173,6 +173,21 @@ function continuationAbove(raw: Buffer, W: number, H: number, srcStart: number, 
   const gw = 9, gh = Math.max(2, Math.ceil(n / (H * 0.08)) + 1)
   const grid = Array.from({ length: gw * gh }, () => (rnd() - 0.5) * 3)
   const fill = Buffer.alloc(W * n * 3)
+  // Round 8: surface texture (wood grain, fabric) is carried over as a VERTICAL high-pass of the rows next to the seam (mirrored, damped, clamped):
+  // the soft continuation alone left a smooth tan band under a wooden table. Large shapes (objects) are low-frequency vertically and do not come along.
+  const TEX = 6
+  const lumaAt = (yy: number, x: number) => {
+    const j = (Math.min(H - 1, Math.max(0, yy)) * W + x) * 3
+    return 0.299 * raw[j] + 0.587 * raw[j + 1] + 0.114 * raw[j + 2]
+  }
+  const texAt = (k: number, x: number) => {
+    const yy = srcStart + k
+    let m = 0
+    for (let j = -TEX; j <= TEX; j++) m += lumaAt(yy + j, x)
+    m /= 2 * TEX + 1
+    const d = lumaAt(yy, x) - m
+    return d < -16 ? -16 : d > 16 ? 16 : d
+  }
   for (let y = 0; y < n; y++) {
     const k = n - 1 - y // rows away from the seam
     const dr = Math.min(1, k / delta)
@@ -182,9 +197,10 @@ function continuationAbove(raw: Buffer, W: number, H: number, srcStart: number, 
       const g = (grid[y0 * gw + x0] * (1 - fx) + grid[y0 * gw + Math.min(gw - 1, x0 + 1)] * fx) * (1 - fy) + (grid[Math.min(gh - 1, y0 + 1) * gw + x0] * (1 - fx) + grid[Math.min(gh - 1, y0 + 1) * gw + Math.min(gw - 1, x0 + 1)] * fx) * fy
       const i = (y * W + x) * 3
       const grain = (rnd() - 0.5) * 3.4
+      const tex = 0.8 * texAt(k, x)
       for (let c = 0; c < 3; c++) {
         const shift = Math.max(-14, Math.min(14, drift[c] * (k / delta) * 0.55))
-        const v = row[x * 3 + c] + shift + g * Math.min(1, dr + 0.2) + grain
+        const v = row[x * 3 + c] + shift + g * Math.min(1, dr + 0.2) + grain + tex
         fill[i + c] = v < 0 ? 0 : v > 255 ? 255 : Math.round(v)
       }
     }
@@ -201,18 +217,38 @@ function softenJoin(out: Buffer, orig: Buffer, W: number, y0: number, xf: number
   }
 }
 
-export type BlendReport = { applied: boolean; seams: Seam[]; remaining: Seam[]; note: string }
+/** Share of the strip's neighbouring content that is "detailed": the blend continues the per-column mean colour of the rows next to the strip, which smears objects / art / lit areas (round-7 B: smear + glitch at the top edge of the box). */
+export const DETAIL_REFUSE = 0.62
+/** `share of columns` whose mean colour (over the 6 % of the height next to the strip) is > 40 away from the median column: calm wall / table ≈ 0–0.2, objects or art touching the strip ≥ 0.7. */
+export function neighbourDetail(raw: Buffer, W: number, H: number, seam: Seam): number {
+  const rows = Math.max(4, Math.round(H * 0.06))
+  const y0 = seam.edge === 'top' ? Math.min(H - rows, seam.stripPx) : Math.max(0, H - seam.stripPx - rows)
+  const step = Math.max(1, Math.round(W / 320))
+  const cols: Array<[number, number, number]> = []
+  for (let x = 0; x < W; x += step) {
+    const m: [number, number, number] = [0, 0, 0]
+    for (let y = y0; y < y0 + rows; y++) { const i = (y * W + x) * 3; m[0] += raw[i]; m[1] += raw[i + 1]; m[2] += raw[i + 2] }
+    cols.push([m[0] / rows, m[1] / rows, m[2] / rows])
+  }
+  const med = [0, 1, 2].map((c) => cols.map((m) => m[c]).sort((a, b) => a - b)[cols.length >> 1])
+  return Math.round((cols.filter((m) => Math.hypot(m[0] - med[0], m[1] - med[1], m[2] - med[2]) > 40).length / cols.length) * 1000) / 1000
+}
+
+export type BlendReport = { applied: boolean; seams: Seam[]; remaining: Seam[]; /** Strips left as they were because the content next to them is detailed (flag qa.seamBlendSkipped). */ skipped: Array<{ edge: Seam['edge']; detail: number }>; note: string }
 
 /** Replace the flat strips by a continuation of the scene. Returns the new image (same pixel size) and the report. */
-export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93): Promise<{ bytes: Buffer; report: BlendReport }> {
-  if (!seams.length) return { bytes, report: { applied: false, seams: [], remaining: [], note: 'no seams' } }
+export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93, refuseAbove = DETAIL_REFUSE): Promise<{ bytes: Buffer; report: BlendReport }> {
+  if (!seams.length) return { bytes, report: { applied: false, seams: [], remaining: [], skipped: [], note: 'no seams' } }
   const base = sharp(bytes).rotate().removeAlpha()
   const { data, info } = await base.raw().toBuffer({ resolveWithObject: true })
   const W = info.width, H = info.height
   const out = Buffer.from(data)
   const feather = Math.round(H * 0.012)
   const xf = Math.max(4, Math.round(H * 0.012))
+  const skipped: BlendReport['skipped'] = []
   for (const s of seams) {
+    const detail = neighbourDetail(data, W, H, s)
+    if (detail > refuseAbove) { skipped.push({ edge: s.edge, detail }); continue }
     if (s.edge === 'top') {
       const n = s.stripPx + feather
       if (n < 4 || n + 3 * Math.max(6, Math.round(H * 0.02)) + xf >= H) continue
@@ -233,7 +269,77 @@ export async function blendSeams(bytes: Buffer, seams: Seam[], quality = 93): Pr
   }
   const png = await sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality }).toBuffer()
   const after = await detectSeams(png)
-  return { bytes: png, report: { applied: true, seams, remaining: after.found, note: `flat band(s) ${seams.map((s) => `${s.edge} ${Math.round(s.stripShare * 100)}%`).join(', ')} continued from the scene (mirror + progressive blur + grain)` } }
+  const done = seams.filter((x) => !skipped.some((k) => k.edge === x.edge))
+  const note = [
+    done.length ? `flat band(s) ${done.map((x) => `${x.edge} ${Math.round(x.stripShare * 100)}%`).join(', ')} continued from the scene (soft continuation + surface texture + grain)` : '',
+    skipped.length ? `NOT blended (the content next to the strip is detailed, a blend would smear it): ${skipped.map((k) => `${k.edge} (detail ${Math.round(k.detail * 100)}%)`).join(', ')} — left as it is, regenerate` : '',
+  ].filter(Boolean).join('; ')
+  return { bytes: png, report: { applied: done.length > 0, seams, remaining: after.found, skipped, note } }
+}
+
+/** Round 8: the largest zoom the crop-and-zoom path may use (strips of up to ~14 % of the height in total). */
+export const MAX_CROP_ZOOM = 1.16
+
+export type CropZoomReport = { applied: boolean; zoom?: number; cropTopPx?: number; cropBottomPx?: number; cropLeftPx?: number; cropWidthPx?: number; note: string }
+type NB = { x0: number; y0: number; x1: number; y1: number }
+
+/**
+ * Round 8: the flat strips are never "continued" when they can simply be CUT OFF. The picture keeps the rows between the strips and is zoomed back to the
+ * original pixel size (same ratio, so a few % of the sides go too): no mirrored blur, no synthetic rows, nothing to see. Feasible when the zoom stays
+ * ≤ MAX_CROP_ZOOM and every located product / object box still fits inside the cropped window (otherwise the caller falls back to the textured continuation).
+ * Returns the new image and the located boxes mapped into the new picture.
+ */
+export async function cropZoomSeams(bytes: Buffer, seams: Seam[], keep: NB[] = [], quality = 93): Promise<{ bytes: Buffer; keep: NB[]; report: CropZoomReport }> {
+  if (!seams.length) return { bytes, keep, report: { applied: false, note: 'no seams' } }
+  const { data, info } = await sharp(bytes).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  const W = info.width, H = info.height
+  const safety = Math.max(3, Math.round(H * 0.006))
+  const top = seams.filter((x) => x.edge === 'top').reduce((a, x) => Math.max(a, x.stripPx), 0)
+  const bottom = seams.filter((x) => x.edge === 'bottom').reduce((a, x) => Math.max(a, x.stripPx), 0)
+  const t = top ? top + safety : 0
+  const b = bottom ? bottom + safety : 0
+  const ch = H - t - b
+  const zoom = H / ch
+  if (ch < H * 0.6 || zoom > MAX_CROP_ZOOM) return { bytes, keep, report: { applied: false, note: `crop-and-zoom would need ${Math.round((zoom - 1) * 100)}% zoom (max ${Math.round((MAX_CROP_ZOOM - 1) * 100)}%)` } }
+  const cw = Math.min(W, Math.round((ch * W) / H))
+  // keep every located box inside the window horizontally (centre on them when they are off-centre) and inside the kept rows vertically
+  let x0c = Math.round((W - cw) / 2)
+  if (keep.length) {
+    const ux0 = Math.min(...keep.map((k) => k.x0)) * W, ux1 = Math.max(...keep.map((k) => k.x1)) * W
+    if (ux1 - ux0 > cw * 0.995) return { bytes, keep, report: { applied: false, note: 'the product / objects span the whole width: a crop would cut them' } }
+    if (ux0 < x0c) x0c = Math.max(0, Math.floor(ux0 - cw * 0.01))
+    else if (ux1 > x0c + cw) x0c = Math.min(W - cw, Math.ceil(ux1 + cw * 0.01 - cw))
+    if (ux0 < x0c - 1 || ux1 > x0c + cw + 1) return { bytes, keep, report: { applied: false, note: 'the product / objects would be cut by the crop' } }
+    const uy0 = Math.min(...keep.map((k) => k.y0)) * H, uy1 = Math.max(...keep.map((k) => k.y1)) * H
+    if (uy0 < t - 1 || uy1 > H - b + 1) return { bytes, keep, report: { applied: false, note: 'a located object reaches into the strip: not cropped' } }
+  }
+  const out = await sharp(data, { raw: { width: W, height: H, channels: 3 } })
+    .extract({ left: x0c, top: t, width: cw, height: ch })
+    .resize(W, H, { fit: 'fill', kernel: 'lanczos3' })
+    .jpeg({ quality, chromaSubsampling: '4:4:4' }).toBuffer()
+  const after = await detectSeams(out)
+  if (after.found.length) return { bytes, keep, report: { applied: false, note: 'a strip remained after the crop' } }
+  const mapped = keep.map((k) => ({ x0: Math.max(0, (k.x0 * W - x0c) / cw), x1: Math.min(1, (k.x1 * W - x0c) / cw), y0: Math.max(0, (k.y0 * H - t) / ch), y1: Math.min(1, (k.y1 * H - t) / ch) }))
+  return { bytes: out, keep: mapped, report: { applied: true, zoom: Math.round(zoom * 1000) / 1000, cropTopPx: t, cropBottomPx: b, cropLeftPx: x0c, cropWidthPx: cw, note: `strip(s) cut off and the picture zoomed ${Math.round((zoom - 1) * 1000) / 10}% (top ${t}px, bottom ${b}px): no blend, nothing synthetic` } }
+}
+
+/**
+ * Move the picture content UP by `dPx` rows: the vacated bottom is a texture-carrying continuation of the bottom rows, the top `dPx` rows scroll out (cropped).
+ * Used when the CTA has no free slot under the product (the mirror image of shiftSceneDown).
+ */
+export async function shiftSceneUp(bytes: Buffer, dPx: number, quality = 93): Promise<Buffer> {
+  const { data, info } = await sharp(bytes).rotate().removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  const W = info.width, H = info.height
+  const d = Math.max(0, Math.min(Math.round(H * MAX_SHIFT), Math.round(dPx)))
+  if (d < 2) return bytes
+  const flipped = await sharp(data, { raw: { width: W, height: H, channels: 3 } }).flip().raw().toBuffer()
+  const { fill, edge } = continuationAbove(flipped, W, H, 0, d, 17)
+  const out = Buffer.alloc(data.length)
+  data.copy(out, 0, W * d * 3, W * H * 3)
+  const back = await sharp(fill, { raw: { width: W, height: d, channels: 3 } }).flip().raw().toBuffer()
+  back.copy(out, W * (H - d) * 3, 0, W * d * 3)
+  softenJoin(out, Buffer.from(out), W, H - d - 1, Math.max(4, Math.round(H * 0.012)), edge, -1)
+  return sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality }).toBuffer()
 }
 
 /** Largest strip the top / bottom fill can still make from a scene (never more than half the picture). */
@@ -253,7 +359,7 @@ export async function shiftSceneDown(bytes: Buffer, dPx: number, quality = 93): 
   const { fill, edge } = continuationAbove(data, W, H, 0, d, 13)
   fill.copy(out, 0, 0, W * d * 3)
   data.copy(out, W * d * 3, 0, W * (H - d) * 3)
-  softenJoin(out, data, W, d, Math.max(4, Math.round(H * 0.012)), edge, 1)
+  softenJoin(out, Buffer.from(out), W, d, Math.max(4, Math.round(H * 0.012)), edge, 1)
   return sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality }).toBuffer()
 }
 

@@ -65,7 +65,8 @@ describe('seam detector (flat strips Grok paints at the top / bottom = letterbox
 })
 
 describe('seam blend: the strips are continued from the scene, no band edge left', () => {
-  for (const [name, file] of [['A', 'scene-A.jpg'], ['B', 'scene-B.jpg']] as const) {
+  // round 8: scene B (box art + plane touching both strips) is no longer blended — see test/round8.spec.ts (seam blend refusal)
+  for (const [name, file] of [['A', 'scene-A.jpg']] as const) {
     it(`scene ${name}: after the blend the detector finds nothing and the old edge is gone (same size)`, async () => {
       const src = F7(file)
       const before = await detectSeams(src)
@@ -122,10 +123,10 @@ describe('text never on the product: make room by extending the background above
     for (let y = H - cut; y < H; y++) data.copy(out, y * W * 3, (H - cut - 1) * W * 3, (H - cut) * W * 3)
     // clutter under the plane (textured table items) so the bottom is no calm corridor either
     let seed = 7
-    for (let y = Math.round(H * 0.62); y < Math.round(H * 0.8); y++) for (let x = Math.round(W * 0.05); x < Math.round(W * 0.95); x++) for (let c = 0; c < 3; c++) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; out[(y * W + x) * 3 + c] = (seed >> 8) & 255 }
+    for (let y = Math.round(H * 0.58); y < Math.round(H * 0.72); y++) for (let x = Math.round(W * 0.05); x < Math.round(W * 0.95); x++) for (let c = 0; c < 3; c++) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; out[(y * W + x) * 3 + c] = (seed >> 8) & 255 }
     return sharp(out, { raw: { width: W, height: H, channels: 3 } }).jpeg({ quality: 92 }).toBuffer()
   }
-  const productBox = { x0: 0.11, x1: 0.91, y0: 0.348 - 0.05, y1: 0.8 } // plane + the objects under it
+  const productBox = { x0: 0.11, x1: 0.91, y0: 0.348 - 0.05, y1: 0.72 } // plane + the objects under it
   it('without room the text lands on the product / shrinks; with room it gets a calm corridor at ≥ 80 % and the product moved down', async () => {
     const scene = await cramped()
     const blocks = splitCopyBlocks(COPY_A, 'Escribinos por DM')
@@ -228,13 +229,13 @@ describe('prompt (MCP path): natural full-bleed scene, no strips, product low; p
     expect(en).toMatch(/lower 60–65%/)
   })
   it('the lock asks for the exact wing shape and every part\'s colour / material as in the reference (generic, no product hardcoded)', () => {
-    const lock = buildMcpPromptRules('es', { strict: true, requestedRatio: '4:5', productNotes: 'la hélice es de plástico gris claro; el ala es una sola hoja lisa' }, { hasProductRefs: true })
+    const lock = buildMcpPromptRules('es', { strict: true, requestedRatio: '4:5', productKind: 'plane', productNotes: 'la hélice es de plástico gris claro; el ala es una sola hoja lisa' }, { hasProductRefs: true })
     expect(lock).toMatch(/forma EXACTA del ala/)
     expect(lock).toMatch(/color y el material de CADA pieza tal como en la foto de referencia/)
     expect(lock).toContain('NOTAS DEL PRODUCTO')
     expect(lock).toContain('gris claro')
     expect(lock).not.toMatch(/Prototipo|TOPGT/)
-    expect(buildMcpPromptRules('en', { strict: true, requestedRatio: '4:5' }, { hasProductRefs: true })).toMatch(/colour and material of EVERY part as in the reference photo/)
+    expect(buildMcpPromptRules('en', { strict: true, requestedRatio: '4:5', productKind: 'plane' }, { hasProductRefs: true })).toMatch(/colour and material of EVERY part as in the reference photo/)
   })
   it('productNotes is parsed (≤ 400 chars) and echoed in the args', () => {
     expect(parseWebPostArgs({ productNotes: '  hélice gris claro  ' }).productNotes).toBe('hélice gris claro')
@@ -242,7 +243,7 @@ describe('prompt (MCP path): natural full-bleed scene, no strips, product low; p
     expect(parseWebPostArgs({}).productNotes).toBeUndefined()
   })
   it('MCP 0.20.0 advertises the new features', () => {
-    expect(MCP_VERSION).toBe('0.20.0')
+    expect(MCP_VERSION).toBe('0.21.0')
     for (const f of ['seam_blend_no_letterbox', 'text_never_over_product_make_room', 'severity_factors_retry', 'product_notes_input', 'exact_uses_code_layout']) expect(MCP_FEATURES).toContain(f as never)
   })
 })

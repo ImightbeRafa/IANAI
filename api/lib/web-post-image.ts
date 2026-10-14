@@ -128,6 +128,8 @@ export type WebPostMcpRules = {
   compositeLayers?: boolean
   /** Free text appended to the product lock (MCP `productNotes`). */
   productNotes?: string
+  /** Round 8: 'plane' = the plane-specific lock wording (wheels, landing gear, propellers, flaps); anything else / unknown = the generic lock. */
+  productKind?: 'plane' | 'generic'
   /** Reference slots sent to Grok (the web route is fixed at 3; xAI /images/edits accepts up to 5). MCP only. */
   refBudget?: number
 }
@@ -155,6 +157,24 @@ Objetivo: entorno fotografiado completo — un lugar real, no un vacío de estud
 `
 }
 
+/** Round 8: clip at a sentence / word boundary (never mid-word, never leaving a dangling "(" or separator); used for MCP-only prompt strings. */
+export function clipClean(text: string, max: number): string {
+  const t = text.replace(/\s+/g, ' ').trim()
+  if (t.length <= max) return t
+  const head = t.slice(0, max)
+  const sentence = Math.max(head.lastIndexOf('. '), head.lastIndexOf('; '), head.lastIndexOf('! '), head.lastIndexOf('? '))
+  const cut = sentence > max * 0.5 ? head.slice(0, sentence + 1) : head.slice(0, Math.max(head.lastIndexOf(' '), 1))
+  return cut.replace(/[\s,;:(\-–—·|/]+$/, '').trim()
+}
+
+/** Brand voice / visual text for the MCP prompt: the adpack "HECHOS CONFIRMADOS (…" / campaign-context sections are not voice and are cut; the rest is clipped cleanly. */
+export function cleanBrandBlock(text: string | null | undefined, max: number): string | null {
+  if (!text) return text ?? null
+  const cutAt = text.search(/HECHOS CONFIRMADOS|CONTEXTO DE CAMPAÑA|CONFIRMED FACTS/i)
+  const t = cutAt > 0 ? text.slice(0, cutAt) : text
+  return clipClean(t, max) || null
+}
+
 /** Generic recipe with its free-for-all "set props" line replaced by the strict no-invented-props rule. */
 function strictenGenericRecipe(language: 'es' | 'en', recipe: string): string {
   if (!recipe) return recipe
@@ -168,6 +188,7 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
   const m = safeZoneMargins(rules.requestedRatio || '4:5')
   const lines: string[] = []
   const cta = (rules.ctaText || '').trim().slice(0, 120)
+  const plane = rules.productKind === 'plane'
   if (rules.compositeLayers) {
     // Round 6: the SCENE ONLY. Logo, headline, price, facts and the CTA are all composited in code afterwards.
     const bands = freeBands(rules.requestedRatio || '4:5')
@@ -182,8 +203,8 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
       ? `REGLA 2 — ESCENA A SANGRE COMPLETA, SIN FRANJAS: una sola foto continua hasta los 4 bordes. PROHIBIDO barras, franjas, bandas planas, letterbox, marcos, paneles o rectángulos de color o degradado arriba o abajo: la pared y la mesa/superficie continúan de forma natural hasta el borde. Arriba (hasta el ${zoneEnd} desde el borde superior) dejá un fondo natural, CALMO y CONTINUO (pared / ambiente suave, sin objetos, sin recortes) donde irá el texto; el producto y los objetos viven en el 60–65% inferior del encuadre: empiezan por debajo del ${zoneEnd} y terminan antes del ${bottomStart}, centrados y bien visibles. Nada importante en el ${freeTop} superior ni en el ${freeBot} inferior, pero esas zonas son ESCENA REAL (nunca una franja de otro color).`
       : `RULE 2 — FULL-BLEED SCENE, NO STRIPS: one continuous photo to all 4 edges. FORBIDDEN: bars, strips, flat bands, letterbox, frames, panels or colour / gradient rectangles at the top or bottom: the wall and the table / surface continue naturally to the edge. At the top (down to ${zoneEnd} from the top edge) leave a natural, CALM, CONTINUOUS background (soft wall / ambience, no objects, no cut-offs) where the text will go; the product and the objects live in the lower 60–65% of the frame: they start below ${zoneEnd} and end before ${bottomStart}, centred and clearly visible. Nothing important in the top ${freeTop} or the bottom ${freeBot}, but those zones are REAL SCENE (never a strip of another colour).`)
     lines.push(es
-      ? 'SIN OBJETOS EXTRA: ningún objeto que no esté en las fotos de referencia adjuntas ni en la lista de extras permitidos (ni cables, cajas, controles, herramientas, hojas ni empaques inventados).'
-      : 'NO EXTRA OBJECTS: no object that is not in the attached reference photos or in the allowed-extras list (no invented cables, boxes, controllers, tools, sheets or packaging).')
+      ? `SIN OBJETOS EXTRA: ningún objeto que no esté en las fotos de referencia adjuntas ni en la lista de extras permitidos (${plane ? 'ni cables, cajas, controles, herramientas, hojas ni empaques inventados' : 'ni objetos, empaques, accesorios ni herramientas inventados'}).`
+      : `NO EXTRA OBJECTS: no object that is not in the attached reference photos or in the allowed-extras list (${plane ? 'no invented cables, boxes, controllers, tools, sheets or packaging' : 'no invented objects, packaging, accessories or tools'}).`)
     if (rules.layoutCap !== false) {
       lines.push(es
         ? 'COMPOSICIÓN LIMPIA: el producto grande y nada más que lo necesario; sin sellos, viñetas, marcos, bordes ni tarjetas; la imagen llena todo el canvas hasta el borde (nada de marco ni márgenes).'
@@ -208,20 +229,24 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
   if (rules.strict && ctx.hasProductRefs) {
     const allowed = (rules.allowedProps || []).map((a) => a.trim()).filter(Boolean).slice(0, 8)
     const accessories = (rules.accessoryLabels || []).map((a) => a.trim()).filter(Boolean).slice(0, 3)
-    lines.push(es
-      ? 'PRODUCTO BLOQUEADO (reforzado): NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues, cables, hélices, proporciones ni colores. No agregues ni quites alas, aletas, solapas, pestañas ni piezas: el mismo número de partes que la foto. Conservá la forma EXACTA del ala (mismo contorno, sin pliegues ni pestañas de más) y el color y el material de CADA pieza tal como en la foto de referencia (hélices, ruedas, cables, placas, ala): nada se vuelve metálico, oscuro ni brillante. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
-      : 'PRODUCT LOCK (reinforced): do NOT alter shape, parts, wheels, landing gear, tail, folds, wires, propellers, proportions or colours. Do not add or remove wings, fins, flaps, tabs or parts: the same number of parts as the photo. Keep the EXACT wing shape (same outline, no extra folds or tabs) and keep the colour and material of EVERY part as in the reference photo (propellers, wheels, wires, boards, wing): nothing turns metallic, dark or glossy. It is the SAME physical object as the photo; only the environment and light change.')
+    lines.push(plane
+      ? (es
+        ? 'PRODUCTO BLOQUEADO (reforzado): NO alteres forma, partes, ruedas, tren de aterrizaje, cola, pliegues, cables, hélices, proporciones ni colores. No agregues ni quites alas, aletas, solapas, pestañas ni piezas: el mismo número de partes que la foto. Conservá la forma EXACTA del ala (mismo contorno, sin pliegues ni pestañas de más) y el color y el material de CADA pieza tal como en la foto de referencia (hélices, ruedas, cables, placas, ala): nada se vuelve metálico, oscuro ni brillante. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
+        : 'PRODUCT LOCK (reinforced): do NOT alter shape, parts, wheels, landing gear, tail, folds, wires, propellers, proportions or colours. Do not add or remove wings, fins, flaps, tabs or parts: the same number of parts as the photo. Keep the EXACT wing shape (same outline, no extra folds or tabs) and keep the colour and material of EVERY part as in the reference photo (propellers, wheels, wires, boards, wing): nothing turns metallic, dark or glossy. It is the SAME physical object as the photo; only the environment and light change.')
+      : (es
+        ? 'PRODUCTO BLOQUEADO (reforzado): cada pieza, color, material y proporción del producto exactamente como en la foto de referencia. No alteres su forma ni sus proporciones, no agregues ni quites partes, y no cambies ni redibujes lo impreso (textos, logos, gráficos, íconos): nada se vuelve más metálico, oscuro, brillante ni de otro color. Es el MISMO objeto físico de la foto; solo cambian el entorno y la luz.'
+        : 'PRODUCT LOCK (reinforced): every part, colour, material and proportion of the product exactly as in the reference photo. Do not alter its shape or proportions, do not add or remove parts, and do not change or redraw what is printed on it (text, logos, graphics, icons): nothing turns more metallic, darker, glossier or another colour. It is the SAME physical object as the photo; only the environment and light change.'))
     if (rules.productNotes?.trim()) {
       const notes = rules.productNotes.trim().replace(/\s+/g, ' ').slice(0, 400)
       lines.push(es ? `NOTAS DEL PRODUCTO (del dueño, obligatorias): ${notes}` : `PRODUCT NOTES (from the owner, mandatory): ${notes}`)
     }
     lines.push(es
-      ? `PROPS: PROHIBIDO añadir objetos que no estén en las fotos de referencia adjuntas ni nombrados en la escena: ninguna caja, empaque, control/gamepad, cable, herramienta, repuesto, hoja con dibujo, logo, accesorio ni texto impreso inventado. Solo el producto${accessories.length ? ', los accesorios de las fotos adjuntas' : ''} y la superficie/ambiente.${allowed.length ? ` Únicos extras permitidos: ${allowed.join('; ')}.` : ' No hay extras permitidos.'}`
-      : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: no box, packaging, controller/gamepad, cable, tool, spare part, drawn sheet, logo, accessory or invented printed text. Only the product${accessories.length ? ', the accessories in the attached photos' : ''} and the surface/ambience.${allowed.length ? ` Only extras allowed: ${allowed.join('; ')}.` : ' No extras allowed.'}`)
+      ? `PROPS: PROHIBIDO añadir objetos que no estén en las fotos de referencia adjuntas ni nombrados en la escena: ${plane ? 'ninguna caja, empaque, control/gamepad, cable, herramienta, repuesto, hoja con dibujo, logo, accesorio ni texto impreso inventado.' : 'ningún objeto, empaque, accesorio, herramienta, logo ni texto impreso inventado.'} Solo el producto${accessories.length ? ', los accesorios de las fotos adjuntas' : ''} y la superficie/ambiente.${allowed.length ? ` Únicos extras permitidos: ${allowed.join('; ')}.` : ' No hay extras permitidos.'}`
+      : `PROPS: FORBIDDEN to add objects that are not in the attached reference photos or named in the scene: ${plane ? 'no box, packaging, controller/gamepad, cable, tool, spare part, drawn sheet, logo, accessory or invented printed text.' : 'no invented object, packaging, accessory, tool, logo or printed text.'} Only the product${accessories.length ? ', the accessories in the attached photos' : ''} and the surface/ambience.${allowed.length ? ` Only extras allowed: ${allowed.join('; ')}.` : ' No extras allowed.'}`)
     if (accessories.length) {
       lines.push(es
-        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente: misma forma, mismos botones y palancas (la misma cantidad), misma impresión y el mismo tamaño relativo al producto principal (un control de mano es PEQUEÑO frente a un avión o una caja: no lo agrandes ni lo conviertas en un control de consola; una caja plana sigue plana). NO los agrandes, NO los restilices, NO los inventes distintos.`
-        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully: same shape, same buttons and sticks (same count), same print and the SAME size relative to the main product (a handheld controller is SMALL next to a plane or a box: do not enlarge it or turn it into a console gamepad; a flat box stays flat). Do NOT enlarge, restyle or reinvent them.`)
+        ? `Las fotos de referencia adicionales son accesorios REALES del kit (${accessories.join(', ')}): si aparecen en la escena, copialos fielmente: misma forma, mismos botones y palancas (la misma cantidad), misma impresión y el mismo tamaño relativo al producto principal${plane ? ' (un control de mano es PEQUEÑO frente a un avión o una caja: no lo agrandes ni lo conviertas en un control de consola; una caja plana sigue plana)' : ''}. NO los agrandes, NO los restilices, NO los inventes distintos.`
+        : `The additional reference photos are REAL kit accessories (${accessories.join(', ')}): if they appear in the scene, copy them faithfully: same shape, same buttons and sticks (same count), same print and the SAME size relative to the main product${plane ? ' (a handheld controller is SMALL next to a plane or a box: do not enlarge it or turn it into a console gamepad; a flat box stays flat)' : ''}. Do NOT enlarge, restyle or reinvent them.`)
     }
   }
   lines.push(es
@@ -229,8 +254,8 @@ export function buildMcpPromptRules(language: 'es' | 'en', rules: WebPostMcpRule
     : 'SEPARATORS: never leave "·", "|" or "—" dangling at the start or end of a line; if a line wraps, the separator disappears.')
   if (rules.retryHint?.trim()) {
     lines.push(es
-      ? `CORRECCIÓN (el intento anterior falló el control de calidad): ${rules.retryHint.trim().slice(0, 400)}`
-      : `FIX (the previous attempt failed quality control): ${rules.retryHint.trim().slice(0, 400)}`)
+      ? `CORRECCIÓN (el intento anterior falló el control de calidad): ${clipClean(rules.retryHint.trim(), 700)}`
+      : `FIX (the previous attempt failed quality control): ${clipClean(rules.retryHint.trim(), 700)}`)
   }
   return lines.join('\n')
 }
@@ -294,6 +319,9 @@ export function buildWebPostSourcePrompt(input: WebPostPromptInput): string {
       if (/^(Texto visible:|Visible text:)/.test(blk)) return [langCode === 'en' ? sceneOnlyEn : sceneOnlyEs]
       if (/^(Precio listado|List price)/.test(blk)) return []
       if (/^(COPY DEL USUARIO|USER COPY)/.test(blk)) return []
+      // Round 8: the logo IS applied (by code, after the scene): the generic "no logo file attached" line contradicted that
+      if (/^REGLA — LOGO: no hay archivo de logo adjunto/.test(blk)) return ['REGLA — LOGO: el logo de la marca se agrega después por código. NO dibujes ningún logo, wordmark ni subtítulo de marca en la escena.']
+      if (/^LOGO RULE: no logo file attached/.test(blk)) return ['LOGO RULE: the brand logo is added afterwards, in code. Do NOT draw any logo, wordmark or brand subtitle in the scene.']
       return [blk]
     })
     body = blocks

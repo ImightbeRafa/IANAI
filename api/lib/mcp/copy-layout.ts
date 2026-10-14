@@ -13,6 +13,10 @@ export function findCtaLine(lines: string[]): string | undefined {
   return undefined
 }
 
+/** 0 = shipping / delivery, 1 = has figures, 2 = other, 3 = age / "not included" notes (the least useful on the image). */
+export const factRankOf = (l: string): number => (/env[ií]o|gratis|entrega|free shipping|shipping|delivery/i.test(l) ? 0 : /no incluid|años|edad|supervisi|not included|ages?\b/i.test(l) ? 3 : /\d/.test(l) ? 1 : 2)
+export const rankFacts = (lines: string[]): string[] => lines.map((l, i) => ({ l, i })).sort((a, b) => factRankOf(a.l) - factRankOf(b.l) || a.i - b.i).map((x) => x.l)
+
 export function capCopyBlocks(copy: string, maxBlocks = 4): CappedCopy {
   const lines = copy.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const cta = findCtaLine(lines)
@@ -27,7 +31,11 @@ export function capCopyBlocks(copy: string, maxBlocks = 4): CappedCopy {
   if (ctaIdx >= 0) used.add(ctaIdx)
   const headline = pick(() => true)
   const price = pick((l) => PRICE_RE.test(l))
-  const facts = pick(() => true)
+  // Round 8: the facts line that stays on the image is the most useful one (shipping / delivery first, then lines with figures, age / "not included" notes last), not just the first.
+  const factRank = factRankOf
+  const candidates = lines.map((l, idx) => ({ l, idx })).filter((c) => !used.has(c.idx))
+  const factIdx = candidates.length ? candidates.reduce((best, c) => (factRank(c.l) < factRank(best.l) ? c : best), candidates[0]).idx : -1
+  const facts = factIdx >= 0 ? (used.add(factIdx), factIdx) : pick(() => true)
   const keep = [headline, price, facts, ctaIdx].filter((i) => i >= 0).sort((a, b) => a - b)
   const overflow = lines.filter((_, i) => !keep.includes(i))
   return { onImage: keep.map((i) => lines[i]).join('\n'), overflow, cta, capped: overflow.length > 0 }

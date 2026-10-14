@@ -48,6 +48,8 @@ export type FidelityWarning = {
     referenceIndex: number
     /** true = the product was located by feature match, so the structural comparison is trusted. */
     confident: boolean
+    /** Round 8: located by many inliers but only middling cell correlation = another view of the same product (no warning). */
+    perspectiveTolerant?: boolean
     inliers?: number
     /** Share (0–1) of the product's textured regions that still match the reference. */
     preserved?: number
@@ -370,6 +372,13 @@ async function paletteFallback(tpl: RefTemplate, generated: Buffer): Promise<Pal
 export const MIN_LOCATED_INLIERS = 15
 /** Warn when less than this share of the product's textured regions still matches the reference. */
 export const PRESERVED_MIN = 0.8
+/**
+ * Round 8: a product that is located by MANY inliers (the printed art / parts match one to one) but whose per-cell correlation is only middling was most
+ * likely re-shot from another angle (tilted box on the reference, frontal in the ad): the cell comparison assumes the same view, so it is not a verdict.
+ * ≥ STRONG_LOCATION_INLIERS and ≥ PERSPECTIVE_PRESERVED_MIN is "same product, different view" (no warning). A redraw loses inliers and cells together.
+ */
+export const STRONG_LOCATION_INLIERS = 55
+export const PERSPECTIVE_PRESERVED_MIN = 0.35
 /** A comparison over fewer textured cells than this is not trusted. */
 export const MIN_COMPARED_CELLS = 40
 
@@ -385,6 +394,8 @@ export const MIN_COMPARED_CELLS = 40
 export async function checkGeneratedProductFidelity(input: {
   referenceDataUrls: string[]
   generatedDataUrl: string
+  /** Round 8: the product may legitimately appear from another angle (a box / pouch / controller shot): many inliers + middling correlation is not a warning. Never for the plane (a missing part must warn). */
+  tolerateViewChange?: boolean
 }): Promise<FidelityCheckResult> {
   try {
     const generated = dataUrlBytes(input.generatedDataUrl)
@@ -430,7 +441,8 @@ export async function checkGeneratedProductFidelity(input: {
     const colourDeltaE = colour?.details.colourDeltaE
     const colourBad = typeof colourDeltaE === 'number' && colourDeltaE > POSTCHECK_THRESHOLD.colourDeltaE
     const reasons: string[] = []
-    if (best && best.preserved < PRESERVED_MIN) {
+    const perspectiveTolerant = Boolean(input.tolerateViewChange && best && best.preserved < PRESERVED_MIN && best.inliers >= STRONG_LOCATION_INLIERS && best.preserved >= PERSPECTIVE_PRESERVED_MIN)
+    if (best && best.preserved < PRESERVED_MIN && !perspectiveTolerant) {
       reasons.push(`the product's shapes, parts or printed details differ from the reference photo (only ${Math.round(best.preserved * 100)}% of its textured regions match at the located position, < ${Math.round(PRESERVED_MIN * 100)}%): it may have been redrawn`)
     }
     if (colourBad) reasons.push(`product colour differs from the reference (ΔE ${colourDeltaE} > ${POSTCHECK_THRESHOLD.colourDeltaE})`)
@@ -441,6 +453,7 @@ export async function checkGeneratedProductFidelity(input: {
       method: best ? 'features' : fallback?.informative ? 'palette' : 'colour',
       referenceIndex: best ? best.index : (colour?.details.referenceIndex ?? 0),
       confident: Boolean(best),
+      ...(perspectiveTolerant ? { perspectiveTolerant: true } : {}),
       ...(best ? { inliers: best.inliers, preserved: Math.round(best.preserved * 100) / 100, cells: best.cells, scale: Math.round(best.scale * 100) / 100, productBox: { x0: Math.max(0, best.bbox.x0 / FEATURE_GEN_WIDTH), y0: Math.max(0, best.bbox.y0 / best.genH), x1: Math.min(1, best.bbox.x1 / FEATURE_GEN_WIDTH), y1: Math.min(1, best.bbox.y1 / best.genH) } } : {}),
       ...(typeof colourDeltaE === 'number' ? { colourDeltaE } : {}),
       ...(fallback?.informative ? { parts: { clusters: fallback.clusters, presence: fallback.presence, missing: fallback.missing } } : {}),
@@ -498,7 +511,17 @@ export type McpImageQa = {
   /** true when the deterministic scale-in fallback shrank the picture (opt-in last resort): always a defect, never 'pass'. */
   scaleInUsed?: boolean
   /** Round 7: flat top / bottom strips Grok painted (letterbox look) found in the scene, and whether the code blended them away. */
-  seams?: { found: number; blended: boolean; remaining: number; details: Array<{ edge: 'top' | 'bottom'; share: number; step: number }> }
+  /** Round 8: a flat strip was left as it is because the content next to it is detailed (a blend would smear it): regenerate. */
+  seamBlendSkipped?: boolean
+  /** Round 8: the kit logo is a favicon-like square icon, not a wordmark. */
+  logoLooksLikeIcon?: boolean
+  /** Round 8: claims dropped from the offer text / copy because the brand kit (or the built-in list) forbids them. */
+  removedClaims?: string[]
+  seams?: { found: number; blended: boolean; remaining: number; details: Array<{ edge: 'top' | 'bottom'; share: number; step: number }>; /** Round 8: the strips were cut off and the picture zoomed back instead of blended. */ cropZoom?: { zoom: number; cropTopPx: number; cropBottomPx: number } }
+  /** Round 8: button-like blocks the SCENE heuristics found in the bands (bench edge, seam…): informational, never counted as CTAs. */
+  sceneButtonLike?: number
+  /** Round 8: the CTA covers the located product / accessory (no free slot, could not make room). */
+  ctaBlocked?: boolean
   /** Round 7: type scale the layout had to use (1 = nominal) — below 0.8 is always warned, below 0.75 raises the severity. */
   textScale?: number
   /** Round 7: the factors that make up `severity` beyond the base QA (seam, text over product, text scale, fidelity < 0.75, props, CTA on a seam). */
@@ -596,7 +619,10 @@ export async function checkSafeZones(bytes: Buffer, ratio: string, opts: { /** S
         if (flat) { run++; if (run > best) { best = run; bestEnd = x } } else run = 0
       }
       const span = best / w
-      if (span < 0.12 || span > 0.92) continue
+      // Round 8: a CTA pill is a bounded shape: it stops short of both side borders (≤ 78 % of the width), unlike a table / nightstand / floor that runs edge to edge
+      // (Sleeping Patches: a dark nightstand of ~90 % of the width was read as the CTA and made the old flow shrink the picture).
+      const runStart = bestEnd - best
+      if (span < 0.12 || span > 0.78 || runStart <= 1 || bestEnd >= w - 2) continue
       // thickness measured at a column 10% in from the run's left end (clear of the label text)
       const col = Math.min(w - 1, Math.max(0, bestEnd - best + Math.round(best * 0.1)))
       const ref = px(col, y)
@@ -609,13 +635,16 @@ export async function checkSafeZones(bytes: Buffer, ratio: string, opts: { /** S
       }
       const next = y + dir * (t + 1)
       const sharpEdge = next >= 0 && next < h && dist(px(col, next), ref) > 60
-      if (t >= Math.round(h * 0.02) && t <= Math.round(h * 0.14) && sharpEdge) {
+      // button-like proportions: clearly wider than tall (a pill, aspect ≥ 2.2), not a furniture front
+      const pillAspect = best / t
+      if (t >= Math.round(h * 0.02) && t <= Math.round(h * 0.14) && sharpEdge && pillAspect >= 2.2) {
         issues.push({ edge, kind: 'block_touches_edge', detail: `a flat block (~${Math.round(span * 100)}% of the width, e.g. the CTA button) touches the ${edge} edge`, amount: 1 })
         return
       }
     }
   }
-  slab('bottom')
+  // Scene-only flow: the CTA is drawn in code, so a flat dark / light block at the bottom is just scene (furniture, floor); real buttons the model draws are counted by countCtaButtons.
+  if (!sceneBands) slab('bottom')
   // (a flat block at the top edge is usually the photo itself, not a button: only the bottom CTA is checked as a slab)
 
   // 2) text-like energy inside the unsafe bands (strong, dense, short transitions).
@@ -695,6 +724,22 @@ export async function countCtaButtons(bytes: Buffer, opts: { logoBox?: { x0: num
         if (ix * iy > 0.3 * ((comp.x1 - comp.x0 + 1) / w) * ((comp.y1 - comp.y0 + 1) / h)) excluded = true
       }
       if (excluded) continue
+      // Round 8 (scene-only flow): a drawn button STANDS OUT from what surrounds it. A dark nightstand / drawer front / floor patch is flat and wide too but sits on
+      // similar dark surroundings (low contrast with its own ring): not a button.
+      if (opts.onlyBands) {
+        const m = [0, 0, 0]; let mc = 0
+        for (let y = comp.y0; y <= comp.y1; y++) for (let x = comp.x0; x <= comp.x1; x++) if (keyOf[y * w + x] === k) { for (let c = 0; c < 3; c++) m[c] += data[(y * w + x) * 3 + c]; mc++ }
+        const ring = [0, 0, 0]; let rc = 0
+        const R = 3
+        for (let y = Math.max(0, comp.y0 - R); y <= Math.min(h - 1, comp.y1 + R); y++) for (let x = Math.max(0, comp.x0 - R); x <= Math.min(w - 1, comp.x1 + R); x++) {
+          if (x >= comp.x0 && x <= comp.x1 && y >= comp.y0 && y <= comp.y1) continue
+          for (let c = 0; c < 3; c++) ring[c] += data[(y * w + x) * 3 + c]; rc++
+        }
+        if (mc && rc) {
+          const standOut = Math.hypot(m[0] / mc - ring[0] / rc, m[1] / mc - ring[1] / rc, m[2] / mc - ring[2] / rc)
+          if (standOut < 45) continue
+        }
+      }
       boxes.push({ x0: comp.x0, y0: comp.y0, x1: comp.x1, y1: comp.y1 })
       buttons++
     }

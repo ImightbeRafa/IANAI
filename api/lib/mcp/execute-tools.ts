@@ -333,8 +333,9 @@ export function parseWebPostArgs(args: Record<string, unknown>): {
   out.autoRetry = args.autoRetry === true
   out.layoutCap = args.layoutCap !== false
   out.compositeLayers = args.compositeLayers !== false
-  // Composite flow (default): the layout puts everything inside the safe zones, so the scale-in is OFF unless explicitly requested. Legacy flow keeps it ON.
-  out.enforceSafeZones = out.compositeLayers ? args.enforceSafeZones === true : args.enforceSafeZones !== false
+  // Composite flow (default): the layout puts everything inside the safe zones, so the scale-in is OFF unless explicitly requested. 
+  // Round 8: the scale-in canvas is opt-in everywhere (explicit true); with compositeLayers it is ignored (never runs) even when true.
+  out.enforceSafeZones = args.enforceSafeZones === true
   return out
 }
 
@@ -990,6 +991,7 @@ async function runImageGenerateBody(options: {
       textDensity: options.textDensity,
       ctaStrength: options.ctaStrength,
       productUrls,
+      productPhotoRole: (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()) ?? accessoryRefs.rest.find((i) => i.kind !== 'context' && i.kind !== 'generated'); return sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined })(),
       supportUrls,
       referenceMode: options.referenceMode,
       lock,

@@ -1,3 +1,16 @@
+## 2026-10-09 — MCP 0.21.0: scale-in never with compositeLayers, seam blend refuses detailed content (+ surface texture), generic product lock, forbidden-claims filter, favicon-logo warning
+
+**Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file
+**Files:** `api/lib/mcp/{claims-filter,product-kind,logo-check}.ts` (new), `api/lib/mcp/{scene-prep,compose-scene,layout-ad,image-postcheck,web-image,exact-flow,execute-tools,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts` (MCP rules only: `productKind`)
+
+- **(a)** `enforceSafeZones` is ignored with `compositeLayers` (the scale-in canvas never runs; a warning says so) and defaults to false in every flow; the legacy flow (`compositeLayers:false`) needs an explicit `true`. Slab check: a flat block is a CTA only when pill-shaped (≤ 78 % of the width, not touching a side border, aspect ≥ 2.2); skipped in the scene-only flow; `countCtaButtons` (scene-only) ignores blocks that do not stand out from their surroundings (dark nightstand).
+- **(b)** `layout-ad` `tighten` only trims a calm strip that also looks like the background outside the located box (the flat navy top of the pouch was trimmed away → text over the pouch went unseen); make-room refuses a shift that would push the objects onto the CTA.
+- **(c)** The plane lock wording (wheels, landing gear, propellers, flaps, controllers, drawn sheet) is sent only for plane-like products (derived from offer name / type / description / specs / productNotes); every other product gets "every part, colour, material and proportion … as in the reference photo". MCP rules only; web request unchanged.
+- **(d)** Kit `forbiddenPhrases` + built-in regulated claims ("sin efectos secundarios", "sin drogas ni químicos", "reducir el cortisol / la ansiedad", …) are removed (clause level) from the offer text injected as "Contexto factual", the guide prompt, extra context and the copy given to the compositor; `qa.removedClaims` + `removedClaims` + a warning.
+- **(e)** `qa.logoLooksLikeIcon` (nearly square 0.85–1.15 and < 256 px, or a favicon / app-icon URL): warning + `qa.status` ≥ warning; the logo is still placed.
+- Seam blend: a strip whose neighbouring content is detailed (> 50 % of the columns far from the median colour) is NOT blended and is reported (`qa.seamBlendSkipped`, `scenePrep.seams.skipped`); the blended fill carries the surface texture (vertical high-pass of the adjacent rows) instead of a smooth tan band.
+- Web request unchanged (`test/web-mcp-parity.spec.ts` green). Tests: `test/round8.spec.ts`.
+
 ## 2026-10-09 — MCP 0.20.0: natural full-bleed scene (no letterbox strips), text never over the product, severity factors, exact with code layers, productNotes
 
 **Area:** api (mcp, web-post-image), docs — no migration, no new env/secret/binding/route/cron/dependency/font file
@@ -1518,3 +1531,12 @@ Key architectural milestones not captured above:
 - The first chunk and each chunk leased by `get_execute_result` run inline in that request, avoiding nested `waitUntil` work that can be dropped before generation starts. Stale working leases retry the same stable pack/index generation UUID.
 - Every chunk outcome is CAS-persisted, so a late worker cannot overwrite a newer checkpoint or change `completed` back to `running`; provider/save/charge errors record the real failing chunk and error.
 - Running status identifies the next script/image index. The terminal payload includes full script text and saved JPEG HTTPS URLs, never blobs.
+
+### MCP 0.21.0 — round 8b (CoS round-7 live list)
+- Composited flow: scene-derived `safeZones`/`text_in_bands` and scene "button-like" blocks are no longer fail triggers (now `qa.sceneButtonLike`, warning); `qa.ctaButtons` comes from the compositor only; scale-in never runs.
+- Flat strips: cut off + zoom back (≤16 %) when located objects survive and the text corridor does not shrink; otherwise textured continuation; refusal threshold 0.62.
+- CTA: 5 slots × 3 pill sizes; a slot over a located box / accessory or over object pixels (`objectShare` > 0.12, catches unlocatable dark controllers) is inadmissible; if none is free the picture is moved up (bottom extended); if still none the CTA is left out (caption) and `qa.ctaBlocked` fails the image.
+- Fidelity: many-inlier / middling-correlation matches on box / contents / part photos (or non-plane products) are a view change, not a warning; `suggestedFallback: exact` only for plane hero shots.
+- Prompt: brand voice clipped cleanly (adpack "HECHOS CONFIRMADOS" section dropped), retry hint up to 700 chars at a sentence boundary, composited prompts say the logo is added by code.
+- Logo: soft scrim when contrast < 4.5 (`compositeLayers.logo.scrim`, `contrastBefore`).
+- Copy cap keeps the shipping line as the facts line; a second facts line stays on the image when it fits (≥ 85 % scale).

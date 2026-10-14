@@ -34,8 +34,8 @@ export type CompositeReport = {
   method: 'composite'
   width: number
   height: number
-  logo: { status: 'drawn' | 'unavailable' | 'not_requested'; reason?: string; box?: Box; contrast?: number; glow?: boolean }
-  cta: { status: 'drawn' | 'none'; text?: string; box?: Box; fill?: string; textColor?: string; contrast?: number; fontSize?: number; fits?: boolean; slot?: 'center' | 'left' | 'right'; /** Local busyness (0–1 share of edge pixels) under the pill. */ busyness?: number; /** true when even the calmest slot is busy or overlaps the product. */ busy?: boolean; /** true when even the best slot straddles a hard horizontal edge (table edge / band seam). */ seam?: boolean }
+  logo: { status: 'drawn' | 'unavailable' | 'not_requested'; reason?: string; box?: Box; contrast?: number; glow?: boolean; /** Round 8: a soft scrim was put behind the logo because its contrast over the picture was < 4.5:1. */ scrim?: { tone: string; alpha: number }; contrastBefore?: number }
+  cta: { status: 'drawn' | 'none'; text?: string; box?: Box; fill?: string; textColor?: string; contrast?: number; fontSize?: number; fits?: boolean; slot?: 'center' | 'left' | 'right' | 'mid-left' | 'mid-right'; /** Local busyness (0–1 share of edge pixels) under the pill. */ busyness?: number; /** true when even the calmest slot is busy or overlaps the product. */ busy?: boolean; /** true when even the best slot straddles a hard horizontal edge (table edge / band seam). */ seam?: boolean; /** Round 8: share of the pixels under the chosen pill that differ strongly from the band's background (a dark controller on a light table …). */ objectShare?: number; /** Round 8: true when EVERY slot overlaps the located product / an accessory (the CTA is then placed on the least bad one and the caller makes room below). */ blocked?: boolean }
   scrim: { color: string; maxAlpha: number } | null
   /** Band fractions the layers were placed inside. */
   zones: { top: number; bottom: number }
