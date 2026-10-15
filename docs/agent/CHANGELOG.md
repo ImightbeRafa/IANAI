@@ -1,3 +1,20 @@
+## 2026-10-15 — MCP 0.26.0: the model designs the whole ad again (web parity), owner-approved references, reference gate, preflight
+
+**Area:** api (mcp, adpack, bulk), src (brand-kit upload), supabase (migration **086, NOT applied**), Dockerfile (tesseract removed), docs. No new env/secret/route/cron/npm dependency. Full write-up: `docs/mcp-quality.md`.
+**Files:** part A — `api/lib/mcp/{web-image,execute-tools,exact-flow,pack-swap (new),image-postcheck,protocol,tool-registry,server-info}.ts`, `api/lib/web-post-image.ts`, `api/lib/bulk/run-bulk.ts`, `api/lib/adpack/fidelity/{pipeline,photos}.ts`, `api/lib/mcp/pack-ocr.ts` (deleted), tests `test/mcp-quality-026.spec.ts` (new) + round / flow specs updated. Part B — `api/lib/mcp/{reference-gate,asset-tools (new),preflight (new),artifact-store,supabase-adapter,bulk-tools,adpack-tools,protocol,tool-registry}.ts`, `api/lib/adpack/{saved-brand,saved-brand-supabase}.ts`, `api/lib/db-missing-column.ts`, `src/{utils/imageCompression,services/imageStorage}.ts`, `supabase/migrations/086_product_images_approved.sql`, `test/mcp-reference-gate-026.spec.ts` (new).
+
+- **Default = web parity:** `compositeLayers` defaults to **false** — the model designs the whole ad (copy rendered in-image, kit logo as a reference, confirmed product photos as /edits refs under PRODUCT LOCK). The scene-only flow + code layout is an explicit opt-in. The offer lock moved to the prompt head (never clamped away); pack attributes are no longer treated as accessories.
+- **Refs:** kit `referenceImages` are never appended as product refs; `roleFromRequestText` removed.
+- **Retries / cost:** no forced retries; at most ONE, only with `autoRetry:true`, disclosed in the approval; the automatic generated → exact fallback and the whole-pipeline `withProviderRetry` are gone; one usage row per paid call (`paidCalls`).
+- **Removed from the default path:** pack OCR (deleted), seams / make-room / extendCanvas / scale-in / props / cable / CTA-slot heuristics (opt-in only). Fidelity check = warning only.
+- **Packs:** `productFidelity` deprecated / ignored; the real pack pixels are swapped into the located box (`pack-swap.ts`, deterministic, no extra generation).
+- **Opt-ins:** `stampLogo` / `stampPrice` (automatic logo stamp for a vector logo).
+- **Reference gate (`REFERENCE_GATE_CONFIG`):** low resolution / compression / screenshot / burned-in text are accepted with an ES/EN warning (low-res refs are upscaled for free); hard errors only for unreachable / not-an-image; duplicates silently deduped; the vision verdict is cached by content hash in `product_images.quality.gate`.
+- **Assets:** roles product | b-roll | unboxing | lifestyle | packaging | logo; owner-only `approved`; new tools `approve_asset`, `unapprove_asset`, `set_asset_role`; `list_assets` shows role / approved / gate. Generation uses only approved assets (varied pick: hero + angle / packaging + lifestyle).
+- **Preflight:** `adpack_preflight` (free) 0–100; execute tools and `adpack_start` refuse below 70 before charging — only a missing essential (approved product photo, offer name, price, brief) can cause it.
+- **Web app:** brand-kit reference uploads keep full resolution (4096 px cap; was 1024).
+- **Deploy:** apply migration 086 first; existing brands must approve their assets.
+
 ## 2026-10-15 — MCP 0.25.0: connected-only mask repair + leftover-backdrop QA fail, strict-props exact fallback at the generated scale, CTA shrinks the picture to 60 %, asset role inference, fidelity vs the photo through the cache, bundle line kept, framed badge self-plated
 
 **Area:** api (mcp, adpack), docs — no migration, no new env/secret/binding/route/cron, no new npm dependency, no Dockerfile change. Web request byte-identical (`test/web-mcp-parity.spec.ts`).
