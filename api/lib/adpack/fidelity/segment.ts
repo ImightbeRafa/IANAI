@@ -24,9 +24,9 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import type { ModelGateway, ProductPhotoRole, SegmentationItem } from '../types.js'
 import { borderBackground, bordersTouched, components, deltaE, dilate, erode, labImage } from './pixels.js'
-import { BACKGROUND_LEAK_MAX, backgroundLeakShare } from './score.js'
+import { BACKGROUND_LEAK_MAX, backgroundLeakPixels, backgroundLeakShare } from './score.js'
 import { sheetFilm } from './sheet-film.js'
-import { checkMaskCoverage, LEAK_FRAME_SHARE, MASK_MISSED_MAX, PHOTO_IOU_REJECT, photoSilhouetteIoU, type MaskCoverage } from './mask-coverage.js'
+import { backdropExplainedPixels, checkMaskCoverage, LEAK_FRAME_SHARE, LEFTOVER_BG_MAX, MASK_MISSED_MAX, PHOTO_IOU_REJECT, photoSilhouetteIoU, type MaskCoverage } from './mask-coverage.js'
 import { addMissedObjects, cutoutRecall, estimateForeground, isFlatLayEstimate, MIN_CUTOUT_RECALL, type CutoutRecall, type ForegroundEstimate } from './recall.js'
 
 export type CutoutMethod = 'alpha' | 'flood' | 'model'
@@ -167,7 +167,11 @@ async function buildCutout(full: Raw, mask: Uint8Array, mw: number, mh: number, 
   for (let i = 0; i < full.w * full.h; i++) {
     let a = maskPng[i]
     if (filmPng && filmPng[i] > a) {
-      out[i * 4] = full.data[i * full.channels]; out[i * 4 + 1] = full.data[i * full.channels + 1]; out[i * 4 + 2] = full.data[i * full.channels + 2]; out[i * 4 + 3] = filmPng[i]
+      // Round 12: the film carries only its DEVIATION from the photo backdrop (around a neutral mid grey), never the white
+      // backdrop itself — that read as a pale halo patch on a dark scene (round 11 SP halo 37 %)
+      const src = [full.data[i * full.channels], full.data[i * full.channels + 1], full.data[i * full.channels + 2]]
+      const fc = bgRgb ? src.map((v, k) => Math.max(0, Math.min(255, Math.round(150 + (v - bgRgb[k]) * 1.2)))) : src
+      out[i * 4] = fc[0]; out[i * 4 + 1] = fc[1]; out[i * 4 + 2] = fc[2]; out[i * 4 + 3] = filmPng[i]
       continue
     }
     // Hard-edge cleanup: near-zero → 0, near-full → 255 (keeps the interior pixels exact).
@@ -190,6 +194,29 @@ async function buildCutout(full: Raw, mask: Uint8Array, mw: number, mh: number, 
     out[i * 4 + 3] = Math.round((a * srcA) / 255)
   }
   return trimRgba(out, full.w, full.h)
+}
+
+/** Round 12: remove backdrop-coloured pockets of the mask (≥ 0.02 % of it): open ones, and small closed ones. */
+export function cutOpenBackdropPockets(lab: Float32Array, fg: Uint8Array, w: number, h: number, bgLab: [number, number, number]): Uint8Array {
+  const model = backdropExplainedPixels(lab, w, h, fg)
+  const glob = backgroundLeakPixels(lab, fg, bgLab)
+  for (let i = 0; i < model.length; i++) model[i] = model[i] | glob[i]
+  const leakPx = dilate(erode(model, w, h, 1), w, h, 1)
+  for (let i = 0; i < fg.length; i++) if (!fg[i]) leakPx[i] = 0
+  let area = 0
+  for (const v of fg) area += v
+  const outside = new Uint8Array(fg.length)
+  for (let i = 0; i < fg.length; i++) outside[i] = fg[i] ? 0 : 1
+  const edge = dilate(outside, w, h, 2)
+  const { labels, list } = components(leakPx, w, h)
+  const open = new Set<number>()
+  for (let i = 0; i < fg.length; i++) if (labels[i] && edge[i]) open.add(labels[i])
+  // open pockets of any size; closed pockets (wall seen through a cable loop) only while small (≤ 2 % — never a white panel)
+  const drop = new Set(list.filter((c) => (open.has(c.label) && c.area >= 4) || (c.area >= area * 0.0002 && c.area <= area * 0.02)).map((c) => c.label))
+  if (!drop.size) return fg
+  const out = fg.slice()
+  for (let i = 0; i < out.length; i++) if (labels[i] && drop.has(labels[i])) out[i] = 0
+  return out
 }
 
 /** Trim fully transparent borders (keeps a 2px margin). */
@@ -475,6 +502,9 @@ async function tryFlood(bytes: Uint8Array, maxSide: number, opts: FloodOptions, 
   const why = validateMask(fg, work.w, work.h, { allowMulti: opts.allowMulti })
   if (why) return why
   // Round 1 (P2): backdrop baked into the cut-out is a failure (next strategy), never a "product".
+  // Round 12: leftover backdrop pockets that open onto the outside of the silhouette (A: the shaded wall between the
+  // landing-gear legs and the wheels) are cut away before the leak is measured; closed white parts of the product stay.
+  if (!opts.allowMulti) fg = cutOpenBackdropPockets(lab, fg, work.w, work.h, flood.bgLab)
   const leak = opts.allowMulti ? 0 : backgroundLeakShare(lab, fg, work.w, work.h, flood.bgLab)
   if (leak > BACKGROUND_LEAK_MAX) return `background left in cutout ${(leak * 100).toFixed(1)}% > ${BACKGROUND_LEAK_MAX * 100}%`
   let area = 0
@@ -627,17 +657,34 @@ export async function segmentProduct(input: SegmentProductInput): Promise<Cutout
     if (!flatLay && method === 'flood' && wi && res.mask.length === wi.raw.w * wi.raw.h) {
       coverage = checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, res.mask)
       if (coverage.missedShare > MASK_MISSED_MAX) {
-        const fixed = coverage.repaired ? checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, coverage.repaired) : null
-        if (coverage.repaired && fixed && fixed.missedShare <= MASK_MISSED_MAX) {
+        // Round 12: repair step by step (a region becomes reachable once its neighbour is recovered), each step adds only
+        // regions connected to the product; the leftover backdrop of all steps is summed.
+        let fixed = coverage.repaired ? checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, coverage.repaired) : null
+        let leftover = coverage.leftoverBackdrop ?? 0
+        for (let step = 0; step < 3 && fixed && fixed.missedShare > MASK_MISSED_MAX && fixed.repaired; step++) {
+          leftover += fixed.leftoverBackdrop ?? 0
+          coverage.repaired = fixed.repaired
+          fixed = checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, fixed.repaired)
+        }
+        // Round 12: if the repair still carries backdrop, strip those pixels and re-check (keeps the product part of a
+        // large miss; rejects only when that would drop the recovery under the missed-share bar)
+        if (coverage.repaired && leftover > LEFTOVER_BG_MAX) {
+          const bg = backdropExplainedPixels(wi.lab, wi.raw.w, wi.raw.h, coverage.repaired)
+          for (let i = 0; i < coverage.repaired.length; i++) if (bg[i] && !res.mask[i]) coverage.repaired[i] = 0
+          fixed = checkMaskCoverage(wi.lab, wi.raw.w, wi.raw.h, coverage.repaired)
+          leftover = fixed?.leftoverBackdrop ?? leftover
+          coverage.leftoverBackdrop = Math.round(leftover * 10000) / 10000
+        } else coverage.leftoverBackdrop = Math.round(leftover * 10000) / 10000
+        if (coverage.repaired && fixed && fixed.missedShare <= MASK_MISSED_MAX && leftover <= LEFTOVER_BG_MAX) {
           const bgMask = new Uint8Array(coverage.repaired.length)
           for (let i = 0; i < bgMask.length; i++) bgMask[i] = coverage.repaired[i] ? 0 : 1
           const rebuilt = await buildCutout(await rawRgba(bytes, maxSide), coverage.repaired, wi.raw.w, wi.raw.h, labToRgbApprox(wi.raw, bgMask))
           let a = 0
           for (const v of coverage.repaired) a += v
           cut = { ...cut, ...rebuilt, coverage: a / coverage.repaired.length }
-          rejected.push(`${name}: mask missed ${Math.round(coverage.missedShare * 100)}% of the product (light part on a light backdrop) → repaired`)
+          rejected.push(`${name}: mask missed ${Math.round(coverage.missedShare * 100)}% of the product (light part on a light backdrop) → repaired (leftover backdrop ${Math.round(leftover * 1000) / 10}%)`)
         } else {
-          rejected.push(`${name}: mask misses ${Math.round(coverage.missedShare * 100)}% of the product (bbox coverage ${coverage.bboxCoverage})`)
+          rejected.push(`${name}: mask misses ${Math.round(coverage.missedShare * 100)}% of the product (bbox coverage ${coverage.bboxCoverage}${(coverage.leftoverBackdrop ?? 0) > LEFTOVER_BG_MAX ? `; the repair would leave ${Math.round((coverage.leftoverBackdrop ?? 0) * 1000) / 10}% backdrop inside the cut-out > ${LEFTOVER_BG_MAX * 100}%` : ''})`)
           const r = recall ?? { recall: Math.max(0, 1 - coverage.missedShare), areaRecall: Math.max(0, 1 - coverage.missedShare), componentRecall: 1, colorCoverage: 1, components: { source: 1, kept: 1 } }
           if (!incomplete || r.recall > incomplete.recall.recall) incomplete = { recall: { ...r, recall: Math.min(r.recall, Math.max(0, 1 - coverage.missedShare)) }, method }
           continue
@@ -645,7 +692,7 @@ export async function segmentProduct(input: SegmentProductInput): Promise<Cutout
       }
     }
     const finalMask = cut !== res.cut && coverage?.repaired ? coverage.repaired : res.mask
-    const photoIoU = !flatLay && wi && finalMask.length === wi.raw.w * wi.raw.h ? photoSilhouetteIoU(wi.lab, wi.raw.w, wi.raw.h, finalMask) : null
+    const photoIoU = wi && finalMask.length === wi.raw.w * wi.raw.h ? photoSilhouetteIoU(wi.lab, wi.raw.w, wi.raw.h, finalMask) : null
     let maskShare = 0
     for (const v of finalMask) maskShare += v ? 1 : 0
     maskShare /= Math.max(1, finalMask.length)

@@ -20,7 +20,7 @@ import { scriptsToSectionsDto } from '../guiones/script-output.js'
 import { GROK_TEXT_MODEL } from '../grok-models.js'
 import type { AspectRatio } from '../adpack/types.js'
 import { generateExactWebStyleAd } from './exact-flow.js'
-import { roleFromImageRow, roleFromLabel, stripRolePrefix } from '../adpack/fidelity/photos.js'
+import { inferAssetRole, roleFromRequestText, stripRolePrefix } from '../adpack/fidelity/photos.js'
 import { generateWebStyleImage, offerLockFromRow, pickAccessoryPhotos, postCheckSummary } from './web-image.js'
 import type { McpOfferStore } from './offer-tools.js'
 import { resolveImageRatio } from '../image-ratios.js'
@@ -176,7 +176,7 @@ export function resolveQuotedProductFidelity(o: { explicit?: 'exact' | 'generate
   if (o.explicit) return o.explicit
   const offer = o.ctx.offers.find((x) => x.id === o.offerId)
   const sku = o.productImageId ? o.productAssets.find((i) => i.id === o.productImageId) : undefined
-  const role = sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined
+  const role = sku ? (inferAssetRole(sku)) : undefined
   const pack = isPackProduct([offer?.name ?? undefined, offer?.type ?? undefined, offer?.productDescription ?? undefined, offer?.technicalSpecs ?? undefined, o.productNotes])
   const hasPhoto = o.productAssets.length > 0 || Boolean(o.productImageId)
   return pack && hasPhoto && !(role && ['box', 'contents', 'part'].includes(role)) ? 'exact' : 'generated'
@@ -202,7 +202,7 @@ export function splitAccessoryRefs(images: McpOwnedImage[], productImageId?: str
   const accessories: Array<{ id: string; imageUrl: string; label: string }> = []
   const rest: McpOwnedImage[] = []
   for (const image of images) {
-    const role = image.id === skuId ? undefined : (roleFromImageRow({ tags: image.tags, is_primary: image.isPrimary }) ?? roleFromLabel(image.label))
+    const role = image.id === skuId ? undefined : inferAssetRole(image)
     if (image.kind !== 'context' && image.kind !== 'generated' && (role === 'box' || role === 'contents' || role === 'part')) {
       accessories.push({ id: image.id, imageUrl: image.imageUrl, label: [stripRolePrefix(image.label), image.role].filter(Boolean).join(' ').trim() || role })
     } else rest.push(image)
@@ -914,7 +914,7 @@ async function runImageGenerateBody(options: {
 
   // Round 9: a printed pouch / pack defaults to the real-pixel path (Grok misspells its printing); the hero must be the pack itself, not a box / part photo.
   const offerForKind = options.ctxPreview.offers.find((o) => o.id === options.offerId)
-  const heroRoleForKind = (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()); return sku ? (roleFromImageRow({ tags: sku.tags, is_primary: sku.isPrimary }) ?? roleFromLabel(sku.label)) : undefined })()
+  const heroRoleForKind = (() => { const sku = ownedRefs.find((i) => i.id === options.productImageId?.trim()); return sku ? (inferAssetRole(sku)) : undefined })()
   const packDefault = isPackProduct([offerForKind?.name, offerForKind?.type, offerForKind?.productDescription, offerForKind?.technicalSpecs, options.productNotes]) && !(heroRoleForKind && ['box', 'contents', 'part'].includes(heroRoleForKind))
   const fidelityMode = resolveToolProductFidelity(options.productFidelity, productUrls.length > 0, { defaultExact: packDefault })
   // Round 10: an explicit "generated" on a printed pack is honoured but warned about (Grok misspells pack printing; round 9 SP / PH)
@@ -928,7 +928,7 @@ async function runImageGenerateBody(options: {
   let postCheck: Record<string, unknown> | null = null
   let rawSceneDataUrl: string | undefined
   let generated: { imageDataUrl: string; providerModel: string; estimatedCostUsd: number; resolution: string; quality: string; aspectRatio: string; mode: string; lockApplied: boolean }
-  const runExact = async () => {
+  const runExact = async (region?: { x0: number; y0: number; x1: number; y1: number }) => {
     // Real product pixels on a generated plate (A1), then the SAME ad layers as the web-style flow: copy / one CTA / logo /
     // safe zones / QA / halo flags (api/lib/mcp/exact-flow.ts). Never a redrawn product; flags are warnings only.
     const offerName = options.ctxPreview.offers.find((o) => o.id === options.offerId)?.name || options.offerId
@@ -944,6 +944,9 @@ async function runImageGenerateBody(options: {
         styleNotes: kit?.visualStyleNotes || undefined,
         palette: [kit?.primaryColor, kit?.secondaryColor, kit?.accentColor].filter((c): c is string => Boolean(c)),
         allowedProps: options.allowedProps,
+        // Round 12: the MCP lock is strict (forbidExtraProps): no plant / blanket in the exact plate either
+        strictProps: true,
+        ...(region ? { region } : {}),
         ...(options.immutableAttributes?.length || options.productNotes ? { immutableAttributes: [...(options.immutableAttributes ?? []), ...(options.productNotes ? [options.productNotes] : [])] } : {}),
         ...(options.relight === 'ai' ? { relight: 'ai' as const } : {}),
       },
@@ -1019,11 +1022,13 @@ async function runImageGenerateBody(options: {
       max: 3,
     }).map((a) => ({ imageUrl: a.imageUrl, label: a.label }))
     const heroSku = ownedRefs.find((i) => i.id === options.productImageId?.trim()) ?? accessoryRefs.rest.find((i) => i.kind !== 'context' && i.kind !== 'generated')
-    const heroRole = heroSku ? (roleFromImageRow({ tags: heroSku.tags, is_primary: heroSku.isPrimary }) ?? roleFromLabel(heroSku.label)) : undefined
+    // Round 12: a selected photo with no role data (no tag / role / label) that is NOT the offer's primary photo, while the
+    // request's productNotes / scene name an accessory first ("Control: gamepad negro…"), takes that accessory role.
+    const heroRole = heroSku ? (inferAssetRole(heroSku) ?? (heroSku.isPrimary ? 'hero' : allProductAssets.some((a) => a.id !== heroSku.id && a.isPrimary) ? roleFromRequestText([options.productNotes, options.scene]) : undefined)) : undefined
     // Round 9: the selected photo is a box / contents / part (e.g. the controller): the offer's MAIN product must not show up — its real photo joins the
     // "unlisted objects" feature-match check, so a duplicate / extra product in the scene is flagged.
     if (heroRole && ['box', 'contents', 'part'].includes(heroRole)) {
-      const main = allProductAssets.find((a) => a.imageUrl && a.id !== heroSku?.id && (a.isPrimary || roleFromImageRow({ tags: a.tags, is_primary: a.isPrimary }) === 'hero') && a.kind !== 'generated' && a.kind !== 'context')
+      const main = allProductAssets.find((a) => a.imageUrl && a.id !== heroSku?.id && (a.isPrimary || inferAssetRole(a) === 'hero') && a.kind !== 'generated' && a.kind !== 'context')
       if (main) libraryPhotos.unshift({ imageUrl: main.imageUrl, label: `producto principal (${main.label || 'foto principal'})` })
     }
     const web = await generateWebStyleImage({
@@ -1040,7 +1045,8 @@ async function runImageGenerateBody(options: {
       ctaStrength: options.ctaStrength,
       productUrls,
       productPhotoRole: heroRole,
-      productPhotoLabel: heroSku?.label ?? undefined,
+      // Round 12: the free-text role column ("control negro tipo gamepad") names the object too
+      productPhotoLabel: [heroSku?.label, heroSku?.role].filter((x): x is string => Boolean(x && x.trim())).join(' · ') || (heroRole && heroRole !== 'hero' ? options.productNotes?.split(/[:.;,]/)[0]?.trim().slice(0, 60) || undefined : undefined),
       supportUrls,
       referenceMode: options.referenceMode,
       lock,
@@ -1073,7 +1079,8 @@ async function runImageGenerateBody(options: {
       const genReason = web.fidelityFallback.reason
       const genPostCheck = postCheck
       try {
-        await runExact()
+        // Round 12: the real product goes where (and as big as) the generated scene put it — same ground line
+        await runExact(web.fidelityFallback.productBox)
         fidelityFallback = { from: 'generated', to: 'exact', score: web.fidelityFallback.score, reason: `${genReason}: switched to productFidelity "exact" (real product pixels)`, generatedQa: (genPostCheck as { qa?: unknown } | null)?.qa ?? null }
       } catch (err) {
         fidelityFallback = { from: 'generated', to: 'exact', score: web.fidelityFallback.score, failed: true, reason: `exact fallback failed: ${err instanceof Error ? err.message.slice(0, 120) : 'error'} — the generated image (redrawn product) is kept` }

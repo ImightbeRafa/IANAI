@@ -21,7 +21,7 @@ const F11 = (n: string) => readFileSync(new URL(`./fixtures/round11/${n}`, impor
 const F10 = (n: string) => readFileSync(new URL(`./fixtures/round10/${n}`, import.meta.url))
 
 describe('round 11 — 0.24.0', () => {
-  it('version', () => { expect(MCP_VERSION).toBe('0.24.0') })
+  it('version', () => { expect(MCP_VERSION).toBe('0.25.0') })
 
   it('PH energy pouch: the flood mask missed the white top → repaired, full pouch (IoU vs the photo ≥ 0.97)', async () => {
     const r = await segmentProduct({ bytes: F11('ph-energy.jpg'), role: 'front' as never })

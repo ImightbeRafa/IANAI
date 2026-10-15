@@ -13,6 +13,8 @@ export const TEXT_SCALE_OK = 0.8
 export const TEXT_MIN = 0.85
 /** Round 11: smallest picture for TEXT that would otherwise sit on an object (room mostly above): a smaller picture beats a headline on the product. */
 export const EXTEND_TEXT_LAST = 0.72
+/** Round 12: a CTA blocked in every slot shrinks the picture down to 60 % before it would ever be drawn on the product / a table edge. */
+export const EXTEND_CTA_MIN = 0.6
 
 export type ScenePrepReport = {
   seams: { checked: boolean; found: Seam[]; blended?: boolean; remaining?: number; /** Strips NOT blended because the neighbouring content is detailed. */ skipped?: Array<{ edge: 'top' | 'bottom'; detail: number }>; /** Round 8: the strips were cut off and the picture zoomed back (no blend). */ cropZoom?: CropZoomReport; note?: string }
@@ -168,7 +170,7 @@ export async function prepareAndLayout(input: Omit<LayoutInput, 'avoid' | 'block
     // 94 / 90 / 86 % first; a CTA still blocked by a product that stands on the bottom edge (round 9 SP pouch to 95 %) may go to 82 / 78 % with the room
     // mostly below (last resort before the blocked flag: a smaller product beats a CTA on the product)
     const a2 = anchors.slice(0, 2)
-    const plan: Array<[number, number[]]> = [[0.94, a2], [0.9, a2], [0.86, anchors], ...(reason !== 'text' ? ([[0.82, [0.25]], [EXTEND_LAST_RESORT, [0.1, 0.25]]] as Array<[number, number[]]>) : ([[0.82, [0.75, 0.6, 0.5]], [EXTEND_LAST_RESORT, [0.75, 0.6, 0.85]], [EXTEND_TEXT_LAST, [0.85, 0.75, 0.6]]] as Array<[number, number[]]>))]
+    const plan: Array<[number, number[]]> = [[0.94, a2], [0.9, a2], [0.86, anchors], ...(reason !== 'text' ? ([[0.82, [0.25, 0.5]], [EXTEND_LAST_RESORT, [0.1, 0.25, 0.5]], [EXTEND_TEXT_LAST, [0.1, 0.25, 0.5, 0.75]], [0.66, [0.1, 0.3, 0.5]], [EXTEND_CTA_MIN, [0.15, 0.3, 0.5]]] as Array<[number, number[]]>) : ([[0.82, [0.75, 0.6, 0.5]], [EXTEND_LAST_RESORT, [0.75, 0.6, 0.85]], [EXTEND_TEXT_LAST, [0.85, 0.75, 0.6]], [0.66, [0.9, 0.8]], [EXTEND_CTA_MIN, [0.9, 0.8, 0.7]]] as Array<[number, number[]]>))]
     const bases = [{ bytes: sceneBytes, avoid: sceneAvoid, undoUp: false }, ...(textBad(r2) && scenePrep.roomBelow?.applied ? [{ bytes: preCta.bytes, avoid: preCta.avoid, undoUp: true }] : [])]
     search: for (const [scale, anchorList] of plan) for (const base of bases) {
       for (const anchorY of anchorList) {

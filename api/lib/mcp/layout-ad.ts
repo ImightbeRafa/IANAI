@@ -139,25 +139,60 @@ const OBJ_TEXT_MAX = 0.06
 
 /** Round 11: the logo's own solid plate — opaque border ring (≥ 92 % opaque, colour spread small) around a mark of another colour. */
 function selfPlate(data: Buffer, ch: number, w: number, h: number): { fill: Rgb; contrast: number } | null {
-  const ring = Math.max(2, Math.round(Math.min(w, h) * 0.04))
-  const inset = Math.max(1, Math.round(Math.min(w, h) * 0.01))
+  // Round 12: the ring follows the logo's OWN outline (distance to the nearest transparent pixel / edge), so a badge with
+  // rounded transparent corners (Prototipo) is recognised as plated too; the shape must be solid (≥ 85 % of its box).
+  const ring = Math.max(2, Math.round(Math.min(w, h) * 0.025))
+  const inset = Math.max(1, Math.round(Math.min(w, h) * 0.006))
+  const n = w * h
+  const dist = new Float32Array(n)
+  let opaque = 0, bx0 = w, by0 = h, bx1 = -1, by1 = -1
+  for (let i = 0; i < n; i++) {
+    const o = data[i * ch + 3] > 128
+    dist[i] = o ? 1e9 : 0
+    if (o) { opaque++; const x = i % w, y = (i - x) / w; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y }
+  }
+  if (!opaque || opaque / ((bx1 - bx0 + 1) * (by1 - by0 + 1)) < 0.85) return null
+  // two-pass chamfer distance (edge of the canvas counts as transparent)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!dist[i]) continue; let d = Math.min(x, y) + 1; if (x) d = Math.min(d, dist[i - 1] + 1); if (y) d = Math.min(d, dist[i - w] + 1); dist[i] = d }
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) { const i = y * w + x; if (!dist[i]) continue; let d = Math.min(dist[i], w - x, h - y); if (x < w - 1) d = Math.min(d, dist[i + 1] + 1); if (y < h - 1) d = Math.min(d, dist[i + w] + 1); dist[i] = d }
   const px: Rgb[] = []
   let tot = 0
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const d = Math.min(x, y, w - 1 - x, h - 1 - y)
-    if (d < inset || d >= inset + ring) continue
+  for (let i = 0; i < n; i++) {
+    const d = dist[i]
+    if (d <= inset || d > inset + ring) continue
     tot++
-    const i = (y * w + x) * ch
-    if (data[i + 3] > 230) px.push({ r: data[i], g: data[i + 1], b: data[i + 2] })
+    const k = i * ch
+    if (data[k + 3] > 230) px.push({ r: data[k], g: data[k + 1], b: data[k + 2] })
   }
   if (!tot || px.length / tot < 0.92) return null
   const med = (k: 'r' | 'g' | 'b') => px.map((p) => p[k]).sort((a, b) => a - b)[px.length >> 1]
-  const fill = { r: med('r'), g: med('g'), b: med('b') }
+  let fill = { r: med('r'), g: med('g'), b: med('b') }
   const near = px.filter((p) => Math.hypot(p.r - fill.r, p.g - fill.g, p.b - fill.b) < 28).length
-  if (near / px.length < 0.85) return null
+  if (near / px.length < 0.85) {
+    // Round 12: a framed badge (Prototipo: navy plate with a thin off-white frame line at its edge) — a nearly solid
+    // shape (≥ 95 % of its box) whose opaque pixels are dominated by one plate colour (≥ 45 %) is plated too.
+    if (opaque / ((bx1 - bx0 + 1) * (by1 - by0 + 1)) < 0.95) return null
+    const bins = new Map<number, { c: number; r: number; g: number; b: number }>()
+    for (let i = 0; i < n; i++) {
+      const k = i * ch
+      if (data[k + 3] < 230) continue
+      const key = ((data[k] >> 4) << 8) | ((data[k + 1] >> 4) << 4) | (data[k + 2] >> 4)
+      const e = bins.get(key) ?? { c: 0, r: 0, g: 0, b: 0 }
+      e.c++; e.r += data[k]; e.g += data[k + 1]; e.b += data[k + 2]
+      bins.set(key, e)
+    }
+    const top = [...bins.values()].sort((a, b) => b.c - a.c)[0]
+    if (!top) return null
+    const dom = { r: top.r / top.c, g: top.g / top.c, b: top.b / top.c }
+    let dn = 0
+    for (let i = 0; i < n; i++) { const k = i * ch; if (data[k + 3] >= 230 && Math.hypot(data[k] - dom.r, data[k + 1] - dom.g, data[k + 2] - dom.b) < 28) dn++ }
+    if (dn / opaque < 0.45) return null
+    fill = { r: Math.round(dom.r), g: Math.round(dom.g), b: Math.round(dom.b) }
+  }
   // the mark: inner opaque pixels clearly off the plate colour
   let mr = 0, mg = 0, mb = 0, mn = 0
-  for (let y = inset + ring; y < h - inset - ring; y++) for (let x = inset + ring; x < w - inset - ring; x++) {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (dist[y * w + x] <= inset + ring) continue
     const i = (y * w + x) * ch
     if (data[i + 3] < 200) continue
     if (Math.hypot(data[i] - fill.r, data[i + 1] - fill.g, data[i + 2] - fill.b) < 60) continue

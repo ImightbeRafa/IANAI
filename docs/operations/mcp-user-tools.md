@@ -37,6 +37,17 @@ Enabled tools now:
 
 **Offers + photos (sync write, no credits, 0.11):** `create_offer`, `update_offer`, `set_primary_product_image`, `tag_product_image`, `create_upload_url` → PUT → `finalize_upload`.
 
+### 0.25.0 — connected-only mask repair, strict-props exact fallback at the generated scale, CTA shrinks the picture, asset roles, fidelity vs the photo through the cache
+
+Registry / server version **0.25.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency. Proofs: `test/round12.spec.ts`, `test/web-mcp-parity.spec.ts` (web request unchanged).
+
+- Cut-out repair adds back only regions connected to the product; leftover photo backdrop > 1.5 % fails (strategy rejected; exact flow `qa.leftoverBackdrop`, `qa.status:"fail"`).
+- Exact fallback (`fidelityFallback`): plate with only `allowedProps` + surface / wall / light; the real product goes in the generated scene's located box (same size, same ground line).
+- A CTA blocked in every slot shrinks the picture (down to 60 %) before it is drawn on the product or a table edge; text keeps ≥ 85 %.
+- The selected photo's role comes from tags, the free-text `role` column, the label, or (untagged) the accessory named first in productNotes / scene; `lockScope.role` is no longer null for a controller photo.
+- `fidelity.silhouetteVs` is `"photo"` for flat lays and after a cut-out cache hit; the clear sheet film has no pale veil.
+- A bundle line ("2 kits por ₡29.800") stays on the image; a framed badge logo (Prototipo) gets no extra plate.
+
 ### 0.24.0 — text never over any object, cutout mask coverage, fidelity vs the photo, clear sheet kept, low fidelity → exact
 
 Registry / server version **0.24.0**. **No migration**, no new env/secret/binding/route/cron, no new npm dependency. Proofs: `test/round11.spec.ts`, `test/round7.spec.ts`, `test/web-mcp-parity.spec.ts` (web request unchanged).
@@ -288,7 +299,7 @@ Authorize always redirects to the Supabase **Site URL** (`https://advanceai.stud
 
 ## Code map
 - Host: `api/mcp.ts`, `api/lib/mcp/protocol.ts`
-- Registry: `api/lib/mcp/tool-registry.ts` (0.24.0)
+- Registry: `api/lib/mcp/tool-registry.ts` (0.25.0)
 - Offers / photos / uploads: `api/lib/mcp/offer-tools.ts`, `api/lib/mcp/upload-tools.ts`, `api/lib/mcp/asset-rehost.ts`, `api/lib/adpack/offer-profile.ts`, `api/lib/brand-profile.ts`, `api/lib/placeholder-guard.ts`, `api/lib/product-image-order.ts`, migration `085`
 - Brand kits: `api/lib/mcp/brand-kit-tools.ts`, `api/lib/brand-kit-resolve.ts`, migration `081`
 - Audit: `api/lib/mcp/tool-audit.ts`; MCP caps: `api/lib/mcp/limits.ts`

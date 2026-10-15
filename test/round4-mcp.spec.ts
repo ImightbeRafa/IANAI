@@ -40,8 +40,9 @@ describe('copy layout cap', () => {
   it('keeps headline + ONE price + ONE facts + ONE CTA, in the original order; overflow is returned', () => {
     const r = capCopyBlocks(long)
     expect(r.capped).toBe(true)
-    expect(r.onImage.split('\n')).toEqual(['Un regalo que armás con papel', '₡14.900', 'Envío gratis llevando 2 kits o más', 'Escribinos por DM']) // round 8: the shipping line is the facts line kept on the image
-    expect(r.overflow).toEqual(['Kit HM939 con control 2.4GHz', '2 kits por ₡29.800', 'Papel y 3 pilas AA no incluidos'])
+    // round 12: a bundle offer line ("2 kits por ₡29.800") is the deal → it takes the facts slot; shipping goes to the caption
+    expect(r.onImage.split('\n')).toEqual(['Un regalo que armás con papel', '₡14.900', '2 kits por ₡29.800', 'Escribinos por DM'])
+    expect(r.overflow).toEqual(['Kit HM939 con control 2.4GHz', 'Envío gratis llevando 2 kits o más', 'Papel y 3 pilas AA no incluidos'])
     expect(r.cta).toBe('Escribinos por DM')
   })
   it('a short copy is untouched', () => {
@@ -215,7 +216,7 @@ describe('server info (version visible in a tool response)', () => {
   it('reports the MCP version, build commit when known, and the feature list', () => {
     const info = buildServerInfo({ commit: 'abc1234' })
     expect(info.version).toBe(MCP_VERSION)
-    expect(info.version).toBe('0.24.0')
+    expect(info.version).toBe('0.25.0')
     expect(info.commit).toBe('abc1234')
     expect(info.features).toEqual(expect.arrayContaining(['generated_web_flow', 'exact_with_text_logo_qa', 'auto_retry_keep_better', 'provider_retry_backoff']))
     expect(MCP_SERVER_INFO.name).toBeTruthy()

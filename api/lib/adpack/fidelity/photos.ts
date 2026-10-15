@@ -43,7 +43,7 @@ export function roleFromLabel(label: string | null | undefined): ProductPhotoRol
   if (/\b(contenido|contents|kit|incluye|includes)\b/.test(s)) return 'contents'
   if (/\b(en[- ]uso|in[- ]use|uso|using|lifestyle)\b/.test(s)) return 'in_use'
   if (/\b(detalle|detail|close[- ]?up|macro)\b/.test(s)) return 'detail'
-  if (/\b(parte|part|pieza|piece|control|remote|accesorio|accessory)\b/.test(s)) return 'part'
+  if (/\b(parte|part|pieza|piece|control|controller|controlador|mando|remote|gamepad|joystick|joysticks|transmisor|transmitter|cable|cargador|charger|bateria|battery|helice|propeller|rueda|wheel|repuesto|accesorio|accessory)\b/.test(s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) return 'part'
   return undefined
 }
 
@@ -67,6 +67,38 @@ export function roleFromImageRow(row: { tags?: unknown; is_primary?: unknown }):
   if (tags.includes('part')) return 'part'
   if (row.is_primary === true || tags.includes('hero')) return 'hero'
   for (const tag of ['caja', 'contenido-kit', 'en-uso', 'detalle']) if (tags.includes(tag)) return TAG_ROLE[tag]
+  return undefined
+}
+
+/**
+ * Round 12: ONE role inference for a saved product image (used for the lock scope, the pack default and the quote):
+ * an explicit 'part' tag, then the free-text `role` column (085: "control negro tipo gamepad" → part), then
+ * is_primary / 'hero', then the other 085 tags, then any free-text tag, then the label. Before, the `role` column was
+ * ignored, so a controller photo saved with role "control" and no tag resolved to null (round 11 B lockScope).
+ */
+export function inferAssetRole(a: { tags?: unknown; isPrimary?: unknown; is_primary?: unknown; role?: string | null; label?: string | null }): ProductPhotoRole | undefined {
+  const tags = Array.isArray(a.tags) ? a.tags.filter((t): t is string => typeof t === 'string') : []
+  if (tags.includes('part')) return 'part'
+  const fromRoleCol = roleFromLabel(a.role)
+  if (fromRoleCol) return fromRoleCol
+  const row = roleFromImageRow({ tags, is_primary: a.isPrimary ?? a.is_primary })
+  if (row) return row
+  for (const t of tags) { const r = roleFromLabel(t.replace(/^role:/i, '').replace(/[-_]/g, ' ')); if (r) return r }
+  return roleFromLabel(a.label)
+}
+
+/** Round 12: the accessory a request text names FIRST (productNotes / scene) → its role; undefined when none. */
+export function roleFromRequestText(texts: Array<string | null | undefined>): ProductPhotoRole | undefined {
+  for (const t of texts) {
+    const s = String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    if (!s) continue
+    const hits: Array<[number, ProductPhotoRole]> = []
+    const box = s.search(/\b(caja|box|empaque|packaging)\b/)
+    const part = s.search(/\b(control|controller|controlador|mando|gamepad|joystick|transmisor|cable|cargador|helice|propeller)\b/)
+    if (box >= 0) hits.push([box, 'box'])
+    if (part >= 0) hits.push([part, 'part'])
+    if (hits.length) return hits.sort((a, b) => a[0] - b[0])[0][1]
+  }
   return undefined
 }
 

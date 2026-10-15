@@ -28,6 +28,40 @@ export interface MaskCoverage {
   /** Repaired mask (mask ∪ missed, closed, holes filled) when something was missed. */
   repaired?: Uint8Array
   missedBox?: { x0: number; y0: number; x1: number; y1: number }
+  /** Round 12: share of the repaired mask that the backdrop model explains (leftover background); > LEFTOVER_BG_MAX fails. */
+  leftoverBackdrop?: number
+  addedShare?: number
+}
+
+/** Round 12: a repair that leaves more than this share of backdrop inside the product is a QA fail (A's grey patch). */
+export const LEFTOVER_BG_MAX = 0.015
+/** Round 12: the span fill (invisible outline of a light panel) only when the first mask missed more than this. */
+export const SPAN_FILL_MIN_MISSED = 0.25
+/** Round 12: mean ΔE to the backdrop model a region of a SMALL miss needs to be added back. */
+export const SMALL_MISS_MIN_DE = 9
+/** Round 12: mean |∇L| (per px, L units) under which a darker missed region is a soft shadow, not product. */
+const SHADOW_MAX_GRAD = 1.2
+
+/**
+ * Round 12: mask pixels the smooth backdrop model explains (ΔE ≤ 5 to the fitted wall / floor at that spot) — the
+ * light fringe of wall a flood keeps along thin legs / wheels, where the wall is brighter than its border colour.
+ */
+export function backdropExplainedPixels(lab: Float32Array, w: number, h: number, mask: Uint8Array): Uint8Array {
+  bgH = h
+  const coef = fitBackground(lab, w, h, mask)
+  const out = new Uint8Array(w * h)
+  for (let i = 0; i < out.length; i++) if (mask[i] && bgDelta(lab, i, w, coef) <= 5) out[i] = 1
+  return out
+}
+
+/** Keep only the mask components that overlap the original mask (a recovered island never comes alone). */
+function keepConnectedToMask(rep: Uint8Array, mask: Uint8Array, w: number, h: number): Uint8Array {
+  const { labels } = components(rep, w, h)
+  const keep = new Set<number>()
+  for (let i = 0; i < rep.length; i++) if (mask[i] && labels[i]) keep.add(labels[i])
+  const out = new Uint8Array(rep.length)
+  for (let i = 0; i < rep.length; i++) out[i] = labels[i] && keep.has(labels[i]) ? 1 : 0
+  return out
 }
 
 /** Smooth backdrop model: L, a, b each a quadratic surface in (x, y), robustly fitted (outliers trimmed) on pixels away from the mask. */
@@ -127,6 +161,29 @@ export function checkMaskCoverage(lab: Float32Array, w: number, h: number, mask:
   for (let i = 0; i < n; i++) if (reach[i] && labels[i] && touching.has(labels[i])) hits.add(labels[i])
   const missed = new Uint8Array(n)
   for (let i = 0; i < n; i++) if (labels[i] && hits.has(labels[i]) && !mask[i]) missed[i] = 1
+  // Round 12: a SMALL miss (≤ 25 % of the mask) is accepted per region only when that region clearly differs from the
+  // backdrop (mean ΔE ≥ 9): a lit, smooth patch of wall next to the product (A: between the landing-gear legs) is not
+  // product. A large miss (PH white pouch top) keeps the round-11 behaviour.
+  {
+    let mArea = 0
+    for (let i = 0; i < n; i++) mArea += missed[i]
+    if (mArea) {
+      const small = mArea / area <= SPAN_FILL_MIN_MISSED
+      const { labels: ml, list: mlist } = components(missed, w, h)
+      const sum = new Float64Array(mlist.length + 2), dLs = new Float64Array(mlist.length + 2), grad = new Float64Array(mlist.length + 2)
+      for (let i = 0; i < n; i++) {
+        const c = ml[i]
+        if (!c) continue
+        sum[c] += bgDelta(lab, i, w, coef)
+        dLs[c] += lab[i * 3] - bgAt(i, w, coef)[0]
+        const x = i % w
+        if (x + 1 < w && i + w < n) grad[c] += Math.abs(lab[(i + 1) * 3] - lab[i * 3]) + Math.abs(lab[(i + w) * 3] - lab[i * 3])
+      }
+      // also not product: a soft (blurred, edge-free) region darker than the backdrop = a cast / contact shadow
+      const weak = new Set(mlist.filter((c) => (small && sum[c.label] / c.area < SMALL_MISS_MIN_DE) || (dLs[c.label] / c.area < -2 && grad[c.label] / c.area < SHADOW_MAX_GRAD)).map((c) => c.label))
+      for (let i = 0; i < n; i++) if (ml[i] && weak.has(ml[i])) missed[i] = 0
+    }
+  }
   if (debug) { debug.notBg = notBg; debug.missed = missed }
   // thin rims (antialias / edge halo) are not product: open the missed field
   const solid = missed
@@ -138,9 +195,47 @@ export function checkMaskCoverage(lab: Float32Array, w: number, h: number, mask:
   const bboxCoverage = Math.round((((mx1 - mx0 + 1) * (my1 - my0 + 1)) / ((ux1 - ux0 + 1) * (uy1 - uy0 + 1))) * 10000) / 10000
   let rep: Uint8Array = new Uint8Array(n)
   for (let i = 0; i < n; i++) rep[i] = mask[i] || solid[i] ? 1 : 0
-  rep = erode(dilate(rep, w, h, 4), w, h, 4)
-  rep = fillEnclosed(spanFill(rep, w, h), w, h)
-  return { missedShare, bboxCoverage, repaired: rep, missedBox: { x0: x0 / w, y0: y0 / h, x1: (x1 + 1) / w, y1: (y1 + 1) / h } }
+  // Round 12: bridge only the low-contrast band between a recovered region and the mask (closing at the reach radius),
+  // then fill fully enclosed holes. No row/column span fill: it painted the open gaps between A's landing-gear legs
+  // (grey backdrop rectangles). Only regions CONNECTED to the product after the bridge are kept.
+  const r = Math.max(3, Math.round(Math.max(w, h) * 0.015))
+  const closed = erode(dilate(rep, w, h, r), w, h, r)
+  // the bridge only adds pixels the backdrop model can NOT explain (the low-contrast band itself); backdrop stays out
+  for (let i = 0; i < n; i++) if (closed[i] && !rep[i] && bgDelta(lab, i, w, coef) > NOT_BG_DE_CAST) rep[i] = 1
+  rep = erode(dilate(rep, w, h, 2), w, h, 2)
+  // a LARGE missed light panel (PH: 95 % of the pouch, white on a white wall) has an invisible outline: its face is
+  // indistinguishable from the wall, so it is closed by the row ∩ column spans of the recovered silhouette. Small misses
+  // (A: 4 %) never get spans — the open gaps of a frame product stay open.
+  if (missedShare > SPAN_FILL_MIN_MISSED) rep = spanFill(rep, w, h)
+  // enclosed holes: filled only when they are not backdrop (printed text inside a recovered panel); a real opening of
+  // the product (the triangle between landing-gear legs) shows the backdrop and stays open
+  {
+    const filled = fillEnclosed(rep, w, h)
+    const holes = new Uint8Array(n)
+    for (let i = 0; i < n; i++) holes[i] = filled[i] && !rep[i] ? 1 : 0
+    const { labels: hl, list: hlist } = components(holes, w, h)
+    const bgCount = new Map<number, number>()
+    for (let i = 0; i < n; i++) if (hl[i] && bgDelta(lab, i, w, coef) <= NOT_BG_DE_CAST) bgCount.set(hl[i], (bgCount.get(hl[i]) ?? 0) + 1)
+    const fill = new Set(hlist.filter((c) => (bgCount.get(c.label) ?? 0) / c.area < 0.5 || (c.area < area * 0.0005 && (bgCount.get(c.label) ?? 0) / c.area < 0.8)).map((c) => c.label))
+    for (let i = 0; i < n; i++) if (hl[i] && fill.has(hl[i])) rep[i] = 1
+  }
+  rep = keepConnectedToMask(rep, mask, w, h)
+  // leftover backdrop added by the repair (pixels the backdrop model explains) — > 1.5 % of the product = fail
+  // counted on the cut-out's rim band (where leftover backdrop shows against the new scene): a light product face that
+  // matches the wall INSIDE the silhouette (PH white pouch top) is product, not leftover
+  const inner = erode(rep, w, h, Math.max(3, Math.round(Math.max(w, h) * 0.006)))
+  let added = 0, bgAdded = 0, repArea = 0
+  for (let i = 0; i < n; i++) {
+    if (!rep[i]) continue
+    repArea++
+    if (mask[i]) continue
+    added++
+    if (inner[i]) continue
+    const de = bgDelta(lab, i, w, coef)
+    if (de <= NOT_BG_DE_CAST) bgAdded++
+  }
+  const leftoverBackdrop = repArea ? Math.round((bgAdded / repArea) * 10000) / 10000 : 0
+  return { missedShare, bboxCoverage, repaired: rep, leftoverBackdrop, addedShare: Math.round((added / Math.max(1, area)) * 10000) / 10000, missedBox: { x0: x0 / w, y0: y0 / h, x1: (x1 + 1) / w, y1: (y1 + 1) / h } }
 }
 
 /**
@@ -223,7 +318,16 @@ export function photoSilhouetteIoU(lab: Float32Array, w: number, h: number, mask
   let sil: Uint8Array = new Uint8Array(n)
   const big = new Set(list.filter((c) => c.area >= minArea).map((c) => c.label))
   for (let i = 0; i < n; i++) sil[i] = labels[i] && keep.has(labels[i]) && big.has(labels[i]) ? 1 : 0
-  sil = fillEnclosed(spanFill(erode(dilate(sil, w, h, 4), w, h, 4), w, h), w, h)
+  // Round 12: no span fill — openings of the product (landing-gear triangle) show the backdrop and stay open
+  sil = erode(dilate(sil, w, h, 4), w, h, 4)
+  // a solid product (its mask fills its own spans: a pouch, a box) gets a span-filled silhouette (its light face can
+  // match the wall); a frame product (open gaps between legs / wheels) keeps its openings
+  {
+    let ma = 0, sa = 0
+    const spanned = spanFill(mask, w, h)
+    for (let i = 0; i < n; i++) { ma += mask[i] ? 1 : 0; sa += spanned[i] }
+    if (sa && ma / sa > 0.9) sil = fillEnclosed(spanFill(sil, w, h), w, h)
+  }
   let inter = 0, uni = 0
   for (let i = 0; i < n; i++) { const a = mask[i] ? 1 : 0, b = sil[i]; inter += a & b; uni += a | b }
   return uni ? Math.round((inter / uni) * 10000) / 10000 : null

@@ -128,6 +128,20 @@ const LEAK_TINTED_CHROMA = 3
  * The fidelity score compares the render with the cut-out, so backdrop baked INTO the cut-out
  * ("halo") scored 0.95 in round 1; this measures it against the source photo instead.
  */
+/** Round 12: per-pixel version of backgroundLeakShare's test (1 = this mask pixel reads as the photo backdrop). */
+export function backgroundLeakPixels(lab: Float32Array, mask: Uint8Array, backdrop: [number, number, number]): Uint8Array {
+  const [L0, A0, B0] = backdrop
+  const tinted = Math.hypot(A0, B0) >= LEAK_TINTED_CHROMA
+  const out = new Uint8Array(mask.length)
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i]) continue
+    const L = lab[i * 3]
+    if (tinted) { if (L <= L0 + 3 && L >= L0 - 50 && Math.abs(lab[i * 3 + 1] - A0) <= 2.5 && Math.abs(lab[i * 3 + 2] - B0) <= 1.8) out[i] = 1 }
+    else if (deltaELab(lab, i, L0, A0, B0) <= 4) out[i] = 1
+  }
+  return out
+}
+
 export function backgroundLeakShare(lab: Float32Array, mask: Uint8Array, w: number, h: number, backdrop: [number, number, number]): number {
   const core = erode(mask, w, h, 2)
   const [L0, A0, B0] = backdrop

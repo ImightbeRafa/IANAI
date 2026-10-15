@@ -188,5 +188,5 @@ describe('6. explicit "generated" on a pack', () => {
 })
 
 describe('version', () => {
-  it('MCP 0.24.0', () => expect(MCP_VERSION).toBe('0.24.0'))
+  it('MCP 0.25.0', () => expect(MCP_VERSION).toBe('0.25.0'))
 })

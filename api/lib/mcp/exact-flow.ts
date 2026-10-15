@@ -7,6 +7,7 @@
  * same free QA (safe zones, text, separators, extra-CTA risk) + halo / edge-roughness flags. Warning only: nothing here
  * blocks a delivered image, retries a paid call or changes credits.
  */
+import { LEFTOVER_BG_MAX } from '../adpack/fidelity/mask-coverage.js'
 import { scrubCopy, uniqueClaims } from './claims-filter.js'
 import { loadAdLogo, logoIconCheck } from './logo-check.js'
 import { edgeRoughness, QA_THRESHOLDS } from '../adpack/qa-gate.js'
@@ -163,6 +164,13 @@ export async function generateExactWebStyleAd(input: {
   if (typeof rough === 'number' && rough > QA_THRESHOLDS.edgeRoughnessMax) reasons.push(`cut-out edge roughness ${rough} > ${QA_THRESHOLDS.edgeRoughnessMax} (jagged silhouette)`)
   halo.flagged = reasons.length > 0
   halo.reasons = reasons
+  // Round 12: leftover photo backdrop inside the cut-out (A's grey patch) is a QA FAIL, not only a warning
+  if (typeof halo.leak === 'number' && halo.leak > LEFTOVER_BG_MAX) {
+    qa.status = 'fail'
+    qa.leftoverBackdrop = halo.leak
+    qa.warnings.push(`leftover photo backdrop inside the real product's cut-out: ${Math.round(halo.leak * 1000) / 10}% > ${LEFTOVER_BG_MAX * 100}% (qa.leftoverBackdrop)`)
+    qa.severity = Math.round(((qa.severity ?? 0) + 4) * 100) / 100
+  }
   return {
     imageDataUrl: dataUrl,
     rawSceneDataUrl: `data:image/png;base64,${Buffer.from(exact.png).toString('base64')}`,

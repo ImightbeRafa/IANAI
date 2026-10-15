@@ -261,5 +261,5 @@ describe('units: claims filter, product kind, logo check, prompt wording', () =>
     expect(en).toMatch(/every part, colour, material and proportion of the product exactly as in the reference photo/)
     expect(en).not.toMatch(/wheels|landing gear|propellers|flaps|controller/)
   })
-  it('MCP 0.24.0', () => expect(MCP_VERSION).toBe('0.24.0'))
+  it('MCP 0.25.0', () => expect(MCP_VERSION).toBe('0.25.0'))
 })

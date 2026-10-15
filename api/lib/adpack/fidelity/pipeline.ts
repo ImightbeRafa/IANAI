@@ -8,6 +8,7 @@
  *   (plate → props check → composite + deterministic relight stage → optional AI relight →
  *   fidelity), used by MCP execute_image_generate, bulk posts and the campaign pack image step.
  */
+import { readCutoutMeta, writeCutoutMeta } from './cutout-meta.js'
 import { measureHalo, type HaloReport } from './halo.js'
 import type { Box } from '../render/types.js'
 import sharp from 'sharp'
@@ -63,7 +64,7 @@ async function sourceBytes(url: string, ctx: CutoutContext): Promise<Uint8Array>
  */
 /** Round 11: cut-out vs reference-photo silhouette below this → warning. */
 export const PHOTO_IOU_WARN = 0.9
-export const CUTOUT_CACHE_VERSION = 'seg3'
+export const CUTOUT_CACHE_VERSION = 'seg4'
 export const cutoutCacheKey = (hash: string) => `${hash}-${CUTOUT_CACHE_VERSION}`
 
 /** In-process LRU of cut-outs / photo quality by source hash (warm instances skip re-segmentation). */
@@ -156,7 +157,8 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
   if (cached) {
     const m = await sharp(cached.bytes).metadata()
     return {
-      stored: storedCutout(photo, cached.url, 'cache', hash, { flatLay: await cutoutIsFlatLay(cached.bytes, photo.role) }),
+      // Round 12: the QA metadata rides in the PNG (tEXt) → photoIoU / maskRepaired survive a storage-cache hit
+      stored: storedCutout(photo, cached.url, 'cache', hash, { ...(readCutoutMeta(cached.bytes) ?? {}), flatLay: (readCutoutMeta(cached.bytes)?.flatLay ?? false) || (await cutoutIsFlatLay(cached.bytes, photo.role)) }),
       bytes: cached.bytes,
       width: m.width ?? 0,
       height: m.height ?? 0,
@@ -170,7 +172,7 @@ async function cutoutFromBytes(photo: ProductPhoto, bytes: Uint8Array, hash: str
     made = { png: new Uint8Array(res.png), width: res.width, height: res.height, method: res.method, ...(res.recall ? { recall: res.recall.recall } : {}), ...(res.flatLay ? { flatLay: true } : {}), ...(typeof res.backgroundLeak === 'number' ? { backgroundLeak: res.backgroundLeak } : {}), ...(typeof res.photoIoU === 'number' ? { photoIoU: res.photoIoU } : {}), ...(res.maskCoverage?.repaired ? { maskRepaired: true } : {}) }
     remember(cutoutMemo, key, made)
   }
-  const png = made.png
+  const png = writeCutoutMeta(made.png, { photoIoU: made.photoIoU, maskRepaired: made.maskRepaired, recall: made.recall, backgroundLeak: made.backgroundLeak, flatLay: made.flatLay })
   let url = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
   if (ctx.cache) {
     try {
@@ -263,6 +265,11 @@ export interface ExactImageInput {
   styleNotes?: string
   palette?: string[]
   allowedProps?: string[]
+  /** Round 12: strict prop lock (MCP exact): only allowedProps + surface / wall / light in the plate. */
+  strictProps?: boolean
+  /** Round 12: where the product goes (plate fractions) — the generated attempt's located product box on a fidelity
+   * fallback, so the real product keeps the scale and the ground line the scene was composed for. */
+  region?: PlateRegion
   /** Product appearance facts that never change (plate prompt, plate check, relight). */
   immutableAttributes?: string[]
   /**
@@ -296,6 +303,19 @@ export type ExactImageResult =
       halo: HaloReport
     }
   | { ok: false; error: string; costUsd: number; warnings: string[] }
+
+/**
+ * Round 12: a located product box from a generated scene → placement region. Kept in frame, at least 30 % wide (a
+ * shrunken located box never turns the product into a sticker), the base (y1) is the ground line of the plate.
+ */
+export function fallbackRegion(b: PlateRegion): PlateRegion {
+  const cx = (b.x0 + b.x1) / 2
+  const w = Math.min(0.9, Math.max(0.3, b.x1 - b.x0))
+  const y1 = Math.min(0.9, Math.max(0.45, b.y1))
+  const h = Math.min(y1 - 0.05, Math.max(0.2, b.y1 - b.y0))
+  const x0 = Math.min(Math.max(0.03, cx - w / 2), 0.97 - w)
+  return { x0, x1: x0 + w, y0: y1 - h, y1, baseY: y1 }
+}
 
 /** Product placement for a single image: centered, lower-middle, ~55% of the width. */
 export function singleImageRegion(ratio: string): PlateRegion {
@@ -332,7 +352,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   const cutouts = await prepareProductCutouts({ photos: input.photos, format: 'offer_graphic', language: input.language, withParts: false, gateway: input.gateway, cache: input.cache, load: input.load })
   if (!cutouts.ok) return { ok: false, error: cutouts.error, costUsd, warnings: cutouts.warnings }
   warnings.push(...cutouts.warnings)
-  const region = singleImageRegion(input.ratio)
+  const region = input.region ? fallbackRegion(input.region) : singleImageRegion(input.ratio)
   const light: LightDirection = plateLight(input.variation ?? 0)
   const surface = plateSurface('offer_graphic', input.variation ?? 0)
   const dna = minimalDna(input)
@@ -347,7 +367,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
   for (let a = 0; a < attempts && !plateBytes; a++) {
     let plate
     try {
-      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, surface, variation: input.variation, allowedProps: input.allowedProps, immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
+      plate = await generatePlate({ gateway: input.gateway, format: 'offer_graphic', dna, offer, placement: region, light, surface, variation: input.variation, allowedProps: input.allowedProps, ...(input.strictProps ? { strictProps: true } : {}), immutableAttributes: input.immutableAttributes, sceneBrief: input.sceneHint, draft: false, promptSuffix: hint, ratio: (isSupportedImageRatio(input.ratio) ? input.ratio : '9:16') as AspectRatio })
     } catch (error) {
       warnings.push(`plate attempt ${a + 1} failed: ${error instanceof Error ? error.message : String(error)}`)
       continue
@@ -357,7 +377,7 @@ export async function generateExactProductImage(input: ExactImageInput): Promise
     const reframed = await reframeToRatio(plate.bytes, input.ratio, { mode: 'cover' })
     const canvas = await sharp(reframed.bytes).resize(size.width, size.height, { fit: 'cover' }).removeAlpha().png().toBuffer()
     try {
-      lastCheck = await checkPlate({ gateway: input.gateway, plateImage: `data:image/png;base64,${canvas.toString('base64')}`, refs, allowedProps: input.allowedProps, placement: region, language: input.language, immutableAttributes: input.immutableAttributes })
+      lastCheck = await checkPlate({ gateway: input.gateway, plateImage: `data:image/png;base64,${canvas.toString('base64')}`, refs, allowedProps: input.allowedProps, ...(input.strictProps ? { strictProps: true } : {}), placement: region, language: input.language, immutableAttributes: input.immutableAttributes })
       costUsd += lastCheck.costUsd
     } catch (error) {
       warnings.push(`plate check unavailable: ${error instanceof Error ? error.message : String(error)}`)

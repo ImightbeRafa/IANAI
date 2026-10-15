@@ -9,8 +9,8 @@
  */
 import { components } from './pixels.js'
 
-export const FILM_ALPHA = 0.24
-export const FILM_EDGE_ALPHA = 0.5
+export const FILM_ALPHA = 0.16
+export const FILM_EDGE_ALPHA = 0.34
 
 export interface SheetFilm {
   /** Alpha (0–255) of the film per work pixel, 0 outside the film / on the pieces. */

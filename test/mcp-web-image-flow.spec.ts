@@ -312,9 +312,9 @@ describe('round 4: allowedProps, one CTA, layout cap, better-of-two retry, capac
     expect(prompt).toContain('Un regalo que armás con papel')
     expect(prompt).toContain('₡14.900')
     expect(prompt).toContain('Escribinos por DM')
-    expect(prompt).toContain('Envío gratis llevando 2 kits o más') // round 8: the shipping line is the facts line kept
+    expect(prompt).toContain('2 kits por ₡29.800') // round 12: the bundle offer line is the facts line kept
     expect(prompt).not.toContain('Kit HM939 con control 2.4GHz')
-    expect(status.copyOverflow).toEqual(expect.arrayContaining(['2 kits por ₡29.800', 'Kit HM939 con control 2.4GHz', 'Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto']))
+    expect(status.copyOverflow).toEqual(expect.arrayContaining(['Envío gratis llevando 2 kits o más', 'Kit HM939 con control 2.4GHz', 'Papel y 3 pilas AA no incluidos', 'Desde 8 años con supervisión de un adulto']))
     // opt-out
     xai = []
     sequence([await ad(190)])

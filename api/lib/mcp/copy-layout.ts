@@ -17,6 +17,9 @@ export function findCtaLine(lines: string[]): string | undefined {
 export const factRankOf = (l: string): number => (/env[ií]o|gratis|entrega|free shipping|shipping|delivery/i.test(l) ? 0 : /no incluid|años|edad|supervisi|not included|ages?\b/i.test(l) ? 3 : /\d/.test(l) ? 1 : 2)
 export const rankFacts = (lines: string[]): string[] => lines.map((l, i) => ({ l, i })).sort((a, b) => factRankOf(a.l) - factRankOf(b.l) || a.i - b.i).map((x) => x.l)
 
+/** Round 12: a multi-unit offer with a price ("2 kits por ₡29.800", "3 x ₡25.000", "2x1"). */
+export const BUNDLE_RE = /(\b\d+\s*(?:x|×)\s*1\b)|(\b\d+\s*(?:kits?|unidades|bolsas?|cajas?|pares|paquetes|packs?|piezas|x|×)\b[^\n]{0,24}(?:₡|\$|colones|\bpor\b\s*\d))/i
+
 export function capCopyBlocks(copy: string, maxBlocks = 4): CappedCopy {
   const lines = copy.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const cta = findCtaLine(lines)
@@ -35,7 +38,10 @@ export function capCopyBlocks(copy: string, maxBlocks = 4): CappedCopy {
   const factRank = factRankOf
   const candidates = lines.map((l, idx) => ({ l, idx })).filter((c) => !used.has(c.idx))
   const factIdx = candidates.length ? candidates.reduce((best, c) => (factRank(c.l) < factRank(best.l) ? c : best), candidates[0]).idx : -1
-  const facts = factIdx >= 0 ? (used.add(factIdx), factIdx) : pick(() => true)
+  // Round 12: a bundle offer line ("2 kits por ₡29.800", "3x₡…", "2 bolsas por …") is the deal — it takes the facts
+  // slot ahead of shipping / age notes (those go to the caption), never dropped for them.
+  const bundleIdx = candidates.find((c) => BUNDLE_RE.test(c.l))?.idx ?? -1
+  const facts = bundleIdx >= 0 ? (used.add(bundleIdx), bundleIdx) : factIdx >= 0 ? (used.add(factIdx), factIdx) : pick(() => true)
   const keep = [headline, price, facts, ctaIdx].filter((i) => i >= 0).sort((a, b) => a - b)
   const overflow = lines.filter((_, i) => !keep.includes(i))
   return { onImage: keep.map((i) => lines[i]).join('\n'), overflow, cta, capped: overflow.length > 0 }

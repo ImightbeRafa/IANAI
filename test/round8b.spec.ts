@@ -178,10 +178,11 @@ describe('7. logo scrim below 4.5:1, 8. shipping line stays, 6. prompt strings',
   it('a logo over bright foliage (contrast < 4.5) gets a SOLID plate (round 9, no glow) and the report has both contrasts; over a calm dark wall it does not', async () => {
     const bright = await layoutOf(F8b('scene-A-r7.jpg'), COPY_A, [BOX_A])
     expect(bright.report.logo.status).toBe('drawn')
-    expect(bright.report.logo.plate).toBeTruthy()
+    // round 12: the Prototipo file is a framed badge = its own plate (selfPlated) — no second plate is added
+    expect(bright.report.logo.plate ?? bright.report.logo.selfPlated).toBeTruthy()
     expect(bright.report.logo.scrim).toBeUndefined()
-    expect(bright.report.logo.contrastBefore).toBeLessThan(4.5)
-    expect(bright.report.logo.contrast).toBeGreaterThanOrEqual(4.5)
+    if (bright.report.logo.plate) expect(bright.report.logo.contrastBefore).toBeLessThan(4.5)
+    expect(bright.report.logo.selfPlated?.markContrast ?? bright.report.logo.contrast ?? 0).toBeGreaterThanOrEqual(4.5)
     const dark = await sharp({ create: { width: 800, height: 1000, channels: 3, background: { r: 245, g: 241, b: 232 } } }).jpeg().toBuffer()
     const calm = await layoutOf(dark, COPY_A, [])
     expect(calm.report.logo.plate).toBeUndefined()

@@ -229,7 +229,7 @@ export type WebStyleImageOutput = {
   /** Round 7: set when the fidelity warning survived (the one retry included): the real-pixels path is the way out. */
   suggestedFallback?: { productFidelity: 'exact'; reason: string }
   /** Round 11: the product fidelity stayed below FIDELITY_FALLBACK_BELOW after the retry → the MCP caller switches to the exact path. */
-  fidelityFallback?: { score: number; reason: string }
+  fidelityFallback?: { score: number; reason: string; productBox?: { x0: number; y0: number; x1: number; y1: number } }
   copyNormalised: string[]
   /** Copy lines moved off the image by the layout cap (put them in the caption). */
   copyOverflow: string[]
@@ -772,7 +772,7 @@ export async function generateWebStyleImage(input: WebStyleImageInput): Promise<
     ? { productFidelity: 'exact', reason: `the product still differs from the reference photo (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_RETRY_BELOW})${autoRetry.attempted ? ' after the one automatic retry' : ''}: re-run with productFidelity:"exact" (real product pixels + the same logo / text / CTA layers) — it is not run automatically because it is a second paid generation` }
     : undefined
   const fidelityFallback: WebStyleImageOutput['fidelityFallback'] = lowFidelity(kept) && fidelityCheck.status === 'warning'
-    ? { score: fidelityCheck.warning.score, reason: `the product was redrawn (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_FALLBACK_BELOW} vs the reference photo${autoRetry.attempted ? ', after the one automatic retry' : ''})` }
+    ? { score: fidelityCheck.warning.score, reason: `the product was redrawn (fidelity ${fidelityCheck.warning.score} < ${FIDELITY_FALLBACK_BELOW} vs the reference photo${autoRetry.attempted ? ', after the one automatic retry' : ''})`, ...(fidelityCheck.warning.details.productBox ? { productBox: fidelityCheck.warning.details.productBox } : {}) }
     : undefined
   return {
     ...(fidelityFallback ? { fidelityFallback } : {}),

@@ -105,7 +105,7 @@ describe('round 1 · P2 background-leak fidelity check (vs the source photo)', (
     expect(fidelityFailReason({ ...base, backgroundLeak: 0.2 })).toMatch(/background/i)
     expect(fidelityFailReason({ ...base, backgroundLeak: 0.01 })).not.toMatch(/background/i)
     expect(cutoutCacheKey('abc')).toBe(`abc-${CUTOUT_CACHE_VERSION}`)
-    expect(CUTOUT_CACHE_VERSION).toBe('seg3')
+    expect(CUTOUT_CACHE_VERSION).toBe('seg4')
   })
 })
 
